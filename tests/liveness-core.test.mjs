@@ -959,7 +959,7 @@ for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått u
     : fail(`"${notice}" classified ${closed.result}/${closed.code}, expected expired`);
 }
 
-for (const notice of ['Søknadsfrist: 20.11.2026', 'Søknadsfristen utløper 20. november', 'Søknadsfristen er 20. november', 'Stillingen er ledig fra 1. januar', 'Stillingen vil bli besatt så snart som mulig']) {
+for (const notice of ['Når søknadsfristen er utløpt, blir søkerlisten offentliggjort', 'Etter at søknadsfristen er utløpt vil vi kalle inn til intervju', 'Søkerlisten blir offentlig så snart søknadsfristen har gått ut', 'Søknadsfrist: 20.11.2026', 'Søknadsfristen utløper 20. november', 'Søknadsfristen er 20. november', 'Stillingen er ledig fra 1. januar', 'Stillingen vil bli besatt så snart som mulig']) {
   const open = classifyLiveness({
     status: 200,
     requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',

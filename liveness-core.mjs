@@ -289,8 +289,13 @@ function firstMatch(patterns, text = '') {
 //
 // Words are separated by a single space because normalizeForMatch() leaves one
 // character per run of whitespace; "\n" is not a space, so the clause stops there.
+// The Norwegian openers are spelled as normalizeForMatch() leaves them (når →
+// "nar", så → "sa"; ø is kept): public-sector postings routinely say "Når
+// søknadsfristen er utløpt, blir søkerlisten offentliggjort", which describes
+// what happens after the deadline, not a closed posting (#6620). "for" and "til"
+// are left out because they are also prepositions in both languages.
 const TIME_OR_CONDITION_CLAUSE =
-  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/i;
+  /(?:\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as|nar|etter at|inntil|hvis|dersom|sa snart)|(?<![\p{L}\p{N}])før) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/iu;
 
 // `lines` keeps its line breaks (normalizeForMatch with keepLineBreaks). The
 // patterns match on the joined text, as every other check here does, so a
