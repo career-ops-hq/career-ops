@@ -118,17 +118,19 @@
 
 # -- SEEK NZ keyword searches (optional) --
 # Read by scan-seek.mjs (`npm run scan:seek`), which covers NZ-domestic
-# employers and recruiters with no public ATS board. One request per entry
-# over the robots-allowed SEO path (`nz.seek.com/<keyword>-jobs[/in-All-<Location>]`,
-# no query string by default). title_filter, location_filter and
-# data/blacklist.md below apply. See docs/SUPPORTED_JOB_BOARDS.md for the
-# robots.txt notes on SEEK.
+# employers and recruiters with no public ATS board. Fetches the SEO path
+# (`nz.seek.com/<keyword>-jobs[/in-<Location>]`), paging `?page=N` up to
+# `max_pages` (default 5, cap 50) and optionally scoping to the last N days via
+# `daterange` (or `--daterange N` / `--pages N` on the CLI). title_filter,
+# location_filter and data/blacklist.md below apply.
 #
-# `keyword` is the search text; `location` is optional.
+# `keyword` is the search text; `location`, `daterange` and `max_pages` are optional.
 #
 # seek_searches:
 #   - keyword: "data analyst"
 #     location: "Wellington"
+#     daterange: 7
+#     max_pages: 5
 
 # -- Dayforce (Ceridian) Recruiting boards (optional) --
 # Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
