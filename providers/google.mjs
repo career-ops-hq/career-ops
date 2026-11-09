@@ -17,8 +17,8 @@ import { htmlToText } from './_html-to-text.mjs';
 // A card without that markup falls back to the entry name, the link's
 // aria-label or slug for the title, and a blank location.
 //
-// FIRST PAGE ONLY, and that is a robots.txt constraint, not an oversight.
-// google.com/robots.txt disallows the paginated results URLs for every crawler:
+// PAGINATION: `max_pages` pages through the results. google.com/robots.txt used
+// to disallow the paginated results URLs for every crawler:
 //
 //   Disallow: /about/careers/applications/jobs/results?page=
 //   Disallow: /about/careers/applications/jobs/results/?page=
@@ -26,22 +26,26 @@ import { htmlToText } from './_html-to-text.mjs';
 //   Disallow: /about/careers/applications/jobs/results/?*&page=
 //
 // with no Allow under /about/careers that could take precedence (RFC 9309 §2.2.2
-// longest-match). career-ops declines Lagou for the same reason — see
-// docs/SUPPORTED_JOB_BOARDS.md: "The project does not route around that stated
-// restriction." So this provider never sends `page`, which leaves one results
-// page per query (~20 postings). `sort_by=date` makes that page the NEWEST
-// postings, which is what a scanner run on a schedule wants; pages beyond the
-// first are unreachable without the disallowed parameter, so `max_pages` does
-// not apply to this provider.
+// longest-match), so this provider never sent `page`. Rule 6 of the Source
+// Indexing Policy changed in #6691: robots.txt is no longer a gate, so the
+// disallowed parameter is now just a URL (#6694). Page 1 keeps the bare URL,
+// deeper pages append page=N, and the walk stops as soon as a page adds no new
+// ids (a parameter the board ignores re-serves page 1, so that ends the walk
+// instead of repeating it). `sort_by=date` makes page 1 the NEWEST postings,
+// which is what a scanner run on a schedule wants; with no `max_pages` the
+// provider keeps its old single-page behavior.
 //
 // Config (portals.yml):
 //   provider: google
+//   max_pages: 5                     # optional, default 1 (first page only), cap 20
 //   google:
 //     location: "United States"      # optional
 //     queries: ["business strategy", "business operations", ...]
 
 const BASE = 'https://www.google.com/about/careers/applications/jobs/results/';
-// One request per query: no `page` parameter exists in any URL this provider builds.
+// First page only unless the entry sets `max_pages` (see the header comment).
+const DEFAULT_MAX_PAGES = 1;
+const MAX_PAGES_CAP = 20;
 // The anchor that closes each card; the markup since the previous anchor is that
 // card. Google serves the href relative ("jobs/results/…"); a path prefix is
 // tolerated, and the URL is rebuilt from BASE either way.
@@ -60,6 +64,17 @@ function getConfig(entry) {
   const c = entry.google || {};
   const queries = Array.isArray(c.queries) && c.queries.length ? c.queries : DEFAULT_QUERIES;
   return { location: c.location || 'United States', queries };
+}
+
+/**
+ * The entry's page budget: `max_pages` (or camelCase) clamped to 1..MAX_PAGES_CAP.
+ * Anything missing or malformed keeps the old single-page behavior.
+ */
+function resolveMaxPages(entry) {
+  const raw = entry?.max_pages ?? entry?.maxPages;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return DEFAULT_MAX_PAGES;
+  return Math.min(n, MAX_PAGES_CAP);
 }
 
 function titleFromSlug(slug) {
@@ -123,21 +138,34 @@ export default {
     const { location, queries } = getConfig(entry);
     // A probe only needs to know the board answers, so it spends one query.
     const probing = Number(/** @type {any} */ (ctx)?.maxPages) > 0;
+    // The probe's budget caps paging too; without max_pages this stays 1.
+    const pageBudget = Math.min(
+      resolveMaxPages(entry),
+      probing ? Number(/** @type {any} */ (ctx).maxPages) : Infinity,
+    );
     const byId = new Map();
     for (const q of (probing ? queries.slice(0, 1) : queries)) {
       // URLSearchParams, not hand-built encodeURIComponent: q and location come from
       // portals.yml, and URLSearchParams never throws on a malformed string.
-      const url = `${BASE}?${new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' })}`;
-      const html = await ctx.fetchText(url, { redirect: 'error' });
-      for (const { id, slug, title, employer, locations } of parseResultsPage(html)) {
-        if (byId.has(id)) continue;
-        byId.set(id, {
-          title,
-          url: `${BASE}${id}-${slug}`,
-          company: employer || entry.name,
-          location: locations.join('; '),
-          ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
-        });
+      const params = new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' });
+      for (let page = 1; page <= pageBudget; page++) {
+        // Page 1 keeps the bare URL; deeper pages carry page=N.
+        const url = page === 1 ? `${BASE}?${params}` : `${BASE}?${params}&page=${page}`;
+        const html = await ctx.fetchText(url, { redirect: 'error' });
+        let added = 0;
+        for (const { id, slug, title, employer, locations } of parseResultsPage(html)) {
+          if (byId.has(id)) continue;
+          added++;
+          byId.set(id, {
+            title,
+            url: `${BASE}${id}-${slug}`,
+            company: employer || entry.name,
+            location: locations.join('; '),
+            ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
+          });
+        }
+        // A page with no new ids ends the walk for this query.
+        if (added === 0) break;
       }
     }
     return [...byId.values()];
