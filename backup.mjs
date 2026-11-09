@@ -6,7 +6,8 @@
  * profile, portals, tracker and everything under data/, reports/, output/,
  * jds/ ...) from the data root to a destination folder. Nothing is ever
  * deleted at the destination, so a file you removed locally stays in the
- * backup. data/Connections.csv, data/contacts.tsv and data/reply-candidates.json
+ * backup. data/Connections.csv, data/contacts.tsv, data/reply-candidates.json and
+ * output/contacts.vcf (the default vCard export)
  * hold other people's contact details and are left out unless you pass
  * --include-contacts.
  *
@@ -33,7 +34,7 @@ import {
   renameSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
 import { homedir, platform as osPlatform } from 'os';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -50,7 +51,7 @@ export const MANIFEST_NAME = '.career-ops-backup.json';
 /** The one file under data/ that holds other people's data (a LinkedIn export). */
 // Files that hold other people's contact details (DATA_CONTRACT.md: third-party
 // PII). Left out unless the caller opts in with --include-contacts.
-const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-candidates.json'];
+const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-candidates.json', 'output/contacts.vcf'];
 
 /**
  * User Layer paths (relative to the data root, no trailing slash) a backup
@@ -179,13 +180,13 @@ export function resolveDestination({ dest, provider, account, folder, env = proc
 
 // ── Safety ───────────────────────────────────────────────────────────────
 
-function canonical(path) {
+export function canonical(path) {
   // realpath of the deepest ancestor that exists, so a not-yet-created
   // destination under a symlinked folder is still compared by its real place.
   let probe = resolve(path);
   const tail = [];
   while (!existsSync(probe) && dirname(probe) !== probe) {
-    tail.unshift(probe.slice(dirname(probe).length + 1));
+    tail.unshift(basename(probe));
     probe = dirname(probe);
   }
   let real = probe;
@@ -391,7 +392,7 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json (other people's contact details); not with --provider. A --dest inside a recognized sync folder is refused too, but verify yourself that the destination is not synced
+  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json, output/contacts.vcf (other people's contact details); not with --provider. A --dest inside a recognized sync folder is refused too, but verify yourself that the destination is not synced
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest

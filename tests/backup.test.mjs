@@ -29,6 +29,10 @@ try {
   assert.equal(b.isExcluded('Data/CONNECTIONS.CSV'), true);
   assert.equal(b.isExcluded('data/contacts.tsv'), true);
   assert.equal(b.isExcluded('data/reply-candidates.json'), true);
+  assert.equal(b.isExcluded('output/contacts.vcf'), true);
+  assert.equal(b.isExcluded('output/Contacts.VCF'), true);
+  assert.equal(b.isExcluded('output/contacts.vcf', { includeContacts: true }), false);
+  assert.equal(b.isExcluded('output/cv.pdf'), false);
   assert.equal(b.isExcluded('data/contacts.tsv', { includeContacts: true }), false);
   assert.equal(b.isExcluded('config/.ENV'), true);
   assert.equal(b.isExcluded('plugins.local/x/.git/config'), true);
@@ -252,6 +256,9 @@ try {
       else process.env[key] = value;
     }
   }
+
+  // A missing first component directly under a root must keep its full name.
+  assert.equal(b.canonical(join(process.platform === 'win32' ? process.cwd().slice(0, 3) : '/', 'career-ops-no-such-dir', 'x')).endsWith(join('career-ops-no-such-dir', 'x')), true);
 
   // A declaration file that cannot be parsed falls back to the built-in list.
   const decl = join(tmp, 'decl-root');
