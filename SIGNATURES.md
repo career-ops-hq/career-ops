@@ -214,3 +214,11 @@ public commit with a stated reason.
 - @LolRekkles | LolRekkles | 2026-10-29 | id:42163790 | src:https://github.com/career-ops-hq/career-ops/discussions/6194 | n:166
 - @dineshkanna113 | Dinesh Kanna | 2026-10-29 | "To get better job that pays and keep me update." | id:50012730 | src:https://github.com/career-ops-hq/career-ops/discussions/6195 | n:167
 - @lkorchnoy | Ludmila Korchnoy | 2026-10-29 | "Quality job search. Agent on your side. Future looks promising with this tool." | id:55862411 | src:https://github.com/career-ops-hq/career-ops/discussions/6248 | n:168
+- @roberttk01 | Thomas Kyle Robertson | 2026-11-01 | id:6352722 | src:https://github.com/career-ops-hq/career-ops/discussions/6388 | n:169
+- @sayyidmibrahiim | Ibrahim | 2026-11-03 | "ai ops" | id:106948724 | src:https://github.com/career-ops-hq/career-ops/discussions/6422 | n:170
+- @taattieee | 2026-11-04 | "Make job applications less monotonous!" | id:100685678 | src:https://github.com/career-ops-hq/career-ops/discussions/6487 | n:171
+- @beatrizfsvieira8 | Beatriz | 2026-11-05 | id:352906915 | src:https://github.com/career-ops-hq/career-ops/discussions/6537 | n:172
+- @moizghumann | moiz ghuman | 2026-11-07 | "Anyone can build anything now. hiring metrics should evaluate grit, hunger to grow and vibe fit more than ever now" | id:68769670 | src:https://github.com/career-ops-hq/career-ops/discussions/6651 | n:173
+- @LucasAzLima | Lucas de Azevedo Lima | 2026-11-07 | id:28840603 | src:https://github.com/career-ops-hq/career-ops/discussions/6666 | n:174
+- @Bossku888 | 2026-11-08 | id:290774118 | src:https://github.com/career-ops-hq/career-ops/discussions/6689 | n:175
+- @marichikajoshi | Marichika Joshi | 2026-11-09 | "Front end developer" | id:86568342 | src:https://github.com/career-ops-hq/career-ops/discussions/6723 | n:176

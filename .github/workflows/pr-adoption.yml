@@ -17,7 +17,10 @@ on:
 
 permissions:
   issues: write
-  pull-requests: read
+  # Removing a label from a pull request takes pull-requests: write; issues: write
+  # only covers issues. The first reset on a PR (#5406, from 2026-11-07) failed with
+  # 403 and turned every daily run red until this changed.
+  pull-requests: write
 
 jobs:
   reset:

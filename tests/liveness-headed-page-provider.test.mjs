@@ -8,6 +8,9 @@
 // nothing in the output showed the fallback had stopped working.
 import { pass, fail } from './helpers.mjs';
 import { createHeadedPageProvider } from '../liveness-browser.mjs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 console.log('\nliveness-browser — createHeadedPageProvider drops a closed page');
 
@@ -126,4 +129,36 @@ const makeChromium = () => {
   second && second !== first && stale.connected === false && chromium.launches.length === 2
     ? pass('a stale browser is closed before its replacement is launched')
     : fail('get() replaced the page but left the previous browser running');
+}
+
+// 6. The headed retry must use the same data-root browser settings as the
+// headless launch. Otherwise a relative path loaded from .env changes origin
+// after another module has populated process.env.
+{
+  const root = mkdtempSync(join(tmpdir(), 'co-headed-browser-root-'));
+  let launchOptions;
+  const chromium = {
+    async launch(options) {
+      launchOptions = options;
+      return {
+        isConnected: () => true,
+        async newContext() {
+          return { async newPage() { return { isClosed: () => false }; } };
+        },
+        async close() {},
+      };
+    },
+  };
+  try {
+    writeFileSync(join(root, '.env'), 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=browser/chrome\n');
+    const provider = createHeadedPageProvider(chromium, { projectRoot: root, processEnv: {} });
+    await provider.get();
+    await provider.close();
+
+    launchOptions?.executablePath === resolve(root, 'browser/chrome')
+      ? pass('headed fallback preserves the data-root origin of browser settings')
+      : fail(`headed fallback resolved browser settings from the wrong root: ${launchOptions?.executablePath}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }

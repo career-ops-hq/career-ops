@@ -42,13 +42,14 @@ import { fetchJsonWithRetry, sleep } from './_http.mjs';
 //                               #   [1, 34] queries both jobs and internships
 //     enabled: true
 
-// v6. The v4 search and detail endpoints both 404 as of 2026-08-04 (#2494);
-// v5 does too. v6 keeps every query parameter this provider sends
-// (was/wo/umkreis/veroeffentlichtseit/angebotsart/homeoffice/page/size) but
-// renames the response fields — see normalizeJob().
 const API_URL = 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs';
 const API_KEY = 'jobboerse-jobsuche'; // public client key the arbeitsagentur.de UI uses
 const DETAIL_BASE = 'https://www.arbeitsagentur.de/jobsuche/jobdetail/';
+// The detail page answers 404 to a once-encoded slash in its path, and a bare
+// slash would split the path. Its own search results encode the slash twice.
+export const PATH_BREAKING_CHAR = '/';
+export const PATH_BREAKING_CHAR_ENCODED_ONCE = encodeURIComponent(PATH_BREAKING_CHAR);
+const PATH_BREAKING_CHAR_ENCODED_TWICE = encodeURIComponent(PATH_BREAKING_CHAR_ENCODED_ONCE);
 const INTER_PAGE_DELAY_MS = 200; // between filter-mode page requests
 // 'filter' mode's server-side home-office query: every posting where home office
 // is possible. The value is a `;` list: `prozentual_{N}` selects postings that
@@ -108,7 +109,7 @@ export function parseAngebotsart(val) {
 }
 
 /**
- * Assembles a human-readable location from v6's `stellenlokationen` array: one
+ * Assembles a human-readable location from the `stellenlokationen` array: one
  * place per address, in the API's order. Most postings are in Germany; only a
  * non-DE country is appended to its place so the downstream location_filter can
  * act on it. The address `region` is an uppercase federal-state enum
@@ -156,10 +157,9 @@ export function hasGermanAddress(lokationen) {
  * provider returns. Returns null when the posting lacks a usable reference
  * number or title.
  *
- * v6 renamed every field this reads — `refnr` → `referenznummer`, `titel` →
- * `stellenangebotsTitel`, `arbeitgeber` → `firma`, `arbeitsort` →
- * `stellenlokationen[]` (#2494). The public job-detail page still resolves by
- * reference number, so the outgoing URL is unchanged.
+ * Reads `referenznummer`, `stellenangebotsTitel`, `firma` and
+ * `stellenlokationen[]`.
+ * The public job-detail page resolves by reference number.
  * @param {any} job
  * @returns {({title: string, url: string, company: string, location: string, refnr: string, inGermany: boolean}) | null}
  */
@@ -182,7 +182,7 @@ export function normalizeJob(job) {
   if (inGermany && Number(job && job.homeofficeprozent) >= 100) location = withRemoteMarker(location);
   return {
     title,
-    url: DETAIL_BASE + encodedRefnr,
+    url: DETAIL_BASE + encodedRefnr.replaceAll(PATH_BREAKING_CHAR_ENCODED_ONCE, PATH_BREAKING_CHAR_ENCODED_TWICE),
     company: String((job && job.firma) || '').trim(),
     location,
     refnr: String(refnr),
@@ -197,8 +197,8 @@ export function normalizeJob(job) {
 // query matches every posting where home office is *possible*, which includes
 // `homeofficetyp: NACH_VEREINBARUNG` ("nach Absprache") — an office-anchored
 // hybrid — and the search hit's boolean `homeofficemoeglich` is `true` for all
-// of them. The detail endpoint answers 403 to this public client key, so it
-// cannot be asked either.
+// of them. This provider makes list requests only, so it never reads the
+// detail record.
 //
 // Two signals on the search hit itself are accepted, in every pass and mode:
 //   - the posting's own title claims remote (REMOTE_RE);

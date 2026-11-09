@@ -126,6 +126,16 @@ function reportTemplates(text) {
     .filter(isReportTemplate);
 }
 
+/** H2 section titles of the single fenced report template, in order.
+ * @param {string} text Mode documentation.
+ * @returns {string[]} Titles without the `## ` marker; empty without exactly one template.
+ */
+export function reportSectionTitles(text) {
+  const templates = reportTemplates(text);
+  if (templates.length !== 1) return [];
+  return templates[0].map(line => line.match(/^ {0,3}##[ \t]+(.*?)[ \t]*$/)?.[1]).filter(Boolean);
+}
+
 /** Missing or malformed parts of the single fenced report-format template.
  * @param {string} text Mode documentation, whose template H1 may be localized.
  * @returns {string[]} Empty only when the template satisfies the shared contract.
@@ -145,10 +155,15 @@ export function structuralGaps(text) {
     gaps.push('report section order A)–G) → Risk Summary → H)');
   }
   // Scripts find the Machine Summary by its heading, so it goes last (#6156)
-  // instead of standing between the reader and A). Not every locale has one.
+  // instead of standing between the reader and A). Every template asks for
+  // one: the web app refuses a report without it (#6158).
   const sections = lines.filter(line => /^ {0,3}##[ \t]+/.test(line));
-  const machine = sections.findIndex(line => /^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(line));
-  if (machine >= 0 && machine !== sections.length - 1) gaps.push('## Machine Summary is not the last report section');
+  const machine = sections.filter(line => /^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(line)).length;
+  if (machine === 0) gaps.push('## Machine Summary');
+  else if (machine > 1) gaps.push('duplicate ## Machine Summary');
+  else if (!/^ {0,3}##[ \t]+Machine Summary[ \t]*$/.test(sections.at(-1))) {
+    gaps.push('## Machine Summary is not the last report section');
+  }
   // The header ends at the first H2, whatever it is, not just at A).
   const firstSection = lines.findIndex(line => /^ {0,3}##[ \t]+/.test(line));
   const header = lines.slice(0, firstSection);

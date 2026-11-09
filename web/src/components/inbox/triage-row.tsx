@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Bookmark, BookmarkCheck, Loader2, X } from "lucide-react";
+import { Bookmark, BookmarkCheck, Loader2, X, CirclePause } from "lucide-react";
 import type { InboxJob } from "@/lib/career-ops";
 import type { AtsSource } from "@/lib/explore";
 import { ATS_LABEL } from "@/lib/explore";
@@ -11,7 +11,7 @@ import { CompanyLogo } from "@/components/company-logo";
 import { cn } from "@/lib/cn";
 import { inboxScoreTarget } from "@/lib/inbox-score-target.mjs";
 
-export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null };
+export type RowScore = { score: number | null; tone: "good" | "warn" | "bad" | "muted"; jobId: string; running: boolean; reportN?: number | null; needsReview?: boolean };
 
 function agoLabel(age: number | null): string | null {
   if (age == null) return null;
@@ -31,6 +31,7 @@ export function TriageRow({
   job,
   source,
   age,
+  reason,
   scored,
   selected,
   shortlisted,
@@ -43,6 +44,7 @@ export function TriageRow({
   job: InboxJob;
   source: AtsSource | null;
   age: number | null;
+  reason?: string;
   scored?: RowScore;
   selected: boolean;
   shortlisted: boolean;
@@ -96,13 +98,28 @@ export function TriageRow({
           {job.location && <span className="truncate">{job.location}</span>}
           {source && <span className="rounded bg-surface-hover px-1 py-px font-medium text-muted">{ATS_LABEL[source]}</span>}
           {ago && <span>{ago}</span>}
-          {/* 🔴 CRUDA: honest "not scored" — no fabricated match%. */}
+          {reason ? <span className="text-muted">{reason}</span> : null}
           {!evaluated && <span className="italic text-muted">not scored</span>}
         </p>
       </div>
 
       {/* EVALUADA state (right-aligned, visually distinct from raw rows) */}
-      {evaluated && target.href ? (
+      {scored?.needsReview ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <Link href={`/jobs/${scored.jobId}`} className="flex items-center gap-1.5 text-xs text-amber-800 dark:text-amber-400">
+            <CirclePause className="size-3.5" /> Needs review
+          </Link>
+          <button
+            type="button"
+            onClick={onSkip}
+            title="Skip — hide from the inbox"
+            aria-label={`Skip ${job.company} ${job.role}`}
+            className="inline-flex items-center justify-center rounded-md p-1 text-faint transition-colors hover:bg-surface-hover hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px]"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+      ) : evaluated && target.href ? (
         <Link href={target.href} className="flex shrink-0 items-center gap-1.5 text-xs">
           {scored!.running ? (
             <>

@@ -37,12 +37,12 @@ import {
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
   extractReqNumber,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
+import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
 import { checkFollowupsSchema } from './stats.mjs';
-import { loadCanonicalStates } from './tracker-utils.mjs';
+import { loadCanonicalStates, stripStatusDecoration } from './tracker-utils.mjs';
 import { checkJdArchive } from './check-jd-archive.mjs';
 import { machineSummarySection } from './lib/machine-summary-section.mjs';
 
@@ -158,9 +158,9 @@ console.log(`\n📊 Checking ${entries.length} entries in applications.md\n`);
 // --- Check 1: Canonical statuses ---
 let badStatuses = 0;
 for (const e of entries) {
-  const clean = e.status.replace(/\*\*/g, '').trim().toLowerCase();
-  // Strip trailing dates
-  const statusOnly = clean.replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
+  // The bold and the date have checks of their own below. This one asks whether
+  // the state under them is known, as every reader resolves it.
+  const statusOnly = stripStatusDecoration(e.status).toLowerCase();
 
   if (!CANONICAL_STATUSES.has(statusOnly) && !ALIASES[statusOnly]) {
     error(`#${e.num}: Non-canonical status "${e.status}"`,
@@ -186,6 +186,7 @@ if (badStatuses === 0) ok('All statuses are canonical');
 
 // --- Check 2: Duplicates ---
 const companyRoleMap = new Map();
+const roleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
   // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
@@ -199,6 +200,16 @@ for (const e of entries) {
     : normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
+  if (String(e.company || '').trim() !== '?') {
+    const roleKey = normalizeTextKey(e.role);
+    const companyKey = normalizeTextKey(e.company);
+    const tokens = normalizeTextKey(e.company, ' ').split(' ').filter(Boolean);
+    if (!roleMap.has(roleKey)) roleMap.set(roleKey, new Map());
+    const buckets = roleMap.get(roleKey);
+    const bucketKey = companyKey.slice(0, MIN_STEM_CHARS);
+    if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+    buckets.get(bucketKey).push({ entry: e, companyKey, tokens });
+  }
 }
 for (const [key, group] of companyRoleMap) {
   if (group.length > 1) {
@@ -220,6 +231,30 @@ for (const [key, group] of companyRoleMap) {
 
     if (hasPossibleDuplicate) {
       warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+      dupes++;
+    }
+  }
+}
+// Exact groups above retain their existing warnings. Compare different company
+// keys pairwise as well: corporate-form twins otherwise never meet (#4421).
+// Do not cluster these matches: "Acme" matches both "Acme Solutions" and
+// "Acme Technologies", but the latter two must never be reported as one group.
+// The matcher guarantees matching names share this normalized prefix.
+// Cache keys and tokens once per row, then compare only within that bucket.
+for (const group of [...roleMap.values()].flatMap(buckets => [...buckets.values()])) {
+  for (let i = 0; i < group.length; i++) {
+    for (let j = i + 1; j < group.length; j++) {
+      const left = group[i];
+      const right = group[j];
+      if (left.companyKey === right.companyKey
+          || !corporateFormTokensMatch(left.tokens, right.tokens)) continue;
+      const a = left.entry;
+      const b = right.entry;
+      const reqA = extractReqNumber(a.notes);
+      const reqB = extractReqNumber(b.notes);
+      if (reqA && reqB && reqA !== reqB) continue;
+      warn(`Possible duplicates: #${a.num}, #${b.num} (${a.company} — ${a.role})`,
         "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
       dupes++;
     }
@@ -387,6 +422,31 @@ function extractReportUrlKey(reportContent) {
   return normalizeUrl(unwrapReportUrlToken(m[1]));
 }
 
+// Report numbers a tracker row's Report cell links: the [NNN] link text(s) and
+// the NNN- prefix of the linked filename(s). Shared with Check 10.
+function linkedReportNums(cell) {
+  const nums = [];
+  for (const link of parseMarkdownLinks(cell)) {
+    if (/^\d+$/.test(link.label)) nums.push(parseInt(link.label, 10));
+    const m = link.target.split(/[\\/]/).pop().match(/^(\d+)-/);
+    if (m) nums.push(parseInt(m[1], 10));
+  }
+  return nums;
+}
+
+// A re-evaluation keeps the earlier report on the same row (#5780): both links
+// in the Report cell, or merge-tracker's `Superseded report [N]` marker in
+// Notes. Map each report number to the rows that keep it on record.
+const SUPERSEDED_RE = /Superseded report \[(\d+)\]/gi;
+const rowsByReport = new Map();
+entries.forEach((e, row) => {
+  const superseded = [...e.notes.matchAll(SUPERSEDED_RE)].map(m => parseInt(m[1], 10));
+  for (const n of [...linkedReportNums(e.report), ...superseded]) {
+    if (!rowsByReport.has(n)) rowsByReport.set(n, new Set());
+    rowsByReport.get(n).add(row);
+  }
+});
+
 const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
@@ -394,7 +454,7 @@ const reportFiles = existsSync(REPORTS_DIR)
 let dupReports = 0;
 const reportsByRole = new Map();
 for (const name of reportFiles) {
-  const companySlug = name.match(REPORT_FILE_RE)[2];
+  const [, num, companySlug] = name.match(REPORT_FILE_RE);
   let role = null;
   let urlKey = '';
   try {
@@ -407,7 +467,7 @@ for (const name of reportFiles) {
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push({ name, urlKey });
+  reportsByRole.get(key).push({ name, urlKey, num: parseInt(num, 10) });
 }
 for (const group of reportsByRole.values()) {
   if (group.length < 2) continue;
@@ -418,8 +478,14 @@ for (const group of reportsByRole.values()) {
   // a key and no two share one.
   const keys = group.map(r => r.urlKey);
   if (keys.every(Boolean) && new Set(keys).size === keys.length) continue;
+  // One tracker row keeping every report on record is a re-evaluation, not a
+  // concurrent-worker race. An unreferenced report, reports split across rows,
+  // or two files sharing one number still warn.
+  const nums = group.map(r => r.num);
+  const rows = new Set(nums.flatMap(n => [...(rowsByReport.get(n) ?? [])]));
+  if (new Set(nums).size === nums.length && nums.every(n => rowsByReport.has(n)) && rows.size === 1) continue;
   warn(`Duplicate reports for same company+role: ${group.map(r => r.name).join(', ')}`,
-       "open both reports and delete or archive the stale one if it is a concurrent-worker duplicate; keep both if the JD changed (re-evaluation) or the openings differ (add the posting URL)");
+       "open both reports and delete or archive the stale one if it is a concurrent-worker duplicate; for a re-evaluation, keep both on one row (link both in its Report cell); if the openings differ, add each posting URL");
   dupReports++;
 }
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
@@ -445,17 +511,12 @@ if (dupReports === 0) ok('No duplicate reports for the same company+role');
 // in the cell false-positives as an orphan.
 const referencedNums = new Set();
 for (const e of entries) {
-  const linkTexts = [...e.report.matchAll(/\[(\d+)\]/g)];
-  const linkTargets = parseMarkdownLinks(e.report).map(link => link.target);
-  if (linkTexts.length === 0 && linkTargets.length === 0) {
+  const nums = linkedReportNums(e.report);
+  if (nums.length === 0 && parseMarkdownLinks(e.report).length === 0) {
     referencedNums.add(e.num);
     continue;
   }
-  for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
-  for (const lt of linkTargets) {
-    const m = lt.split(/[\\/]/).pop().match(/^(\d+)-/);
-    if (m) referencedNums.add(parseInt(m[1], 10));
-  }
+  for (const n of nums) referencedNums.add(n);
 }
 
 let orphanReports = 0;

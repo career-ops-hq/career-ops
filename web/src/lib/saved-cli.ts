@@ -82,7 +82,9 @@ export async function resolveCliId(
   }
   if (keepIfInstalled(saved, clis)) return saved;
   const fallback = keepIfInstalled(remembered, clis) || pickSoleInstalled(clis);
-  if (fallback) persistCliId(fallback);
+  // The lookup awaited /api/clis: a Config save made meanwhile is newer than
+  // this pick, so it is kept rather than overwritten.
+  if (fallback && readSavedCliId() === saved) persistCliId(fallback);
   if (saved) onStale?.(saved, fallback);
   return fallback;
 }
