@@ -207,6 +207,17 @@ test('a cap named only to say it does not apply still counts as a default', () =
   }
 });
 
+test('a 2/5 cap the line says is not set is still a default', () => {
+  const line = 'Cultural signals: no evidence; cap at 2/5 is not set; defaults to 3.';
+  const out = normalizeEvaluationText(reply().replace(
+    'Cultural signals: 3/5 by default, no evidence in the posting.',
+    line,
+  ), JD_WITH_PAY);
+  assert.equal(out.includes(line), false);
+  assert.match(out, /Cultural signals: unknown/);
+  assert.equal(out.includes(CULTURE_SCORE_FLAG), true);
+});
+
 test('a culture cap with no evidence is left as written', () => {
   const capped = 'Cultural signals: no evidence in the posting, capped at 2/5.';
   const out = normalizeEvaluationText(reply().replace(
