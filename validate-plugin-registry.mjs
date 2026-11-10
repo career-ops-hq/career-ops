@@ -107,6 +107,9 @@ export async function fetchLatestRelease(repoUrl, { fetchImpl = fetch } = {}) {
   return { tag: rel.tag_name, sha: commit.sha };
 }
 
+/** The four compare statuses GitHub documents (schema `commit-comparison`). */
+const PIN_POSITIONS = new Set(['ahead', 'behind', 'diverged', 'identical']);
+
 /**
  * Where a pin sits relative to the release commit, from GitHub's compare of
  * release...pin: `status` is `ahead`, `behind`, `diverged` or `identical`,
@@ -117,12 +120,23 @@ export async function fetchLatestRelease(repoUrl, { fetchImpl = fetch } = {}) {
  * release, and only the commit graph tells that apart from a pin that trails.
  * The release lookup has already reached the repo, so a 404 here means the
  * pinned commit is not in it, which is an error rather than a position.
+ *
+ * Any other answer than those four statuses, or an `ahead` without a count,
+ * is malformed and throws. The caller reads every status it does not know as
+ * `stale`, so an unexpected value would otherwise turn into "pin trails"
+ * advice that nothing measured.
  */
 export async function fetchPinPosition(repoUrl, releaseSha, pinSha, { fetchImpl = fetch } = {}) {
   const slug = repoSlug(repoUrl);
   const cmp = await ghJson(`${GITHUB_API}/repos/${slug}/compare/${releaseSha}...${pinSha}`, fetchImpl);
   if (!cmp) throw new Error(`pinned commit ${String(pinSha).slice(0, 10)} not found in ${slug}`);
   if (!cmp.status) throw new Error(`malformed compare response for ${slug}: no status`);
+  if (!PIN_POSITIONS.has(cmp.status)) {
+    throw new Error(`malformed compare response for ${slug}: unknown status ${JSON.stringify(cmp.status)}`);
+  }
+  if (cmp.status === 'ahead' && !Number.isInteger(cmp.ahead_by)) {
+    throw new Error(`malformed compare response for ${slug}: ahead with no ahead_by count`);
+  }
   return { status: cmp.status, aheadBy: cmp.ahead_by };
 }
 
@@ -212,7 +226,12 @@ if (isMainModule(import.meta.url)) {
     for (const r of stale) problems.push(`${r.name || r.id}: pin ${String(r.pinnedSha).slice(0, 10)} ${r.position === 'diverged' ? 'diverged from' : 'trails'} release ${r.releaseTag} (${String(r.releaseSha).slice(0, 10)}) — bump plugins-registry/${r.id}.json`);
     // An unreachable repo fails the run rather than passing quietly. A check
     // that cannot see is not a check that found nothing.
-    for (const r of errored) problems.push(`${r.name || r.id}: could not resolve latest release — ${r.detail}`);
+    // releaseTag is set only once the release lookup succeeded, so an error with
+    // one came from comparing the pin against that release.
+    for (const r of errored) {
+      const what = r.releaseTag ? `could not compare the pin with release ${r.releaseTag}` : 'could not resolve latest release';
+      problems.push(`${r.name || r.id}: ${what} — ${r.detail}`);
+    }
   }
   if (problems.length) { for (const p of problems) console.error(`✗ ${p}`); process.exit(1); }
   console.log(`✓ plugin registry is valid${deep ? ' (deep: all entries cloned + audited)' : ''}`); process.exit(0);

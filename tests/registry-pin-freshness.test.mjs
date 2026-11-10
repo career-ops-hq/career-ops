@@ -385,3 +385,33 @@ test('fetchPinPosition throws on a compare answer with no status', async () => {
     /no status/,
   );
 });
+
+test('fetchPinPosition throws on a status GitHub does not document', async () => {
+  // The caller reads any status it does not know as stale, so an unknown one
+  // would print "pin trails" with nothing behind it. It must be an error.
+  const t = transport({ '/compare/': { status: 200, body: { status: 'sideways', ahead_by: 0, behind_by: 0 } } });
+  await assert.rejects(
+    () => fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl }),
+    /unknown status "sideways"/,
+  );
+});
+
+test('fetchPinPosition throws on ahead with no integer ahead_by', async () => {
+  // Without the count the row would read "pin is undefined commits after".
+  for (const ahead_by of [undefined, '2', 1.5]) {
+    const t = transport({ '/compare/': { status: 200, body: { status: 'ahead', ahead_by } } });
+    await assert.rejects(
+      () => fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl }),
+      /ahead with no ahead_by/,
+      `ahead_by ${JSON.stringify(ahead_by)} must be refused`,
+    );
+  }
+});
+
+test('fetchPinPosition accepts every documented status', async () => {
+  for (const status of ['ahead', 'behind', 'diverged', 'identical']) {
+    const t = transport({ '/compare/': { status: 200, body: { status, ahead_by: 1, behind_by: 1 } } });
+    const pos = await fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl });
+    assert.equal(pos.status, status);
+  }
+});
