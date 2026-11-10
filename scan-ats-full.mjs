@@ -848,6 +848,30 @@ export function dedupTokenFor(job, provider) {
   return provider?.dedupKey?.(job) || seenJobKey(job.url);
 }
 
+/**
+ * Checkpoint offers the pipeline does not already hold. A Workday requisition
+ * key misses a URL that scan-history never recorded, so the URL key counts
+ * too. That requisition key is kept, or the other site of the same posting
+ * comes back as new.
+ *
+ * @param {object[] | null | undefined} offers
+ * @param {Set<string>} seenUrls
+ */
+export function unseenCheckpointOffers(offers, seenUrls) {
+  const fresh = [];
+  for (const offer of offers || []) {
+    const token = dedupTokenFor(offer, providerForSource(offer.source));
+    if (seenUrls.has(token)) continue;
+    const urlKey = seenJobKey(offer.url);
+    if (urlKey && seenUrls.has(urlKey)) {
+      seenUrls.add(token);
+      continue;
+    }
+    fresh.push(offer);
+  }
+  return fresh;
+}
+
 // Resolve an offer's provider from its recorded `source` string — shared by
 // the checkpoint-resume reseed below and by loadSeenUrls' extraTokensFor
 // hook. `source` is "{sourcesKey}-full" for the main sweep and
@@ -1289,8 +1313,9 @@ async function main() {
     console.error(`⚠️  Unfinished sweep checkpoint found at ${CHECKPOINT_PATH} — pass --resume to continue it; this fresh run will overwrite it.`);
   }
   // Resume reuses the ORIGINAL cutoff so the date window stays consistent
-  // across the interruption instead of silently sliding forward.
-  const cutoff = checkpoint ? checkpoint.cutoffMs : Date.now() - opts.sinceDays * 86_400_000;
+  // across the interruption instead of silently sliding forward. A discarded
+  // checkpoint resets this below to the current --since window.
+  let cutoff = checkpoint ? checkpoint.cutoffMs : Date.now() - opts.sinceDays * 86_400_000;
   // In --json mode, stdout is reserved for the single machine-readable result,
   // so every human-facing line goes to stderr instead.
   const log = opts.json ? (...a) => console.error(...a) : (...a) => console.log(...a);
@@ -1433,11 +1458,13 @@ async function main() {
       }
       console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${sourceName} company list). Starting a fresh sweep. The checkpoint will be overwritten.`);
       checkpoint = null;
+      // The discarded sweep's cutoff is not this run's --since window.
+      cutoff = Date.now() - opts.sinceDays * 86_400_000;
+      ctx.sinceMs = cutoff;
     }
   }
 
-  const newOffers = (checkpoint?.offers || [])
-    .filter(o => !seenUrls.has(dedupTokenFor(o, providerForSource(o.source))));
+  const newOffers = unseenCheckpointOffers(checkpoint?.offers, seenUrls);
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
   // Reseed with the SAME token a fresh dedup check would produce (provider

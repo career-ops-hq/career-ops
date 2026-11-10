@@ -29,19 +29,22 @@ function prepare(dir) {
   writeFileSync(join(dir, 'data', 'cache', 'ats-companies', 'greenhouse.json'), JSON.stringify(['sandbox-co-0']), 'utf-8');
   writeFileSync(join(dir, 'data', 'pipeline.md'), '# Pipeline\n\n## Pendientes\n', 'utf-8');
   const fetched = join(dir, 'fetched.txt');
+  const sinceFile = join(dir, 'since.txt');
   writeFileSync(fetched, '', 'utf-8');
+  writeFileSync(sinceFile, '', 'utf-8');
   const preload = join(dir, 'preload.mjs');
   writeFileSync(preload, `
 import { appendFileSync } from 'node:fs';
 import provider from ${JSON.stringify(pathToFileURL(join(ROOT, 'providers', 'greenhouse.mjs')).href)};
 provider.fetchListing = undefined;
-provider.fetch = async (entry) => {
+provider.fetch = async (entry, ctx) => {
   appendFileSync(${JSON.stringify(fetched)}, entry.name + '\\n');
+  appendFileSync(${JSON.stringify(sinceFile)}, String(ctx?.sinceMs ?? '') + '\\n');
   return [];
 };
 globalThis.fetch = async () => { throw new Error('Unexpected network request'); };
 `, 'utf-8');
-  return { preload, fetched };
+  return { preload, fetched, sinceFile };
 }
 
 function writeCheckpoint(dir, body) {
@@ -156,4 +159,33 @@ try {
   }
 } finally {
   rmSync(strictDir, { recursive: true, force: true });
+}
+
+// A discarded checkpoint must not keep its own date window. --since 1 wrote
+// cutoffMs one day back. This run asks for 7. Leaving that cutoff in place
+// drops postings from three days ago.
+const cutoffDir = mkdtempSync(join(tmpdir(), 'ats-full-cutoff-reset-'));
+try {
+  const { preload, fetched, sinceFile } = prepare(cutoffDir);
+  const staleCutoff = Date.now() - 86_400_000;
+  writeCheckpoint(cutoffDir, {
+    ...baseCheckpoint,
+    ats: ['greenhouse'],
+    cutoffMs: staleCutoff,
+    current: { name: 'greenhouse', resumeAt: 0, datasetLen: 2, datasetHash: '0123456789abcdef' },
+  });
+  const started = Date.now();
+  const result = run(cutoffDir, preload, ['--resume-if-compatible']);
+  const names = readFileSync(fetched, 'utf-8').split('\n').filter(Boolean);
+  const sinceMs = Number(readFileSync(sinceFile, 'utf-8').split('\n').find(Boolean));
+  const ageDays = (started - sinceMs) / 86_400_000;
+  const companyList = /greenhouse company list/.test(result.stderr || '');
+  const warned = /Starting a fresh sweep/.test(result.stderr || '');
+  if (result.status === 0 && companyList && warned && names.includes('sandbox-co-0') && ageDays >= 6 && ageDays <= 8) {
+    pass('--resume-if-compatible resets the date window when the company list discards the checkpoint');
+  } else {
+    fail(`discarded checkpoint kept a stale cutoff: status=${result.status} companyList=${companyList} warned=${warned} fetched=${names.join(',')} ageDays=${ageDays}\n${(result.stderr || '').slice(-700)}`);
+  }
+} finally {
+  rmSync(cutoffDir, { recursive: true, force: true });
 }
