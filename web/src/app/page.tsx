@@ -65,7 +65,7 @@ export default async function Home() {
   );
   const applyFacts: Record<string, { pdfOnDisk: boolean; postingUrl: string }> = {};
   for (const app of awaiting) {
-    applyFacts[app.n] = { pdfOnDisk: disks[app.n]?.exists ?? false, postingUrl: postingUrls[app.n] ?? "" };
+    applyFacts[app.n] = { pdfOnDisk: disks[app.n]?.applyPdfReady ?? false, postingUrl: postingUrls[app.n] ?? "" };
   }
   // Established / in-between: the dual-loop retention dashboard. Show the setup
   // banner whenever ANY prereq is missing (mirrors the core doctor.mjs), so a
