@@ -591,7 +591,7 @@ Siehe [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) für alle Details. Diese Softwa
 ## Mitwirkende
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Alle, die Code, Dokumentation, Übersetzungen oder Tests beigesteuert haben, stehen in

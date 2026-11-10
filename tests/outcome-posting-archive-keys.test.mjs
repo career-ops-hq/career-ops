@@ -103,3 +103,35 @@ ok('with no capture, the posting is archived from the URL column, keyed by repor
   // The stubbed archive fails, so the stub records the URL it tried.
   assert.ok((read('posting_missing.md') ?? '').includes(`**URL**: ${url}`), read('posting_missing.md'));
 });
+
+// archive-posting.mjs names a capture with jd-capture.mjs's captureSlug(), which
+// keeps a name written only in another script (#5689). The lookup has to use
+// the same slug: outcome.mjs's own slugify() turned such a name into 'unknown',
+// which no capture carries, so the posting was never found, and every run asked
+// archive-posting for it again.
+const { captureSlug } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
+for (const [company, role] of [['株式会社アクメ', 'エンジニア'], ['Яндекс', 'Инженер']]) {
+  ok(`a capture for ${company} is found under the slug archive-posting wrote`, () => {
+    const name = `014-2026-10-01_${captureSlug(company)}_${captureSlug(role)}_0123456789abcdef.pdf`;
+    const { read, archiveCalls } = outcome(
+      [`| 7 | 2026-10-01 | ${company} | ${role} | 4.2/5 | Applied | ❌ | [14](../reports/014-acme-2026-10-01.md) | applied | https://job-boards.greenhouse.io/acme/jobs/7008 |`],
+      { [name]: '%PDF capture for report 14' },
+      7,
+    );
+    assert.strictEqual(read('posting.pdf'), '%PDF capture for report 14', `${name} must be the archived posting`);
+    assert.deepStrictEqual(archiveCalls, [], 'a capture was found, so nothing is re-archived');
+  });
+}
+
+// The `?` placeholder employer has no captureSlug() at all. The lookup falls
+// back to 'unknown', the name archive-posting gives a posting whose company it
+// could not detect, as it did while outcome.mjs used its own slugify().
+ok('a capture filed under unknown is found for the ? placeholder employer', () => {
+  const { read, archiveCalls } = outcome(
+    ['| 8 | 2026-10-01 | ? | Platform Engineer | 4.2/5 | Applied | ❌ | [15](../reports/015-unknown-2026-10-01.md) | via agency | https://job-boards.greenhouse.io/acme/jobs/7009 |'],
+    { '015-2026-10-01_unknown_platform-engineer_0123456789abcdef.pdf': '%PDF capture for report 15' },
+    8,
+  );
+  assert.strictEqual(read('posting.pdf'), '%PDF capture for report 15', 'the unknown capture must be the archived posting');
+  assert.deepStrictEqual(archiveCalls, [], 'a capture was found, so nothing is re-archived');
+});

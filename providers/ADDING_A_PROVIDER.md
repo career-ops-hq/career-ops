@@ -138,6 +138,17 @@ export default {
   per-posting detail on every scan, with no config switch, defeats the
   opt-in and puts the per-posting request fan-out back on the default path;
   `detailLimit` is the cap on that loop, never the thing that turns it on.
+- A teaser, summary or excerpt is not a `description`: `content_filter`
+  reads any description as the full JD, so a short blurb that lacks a
+  required keyword drops the posting. When such a blurb states where the
+  job can be done ("can be done remotely anywhere in the United States"),
+  put only that statement in `eligibilityText`, which
+  `country_eligibility_filter` reads and no other filter does. Reference:
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. When the
+  blurb can mention visa sponsorship, put it in `visaText`, which only
+  `visa_filter` reads. The whole blurb may go there, since `visa_filter`
+  matches nothing but its sponsorship keywords. Reference:
+  `providers/startup-jobs.mjs`.
 - When the payload exposes **more than one** candidate URL for a posting —
   typically an aggregator carrying the employer's upstream ATS/application
   link alongside its own posting page — `Job.url` is the employer's link, per
@@ -179,7 +190,10 @@ judge.
   modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`, `bamboohr`,
   `paylocity`, `join`), each paired with a public company directory (a
   dataset, or for `join` the ATS's own sitemap). No registry lookup;
-  joining it means adding an import and a `SOURCES` entry.
+  joining it means adding an import and a `SOURCES` entry. A ninth entry,
+  `workable`, has no directory: it reads Workable's XML job feed, which
+  already carries every posting, so no provider module's `fetch()` or
+  `enrichDate` runs for it.
 - **The `--history-seeds` pass.** Boards derived from the user's tracker and
   scan history (`history-ats-seeds.mjs`). This one does load the registry,
   but it only reaches a provider whose `id` equals a vendor label from

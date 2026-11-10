@@ -33,9 +33,13 @@
 // returning 200. An hours-long `Retry-After` is not worth honouring; giving up
 // fast and falling through to the markdown feed serves the scan better than
 // stalling on it.
+//
+// The end of this file also reads Workable's public XML job feed, which
+// carries every tenant's postings at once (loadWorkableFeed). scan.mjs never
+// uses it; scan-ats-full.mjs does, as its Workable source.
 
 import { decodeEntities } from './_html-entities.mjs';
-import { BROWSER_LIKE_USER_AGENT, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchTextStream, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
 
 const ALLOWED_WORKABLE_HOSTS = new Set(['apply.workable.com']);
 
@@ -365,4 +369,270 @@ export function parseWorkableMarkdown(text, companyName) {
     jobs.push({ title, url: safe, location, company: companyName });
   }
   return jobs;
+}
+
+// ── Public XML job feed ─────────────────────────────────────────────────
+//
+// Every posting published on Jobs by Workable, for every Workable ATS
+// tenant, in one document:
+//
+//   GET https://www.workable.com/boards/workable.xml
+//   <source><publisher/><publisherurl/>
+//     <job><title/><date/><referencenumber/><url/><company/><city/><state/>
+//          <country/><remote/><postalcode/><description/><education/>
+//          <jobtype/><category/><experience/><website/></job> ...
+//   </source>
+//
+// Workable documents it for job boards it has no integration with, updates it
+// every hour, and asks that the posting URLs are not altered, because they
+// attribute candidates. Each `<url>` is the tenant's own share link,
+// `https://apply.workable.com/j/<shortcode>`, the URL the widget path above
+// emits for a tracked company, so a posting from the feed and the same posting
+// from a tracked company's careers page are one dedup key.
+//
+// The document is large (about 870 MB of XML, served as about 140 MB of
+// brotli), so it is read with fetchTextStream and parsed one `<job>` at a time;
+// only the postings that pass the caller's date window and title filter are
+// kept. Every value sits in CDATA; `<country>` is an ISO 3166 code, turned into
+// its English name here because location_filter is written in names.
+//
+// Like the widget, the feed lists a posting once per location, each row with
+// the same `<url>`. Rows are handed to parseWorkableWidget, which folds them
+// into one posting with every location, oldest row first, so a posting's date
+// is the date it was first published. `<date>` follows the widget's
+// `published_on`: it moves when a tenant republishes a posting, not when the
+// feed is rebuilt.
+
+export const WORKABLE_FEED_URL = 'https://www.workable.com/boards/workable.xml';
+// The whole transfer, headers included: the first byte has been seen after
+// about 18 s and the body after about 40 s.
+export const WORKABLE_FEED_TIMEOUT_MS = 10 * 60_000;
+// Decoded size, several times the size the feed has been seen at.
+export const WORKABLE_FEED_MAX_BYTES = 4 * 1024 * 1024 * 1024;
+// One `<job>` has been seen at up to about 44 KB; anything near this is not a
+// posting but a feed whose closing tag never arrives.
+const MAX_FEED_JOB_CHARS = 1024 * 1024;
+// Rows kept in memory, after the date window and the title filter. A 7-day
+// window with no title filter has kept about 19,000 rows in about 430 MB.
+export const WORKABLE_FEED_MAX_KEPT_ROWS = 25_000;
+const FEED_JOB_OPEN = '<job>';
+const FEED_JOB_CLOSE = '</job>';
+const FEED_SOURCE_OPEN = '<source>';
+const FEED_SOURCE_CLOSE = '</source>';
+// Between jobs only a tail this long is kept: enough to finish any of these
+// tags when a piece ends inside it.
+const FEED_TAIL_CHARS = Math.max(FEED_JOB_OPEN.length, FEED_SOURCE_OPEN.length, FEED_SOURCE_CLOSE.length) - 1;
+
+const regionNames = new Intl.DisplayNames(['en'], { type: 'region' });
+
+/**
+ * English country name for an ISO 3166-1 alpha-2 code, or the value as given.
+ * @param {string} code
+ */
+export function feedCountryName(code) {
+  const c = String(code ?? '').trim();
+  if (!/^[A-Za-z]{2}$/.test(c)) return c;
+  try {
+    return regionNames.of(c.toUpperCase()) ?? c;
+  } catch {
+    return c;
+  }
+}
+
+/**
+ * The text of one child element of a feed `<job>`: its CDATA sections joined,
+ * any text outside them entity-decoded, trimmed. Empty when the element is
+ * absent.
+ * @param {string} block
+ * @param {string} name
+ */
+export function readFeedField(block, name) {
+  const open = `<${name}>`;
+  const start = block.indexOf(open);
+  if (start === -1) return '';
+  let pos = start + open.length;
+  let out = '';
+  while (pos < block.length) {
+    if (block.startsWith('<![CDATA[', pos)) {
+      const end = block.indexOf(']]>', pos + 9);
+      if (end === -1) break;
+      out += block.slice(pos + 9, end);
+      pos = end + 3;
+      continue;
+    }
+    const next = block.indexOf('<', pos);
+    if (next === -1) break;
+    out += decodeEntities(block.slice(pos, next));
+    pos = next;
+    if (!block.startsWith('<![CDATA[', pos)) break; // the closing tag, or markup the feed does not use
+  }
+  return out.trim();
+}
+
+/**
+ * One feed `<job>` in the widget's row shape, so parseWorkableWidget can read
+ * it. Null when the block has no title or URL.
+ * @param {string} block
+ */
+export function feedRowToWidgetRow(block) {
+  const title = readFeedField(block, 'title');
+  const url = readFeedField(block, 'url');
+  if (!title || !url) return null;
+  const stamp = Date.parse(readFeedField(block, 'date'));
+  return {
+    title,
+    shortlink: url,
+    city: readFeedField(block, 'city'),
+    state: readFeedField(block, 'state'),
+    country: feedCountryName(readFeedField(block, 'country')),
+    telecommuting: readFeedField(block, 'remote').toLowerCase() === 'true',
+    published_on: Number.isNaN(stamp) ? '' : new Date(stamp).toISOString(),
+    description: readFeedField(block, 'description'),
+    company: readFeedField(block, 'company'),
+    website: readFeedField(block, 'website'),
+    _postedMs: Number.isNaN(stamp) ? null : stamp,
+  };
+}
+
+/**
+ * Cut a text stream into `<job>…</job>` blocks.
+ * @param {(block: string) => void} onBlock
+ */
+export function createFeedJobSplitter(onBlock) {
+  let buf = '';
+  let sawSource = false;
+  let sawSourceEnd = false;
+  return {
+    /** @param {string} text */
+    push(text) {
+      buf += text;
+      for (;;) {
+        if (!sawSource && buf.includes(FEED_SOURCE_OPEN)) sawSource = true;
+        const start = buf.indexOf(FEED_JOB_OPEN);
+        if (start === -1) {
+          // Only text between jobs is searched for the root's closing tag, so
+          // a `</source>` inside a posting's CDATA never counts.
+          if (sawSource && buf.includes(FEED_SOURCE_CLOSE)) sawSourceEnd = true;
+          buf = buf.slice(-FEED_TAIL_CHARS);
+          return;
+        }
+        if (sawSource && buf.slice(0, start).includes(FEED_SOURCE_CLOSE)) sawSourceEnd = true;
+        const end = buf.indexOf(FEED_JOB_CLOSE, start);
+        if (end === -1) {
+          if (buf.length - start > MAX_FEED_JOB_CHARS) {
+            throw new Error(`workable feed: a <job> element runs past ${MAX_FEED_JOB_CHARS} characters without a closing tag`);
+          }
+          buf = buf.slice(start);
+          return;
+        }
+        onBlock(buf.slice(start, end + FEED_JOB_CLOSE.length));
+        buf = buf.slice(end + FEED_JOB_CLOSE.length);
+      }
+    },
+    get sawSource() {
+      return sawSource;
+    },
+    /** True once the root's closing tag has arrived: the document was not cut short. */
+    get sawSourceEnd() {
+      return sawSourceEnd;
+    },
+  };
+}
+
+/**
+ * Read the feed and keep the postings a reverse scan wants.
+ *
+ * A posting is kept when its title passes `titleFilter` (called with the
+ * employer's name, which stands in for the company slug of other sources) and
+ * none of its rows is older than `cutoffMs`: the posting's date is its oldest
+ * row. A row with no date counts only with `includeUndated`.
+ *
+ * Throws, so the caller keeps nothing from a bad read, when the response is
+ * not the feed (no `<source>` root), when it ends before `</source>` (a body
+ * cut short would otherwise read as a smaller feed), when a `<job>` never
+ * closes, and when more than `maxKeptRows` rows pass the window and the title
+ * filter (the kept postings, not the download, are what fills memory).
+ *
+ * @param {{
+ *   cutoffMs: number,
+ *   includeUndated?: boolean,
+ *   titleFilter: (title: string, companySlug?: string) => boolean,
+ *   fetchStream?: typeof fetchTextStream,
+ *   timeoutMs?: number,
+ *   maxBytes?: number,
+ *   maxKeptRows?: number,
+ * }} opts
+ * @returns {Promise<{ companies: Array<{ company: string, website: string, jobs: any[] }>, stats: { rows: number, keptRows: number, postings: number, staleRows: number, undatedRows: number, bytes: number } }>}
+ */
+export async function loadWorkableFeed({
+  cutoffMs, includeUndated = false, titleFilter,
+  fetchStream = fetchTextStream,
+  timeoutMs = WORKABLE_FEED_TIMEOUT_MS, maxBytes = WORKABLE_FEED_MAX_BYTES,
+  maxKeptRows = WORKABLE_FEED_MAX_KEPT_ROWS,
+}) {
+  /** @type {Map<string, any[]>} posting URL → its rows */
+  const rowsByUrl = new Map();
+  /** Postings with a row older than the window: the posting is older than it. */
+  const stale = new Set();
+  const stats = { rows: 0, keptRows: 0, postings: 0, staleRows: 0, undatedRows: 0, bytes: 0 };
+  let held = 0;
+
+  const splitter = createFeedJobSplitter((block) => {
+    stats.rows++;
+    const row = feedRowToWidgetRow(block);
+    if (!row || !row.company) return;
+    if (!titleFilter(row.title, row.company)) return;
+    const key = row.shortlink;
+    if (row._postedMs === null) {
+      stats.undatedRows++;
+      if (!includeUndated) return;
+    } else if (row._postedMs < cutoffMs) {
+      stats.staleRows++;
+      stale.add(key);
+      held -= rowsByUrl.get(key)?.length ?? 0;
+      rowsByUrl.delete(key);
+      return;
+    }
+    if (stale.has(key)) return;
+    if (++held > maxKeptRows) {
+      throw new Error(`workable feed: more than ${maxKeptRows} feed rows pass the --since window and the title filter; narrow --since or title_filter`);
+    }
+    const rows = rowsByUrl.get(key) ?? [];
+    rows.push(row);
+    rowsByUrl.set(key, rows);
+  });
+
+  // A fixed literal URL, so there is no host to check before the request;
+  // redirect: 'error' keeps the response on that host.
+  const { bytes } = await fetchStream(WORKABLE_FEED_URL, { timeoutMs, maxBytes, redirect: 'error' }, (text) => { splitter.push(text); });
+  stats.bytes = bytes;
+  if (!splitter.sawSource) {
+    throw new Error('workable feed: unexpected response — no <source> element');
+  }
+  if (!splitter.sawSourceEnd) {
+    throw new Error(`workable feed: the response ended before </source> after ${stats.rows} <job> rows; the feed was cut short`);
+  }
+
+  /** @type {Map<string, { company: string, website: string, rows: any[] }>} */
+  const byCompany = new Map();
+  for (const rows of rowsByUrl.values()) {
+    stats.keptRows += rows.length;
+    const { company, website } = rows[0];
+    const group = byCompany.get(company) ?? { company, website, rows: [] };
+    if (!group.website && website) group.website = website;
+    group.rows.push(...rows);
+    byCompany.set(company, group);
+  }
+  const companies = [];
+  for (const { company, website, rows } of byCompany.values()) {
+    // Oldest row first: parseWorkableWidget takes a posting's date from the
+    // first row it sees for that URL.
+    rows.sort((a, b) => (a._postedMs ?? Infinity) - (b._postedMs ?? Infinity));
+    const jobs = parseWorkableWidget({ jobs: rows }, company);
+    if (!jobs.length) continue;
+    stats.postings += jobs.length;
+    companies.push({ company, website, jobs });
+  }
+  companies.sort((a, b) => a.company.localeCompare(b.company));
+  return { companies, stats };
 }
