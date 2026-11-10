@@ -232,7 +232,7 @@ export type Application = {
 export function readApplications(): Application[] {
   const root = careerOpsRoot();
   const file = resolveTrackerPath(root);
-  const codeRoot = path.resolve(process.cwd(), "..");
+  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   // Parsed rows follow tracker-aliases.json as well as the tracker. A header
   // rename in that file must not keep serving the old columns.
   const aliasFiles = [...new Set([
@@ -256,7 +256,7 @@ export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
  *  so the pipeline does not tell every zero-row case to clear the search. */
 export function readTrackerShape(): TrackerShape {
   const md = readTrackerFile(careerOpsRoot());
-  return classifyTracker(md, careerOpsRoot(), path.resolve(process.cwd(), ".."));
+  return classifyTracker(md, careerOpsRoot(), resolveCodeRoot(process.cwd(), process.env));
 }
 
 export type StatusLogRow = {
