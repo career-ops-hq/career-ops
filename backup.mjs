@@ -129,20 +129,30 @@ function templateUserFiles(dataRoot, warnings, failed) {
 const isAgentSetting = (lower) => lower.startsWith('.claude/') || lower === 'opencode.json'
   || lower === 'plugins.local' || lower.startsWith('plugins.local/');
 
-// Editor leftovers of a contact file hold the same details, so they are held
-// back with it: vim swap files (`.contacts.tsv.swp`, `.swo`, `.swn`, ...), emacs
-// `#contacts.tsv#` autosaves and `.#contacts.tsv` locks, `contacts.tsv~`, and
-// `.bak`/`.orig`/`.old`/`.save` copies.
-const EDITOR_SUFFIX = /\.(sw[a-z]|bak|orig|old|save)$/;
-function isContactFile(lower) {
-  const dir = lower.slice(0, lower.lastIndexOf('/') + 1);
-  let name = lower.slice(dir.length);
-  const emacs = name.match(/^#(.+)#$/) || name.match(/^\.#(.+)$/);
-  if (emacs) name = emacs[1];
-  name = name.replace(/^\./, '');
-  while (EDITOR_SUFFIX.test(name) || name.endsWith('~')) name = name.replace(EDITOR_SUFFIX, '').replace(/~$/, '');
-  const stripped = dir + name;
-  return name.endsWith('.vcf') || CONTACT_FILES.some((f) => stripped === f.toLowerCase());
+// Editor leftovers. Vim swap files (`.name.swp`, `.swo`, `.swn`, ...), emacs
+// `#name#` autosaves and `.#name` locks, and `name~` are transient and never
+// copied, for any file. `.bak`/`.orig`/`.old`/`.save` copies are not transient,
+// but one of a secret or contact file holds the same data, so for those the
+// original's name decides. `data/..env.swp` is therefore the `.env` swap file.
+const BACKUP_COPY_SUFFIX = /\.(bak|orig|old|save)$/;
+function editorLeftover(name) {
+  let base = name;
+  let temp = false;
+  for (let changed = true; changed;) {
+    const before = base;
+    const emacs = base.match(/^#(.+)#$/) || base.match(/^\.#(.+)$/);
+    const vim = base.match(/^\.(.+)\.sw[a-z]$/) || base.match(/^(.+)\.sw[a-z]$/);
+    if (emacs) { base = emacs[1]; temp = true; }
+    else if (vim) { base = vim[1]; temp = true; }
+    else if (base.length > 1 && base.endsWith('~')) { base = base.slice(0, -1); temp = true; }
+    else base = base.replace(BACKUP_COPY_SUFFIX, '');
+    changed = base !== before;
+  }
+  return { base, temp };
+}
+
+function isContactFile(dir, base) {
+  return base.endsWith('.vcf') || CONTACT_FILES.some((f) => dir + base === f.toLowerCase());
 }
 
 /**
@@ -154,18 +164,21 @@ export function isExcluded(relPath, { includeContacts = false, skipAgentSettings
   // Lowercased: macOS and Windows volumes are case-insensitive, so a renamed
   // `Data/connections.csv` or `.ENV` is the same file.
   const lower = p.toLowerCase();
-  const name = lower.slice(lower.lastIndexOf('/') + 1);
-  if (name === '.ds_store' || name === '.env' || name.startsWith('.env.')) return true;
+  const dir = lower.slice(0, lower.lastIndexOf('/') + 1);
+  const name = lower.slice(dir.length);
+  const { base, temp } = editorLeftover(name);
+  if (temp) return true;
+  if (name === '.ds_store' || base === '.env' || base.startsWith('.env.')) return true;
   // A nested checkout is copied for its files, but its git metadata (remote
   // URLs can embed tokens) and dependency folders are not.
   if (lower.split('/').some((seg) => seg === '.git' || seg === 'node_modules')) return true;
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
   if (skipAgentSettings && isAgentSetting(lower)) return true;
   // Any .vcf is a vCard export from contacts.mjs, which takes a custom path.
-  if (!includeContacts && isContactFile(lower)) return true;
+  if (!includeContacts && isContactFile(dir, base)) return true;
   // plugins.lock is a User Layer file (USER_PATHS), not a transient lock.
   if (lower === 'plugins.lock') return false;
-  return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
+  return /\.(lock|tmp|tick|part)$/.test(name);
 }
 
 // ── Destination discovery ────────────────────────────────────────────────

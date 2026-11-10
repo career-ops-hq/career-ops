@@ -36,12 +36,24 @@ try {
   assert.equal(b.isExcluded('output/Contacts.VCF'), true);
   assert.equal(b.isExcluded('output/contacts.vcf', { includeContacts: true }), false);
   assert.equal(b.isExcluded('output/caller-id.vcf'), true);
-  // Editor leftovers of a contact file go with it; unrelated files of the same kind do not.
-  for (const f of ['data/.contacts.tsv.swp', 'data/contacts.tsv.bak', 'data/Connections.csv.orig', 'data/.reply-candidates.json.swo', 'output/contacts.vcf.bak', 'data/#contacts.tsv#', 'data/.contacts.tsv.swn', 'data/.#contacts.tsv', 'data/contacts.tsv.swm']) {
+  // Copies of a contact file go with it (and are included with it); unrelated copies are not held back.
+  for (const f of ['data/contacts.tsv.bak', 'data/Connections.csv.orig', 'output/contacts.vcf.bak']) {
     assert.equal(b.isExcluded(f), true, f);
     assert.equal(b.isExcluded(f, { includeContacts: true }), false, `${f} with --include-contacts`);
   }
+  // Editor swap/autosave files are never copied, even with --include-contacts.
+  for (const f of ['data/.contacts.tsv.swp', 'data/.reply-candidates.json.swo', 'data/#contacts.tsv#', 'data/.contacts.tsv.swn', 'data/.#contacts.tsv', 'data/contacts.tsv.swm']) {
+    assert.equal(b.isExcluded(f), true, f);
+    assert.equal(b.isExcluded(f, { includeContacts: true }), true, `${f} with --include-contacts`);
+  }
   assert.equal(b.isExcluded('data/applications.md.bak'), false);
+  // Editor temp files are never copied, for any file; secrets keep their editor copies out too.
+  for (const f of ['data/.applications.md.swp', 'data/#applications.md#', 'data/.#applications.md', 'data/..env.swp', 'data/#.env#', 'data/.env.bak', 'data/.env~', 'cv.md~']) {
+    assert.equal(b.isExcluded(f), true, f);
+    assert.equal(b.isExcluded(f, { includeContacts: true }), true, `${f} with --include-contacts`);
+  }
+  assert.equal(b.isExcluded('data/applications.md'), false);
+  assert.equal(b.isExcluded('~'), false);
   assert.equal(b.isExcluded('output/sub/Phone.VCF'), true);
   assert.equal(b.isExcluded('output/caller-id.vcf', { includeContacts: true }), false);
   assert.equal(b.isExcluded('output/cv.pdf'), false);
