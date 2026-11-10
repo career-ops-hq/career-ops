@@ -1492,6 +1492,10 @@ async function main() {
   let domainGatedBoards = cc.domainGatedBoards || 0;
   let domainGatedPostings = cc.domainGatedPostings || 0;
   const datasetStatus = {};
+  // Companies each source's list held, kept in the checkpoint beside its
+  // status so a resumed run can report a finished source without reading its
+  // list again (see restartOnResume).
+  const datasetSizes = {};
 
   // Graceful stop for the web layer: it SIGTERMs us when its scan budget elapses
   // (see web/src/lib/core/scan-timeout.mjs). A full sweep only prints its result
@@ -1562,6 +1566,7 @@ async function main() {
     includeUndated: opts.includeUndated,
     filters,
     completedSources: [...completedSources],
+    datasets: Object.fromEntries(Object.keys(datasetStatus).map((n) => [n, { status: datasetStatus[n], available: datasetSizes[n] ?? 0 }])),
     offers: newOffers,
     savedAt: new Date().toISOString(),
   });
@@ -1617,12 +1622,27 @@ async function main() {
 
   for (const name of opts.ats.filter((ats) => SOURCES[ats])) {
     const source = SOURCES[name];
+    // A finished source whose list is rebuilt rather than cached (the Workable
+    // feed, about 140 MB a read) is not read again on --resume: its status and
+    // size come from the checkpoint. A checkpoint that predates those fields
+    // reports it as read ('ok', since it finished) with no companies counted.
+    if (completedSources.has(name) && source.restartOnResume) {
+      const saved = checkpoint?.datasets?.[name];
+      datasetStatus[name] = ['ok', 'stale', 'empty'].includes(saved?.status) ? saved.status : 'ok';
+      const available = Number.isInteger(saved?.available) && saved.available >= 0 ? saved.available : 0;
+      datasetSizes[name] = available;
+      totalCompaniesAvailable += available;
+      if (opts.limit < available) capHit = true;
+      log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping (its list is not read again)`);
+      continue;
+    }
     // Stats are accumulated BEFORE the completed-source skip: on --resume a
     // source finished before the checkpoint was written still contributed its
     // companies to the sweep, so it must still count toward the availability /
     // cap figures the final report and --json output show.
     const { list, status } = await loadSourceList(name, source, { cutoff, includeUndated: opts.includeUndated, titleFilter });
     datasetStatus[name] = status;
+    datasetSizes[name] = list.length;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
     if (completedSources.has(name)) {
