@@ -1405,7 +1405,7 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
       : 'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.');
 
   if (strictPages) {
-    throw new Error(`${message} (strict page budget: --strict-pages or cv.strict_pages)`);
+    throw new Error(`${message} (strict page budget: ${isCover ? '--strict-pages' : '--strict-pages or cv.strict_pages'})`);
   }
 
   console.warn(`⚠️  ${message} Overflow is warning-only by default; use --strict-pages to reject it.`);
