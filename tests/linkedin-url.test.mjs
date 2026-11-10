@@ -47,6 +47,11 @@ for (const [desc, url] of ACCEPTS) {
 check('a /jobs/view/ id wins over a different ?currentJobId=',
   idOf(`https://www.linkedin.com/jobs/view/${ID}/?currentJobId=111`) === ID);
 
+check('a bare short /jobs/view/ id is still that job',
+  idOf('https://www.linkedin.com/jobs/view/2024') === '2024');
+check('a slug trailing id of seven digits is the job',
+  idOf('https://www.linkedin.com/jobs/view/data-scientist-1234567') === '1234567');
+
 // -- 2. what must NOT yield an id --------------------------------------------
 const REJECTS = [
   ['a non-LinkedIn host', `https://example.com/jobs/view/${ID}`],
@@ -57,6 +62,8 @@ const REJECTS = [
   ['a company jobs page', 'https://www.linkedin.com/company/acme/jobs/'],
   ['/jobs/view/ with no id', 'https://www.linkedin.com/jobs/view/'],
   ['a slug with no trailing id', 'https://www.linkedin.com/jobs/view/staff-software-engineer-at-acme'],
+  ['a title slug that ends in a year', 'https://www.linkedin.com/jobs/view/data-scientist-2024'],
+  ['a title slug whose trailing number is only six digits', 'https://www.linkedin.com/jobs/view/data-scientist-123456'],
   ['a non-numeric job id', 'https://www.linkedin.com/jobs/view/not-a-number/'],
   ['/comm/ with a title slug (emails never carry one)', `https://www.linkedin.com/comm/jobs/view/staff-engineer-${ID}`],
   ['an id followed by more path', `https://www.linkedin.com/jobs/view/${ID}/apply`],
@@ -111,6 +118,9 @@ check('linkedInCanonicalKey folds the spellings onto one id',
 check('linkedInCanonicalKey ignores a non-posting',
   linkedInCanonicalKey('https://www.linkedin.com/in/someone') === ''
   && linkedInCanonicalKey('https://example.com/jobs/view/123') === '');
+check('a year at the end of a slug is not the short job id',
+  linkedInCanonicalKey('https://www.linkedin.com/jobs/view/data-scientist-2024') === ''
+  && linkedInCanonicalKey('https://www.linkedin.com/jobs/view/2024') === 'linkedin.com:2024');
 
 // -- 6. loadable outside Node, and shipped by the updater --------------------
 // A browser bundle has to be able to load this file, so it must import nothing.
