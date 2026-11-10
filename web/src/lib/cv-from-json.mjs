@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -9,6 +10,44 @@ import { PAGE_FORMATS } from "./page-formats.mjs";
 async function loadCore(coreRoot, fileName) {
   const href = pathToFileURL(path.join(coreRoot, fileName)).href;
   return import(/* webpackIgnore: true */ href);
+}
+
+const sharedPdfPaths = new Map();
+
+/**
+ * Runs that publish the same HTML path take turns. The next run waits until
+ * the earlier one has finished writing that path and the PDF beside it.
+ *
+ * @template T
+ * @param {string} key
+ * @param {() => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export function withSharedPdfPath(key, fn) {
+  const previous = sharedPdfPaths.get(key) ?? Promise.resolve();
+  const run = previous.then(fn, fn);
+  const settled = run.then(() => {}, () => {});
+  sharedPdfPaths.set(key, settled);
+  settled.then(() => {
+    if (sharedPdfPaths.get(key) === settled) sharedPdfPaths.delete(key);
+  });
+  return run;
+}
+
+/**
+ * @param {string} htmlPath
+ */
+function runScratch(htmlPath) {
+  const dir = path.join(path.dirname(htmlPath), `run-${randomUUID()}`);
+  fs.mkdirSync(dir, { recursive: true });
+  const base = path.join(dir, "cv");
+  return {
+    dir,
+    json: `${base}.payload.json`,
+    html: `${base}.html`,
+    atsJson: `${base}.ats.json`,
+    atsHtml: `${base}.ats.html`,
+  };
 }
 
 function runNode(dataRoot, args) {
@@ -114,7 +153,7 @@ function structureWarnings(structure) {
  * @param {string} args.htmlPath
  * @param {string} args.finalPdf
  * @param {boolean} [args.ats]
- * @returns {Promise<{ok: true, html: string, warnings: string[], ats: {html: string, finalPdf: string}|null} | {ok: false, error: string}>}
+ * @returns {Promise<{ok: true, html: string, warnings: string[], ats: {html: string, finalPdf: string}|null, scratchDir?: string} | {ok: false, error: string}>}
  */
 export async function materializeTailoredCv({
   envelope,
@@ -168,37 +207,46 @@ export async function materializeTailoredCv({
   const structureMod = await loadCore(coreRoot, "verify-cv-structure.mjs");
   warnings.push(...structureWarnings(structureMod.verifyStructure(payload, cvMd)));
 
-  const jsonPath = htmlPath.replace(/\.html$/i, ".payload.json");
-  fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
-  fs.writeFileSync(jsonPath, JSON.stringify(payload));
-  const template = cvTemplateAbsolute({ cvTemplate, codeRoot: coreRoot, userTemplatesDir, dataRoot });
-  const built = await runNode(dataRoot, [
-    path.join(coreRoot, "build-cv-html.mjs"),
-    jsonPath,
-    htmlPath,
-    template,
-  ]);
-  if (!built.ok) {
-    const detail = built.stderr || "build-cv-html.mjs failed.";
-    return { ok: false, error: `Could not build the tailored CV. ${detail}` };
-  }
-
-  let html;
+  const scratch = runScratch(htmlPath);
+  let keepScratch = false;
   try {
-    html = fs.readFileSync(htmlPath, "utf8");
-  } catch (err) {
-    return { ok: false, error: `The tailored CV HTML was not written: ${err.message}` };
-  }
+    fs.writeFileSync(scratch.json, JSON.stringify(payload));
+    const template = cvTemplateAbsolute({ cvTemplate, codeRoot: coreRoot, userTemplatesDir, dataRoot });
+    const built = await runNode(dataRoot, [
+      path.join(coreRoot, "build-cv-html.mjs"),
+      scratch.json,
+      scratch.html,
+      template,
+    ]);
+    if (!built.ok) {
+      const detail = built.stderr || "build-cv-html.mjs failed.";
+      return { ok: false, error: `Could not build the tailored CV. ${detail}` };
+    }
 
-  const report = reportPath(dataRoot, reportFile);
-  if (report && fs.existsSync(/* turbopackIgnore: true */ report)) {
-    warnings.push(...await keywordWarnings(coreRoot, dataRoot, report, htmlPath));
-  }
+    let html;
+    try {
+      html = fs.readFileSync(scratch.html, "utf8");
+    } catch (err) {
+      return { ok: false, error: `The tailored CV HTML was not written: ${err.message}` };
+    }
 
-  const atsVariant = ats === true
-    ? await buildAtsVariant({ coreRoot, dataRoot, payload, htmlPath, finalPdf, warnings })
-    : null;
-  return { ok: true, html, warnings, ats: atsVariant };
+    const report = reportPath(dataRoot, reportFile);
+    if (report && fs.existsSync(/* turbopackIgnore: true */ report)) {
+      warnings.push(...await keywordWarnings(coreRoot, dataRoot, report, scratch.html));
+    }
+
+    const atsVariant = ats === true
+      ? await buildAtsVariant({ coreRoot, dataRoot, payload, scratch, finalPdf, warnings })
+      : null;
+    fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
+    fs.writeFileSync(htmlPath, html);
+    fs.rmSync(scratch.json, { force: true });
+    fs.rmSync(scratch.atsJson, { force: true });
+    keepScratch = Boolean(atsVariant);
+    return { ok: true, html, warnings, ats: atsVariant, scratchDir: keepScratch ? scratch.dir : undefined };
+  } finally {
+    if (!keepScratch) fs.rmSync(scratch.dir, { recursive: true, force: true });
+  }
 }
 
 function reportPath(dataRoot, reportFile) {
@@ -234,7 +282,7 @@ async function keywordWarnings(coreRoot, dataRoot, report, htmlPath) {
   }
 }
 
-async function buildAtsVariant({ coreRoot, dataRoot, payload, htmlPath, finalPdf, warnings }) {
+async function buildAtsVariant({ coreRoot, dataRoot, payload, scratch, finalPdf, warnings }) {
   let atsTemplate;
   try {
     const templates = await loadCore(coreRoot, "cv-templates.mjs");
@@ -255,18 +303,16 @@ async function buildAtsVariant({ coreRoot, dataRoot, payload, htmlPath, finalPdf
     const message = String(finding.message ?? "").slice(0, 180);
     warnings.push(`ATS lint ${finding.code}: ${message}`);
   }
-  const atsJson = htmlPath.replace(/\.html$/i, ".ats.json");
-  const atsHtml = htmlPath.replace(/\.html$/i, ".ats.html");
-  fs.writeFileSync(atsJson, JSON.stringify(folded.payload));
+  fs.writeFileSync(scratch.atsJson, JSON.stringify(folded.payload));
   const built = await runNode(dataRoot, [
     path.join(coreRoot, "build-cv-html.mjs"),
-    atsJson,
-    atsHtml,
+    scratch.atsJson,
+    scratch.atsHtml,
     atsTemplate,
   ]);
   if (!built.ok) {
     warnings.push(`ATS PDF was not created: ${built.stderr || "the ATS HTML build failed"}. Apply will use the styled PDF.`);
     return null;
   }
-  return { html: atsHtml, finalPdf: atsPdfPath(finalPdf) };
+  return { html: scratch.atsHtml, finalPdf: atsPdfPath(finalPdf) };
 }

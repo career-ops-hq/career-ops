@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { materializeTailoredCv, restoreNewestFirst } from "../../src/lib/cv-from-json.mjs";
+import { materializeTailoredCv, restoreNewestFirst, withSharedPdfPath } from "../../src/lib/cv-from-json.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -183,6 +183,64 @@ test("a legacy HTML envelope is kept as emitted and does not grow an ATS sibling
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("two builds of one report keep their own CV", async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "cv-race-"));
+  const savedRoot = process.env.CAREER_OPS_ROOT;
+  process.env.CAREER_OPS_ROOT = dir;
+  try {
+    writeFileSync(path.join(dir, "cv.md"), CV_MD);
+    const htmlPath = path.join(dir, "cv.html");
+    const finalPdf = path.join(dir, "out.pdf");
+    const one = payload();
+    one.candidate.name = "Ada Lovelace";
+    const other = payload();
+    other.candidate.name = "Grace Hopper";
+    const [first, second] = await Promise.all([
+      materializeTailoredCv({
+        envelope: { ok: true, kind: "json", format: "letter", payload: one, warnings: [] },
+        coreRoot: CORE,
+        dataRoot: dir,
+        htmlPath,
+        finalPdf,
+      }),
+      materializeTailoredCv({
+        envelope: { ok: true, kind: "json", format: "letter", payload: other, warnings: [] },
+        coreRoot: CORE,
+        dataRoot: dir,
+        htmlPath,
+        finalPdf,
+      }),
+    ]);
+    assert.equal(first.ok, true, first.error);
+    assert.equal(second.ok, true, second.error);
+    assert.match(first.html, /Ada Lovelace/);
+    assert.doesNotMatch(first.html, /Grace Hopper/);
+    assert.match(second.html, /Grace Hopper/);
+    assert.doesNotMatch(second.html, /Ada Lovelace/);
+    const published = readFileSync(htmlPath, "utf8");
+    assert.ok(published === first.html || published === second.html);
+  } finally {
+    if (savedRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = savedRoot;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a shared PDF path publishes one run at a time", async () => {
+  let active = 0;
+  let peak = 0;
+  const gate = (name) => withSharedPdfPath("cv.html", async () => {
+    active += 1;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    active -= 1;
+    return name;
+  });
+  const names = await Promise.all([gate("one"), gate("two")]);
+  assert.deepEqual(names.sort(), ["one", "two"]);
+  assert.equal(peak, 1);
 });
 
 test("a payload the title check cannot read stops the render", async () => {

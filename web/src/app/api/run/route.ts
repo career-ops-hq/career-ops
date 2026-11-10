@@ -14,7 +14,7 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { materializeTailoredCv } from "@/lib/cv-from-json.mjs";
+import { materializeTailoredCv, withSharedPdfPath } from "@/lib/cv-from-json.mjs";
 import { saveBuiltCv } from "@/lib/pdf-run-save.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
@@ -621,20 +621,25 @@ export async function POST(req: Request) {
             sendWarnings(envelope.warnings);
             // Tracked so cancel() can defer releasing writeToken until this
             // settles. close() happens once rendering finishes, not here.
-            pdfRenderPromise = (async () => {
+            pdfRenderPromise = withSharedPdfPath(pdfPaths.html, async () => {
+              let scratchDir = "";
               try {
                 await saveBuiltCv({
-                  build: () => materializeTailoredCv({
-                    envelope,
-                    coreRoot: resolveCodeRoot(process.cwd(), process.env),
-                    dataRoot: careerOpsRoot(),
-                    cvTemplate,
-                    userTemplatesDir,
-                    reportFile: pdfPaths.reportFile,
-                    htmlPath: pdfPaths.html,
-                    finalPdf: pdfPaths.finalPdf,
-                    ats: body.ats === true,
-                  }),
+                  build: async () => {
+                    const built = await materializeTailoredCv({
+                      envelope,
+                      coreRoot: resolveCodeRoot(process.cwd(), process.env),
+                      dataRoot: careerOpsRoot(),
+                      cvTemplate,
+                      userTemplatesDir,
+                      reportFile: pdfPaths.reportFile,
+                      htmlPath: pdfPaths.html,
+                      finalPdf: pdfPaths.finalPdf,
+                      ats: body.ats === true,
+                    });
+                    if (built.ok && built.scratchDir) scratchDir = built.scratchDir;
+                    return built;
+                  },
                   isClosed: () => closed,
                   onError: (error) => send({ type: "error", msg: error.slice(0, 200) }),
                   onWarnings: sendWarnings,
@@ -644,9 +649,10 @@ export async function POST(req: Request) {
               } catch (e) {
                 send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
               } finally {
+                if (scratchDir) fs.rmSync(scratchDir, { recursive: true, force: true });
                 close();
               }
-            })();
+            });
             return;
             // saveCv already streamed the specific reason.
           }
