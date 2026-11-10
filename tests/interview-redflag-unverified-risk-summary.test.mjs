@@ -11,7 +11,7 @@
 // file exists) and maps to `risk_summary.interview_redflags: not_evaluated`.
 // A file Step 5 rewrites from real-interview sessions carries no marker and
 // shows its warning level as before; a missing file keeps the no-session row.
-import { readFileSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 
@@ -79,6 +79,20 @@ const consumers = [
   { file: 'modes/vi/tuyen-dung.md', notEvaluated: '— not evaluated', noSessions: '— no interview sessions yet', l10n: true },
 ];
 
+// Every evaluation mode that cross-references the red-flag file must be in the list above,
+// so a locale that adds the Interview red flags row later fails here until it is covered.
+const referencing = ['modes/oferta.md', 'batch/batch-prompt.md'];
+for (const dir of readdirSync(join(ROOT, 'modes'), { withFileTypes: true })) {
+  if (!dir.isDirectory()) continue;
+  for (const f of readdirSync(join(ROOT, 'modes', dir.name))) {
+    if (f.endsWith('.md') && read('modes', dir.name, f).includes('-redflags.md')) referencing.push(`modes/${dir.name}/${f}`);
+  }
+}
+const listed = new Set(consumers.map((c) => c.file));
+const missing = referencing.filter((f) => !listed.has(f));
+check('every mode file that cites the red-flag file is a checked consumer',
+  missing.length === 0, `not covered: ${missing.join(', ')}`);
+
 for (const c of consumers) {
   const text = read(c.file);
   const levelLink = `[${c.level || '{level}'}](${LINK})`;
@@ -107,6 +121,17 @@ for (const c of consumers) {
   check(`${c.file}: the no-session exception excludes a file marked unverified`,
     exceptionLine.includes(`\`${c.notEvaluated}\``) && (exceptionLine.match(new RegExp(escape(c.notEvaluated), 'g')) || []).length >= 2,
     'exception paragraph does not name the unverified case');
+  // The count above still passes if the "marked file is not this exception" sentence goes,
+  // so pin that sentence where the paragraph is written in a language this test reads.
+  const exceptionExclusion = {
+    'modes/oferta.md': /marked unverified.*`— not evaluated`.*not this exception/,
+    'batch/batch-prompt.md': /marked unverified.*`— not evaluated`.*not this exception/,
+    'modes/pt/oferta.md': /marcado como não verificado.*`— não avaliado`.*não esta exceção/,
+  }[c.file];
+  if (exceptionExclusion) {
+    check(`${c.file}: a marked file is not the no-session exception`,
+      exceptionExclusion.test(exceptionLine), 'marked-file exclusion missing from the exception paragraph');
+  }
 }
 
 // --- Machine Summary agrees with the row ---
