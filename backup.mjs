@@ -66,14 +66,15 @@ const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-
  * tools derive the same boundary; a fork's `config/local-paths.txt`
  * declarations come with it. The declaration file itself is added so a restore
  * brings the declarations back. A declaration file that cannot be parsed falls
- * back to the built-in list and says so in `warnings`.
+ * back to the built-in list and is reported in `failed`, so the run exits non-zero.
  */
 export function backupPaths(dataRoot, warnings = [], failed = []) {
   let paths = [...USER_PATHS];
   try {
     paths = effectiveUserPaths(dataRoot);
   } catch (error) {
-    warnings.push(`${error.message}; backing up the built-in user paths only.`);
+    // Declared files are missing from this backup, so the run must not read as a clean success.
+    failed.push({ path: LOCAL_PATHS_FILE, error: `${error.message}; backing up the built-in user paths only` });
   }
   return [...new Set([...paths, LOCAL_PATHS_FILE, ...templateUserFiles(dataRoot, warnings, failed)].map((p) => p.replace(/\/+$/, '')))];
 }

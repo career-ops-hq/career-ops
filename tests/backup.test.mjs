@@ -391,16 +391,14 @@ try {
   // A destination that holds the checkout is refused when the data root is elsewhere.
   assert.throws(() => b.assertSafeDestination(join(tmp, 'co-parent'), join(tmp, 'dr'), join(tmp, 'co-parent', 'checkout')), /contains/);
 
-  // A declaration file that cannot be parsed falls back to the built-in list.
+  // A declaration file that cannot be parsed is reported as a failure; the built-in list is still backed up.
   const decl = join(tmp, 'decl-root');
   put(decl, 'cv.md', 'cv');
   put(decl, 'config/local-paths.txt', '/etc/passwd\n');
   const warned = b.runBackup({ dataRoot: decl, dest: join(tmp, 'backup', 'decl') });
-  // The checkout's own local-paths.txt, if a fork has one, adds an unrelated warning.
-  const declWarnings = warned.warnings.filter((w) => !w.includes('is not read when the data root is elsewhere'));
-  assert.equal(declWarnings.length, 1);
+  assert.equal(warned.failed.filter((f) => f.path === 'config/local-paths.txt').length, 1);
   assert.equal(warned.copied, 2);
-  pass('an unparseable local-paths.txt warns and backs up the built-in paths');
+  pass('an unparseable local-paths.txt is a failure and still backs up the built-in paths');
 
   // CLI: JSON result and exit codes, against the fixture root.
   const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_BACKUP_DIR: '' };
