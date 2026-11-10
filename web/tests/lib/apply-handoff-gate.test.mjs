@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { answersByFieldId, handoffDecision, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
+import { answersByFieldId, handoffDecision, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
 
 const sponsorship = { id: "visa", type: "select", label: "Will you require visa sponsorship?", required: true };
 const salary = { id: "pay", type: "text", label: "Desired salary", required: true };
@@ -211,6 +211,23 @@ test("two fields that share a label keep the answer stored on each id", () => {
     { id: "visa-b", label: "Will you require visa sponsorship?", value: "" },
   ]);
   assert.deepEqual(mapped, { "visa-a": "No", "visa-b": "" });
+});
+
+test("a retry replaces a stale required-empty warning and keeps unrelated issues", () => {
+  const previous = [
+    { code: "required-empty", message: "Required and still empty: Visa sponsorship" },
+    { code: "fill-mismatch", message: "A field did not match" },
+  ];
+  assert.deepEqual(replaceRequiredEmpty(previous, []), [
+    { code: "fill-mismatch", message: "A field did not match" },
+  ]);
+  assert.deepEqual(replaceRequiredEmpty(previous, [
+    { code: "required-empty", message: "Required and still empty: Phone" },
+    { code: "fill-mismatch", message: "A field did not match" },
+  ]), [
+    { code: "fill-mismatch", message: "A field did not match" },
+    { code: "required-empty", message: "Required and still empty: Phone" },
+  ]);
 });
 
 test("a retry can drop the previous handoff gaps without dropping other issues", () => {

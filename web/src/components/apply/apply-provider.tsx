@@ -5,7 +5,7 @@ import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
-import { withoutHandoffGaps } from "@/lib/apply/handoff-gate.mjs";
+import { replaceRequiredEmpty, withoutHandoffGaps } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
@@ -356,13 +356,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
       setSteps(d.steps ?? []);
       if (typeof d.cvAttached === "boolean") setCvAttached(d.cvAttached);
-      // merge the verify-after-fill warnings (required-empty / mismatch / validation)
-      if (Array.isArray(d.issues) && d.issues.length) {
-        setIssues((prev) => {
-          const seen = new Set(prev.map((i: ApplyIssue) => i.message));
-          return [...prev, ...(d.issues as ApplyIssue[]).filter((i) => !seen.has(i.message))];
-        });
-      }
+      // The latest verify-after-fill list replaces required-empty. A field that
+      // filled this time must not stay on the page as empty.
+      setIssues((prev) => replaceRequiredEmpty(prev, Array.isArray(d.issues) ? d.issues as ApplyIssue[] : []));
       if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
       if (d.handedOff) {
         setStatus("done");

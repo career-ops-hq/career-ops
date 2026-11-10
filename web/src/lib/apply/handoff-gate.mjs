@@ -149,6 +149,22 @@ export function withoutHandoffGaps(issues) {
 }
 
 /**
+ * The latest verify-after-fill list replaces earlier required-empty warnings.
+ * A field that filled this time drops off. Other issues stay.
+ *
+ * @template {{ code?: string, message?: string }} T
+ * @param {T[] | null | undefined} previous
+ * @param {T[] | null | undefined} verified
+ * @returns {T[]}
+ */
+export function replaceRequiredEmpty(previous, verified) {
+  const kept = (Array.isArray(previous) ? previous : []).filter((issue) => !issue || issue.code !== "required-empty");
+  const fresh = Array.isArray(verified) ? verified : [];
+  const seen = new Set(kept.map((issue) => issue && issue.message));
+  return [...kept, ...fresh.filter((issue) => issue && !seen.has(issue.message))];
+}
+
+/**
  * Map labeled drive answers onto field ids. A blank value stays blank so the
  * gate can see it.
  *

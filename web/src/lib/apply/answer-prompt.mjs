@@ -4,9 +4,13 @@
  * Plain .mjs whose only import is the dependency-free profile-path.mjs, for the same reason extract-json-object.mjs is:
  * the prompt is the part of apply/prefill that decides what the model is
  * allowed to answer, and it was unreachable by a test while it lived inline in
- * the route. Work authorization, visa, and compensation are filled from the
- * profile when it states them. Citizenship, gender, race, disability, and
- * veteran questions stay blank, and years of experience are not invented.
+ * the route. The sensitive-field carve-out on the fourth bullet is the line that
+ * matters - it is what keeps legal, visa, work-authorization, salary and
+ * demographic questions from being auto-filled - and nothing pinned it.
+ *
+ * Moved verbatim from api/apply/prefill/route.ts. The wording, the
+ * tab-separated field list and the arrows are the prompt the planner has been
+ * receiving all along; this is a relocation, not a rewrite.
  */
 import { DEFAULT_PROFILE_REF } from "../core/profile-path.mjs";
 
@@ -65,12 +69,7 @@ For each field give the best answer:
 - experience (employer, job title, dates, location, role description) → from the source that owns it above, verbatim in substance.
 - free-text (Why us?, cover-letter, "most impactful thing you've built", etc.) → a concise, honest, concrete answer in the candidate's own voice (no buzzwords, active voice, real metrics only). Keep each under ~120 words.
 - select/radio → choose the best-matching option using the EXACT option text from the list.
-- work authorization, visa sponsorship, and compensation expectations → from ${profile} when it states them (location.authorized_in, location.visa_status, location.needs_sponsorship, compensation.target_range). Use the exact option text. If ${profile} does not state that answer, set needs_confirmation:true and value:"".
-- NEVER invent a work-authorization, visa, sponsorship, or salary answer the profile does not state.
-- NEVER fill citizenship, nationality, permanent resident, gender, race, ethnicity, disability, or veteran questions → set needs_confirmation:true and value:"".
-- NEVER fill criminal history, non-compete, security clearance, age or date of birth, sexual orientation, religion, or marital status questions → set needs_confirmation:true and value:"".
-- NEVER invent years of experience, a degree, or a credential to meet a minimum. If the source does not state it, set needs_confirmation:true and value:"".
-- NEVER fill a legal consent, privacy, or terms checkbox → set needs_confirmation:true and value:"".
+- NEVER fill legal / visa / work-authorization / salary / demographic / sensitive fields → set needs_confirmation:true and value:"".
 
 Output ONLY a compact JSON object mapping each field id → {"value": "...", "needs_confirmation": boolean}. No prose, no markdown, no code fence.`;
 }

@@ -53,7 +53,17 @@ export async function POST(req: Request) {
           }
           const company = typeof body.company === "string" ? body.company : undefined;
           const application = typeof body.application === "string" ? body.application : undefined;
-          const cvPath = await resolveSessionCv({ company, application, title: s.title });
+          // A throw here used to skip the gate and return t:error. The résumé is
+          // unattached, the gate still decides, and the message rides the same
+          // done stream as the other gaps.
+          let cvPath: string | null = null;
+          let cvResolveError = "";
+          try {
+            cvPath = await resolveSessionCv({ company, application, title: s.title });
+          } catch (error) {
+            cvPath = null;
+            cvResolveError = error instanceof Error ? error.message.slice(0, 160) : "Could not resolve the résumé.";
+          }
           const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
           const attached = cvPath
             ? await fillSession(s.id, {}, s.fields, cvPath, cvUploadName)
@@ -69,12 +79,15 @@ export async function POST(req: Request) {
             unmetLabels,
           });
           if (decision.handoff) await handoffSession(s.id).catch(() => {});
+          const gaps = cvResolveError
+            ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }, ...decision.gaps]
+            : decision.gaps;
           emit({
             t: "done",
             filled: decision.handoff,
             turns: result.turns,
             reason: result.reason,
-            gaps: decision.gaps,
+            gaps,
           });
           return;
         }
