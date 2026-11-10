@@ -5,7 +5,7 @@ import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
-import { mergeIssues, replaceRequiredEmpty, withoutHandoffGaps } from "@/lib/apply/handoff-gate.mjs";
+import { issuesAfterAgent, issuesAfterFill } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
@@ -342,7 +342,6 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const gen = generation.current;
     setStatus("filling");
     setSteps([]);
-    setIssues((prev) => withoutHandoffGaps(prev));
     try {
       const r = await fetch("/api/apply/fill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, answers, fields, handoff: true, company: companyRef.current, application: nRef.current }) });
       const d = await r.json();
@@ -356,9 +355,8 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
       setSteps(d.steps ?? []);
       if (typeof d.cvAttached === "boolean") setCvAttached(d.cvAttached);
-      // The latest verify-after-fill list replaces required-empty. A field that
-      // filled this time must not stay on the page as empty.
-      setIssues((prev) => replaceRequiredEmpty(prev, Array.isArray(d.issues) ? d.issues as ApplyIssue[] : []));
+      // Gaps stay up while the request runs. This body is what replaces them.
+      setIssues((prev) => issuesAfterFill(prev, Array.isArray(d.issues) ? d.issues as ApplyIssue[] : []));
       if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
       if (d.handedOff) {
         setStatus("done");
@@ -392,7 +390,6 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setDriveSteps([]);
     setError("");
     setStatus("filling");
-    setIssues((prev) => withoutHandoffGaps(prev));
     fillAbort.current?.abort();
     const controller = new AbortController();
     fillAbort.current = controller;
@@ -402,14 +399,16 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const result = await readFillResult(r, (step) => setDriveSteps((p) => [...p, step]), () => generation.current === gen, controller.signal);
       if (!result || controller.signal.aborted || generation.current !== gen) return; // left mid-fill
       const outcome = screenForFill(result);
-      if ("gaps" in outcome && outcome.gaps?.length) {
-        const gaps = outcome.gaps;
-        setIssues((prev) => mergeIssues(prev, gaps));
+      const gaps = "gaps" in outcome && outcome.gaps?.length ? outcome.gaps : [];
+      if (gaps.length || outcome.status === "done") {
+        setIssues((prev) => issuesAfterAgent(prev, {
+          gaps,
+          note: outcome.status === "done" ? outcome.issue : "",
+        }));
       }
       if (outcome.status === "done") {
-        setIssues((prev) => mergeIssues(prev, [{ level: "info", code: "ai-filled", message: outcome.issue }]));
         setStatus("done");
-      } else if ("gaps" in outcome && outcome.gaps?.length) {
+      } else if (gaps.length) {
         setStatus("ready");
       } else {
         setError(outcome.error || "The agent couldn't finish. Check the real form before trying again.");

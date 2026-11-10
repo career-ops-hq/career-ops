@@ -93,6 +93,8 @@ export function handoffDecision({
   unmetLabels = [],
   blankAnswersBlock = true,
 } = {}) {
+  // verifyFill names empty fields by label. It does not send field ids, so one
+  // unmet label holds every field that shares that label.
   const unmet = new Set(unmetLabels.filter((label) => typeof label === "string" && label));
   /** @type {{ level: "warn", code: string, message: string, field?: string }[]} */
   const gaps = [];
@@ -199,6 +201,34 @@ export function replaceRequiredEmpty(previous, verified) {
   const fresh = Array.isArray(verified) ? verified : [];
   const seen = new Set(kept.map((issue) => issue && issue.message));
   return [...kept, ...fresh.filter((issue) => issue && !seen.has(issue.message))];
+}
+
+/**
+ * A fill body replaces the last handoff gaps. The caller leaves the previous
+ * list alone when the request fails or has not returned.
+ *
+ * @template {{ code?: string, message?: string }} T
+ * @param {T[] | null | undefined} previous
+ * @param {T[] | null | undefined} incoming
+ * @returns {T[]}
+ */
+export function issuesAfterFill(previous, incoming) {
+  return replaceRequiredEmpty(withoutHandoffGaps(previous), incoming);
+}
+
+/**
+ * An agent result replaces the last handoff gaps, then adds the gaps that
+ * came back. `note` is the one ai-filled line, and only when the handoff finished.
+ *
+ * @template {{ code?: string, message?: string }} T
+ * @param {T[] | null | undefined} previous
+ * @param {{ gaps?: T[] | null, note?: string }} [result]
+ * @returns {T[]}
+ */
+export function issuesAfterAgent(previous, { gaps, note } = {}) {
+  const next = mergeIssues(withoutHandoffGaps(previous), gaps);
+  if (!note) return next;
+  return mergeIssues(next, [{ level: "info", code: "ai-filled", message: note }]);
 }
 
 /**

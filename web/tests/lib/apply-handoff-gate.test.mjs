@@ -7,8 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
-import { answersByFieldId, handoffDecision, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
+import { answersByFieldId, handoffDecision, issuesAfterAgent, issuesAfterFill, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
 
 const sponsorship = { id: "visa", type: "select", label: "Will you require visa sponsorship?", required: true };
 const salary = { id: "pay", type: "text", label: "Desired salary", required: true };
@@ -237,8 +236,58 @@ test("a retry can drop the previous handoff gaps without dropping other issues",
     { code: "fill-mismatch", message: "A field did not match" },
   ]);
   assert.deepEqual(next, [{ code: "fill-mismatch", message: "A field did not match" }]);
-  const provider = readFileSync(new URL("../../src/components/apply/apply-provider.tsx", import.meta.url), "utf8");
-  assert.equal(provider.split("withoutHandoffGaps(").length - 1, 2);
+});
+
+test("one unmet label holds every required field that shares it", () => {
+  const fields = [
+    { id: "visa-a", type: "select", label: "Will you require visa sponsorship?", required: true },
+    { id: "visa-b", type: "select", label: "Will you require visa sponsorship?", required: true },
+  ];
+  const decision = handoffDecision({
+    fields,
+    answers: { "visa-a": "No", "visa-b": "No" },
+    unmetLabels: ["Will you require visa sponsorship?"],
+  });
+  assert.equal(decision.handoff, false);
+  assert.equal(decision.gaps.length, 2);
+  assert.deepEqual(decision.gaps.map((gap) => gap.field), [
+    "Will you require visa sponsorship?",
+    "Will you require visa sponsorship?",
+  ]);
+});
+
+test("a finished fill replaces the last gaps and a stopped agent fill does not add an ai-filled note", () => {
+  const previous = [
+    { code: "screening-empty", message: "Required sponsorship question is still empty" },
+    { code: "resume-missing", message: "old résumé gap" },
+    { code: "fill-mismatch", message: "A field did not match" },
+  ];
+  assert.deepEqual(issuesAfterFill(previous, [
+    { code: "required-empty", message: "Required and still empty: Phone" },
+    { code: "resume-missing", message: "No tailored CV was resolved for Resume/CV." },
+  ]), [
+    { code: "fill-mismatch", message: "A field did not match" },
+    { code: "required-empty", message: "Required and still empty: Phone" },
+    { code: "resume-missing", message: "No tailored CV was resolved for Resume/CV." },
+  ]);
+  assert.deepEqual(issuesAfterAgent(previous, {
+    gaps: [{ code: "resume-missing", message: "new résumé gap" }],
+  }), [
+    { code: "fill-mismatch", message: "A field did not match" },
+    { code: "resume-missing", message: "new résumé gap" },
+  ]);
+  const note = "AI filled the form for you — review every answer on the real form, then submit it yourself.";
+  assert.deepEqual(issuesAfterAgent([
+    ...previous,
+    { code: "ai-filled", message: note },
+  ], {
+    gaps: [{ code: "cv-resolve", message: "Could not resolve the résumé." }],
+    note,
+  }), [
+    { code: "fill-mismatch", message: "A field did not match" },
+    { code: "ai-filled", message: note },
+    { code: "cv-resolve", message: "Could not resolve the résumé." },
+  ]);
 });
 
 test("a retry keeps one ai-filled note and both résumé gaps", () => {
