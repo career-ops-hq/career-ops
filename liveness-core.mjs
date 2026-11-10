@@ -315,10 +315,25 @@ function firstMatch(patterns, text = '') {
 // søknadsfristen er utløpt, blir søkerlisten offentliggjort", which describes
 // what happens after the deadline, not a closed posting (#6620). "for" and "til"
 // are left out because they are also prepositions in both languages. So is
-// "etter" ("Søk etter stillinger"), so it counts without "at" only right
-// before the deadline noun: "Søknader behandles etter søknadsfristen er utløpt".
+// "etter" ("Søk etter stillinger"); see ETTER_BEFORE_MATCH for the one place a
+// bare "etter" opens the clause.
 const TIME_OR_CONDITION_CLAUSE =
-  /(?:\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as|nar|etter at|etter(?= s[øo]knadsfrist)|inntil|hvis|dersom|sa snart)|(?<![\p{L}\p{N}])før) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/iu;
+  /(?:\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as|nar|etter at|inntil|hvis|dersom|sa snart)|(?<![\p{L}\p{N}])før) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/iu;
+
+// A bare "etter" opens the clause only when the match itself starts at the
+// deadline noun right after it: "Søknader behandles etter søknadsfristen er
+// utløpt". A lookahead for the noun anywhere after "etter" also caught a sort
+// control: "Sorter etter søknadsfrist Stillingen er besatt", with the control
+// and the banner joined on one line, read the banner as part of a time clause
+// and the filled position as active (#6788).
+const ETTER_BEFORE_MATCH = /(?<![\p{L}\p{N}])etter $/iu;
+const DEADLINE_NOUN_START = /^s[øo]knadsfrist/iu;
+
+function opensTimeOrConditionClause(lines, match) {
+  const end = match.index + match[0].length;
+  if (TIME_OR_CONDITION_CLAUSE.test(lines.slice(0, end))) return true;
+  return DEADLINE_NOUN_START.test(match[0]) && ETTER_BEFORE_MATCH.test(lines.slice(0, match.index));
+}
 
 // `lines` keeps its line breaks (normalizeForMatch with keepLineBreaks). The
 // patterns match on the joined text, as every other check here does, so a
@@ -328,7 +343,7 @@ function firstStatedMatch(patterns, lines = '') {
   const text = lines.replace(/\n/g, ' ');
   return patterns.find((pattern) => {
     for (const match of text.matchAll(new RegExp(pattern, `${pattern.flags}g`))) {
-      if (!TIME_OR_CONDITION_CLAUSE.test(lines.slice(0, match.index + match[0].length))) return true;
+      if (!opensTimeOrConditionClause(lines, match)) return true;
     }
     return false;
   });

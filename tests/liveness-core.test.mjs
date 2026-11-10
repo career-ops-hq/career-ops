@@ -947,8 +947,10 @@ for (const label of ['Søk', 'Søk etter stillinger', 'Søknadsfrist', 'Søk sen
 // A closed Norwegian posting can keep its "Søk her" link next to the closure
 // banner. The banner wins; a deadline still ahead does not (#6620).
 // "Søk etter stillinger" is site chrome, not a clause opener: it can sit on the
-// banner's own line and must not hide the closure.
-for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått ut', 'Stillingen er ikke lenger ledig', 'Denne annonsen er utløpt', 'Stillingen er besatt', 'Søk etter stillinger Søknadsfristen er utløpt']) {
+// banner's own line and must not hide the closure. Neither may a "Sorter etter
+// søknadsfrist" sort control joined to the banner: its "etter" opens no clause
+// around the banner (#6788).
+for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått ut', 'Stillingen er ikke lenger ledig', 'Denne annonsen er utløpt', 'Stillingen er besatt', 'Søk etter stillinger Søknadsfristen er utløpt', 'Sorter etter søknadsfrist Stillingen er besatt', 'Sorter etter søknadsfrist\nStillingen er besatt', 'Sorter etter søknadsfrist Søknadsfristen er utløpt']) {
   const closed = classifyLiveness({
     status: 200,
     requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
