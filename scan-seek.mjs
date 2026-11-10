@@ -3,29 +3,26 @@
 /**
  * scan-seek.mjs — SEEK NZ keyword scanner over the SEO path form.
  *
- * Fetches https://nz.seek.com/<keyword>-jobs[/in-All-<Location>] and reads the
+ * Fetches https://nz.seek.com/<keyword>-jobs[/in-<Location>] and reads the
  * job records out of the page's inlined `window.SEEK_REDUX_DATA` (id, title,
  * advertiser, location, salary label, listing date, teaser, work types).
  *
- * WHY THIS SHAPE. nz.seek.com/robots.txt disallows, for every agent,
- * any /job/ path, `*?`, `/graphql` and `/api/jobsearch/`. The JSON API that
- * `providers/jobstreet.mjs` calls (`/api/jobsearch/v5/search` for known
- * companies in `companies:`) is therefore off limits for robots-strict scanning.
- * The SEO path form carries no disallowed segment, so this scanner fetches only
- * that, and discovers roles by keyword across NZ-domestic employers and
- * recruiters with no public ATS board. It never fetches a `/job/<id>` page:
- * the URL is built for the pipeline, not requested.
+ * Unlike `providers/jobstreet.mjs` (which queries `/api/jobsearch/v5/search`
+ * for known companies in `companies:`), this scanner discovers roles by
+ * keyword across NZ-domestic employers and recruiters with no public ATS
+ * board. It never fetches a `/job/<id>` detail page: the posting URL is built
+ * for the pipeline, not requested during the scan.
  *
- * NO PAGINATION. Paging needs a query string, which `*?` disallows. Depth
- * comes from more, narrower queries (one per seek_searches entry); Seek's
- * totalCount is fuzzy relevance matching, so deeper pages would be less
- * relevant anyway.
+ * PAGINATION & FRESHNESS (#6694). Paginates `?page=N` (from page 2 onward) up
+ * to `max_pages` per search (default 5, cap 50, or `--pages N` on the CLI),
+ * stopping early when a page yields no new postings. `--daterange N` (or
+ * `daterange: N` on an entry) appends `daterange=N` so results are scoped to
+ * the last N days of ads. (Until #6691, query strings were omitted to stay
+ * inside `nz.seek.com/robots.txt`'s `*?` disallow; rule 6 no longer treats
+ * `robots.txt` as a gate.)
  *
- * relevance and can be dominated by older ads. There is deliberately no date
- * window flag: it would need `?daterange=N`, a query string, and `*?` is
- * disallowed, so the scanner only ever requests query-free paths.
- *
- * Config (portals.yml): `seek_searches`, a list of `{ keyword, location? }`.
+ * Config (portals.yml): `seek_searches`, a list of
+ * `{ keyword, location?, daterange?, max_pages? }`.
  * title_filter, location_filter and data/blacklist.md apply as in scan.mjs.
  */
 
@@ -47,33 +44,67 @@ import {
   createLocalGate, formatLocalSkips, writeRunLog,
 } from './scan-local-lib.mjs';
 
-const KNOWN_FLAGS = ['--help', '-h', '--delay-ms', '--dry-run'];
+const KNOWN_FLAGS = ['--help', '-h', '--daterange', '--pages', '--max-pages', '--delay-ms', '--dry-run'];
+const VALUE_FLAGS = ['--daterange', '--pages', '--max-pages', '--delay-ms'];
 const USAGE = `Usage:
-  node scan-seek.mjs                  # one request per seek_searches entry
+  node scan-seek.mjs                  # scan seek_searches from portals.yml
+  node scan-seek.mjs --daterange 7    # restrict to the last 7 days (?daterange=7)
+  node scan-seek.mjs --pages 3        # fetch up to 3 pages per search (?page=N)
   node scan-seek.mjs --dry-run        # print matches, write nothing
 
 Reads seek_searches from portals.yml:
   seek_searches:
     - keyword: "data analyst"
       location: "Wellington"          # optional; omit for all of NZ
+      daterange: 7                    # optional; last N days
+      max_pages: 5                    # optional; default 5 (cap 50)
 
-Fetches only the SEO path (nz.seek.com/<keyword>-jobs[/in-All-<Location>]) and
-reads the inlined search results. No query string, no pagination; add narrower
-searches for depth.
+Fetches the SEO path (nz.seek.com/<keyword>-jobs[/in-<Location>]) and reads
+the inlined window.SEEK_REDUX_DATA results, paging ?page=N until a page yields
+no new postings or max_pages is reached.
 
 Flags:
+  --daterange N     append daterange=N (last N days of ads)
+  --pages N         max pages per search (default 5, cap 50; alias --max-pages)
   --delay-ms N      pause between requests (default 2000)
   --dry-run         do not touch pipeline, scan history or scan-runs
   --help, -h        show this help and exit`;
 
 const BASE = 'https://nz.seek.com';
+export const DEFAULT_MAX_PAGES = 5;
+export const MAX_PAGES_CAP = 50;
+
+function coercePositiveInt(v) {
+  if (typeof v === 'number' && Number.isSafeInteger(v) && v >= 1) return v;
+  if (typeof v === 'string' && /^[1-9]\d*$/.test(v.trim())) {
+    const n = Number(v.trim());
+    if (Number.isSafeInteger(n)) return n;
+  }
+  return v;
+}
+
+function parsePositiveInt(val, name) {
+  const n = coercePositiveInt(val);
+  if (typeof n === 'number' && Number.isSafeInteger(n) && n >= 1) return n;
+  throw new Error(`Invalid ${name} ${JSON.stringify(val)}; must be a positive integer`);
+}
 
 export function loadSearches(portals) {
   const list = Array.isArray(portals?.seek_searches) ? portals.seek_searches : [];
   return list
     .map((s) => (typeof s === 'string' ? { keyword: s } : s))
     .filter((s) => s && typeof s.keyword === 'string' && s.keyword.trim())
-    .map((s) => ({ keyword: s.keyword.trim(), location: (s.location || '').trim() }));
+    .map((s) => {
+      const entry = { keyword: s.keyword.trim(), location: (s.location || '').trim() };
+      const maxPages = s.max_pages ?? s.pages;
+      if (maxPages !== undefined && maxPages !== null && maxPages !== '') {
+        entry.max_pages = coercePositiveInt(maxPages);
+      }
+      if (s.daterange !== undefined && s.daterange !== null && s.daterange !== '') {
+        entry.daterange = coercePositiveInt(s.daterange);
+      }
+      return entry;
+    });
 }
 
 const NZ_LOCATION_SLUGS = {
@@ -127,12 +158,31 @@ export function formatSeekLocation(location) {
   throw new Error(`Unknown SEEK NZ location ${JSON.stringify(location)}; use a known NZ region/city or a canonical "in-..." SEEK path slug`);
 }
 
-/** SEO path URL for one search: query-free, as nz.seek.com/robots.txt requires (`*?`). */
-export function buildSeekUrl({ keyword, location }) {
+/**
+ * SEO path URL for one search. `daterange` (positive integer days) and `page`
+ * (1-based; omitted on page 1) are appended as query parameters when set.
+ * Accepts either `(search, daterange, page)` or `(search, { daterange, page })`.
+ */
+export function buildSeekUrl({ keyword, location, daterange: entryDaterange }, optsOrDaterange = null, pageArg = 1) {
   const kw = slugify(keyword);
   if (!kw) throw new Error(`Empty keyword: ${JSON.stringify(keyword)}`);
   const loc = formatSeekLocation(location);
-  return `${BASE}/${kw}-jobs${loc ? `/${loc}` : ''}`;
+  const isOpts = optsOrDaterange !== null && typeof optsOrDaterange === 'object';
+  const daterange = isOpts ? (optsOrDaterange.daterange ?? entryDaterange ?? null) : (optsOrDaterange ?? entryDaterange ?? null);
+  const page = isOpts ? (optsOrDaterange.page ?? 1) : (pageArg ?? 1);
+
+  const params = new URLSearchParams();
+  if (daterange !== null && daterange !== undefined && daterange !== '') {
+    const days = parsePositiveInt(daterange, 'daterange');
+    params.set('daterange', String(days));
+  }
+  if (page !== null && page !== undefined && page !== 1) {
+    const p = parsePositiveInt(page, 'page');
+    if (p > 1) params.set('page', String(p));
+  }
+  const base = `${BASE}/${kw}-jobs${loc ? `/${loc}` : ''}`;
+  const qs = params.toString();
+  return qs ? `${base}?${qs}` : base;
 }
 
 /** Text of the JSON object literal assigned to window.SEEK_REDUX_DATA, or null. */
@@ -192,7 +242,7 @@ export function parseSeekPage(html) {
     const date = typeof j.listingDate === 'string' ? j.listingDate.slice(0, 10) : '';
     offers.push({
       id,
-      url: `${BASE}/job/${id}`, // recorded, never fetched (robots: */job/)
+      url: `${BASE}/job/${id}`, // recorded, never fetched during scan
       title: decodeHtml(j.title),
       company: decodeHtml(j.advertiser?.description ?? j.companyName ?? ''),
       location: decodeHtml(j.location ?? j.locationLabel ?? ''),
@@ -204,6 +254,51 @@ export function parseSeekPage(html) {
     });
   }
   return offers;
+}
+
+/**
+ * Page through one SEEK search (`?page=1..maxPages`), stopping early when a
+ * page returns no unseen job IDs.
+ */
+export async function scanSeekSearch(
+  search,
+  {
+    fetchText,
+    daterange = null,
+    maxPages = null,
+    delayMs = 0,
+    sleepImpl = sleep,
+  } = {},
+) {
+  const rawMax = maxPages ?? search?.max_pages ?? DEFAULT_MAX_PAGES;
+  const pages = parsePositiveInt(rawMax, 'max_pages');
+  const pageLimit = Math.min(pages, MAX_PAGES_CAP);
+  const effectiveDaterange = daterange ?? search?.daterange ?? null;
+  const seenIds = new Set();
+  const collected = [];
+  let lastUrl = search?.keyword ?? '';
+
+  for (let page = 1; page <= pageLimit; page++) {
+    try {
+      lastUrl = buildSeekUrl(search, effectiveDaterange, page);
+      if (page > 1 && delayMs > 0) await sleepImpl(delayMs);
+      const html = await fetchText(lastUrl);
+      const offers = parseSeekPage(html);
+      const fresh = offers.filter((o) => !seenIds.has(o.id));
+      if (fresh.length === 0) break;
+      for (const o of fresh) {
+        seenIds.add(o.id);
+        collected.push(o);
+      }
+    } catch (err) {
+      if (err && typeof err === 'object' && !err.seekUrl) err.seekUrl = lastUrl;
+      if (page === 1) throw err;
+      collected.incomplete = true;
+      collected.error = err;
+      break;
+    }
+  }
+  return collected;
 }
 
 function loadPortals() {
@@ -218,8 +313,26 @@ function loadPortals() {
 
 async function main(args) {
   const dryRun = args.includes('--dry-run');
-  const delayMs = Number(flagValue(args, '--delay-ms') ?? 2000);
-  if (!Number.isFinite(delayMs) || delayMs < 0) {
+  const daterangeRaw = flagValue(args, '--daterange');
+  if (daterangeRaw !== undefined && !/^[1-9]\d*$/.test(daterangeRaw)) {
+    console.error('Error: --daterange needs a positive whole number of days');
+    process.exit(1);
+  }
+  const daterange = daterangeRaw !== undefined ? Number(daterangeRaw) : null;
+
+  for (const flag of ['--pages', '--max-pages']) {
+    const raw = flagValue(args, flag);
+    if (raw !== undefined && !/^[1-9]\d*$/.test(raw)) {
+      console.error(`Error: ${flag} needs a positive whole number of pages`);
+      process.exit(1);
+    }
+  }
+  const pagesRaw = flagValue(args, '--pages') ?? flagValue(args, '--max-pages');
+  const maxPages = pagesRaw !== undefined ? Number(pagesRaw) : null;
+
+  const delayRaw = flagValue(args, '--delay-ms');
+  const delayMs = delayRaw !== undefined ? Number(delayRaw) : 2000;
+  if (delayRaw !== undefined && (delayRaw.trim() === '' || !Number.isFinite(delayMs) || delayMs < 0)) {
     console.error('Error: --delay-ms needs a non-negative number');
     process.exit(1);
   }
@@ -239,19 +352,26 @@ async function main(args) {
 
   for (let i = 0; i < searches.length; i++) {
     if (i > 0) await sleep(delayMs);
-    let url = searches[i].keyword;
     try {
-      url = buildSeekUrl(searches[i]);
-      const offers = parseSeekPage(await fetchTextWithRetry(ctx, url, { headers: { 'accept-language': 'en' } }));
+      const offers = await scanSeekSearch(searches[i], {
+        fetchText: (url) => fetchTextWithRetry(ctx, url, { headers: { 'accept-language': 'en' } }),
+        daterange,
+        maxPages,
+        delayMs,
+      });
       found += offers.length;
       for (const offer of offers) {
         if (gate.check(offer)) continue;
         added.push(offer);
         console.log(`  ✅ ${offer.company} — ${offer.title}`);
       }
+      if (offers.error) {
+        errors++;
+        console.warn(`⚠️  ${offers.error.seekUrl || searches[i].keyword}: ${offers.error.message}`);
+      }
     } catch (err) {
       errors++;
-      console.warn(`⚠️  ${url}: ${err.message}`);
+      console.warn(`⚠️  ${err.seekUrl || searches[i].keyword}: ${err.message}`);
     }
   }
 
@@ -275,6 +395,6 @@ async function main(args) {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--delay-ms'], requireOperand: true });
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   main(args).catch((err) => { console.error('Fatal:', err.message); process.exit(1); });
 }

@@ -277,6 +277,7 @@ const MARKET_EVAL_FILES = {
   it: 'annuncio.md',
   ja: 'kyujin.md',
   ko: 'gonggo.md',
+  nb: 'stilling.md',
   nl: 'vacature.md',
   pl: 'oferta.md',
   pt: 'oferta.md',
