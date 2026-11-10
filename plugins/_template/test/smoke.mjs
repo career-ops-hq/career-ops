@@ -2,14 +2,16 @@
 // hooks that match the manifest. Run by `plugins.mjs add` + the registry CI.
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const KINDS = ['provider', 'ingest', 'search', 'notify', 'export'];
 
 const manifest = JSON.parse(readFileSync(path.join(here, '..', 'manifest.json'), 'utf8'));
-const mod = await import(path.join(here, '..', manifest.entry || 'index.mjs'));
+// import() takes a URL, not a path: a Windows drive letter reads as a URL
+// scheme, and a '#' or '%' in a directory name changes which file it names.
+const mod = await import(pathToFileURL(path.join(here, '..', manifest.entry || 'index.mjs')).href);
 const hooks = mod.default;
 
 assert(hooks && typeof hooks === 'object', 'default export must be an object of hooks');
