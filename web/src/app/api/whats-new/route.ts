@@ -3,7 +3,7 @@ import { getNormalizeTextKey } from "@/lib/core/text-key";
 import { getAggregatorRule } from "@/lib/core/aggregator-id";
 import { evaluatedKeys, isEvaluated } from "@/lib/whats-new-suppression.mjs";
 import type { DiscoveredOffer } from "@/lib/explore";
-import { MAX_OFFER_LIMIT, collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
+import { collectWhatsNew, resolveOfferLimit } from "@/lib/whats-new.mjs";
 import { rankOffers } from "@/lib/core/inbox-rank.mjs";
 import { loadFitTargets } from "@/lib/inbox-fit-profile.mjs";
 import { loadWorkplacePolicy } from "@/lib/core/workplace-policy.mjs";
@@ -75,7 +75,11 @@ export async function GET(req: Request) {
   // is "URL unknown", any other read failure throws from readLinkedReport. The
   // reads are lazy, inside toOffer, so they surface here.
   try {
-    const { offers: pool, count } = collectWhatsNew(rows, { cutoff, toOffer, offerLimit: MAX_OFFER_LIMIT });
+    const { offers: pool, count } = collectWhatsNew(rows, {
+      cutoff,
+      toOffer,
+      offerLimit: Number.POSITIVE_INFINITY,
+    });
     const offers = rankOffers(pool, loadFitTargets(), offerLimit);
     return Response.json({ offers, count });
   } catch (err) {
