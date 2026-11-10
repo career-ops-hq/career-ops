@@ -61,7 +61,7 @@ await import(${JSON.stringify(scanUrl)});
     let json = null;
     try { json = JSON.parse(out); } catch { /* reported below */ }
     const asked = existsSync(lookups) ? readFileSync(lookups, 'utf-8').split('\n').filter(Boolean) : [];
-    if (!asked.some((h) => h.endsWith('workable.com'))) pass('the finished Workable source is not downloaded again on --resume');
+    if (!asked.some((h) => h === 'workable.com' || h.endsWith('.workable.com'))) pass('the finished Workable source is not downloaded again on --resume');
     else fail(`the resumed run looked up ${asked.join(', ')}`);
     if (json?.datasetStatus?.workable === 'ok' && json.companiesAvailable === 55) {
       pass("its status and size in the report come from the checkpoint");
