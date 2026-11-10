@@ -313,7 +313,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint. Use it only if you choose to share that data with the provider.
 >
-> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` sends a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
+> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` and `openai-tailor.mjs` send a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
 >
 > Runcrate (`https://api.runcrate.ai/v1`) is another OpenAI-compatible endpoint that works the same way. Model ids carry the vendor prefix, such as `deepseek-ai/DeepSeek-V4.1-Flash`:
 > ```bash

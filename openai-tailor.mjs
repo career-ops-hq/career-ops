@@ -16,6 +16,7 @@
  *   OPENAI_MODEL (or --model)   — the model id
  */
 
+import { randomUUID } from 'crypto';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
@@ -26,6 +27,7 @@ import { readLockedSections } from './theme-style.mjs';
 import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { endpointHeaders } from './lib/endpoint-headers.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer.
@@ -275,6 +277,14 @@ console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a m
 
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// OpenCode Go answers HTTP 400 MissingSessionID to a request with no session
+// id, and its docs ask for an own user agent: the same headers openai-eval.mjs
+// sends (#5825), for opencode.ai only. One tailoring run is one conversation.
+// https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+let careerOpsVersion;
+// VERSION may carry a release-please marker ("1.38.0 # x-release-please-version").
+try { careerOpsVersion = readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim().split(/\s+/)[0] || undefined; } catch { /* default User-Agent version */ }
+Object.assign(headers, endpointHeaders(endpointHost, randomUUID(), careerOpsVersion));
 
 let tailoredHtml;
 try {
