@@ -17,7 +17,7 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
 import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
@@ -153,6 +153,14 @@ export function PipelineView({
   useEffect(() => {
     if (!isPending) setPendingTab(null);
   }, [isPending]);
+
+  useLayoutEffect(() => {
+    const button = activeTab.current;
+    const strip = button?.parentElement;
+    if (!button || !strip) return;
+    const left = tabStripScrollLeft(strip.getBoundingClientRect(), button.getBoundingClientRect(), strip.scrollLeft);
+    if (left !== strip.scrollLeft) strip.scrollLeft = left;
+  }, [tab]);
 
   useEffect(() => {
     try {
@@ -745,7 +753,7 @@ export function PipelineView({
       </div>
 
       {/* tabs */}
-      <div className="mt-6 flex flex-nowrap gap-1 overflow-x-auto border-b border-border">
+      <div className="mt-6 flex min-w-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden border-b border-border">
         {PIPELINE_TABS.map((t) => {
           const count =
             t === "INBOX"

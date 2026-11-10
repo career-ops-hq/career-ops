@@ -46,6 +46,12 @@ test("The in-page back link returns to the list where it was left", { skip: live
   }
   assert.equal(mountedCompany, true, "Fixture Company 60 mounts when the list is scrolled");
   await company.scrollIntoViewIfNeeded();
+  // The row can mount in the overscan, still below the fold. scrollIntoView
+  // updates scrollY before its scroll event, and Back restores the offset from
+  // that event. Wait for the event to land.
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   const before = await page.evaluate(() => window.scrollY);
   assert.ok(before > 1000, `the list scrolled to row 60 (scrollY ${before})`);
   const listKey = await entryKey();
