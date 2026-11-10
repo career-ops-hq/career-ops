@@ -129,12 +129,17 @@ function templateUserFiles(dataRoot, warnings, failed) {
 const isAgentSetting = (lower) => lower.startsWith('.claude/') || lower === 'opencode.json'
   || lower === 'plugins.local' || lower.startsWith('plugins.local/');
 
-// Editor leftovers of a contact file (`.contacts.tsv.swp`, `contacts.tsv.bak`,
-// `contacts.tsv.orig`) hold the same details, so they are held back with it.
-const EDITOR_SUFFIX = /\.(swp|swo|swx|bak|orig|old|save)$/;
+// Editor leftovers of a contact file hold the same details, so they are held
+// back with it: vim swap files (`.contacts.tsv.swp`, `.swo`, `.swn`, ...), emacs
+// `#contacts.tsv#` autosaves and `.#contacts.tsv` locks, `contacts.tsv~`, and
+// `.bak`/`.orig`/`.old`/`.save` copies.
+const EDITOR_SUFFIX = /\.(sw[a-z]|bak|orig|old|save)$/;
 function isContactFile(lower) {
   const dir = lower.slice(0, lower.lastIndexOf('/') + 1);
-  let name = lower.slice(dir.length).replace(/^\./, '');
+  let name = lower.slice(dir.length);
+  const emacs = name.match(/^#(.+)#$/) || name.match(/^\.#(.+)$/);
+  if (emacs) name = emacs[1];
+  name = name.replace(/^\./, '');
   while (EDITOR_SUFFIX.test(name) || name.endsWith('~')) name = name.replace(EDITOR_SUFFIX, '').replace(/~$/, '');
   const stripped = dir + name;
   return name.endsWith('.vcf') || CONTACT_FILES.some((f) => stripped === f.toLowerCase());

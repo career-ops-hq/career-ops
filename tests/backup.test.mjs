@@ -37,7 +37,7 @@ try {
   assert.equal(b.isExcluded('output/contacts.vcf', { includeContacts: true }), false);
   assert.equal(b.isExcluded('output/caller-id.vcf'), true);
   // Editor leftovers of a contact file go with it; unrelated files of the same kind do not.
-  for (const f of ['data/.contacts.tsv.swp', 'data/contacts.tsv.bak', 'data/Connections.csv.orig', 'data/.reply-candidates.json.swo', 'output/contacts.vcf.bak']) {
+  for (const f of ['data/.contacts.tsv.swp', 'data/contacts.tsv.bak', 'data/Connections.csv.orig', 'data/.reply-candidates.json.swo', 'output/contacts.vcf.bak', 'data/#contacts.tsv#', 'data/.contacts.tsv.swn', 'data/.#contacts.tsv', 'data/contacts.tsv.swm']) {
     assert.equal(b.isExcluded(f), true, f);
     assert.equal(b.isExcluded(f, { includeContacts: true }), false, `${f} with --include-contacts`);
   }
