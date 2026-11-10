@@ -545,7 +545,8 @@ export function createFeedJobSplitter(onBlock) {
  * A posting is kept when its title passes `titleFilter` (called with the
  * employer's name, which stands in for the company slug of other sources) and
  * none of its rows is older than `cutoffMs`: the posting's date is its oldest
- * row. A row with no date counts only with `includeUndated`.
+ * row. A row with no date counts only with `includeUndated`. Every employer
+ * in the feed is returned, with no postings when none was kept.
  *
  * Throws, so the caller keeps nothing from a bad read, when the response is
  * not the feed (no `<source>` root), when it ends before `</source>` (a body
@@ -576,11 +577,14 @@ export async function loadWorkableFeed({
   const stale = new Set();
   const stats = { rows: 0, keptRows: 0, postings: 0, staleRows: 0, undatedRows: 0, bytes: 0 };
   let held = 0;
+  /** @type {Map<string, string>} every employer in the feed → its website */
+  const employers = new Map();
 
   const splitter = createFeedJobSplitter((block) => {
     stats.rows++;
     const row = feedRowToWidgetRow(block);
     if (!row || !row.company) return;
+    if (!employers.get(row.company)) employers.set(row.company, row.website);
     if (!titleFilter(row.title, row.company)) return;
     const key = row.shortlink;
     if (row._postedMs === null) {
@@ -613,23 +617,24 @@ export async function loadWorkableFeed({
     throw new Error(`workable feed: the response ended before </source> after ${stats.rows} <job> rows; the feed was cut short`);
   }
 
-  /** @type {Map<string, { company: string, website: string, rows: any[] }>} */
-  const byCompany = new Map();
+  /** @type {Map<string, any[]>} employer → its kept rows */
+  const rowsByCompany = new Map();
   for (const rows of rowsByUrl.values()) {
     stats.keptRows += rows.length;
-    const { company, website } = rows[0];
-    const group = byCompany.get(company) ?? { company, website, rows: [] };
-    if (!group.website && website) group.website = website;
-    group.rows.push(...rows);
-    byCompany.set(company, group);
+    const { company } = rows[0];
+    const group = rowsByCompany.get(company) ?? [];
+    group.push(...rows);
+    rowsByCompany.set(company, group);
   }
+  // Every employer in the feed is a board, an empty one when none of its
+  // postings passed, as every tenant of a directory is for the other sources.
   const companies = [];
-  for (const { company, website, rows } of byCompany.values()) {
+  for (const [company, website] of employers) {
+    const rows = rowsByCompany.get(company) ?? [];
     // Oldest row first: parseWorkableWidget takes a posting's date from the
     // first row it sees for that URL.
     rows.sort((a, b) => (a._postedMs ?? Infinity) - (b._postedMs ?? Infinity));
     const jobs = parseWorkableWidget({ jobs: rows }, company);
-    if (!jobs.length) continue;
     stats.postings += jobs.length;
     companies.push({ company, website, jobs });
   }

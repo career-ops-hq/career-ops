@@ -456,8 +456,10 @@ export const SOURCES = {
     // there is no company directory to walk and nothing to fetch per board:
     // loadDataset reads the feed once (loadWorkableFeed in
     // providers/workable.mjs, through workableFeedCache) and hands back
-    // one board per employer with its postings attached, already narrowed to
-    // the --since window and the title filter. The rest of the sweep (domain
+    // one board per employer in the feed with its postings attached, already
+    // narrowed to the --since window and the title filter (so most boards are
+    // empty, and the source counts every employer as others count every
+    // tenant of their directory). The rest of the sweep (domain
     // gate, location and content filters, blacklist, dedup) runs per employer
     // as for any other source. Title-filter overrides match the employer name.
     provider: WORKABLE_FEED_PROVIDER,
