@@ -1152,6 +1152,13 @@ export function buildTitleGate(titleFilterConfig, contentFilter, titleFilter = b
 // often lives only in the JD DESCRIPTION body text, which this filter reads
 // (same field `content_filter` already reads — `job.description`).
 //
+// It also reads `job.eligibilityText` (#6747): a source's own eligibility
+// statement given outside the JD, such as the CryptocurrencyJobs feed
+// teaser's "can be done remotely anywhere in the United States, or Canada".
+// countryEligibilityText() below joins the two, and the rules apply to that
+// text. content_filter and visa_filter never see `eligibilityText`, so a
+// posting that carries one but no description still reads as having no JD.
+//
 // Semantics (case-insensitive substring), mirroring location_filter's
 // "don't penalize missing data" discipline exactly:
 //   - Candidate's own `location.country` (config/profile.yml) is "United
@@ -1210,6 +1217,19 @@ export function buildCountryEligibilityFilter(countryEligibilityFilter, candidat
 
     return false;
   };
+}
+
+/**
+ * The text country_eligibility_filter reads for a job: its description and
+ * its `eligibilityText` (#6747), each when it is a non-empty string, joined
+ * by a newline. '' when the job has neither, which the filter passes.
+ * @param {{ description?: unknown, eligibilityText?: unknown }} job
+ * @returns {string}
+ */
+export function countryEligibilityText(job) {
+  return [job?.description, job?.eligibilityText]
+    .filter(t => typeof t === 'string' && t.trim() !== '')
+    .join('\n');
 }
 
 // ── Visa / work-authorization filter ────────────────────────────────
@@ -1760,12 +1780,19 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
  * relisted: pinning the retirement for good would put the recheck the user
  * configured out of reach for exactly the URLs most likely to come back.
  *
+ * `skipped_dup` says a scanner met a seen URL again, so it can pin no longer than
+ * whatever made the URL seen. As a permanent pin, the first repeat sighting kept
+ * an aged posting out for good, and scan-dayforce.mjs and scan-interamt.mjs write
+ * one on every scan that lists it. Its `first_seen` is the day of that repeat,
+ * not of the posting, so the TTL reads it only for a row with no original in
+ * scan-history; otherwise collectSeenUrls lets the row go with its original.
+ *
  * Everything else keeps its permanent pin. The distinction is whether the status
  * describes a POSTING, which can change, or the URL itself — an invalid URL does
  * not become valid and a blocked host does not become reachable because a window
  * elapsed.
  */
-const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
+const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired', 'skipped_dup']);
 
 /**
  * The offers not yet recorded under `status`, one per URL.
@@ -1799,6 +1826,11 @@ function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
   const endDate = new Date(`${end}T00:00:00Z`);
+  // A month or day out of range (`2026-13-01`) is an Invalid Date, and
+  // toISOString() throws on one: a single such scan-history row aborted
+  // loadSeenUrls, and with it the scan. Read it as no date, as the check below
+  // reads `2026-02-30`.
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
   if (startDate.toISOString().slice(0, 10) !== start || endDate.toISOString().slice(0, 10) !== end) return null;
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
@@ -1824,9 +1856,18 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   return ageDays < recheckAfterDays;
 }
 
-
-function scanHistoryPolicy(config = {}) {
-  const raw = config.scan_history?.recheck_after_days;
+/**
+ * The `scan_history` recheck policy portals.yml sets, in the shape
+ * collectSeenUrls and loadSeenUrls take. Exported so every scanner that builds
+ * a seen set releases the rows scan.mjs releases: a policy left out reads as
+ * "dedup forever", so a scanner that skipped it kept a URL seen after
+ * scan.mjs had let it back in.
+ *
+ * @param {object|null} [config] - Parsed portals.yml.
+ * @returns {{recheckAfterDays: number|null}}
+ */
+export function scanHistoryPolicy(config = {}) {
+  const raw = config?.scan_history?.recheck_after_days;
   const parsed = Number.parseInt(raw, 10);
   return {
     recheckAfterDays: Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
@@ -2323,6 +2364,13 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     if (!identityPromotableUrls.has(urlToken)) identityPromotableUrls.set(urlToken, new Set());
     identityPromotableUrls.get(urlToken).add(listingKey || null);
   };
+  const pinHistoryRow = (urlToken, url, title, language) => {
+    seen.add(urlToken);
+    const recorded = languageFormsForDedup(language);
+    recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
+  };
+  const dupRows = [];
+  const agedOrphanDups = new Set();
 
   // scan-history.tsv
   // Line 0 only when it is the header; a headerless legacy file starts with a data row.
@@ -2336,11 +2384,16 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // and the URL was never queued, so counting it as "eligible again" would
     // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
+    // Under a recheck window a repeat sighting takes its verdict from the URL's
+    // other rows, which can sit anywhere in the file, so it waits for all of
+    // them (next loop). With no window it pins like any other row.
+    if (status === 'skipped_dup' && policy.recheckAfterDays != null) {
+      dupRows.push({ url, firstSeen, title, language });
+      continue;
+    }
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = seenJobKey(url);
-      seen.add(urlToken);
-      const recorded = languageFormsForDedup(language);
-      recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
+      pinHistoryRow(urlToken, url, title, language);
       // Only accepted or intentionally deferred posting rows can teach this
       // scan a strong identity. A verification rejection such as an expired
       // URL may pin that URL, but must not suppress a different live alias
@@ -2361,6 +2414,28 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       if (status === 'added' && listingKey) {
         recheckListingTokens.set(urlToken, `listing:${listingKey}`);
       }
+    }
+  }
+
+  // A `skipped_dup` row is dated the day of the repeat, and a scanner writes one
+  // on every run that lists the URL, so reading that date would restart the
+  // clock each time. The URL's own rows decide instead, whatever the repeat's
+  // age: one still pinned keeps it seen, and once they are all released the
+  // repeat goes with them.
+  //
+  // Only a row with no original here falls back on its own `first_seen`: the
+  // agent workflow in modes/scan.md writes these for a URL whose original lives
+  // in the tracker or pipeline. An aged one stops pinning and nothing more. It
+  // stays out of recheckCandidates, which the pipeline pass below reads as
+  // "scan-history released this URL": a row repeating a `- [x]` entry would
+  // otherwise un-pin the very entry it repeats.
+  for (const { url, firstSeen, title, language } of dupRows) {
+    const urlToken = seenJobKey(url);
+    if (!seen.has(urlToken) && recheckCandidates.has(urlToken)) continue;
+    if (seen.has(urlToken) || shouldDedupScanHistoryRow({ firstSeen, status: 'skipped_dup' }, policy)) {
+      pinHistoryRow(urlToken, url, title, language);
+    } else {
+      agedOrphanDups.add(urlToken);
     }
   }
 
@@ -2426,7 +2501,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // actionable pipeline row pinned again is not eligible, and saying so keeps the
   // number the scanners print honest.
   let recheckEligible = 0;
-  for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
+  for (const key of [...recheckCandidates, ...agedOrphanDups]) if (!seen.has(key)) recheckEligible++;
 
   return { seen, recheckEligible, identityPromotableUrls, variants };
 }
@@ -3793,17 +3868,21 @@ export async function appendToPipeline(offers, {
 // so such a caller cannot simply wrap this call; it takes the lock itself and
 // passes true. Everything else must leave it alone: true with no lock actually
 // held reintroduces both races described above.
+// `historyPath` is for a caller that resolves its own data root at call time,
+// as the LinkedIn mail drop does. SCAN_HISTORY_PATH is fixed when this module
+// first loads. The dedup read, the append, and the lock share that path.
 export async function appendToScanHistory(offers, date, status = 'added', {
   alreadyLocked = false,
   historyPolicy = null,
+  historyPath = SCAN_HISTORY_PATH,
 } = {}) {
   const write = () => {
     // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
     // list the row writer (formatScanHistoryRow) emits in order. Written ONLY
     // on fresh-file creation; existing files are never rewritten.
-    if (!existsSync(SCAN_HISTORY_PATH)) {
-      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      atomicWriteFile(SCAN_HISTORY_PATH, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
+    if (!existsSync(historyPath)) {
+      mkdirSync(path.dirname(historyPath), { recursive: true });
+      atomicWriteFile(historyPath, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
     }
 
     // Re-read under the lock (the caller holds it, or withPipelineLock does).
@@ -3811,17 +3890,17 @@ export async function appendToScanHistory(offers, date, status = 'added', {
     // `skipped_expired` stop blocking once the recheck window releases them,
     // so a later scan can record the posting coming back or closing again.
     const policy = historyPolicy ?? historyPolicyFromPortals();
-    const fresh = offersMissingFromHistory(offers, status, readIfExists(SCAN_HISTORY_PATH), policy);
+    const fresh = offersMissingFromHistory(offers, status, readIfExists(historyPath), policy);
     if (fresh.length === 0) return 0;
 
     const lines = fresh.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-    appendLedgerRows(SCAN_HISTORY_PATH, lines);
+    appendLedgerRows(historyPath, lines);
     return fresh.length;
   };
 
   if (alreadyLocked) return write();
-  else return await withPipelineLock(SCAN_HISTORY_PATH, write);
+  else return await withPipelineLock(historyPath, write);
 }
 
 /**
@@ -5199,7 +5278,7 @@ async function main() {
           totalFilteredContent++;
           continue;
         }
-        if (!countryEligibilityFilter(job.description)) {
+        if (!countryEligibilityFilter(countryEligibilityText(job))) {
           totalFilteredCountryEligibility++;
           continue;
         }

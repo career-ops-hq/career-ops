@@ -138,6 +138,13 @@ export default {
   per-posting detail on every scan, with no config switch, defeats the
   opt-in and puts the per-posting request fan-out back on the default path;
   `detailLimit` is the cap on that loop, never the thing that turns it on.
+- A teaser, summary or excerpt is not a `description`: `content_filter`
+  reads any description as the full JD, so a short blurb that lacks a
+  required keyword drops the posting. When such a blurb states where the
+  job can be done ("can be done remotely anywhere in the United States"),
+  put only that statement in `eligibilityText`, which
+  `country_eligibility_filter` reads and no other filter does. Reference:
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`.
 - When the payload exposes **more than one** candidate URL for a posting —
   typically an aggregator carrying the employer's upstream ATS/application
   link alongside its own posting page — `Job.url` is the employer's link, per

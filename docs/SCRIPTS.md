@@ -387,6 +387,14 @@ npm run cv:verify-facts -- --self-test
 
 PDF generation calls the same check, so a document that fails here fails there too.
 
+Besides metrics, it blocks a bullet whose verb drifted from the source bullet it restates (#1411). Each rendered bullet (HTML `<li>`, markdown list item, LaTeX `\item` / `\resumeItem`) is anchored to the source statement that shares the most content words with it, and the two are compared word by word. Deleting words, reordering, changing a word's inflection, adding function words and adding JD keywords are allowed. A word that opens a clause, where a bullet says what the candidate did, must appear in that anchor in some inflection, so "Used Kafka for event ingestion" rendered as "Led a Kafka migration" blocks, while "Built a Python ETL pipeline" rendered as "Building Python ETL pipelines for FP&A reporting" passes. A true verb change is declared in `config/cv-facts.json`:
+
+```json
+{ "allow_swaps": ["evaluated -> conducted", "used -> led"] }
+```
+
+A swap is pairwise: `"used -> led"` allows "led" only in a bullet whose source says "used". A later clause that opens with an "-ed" word or an irregular participle that no determiner or object pronoun follows ("…and automated reporting", "…and related to billing", "…and written communication") is ambiguous between verb and adjective, so it warns instead of blocking; simple-past irregular forms ("…and wrote …", unless a passive preposition follows: "…, built on AWS" warns) and words before a determiner ("…and managed the vendors") still block. The same holds for the bullet's first word: one that does not read as a verb ("Scalable ETL pipeline built in Python") warns. Bullets with no source anchor, and documents not in English, are left to the other checks.
+
 ---
 
 ## cv:verify-ats
@@ -1123,7 +1131,7 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 
 `--rediscover-404` also recognizes authoritative API 404/410 verdicts: for a tracked company with a careers domain, it searches that domain and requires a confirmed live replacement before migrating the URL. Soft closure signals do not trigger rediscovery.
 
-`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
+`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Under the window a `skipped_dup` row lasts while any other scan-history row for the URL still pins it, whatever its own date, so a repeat sighting neither pins the URL nor restarts the clock. A `skipped_dup` row with no such row in scan-history ages out by its own `first_seen`, and a tracker or pipeline entry for that URL still pins it. Permanent invalid statuses such as blocked host and malformed URL remain permanent. The other writers of the pipeline apply the same window to the same history: `scan-ats-full.mjs`, `scan-dayforce.mjs`, and everything admitted through `lib/admission-gate.mjs` (`scan-interamt.mjs`, `scan-hn.mjs`, `openrouter-runner.mjs`). Plugin ingest goes through the gate too, but `plugins.mjs` first drops a posting that `pipeline.md` already lists, checked off or not, so for plugin ingest the window releases only a URL the pipeline does not list.
 
 `scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
 

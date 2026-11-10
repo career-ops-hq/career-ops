@@ -8,11 +8,11 @@ This mode answers: *"Even if I win this process — is this company safe to join
 
 ## Dependency
 
-Requires transcripts produced by `modes/interview/debrief.md` or `modes/interview/practice.md` (#956). Each transcript must be saved under `interview-prep/sessions/` (gitignored). If no session files exist, exit gracefully with an onboarding message.
+Requires real-interview transcripts under `interview-prep/sessions/` (gitignored): those produced by `modes/interview/debrief.md` (#956), or written by hand (`source: manual`). `modes/interview/practice.md` writes to the same directory, but the `**Interviewer:**` turns in its files are the AI's own mock questions, not the company's, so this mode skips them (see Step 1). If no eligible session files exist, exit gracefully with an onboarding message.
 
 ## Inputs
 
-- `interview-prep/sessions/` — Session transcripts (debrief + practice outputs). One file per round.
+- `interview-prep/sessions/` — Session transcripts, one file per round. Only real interviews are analysed: files whose front matter says `source: practice` or `source: mock` are skipped (Step 1). The front matter format is documented in `interview-prep/sessions/README.md`.
 - `interview-prep/{company}-{role}.md` — Company intel file (for context + output target).
 - `config/profile.yml` — User profile (for role/archetype context, and for the candidate's location → jurisdiction derivation used by Step 2c).
 - `templates/protected-grounds.yml` — Jurisdiction-keyed table of protected grounds / do-not-ask topics in hiring (for Step 2c only). A data reference, not instruction logic — adding a jurisdiction row there never requires touching this mode. Reading it is a local file lookup; nothing leaves the machine.
@@ -25,16 +25,33 @@ Expected transcript filename convention (from #956):
 
 ## Minimum Threshold
 
-Check: does `interview-prep/sessions/` contain at least **1** file?
+Check: does `interview-prep/sessions/` contain at least **1** eligible session file? `README.md` is not a session, and a file with `source: practice` or `source: mock` in its front matter is not eligible (Step 1).
 
-If not:
-> "No session transcripts found yet. Run `/career-ops interview` on a role after your next interview to generate a debrief, then come back to check for red flags."
+If there are no session files at all:
+> "No session transcripts found yet. Run `/career-ops interview/debrief` on a role after your next interview to generate a debrief, then come back to check for red flags."
 
-Exit gracefully.
+If session files exist but every one is a practice or mock session:
+> "Only practice or mock sessions found. Red flags come from how a real interviewer at the company behaved, and practice or mock sessions don't show that: in a practice session the AI asks the questions. Run `/career-ops interview/debrief` after your next real interview to generate a debrief, then come back to check for red flags."
+
+In that case, run the stale red-flag file check (Step 1) before exiting.
+
+Either way, exit gracefully.
 
 ## Step 1 — Discover Sessions
 
-List all `.md` files in `interview-prep/sessions/`. Parse each filename using the `YYYY-MM-DD` date segment as the anchor:
+List all `.md` files in `interview-prep/sessions/` except `README.md`, and read each file's YAML front matter `source` field.
+
+**Skip every file with `source: practice` or `source: mock`**, even when its front matter or filename names a real company. In those files the `**Interviewer:**` turns are mock questions (in a `practice` file, the questions the AI asked while role-playing), so they say nothing about how the company interviews. A skipped file contributes nothing to Steps 2–6: no signals, no Step 2c observations, no session count. A file without a `source` field is treated as a real interview, as before.
+
+**Stale red-flag file check.** Earlier versions of this mode counted practice sessions, so an existing `interview-prep/{company-slug}-redflags.md` may rest on them, and the evaluation report's Risk Summary (`modes/oferta.md`) still shows its warning level. A company with at least one eligible session gets that file rewritten in Step 5 from eligible sessions only. Start from the files: for each existing `interview-prep/*-redflags.md`, take its `{company-slug}`. If no eligible session belongs to that company but at least one skipped file does (its front matter `company`, slugified, equals the slug; for a file without that field, its filename starts with `{company-slug}-`), tell the user that red-flag file may have been built from practice sessions and offer to delete it. Delete it only on the user's explicit yes. Otherwise keep it, add this note on the line below its `# Red-Flag Analysis` heading (once; skip it if the note is already there), and say so in the summary:
+
+```markdown
+> [Render in {language.output}: "Unverified: this analysis may rest on practice or mock sessions, which this mode no longer counts, and no real-interview session for this company is on file. Do not treat its warning level as evidence about how the company interviews."]
+```
+
+A later run that finds an eligible session for the company rewrites the file in Step 5, which drops the note.
+
+Parse each remaining filename using the `YYYY-MM-DD` date segment as the anchor:
 
 ```
 {company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md
@@ -132,7 +149,7 @@ Compute a **red-flag score**:
 
 ## Step 5 — Generate Output
 
-**Output routing:** Red-flag analysis is company-wide (signals aggregate across rounds regardless of role). Write to a single company-level file: `interview-prep/{company-slug}-redflags.md`. Create it if absent. If sessions span multiple role slugs, note all roles in the header. Do not append to per-role intel files — those are role-specific, this is company-specific. This file is cross-referenced by the evaluation report's `## Risk Summary` block (see `modes/oferta.md`), which surfaces its warning level plus a relative link — keep the `**Warning level:**` line intact.
+**Output routing:** Red-flag analysis is company-wide (signals aggregate across rounds regardless of role). Write to a single company-level file: `interview-prep/{company-slug}-redflags.md`. Create it if absent, and replace it if present. If sessions span multiple role slugs, note all roles in the header. Do not append to per-role intel files — those are role-specific, this is company-specific. This file is cross-referenced by the evaluation report's `## Risk Summary` block (see `modes/oferta.md`), which surfaces its warning level plus a relative link — keep the `**Warning level:**` line intact.
 
 Write the following structure:
 

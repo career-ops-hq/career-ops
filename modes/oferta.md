@@ -458,6 +458,7 @@ Every jurisdiction splits work into two buckets under different names: an "emplo
 | Canada | "T4A", "independent contractor", "self-employed", "invoice for services" |
 | US | "1099", "independent contractor", "W-2 not provided" |
 | UK | "self-employed", "umbrella company", "outside IR35" / "inside IR35" |
+| Norway | "oppdragstaker", "selvstendig næringsdrivende", "fakturere" / "faktura", "via eget ENK" / "via eget AS", "konsulentoppdrag", "oppdragsavtale" (vs. "arbeidsavtale"; arbeidsmiljøloven § 1-8) |
 | Other jurisdictions | "labour contract" vs "employment contract" phrasing, "service agreement", "consulting agreement" (e.g., 劳务合同 vs 劳动合同 in China) |
 
 Plus a jurisdiction-agnostic structural check — **"contract position" alone is not enough to trigger this**, since plenty of legitimate fixed-term *employee* roles use that phrase. Only flag when the JD has explicit contractor-status wording (asks the candidate to "invoice," or to operate as a "consultant"/"freelancer," rather than being "hired"/"employed") **and** at least one corroborating omission (no benefits language, no vacation/PTO mention, no defined end date, no standard employment-standards phrasing, no mention of statutory deductions/withholding).

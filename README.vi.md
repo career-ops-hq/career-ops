@@ -593,7 +593,7 @@ Xem [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) để biết chi tiết. Phần m
 ## Người đóng góp
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Mọi người đã đóng góp mã, tài liệu, bản dịch hoặc test đều được liệt kê trong
