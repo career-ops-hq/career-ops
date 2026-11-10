@@ -510,12 +510,16 @@ export async function robotsAllows(url, opts = {}) {
   // One fetch per origin per process: scan --verify over many postings on one
   // host reads robots.txt once. The promise is cached, so concurrent callers
   // share the request too.
+  // The policy depends on which redirect hosts were allowed, so the allowlist
+  // is part of the key: one call's allowlist never answers for another's.
   const origin = parsed.origin;
-  let pending = cache.get(origin);
+  const allowKey = [...new Set(allowedRedirectHosts.map((h) => String(h).toLowerCase()))].sort().join(',');
+  const cacheKey = allowKey ? `${origin}|${allowKey}` : origin;
+  let pending = cache.get(cacheKey);
   if (!pending) {
     pending = loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects, allowedRedirectHosts })
       .catch((err) => deny('robots_fetch_error', `check failed (${String(err?.message ?? err).split('\n')[0]})`));
-    cache.set(origin, pending);
+    cache.set(cacheKey, pending);
   }
   const policy = await pending;
   if (!('body' in policy)) return policy;
