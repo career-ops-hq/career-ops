@@ -32,8 +32,9 @@ function tracker(company) {
   ].join('\n');
 }
 
-function run(script, args, cwd, override) {
+function run(script, args, cwd, override, codeRoot = code) {
   const env = { ...childEnv, CAREER_OPS_ROOT: data, CAREER_OPS_PROFILE: 'profiles/lane.yml' };
+  if (codeRoot != null) env.CAREER_OPS_CODE_ROOT = codeRoot;
   if (override !== undefined) env.CAREER_OPS_TRACKER = override;
   return execFileSync(NODE, [join(code, script), ...args], {
     cwd, env, encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
@@ -55,19 +56,31 @@ try {
     'tracker.mjs', 'set-status.mjs', 'funnel-velocity.mjs', 'stats.mjs',
     'followup-cadence.mjs', 'funnel-stages.mjs', 'role-matcher.mjs',
     'session-activity.mjs', 'check-jd-archive.mjs', 'jd-capture.mjs', 'templates/states.yml',
+    'web/src/lib/core/tracker-files.mjs', 'web/src/lib/core/code-root.mjs',
   ]) {
     mkdirSync(dirname(join(code, file)), { recursive: true });
     copyFileSync(join(ROOT, file), join(code, file));
   }
   linkRepoPackage(code, 'js-yaml');
   write(join(code, 'probe.mjs'), `
+    import assert from 'node:assert/strict';
+    import { readFileSync, existsSync } from 'node:fs';
     import { getCareerOpsRoot, getProfilePath, rawTrackerPath, resolveTrackerPath, resolveTrackerPathForWrite } from './path-resolver.mjs';
     import { resolveWorkspaceRootFor, trackerLinkDirsFor } from './tracker-utils.mjs';
+    import { resolveTrackerPath as webResolve, trackerLinkDirs as webLinkDirs, readTrackerFile } from './web/src/lib/core/tracker-files.mjs';
     const root = getCareerOpsRoot();
+    assert.equal(webResolve(root), resolveTrackerPath(root));
+    assert.deepEqual(webLinkDirs(root), trackerLinkDirsFor(root));
+    assert.equal(readTrackerFile(root), existsSync(resolveTrackerPath(root)) ? readFileSync(resolveTrackerPath(root), 'utf8') : null);
     console.log(JSON.stringify({
       raw: rawTrackerPath(root), read: resolveTrackerPath(root), write: resolveTrackerPathForWrite(root),
       workspace: resolveWorkspaceRootFor(root), linkDirs: trackerLinkDirsFor(root), profile: getProfilePath(),
     }));
+  `);
+  write(join(code, 'web-read.mjs'), `
+    import { getCareerOpsRoot } from './path-resolver.mjs';
+    import { readTrackerFile } from './web/src/lib/core/tracker-files.mjs';
+    console.log(JSON.stringify({ tracker: readTrackerFile(getCareerOpsRoot()), ledger: readTrackerFile(getCareerOpsRoot(), 'status-log.tsv') }));
   `);
 
   const relativeTracker = join(code, 'custom/data/applications.md');
@@ -75,6 +88,17 @@ try {
   write(relativeTracker, tracker('Code Target'));
   write(externalTracker, tracker('External Target'));
   symlinkSync(join(code, 'custom'), join(code, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
+
+  check('web checkout fallback and relative code-root override select the CLI tracker', () => {
+    // A web deployment normally runs from <checkout>/web; an external one
+    // selects its engine explicitly, independently of the configured data root.
+    const webCwd = join(code, 'web');
+    // null leaves CAREER_OPS_CODE_ROOT unset (the run helper defaults to code).
+    for (const codeRoot of [null, '..']) {
+      const actual = JSON.parse(run('probe.mjs', [], webCwd, 'custom/data/applications.md', codeRoot));
+      assert.equal(actual.read, realpathSync(relativeTracker));
+    }
+  });
 
   for (const [name, override, raw, canonical, workspace, linkDirs] of [
     ['existing relative override', 'custom/data/applications.md', relativeTracker, realpathSync(relativeTracker), join(code, 'custom'), [dirname(realpathSync(relativeTracker))]],
@@ -153,6 +177,9 @@ try {
       run('set-status.mjs', ['1', 'Rejected', '--json'], cwdB, override);
       const rows = JSON.parse(run('tracker.mjs', ['query', '--json'], cwdA, override));
       assert.equal(rows[0].status, 'Rejected');
+      const web = JSON.parse(run('web-read.mjs', [], cwdB, override));
+      assert.match(web.tracker, /Rejected/);
+      assert.match(web.ledger, /Rejected/);
       assert.match(readFileSync(target, 'utf-8'), /Rejected/);
       assert.ok(existsSync(join(dirname(target), 'applications.db')));
       assert.match(readFileSync(join(dirname(target), 'status-log.tsv'), 'utf-8'), /Rejected/);
