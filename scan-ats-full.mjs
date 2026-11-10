@@ -5,9 +5,9 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com) and
- * surfaces fresh postings that match your portals.yml `title_filter` /
- * `location_filter` — no manual company curation needed.
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com,
+ * Workable) and surfaces fresh postings that match your portals.yml
+ * `title_filter` / `location_filter` — no manual company curation needed.
  *
  * Optional `title_filter_full` in portals.yml overrides `title_filter` for
  * THIS scanner only, so the keywords tuned for scan.mjs's curated company
@@ -29,7 +29,9 @@
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), except join.com's, which is
  * read from join.com's own company sitemap. Each is cached in data/cache/ for
- * 24h.
+ * 24h. Workable has no directory: its public XML job feed carries every
+ * tenant's postings, so that source reads the feed once per run (about 140 MB
+ * compressed) and is not cached (see loadWorkableFeed in providers/workable.mjs).
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -69,6 +71,7 @@ import icims from './providers/icims.mjs';
 import bamboohr from './providers/bamboohr.mjs';
 import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.mjs';
 import join, { parseCompanySitemap } from './providers/join.mjs';
+import { loadWorkableFeed, WORKABLE_FEED_URL } from './providers/workable.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilterOrExit, matchedTitleKeywords, loadSeenUrls, seenJobKey, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
@@ -332,8 +335,18 @@ export function paylocityEntry(row) {
   return entryOnHost(name, careersUrl, h => h === 'recruiting.paylocity.com');
 }
 
+// The Workable source's boards arrive with their postings from the feed, so
+// its "provider" only hands them back. It is not registered in providers/:
+// nothing in portals.yml can name it, and scan.mjs never downloads the feed.
+const WORKABLE_FEED_PROVIDER = Object.freeze({
+  id: 'workable-feed',
+  fetch: async (entry) => (Array.isArray(entry?.jobs) ? entry.jobs : []),
+});
+
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
+// A source with `loadDataset` builds its list itself instead of downloading a
+// company directory (see loadSourceList).
 export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
@@ -433,6 +446,28 @@ export const SOURCES = {
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://join.com/companies/${slug}`, h => h === 'join.com')
       : null,
+  },
+  workable: {
+    // Workable publishes every tenant's postings in one hourly XML feed, so
+    // there is no company directory to walk and nothing to fetch per board:
+    // loadDataset reads the feed once (loadWorkableFeed in
+    // providers/workable.mjs) and hands back
+    // one board per employer with its postings attached, already narrowed to
+    // the --since window and the title filter. The rest of the sweep (domain
+    // gate, location and content filters, blacklist, dedup) runs per employer
+    // as for any other source. Title-filter overrides match the employer name.
+    provider: WORKABLE_FEED_PROVIDER,
+    singleHost: true,
+    // The feed changes every hour, so an interrupted pass cannot resume at an
+    // offset into it; it starts again, and seenUrls keeps the matches already
+    // saved from being added twice.
+    restartOnResume: true,
+    dataset: WORKABLE_FEED_URL,
+    loadDataset: ({ cutoff, includeUndated, titleFilter }) => loadWorkableFeed({ cutoffMs: cutoff, includeUndated, titleFilter })
+      .then(({ companies }) => companies),
+    toEntry: (row) => (row && typeof row.company === 'string' && row.company
+      ? { name: row.company, ...(row.website ? { website: row.website } : {}), jobs: Array.isArray(row.jobs) ? row.jobs : [] }
+      : null),
   },
 };
 
@@ -606,6 +641,22 @@ export async function loadCompanyList(name, url, parseDataset, { cacheDir = CACH
     try { return { list: JSON.parse(readFileSync(cacheFile, 'utf-8')), status: 'stale' }; } catch { /* fall through */ }
   }
   return { list: [], status: 'empty' };
+}
+
+// A source with `loadDataset` (workable) builds its own list from the sweep's
+// window and title filter; every other source downloads its company directory
+// through loadCompanyList. Both answer { list, status }, and a failed
+// loadDataset reads as 'empty', reported once, like a directory that could not
+// be downloaded and has no cache.
+export async function loadSourceList(name, source, datasetOpts, { loadCompanyListFn = loadCompanyList } = {}) {
+  if (typeof source?.loadDataset !== 'function') return loadCompanyListFn(name, source.dataset, source.parseDataset);
+  try {
+    const list = await source.loadDataset(datasetOpts);
+    return { list: Array.isArray(list) ? list : [], status: 'ok' };
+  } catch (err) {
+    console.error(`⚠️  ${name}: could not read ${source.dataset} — ${err.message}`);
+    return { list: [], status: 'empty' };
+  }
 }
 
 // Date gate for one posting in a reverse (fresh-first) scan:
@@ -1570,7 +1621,7 @@ async function main() {
     // source finished before the checkpoint was written still contributed its
     // companies to the sweep, so it must still count toward the availability /
     // cap figures the final report and --json output show.
-    const { list, status } = await loadCompanyList(name, source.dataset, source.parseDataset);
+    const { list, status } = await loadSourceList(name, source, { cutoff, includeUndated: opts.includeUndated, titleFilter });
     datasetStatus[name] = status;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
@@ -1578,11 +1629,15 @@ async function main() {
       log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping`);
       continue;
     }
-    const datasetHash = datasetFingerprint(list);
+    // A source that restarts on resume never compares fingerprints, and its
+    // list carries every kept posting, so it is not hashed.
+    const datasetHash = source.restartOnResume ? null : datasetFingerprint(list);
     const entriesAll = sampleCompanies(list, opts.limit, opts.shuffle).map(source.toEntry).filter(Boolean);
 
     let startAt = 0;
-    if (checkpoint && checkpoint.current?.name === name) {
+    if (checkpoint && checkpoint.current?.name === name && source.restartOnResume) {
+      log(`  ${name} — interrupted in the checkpoint; its list is rebuilt, so the pass starts again`);
+    } else if (checkpoint && checkpoint.current?.name === name) {
       // datasetHash is absent in checkpoints written before this guard existed;
       // fall back to the length-only check for those rather than hard-failing.
       const hashMismatch = checkpoint.current.datasetHash != null
