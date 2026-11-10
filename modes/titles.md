@@ -74,7 +74,8 @@ list — this system optimizes for quality, not quantity.
    `title-keywords.mjs` (`buildTitleFilter` / `compileKeyword`, imported by
    `scan.mjs`). Before comparing, both the keyword and the title are
    lowercased, stripped of accents, and have runs of whitespace collapsed. A
-   plain keyword matches as a substring of the title. The exception is a 2–3
+   plain keyword matches as a case-insensitive substring of the title. The
+   exception is a 2–3
    letter keyword made only of letters (`vp`, `cto`), which must match a whole
    word. A `word:` prefix asks for whole-word matching at any length:
    `word:intern` matches "Operations Intern" but not "Internal Tools". A
