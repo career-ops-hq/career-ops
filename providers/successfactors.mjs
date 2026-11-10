@@ -569,7 +569,17 @@ export default {
     // a second read at its own limits; the bounded probe stays quiet.
     const raised = resolveLimits(entry, 'csb').raised;
     const probed = await fetchCsb(entry, cfg, ctx, { probe: true, quiet: raised });
-    if (raised && probed.length > 0) return fetchCsb(entry, cfg, ctx);
+    if (raised && probed.length > 0) {
+      const full = await fetchCsb(entry, cfg, ctx);
+      // A partial failure of the full read (the locale that held the probed job
+      // errored while another came back empty) must not turn a board the probe
+      // just saw into zero postings.
+      if (full.length === 0) {
+        console.error(`⚠️  successfactors: ${entry.name} full read at the raised limits returned no postings after the probe found one — keeping the probed posting`);
+        return probed;
+      }
+      return full;
+    }
     return probed;
   },
 };

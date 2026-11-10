@@ -556,6 +556,12 @@ try {
       jobs = await sf.fetch({ name: 'AutoCsb', careers_url: 'https://careers.autocsb.example', max_pages: 200, max_jobs: 5000 }, { ...csbCtx(calls), fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a>') });
       if (jobs.length === TOTAL && warns.length === 0 && calls.n <= 130) pass('successfactors unflagged CSB entry with raised limits is read at those limits after a one-job probe');
       else fail(`successfactors auto-CSB raise wrong: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      // A full read that comes back empty after a probe that found a posting keeps the probed posting and says so.
+      warns.length = 0;
+      let csbCalls = 0;
+      jobs = await sf.fetch({ name: 'FlakyCsb', careers_url: 'https://careers.flakycsb.example', max_pages: 200 }, { sleep: async () => {}, fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a>'), fetchJson: async () => { csbCalls++; return csbCalls === 1 ? { totalJobs: 1, jobSearchResult: [rec('1')] } : { totalJobs: 0, jobSearchResult: [] }; } });
+      if (jobs.length === 1 && warns.some((w) => /keeping the probed posting/.test(w))) pass('successfactors keeps the probed posting when the raised full read comes back empty');
+      else fail(`successfactors probe result lost: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
       // RMK fullness uses raw tile rows: a full last page containing one title-less tile still counts as capped.
       warns.length = 0;
       const badTile = '<li class="job-tile job-id-999999"><a data-url="/job/x/999999/" href="#"></a></li>';
