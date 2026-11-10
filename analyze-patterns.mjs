@@ -983,7 +983,7 @@ const ARCHETYPE_LABELS = [
   'Archetipo',  // it   — modes/it/annuncio.md
   'Archetyp',   // de, pl — modes/de/angebot.md, modes/pl/oferta.md
   'Arketipe',   // id   — modes/id/lowongan.md
-  'Arketype',   // da   — modes/da/oferta.md
+  'Arketype',   // da, nb — modes/da/oferta.md, modes/nb/stilling.md
   'Arketip',    // tr   — modes/tr/is-ilani.md
   'Архетип',    // ru, ua — modes/ru/oferta.md, modes/ua/oferta.md
 ];
