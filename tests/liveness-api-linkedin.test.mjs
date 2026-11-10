@@ -204,7 +204,12 @@ const API = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${ID}`;
   const second = await throttleProviderRequest('test-provider-linkedin-rung', 60);
   const elapsed = Date.now() - started;
   check('the first request through a throttled provider does not wait', first === 0, String(first));
-  check('the second waits out the interval', second >= 55 && elapsed >= 55, `waited=${second} elapsed=${elapsed}`);
+  // `second` is the interval minus whatever time passed between the two calls,
+  // so on a loaded runner it can be well under 60 while the spacing is still
+  // right (waited=54 elapsed=61 failed `second >= 55`). The property is that the
+  // second call waited at all and the pair spans the interval; 55 leaves room
+  // for a timer that fires a few ms early.
+  check('the second waits out the interval', second > 0 && elapsed >= 55, `waited=${second} elapsed=${elapsed}`);
   check('a provider with no declared interval never waits',
     (await throttleProviderRequest('test-provider-linkedin-rung-unthrottled', 0)) === 0);
 }
