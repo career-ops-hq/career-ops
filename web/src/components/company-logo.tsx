@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { companyInitials, monogramHue } from "@/lib/company";
 import { cn } from "@/lib/cn";
-
-const CONFIG_KEY = "career-ops:config";
+import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
 
 // A small company mark: the real favicon on a white tile when logos are enabled
 // and resolvable, otherwise a deterministic colored monogram. The monogram is
@@ -25,13 +24,17 @@ export function CompanyLogo({
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(CONFIG_KEY);
-      const v = raw ? JSON.parse(raw) : null;
-      setEnabled(v?.logos !== false); // default ON unless explicitly disabled
-    } catch {
-      setEnabled(true);
+    function read() {
+      try {
+        const raw = localStorage.getItem(CONFIG_KEY);
+        const v = raw ? JSON.parse(raw) : null;
+        setEnabled(v?.logos !== false); // default ON unless explicitly disabled
+      } catch {
+        setEnabled(true);
+      }
     }
+    read();
+    return subscribeConfig(window, read);
   }, []);
 
   const hue = monogramHue(name);

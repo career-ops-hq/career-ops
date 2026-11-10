@@ -1,6 +1,6 @@
 # ATS Auto-Fill Flow (Apply Mode)
 
-The `apply` mode interactive assistant helps you fill out applications for job postings. It reads the form questions in your browser and drafts personalized answers based on your profile and the evaluated report.
+The `apply` mode interactive assistant helps you fill out applications for job postings. It opens the form in a Playwright browser this project launches (`node apply-scope.mjs launch-options` → `chromium.launch`), reads the questions on that page, and drafts personalized answers based on your profile and the evaluated report. It does not attach to your ordinary system browser or a remote-debugging port.
 
 **CRITICAL RULE: Career-Ops never submits.**
 The agent prepares the responses, selects the options, and types out the text fields. **You always click Submit.** This ensures you have the final say and gives you a chance to review the application before it is sent.
@@ -53,4 +53,11 @@ This saves you from spending time tailoring responses for a job that the ATS wil
 
 - **Agent hangs or crashes mid-form:** This usually happens when an ATS updates its React DOM unexpectedly or pops a hidden captcha. When this happens, look at the agent's output—it always prints a complete list of generated answers. You can easily copy and paste the remaining answers manually.
 - **Form changes:** If you notice the form on screen is for a different role than the one evaluated in your report, the agent will detect it and ask if you want to adapt the responses to the new title or stop and re-evaluate.
-- **Multiple roles in one session:** Running batch applies? Always run a **Liveness sweep** (`node check-liveness.mjs --file data/pipeline.md`) first to drop dead postings from your pipeline so you never waste time opening an expired role tab.
+- **Multiple roles in one session:** Running batch applies? Always run the `pipeline` mode **Liveness sweep** first to drop dead postings from your pipeline so you never waste time opening an expired role tab. To run the check by hand, give `check-liveness.mjs --file` a file of bare URLs, one per line. It cannot read `data/pipeline.md` directly: each `- [ ] URL | Company | Role` entry comes back `uncertain` as an invalid URL. Collect the pending URLs first, leaving LinkedIn ones for the pipeline mode:
+
+  ```bash
+  urls=$(mktemp)
+  sed -nE 's/^- \[ \] (https?:\/\/[^ |]+).*/\1/p' data/pipeline.md | grep -viE '^https?://([^/]+\.)?linkedin\.com([:/?#]|$)' > "$urls"
+  node check-liveness.mjs --file "$urls"
+  rm -f "$urls"
+  ```

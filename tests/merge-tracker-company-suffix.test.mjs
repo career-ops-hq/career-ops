@@ -10,7 +10,7 @@
 // where the bug lives, so the resulting rows are what proves the fix. The
 // over-merge guards below matter more than the fix itself, because folding two
 // rows is destructive and splitting them is only untidy.
-import { pass, fail } from './helpers.mjs';
+import { pass, fail, isolatedBatchStatePath } from './helpers.mjs';
 import assert from 'node:assert';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -40,9 +40,9 @@ function addTsv(env, name, cols) {
   writeFileSync(join(env.addDir, name), cols.join('\t'));
 }
 function runMerge(env, args = []) {
-  return execFileSync('node', [MERGE, ...args], {
+  return execFileSync('node', [MERGE, '--allow-headerless', ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir },
+    env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir) },
   });
 }
 function trackerRows(env) {

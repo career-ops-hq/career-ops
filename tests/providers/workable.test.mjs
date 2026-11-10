@@ -108,6 +108,172 @@ try {
     fail('parseWorkableWidget should return [] for null and {} payloads');
   }
 
+  // -- multi-country fan-out ----------------------------------------------
+  // Real shape, captured live 2026-08-21 from
+  //   apply.workable.com/api/v1/widget/accounts/digitalgenius?details=true
+  // A multi-country posting comes back as ONE ENTRY PER LOCATION, all sharing
+  // the same shortlink and differing only in city/state/country. Keeping just
+  // the first recorded "Implementation Engineer" as London/United Kingdom and
+  // dropped its three EU alternatives, so a UK block rule threw the posting
+  // away. Note the payload interleaves two fanned-out postings — the parser
+  // must key on the URL, not on adjacency.
+  const fanOutPayload = {
+    name: 'DigitalGenius',
+    jobs: [
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: 'London', state: 'England', country: 'United Kingdom',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'United Kingdom', countryCode: 'GB', city: 'London', region: 'England' }],
+      },
+      {
+        title: 'Solutions Engineer',
+        shortcode: 'E8064EA4C7',
+        shortlink: 'https://apply.workable.com/j/E8064EA4C7',
+        url: 'https://apply.workable.com/j/E8064EA4C7',
+        city: '', state: '', country: 'Romania',
+        telecommuting: true, published_on: '2026-06-12',
+        locations: [{ country: 'Romania', countryCode: 'RO', city: '', region: null }],
+      },
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: '', state: '', country: 'Romania',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'Romania', countryCode: 'RO', city: '', region: null }],
+      },
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: '', state: '', country: 'Poland',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'Poland', countryCode: 'PL', city: '', region: null }],
+      },
+      {
+        title: 'Solutions Engineer',
+        shortcode: 'E8064EA4C7',
+        shortlink: 'https://apply.workable.com/j/E8064EA4C7',
+        url: 'https://apply.workable.com/j/E8064EA4C7',
+        city: '', state: '', country: 'Portugal',
+        telecommuting: true, published_on: '2026-06-12',
+        locations: [{ country: 'Portugal', countryCode: 'PT', city: '', region: null }],
+      },
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: '', state: '', country: 'Croatia',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'Croatia', countryCode: 'HR', city: '', region: null }],
+      },
+    ],
+  };
+  const fanOutJobs = parseWorkableWidget(fanOutPayload, 'DigitalGenius');
+
+  if (fanOutJobs.length === 2) {
+    pass('parseWorkableWidget collapses each multi-country fan-out into one job');
+  } else {
+    fail(`fan-out produced ${fanOutJobs.length} jobs, expected 2: ${JSON.stringify(fanOutJobs.map(j => `${j.title}@${j.location}`))}`);
+  }
+
+  const implRole = fanOutJobs.find(j => j.title === 'Implementation Engineer');
+  if (implRole?.location === 'London, United Kingdom · Romania · Poland · Croatia · Remote') {
+    pass('parseWorkableWidget joins every fanned-out location in payload order');
+  } else {
+    fail(`fanned-out location was ${JSON.stringify(implRole?.location)}, expected all four countries joined`);
+  }
+
+  // The interleaved second posting must not absorb the first one's locations.
+  const solutionsRole = fanOutJobs.find(j => j.title === 'Solutions Engineer');
+  if (solutionsRole?.location === 'Romania · Portugal · Remote') {
+    pass('parseWorkableWidget keeps interleaved fan-outs separate (keyed on URL, not adjacency)');
+  } else {
+    fail(`interleaved fan-out location was ${JSON.stringify(solutionsRole?.location)}, expected "Romania · Portugal · Remote"`);
+  }
+
+  // Everything except location still comes from the first entry.
+  if (implRole?.postedAt === Date.parse('2026-06-30')
+      && implRole?.url === 'https://apply.workable.com/j/801183DB79'
+      && (implRole?.description || '').includes('Deploy the platform')) {
+    pass('parseWorkableWidget takes non-location fields from the first fanned-out entry');
+  } else {
+    fail(`merged job carried unexpected fields: ${JSON.stringify(implRole)}`);
+  }
+
+  // Siblings with no location of their own add nothing, and a repeat collapses.
+  const noisyFanOut = parseWorkableWidget({
+    jobs: [
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', country: 'Spain' },
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', country: 'Spain' },
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', city: '', country: '' },
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', country: 'Italy' },
+    ],
+  }, 'NoisyCo');
+  if (noisyFanOut.length === 1 && noisyFanOut[0].location === 'Spain · Italy') {
+    pass('parseWorkableWidget dedups repeated locations and ignores empty siblings');
+  } else {
+    fail(`noisy fan-out produced ${JSON.stringify(noisyFanOut.map(j => j.location))}, expected ["Spain · Italy"]`);
+  }
+
+  // telecommuting is a per-job flag. A city-filled role used to keep only
+  // "Bend, United States", and a state with no city collapsed to the country.
+  // Hybrid is not this flag: telecommuting false stays city-only. A sibling
+  // that already contributed "Remote" must not be doubled.
+  const placeFlags = parseWorkableWidget({
+    jobs: [
+      { title: 'Field Coordinator', shortlink: 'https://apply.workable.com/j/B1', city: 'Bend', state: 'Oregon', country: 'United States', telecommuting: true },
+      { title: 'Regional Lead', shortlink: 'https://apply.workable.com/j/B2', city: '', state: 'Oregon', country: 'United States', telecommuting: true },
+      { title: 'Desk Analyst', shortlink: 'https://apply.workable.com/j/B3', city: 'Vancouver', state: 'British Columbia', country: 'Canada', telecommuting: false },
+      { title: 'State Only', shortlink: 'https://apply.workable.com/j/B4', city: '', state: 'Queensland', country: 'Australia', telecommuting: true },
+      { title: 'Already Remote', shortlink: 'https://apply.workable.com/j/B5', city: 'Oslo', country: 'Norway', telecommuting: true },
+      { title: 'Already Remote', shortlink: 'https://apply.workable.com/j/B5', telecommuting: true },
+      { title: 'Mixed Desk', shortlink: 'https://apply.workable.com/j/B6', city: 'Ghent', country: 'Belgium', telecommuting: false },
+      { title: 'Mixed Desk', shortlink: 'https://apply.workable.com/j/B6', city: 'Oslo', country: 'Norway', telecommuting: true },
+    ],
+  }, 'Acme');
+  const byTitle = Object.fromEntries(placeFlags.map(j => [j.title, j.location]));
+  const expectPlaces = {
+    'Field Coordinator': 'Bend, United States · Remote',
+    'Regional Lead': 'Oregon, United States · Remote',
+    'Desk Analyst': 'Vancouver, Canada',
+    'State Only': 'Queensland, Australia · Remote',
+    'Already Remote': 'Oslo, Norway · Remote',
+    'Mixed Desk': 'Ghent, Belgium · Oslo, Norway · Remote',
+  };
+  const placeMismatches = Object.entries(expectPlaces).filter(([title, loc]) => byTitle[title] !== loc);
+  if (placeMismatches.length === 0 && placeFlags.length === 6) {
+    pass('parseWorkableWidget keeps telecommuting and a state-only place on the folded location');
+  } else {
+    fail(`telecommuting locations = ${JSON.stringify(byTitle)}`);
+  }
+
+  // The point of the fix: ask the real consumer, not a reimplementation of it.
+  // This is the config shape that parked the posting — UK blocked, EU allowed.
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const euFilter = buildLocationFilter({
+    always_allow: ['Romania', 'Poland', 'Croatia'],
+    allow: ['Remote', 'Europe'],
+    block: ['United Kingdom', 'London'],
+  });
+  const beforeFix = 'London, United Kingdom';
+  if (!euFilter(beforeFix) && euFilter(implRole?.location)) {
+    pass('merged location survives a UK-blocking location_filter that rejects the pre-fix string');
+  } else {
+    fail(`location_filter verdicts unexpected: pre-fix ${euFilter(beforeFix)}, merged ${euFilter(implRole?.location)}`);
+  }
+
   // fetch() prefers the widget API and never touches the markdown feed when it works.
   let apiCallHeaders = null;
   const apiJobs = await workable.fetch(

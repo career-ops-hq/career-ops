@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'reconcile-pipeline.mjs');
@@ -29,46 +30,46 @@ function runReconcile(...args) {
 
 test('--help prints usage and exits 0', () => {
   const result = runReconcile('--help');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
   assert.match(result.stdout, /node reconcile-pipeline\.mjs/);
 });
 
 test('-h prints usage and exits 0', () => {
   const result = runReconcile('-h');
-  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 0, describeSpawn(result, `expected exit 0, got ${result.status}`));
   assert.match(result.stdout, /Usage:/);
 });
 
 test('a typo of --dry-run exits 1 instead of silently running live', () => {
   const result = runReconcile('--dryrun');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --dryrun/);
   assert.match(result.stderr, /Valid flags:/);
 });
 
 test('an unknown flag exits 1 and names the flag', () => {
   const result = runReconcile('--bogus', '--dry-run');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --bogus/);
 });
 
 test('--help plus an unknown flag still fails', () => {
   const result = runReconcile('--help', '--bogus');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /unrecognized flag\(s\): --bogus/);
   assert.doesNotMatch(result.stdout, /Usage:/);
 });
 
 test('--pipeline without a value is rejected instead of silently using the default', () => {
   const result = runReconcile('--pipeline', '--dry-run');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--pipeline requires a value/);
 });
 
 test('--state without a value is rejected instead of silently using the default', () => {
   const result = runReconcile('--state', '--dry-run');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /--state requires a value/);
 });
 
@@ -83,6 +84,6 @@ test('--pipeline=<path> (equals form) is recognized, not silently discarded', ()
 
 test('a path escaping the repo is rejected, not silently accepted', () => {
   const result = runReconcile('--pipeline', '../outside.md', '--dry-run');
-  assert.equal(result.status, 1, `expected exit 1, got ${result.status}: ${result.all}`);
+  assert.equal(result.status, 1, describeSpawn(result, `expected exit 1, got ${result.status}`));
   assert.match(result.stderr, /path must stay inside the repository/);
 });

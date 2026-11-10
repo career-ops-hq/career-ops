@@ -1,7 +1,7 @@
 import path from "node:path";
 import fs from "node:fs";
 import { pathToFileURL } from "node:url";
-import { careerOpsRoot } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 /**
  * ACL for the core's follow-ups file lock (`followup-seed.mjs`).
@@ -27,9 +27,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
  *
  * THE LOCK IS NOT REENTRANT (no owner/pid self-check in the core). A caller
  * holding it must never orchestrate a core script that also takes it — that
- * self-deadlocks until the timeout. Our two routes write the file DIRECTLY, so
- * this is safe today; it is a rule for any future followups writer that shells
- * out.
+ * self-deadlocks until the timeout.
  *
  * `finally`-release lives in the core export, so it cannot be forgotten here.
  * The web timeout is deliberately far shorter than the CLI's 60s default: a
@@ -52,7 +50,7 @@ const modCache = new Map<string, CoreWithFollowupsLock>();
  *  exclude cross-process and the in-process queue alone is correct — see
  *  `withFollowupsLock` below. */
 async function loadCoreLock(): Promise<CoreWithFollowupsLock | null> {
-  const file = path.join(careerOpsRoot(), "followup-seed.mjs");
+  const file = path.join(resolveCodeRoot(process.cwd(), process.env), "followup-seed.mjs");
   const cached = modCache.get(file);
   if (cached) return cached;
   if (!fs.existsSync(file)) return null;

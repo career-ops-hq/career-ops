@@ -5,6 +5,9 @@
   "allow_facts": [
     "verified title or employer phrase"
   ],
+  "allow_swaps": [
+    "evaluated -> conducted"
+  ],
   "forbidden_phrases": [
     "Fortune 500",
     "patented"

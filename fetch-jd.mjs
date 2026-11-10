@@ -18,8 +18,10 @@
  * expected "fall back to the browser path" case, not an error condition, and
  * a visible miss is the whole point: never a fabricated JD.
  *
- * Coverage is JD_TEXT_API_ATS (liveness-api.mjs): Greenhouse, Lever, Ashby,
- * Workday. Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
+ * Coverage is JD_TEXT_API_ATS (liveness-api.mjs), including company careers
+ * pages that carry only a Greenhouse `?gh_jid=`, and canonical/share-link
+ * Workable postings (description, requirements and benefits).
+ * Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
  * — the same dispatch its own `jd` mode uses — so this script and the
  * interactive extractor cannot drift on which ATS is API-fetchable.
  */
@@ -31,7 +33,18 @@ const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget r
 const TIMEOUT_MS = 15_000;
 
 async function main() {
-  const url = process.argv[2];
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`Usage:
+  node fetch-jd.mjs <url>
+  node fetch-jd.mjs --help
+
+Options:
+  --help, -h  Print this usage block and exit`);
+    process.exit(0);
+  }
+
+  const url = args[0];
 
   if (!url) {
     console.error('usage: node fetch-jd.mjs <url>');
@@ -42,7 +55,16 @@ async function main() {
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.
-  if (!result) process.exit(1);
+  // Signal the miss via exitCode, not process.exit(1). On Windows, Node 24
+  // aborts when process.exit() runs right after a request (nodejs/node#56645):
+  // it prints a libuv assertion and exits with a crash code instead of 1.
+  // Measured 2026-11-04 on Node 24.14.1: misses on Greenhouse, Workable,
+  // SmartRecruiters and Workday aborted 4 times out of 4. Returning lets the
+  // process exit 1 once the event loop drains, right after the answer.
+  if (!result) {
+    process.exitCode = 1;
+    return;
+  }
 
   const header = result.title ? `${result.title}\n\n` : '';
   process.stdout.write(header + result.text);
@@ -51,6 +73,6 @@ async function main() {
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`fetch-jd: unexpected error — ${err?.message || err}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the miss
   });
 }

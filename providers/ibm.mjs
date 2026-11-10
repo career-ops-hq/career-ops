@@ -16,11 +16,19 @@
 //     enabled: true
 //
 // Omit `country` / `categories` to widen the search. Paginates via `from` until
-// the result set is exhausted or MAX_RECORDS is reached.
+// a short page, or until `max_pages` (default DEFAULT_MAX_PAGES) is reached.
+
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { parseDate } from '../lib/parse-date.mjs';
 
 const API_URL = 'https://www-api.ibm.com/search/api/v2';
 const PAGE_SIZE = 30;
-const MAX_RECORDS = 600; // safety cap on pagination
+// IBM's `total` is unreliable (often capped at the page size), so the walk is
+// bounded by these, never by the response. 20 pages is the 600-record cap this
+// provider always had; an entry can raise it with `max_pages`.
+const DEFAULT_MAX_PAGES = 20;
+const MAX_PAGES_CAP = 300;
+const PAGE_DELAY_MS = 200;
 
 /**
  * Builds the Elasticsearch post_filter from the entry's `ibm:` config.
@@ -42,11 +50,23 @@ export function buildPostFilter(cfg) {
 }
 
 /**
+ * Epoch ms (UTC midnight) for `dcdate`, or undefined when absent or not a real
+ * YYYY-MM-DD calendar day. parseDate round-trips the date, so an impossible one
+ * like 2026-02-30 is rejected instead of rolling over to 2 March.
+ * @param {unknown} value
+ */
+function toEpochMs(value) {
+  if (typeof value !== 'string') return undefined;
+  const date = parseDate(value);
+  return date ? date.getTime() : undefined;
+}
+
+/**
  * Normalizes one page of the IBM careers API response into job entries.
  * Throws if the response doesn't carry the expected `hits.hits[]` shape, so a
  * silent endpoint change surfaces as a hard error instead of empty results.
  * @param {any} json - A single API response page.
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
  */
 export function parseIbmResponse(json) {
   const hits = json && json.hits && Array.isArray(json.hits.hits) ? json.hits.hits : null;
@@ -61,14 +81,27 @@ export function parseIbmResponse(json) {
     if (typeof s.url !== 'string' || !/^https?:\/\//i.test(s.url.trim())) continue;
     const loc = typeof s.field_keyword_19 === 'string' ? s.field_keyword_19.trim() : '';
     const mode = typeof s.field_keyword_17 === 'string' ? s.field_keyword_17.trim() : '';
-    out.push({
+    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number}} */
+    const job = {
       title: s.title.trim(),
       url: s.url.trim(),
       company: 'IBM',
       location: [loc, mode].filter(Boolean).join(' · '),
-    });
+    };
+    // `dcdate` is the only date the API lets a caller request; it tracks the
+    // job ids (newer id, later date), so it reads as the posting date.
+    const postedAt = toEpochMs(s.dcdate);
+    if (postedAt !== undefined) job.postedAt = postedAt;
+    out.push(job);
   }
   return out;
+}
+
+/** Resolve the page cap: a positive integer `max_pages` on the entry, capped. */
+export function resolveMaxPages(entry) {
+  const v = entry?.max_pages;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
+  return DEFAULT_MAX_PAGES;
 }
 
 /** @type {Provider} */
@@ -77,8 +110,8 @@ export default {
 
   /**
    * Fetches and normalizes postings from IBM's careers search API.
-   * @param {{ name?: string, ibm?: { country?: string, categories?: string[] } }} entry
-   * @param {{ fetchJson: (url: string, opts?: object) => Promise<any> }} ctx
+   * @param {{ name?: string, max_pages?: number, ibm?: { country?: string, categories?: string[] } }} entry
+   * @param {{ fetchJson: (url: string, opts?: object) => Promise<any>, maxPages?: number, sleep?: (ms: number) => Promise<void> }} ctx
    * @returns {Promise<Array<{title: string, url: string, company: string, location: string}>>}
    */
   async fetch(entry, ctx) {
@@ -86,7 +119,20 @@ export default {
     /** @type {Array<{title: string, url: string, company: string, location: string}>} */
     const out = [];
 
-    for (let from = 0; from < MAX_RECORDS; from += PAGE_SIZE) {
+    const maxPages = resolveMaxPages(entry);
+    // verify-portals' liveness probe sets `ctx.maxPages: 1`. Kept apart from
+    // maxPages so the probe's cap never reads as a truncated board.
+    const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
+    const pagesToFetch = Math.min(maxPages, ctxCap);
+
+    // Why the walk stopped: 'complete' (a short page), 'cap' (max_pages ran out
+    // on a full page) or 'fetch-error' (a later page failed after retries).
+    let stopReason = 'complete';
+    let page = 0;
+    let lastPageFull = false;
+    for (; page < pagesToFetch; page++) {
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
+      const from = page * PAGE_SIZE;
       const body = {
         appId: 'careers',
         scopes: ['careers2'],
@@ -98,25 +144,41 @@ export default {
         lang: 'zz',
         localeSelector: {},
         sm: { query: '', lang: 'zz' },
-        _source: ['_id', 'title', 'url', 'description', 'language',
+        _source: ['_id', 'title', 'url', 'description', 'language', 'dcdate',
           'field_keyword_05', 'field_keyword_08', 'field_keyword_17',
           'field_keyword_18', 'field_keyword_19'],
       };
 
-      // redirect:'error' prevents SSRF via server-side redirects
-      const json = await ctx.fetchJson(API_URL, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify(body),
-        redirect: 'error',
-      });
+      let json;
+      try {
+        // redirect:'error' prevents SSRF via server-side redirects
+        json = await fetchJsonWithRetry(ctx, API_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify(body),
+          redirect: 'error',
+        });
+      } catch (err) {
+        // A failed first page is a broken board, not an empty one, and a probe
+        // needs the rejection unwrapped (ProbePageBudgetReached). Past page one
+        // in a real scan, keep what was collected and say so.
+        if (page === 0 || ctxCap !== Infinity) throw err;
+        console.error(`⚠️  ibm: ${entry.name} truncated at page ${page + 1} of ${maxPages} (${out.length} jobs): ${err.message}`);
+        stopReason = 'fetch-error';
+        break;
+      }
 
       out.push(...parseIbmResponse(json));
 
-      // Stop on the first short page. IBM's `total` is unreliable (often
-      // capped at the page size), so don't trust it for the loop bound —
-      // MAX_RECORDS is the hard ceiling.
-      if (json.hits.hits.length < PAGE_SIZE) break;
+      // Stop on the first short page; IBM's `total` is not trusted.
+      lastPageFull = json.hits.hits.length >= PAGE_SIZE;
+      if (!lastPageFull) break;
+    }
+    // Only a full page at the entry's own cap is a truncation. A short last
+    // page ended the board on its own, and the probe's cap is not the entry's.
+    if (stopReason === 'complete' && lastPageFull && page === maxPages) stopReason = 'cap';
+    if (stopReason === 'cap') {
+      console.error(`⚠️  ibm: ${entry.name} truncated at max_pages=${maxPages} (${out.length} jobs) — raise max_pages on this entry for more`);
     }
 
     return out;

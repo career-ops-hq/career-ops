@@ -1,0 +1,61 @@
+<!-- Redacted/synthetic PeopleSoft Fluid Candidate Gateway search-results page.
+     Field-id shape (the `$N` grid-instance suffix, single-quoted attributes,
+     "N rows" rowcnt text with no "of") matches what was actually observed
+     live against a real tenant (2026-09) — NOT the bare-index-suffix shape
+     the source GitHub issue described, which turned out not to match real
+     markup. Company/site names here are fictional (ExampleU) per
+     ADDING_A_PROVIDER.md's fixture policy. Reduced to just the elements
+     peoplesoft.mjs's parser reads. -->
+<!DOCTYPE html>
+<html>
+<head><title>Search for Jobs</title></head>
+<body>
+<div id="ptifrmtgtframe">
+<form name='win0' id='win0' method='post' action="/psc/exu1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL">
+<input type="hidden" name="ICAJAX" value="1">
+<input type="hidden" name="ICNAVTYPEDROPDOWN" value="0">
+<input type="hidden" name="ICType" value="Panel">
+<input type="hidden" name="ICElementNum" value="0">
+<input type="hidden" name="ICStateNum" value="4">
+<input type="hidden" name="ICAction" value="">
+<input type="hidden" name="ICModelCancel" value="0">
+<input type="hidden" name="ICXPos" value="0">
+<input type="hidden" name="ICYPos" value="0">
+<input type="hidden" name="ICFocus" value="">
+<input type="hidden" name="ICSaveWarningFilter" value="0">
+<input type="hidden" name="ICChanged" value="-1">
+<input type="hidden" name="ICResubmit" value="0">
+<input type="hidden" name="ICSID" value="fake-session-id-0001">
+<input type="hidden" name="ICActionPrompt" value="false">
+<input type="hidden" name="ICFind" value="">
+<input type="hidden" name="ICAddCount" value="">
+<input type="hidden" name="ICAPPCLSDATA" value="">
+<input type="checkbox" name="HRS_SCH_WRK_KEYWORD_SW" value="Y" checked>
+<span id='win0divHRS_AGNT_RSLT_Irowcnt$0'><span class='ps-text'>3 rows</span></span>
+<ul id="win0divHRS_AGNT_RSLT_I$0">
+<li class='ps_grid-row' id='HRS_AGNT_RSLT_I$0_row_0'>
+  <span class='ps_box-value' id='SCH_JOB_TITLE$0'>Instructional Designer</span>
+  <span class='ps_box-value' id='HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$0'>JR00012345</span>
+  <span class='ps_box-value' id='LOCATION$0'>London, ON, Canada</span>
+  <span class='ps_box-value' id='HRS_APP_JBSCH_I_HRS_DEPT_DESCR$0'>Faculty of Education</span>
+  <span class='ps_box-value' id='SCH_OPENED$0'>08/15/2026</span>
+</li>
+<li class='ps_grid-row' id='HRS_AGNT_RSLT_I$0_row_1'>
+  <span class='ps_box-value' id='SCH_JOB_TITLE$1'>Learning &amp; Development Specialist</span>
+  <span class='ps_box-value' id='HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$1'>JR00012346</span>
+  <span class='ps_box-value' id='LOCATION$1'>Remote - Ontario</span>
+  <span class='ps_box-value' id='HRS_APP_JBSCH_I_HRS_DEPT_DESCR$1'>Human Resources</span>
+  <span class='ps_box-value' id='SCH_OPENED$1'>08/10/2026</span>
+</li>
+<li class='ps_grid-row' id='HRS_AGNT_RSLT_I$0_row_2'>
+  <span class='ps_box-value' id='SCH_JOB_TITLE$2'>Facilities Coordinator</span>
+  <span class='ps_box-value' id='HRS_APP_JBSCH_I_HRS_JOB_OPENING_ID$2'>JR00012347</span>
+  <span class='ps_box-value' id='LOCATION$2'>London, ON, Canada</span>
+  <span class='ps_box-value' id='HRS_APP_JBSCH_I_HRS_DEPT_DESCR$2'>Facilities Management</span>
+  <span class='ps_box-value' id='SCH_OPENED$2'>not-a-real-date</span>
+</li>
+</ul>
+</form>
+</div>
+</body>
+</html>

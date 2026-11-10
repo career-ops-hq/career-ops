@@ -8,8 +8,9 @@ import { createServer } from 'node:http';
 import {
   copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { dirname, join, relative } from 'node:path';
+import { listTree } from '../lib/walk-tree.mjs';
+import { pass, fail, ownRootEnv, NODE, ROOT } from './helpers.mjs';
 
 console.log('\nollama-eval — includes profile.yml and _profile.md in model context (#2488)');
 
@@ -19,6 +20,21 @@ const copyIntoFixture = (relativePath) => {
   mkdirSync(dirname(destination), { recursive: true });
   copyFileSync(join(ROOT, relativePath), destination);
 };
+
+/** Copy a directory (and everything under it) into the fixture root. */
+const copyDirIntoFixture = (relativeDir) => {
+  for (const abs of listTree(join(ROOT, relativeDir))) copyIntoFixture(relative(ROOT, abs));
+};
+
+// The fixture is a hand-maintained transitive closure of ollama-eval's imports,
+// and every new shared module it pulls in has to be added here or the child dies
+// with ERR_MODULE_NOT_FOUND before it reaches the mock server (#5530-era fix).
+// Enumerating lib/ file by file made that a recurring papercut: the privacy
+// boundary added three modules (llm-outbound, privacy-guard, pii-interceptor)
+// and the list silently went stale. lib/ is a flat, dependency-light shared
+// layer, so copy the whole directory instead and stop maintaining the closure by
+// hand. Top-level entry points stay explicit — those are the files under test.
+copyDirIntoFixture('lib');
 
 for (const relativePath of [
   'ollama-eval.mjs',
@@ -33,10 +49,6 @@ for (const relativePath of [
   // ollama-eval/reserve-report-num resolve user-layer paths via
   // path-resolver.mjs (CAREER_OPS_ROOT), so the fixture carries that too.
   'path-resolver.mjs',
-  'lib/context-budget.mjs',
-  // reserve-report-num.mjs's main-guard comes from lib/is-main-module.mjs
-  // (#3170), so a fixture that carries it has to carry the helper too.
-  'lib/is-main-module.mjs',
   'utils/token-tracker.mjs',
 ]) {
   copyIntoFixture(relativePath);
@@ -106,7 +118,9 @@ try {
     execFile(
       NODE,
       [join(fixtureRoot, 'ollama-eval.mjs'), '--url', `http://127.0.0.1:${port}`, '--no-save', 'On-site role.'],
-      { timeout: 30000 },
+      // The fixture is its own data root; without this the evaluator reads
+      // the profile from the root the suite pins, not the one written above.
+      { timeout: 30000, env: ownRootEnv() },
       (error, stdout, stderr) => resolve({ error, stdout, stderr }),
     );
   });
