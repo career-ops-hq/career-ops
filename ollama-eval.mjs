@@ -373,10 +373,14 @@ try {
   let acc = '', buf = '';
   let completed = false;
   const decoder = new TextDecoder('utf-8', { fatal: true });
+  // Cap each decoded NDJSON record at 1 Mi UTF-16 code units, not the whole
+  // transport chunk or reply, which may contain many small records.
+  const recordLimit = 1024 * 1024;
   const consumeLine = line => {
+    if (line.length > recordLimit) throw new Error('Stream record exceeds the 1 Mi code-unit limit');
     if (!line.trim()) return;
     const obj = JSON.parse(line);
-    if (obj.error) throw new Error(String(obj.error));
+    if (obj.error) throw new Error(String(obj.error).slice(0, 300));
     if (completed) throw new Error('Unexpected data after completed evaluation');
     if (obj.message?.tool_calls?.length) throw new Error('Ollama returned an unsupported tool call instead of an evaluation.');
     if (obj.message?.content) acc += obj.message.content;
@@ -399,10 +403,11 @@ try {
     buf += decoder.decode(chunk, { stream: true });
     let nl;
     while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).trim();
+      const line = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
       consumeLine(line);
     }
+    if (buf.length > recordLimit) throw new Error('Stream record exceeds the 1 Mi code-unit limit');
   }
   consumeLine(buf + decoder.decode());
   if (!completed) throw new Error('Incomplete evaluation: stream ended before done:true');

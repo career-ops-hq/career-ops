@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { fail, linkRepoPackage, NODE, pass, rmSync, ROOT } from './helpers.mjs';
 
 const exec = promisify(execFile);
@@ -42,6 +43,18 @@ async function fixture(engine, scenario, check) {
     Object.assign(env, { CAREER_OPS_ROOT: data, OPENAI_API_KEY: '', OPENAI_TIMEOUT_MS: '10000',
       OLLAMA_TIMEOUT_MS: '10000', OLLAMA_NUM_CTX: '32768' });
     await scenario.setup?.({ code, data, env });
+    const nodeArgs = [];
+    if (scenario.coalesce) {
+      // Make the parser receive one transport chunk, even when HTTP splits the body.
+      const preload = join(sandbox, 'coalesce.mjs');
+      write(preload, `const fetch = globalThis.fetch;
+globalThis.fetch = async (...args) => {
+  const response = await fetch(...args);
+  if (args[1]?.method !== 'POST') return response;
+  return new Response(await response.arrayBuffer(), { status: response.status, headers: response.headers });
+};\n`);
+      nodeArgs.push('--import', pathToFileURL(preload).href);
+    }
     server = createServer((req, res) => {
       if (req.url === '/api/tags') { res.end('{"models":[]}'); return; }
       let raw = '';
@@ -81,7 +94,7 @@ async function fixture(engine, scenario, check) {
     const url = `http://127.0.0.1:${server.address().port}`;
     let output;
     try {
-      output = { code: 0, ...await exec(NODE, [join(code, `${engine}-eval.mjs`), '--url',
+      output = { code: 0, ...await exec(NODE, [...nodeArgs, join(code, `${engine}-eval.mjs`), '--url',
         engine === 'openai' ? `${url}/v1` : url, '--model', scenario.model ?? 'synthetic-test',
         ...(scenario.args ?? []), jd], { cwd: sandbox, env, timeout: 20000, maxBuffer: 2 * 1024 * 1024 }) };
     } catch (error) {
@@ -272,3 +285,53 @@ await fixture('ollama', { name: 'done:true without optional reason',
   assert.equal(code, 0, stderr);
   assert.match(stdout, /total:\s+0\.4k tokens/);
 });
+
+const recordLimit = 1024 * 1024; // Decoded UTF-16 code units, not total stream bytes.
+for (const engine of ['openai', 'ollama']) {
+  const record = JSON.stringify({ padding: 'x'.repeat(recordLimit) });
+  const framed = engine === 'openai' ? `data: ${record}` : record;
+  for (const [name, suffix] of [['terminated oversized record', '\n\n'], ['unterminated oversized record', '']]) {
+    await fixture(engine, { name, body: content(engine) + framed + suffix + (suffix ? terminal(engine) : ''), coalesce: true },
+      ({ code, stderr, data }) => {
+        assert.equal(code, 1);
+        assert.match(stderr, /stream (line|record) exceeds/i);
+        assert.deepEqual(files(join(data, 'reports')), []);
+        assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
+      });
+  }
+  // A single transport chunk can legitimately hold more than the per-record cap.
+  const small = JSON.stringify({ padding: 'x'.repeat(2048) });
+  const records = (engine === 'openai' ? `data: ${small}\n\n` : `${small}\n`).repeat(600);
+  await fixture(engine, { name: 'many small records exceed cap in one transport chunk',
+    body: content(engine) + records + terminal(engine), coalesce: true }, ({ code, stderr }) => {
+    assert.equal(code, 0, stderr);
+  });
+  // More than 1 MiB of UTF-8 bytes is still below the decoded code-unit cap.
+  const unicode = JSON.stringify({ padding: '\u00e9'.repeat(recordLimit / 2) });
+  await fixture(engine, { name: 'record limit counts decoded code units', coalesce: true,
+    body: content(engine) + (engine === 'openai' ? `data: ${unicode}\n\n` : `${unicode}\n`) + terminal(engine),
+  }, ({ code, stderr }) => assert.equal(code, 0, stderr));
+  const message = 'provider-error:'.padEnd(300, 'x') + 'PRIVATE_ERROR_TAIL';
+  const error = engine === 'openai' ? { error: { message } } : { error: message };
+  await fixture(engine, { name: 'provider error text is capped',
+    body: content(engine) + (engine === 'openai' ? `data: ${JSON.stringify(error)}\n\n` : JSON.stringify(error) + '\n'),
+  }, ({ code, stdout, stderr, data }) => {
+    assert.equal(code, 1);
+    assert.ok(stderr.includes(message.slice(0, 300)));
+    assert.doesNotMatch(stdout + stderr, /PRIVATE_ERROR_TAIL/);
+    assert.deepEqual(files(join(data, 'reports')), []);
+    assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
+  });
+}
+const halfData = 'data: ' + ' '.repeat(recordLimit / 2) + '\n';
+await fixture('openai', { name: 'multiline SSE aggregate exceeds event cap', coalesce: true,
+  body: content('openai') + halfData.repeat(2) + 'data: {}\n\n' + terminal('openai'),
+}, ({ code, stderr, data }) => {
+  assert.equal(code, 1);
+  assert.match(stderr, /stream event exceeds/i);
+  assert.deepEqual(files(join(data, 'reports')), []);
+  assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
+});
+await fixture('openai', { name: 'SSE event cap resets between events', coalesce: true,
+  body: content('openai') + (halfData + 'data: {}\n\n').repeat(3) + terminal('openai'),
+}, ({ code, stderr }) => assert.equal(code, 0, stderr));

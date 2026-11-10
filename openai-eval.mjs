@@ -472,19 +472,24 @@ try {
   const parts = [];
   const reader = res.body.getReader();
   const decoder = new TextDecoder('utf-8', { fatal: true });
+  // Bound each decoded line and joined event to 1 Mi UTF-16 code units, not the
+  // transport chunk or total reply: a chunk may contain many small events.
+  const recordLimit = 1024 * 1024;
   let sseBuf = '';
   let thinkOpen = false;
   let streamDone = false;
   let finishReason = null;
   let answer = '';
   let eventData = [];
+  let eventSize = 0;
   const consumeEvent = () => {
     if (!eventData.length) return;
     const payload = eventData.join('\n').trim();
     eventData = [];
+    eventSize = 0;
     if (payload === '[DONE]') { streamDone = true; return; }
     const obj = JSON.parse(payload);
-    if (obj.error) throw new Error(obj.error.message || String(obj.error));
+    if (obj.error) throw new Error(String(obj.error.message || obj.error).slice(0, 300));
     // Some compatible endpoints report running totals or Groq-shaped usage.
     // Keep the latest complete counts, including a genuine measured zero.
     const usage = obj.usage ?? obj.x_groq?.usage;
@@ -519,8 +524,15 @@ try {
     }
   };
   const consumeLine = line => {
+    if (line.length > recordLimit) throw new Error('Stream line exceeds the 1 Mi code-unit limit');
+    line = line.replace(/\r$/, '');
     if (!line) consumeEvent();
-    else if (line.startsWith('data:')) eventData.push(line.slice(5).replace(/^ /, ''));
+    else if (line.startsWith('data:')) {
+      const data = line.slice(5).replace(/^ /, '');
+      eventSize += data.length + (eventData.length ? 1 : 0);
+      if (eventSize > recordLimit) throw new Error('Stream event exceeds the 1 Mi code-unit limit');
+      eventData.push(data);
+    }
   };
   try {
     while (!streamDone) {
@@ -528,11 +540,12 @@ try {
       sseBuf += done ? decoder.decode() : decoder.decode(value, { stream: true });
       let nl;
       while (!streamDone && (nl = sseBuf.indexOf('\n')) >= 0) {
-        consumeLine(sseBuf.slice(0, nl).replace(/\r$/, ''));
+        consumeLine(sseBuf.slice(0, nl));
         sseBuf = sseBuf.slice(nl + 1);
       }
+      if (!streamDone && sseBuf.length > recordLimit) throw new Error('Stream line exceeds the 1 Mi code-unit limit');
       if (done) {
-        if (sseBuf) consumeLine(sseBuf.replace(/\r$/, ''));
+        if (sseBuf) consumeLine(sseBuf);
         consumeEvent();
         break;
       }
