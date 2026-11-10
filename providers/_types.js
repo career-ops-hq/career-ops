@@ -43,6 +43,18 @@
  *                               and visa_filter never read it, so setting it
  *                               cannot make a posting look like it has a JD.
  *                               Omitted when the source has no such statement.
+ * @property {string} [visaText] Text the source gives outside the job
+ *                               description that may state visa sponsorship:
+ *                               `startup-jobs.mjs` passes its feed teaser
+ *                               ("... we offer visa sponsorship."). Unlike
+ *                               `eligibilityText`, a whole teaser is fine here:
+ *                               visa_filter only looks for its sponsorship
+ *                               keywords, and a text without them gets the same
+ *                               decision as no text. Read ONLY by scan.mjs's
+ *                               visa_filter, which matches it together with
+ *                               `description`; content_filter and
+ *                               country_eligibility_filter never read it.
+ *                               Omitted when the source has no such text.
  * @property {number} [postedAt] Epoch ms when the posting was published.
  *                               Omitted when the source doesn't expose a
  *                               usable date. scan.mjs ignores it; consumers

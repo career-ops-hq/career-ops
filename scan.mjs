@@ -1232,6 +1232,19 @@ export function countryEligibilityText(job) {
     .join('\n');
 }
 
+/**
+ * The text visa_filter reads for a job: its description and its `visaText`,
+ * each when it is a non-empty string, joined by a newline. '' when the job
+ * has neither, which the filter treats as no mention.
+ * @param {{ description?: unknown, visaText?: unknown }} job
+ * @returns {string}
+ */
+export function visaFilterText(job) {
+  return [job?.description, job?.visaText]
+    .filter(t => typeof t === 'string' && t.trim() !== '')
+    .join('\n');
+}
+
 // ── Visa / work-authorization filter ────────────────────────────────
 // Optional. If `visa_filter` is absent (or `enabled: false`), all jobs pass.
 // Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1),
@@ -1241,6 +1254,12 @@ export function countryEligibilityText(job) {
 // DESCRIPTION text, so it only has signal for providers that populate
 // job.description (see the content_filter header above); jobs without one fall
 // back to the require_mention rule below.
+//
+// It also reads `job.visaText`: text a source gives outside the JD that may
+// state sponsorship, such as the Startup Jobs feed teaser, which stays out of
+// `description` because content_filter would read it as the JD.
+// visaFilterText() below joins the two. content_filter and
+// country_eligibility_filter never see `visaText`.
 //
 // Semantics (case-insensitive substring):
 //   - any `negative` keyword present → reject (an explicit "no sponsorship")
@@ -5277,7 +5296,7 @@ async function main() {
           totalFilteredCountryEligibility++;
           continue;
         }
-        if (!visaFilter(job.description)) {
+        if (!visaFilter(visaFilterText(job))) {
           totalFilteredVisa++;
           continue;
         }
