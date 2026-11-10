@@ -306,8 +306,12 @@ export function cleanupPdfScratch(scratchDir, prefix) {
  * @param {string[]} warnings
  */
 export function keepTailoredHtml(pdfPaths, warnings) {
+  const published = pdfPaths.finalPdf.replace(/\.pdf$/i, ".html");
   try {
-    fs.copyFileSync(pdfPaths.html, pdfPaths.finalPdf.replace(/\.pdf$/i, ".html"));
+    // copyFileSync leaves a read-only sibling where it is. Keyword matching
+    // then scores that old CV against the PDF this render just replaced.
+    fs.rmSync(published, { force: true });
+    fs.copyFileSync(pdfPaths.html, published);
   } catch (err) {
     warnings.push(`PDF rendered, but its HTML was not kept for the CV Studio: ${err.message}`);
   }

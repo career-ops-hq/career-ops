@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, utimesSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, utimesSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { atsPdfPath } from "../../src/lib/apply/ats-pdf.mjs";
@@ -20,9 +20,11 @@ import {
   spawnGeneratePdf,
   markTrackerReady,
   cleanupPdfScratch,
+  keepTailoredHtml,
   renderAndMarkPdf,
   failureReason,
 } from "../../src/lib/pdf-render.mjs";
+import { tailoredCvForKeywordMatch } from "../../src/lib/keyword-match-cv.mjs";
 
 // A fake stdio stream: emits raw Buffers, or decoded strings once the code
 // under test calls setEncoding() — the same contract a real child's stream
@@ -275,6 +277,45 @@ test("cleanupPdfScratch: a single file's removal failure logs but does not throw
     assert.deepEqual(readdirSync(dir), ["cv-web-3.stuck-dir"]);
   } finally {
     console.error = originalError;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── keepTailoredHtml ──
+
+test("keepTailoredHtml: replaces a read-only sibling with the new CV", () => {
+  const dir = makeScratchDir();
+  try {
+    const html = join(dir, "cv-web-1.html");
+    const pdf = join(dir, "cv.pdf");
+    const sibling = join(dir, "cv.html");
+    writeFileSync(html, "new cv");
+    writeFileSync(sibling, "old cv");
+    chmodSync(sibling, 0o444);
+    const warnings = [];
+    keepTailoredHtml({ html, finalPdf: pdf }, warnings);
+    assert.equal(readFileSync(sibling, "utf8"), "new cv");
+    assert.deepEqual(warnings, []);
+    assert.equal(tailoredCvForKeywordMatch(pdf), sibling);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("keepTailoredHtml: a failed copy does not leave the previous sibling selectable", () => {
+  const dir = makeScratchDir();
+  try {
+    const html = join(dir, "missing.html");
+    const pdf = join(dir, "cv.pdf");
+    const sibling = join(dir, "cv.html");
+    writeFileSync(sibling, "old cv");
+    const warnings = [];
+    keepTailoredHtml({ html, finalPdf: pdf }, warnings);
+    assert.equal(existsSync(sibling), false);
+    assert.equal(tailoredCvForKeywordMatch(pdf), null);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /HTML was not kept for the CV Studio/);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
