@@ -59,9 +59,14 @@ export function releaseTags(cwd = ROOT) {
 }
 
 // v1.18.0 is the user-data format boundary (via / Machine Summary / salary).
+// state-v1.16 was removed (#6707): its files match neither the v1.16.0 nor the
+// v1.18.0 release shape (profile/portals/follow-ups/reports/scan-history all
+// predate both templates), and no leg can reach it anyway - every leg takes
+// its old tag from newestAncestorTag(), which is >= v1.18 on any tree with
+// release tags. Any leg that names a state that no longer exists is refused
+// loudly by assertKnownState() in seed-fixture.mjs, not silently seeded.
 export function fixtureStateFor(tag) {
-  const [maj, min] = semverKey(tag);
-  return maj > 1 || min >= 18 ? 'state-v1.18' : 'state-v1.16';
+  return 'state-v1.18';
 }
 
 function sha256(path) { return createHash('sha256').update(readFileSync(path)).digest('hex'); }
