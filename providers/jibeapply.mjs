@@ -136,7 +136,9 @@ export default {
     let pageFailed = false;
 
     if (total > pageSize && pageSize > 0) {
-      const maxPages = resolveMaxPages(entry);
+      // A health probe (verify-portals passes ctx.maxPages) caps the walk too.
+      const probeMax = Number(ctx.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+      const maxPages = Math.min(resolveMaxPages(entry), probeMax);
       const pages = Math.min(Math.ceil(total / pageSize), maxPages);
       // Sequential, not concurrent (mirrors providers/4dayweek.mjs, thehub.mjs,
       // arbeitnow.mjs, workday.mjs) — a single tenant's API has no reason to
@@ -165,7 +167,7 @@ export default {
       // otherwise the user has no way to notice postings are missing from
       // their scan.
       // Not when a page failed: the scan stopped on the fetch error, already reported above.
-      if (!pageFailed && Math.ceil(total / pageSize) > maxPages) {
+      if (!pageFailed && probeMax === Infinity && Math.ceil(total / pageSize) > maxPages) {
         truncated = true;
         const atCap = maxPages >= MAX_PAGES_CAP;
         if (atCap) {

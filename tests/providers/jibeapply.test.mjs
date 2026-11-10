@@ -338,20 +338,29 @@ try {
     fail(`jibeapply fail-vs-ceiling warnings wrong: ${JSON.stringify(failCeil)}`);
   }
 
-  // A health probe (ctx.maxPages set) propagates a later-page failure instead of returning partial jobs.
+  // A health probe caps the walk at ctx.maxPages; with maxPages 1 only page 1 is requested.
+  const probePages = [];
+  const probeFetch = (maxPages) => jibeapply.fetch(entry, {
+    transport: 'http',
+    maxPages,
+    fetchText: async () => { throw new Error('fetchText not expected'); },
+    fetchJson: async (url) => {
+      const pg = new URL(url).searchParams.get('page') || '1';
+      probePages.push(pg);
+      if (pg === '2') throw new Error('HTTP 503');
+      return { totalCount: 40, count: 10, jobs: Array.from({ length: 10 }, (_, i) => ({ title: `J${i}`, slug: `j${i}` })) };
+    },
+  });
+  console.error = () => {};
+  let probeOne;
+  try { probeOne = await probeFetch(1); } finally { console.error = originalConsoleError; }
+  if (probePages.join(',') === '1' && probeOne.length === 10) pass('jibeapply.fetch() probe with maxPages 1 requests only page 1');
+  else fail(`jibeapply probe maxPages 1: pages=${probePages}`);
+
+  // A probe allowed more pages still propagates a later-page failure.
   let probeThrew = false;
   console.error = () => {};
-  try {
-    await jibeapply.fetch(entry, {
-      transport: 'http',
-      maxPages: 1,
-      fetchText: async () => { throw new Error('fetchText not expected'); },
-      fetchJson: async (url) => {
-        if (new URL(url).searchParams.get('page') === '2') throw new Error('HTTP 503');
-        return { totalCount: 40, count: 10, jobs: Array.from({ length: 10 }, (_, i) => ({ title: `J${i}`, slug: `j${i}` })) };
-      },
-    });
-  } catch { probeThrew = true; } finally { console.error = originalConsoleError; }
+  try { await probeFetch(2); } catch { probeThrew = true; } finally { console.error = originalConsoleError; }
   if (probeThrew) pass('jibeapply.fetch() propagates a page failure during a probe');
   else fail('jibeapply probe should throw on a later-page failure');
 
