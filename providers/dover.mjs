@@ -215,6 +215,12 @@ export default {
       stopReason = STOP_REASON.CAP;
       console.error(`⚠️  dover: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
     }
+    // Canonical partial-read signal (lib/board-truncation.mjs): scan.mjs logs
+    // the board `partial`, not `reachable`. A probe never gets here with
+    // either reason (it throws on a failure and stops below the cap).
+    if (!probing && (stopReason === STOP_REASON.CAP || stopReason === STOP_REASON.FETCH_ERROR)) {
+      /** @type {any} */ (jobs).truncated = { reason: stopReason === STOP_REASON.CAP ? 'page-cap' : 'fetch-error', fetched: jobs.length };
+    }
 
     return jobs;
   },

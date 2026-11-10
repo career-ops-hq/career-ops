@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { pdfReadyForReport, pipelineSummary, readTrackerShape, type InboxJob } from "@/lib/career-ops";
+import { pdfReadyForReport, pipelineSummary, readTrackerShape, withCloseDates, type InboxJob } from "@/lib/career-ops";
 import { reportNumberFromCell } from "@/lib/apply/cv-selection.mjs";
 import { pendingInbox } from "@/lib/inbox-pending.mjs";
 import { PipelineView } from "@/components/pipeline-view";
@@ -14,7 +14,9 @@ export const dynamic = "force-dynamic"; // always read fresh local files
 export default async function PipelinePage({ searchParams }: { searchParams: Promise<{ tab?: string | string[] }> }) {
   const { tab } = await searchParams;
   const onInbox = pipelineTab(tab) === "INBOX";
-  const { inbox, applications } = pipelineSummary();
+  const summary = pipelineSummary();
+  const applications = await withCloseDates(summary.applications);
+  const { inbox } = summary;
   const pending = pendingInbox(inbox);
   const fitted = onInbox ? withInboxFit(pending) : null;
   const trackerShape = readTrackerShape();

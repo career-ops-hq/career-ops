@@ -79,10 +79,11 @@ import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
@@ -117,6 +118,7 @@ import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-l
 import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
 import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 export { applyEntryResponseCap };
+import { boardTruncation, describeTruncation } from './lib/board-truncation.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -1766,54 +1768,6 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
 const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
 
 /**
- * Statuses recorded for VISIBILITY only, which must never pin a URL for dedup.
- *
- * Every other skipped status describes the posting: a dead URL stays dead
- * until the configured recheck window releases it (see
- * RECHECKABLE_SCAN_HISTORY_STATUSES), a blocked host stays blocked, so pinning
- * saves a later scan the work. These four describe something else.
- *
- * `skipped_title`, `skipped_location` and `skipped_age` describe the user's
- * CONFIG — `title_filter`, `location_filter` and `max_posting_age_days` are
- * settings they edit. Pinning would mean a role dropped under the old setting
- * never resurfaces under the new one, which is the opposite of what recording
- * the drop is for: a keyword added to `title_filter.positive` has to hand back
- * the titles it now matches. For those three, not pinning is also free: each
- * cut runs on data the provider already returned, before any liveness
- * verification, so a re-scan of one of these URLs costs no extra request.
- *
- * `skipped_no_apply_control` describes the CHECK: the browser classifier did
- * not see an Apply control, which is not proof the posting is closed. On
- * boards whose button it does not recognise, pinning would drop a live posting
- * once and never offer it again (#4832). Unlike the other two, this verdict
- * comes from a browser load, so every `--verify` scan re-opens the posting for
- * as long as the provider lists it. That is the accepted price: a slower
- * `--verify` beats a posting lost for good, and it shrinks as the classifier
- * learns each board, since a posting that reads `active` gets an `added` row
- * and stops coming back.
- *
- * `skipped_content`, `skipped_visa` and `skipped_country_eligibility` are
- * scan-dayforce.mjs's rows for its `content_filter`, visa and
- * `country_eligibility_filter` cuts: CONFIG again, by the same reasoning as the
- * first three. They were missing here, so they fell through to the permanent
- * pin, and widening one of those filters never handed back a Dayforce posting
- * it had dropped. (scan.mjs counts the same cuts and records no row for them.)
- *
- * `collectSeenCompanyRoles` needs no companion change — it already seeds from
- * `added` rows alone.
- */
-const OBSERVATIONAL_SCAN_HISTORY_STATUSES = new Set([
-  'skipped_title',
-  'skipped_location',
-  'skipped_age',
-  'skipped_no_apply_control',
-  'skipped_content',
-  'skipped_visa',
-  'skipped_country_eligibility',
-  'skipped_experience',
-]);
-
-/**
  * The offers not yet recorded under `status`, one per URL.
  *
  * The title, location and posting-age cuts run before dedup, and their rows never
@@ -1869,6 +1823,7 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   if (ageDays == null) return true;
   return ageDays < recheckAfterDays;
 }
+
 
 function scanHistoryPolicy(config = {}) {
   const raw = config.scan_history?.recheck_after_days;
@@ -2392,7 +2347,9 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       // with the same provider identity. (A missing Apply control never gets
       // here: its row is observational and pins nothing, see above.)
       const identityMayPromote = status === 'added' || status.startsWith('cooldown:');
-      if (identityMayPromote) addIdentityPromotableUrl(urlToken, listingKey);
+      if (identityMayPromote) {
+        addIdentityPromotableUrl(urlToken, listingKey);
+      }
       if (extraTokensFor && identityMayPromote) {
         for (const token of [].concat(extraTokensFor(url, portal, listingKey) || [])) {
           if (token) seen.add(token);
@@ -2401,7 +2358,9 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     } else {
       const urlToken = seenJobKey(url);
       recheckCandidates.add(urlToken);
-      if (status === 'added' && listingKey) recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+      if (status === 'added' && listingKey) {
+        recheckListingTokens.set(urlToken, `listing:${listingKey}`);
+      }
     }
   }
 
@@ -3469,6 +3428,7 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     requisition_id: typeof offer.requisitionId === 'string' ? offer.requisitionId : '',
     language: typeof offer.language === 'string' ? offer.language : '',
     listing_key: typeof offer.listingKey === 'string' ? offer.listingKey : '',
+    closes_at: closesAtIso(offer.closesAt) || closesAtIso(offer),
   };
   return SCAN_HISTORY_COLUMNS.map((name) => sanitizeTsvField(record[name])).join('\t');
 }
@@ -3498,6 +3458,7 @@ export function refreshListingKey(offer) {
   offer.listingKey = token ? token.slice('listing:'.length) : '';
   return token;
 }
+
 
 export function isOfferSeen(offer, seenUrls, identityPromotableUrls = null) {
   const urlToken = seenJobKey(offer?.url);
@@ -3743,6 +3704,7 @@ function keysInScanHistory(text, status, policy = {}) {
   }
   return keys;
 }
+
 
 function offersMissingFromHistory(offers, status, historyText, policy = {}) {
   const keys = keysInScanHistory(historyText, status, policy);
@@ -4190,11 +4152,23 @@ export function computeConsecutiveFailures(healthRecords) {
     // Inverted (vs. listing failure statuses) so the newer error kinds
     // (auth/server/unknown) can't silently fall outside the streak again.
     // 'empty' is deliberately healthy: a live board with 0 jobs is reachable.
-    if (r.status === 'reachable' || r.status === 'empty') {
+    // 'partial' is reachable too: the board answered, it was only cut short,
+    // often by a cap the user set on purpose. verify-portals and a new slug
+    // cannot fix that, so it has its own streak (computePartialStreaks).
+    if (r.status === 'reachable' || r.status === 'empty' || r.status === 'partial') {
       streaks.set(r.company, 0);
     } else {
       streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
     }
+  }
+  return streaks;
+}
+
+// Consecutive `partial` runs per company: any other status resets it.
+export function computePartialStreaks(healthRecords) {
+  const streaks = new Map();
+  for (const r of healthRecords) {
+    streaks.set(r.company, r.status === 'partial' ? (streaks.get(r.company) || 0) + 1 : 0);
   }
   return streaks;
 }
@@ -4958,6 +4932,10 @@ async function main() {
   let failedTargets = 0;
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
+  // Boards a provider read only partly (page cap, 429, fetch error), keyed by
+  // company: see lib/board-truncation.mjs. Logged `partial`, never `reachable`.
+  /** @type {Map<string, import('./lib/board-truncation.mjs').BoardTruncation>} */
+  const partialTargets = new Map();
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
   // every counter it reads is in scope. new_added is hardcoded 0 on a failed
@@ -4993,6 +4971,13 @@ async function main() {
   const deferredBoards = [];
   const employerLocationRejected = new Set();
   const employerLocationAccepted = new Set();
+  // Boards whose fetch failed on a transient error, retried once after the
+  // sweep (see retryTransientFailures below).
+  const TRANSIENT_KINDS = new Set(['network', 'server']);
+  const TRANSIENT_RETRY_GAP_MS = 3_000;
+  /** @type {Array<{ company: any, entry: any }>} */
+  const transientFailures = [];
+  const retriedTargets = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -5037,14 +5022,18 @@ async function main() {
     applyEntryResponseCap(ctx, company);
     applyEntryTimeout(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
-    const recordError = err => {
+    const recordError = (err, { retryable = false } = {}) => {
       failedTargets++;
-      errors.push({
+      const entry = {
         company: company.name,
         error: err.message,
         kind: classifyFetchError(err),
         status: err.status ?? observation.lastStatus,
-      });
+      };
+      errors.push(entry);
+      if (retryable && TRANSIENT_KINDS.has(entry.kind) && !retriedTargets.has(company)) {
+        transientFailures.push({ company, entry });
+      }
     };
     try {
       let jobs;
@@ -5067,12 +5056,16 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
+      const truncation = boardTruncation(jobs);
+      // Boards (job_boards: aggregators) too: unlike an empty result, which is
+      // routine for a keyword search, a capped or failed walk is a real gap.
+      if (truncation) partialTargets.set(company.name, truncation);
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
       }
 
-      const processJobs = () => {
+      const processJobs = async () => {
       // This fetch's language versions of each posting, in provider order and
       // before any filter: a seen row is matched against every version, also
       // those a filter rejects (a German title can fail a title filter that its
@@ -5307,21 +5300,49 @@ async function main() {
       if (company._isBoard) {
         // Never await an employer barrier inside a fetch worker: enough fast
         // boards could occupy every worker before the employer can start.
-        deferredBoards.push(() => {
-          try { processJobs(); } catch (err) { recordError(err); }
+        deferredBoards.push(async () => {
+          try { await processJobs(); } catch (err) { recordError(err); }
         });
       } else {
-        processJobs();
+        await processJobs();
       }
     } catch (err) {
-      recordError(err);
+      recordError(err, { retryable: true });
     }
   });
 
-  const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
-    hostLimit: HOST_CONCURRENCY,
-    hostOf: (_task, index) => companyFetchHost(targets[index]),
-  });
+  // Second pass for boards that failed on a TRANSIENT error (timeout, reset,
+  // 5xx) during the concurrent sweep. A provider already retries each request
+  // with backoff, but those retries run inside the same burst that caused the
+  // failure: on 2026-11-07 Marvell's first page timed out four times while
+  // other Workday boards on the same data center were paging, then read in
+  // full in 26 s on its own. Re-running the failed boards one at a time after
+  // the sweep removes the contention instead of repeating into it: the same
+  // deferred sequential retry scan-ats-full.mjs runs, and the AWS Builders'
+  // Library advice to retry with the load reduced rather than amplify it
+  // ("Timeouts, retries, and backoff with jitter"). Bounded: one extra attempt
+  // per board, never for a 4xx (a 403 or 404 will not change in seconds).
+  const retryTransientFailures = async () => {
+    if (transientFailures.length === 0) return;
+    const pending = transientFailures.splice(0);
+    process.stderr.write(`scan: retrying ${pending.length} board(s) that failed on a transient error, one at a time: ${pending.map((p) => p.company.name).join(', ')}\n`);
+    for (const { company, entry } of pending) {
+      retriedTargets.add(company);
+      const at = errors.indexOf(entry);
+      if (at !== -1) errors.splice(at, 1);
+      failedTargets--;
+      await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_GAP_MS));
+      await tasks[targets.indexOf(company)]();
+    }
+  };
+
+  const companyFetches = async () => {
+    await parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+      hostLimit: HOST_CONCURRENCY,
+      hostOf: (_task, index) => companyFetchHost(targets[index]),
+    });
+    await retryTransientFailures();
+  };
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
     await companyFetches();
   } else {
@@ -5340,7 +5361,7 @@ async function main() {
       process.stderr.write(`scan: ${parts.join(', and ')}. Set CAREER_OPS_HTTP_CACHE=0 to always download.\n`);
     });
   }
-  for (const processBoard of deferredBoards) processBoard();
+  for (const processBoard of deferredBoards) await processBoard();
   // --dry-run leaves no trace, this cache included.
   if (!dryRun) {
     try {
@@ -5708,6 +5729,11 @@ async function main() {
     const isUnverifiedZero = unverifiedZeroTargets.includes(t.name);
 
     let status = errorKindByCompany.get(t.name) || 'reachable';
+    // A board read only partly is not healthy coverage: logged `partial`, never
+    // `reachable`, with its own repeat warning below (not the 🚨 dead-board
+    // streak). Checked before `empty`, so a tagged empty read cannot pass as
+    // healthy.
+    if (status === 'reachable' && partialTargets.has(t.name)) status = 'partial';
     if (status === 'reachable' && isEmpty) status = 'empty';
     if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
 
@@ -5716,6 +5742,7 @@ async function main() {
 
   const pastHealth = loadPortalHealth();
   const currentStreaks = computeConsecutiveFailures([...pastHealth, ...healthRecords]);
+  const partialStreaks = computePartialStreaks([...pastHealth, ...healthRecords]);
 
   const persistentlyDead = [];
   const newlyDeadSlug = [];
@@ -5748,6 +5775,18 @@ async function main() {
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
+  }
+  if (partialTargets.size > 0) {
+    const parts = [...partialTargets].map(([company, t]) => describeTruncation(company, t));
+    console.log(`\n⚠️  ${partialTargets.size} board(s) only PARTLY read — postings beyond the cut were not scanned:`);
+    for (const p of parts) console.log(`   • ${p}`);
+    // A repeat is not a dead board: the board answers every run. The usual
+    // cause is a cap on the entry, which only the entry can change.
+    const repeated = [...partialTargets.keys()].filter((c) => (partialStreaks.get(c) || 0) >= STREAK_THRESHOLD);
+    if (repeated.length > 0) {
+      console.log(`   Partly read for ${STREAK_THRESHOLD}+ runs in a row: ${repeated.join(', ')}`);
+      console.log(`   For a page cap, raise max_pages on the entry or narrow its search; a fetch error or rate limit that repeats points at the board's host.`);
+    }
   }
   if (unverifiedZeroTargets.length > 0) {
     console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
@@ -5829,6 +5868,9 @@ async function main() {
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
       unverified_zero: unverifiedZeroTargets,
+      // Boards read only partly (lib/board-truncation.mjs), so automation can
+      // tell a short read from a complete one without parsing stdout.
+      partial: [...partialTargets].map(([company, { source: _source, ...t }]) => ({ company, ...t })),
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }
@@ -5845,23 +5887,6 @@ async function main() {
   if (everyTargetFailed && !jsonMode) {
     console.error(`Error: every scan target failed (${attempted} of ${attempted}); no board could be read. See the errors above.`);
     process.exitCode = 2;
-  }
-
-  // One-time-ever manifesto note: first successful REAL run only. The state
-  // file keeps it from ever repeating; --dry-run must leave no trace, and a
-  // piped/quiet run is not the moment for it.
-  if (!dryRun && !everyTargetFailed && process.stdout.isTTY && !process.argv.includes('--quiet') && !existsSync('.manifesto-noted')) {
-    // OSC 8 hyperlink where support is known, so the click attributes as
-    // utm_source=cli while the visible text stays clean; otherwise print the
-    // URL with the utm so typed visits attribute too.
-    const osc8 = ['iTerm.app', 'WezTerm', 'vscode', 'ghostty', 'Hyper', 'Tabby'].includes(process.env.TERM_PROGRAM)
-      || !!process.env.WT_SESSION || !!process.env.KITTY_WINDOW_ID
-      || parseInt(process.env.VTE_VERSION || '0', 10) >= 5000;
-    const link = osc8
-      ? '\x1b]8;;https://career-ops.org/manifesto?utm_source=cli\x1b\\career-ops.org/manifesto\x1b]8;;\x1b\\'
-      : 'career-ops.org/manifesto?utm_source=cli';
-    console.log(`\nthe practice behind this tool has a name and a manifesto: ${link}`);
-    try { writeFileSync('.manifesto-noted', new Date().toISOString() + '\n'); } catch { /* best-effort */ }
   }
 }
 

@@ -227,9 +227,14 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    const maxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
+    const entryMaxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
       ? Math.min(entry.max_pages, MAX_PAGES)
       : MAX_PAGES;
+    // `ctx.maxPages` is verify-portals' liveness probe: honor it as a ceiling,
+    // so a probe costs one request instead of the whole board
+    // (providers/ADDING_A_PROVIDER.md).
+    const ctxMaxPages = Number(/** @type {any} */ (ctx)?.maxPages);
+    const maxPages = ctxMaxPages > 0 ? Math.min(entryMaxPages, ctxMaxPages) : entryMaxPages;
 
     const all = [];
     let total = null;
@@ -267,6 +272,12 @@ export default {
       if (total !== null) {
         if (offset + PAGE_SIZE >= total) break;
       } else if (listLen < PAGE_SIZE) break;
+      if (page === maxPages - 1 && !ctx?.maxPages) {
+        // Walked every allowed page and the tenant still reports more: say so
+        // (lib/board-truncation.mjs) instead of returning a silent prefix.
+        console.error(`⚠️  oraclecloud: ${entry.name} stopped at max_pages=${maxPages} (${all.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial`);
+        /** @type {any} */ (all).truncated = { reason: 'page-cap', fetched: all.length, ...(total === null ? {} : { total }) };
+      }
     }
     return all;
   },
