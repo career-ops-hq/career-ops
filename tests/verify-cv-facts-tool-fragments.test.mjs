@@ -110,7 +110,7 @@ try {
   blocksOn('a name before "!" mid-paragraph is checked', javaOnly, '- Built it using Java and Kubernetes! Then shipped it.', ['kubernetes']);
   blocksOn('a list after "using:" is checked', javaOnly, '- Tools I was using: Java, Kubernetes.', ['kubernetes']);
   passes('the clause after ":" is not read as a tool',
-    javaAndKubernetes, '- Built it using Java and Kubernetes: cut release time.');
+    javaAndKubernetes, '- Built it using Java and Kubernetes: services in production.');
   blocksOn('a declared list after "Technologies:" is still read',
     javaOnly, 'Technologies: Java, Kubernetes', ['kubernetes']);
   const afterPeriod = toolValues('Built it using React. Grew ARR.');
@@ -300,11 +300,11 @@ try {
   // percentage or a multiplier beside an acronym is a metric, not part of a
   // name the sources must contain word for word.
   passes('a percentage after a backed acronym is not part of a name',
-    '- Cut CAC by 30% with nurture flows built in HubSpot.', '- Rebuilt nurture using HubSpot to cut CAC 30%.');
+    '- Cut CAC by 30% with nurture flows built in HubSpot.', '- Built nurture using HubSpot to cut CAC 30%.');
   passes('a count before a backed acronym is not part of a name',
-    '- Ran HubSpot in 12 markets across EMEA.', '- Scaled demand using HubSpot across 12 EMEA markets.');
+    '- Ran HubSpot in 12 markets across EMEA.', '- Ran demand using HubSpot across 12 EMEA markets.');
   passes('a multiplier after a backed acronym is not part of a name',
-    '- Lifted MQLs by 3x using HubSpot.', '- Rebuilt scoring using HubSpot and lifted MQLs 3x across regions.');
+    '- Lifted MQLs by 3x using HubSpot.', '- Used HubSpot scoring and lifted MQLs 3x across regions.');
   blocksOn('a versioned name in a clause is checked by its name',
     '- Built services using Go.', '- Built it using Python 3 across every service.', ['python']);
 
@@ -382,7 +382,7 @@ try {
   passes('the sentence after an ideographic full stop is not read as a tool',
     javaAndKubernetes, '- Built it using Java and Kubernetes\u3002Then we scaled it.');
   passes('the clause after an Arabic semicolon is not read as a tool',
-    javaAndKubernetes, '- Built it using Java and Kubernetes\u061b Then we scaled it.');
+    javaAndKubernetes, '- Built it using Java and Kubernetes\u061b Then we built more services.');
 
   // A capture of hundreds of thousands of names is read without overflowing
   // the call stack.
