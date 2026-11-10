@@ -3793,17 +3793,21 @@ export async function appendToPipeline(offers, {
 // so such a caller cannot simply wrap this call; it takes the lock itself and
 // passes true. Everything else must leave it alone: true with no lock actually
 // held reintroduces both races described above.
+// `historyPath` is for a caller that resolves its own data root at call time,
+// as the LinkedIn mail drop does. SCAN_HISTORY_PATH is fixed when this module
+// first loads. The dedup read, the append, and the lock share that path.
 export async function appendToScanHistory(offers, date, status = 'added', {
   alreadyLocked = false,
   historyPolicy = null,
+  historyPath = SCAN_HISTORY_PATH,
 } = {}) {
   const write = () => {
     // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
     // list the row writer (formatScanHistoryRow) emits in order. Written ONLY
     // on fresh-file creation; existing files are never rewritten.
-    if (!existsSync(SCAN_HISTORY_PATH)) {
-      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      atomicWriteFile(SCAN_HISTORY_PATH, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
+    if (!existsSync(historyPath)) {
+      mkdirSync(path.dirname(historyPath), { recursive: true });
+      atomicWriteFile(historyPath, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
     }
 
     // Re-read under the lock (the caller holds it, or withPipelineLock does).
@@ -3811,17 +3815,17 @@ export async function appendToScanHistory(offers, date, status = 'added', {
     // `skipped_expired` stop blocking once the recheck window releases them,
     // so a later scan can record the posting coming back or closing again.
     const policy = historyPolicy ?? historyPolicyFromPortals();
-    const fresh = offersMissingFromHistory(offers, status, readIfExists(SCAN_HISTORY_PATH), policy);
+    const fresh = offersMissingFromHistory(offers, status, readIfExists(historyPath), policy);
     if (fresh.length === 0) return 0;
 
     const lines = fresh.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-    appendLedgerRows(SCAN_HISTORY_PATH, lines);
+    appendLedgerRows(historyPath, lines);
     return fresh.length;
   };
 
   if (alreadyLocked) return write();
-  else return await withPipelineLock(SCAN_HISTORY_PATH, write);
+  else return await withPipelineLock(historyPath, write);
 }
 
 /**
