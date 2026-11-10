@@ -12,8 +12,8 @@ set -euo pipefail
 #   qwen      — qwen -p
 #   grok      — grok -p with --always-approve
 #
-# Only claude supports --strict-mcp-config, the rate-limit/session retry loop,
-# and --parallel > 1; other CLIs run sequentially with a single attempt.
+# Only claude supports --strict-mcp-config and --parallel > 1. Claude and grok
+# share the rate-limit/session retry loop. Other CLIs run one attempt.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -169,7 +169,7 @@ Options:
                        On a rate limit, the rest of the batch runs on 1 worker.
   --dry-run            Show what would be processed, don't execute
   --retry-failed       Only retry offers marked as "failed" in state
-  --resume-paused      Resume offers paused by a Claude session/rate limit
+  --resume-paused      Resume offers paused by a session or rate limit
   --start-from N       Start from offer ID N (skip earlier IDs)
   --company A,B        Only process offers whose company matches (case- and
                        punctuation-insensitive substring of the notes' company
@@ -191,7 +191,7 @@ Options:
                        zero model tokens, needs 'npx playwright install chromium') and
                        hands the recovered text to the worker
   --rate-limit-sleep N Maximum adaptive retry delay in seconds; 0 pauses immediately
-                       (default: 300; range: 0–2147483647; claude only)
+                       (default: 300; range: 0–2147483647; claude and grok)
   --status             Show batch progress and a per-job table, then exit
   --summary            With --status, print the totals only (the table is one row per offer)
   --full               With --status, print the per-job table (the default)
@@ -433,8 +433,8 @@ check_prerequisites() {
     [[ "$DRY_RUN" == "true" ]] || exit 1
   fi
 
-  # Parallelism, the rate-limit retry loop, and --strict-mcp-config are
-  # claude-only; local models run one at a time.
+  # --parallel > 1 and --strict-mcp-config are claude-only. Grok shares the
+  # rate-limit pause, and still runs one worker at a time.
   if [[ "$CLI" != "claude" && "$PARALLEL" -gt 1 ]]; then
     echo "WARN: --parallel >1 is not supported for --cli $CLI (local models run sequentially). Resetting to 1."
     PARALLEL=1
@@ -1669,8 +1669,8 @@ process_offer() {
     [[ -n "$MODEL" ]] && model_args=(--model "$MODEL")
   fi
 
-  # Non-claude CLIs run a single attempt (explicit break after dispatch); the
-  # rate-limit/session retry loop only applies to claude.
+  # Qwen, gemini, and opencode run one attempt (break below). Claude and grok
+  # share the rate-limit and session pause.
   local exit_code=0
   local terminal_failure_recorded=false
   local shim_retries=0
@@ -1756,10 +1756,10 @@ process_offer() {
       fi
     fi
 
-    # Non-claude CLIs run a single attempt: the session-limit and rate-limit
-    # detection below greps generic phrases (429, quota, session limit) that
-    # another CLI's log could match by coincidence and pause or retry the batch.
-    if [[ "$CLI" != "claude" ]]; then
+    # Qwen, gemini, and opencode stop here. A posting they score can mention
+    # 429 or quota, and that phrase would pause the batch. Claude and grok
+    # share the session and rate-limit pause.
+    if [[ "$CLI" != "claude" && "$CLI" != "grok" ]]; then
       break
     fi
 

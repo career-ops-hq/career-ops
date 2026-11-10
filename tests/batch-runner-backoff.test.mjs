@@ -103,6 +103,7 @@ function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429'
       return 1
     }
     qwen() { claude; }
+    grok() { claude; }
     run_worker() { "$@"; }
     sleep() { printf 'SLEEP:%s\n' "$1"; }
     update_state_retrying() { printf 'STATE:%s:%s:%s\n' "$3" "$8" "$9"; }
@@ -146,6 +147,20 @@ test('successful, non-rate-limit and non-Claude workers do not back off', () => 
     assert.doesNotMatch(out, /SLEEP:|STATE:/);
     assert.match(out, /END:1:0:false:/);
   }
+}));
+
+test('a grok 429 pauses and retries the same way claude does', () => fixture(ctx => {
+  const paused = runLoop(ctx, { cli: 'grok', cap: 0, log: '429 rate limit exceeded' });
+  assert.doesNotMatch(paused, /SLEEP:/);
+  assert.match(paused, /STATE:paused_rate_limit/);
+  assert.match(paused, /END:1:0:true:1/);
+  assert.match(readFileSync(join(ctx.dir, 'pause.tsv'), 'utf8'), /^1\t001\t/);
+
+  const retried = runLoop(ctx, { cli: 'grok', log: '429 rate limit exceeded' });
+  const sleeps = [...retried.matchAll(/SLEEP:(\d+)/g)].map(match => Number(match[1]));
+  assert.equal(sleeps.length, 2);
+  assert.match(retried, /STATE:rate_limited:rate-limit; retrying after/);
+  assert.match(retried, /END:3:2:false:1/);
 }));
 
 test('full runner resumes persisted retries and schedules paused rows only with --resume-paused', () => fixture(({ dir, invoke }) => {
