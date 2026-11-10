@@ -32,6 +32,9 @@ try {
   assert.equal(b.isExcluded('output/contacts.vcf'), true);
   assert.equal(b.isExcluded('output/Contacts.VCF'), true);
   assert.equal(b.isExcluded('output/contacts.vcf', { includeContacts: true }), false);
+  assert.equal(b.isExcluded('output/caller-id.vcf'), true);
+  assert.equal(b.isExcluded('output/sub/Phone.VCF'), true);
+  assert.equal(b.isExcluded('output/caller-id.vcf', { includeContacts: true }), false);
   assert.equal(b.isExcluded('output/cv.pdf'), false);
   assert.equal(b.isExcluded('data/contacts.tsv', { includeContacts: true }), false);
   assert.equal(b.isExcluded('config/.ENV'), true);

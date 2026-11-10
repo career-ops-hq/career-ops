@@ -56,7 +56,8 @@ export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
 
 // Files that hold other people's contact details (DATA_CONTRACT.md: third-party
-// PII). Left out unless the caller opts in with --include-contacts.
+// PII). Any other .vcf file is left out too. All of it stays out unless the
+// caller opts in with --include-contacts.
 const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-candidates.json', 'output/contacts.vcf'];
 
 /**
@@ -132,7 +133,8 @@ export function isExcluded(relPath, { includeContacts = false, skipAgentSettings
   if (lower.split('/').some((seg) => seg === '.git' || seg === 'node_modules')) return true;
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
   if (skipAgentSettings && isAgentSetting(lower)) return true;
-  if (!includeContacts && CONTACT_FILES.some((f) => lower === f.toLowerCase())) return true;
+  // Any .vcf is a vCard export from contacts.mjs, which takes a custom path.
+  if (!includeContacts && (name.endsWith('.vcf') || CONTACT_FILES.some((f) => lower === f.toLowerCase()))) return true;
   // plugins.lock is a User Layer file (USER_PATHS), not a transient lock.
   if (lower === 'plugins.lock') return false;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
@@ -450,7 +452,7 @@ const USAGE = `Usage:
   node backup.mjs --provider google-drive  # <drive>/Backups/career-ops; also dropbox | onedrive | icloud
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
-  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json, output/contacts.vcf (other people's contact details); not with --provider. A --dest inside a recognized sync folder is refused too, but verify yourself that the destination is not synced
+  node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json, output/contacts.vcf and any other .vcf (other people's contact details); not with --provider. A --dest inside a recognized sync folder is refused too, but verify yourself that the destination is not synced
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
