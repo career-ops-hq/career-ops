@@ -93,6 +93,13 @@ const MACHINE_SUMMARY_FIELDS = new Set([
   // logic yet, deliberately: importance is score-neutral, so nothing that folds
   // historical scores may start reading it without its own design pass.
   'requirement_importance',
+  // Optional positioning label beside the 1-5 score (RFC #4720): challenge,
+  // target, safety_net, out_of_scope or unknown, with its reason and the four
+  // evidence inputs. Allowlisted so it round-trips; report output only, and
+  // nothing that folds historical scores may read it to change a score.
+  'positioning_band',
+  'positioning_band_reason',
+  'positioning_band_evidence',
 ]);
 
 const args = process.argv.slice(2);

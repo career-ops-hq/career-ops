@@ -504,6 +504,13 @@ score_evidence:
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
 confidence_gaps: []
+positioning_band: "{challenge | target | safety_net | out_of_scope | unknown}"
+positioning_band_reason: "{one sentence naming the evidence}"
+positioning_band_evidence:
+  role_family: "{supported | partial | unknown}"
+  seniority: "{supported | partial | unknown}"
+  required_experience: "{supported | partial | unknown}"
+  scope: "{supported | partial | unknown}"
 evidence_freshness: "{fresh | stale | not_evaluated}"
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
@@ -544,6 +551,7 @@ Rules:
 - `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
 - `reports_to` is the reporting line the JD itself states, in the JD's own wording; `null` when the JD names none — never infer it from the title, the team size, or company research. It records the seat's altitude, which the title alone does not: an IC seat reporting to a Head of Marketing and one reporting to the CEO are different roles.
 - `posting_location` is the JD's **own** stated work location, verbatim (e.g. `"Halifax, NS"`); `null` when the JD states no specific location, or is fully remote with no base jurisdiction named. Feeds the relocation purchasing-power comparison (Block G Signal 17, #4694) — `salary-gap.mjs` reads it the same way it already reads `advertised_comp`. Never infer it from the company's HQ or from company research; only the JD's own words.
+- `positioning_band` is an optional positioning label that sits **beside** the 1-5 `score` and **never changes it**: it answers whether the role is a stretch, the candidate's current target band, or a deliberate fallback, which a score alone cannot say (a 3.8 can be a well-aligned stretch or an easy role with weak North Star alignment). Values: `challenge` (aligned target family, about one level or scope band above the candidate's current natural level, with explicit stretch gaps), `target` (aligned and within the candidate's current band), `safety_net` (about one band below, still aligned with the candidate's goals and acceptable constraints), `out_of_scope` (not in a target career path; an easy role is **not** automatically a safety net), `unknown` (not enough JD or profile evidence to classify honestly; never guess). Decide it only after the full JD has been evaluated, from these inputs in order: (1) target archetype and role-family alignment from `modes/_profile.md` or `config/profile.yml` (`role_family`), (2) required experience and qualifications from the whole JD, with required versus preferred gaps (`required_experience`), (3) responsibilities, ownership, decision scope and team or client scope (`scope`). `seniority` records the resulting level band judged from (2) and (3). The title and external leveling sources are secondary evidence only; **never classify from the title alone**, and never infer missing experience or scope evidence. `positioning_band_reason` is one sentence naming that evidence. `positioning_band_evidence` has one key per input above plus `seniority`, each `supported | partial | unknown`; `unknown` in `role_family` or `required_experience` makes `positioning_band: unknown` unless the other inputs clearly place the role as `out_of_scope`. Thresholds stay profile-defined: this contract fixes the evidence and the enum, not a candidate's levels. It is report output only: it never triggers an application, a tracker status, or a score change.
 - Do not invent missing data. Derive `confidence` from `score_evidence` using the Score Evidence tier rules above; the report's evidence table and `confidence_gaps` must explain the tier. Do not confuse it with `legitimacy_tier`.
 - `evidence_freshness` is the Step 1.7 check (`node evidence-freshness.mjs`, opt-in; the batch runner runs it once per run, and interactive runs reach it through `modes/oferta.md` → GitHub evidence freshness): `stale` when it printed `"stale": true`, `fresh` when it printed `"status": "ok"` with `"stale": false`, and `not_evaluated` for every other status (`no-github`, `gh-unavailable`, `gh-query-failed`, `disabled`), when the check is off, or when it could not run. It says the GitHub evidence behind `cv.md` may be out of date; it never changes `score` or `final_decision`.
 - `work_auth` reflects the Block A work-authorization tier: `no_sponsorship` only when the JD **explicitly** refuses sponsorship for a role outside the candidate's `authorized_in`; `unstated` when the JD is silent (neutral, not a blocker); `not_needed` when the role is within `authorized_in` or sponsorship isn't required; `sponsors` when the JD explicitly offers it.
@@ -649,6 +657,13 @@ score_evidence:
   culture: "{supported | partial | unknown}"
   red_flags: "{supported | partial | unknown}"
 confidence_gaps: []
+positioning_band: "{challenge | target | safety_net | out_of_scope | unknown}"
+positioning_band_reason: "{one sentence naming the evidence}"
+positioning_band_evidence:
+  role_family: "{supported | partial | unknown}"
+  seniority: "{supported | partial | unknown}"
+  required_experience: "{supported | partial | unknown}"
+  scope: "{supported | partial | unknown}"
 evidence_freshness: "{fresh | stale | not_evaluated}"
 next_action: "{one concrete next step}"
 work_auth: "{sponsors | not_needed | unstated | no_sponsorship}"
@@ -694,7 +709,7 @@ The report's sections, in this order:
 - `## G) Posting Legitimacy`
 - `## Verdict (lead)`
 - `## Risk Summary`
-- `## Score Evidence`
+- `## Score Evidence`, followed by one line `**Positioning band:** {challenge | target | safety_net | out_of_scope | unknown} - {one sentence naming the evidence}`, mirrored in Machine Summary `positioning_band`, `positioning_band_reason` and `positioning_band_evidence` (optional context beside the Global Score; it never changes it)
 - `## Extracted Keywords`
 - `## Keyword Coverage`, the block the `keyword-match.mjs` command under **Command arguments** below prints for this report, pasted after the keyword list. A report without both sections leaves the coverage check in `modes/pdf.md` Step 22 with nothing to read.
 - `## Job Description (archived verbatim)` — the full JD pasted verbatim. REQUIRED, not optional (AGENTS.md rule #2789): the `**URL:**` header is a live pointer and rots the moment the posting closes, so this section is the only durable record of what was asked. `check-jd-archive.mjs` validates it. Paste `{{JD_FILE}}`'s content unchanged (or, when the JD was fetched instead of prefetched, the fetched text as-is). Never paraphrase or restate it under this heading. If you cannot reproduce the text in full, capture it with `archive-posting.mjs` as **Command arguments** below shows (`company` is the same slug as in the report filename, `report` is `{{REPORT_NUM}}`) and use the pointer sentence from `modes/oferta.md` instead; `check-jd-archive.mjs` does not credit a section that calls itself a paraphrase.
