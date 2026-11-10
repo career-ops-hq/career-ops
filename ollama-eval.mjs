@@ -27,6 +27,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
@@ -50,7 +51,10 @@ tracker.recordZeroToken('pdf payload');
 
 try {
   const { config } = await import('dotenv');
-  config();
+  // The data root's .env first: doctor.mjs, remember-cli.mjs, scan.mjs and the
+  // plugin engine all read it there. The working directory's .env, the only one
+  // read before, still supplies what the data root's leaves unset.
+  config({ path: [join(getCareerOpsRoot(), '.env'), join(process.cwd(), '.env')] });
 } catch { /* dotenv optional */ }
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -124,9 +128,21 @@ let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replac
 // Context window for the request AND the prompt budget. Defaults to the previous hardcoded
 // 32768, so behaviour is unchanged unless OLLAMA_NUM_CTX is set. Raise it for a model with a
 // bigger window; `ollama show` reports each model's ceiling (qwen2.5 caps at 32768).
-const numCtx = parseInt(process.env.OLLAMA_NUM_CTX || '32768', 10);
-if (Number.isNaN(numCtx) || numCtx <= 0) {
+// Digits only: parseInt read "32k" as 32, a 32-token context, and the prompt was
+// cut to fit it.
+const numCtxRaw = (process.env.OLLAMA_NUM_CTX || '32768').trim();
+const numCtx = /^\d+$/.test(numCtxRaw) ? Number(numCtxRaw) : NaN;
+if (!Number.isSafeInteger(numCtx) || numCtx <= 0) {
   console.error(`❌  Invalid OLLAMA_NUM_CTX: "${process.env.OLLAMA_NUM_CTX}" — must be a positive integer (tokens).`);
+  process.exit(1);
+}
+// Checked here, with the other settings, before the server is contacted. Digits
+// only (parseInt read "5m" as a 5 ms timeout) and at most 2^31-1 ms:
+// AbortSignal.timeout() fires a longer delay after 1 ms, and throws past 2^32-1.
+const timeoutRaw = (process.env.OLLAMA_TIMEOUT_MS || '300000').trim();
+const timeoutMs = /^\d+$/.test(timeoutRaw) ? Number(timeoutRaw) : NaN;
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+  console.error(`❌  Invalid OLLAMA_TIMEOUT_MS: "${process.env.OLLAMA_TIMEOUT_MS}" — must be a positive integer of at most 2147483647 (milliseconds).`);
   process.exit(1);
 }
 let saveReport = true;
@@ -262,6 +278,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileContent,
   customContent,
   jdText,
+  jdInContext: false, // The user message carries the JD; still budget it once.
   maxTokens: numCtx, // matches options.num_ctx below
 });
 
@@ -308,11 +325,6 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 // Call Ollama
 // ---------------------------------------------------------------------------
 const endpoint = `${baseUrl}/api/chat`;
-const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS || '300000', 10);
-if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
-  console.error(`❌  Invalid OLLAMA_TIMEOUT_MS: "${process.env.OLLAMA_TIMEOUT_MS}" — must be a positive integer (milliseconds).`);
-  process.exit(1);
-}
 
 console.log(`🤖  Calling Ollama (${modelName})... this may take a minute.\n`);
 
@@ -444,12 +456,13 @@ const trackable  = Boolean(summary?.company && summary.role && summary.role.toLo
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reservedNumbers = [];
+  let saveStage = 'report';
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
+    reservedNumbers   = await reserveReportNumbers(1, { rootDir: DATA_ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
     // LOCAL calendar day (#3070). This one value becomes three things that have to
     // agree with each other and with the user's calendar: the report FILENAME
@@ -481,7 +494,7 @@ if (saveReport) {
 ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
 `;
 
-    writeFileSync(reportPath, reportContent, 'utf-8');
+    writeFileSync(reportPath, withJdArchiveSection(reportContent, jdText), 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
     if (!trackable) {
@@ -515,6 +528,7 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       // needs its own label -- values are read BY label, so a tenth field the
       // header does not name is not mis-mapped, it is dropped.
       const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      saveStage = 'tracker addition';
       mkdirSync(PATHS.trackerAdditions, { recursive: true });
       writeFileSync(
         join(PATHS.trackerAdditions, additionName),
@@ -525,7 +539,8 @@ ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').tri
       console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
     }
   } catch (err) {
-    console.warn(`⚠️   Could not save report: ${err.message}`);
+    console.warn(`⚠️   Could not save evaluation (${saveStage}): ${err.message}`);
+    process.exitCode = 1;
   } finally {
     if (reservedNumbers.length > 0) {
       try {

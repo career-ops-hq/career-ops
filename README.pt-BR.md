@@ -591,7 +591,7 @@ Veja [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) para todos os detalhes. Este sof
 ## Contribuidores
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Todas as pessoas que entregaram código, documentação, traduções ou testes estão listadas em

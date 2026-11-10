@@ -715,6 +715,53 @@ try {
     }
   }
 
+  // Simplified Chinese has its own profile (#5290), so a Chinese CV checked
+  // against a Chinese cv.md is read. Any other pairing keeps the warning: a
+  // Chinese CV with an English cv.md, and Traditional Chinese or Japanese,
+  // which have no profile.
+  const zhSource = join(tmp, 'zh-cv.md');
+  writeFileSync(zhSource, '## 工作经历\n- 参与了计费系统迁移，协助完成数据库切换。\n- 贡献了内部工具的部分功能。\n');
+  const zhResult = verifyFacts(
+    '<html lang="zh-CN"><body><ul><li>主导了计费系统迁移，独立完成数据库切换。</li>'
+      + '<li>从零搭建内部工具，被全公司采用，服务日活十万用户。</li></ul></body></html>',
+    { sourcePaths: [zhSource], configPath: config },
+  );
+  const zhScope = zhResult.unsupportedFacts.filter(claim => claim.kind === 'scope').map(claim => claim.value);
+  if (zhResult.verdict === 'block'
+      && !zhResult.coverage
+      && ['主导了计费系统迁移', '独立完成数据库切换', '从零搭建内部工具'].every(value => zhScope.includes(value))
+      && zhResult.advisoryFacts.some(claim => claim.kind === 'adoption' && claim.value === '被全公司采用')) {
+    pass('a Chinese CV against a Chinese source is checked for scope and adoption');
+  } else {
+    fail(`the Chinese scope check did not run: ${JSON.stringify(zhResult)}`);
+  }
+  const zhTruthful = verifyFacts('<ul><li>参与计费系统的迁移，协助数据库切换。</li></ul>', { sourcePaths: [zhSource], configPath: config });
+  if (zhTruthful.verdict === 'pass') {
+    pass('a Chinese CV that keeps the source verbs passes');
+  } else {
+    fail(`a truthful Chinese CV did not pass: ${JSON.stringify(zhTruthful)}`);
+  }
+  const hantSource = join(tmp, 'zh-hant-cv.md');
+  writeFileSync(hantSource, '- 參與了計費系統遷移，協助完成資料庫切換。');
+  const jaSource = join(tmp, 'ja-cv.md');
+  writeFileSync(jaSource, '- 請求システムの移行に参加しました。');
+  const zhLanguageCases = [
+    ['主导了计费系统迁移。', englishSource, 'a Chinese document with an English source is reported as not checked'],
+    ['Led the billing migration.', zhSource, 'an English document with a Chinese source is reported as not checked'],
+    ['主導了計費系統遷移。', hantSource, 'Traditional Chinese is reported as not checked'],
+    ['請求システムの移行を主導しました。', jaSource, 'Japanese is reported as not checked'],
+  ];
+  for (const [target, sourcePath, label] of zhLanguageCases) {
+    const result = verifyFacts(target, { sourcePaths: [sourcePath], configPath: config });
+    if (result.coverage?.reason === 'scope-not-checked'
+        && result.verdict !== 'pass'
+        && !result.unsupportedFacts.some(claim => claim.kind === 'scope')) {
+      pass(label);
+    } else {
+      fail(`${label}, but got: ${JSON.stringify(result)}`);
+    }
+  }
+
   // A line that opens with the adjective "Driven" asserts no ownership.
   const drivenSource = join(tmp, 'driven-cv.md');
   writeFileSync(drivenSource, 'Contributed to billing systems.');
