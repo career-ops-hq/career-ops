@@ -230,7 +230,9 @@ test('supervisor: a name that starts with a non-ASCII letter names the reporting
     assert.equal(p.status, 'partial', line);
     assert.deepEqual(p.evidence, [line], line);
   }
-  assert.equal(status(analyzeRoleClarity('Reports to: TBD'), 'supervisor'), 'missing');
+  for (const line of ['Reports to: TBD', 'Reports to: TBD¹']) {
+    assert.equal(status(analyzeRoleClarity(line), 'supervisor'), 'missing', line);
+  }
 });
 
 test('success: a measure and a horizon in unrelated sentences are only partial', () => {
