@@ -312,6 +312,7 @@ const AGGREGATOR_HOSTS = [
   'paylocity.com',
   'personio.com',
   'recruitee.com',
+  'recruitmentplatform.com',
   'smartrecruiters.com',
   'teamtailor.com',
   'wellfound.com',

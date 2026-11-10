@@ -1362,6 +1362,8 @@ search_queries:
 #   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
 #   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
 #                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
+#   talentlink      <tenant>.recruitmentplatform.com/[<site path>/][<page>.html]  (Lumesse TalentLink career page; a
+#                   posting's details.html?jobId=<id> link is claimed too and read as its site's board)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1446,6 +1448,16 @@ search_queries:
 # - name: Example HireHive Co
 #   careers_url: https://exampleco.hirehive.com/   # any <tenant>.hirehive.com host
 #   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Example TalentLink Co
+#   careers_url: https://exampleco.recruitmentplatform.com/   # keep the site path your link has, e.g. /internal/ or /FO/<code>/components/
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 200)
+#   enabled: true
+#
+# - name: Example TalentLink Branded Co
+#   careers_url: https://careers.exampleco.example/jobsearch.html   # the employer's page that embeds the TalentLink job list
+#   provider: talentlink   # branded domains are never auto-detected
 #   enabled: true
 #
 # - name: Example Collage HR Co
@@ -2931,6 +2943,11 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/forto
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
     enabled: true
+
+  - name: Mubea
+    careers_url: https://mubeacareers.recruitmentplatform.com/
+    notes: "Attendorn DE. Automotive and aerospace components, engineering and plant roles across DE, CZ, PL, MX, US."
+    enabled: false
 
   # -- DACH IT services / digital transformation consulting --
 

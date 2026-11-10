@@ -46,6 +46,8 @@ try {
     ['https://acme.hirehive.com.evil.example/backend-engineer-Ab12Cd', 'acme.hirehive.com.evil.example'],
     ['https://acme-641e1b39232b.careers.hibob.com/jobs/0b1c2d3e/apply', 'hibob'],
     ['https://careers.hibob.com.evil.example/jobs/1', 'careers.hibob.com.evil.example'],
+    ['https://acme.recruitmentplatform.com/details.html?jobId=4001', 'talentlink'],
+    ['https://acme.recruitmentplatform.com.evil.example/details.html', 'acme.recruitmentplatform.com.evil.example'],
     ['https://careers.example.com/jobs/1', 'careers.example.com'],
     ['https://evil.example/https://jobs.lever.co/acme', 'evil.example'],
   ];
@@ -107,6 +109,18 @@ try {
     assert.equal(atsBoardUrlOf(refused, 'hibob'), null, refused);
   }
   assert.equal(atsBoardUrlOf('http://acme.bamboohr.com/careers/1', 'bamboohr'), 'http://acme.bamboohr.com');
+  assert.equal(
+    atsBoardUrlOf('https://acme.recruitmentplatform.com/internal/details.html?jobId=4001&jobTitle=Role', 'talentlink'),
+    'https://acme.recruitmentplatform.com/internal',
+  );
+  assert.equal(
+    atsBoardUrlOf('https://acme.recruitmentplatform.com/FO/ABC123/components/details.html?jobId=4001', 'talentlink'),
+    'https://acme.recruitmentplatform.com/FO/ABC123/components',
+  );
+  assert.equal(
+    atsBoardUrlOf('https://acme.recruitmentplatform.com/details.html?jobId=4001', 'talentlink'),
+    'https://acme.recruitmentplatform.com',
+  );
   pass('posting URLs collapse to provider-compatible board URLs without query or fragment data');
 
   const trackerWithUrl = [
