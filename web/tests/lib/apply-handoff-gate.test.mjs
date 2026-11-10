@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
-import { answersByFieldId, handoffDecision, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
+import { answersByFieldId, handoffDecision, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
 
 const sponsorship = { id: "visa", type: "select", label: "Will you require visa sponsorship?", required: true };
 const salary = { id: "pay", type: "text", label: "Desired salary", required: true };
@@ -135,7 +135,7 @@ test("a required résumé with no resolved file holds the form", () => {
   assert.equal(decision.gaps[0].code, "resume-missing");
   assert.equal(
     decision.gaps[0].message,
-    "No tailored CV was resolved for Resume/CV, so nothing will be attached. The employer form stays on this page until a file is attached.",
+    "No tailored CV was resolved for Resume/CV, so nothing will be attached. Open the report in another tab and choose Generate tailored CV, then retry filling here. The employer form stays on this page until a file is attached.",
   );
 });
 
@@ -239,4 +239,22 @@ test("a retry can drop the previous handoff gaps without dropping other issues",
   assert.deepEqual(next, [{ code: "fill-mismatch", message: "A field did not match" }]);
   const provider = readFileSync(new URL("../../src/components/apply/apply-provider.tsx", import.meta.url), "utf8");
   assert.equal(provider.split("withoutHandoffGaps(").length - 1, 2);
+});
+
+test("a retry keeps one ai-filled note and both résumé gaps", () => {
+  const previous = [
+    { code: "ai-filled", message: "AI filled the form for you — review every answer on the real form, then submit it yourself." },
+    { code: "resume-missing", message: "No tailored CV was resolved for Resume/CV." },
+  ];
+  const incoming = [
+    { code: "resume-missing", message: "No tailored CV was resolved for Resume/CV." },
+    { code: "resume-missing", message: "No tailored CV was resolved for Cover letter." },
+    { code: "ai-filled", message: "AI filled the form for you — review every answer on the real form, then submit it yourself." },
+    { code: "ai-filled", message: "AI filled the form again." },
+  ];
+  assert.deepEqual(mergeIssues(previous, incoming), [
+    previous[0],
+    previous[1],
+    { code: "resume-missing", message: "No tailored CV was resolved for Cover letter." },
+  ]);
 });

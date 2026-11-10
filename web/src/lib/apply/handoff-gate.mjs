@@ -46,7 +46,7 @@ function screeningMessage(kind, label) {
 
 function resumeMessage(label, cvAttached) {
   if (!cvAttached) {
-    return `No tailored CV was resolved for ${label}, so nothing will be attached. The employer form stays on this page until a file is attached.`;
+    return `No tailored CV was resolved for ${label}, so nothing will be attached. Open the report in another tab and choose Generate tailored CV, then retry filling here. The employer form stays on this page until a file is attached.`;
   }
   return `The tailored CV did not attach to ${label}. The employer form stays on this page until that file is on the form.`;
 }
@@ -156,6 +156,33 @@ export function gapHoldsEditor(gap) {
 export function withoutHandoffGaps(issues) {
   const list = Array.isArray(issues) ? issues : [];
   return list.filter((issue) => !HANDOFF_GAP.has(issue && issue.code));
+}
+
+/**
+ * Append issues that are not already listed. An ai-filled note stays one
+ * per list, so a retry does not stack copies. Two résumé gaps with different
+ * messages both stay.
+ *
+ * @template {{ code?: string, message?: string }} T
+ * @param {T[] | null | undefined} previous
+ * @param {T[] | null | undefined} incoming
+ * @returns {T[]}
+ */
+export function mergeIssues(previous, incoming) {
+  const prev = Array.isArray(previous) ? previous : [];
+  const next = Array.isArray(incoming) ? incoming : [];
+  const seenMessages = new Set(prev.map((issue) => issue && issue.message));
+  const added = [];
+  let hasAiFilled = prev.some((issue) => issue && issue.code === "ai-filled");
+  for (const issue of next) {
+    if (!issue || !issue.message) continue;
+    if (seenMessages.has(issue.message)) continue;
+    if (issue.code === "ai-filled" && hasAiFilled) continue;
+    added.push(issue);
+    seenMessages.add(issue.message);
+    if (issue.code === "ai-filled") hasAiFilled = true;
+  }
+  return [...prev, ...added];
 }
 
 /**

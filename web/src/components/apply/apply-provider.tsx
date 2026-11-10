@@ -5,7 +5,7 @@ import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
-import { replaceRequiredEmpty, withoutHandoffGaps } from "@/lib/apply/handoff-gate.mjs";
+import { mergeIssues, replaceRequiredEmpty, withoutHandoffGaps } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
@@ -404,13 +404,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const outcome = screenForFill(result);
       if ("gaps" in outcome && outcome.gaps?.length) {
         const gaps = outcome.gaps;
-        setIssues((prev) => {
-          const seen = new Set(prev.map((i) => i.message));
-          return [...prev, ...gaps.filter((i) => i.message && !seen.has(i.message))];
-        });
+        setIssues((prev) => mergeIssues(prev, gaps));
       }
       if (outcome.status === "done") {
-        setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: outcome.issue }]);
+        setIssues((prev) => mergeIssues(prev, [{ level: "info", code: "ai-filled", message: outcome.issue }]));
         setStatus("done");
       } else if ("gaps" in outcome && outcome.gaps?.length) {
         setStatus("ready");
