@@ -179,7 +179,10 @@ judge.
   modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`, `bamboohr`,
   `paylocity`, `join`), each paired with a public company directory (a
   dataset, or for `join` the ATS's own sitemap). No registry lookup;
-  joining it means adding an import and a `SOURCES` entry.
+  joining it means adding an import and a `SOURCES` entry. A ninth entry,
+  `workable`, has no directory: it reads Workable's XML job feed, which
+  already carries every posting, so no provider module's `fetch()` or
+  `enrichDate` runs for it.
 - **The `--history-seeds` pass.** Boards derived from the user's tracker and
   scan history (`history-ats-seeds.mjs`). This one does load the registry,
   but it only reaches a provider whose `id` equals a vendor label from
