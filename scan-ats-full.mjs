@@ -1862,11 +1862,18 @@ async function main() {
         }
         try {
           const partialSave = { saved, postingsKept: kept.length };
+          // The stop write is the resume point. If it fails, a checkpoint
+          // already on disk still lets the next run continue. With neither,
+          // the report must not promise a resume.
+          let checkpointAvailable = false;
           if (!opts.dryRun) {
-            const wrote = writeStopCheckpoint(partialSave);
-            if (!wrote) {
+            checkpointAvailable = writeStopCheckpoint(partialSave) === true;
+            if (!checkpointAvailable) {
               const existing = loadCheckpoint();
-              if (existing) writeCheckpoint({ ...existing, partialSave });
+              if (existing?.current) {
+                writeCheckpoint({ ...existing, partialSave });
+                checkpointAvailable = true;
+              }
             }
           }
           const partial = kept.map((o) => ({
@@ -1884,6 +1891,7 @@ async function main() {
             date,
             sources: opts.ats,
             stoppedEarly: true,
+            checkpointAvailable,
             companiesAvailable: totalCompaniesAvailable,
             companiesScanned: live.totalCompaniesScanned,
             capHit,

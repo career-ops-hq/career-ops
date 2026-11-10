@@ -145,7 +145,7 @@ try {
   const sigtermSent = stopped.signal === 'SIGTERM';
   if (!signalReachesHandler && sawFirstRole && sigtermSent && !saved && !cpExists && !stopped.stdout.includes('"stoppedEarly"')) {
     pass('windows ends the sweep before the save handler can run');
-  } else if (signalReachesHandler && saved && cpExists && resumeAt >= 1 && partialSaved >= 1 && stopped.status === 0) {
+  } else if (signalReachesHandler && saved && cpExists && resumeAt >= 1 && partialSaved >= 1 && stopped.status === 0 && stopped.stdout.includes('"checkpointAvailable":true')) {
     pass('a timed-out full sweep keeps the role it already found and a resume point');
   } else {
     fail(`timed-out sweep dropped its role: pipeline=${saved} checkpoint=${cpExists} resumeAt=${resumeAt} partialSaved=${partialSaved} status=${stopped.status} signal=${stopped.signal}\nstdout=${stopped.stdout.slice(-400)}\nstderr=${stopped.stderr.slice(-400)}`);
@@ -195,7 +195,7 @@ try {
   const drySigterm = stopped.signal === 'SIGTERM';
   if (!signalReachesHandler && drySawRole && drySigterm && !textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && !stopped.stdout.includes('"stoppedEarly"')) {
     pass('windows ends a dry run before the handler can print or write');
-  } else if (signalReachesHandler && !textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && stopped.stdout.includes('"stoppedEarly":true')) {
+  } else if (signalReachesHandler && !textHasUrl(text, FIRST) && !existsSync(checkpointPath(dryDir)) && stopped.stdout.includes('"stoppedEarly":true') && stopped.stdout.includes('"checkpointAvailable":false')) {
     pass('a dry run still only prints the partial result and writes nothing');
   } else {
     fail(`dry run wrote state: pipelineHasRole=${textHasUrl(text, FIRST)} checkpoint=${existsSync(checkpointPath(dryDir))} status=${stopped.status} stdout=${stopped.stdout.slice(-300)}`);
@@ -219,6 +219,7 @@ try {
     signalReachesHandler
     && !textHasUrl(text, FIRST)
     && stopped.stdout.includes('"stoppedEarly":true')
+    && stopped.stdout.includes('"checkpointAvailable":true')
     && stopped.stdout.includes('"saved":false')
     && partial?.saved === false
     && partial?.postingsKept >= 1

@@ -889,6 +889,48 @@ test("a full scan that exits 0 at the time limit is not a finished empty run", (
     assert.equal(attempts, 1);
     assert.equal(unread.state, "failed");
     assert.equal(unread.message, "Scanner exited 0 without a readable result.");
+
+    fs.rmSync(path.join(temp, "data", "cache", "ats-full-checkpoint.json"), { force: true });
+    attempts = 0;
+    const noCheckpoint = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(noCheckpoint.state, "failed");
+    assert.equal(noCheckpoint.message, "Sweep stopped before it finished.");
+
+    const reported = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedEarly: true,
+          saved: true,
+          postingsKept: 2,
+          checkpointAvailable: false,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(reported.rolesFound, 2);
+    assert.equal(reported.message, "Sweep stopped before it finished. Saved 2 matching roles.");
+
+    const resumable = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedEarly: true,
+          saved: true,
+          postingsKept: 2,
+          checkpointAvailable: true,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(resumable.rolesFound, 2);
+    assert.equal(resumable.message, "Sweep stopped before it finished. Saved 2 matching roles. The next run continues this sweep.");
   } finally {
     fs.rmSync(temp, { recursive: true, force: true });
   }

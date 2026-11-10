@@ -215,26 +215,27 @@ function parseFullScanResult(stdout) {
   }
 }
 
-function stoppedSweepMessage(saved, postingsKept) {
+function stoppedSweepMessage(saved, postingsKept, checkpointAvailable) {
   const count = Number(postingsKept);
   const known = Number.isFinite(count);
+  const resume = checkpointAvailable === true ? " The next run continues this sweep." : "";
   if (saved === true && known) {
-    return `Sweep stopped before it finished. Saved ${count} matching role${count === 1 ? "" : "s"}. The next run continues this sweep.`;
+    return `Sweep stopped before it finished. Saved ${count} matching role${count === 1 ? "" : "s"}.${resume}`;
   }
   if (saved === false && known && count > 0) {
     return `Sweep stopped before it finished. ${count} matching role${count === 1 ? "" : "s"} were not saved.`;
   }
-  return "Sweep stopped before it finished. The next run continues this sweep.";
+  return `Sweep stopped before it finished.${resume}`;
 }
 
-function stoppedSweepResult(startedAt, attempt, saved, postingsKept) {
+function stoppedSweepResult(startedAt, attempt, saved, postingsKept, checkpointAvailable) {
   const count = Number(postingsKept);
   return {
     state: "failed",
     attempt,
     rolesFound: saved === true && Number.isFinite(count) ? count : 0,
     durationMs: Date.now() - startedAt,
-    message: stoppedSweepMessage(saved, postingsKept),
+    message: stoppedSweepMessage(saved, postingsKept, checkpointAvailable),
   };
 }
 
@@ -325,12 +326,14 @@ export function executeJob(root, job, options = {}) {
             };
           }
           if (parsed?.stoppedEarly === true) {
-            return stoppedSweepResult(startedAt, attempt, parsed.saved, parsed.postingsKept);
+            return stoppedSweepResult(startedAt, attempt, parsed.saved, parsed.postingsKept, parsed.checkpointAvailable === true);
           }
           // spawnSync with a timeout drops the handler's stdout and still reports status 0.
           if (result.error?.code === "ETIMEDOUT") {
-            const partial = readFullCheckpoint(root)?.partialSave;
-            return stoppedSweepResult(startedAt, attempt, partial?.saved, partial?.postingsKept);
+            const checkpoint = readFullCheckpoint(root);
+            const partial = checkpoint?.partialSave;
+            const available = Boolean(checkpoint?.current) && hasResumableCheckpointShape(root);
+            return stoppedSweepResult(startedAt, attempt, partial?.saved, partial?.postingsKept, available);
           }
           return {
             state: "failed",
