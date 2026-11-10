@@ -383,7 +383,7 @@ func NewPipelineModel(t theme.Theme, apps []model.CareerApplication, metrics mod
 		apps:          apps,
 		metrics:       metrics,
 		sortMode:      sortScore,
-		activeTab:     0,
+		activeTab:     defaultTabIndex(),
 		viewMode:      "grouped",
 		width:         width,
 		height:        height,
@@ -1313,6 +1313,19 @@ func (m *PipelineModel) stepTab(delta int) {
 	}
 }
 
+// defaultTabIndex is the tab the dashboard opens on, and the one an invalid
+// selection falls back to: ALL. Looked up by filter rather than assumed to be
+// index 0, so a tab added in front of it does not change where the dashboard
+// lands.
+func defaultTabIndex() int {
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterAll {
+			return i
+		}
+	}
+	return 0
+}
+
 // clampActiveTab keeps the selection on a tab the tracker can show.
 func (m *PipelineModel) clampActiveTab() {
 	tabs := getPipelineTabs()
@@ -1321,10 +1334,10 @@ func (m *PipelineModel) clampActiveTab() {
 		return
 	}
 	if m.activeTab < 0 || m.activeTab >= len(tabs) {
-		m.activeTab = 0
+		m.activeTab = defaultTabIndex()
 	}
 	if tabs[m.activeTab].filter == filterOther && m.countForFilter(filterOther) == 0 {
-		m.activeTab = 0
+		m.activeTab = defaultTabIndex()
 	}
 }
 
