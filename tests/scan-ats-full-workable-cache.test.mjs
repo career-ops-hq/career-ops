@@ -63,7 +63,7 @@ try {
   const c1 = workableFeedCache({ cacheDir: dir, fetchStream: first });
   const titles1 = await load(c1);
   check(first.calls.length === 1 && !first.calls[0]['if-modified-since'] && c1.from === 'network' && titles1.join() === 'QA Engineer,QA Lead', 'a first run downloads the feed, with no conditional header');
-  check(files(dir) === 'workable.xml.gz,workable.xml.json' && JSON.parse(readFileSync(join(dir, 'workable.xml.json'), 'utf-8')).lastModified === LM1,
+  check(files(dir) === 'workable.meta.json,workable.xml.gz' && JSON.parse(readFileSync(join(dir, 'workable.meta.json'), 'utf-8')).lastModified === LM1,
     'a complete download is kept with its Last-Modified, and no temporary file is left');
 
   // 2. The feed has not changed: a 304, and the copy is read.
@@ -76,7 +76,7 @@ try {
   const changed = network({ text: feed(job('SDET', 'C1')), lastModified: LM2 });
   const c3 = workableFeedCache({ cacheDir: dir, fetchStream: changed });
   const titles3 = await load(c3);
-  check(c3.from === 'network' && titles3.join() === 'SDET' && JSON.parse(readFileSync(join(dir, 'workable.xml.json'), 'utf-8')).lastModified === LM2,
+  check(c3.from === 'network' && titles3.join() === 'SDET' && JSON.parse(readFileSync(join(dir, 'workable.meta.json'), 'utf-8')).lastModified === LM2,
     'a changed feed (200) replaces the copy and its Last-Modified');
 
   // 4. Refused before any byte: the copy, reported as stale.
@@ -90,7 +90,7 @@ try {
   const c5 = workableFeedCache({ cacheDir: dir, fetchStream: broken });
   let err5 = null;
   try { await load(c5); } catch (e) { err5 = e; }
-  check(err5?.message === 'socket hang up' && files(dir) === 'workable.xml.gz,workable.xml.json', 'a download that fails mid-feed is an error, not a fallback, and leaves no temporary file');
+  check(err5?.message === 'socket hang up' && files(dir) === 'workable.meta.json,workable.xml.gz', 'a download that fails mid-feed is an error, not a fallback, and leaves no temporary file');
 
   // 6. A response the reader refuses does not replace the copy.
   const notAFeed = network({ text: '<html>Attention Required</html>', lastModified: 'Tue, 10 Nov 2026 08:16:04 GMT' });
@@ -100,10 +100,10 @@ try {
   check(/no <source> element/.test(err6?.message ?? '') && stillThere.join() === 'SDET', 'a response the reader refuses does not replace the copy or its date');
 
   // 7. A copy whose date file is missing is not trusted for a conditional request.
-  rmSync(join(dir, 'workable.xml.json'));
+  rmSync(join(dir, 'workable.meta.json'));
   const noDate = network({ text: feed(job('QA Engineer', 'D1')), lastModified: LM2 });
   await load(workableFeedCache({ cacheDir: dir, fetchStream: noDate }));
-  check(!noDate.calls[0]['if-modified-since'] && existsSync(join(dir, 'workable.xml.json')), 'without its date file the copy is downloaded again, and the date is written back');
+  check(!noDate.calls[0]['if-modified-since'] && existsSync(join(dir, 'workable.meta.json')), 'without its date file the copy is downloaded again, and the date is written back');
 
   // 8. No copy at all and a 429: the error says when to try again.
   const empty = mkdtempSync(join(tmpdir(), 'career-ops-workable-cache-empty-'));

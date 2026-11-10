@@ -56,7 +56,6 @@
 
 import { captureWorkplaceEvidence } from './providers/_country.mjs';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, createReadStream, createWriteStream } from 'fs';
-import { once } from 'node:events';
 import { finished } from 'node:stream/promises';
 import { createGunzip, createGzip } from 'node:zlib';
 import { createHash } from 'crypto';
@@ -687,7 +686,20 @@ export async function loadSourceList(name, source, datasetOpts, { loadCompanyLis
 // copy is read and the source reports 'stale', as an expired directory cache
 // does.
 const WORKABLE_FEED_CACHE_FILE = 'workable.xml.gz';
-const WORKABLE_FEED_META_FILE = 'workable.xml.json';
+const WORKABLE_FEED_META_FILE = 'workable.meta.json';
+
+/** Wait until a full stream can take more, or fails; both listeners are removed after. */
+function drainOrError(stream) {
+  return new Promise((resolve) => {
+    const done = () => {
+      stream.off('drain', done);
+      stream.off('error', done);
+      resolve();
+    };
+    stream.on('drain', done);
+    stream.on('error', done);
+  });
+}
 
 /**
  * A fetchTextStream stand-in for loadWorkableFeed that serves and keeps the
@@ -770,7 +782,7 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTex
         delivered = true;
         if (!writeFailed) {
           const g = sink();
-          if (!g.write(text)) await Promise.race([once(g, 'drain'), once(g, 'error')]).catch(() => {});
+          if (!g.write(text)) await drainOrError(g);
         }
         return onText(text);
       });
