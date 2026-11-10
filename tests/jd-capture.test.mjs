@@ -5,7 +5,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { pathToFileURL } from 'url';
 
-const { findCaptureForReport, reportPrefix } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
+const { captureSlug, findCaptureForReport, reportPrefix } = await import(pathToFileURL(join(ROOT, 'jd-capture.mjs')).href);
 
 console.log('\njd-capture.mjs — report-keyed capture lookup');
 
@@ -33,6 +33,7 @@ try {
   // ── reportPrefix ───────────────────────────────────────────────────────────
   check('reportPrefix pads to three digits', reportPrefix(64) === '064');
   check('reportPrefix leaves 3-digit numbers alone', reportPrefix(563) === '563');
+  check('captureSlug matches archive-posting punctuation semantics', captureSlug('Foo&Bar Inc.') === 'foobar-inc');
   check('reportPrefix does not truncate 4-digit numbers', reportPrefix(1024) === '1024');
   check('reportPrefix accepts a numeric string', reportPrefix('64') === '064');
 
@@ -101,7 +102,7 @@ try {
   // ── the slug must identify the company, not merely occur in the name ───────
   // Both grammars this repo writes put the company first, after the report
   // prefix and an optional capture date:
-  //   {NNN}-{YYYY-MM-DD}_{company}_{role}.pdf   (archive-posting.mjs)
+  //   {NNN}-{YYYY-MM-DD}_{company}_{role}_{sha256(url)[0:16]}[-2, -3, ...].pdf   (archive-posting.mjs)
   //   {NNN}-{company}-{role}.{ext}              (hand-named / plugin captures)
   // Substring matching let a role word stand in for a company, which is the
   // same mistake as matching on the number alone.

@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="208" viewBox="0 0 760 208" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-labelledby="data-flow-title">
+  <title id="data-flow-title">Data flow of a typical run: scan (scan.mjs) adds URLs to data/pipeline.md; evaluate (oferta.md with cv.md) writes reports/NNN-*.md and a row in the tracker, data/applications.md, which links the report; then you apply: you review and click Submit yourself.</title>
+  <rect width="760" height="208" rx="12" fill="#0d1117"/>
+  <rect x="13" y="16" width="158" height="64" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="df-0"><rect x="13" y="16" width="158" height="64" rx="10"/></clipPath>
+  <rect x="13" y="16" width="6" height="64" fill="#DD7627" clip-path="url(#df-0)"/>
+  <text x="92" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Scan</text>
+  <text x="92" y="64" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">scan.mjs</text>
+  <rect x="205" y="16" width="158" height="64" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="df-1"><rect x="205" y="16" width="158" height="64" rx="10"/></clipPath>
+  <rect x="205" y="16" width="6" height="64" fill="#DD7627" clip-path="url(#df-1)"/>
+  <text x="284" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">URL inbox</text>
+  <text x="284" y="64" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">data/pipeline.md</text>
+  <rect x="397" y="16" width="158" height="64" rx="10" fill="#161b22" stroke="#30363d"/>
+  <clipPath id="df-2"><rect x="397" y="16" width="158" height="64" rx="10"/></clipPath>
+  <rect x="397" y="16" width="6" height="64" fill="#DD7627" clip-path="url(#df-2)"/>
+  <text x="476" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Evaluate</text>
+  <text x="476" y="64" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">oferta.md + cv.md</text>
+  <rect x="589" y="16" width="158" height="64" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="668" y="43" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Report</text>
+  <text x="668" y="64" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">reports/NNN-*.md</text>
+  <line x1="171" y1="48" x2="198" y2="48" stroke="#6e7681" stroke-width="2"/><path d="M196 42 L196 54 L205 48 Z" fill="#6e7681"/><line x1="363" y1="48" x2="390" y2="48" stroke="#6e7681" stroke-width="2"/><path d="M388 42 L388 54 L397 48 Z" fill="#6e7681"/><line x1="555" y1="48" x2="582" y2="48" stroke="#6e7681" stroke-width="2"/><path d="M580 42 L580 54 L589 48 Z" fill="#6e7681"/>
+  <line x1="476" y1="80" x2="476" y2="121" stroke="#6e7681" stroke-width="2"/><path d="M470 119 L482 119 L476 128 Z" fill="#6e7681"/><line x1="668" y1="80" x2="668" y2="121" stroke="#6e7681" stroke-width="2"/><path d="M662 119 L674 119 L668 128 Z" fill="#6e7681"/>
+  <text x="676" y="108" font-size="12" fill="#9198a1">linked</text>
+  <rect x="442" y="128" width="260" height="64" rx="10" fill="#2a1d12" stroke="#DD7627"/>
+  <text x="572" y="155" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Tracker</text>
+  <text x="572" y="176" text-anchor="middle" font-size="12.5" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#9198a1">data/applications.md</text>
+  <line x1="442" y1="160" x2="417" y2="160" stroke="#6e7681" stroke-width="2"/><path d="M419 154 L419 166 L410 160 Z" fill="#6e7681"/>
+  <rect x="90" y="128" width="320" height="64" rx="32" fill="#0d1117" stroke="#DD7627" stroke-width="2"/>
+  <text x="250" y="155" text-anchor="middle" font-size="16" font-weight="700" fill="#e6edf3">Apply</text>
+  <text x="250" y="176" text-anchor="middle" font-size="13" fill="#9198a1">you review, then click Submit yourself</text>
+</svg>

@@ -42,6 +42,11 @@ export const STATUS_ALIAS = {
   yanit_verildi: "RESPONDED",
   respondida: "RESPONDED", // web-only: not in states.yml
   contestada: "RESPONDED", // web-only: not in states.yml
+  // Assessment — states.yml `assessment`
+  screening: "ASSESSMENT",
+  "online assessment": "ASSESSMENT",
+  online_assessment: "ASSESSMENT",
+  "online screening": "ASSESSMENT",
   // Interview — states.yml `interview`
   entrevista: "INTERVIEW",
   "mülakat": "INTERVIEW",
@@ -62,6 +67,7 @@ export const STATUS_ALIAS = {
   iptal_edildi: "DISCARDED",
   "ıptal edildi": "DISCARDED",
   "ıptal_edildi": "DISCARDED",
+  lapsed: "DISCARDED",
   duplicado: "DISCARDED", // web-only: not in states.yml
   repost: "DISCARDED", // web-only: not in states.yml
   // SKIP — states.yml `skip`
@@ -130,5 +136,5 @@ function foldStatus(s) {
 export function canonStatus(s) {
   const k = foldStatus(s);
   if (k === "" || k === "—" || k === "-") return "DISCARDED";
-  return STATUS_ALIAS[k] ?? String(s ?? "").toUpperCase();
+  return STATUS_ALIAS[k] ?? k.toUpperCase();
 }

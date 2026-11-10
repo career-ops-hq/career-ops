@@ -18,6 +18,41 @@
 import { readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
 
+const SLUG_MAX = 60;
+
+/** Cut at a character boundary so the result is at most `max` UTF-8 bytes. */
+function truncateUtf8(value, max) {
+  let bytes = 0;
+  let out = '';
+  for (const char of value) {
+    bytes += Buffer.byteLength(char);
+    if (bytes > max) break;
+    out += char;
+  }
+  return out.replace(/-+$/g, '');
+}
+
+/** Slug grammar used by archive-posting.mjs for capture name fields. */
+export function captureSlug(text) {
+  const fold = (value) => value
+    .replace(/[\s_]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const lowered = String(text ?? '').toLowerCase();
+  const ascii = fold(lowered.replace(/[^\w\s-]/g, '')).slice(0, SLUG_MAX);
+  if (ascii !== '') return ascii;
+  // A name written entirely in another script (株式会社アクメ, Яндекс, شركة) has no
+  // ASCII word character, so the grammar above reduced it to '' and every such
+  // capture came out as `{date}__.pdf`: two postings on one day overwrote each
+  // other, and companyMatches() treats '' as "attribute nothing", so the capture
+  // was never found again. Only that all-empty case falls back to the letters and
+  // digits of any script, so every slug that was already non-empty is unchanged
+  // and the captures written under it keep resolving. The limit is in bytes
+  // (one ASCII character is one byte, a CJK character three), so that company
+  // and role together keep the whole capture filename under the 255 bytes most
+  // filesystems allow.
+  return truncateUtf8(fold(lowered.normalize('NFC').replace(/[^\p{L}\p{M}\p{N}\s_-]/gu, '')), SLUG_MAX);
+}
+
 /** Zero-pad a report number to the 3-digit form used by reports/ filenames. */
 export function reportPrefix(num) {
   return String(num).padStart(3, '0');
@@ -29,7 +64,7 @@ export function reportPrefix(num) {
  * Both grammars written here put the company first, after the report prefix and
  * an optional capture date:
  *
- *   {NNN}-{YYYY-MM-DD}_{company}_{role}.pdf   archive-posting.mjs
+ *   {NNN}-{YYYY-MM-DD}_{company}_{role}_{sha256(url)[0:16]}[-2, -3, ...].pdf   archive-posting.mjs
  *   {NNN}-{company}-{role}.{ext}              hand-named and plugin captures
  *
  * So the slug is anchored to that position and must end on a field boundary.

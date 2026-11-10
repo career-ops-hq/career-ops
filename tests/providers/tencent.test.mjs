@@ -1,7 +1,7 @@
 // tests/providers/tencent.test.mjs — Tencent careers provider (careers.tencent.com
 // public JSON API). Added with the provider in the same PR; follows the
 // discovered-test layout from #1440.
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -184,11 +184,18 @@ try {
     Code: 200,
     Data: { Count: 500, Posts: Array.from({ length: 100 }, (_, i) => mkPost(3000 + i, `岗位C${i}`)) },
   }));
-  await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('tencent.fetch() honors entry.max_pages');
   } else {
     fail(`tencent.fetch() entry.max_pages=1 made ${capped.calls.length} requests`);
+  }
+
+  if (cappedErrors.some((line) => String(line).includes('truncated at 100 of 500 postings'))) {
+    pass('tencent.fetch() warns when max_pages truncates the board instead of stopping silently');
+  } else {
+    fail(`tencent.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
   }
 
   const probe = mkCtx(() => ({
@@ -196,11 +203,56 @@ try {
     Data: { Count: 500, Posts: Array.from({ length: 100 }, (_, i) => mkPost(4000 + i, `岗位D${i}`)) },
   }));
   probe.ctx.maxPages = 1;
-  const probeJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, probe.ctx);
+  const { result: probeJobs, errors: probeErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, probe.ctx));
   if (probe.calls.length === 1 && probe.calls[0].keyword === '' && probeJobs.length === 100) {
     pass('tencent.fetch() honors the ctx.maxPages probe hint and defaults to a whole-board (empty keyword) query');
   } else {
     fail(`tencent.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
+  }
+
+  if (probeErrors.length === 0) {
+    pass('tencent.fetch() stays quiet when the ctx.maxPages probe, not max_pages, stops pagination');
+  } else {
+    fail(`tencent.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
+  }
+
+  // The live whole board (2257 postings on 2026-10-12) outgrew the old 20-page default.
+  const BOARD_SIZE = 2257;
+  const wholeBoard = mkCtx((_kw, page) => ({
+    Code: 200,
+    Data: {
+      Count: BOARD_SIZE,
+      Posts: Array.from(
+        { length: Math.min(100, BOARD_SIZE - (page - 1) * 100) },
+        (_, i) => mkPost(10000 + (page - 1) * 100 + i, `岗位G${page}-${i}`),
+      ),
+    },
+  }));
+  const { result: wholeBoardJobs, errors: wholeBoardErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, wholeBoard.ctx));
+  if (wholeBoardJobs.length === BOARD_SIZE && wholeBoard.calls.length === 23 && wholeBoardErrors.length === 0) {
+    pass('tencent.fetch() pulls a whole board past the old 20-page default (2257 posts → 23 requests, no warning)');
+  } else {
+    fail(`tencent.fetch() whole board: ${wholeBoardJobs.length} jobs, ${wholeBoard.calls.length} requests, warnings ${JSON.stringify(wholeBoardErrors)}`);
+  }
+
+  // A board whose reported total never runs out still stops at the
+  // DEFAULT_MAX_PAGES runaway guard, and says so.
+  const endless = mkCtx((_kw, page) => ({
+    Code: 200,
+    Data: {
+      Count: 1000000,
+      Posts: Array.from({ length: 100 }, (_, i) => mkPost(100000 + page * 100 + i, `岗位H${page}-${i}`)),
+    },
+  }));
+  const { result: endlessJobs, errors: endlessErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL }, endless.ctx));
+  if (endless.calls.length === 100 && endlessJobs.length === 10000
+      && endlessErrors.some((line) => String(line).includes('truncated at 10000 of 1000000 postings'))) {
+    pass('tencent.fetch() stops at the 100-page default when the reported total keeps going, and warns');
+  } else {
+    fail(`tencent.fetch() default cap: ${endless.calls.length} requests, ${endlessJobs.length} jobs, warnings ${JSON.stringify(endlessErrors)}`);
   }
 
   const blip = mkCtx((keyword) => {

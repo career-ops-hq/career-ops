@@ -23,8 +23,20 @@ node agent-inbox.mjs add "run a scan and triage anything new"
 ```bash
 node agent-inbox.mjs list            # pending items
 node agent-inbox.mjs list --all      # include resolved items
-node agent-inbox.mjs resolve 1 --result "scored 4.3 — report 012"
+node agent-inbox.mjs resolve 1 --expect "Acme" --result "scored 4.3 — report 012"
 ```
+
+**Item numbers are stable file positions, not positions in the pending list.**
+`add` only appends, so a number never changes meaning once printed: you can read
+a whole batch off a single `list` and resolve them in any order. `list` shows
+gaps as items get resolved (1, 3, 5) — that is the receipt that something was
+already handled, not a display bug.
+
+Two loud failures protect the write: resolving an item that is already `[x]`
+aborts rather than overwriting its result, and `--expect "<substring>"` aborts
+unless the target item contains that substring (case-insensitive). Prefer
+`--expect` whenever you know what you mean to resolve — it turns "right command,
+wrong row" into an error instead of a plausible-looking wrong result line.
 
 `data/agent-inbox.md` is user-layer (gitignored). Items look like:
 
@@ -40,7 +52,9 @@ node agent-inbox.mjs resolve 1 --result "scored 4.3 — report 012"
 2. Run each **unchecked** item top-to-bottom by routing it to the right mode
    (a URL → `auto-pipeline`; "follow-up" → `followup`; "scan" → `scan`; etc.).
 3. After each, mark it `[x]` and append `→ result: <one line>` — either by hand
-   or with `node agent-inbox.mjs resolve <n> --result "..."`.
+   or with `node agent-inbox.mjs resolve <n> --expect "<distinctive words from
+   the item>" --result "..."`. Pass `--expect` every time: this is a provenance
+   log, and a result stamped onto the wrong item is worse than no result.
 4. Items that need **live user input** (a mock interview, a pasted transcript, a
    decision, anything that would submit an application) → do **not** run them;
    ask the user to start them instead. The inbox never bypasses human review.

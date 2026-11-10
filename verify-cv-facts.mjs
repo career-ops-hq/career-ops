@@ -13,19 +13,106 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { isAbsolute, join, dirname, basename } from 'path';
-import { fileURLToPath } from 'url';
+import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { findExperienceSections, headingText, boldLineText, toPlainText, normalizePandocLine } from './lib/cv-markdown.mjs';
 
-const ROOT = dirname(fileURLToPath(import.meta.url));
-const DEFAULT_SOURCES = ['cv.md', 'article-digest.md'];
-const DEFAULT_CONFIG = join(ROOT, 'config', 'cv-facts.json');
+// Two roots, because this gate compares user-layer files against a user-layer
+// config and previously resolved neither from the user's data root.
+//
+// cv.md and article-digest.md are the Source-of-Truth Boundary's primary files.
+// As bare relative strings they resolved against process.cwd(), so from any
+// directory that is not the data root the gate read NO sources — and a fact
+// check with no sources does not fail open quietly, it fails LOUD and WRONG:
+// every quantified claim in the generated CV is reported as "absent from
+// sources", including claims copied verbatim out of the user's own cv.md.
+//
+// config/cv-facts.json is user-layer too (it holds the user's forbidden and
+// advisory phrases). Resolved from the CODE root it was simply absent for any
+// configured data root, and the gate said so and carried on:
+//
+//     ⚠️  fact-gate config not found: <CHECKOUT>/config/cv-facts.json
+//         — forbidden/advisory phrase checks did not run.
+//
+// So one invocation both invented failures and silently skipped half its
+// checks. --source and --config still override; only the defaults move.
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_SOURCES = [join(DATA_ROOT, 'cv.md'), join(DATA_ROOT, 'article-digest.md')];
+const DEFAULT_CONFIG = join(DATA_ROOT, 'config', 'cv-facts.json');
 const TOOL_PROSE_WORDS = new Set([
   'a', 'an', 'and', 'at', 'built', 'by', 'containerized', 'deployment',
   'deployments', 'delivery', 'diagnosing', 'efficiency', 'feedback', 'for', 'from', 'improve',
   'improving', 'in', 'of', 'on', 'on-time', 'operations', 'production', 'project',
   'recurring', 'resolving', 'submission', 'team', 'the', 'to', 'using', 'with',
 ]);
+// Words that are prose only when they are the whole fragment, in any case.
+// "not just using AI, building for it" leaves "building" alone after the
+// split, and it starts the next clause (#4394). It cannot join
+// TOOL_PROSE_WORDS, which drops an unshaped fragment when any of its words is
+// listed: "using SQL, building Looker models" would then lose Looker
+// unchecked. isLikelyTool checks this set before the shape and source checks,
+// because a capital letter does not make the bare word a name.
+// The pronoun "I" is capitalised, so it is tool-shaped; in "using Java so I
+// could ship weekly" it is the one name-shaped word after Java.
+const PROSE_FRAGMENTS = new Set(['building', 'i']);
+// A leading determiner marks ordinary reference, not a product list: "using
+// that campaign", "using our playbook". The class is closed, so unlike
+// TOOL_PROSE_WORDS it cannot turn into a list that grows by one word per bug
+// report (#4004).
+const DETERMINER_LEAD_RE = /^(?:the|that|this|these|those|our|your|their|its|his|her|my)(?:\s+|$)/i;
+// "a" or "an" before a word opens a noun phrase, and it is a name only inside
+// the phrase: "a Kubernetes cluster" claims Kubernetes, not the cluster. Unlike
+// the determiners above it does not mark the clause as prose, because "using
+// React and an ASP.NET backend" is a list whose second item opens with one.
+const ARTICLE_LEAD_RE = /^an?\s+/i;
+// The ending a name takes from the phrase around it, not from itself: a
+// possessive ("Elasticsearch's index") and a lowercase hyphenated suffix
+// ("Kubernetes-based"). A version or a capital after the hyphen ("GPT-4",
+// "T-Mobile") is part of the name. A single letter before the suffix
+// ("C-suite", "E-commerce", "X-ray") is the start of an ordinary word, so the
+// word is not a name at all.
+const POSSESSIVE_SUFFIX_RE = /['\u2019]s$/i;
+const LOWERCASE_SEGMENT_RE = /^\p{Ll}+$/u;
+const DECLARED_TOOL_TRIGGER_RE = /^(?:technologies?|tech stack)\s*:/i;
+// What separates the names in a tool list. Beside the comma (Arabic and
+// ideographic ones too) and the three connector words: a double quote, a
+// backtick, a pipe, a bullet, a dash or an arrow, none of which occurs inside
+// a name, so two names joined by a dash with no spaces are still two names.
+// Any other symbol separates names only when it stands alone between spaces
+// ("Java & Kubernetes"), because "AT&T", "C++" and "CI/CD" carry one inside.
+// A connector joined by a hyphen is part of a word ("in-house", "built-in"),
+// not a separator.
+const TOOL_LIST_SEPARATOR_RE = /[,\u060c\u3001]|(?<!-)\b(?:and|with|in)\b(?!-)|["\u201c\u201d\u201e\u201a\u00ab\u00bb\u2039\u203a\u0060|\u2022\u00b7\u2013\u2014\u2190\u2192]|(?<=^|\s)[^\p{L}\p{N}\s]+(?=\s|$)/iu;
+// Where a list item ends without the list ending: a bracket, or a colon, "!"
+// or "?" before a space. An ideographic full stop and an Arabic semicolon take
+// no space after them; they end the sentence the way "!" and "?" do.
+// `toolFragments` reads the piece beside one differently from an ordinary item.
+const TOOL_SENTENCE_END_RE = /[!?\u3002\u061b]/;
+const TOOL_BOUNDARY_RE = /([([{)\]}]|[:!?](?=\s|$)|[\u3002\u061b])/;
+// The articles and prepositions in TOOL_PROSE_WORDS that can sit inside a
+// list item. They join names as readily as they join prose ("Kubernetes on
+// AWS"), so on their own they do not make an item prose; see
+// `toolNameBeforeConnector`. "and", "with" and "in" are left out because the
+// list is split on them. "for" is left out because a capture ends at a "for"
+// after a space, and an item that still starts with one ("Kafka,for
+// analytics") is prose. A closed class, like the determiners above.
+const TOOL_PROSE_CONNECTORS = new Set(['a', 'an', 'at', 'by', 'from', 'of', 'on', 'the', 'to']);
+// "Worked with" takes a team or a person as often as a tool ("worked with
+// Finance on pricing"), so `toolNameBeforeConnector` is not applied to a list
+// it opens. Tested against the start of the match, which is the trigger.
+const WORKED_WITH_RE = /^worked with\b/i;
+// "using" opening a later list item: "using React, using Kubernetes". The
+// other prose triggers end in "with", which the list is split on, so they
+// never open an item.
+const INNER_TOOL_TRIGGER_RE = /^\s*using\s+/i;
+// A name with a dot inside it: "Node.js", "ASP.NET", ".NET". Every part between
+// dots has two or more characters, so an abbreviation ("U.S.", "e.g.") is not
+// one. `isDottedName` also wants a letter in the first and the last part, so a
+// version ("22.04", "v18.17") or a figure with a unit ("12.5M", "99.9ms") is
+// not one either.
+const DOTTED_NAME_RE = /^(?:\.[\p{L}\p{N}]{2,}|[\p{L}\p{N}][\p{L}\p{N}+#-]+(?:\.[\p{L}\p{N}][\p{L}\p{N}+#-]+)+)$/u;
+const LETTER_RE = /\p{L}/u;
 const TOOL_PHRASE_PATTERN = /^(?=.{1,80}$)[\p{L}\p{N}.][\p{L}\p{N}+#./-]*(?:\s+[\p{L}\p{N}.][\p{L}\p{N}+#./-]*){0,2}$/u;
 const DELEGATED_PARTY_RE = /\b(?:vendors?|agenc(?:y|ies)|contractors?|consultanc(?:y|ies)|consultants?|external teams?|outsourc(?:ed|ing)|implementation partners?)\b/i;
 const DELEGATION_RE = /\b(?:commissioned|coordinated|directed|engaged|hired|managed|oversaw|partnered with|supervised)\b/i;
@@ -48,7 +135,7 @@ const METRIC_NOUNS = [
   'enrollments', 'enrolments', 'completions', 'courses', 'certifications',
   'certificates', 'sessions', 'responses', 'surveys', 'cohorts',
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
-  'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
+  'servers', 'nodes', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
   // Headcount outside software. The list above counts users, engineers and
   // repos, so a CV in operations, facilities, healthcare, education or the
@@ -59,6 +146,9 @@ const METRIC_NOUNS = [
   'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
   'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
   'crew',
+  // People a candidate mentored or hired: "Mentored 12 interns" against a
+  // source saying 3 passed, because none of these nouns was listed (#5348).
+  'interns', 'mentees', 'apprentices', 'hires',
   // Physical assets and scale, for the same reason.
   'facilities', 'sites', 'buildings', 'rooms', 'labs', 'laboratories', 'plants',
   'machines', 'devices', 'instruments', 'vehicles', 'units', 'locations',
@@ -73,6 +163,39 @@ const METRIC_NOUNS = [
   'graduates', 'alumni', 'teachers', 'instructors', 'educators', 'faculty',
   'schools', 'districts', 'campuses', 'classrooms', 'programs', 'programmes',
   'workshops', 'assessments', 'exams',
+  // German (language.output: de / modes/de). Without these a German CV or cover
+  // letter produced no count claim at all and only got the coverage warning,
+  // so "45 Mitarbeiter" against a source saying 20 passed unchecked. Inflected
+  // forms are listed explicitly (no stemming) and folded to the English
+  // canonical noun in NOUN_SYNONYMS, so a German document checks against an
+  // English or German source alike. German TIME nouns (Tage, Jahre, ...) are
+  // deliberately left out: sources state durations as table cells ("Day
+  // Streak | 316") far more often than as "316 Tage", so adding them would fail
+  // truthful documents without catching the inflation class this gate targets.
+  'mitarbeiter', 'mitarbeitende', 'mitarbeitenden', 'kunden', 'projekte',
+  'projekten', 'standorte', 'standorten', 'zertifikate', 'zertifikaten',
+  'blogbeiträge', 'blogbeiträgen', 'beiträge', 'beiträgen', 'posts',
+  'werkzeuge', 'werkzeugen',
+  'mitarbeitern', 'mitarbeiterinnen', 'teammitglieder', 'teammitgliedern',
+  'nutzer', 'nutzern', 'entwickler', 'entwicklern', 'entwicklerinnen',
+  'ingenieure', 'ingenieuren', 'ingenieurinnen',
+  // French (language.output: fr / modes/fr), on the same terms as German above:
+  // plural forms listed explicitly and folded to the English canonical noun in
+  // NOUN_SYNONYMS, so "Encadré 45 collaborateurs" checks against a cv.md that
+  // says "45 employees". Nouns French spells like English (clients, sites,
+  // services, audits, ...) were already read. Time nouns (ans, années, mois)
+  // stay out for the reason the German block gives.
+  'collaborateurs', 'collaboratrices', 'salariés', 'salariées', 'employés',
+  'employées',
+  'personnes', 'utilisateurs', 'utilisatrices', 'ingénieurs', 'ingénieures',
+  'développeurs', 'développeuses', 'techniciens', 'techniciennes',
+  'opérateurs', 'opératrices', 'équipes', 'stagiaires', 'apprentis',
+  'alternants', 'étudiants', 'étudiantes', 'apprenants', 'formateurs',
+  'enseignants', 'chercheurs', 'bénévoles', 'entreprises', 'sociétés',
+  'partenaires', 'fournisseurs', 'prestataires', 'sous-traitants', 'pays',
+  'projets', 'chantiers', 'usines', 'bâtiments', 'agences', 'magasins',
+  'outils', 'serveurs', 'rapports', 'déploiements', 'formations',
+  'clientes', 'recrutements', 'interventions',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -93,16 +216,36 @@ const METRIC_NOUNS = [
 // for the chain — modifiers are alphabetic only — so a wider window still
 // cannot jump across an intervening figure to bind an unrelated noun.
 const MODIFIER_WINDOW = 4;
-// The number capture takes an immediately-adjacent magnitude suffix (50k, 1.5M)
-// as part of the number, mirroring what the currency pattern below already does.
-// Without it the modifier window re-consumed that letter as a generic word, so
-// "50k users" normalized to the claim "50 users" and matched a CV that said 50 —
-// letting a 1000x inflation through the gate while a smaller "900 users" was
-// correctly caught.
+// The number capture takes a magnitude as part of the number, in both the
+// adjacent-suffix spelling (50k, 1.5M) and the spelled-out one (50 thousand, 1.5
+// million), mirroring what the currency pattern below already does.
 //
-// `[kKmMbB]\b` requires the suffix to END the token, so "50 million users" (space,
-// handled by the modifier window) and "50kg users" (k not at a boundary) both keep
-// their existing behaviour and still normalize to "50".
+// Without the suffix branch the modifier window re-consumed that letter as a
+// generic word, so "50k users" normalized to the claim "50 users" and matched a CV
+// that said 50 — letting a 1000x inflation through the gate while a smaller "900
+// users" was correctly caught.
+//
+// The spelled branch closes the same hole one magnitude further out. Left to the
+// modifier window, "50 million" normalized to "50", so a source saying "Served 50
+// users" was accepted as evidence for "Served 50 million users" — the 10^6 version
+// of the same miss. SPELLED_MAGNITUDES folds each word onto the suffix it
+// abbreviates, so both spellings of one quantity produce one claim and a document
+// cannot pass by writing the magnitude out in words (#4872).
+//
+// Both branches require the magnitude to END the token, so "50kg users" (k not at
+// a boundary) and "50 millionaire users" ("millionaire" is not the magnitude word)
+// keep their previous normalization and still read as "50".
+// Spelled-out magnitudes, folded onto the suffix each one abbreviates so that a
+// quantity compares equal however it is written. The words mirror the existing
+// `[kKmMbB]` suffix set exactly: a word with no suffix counterpart would be a
+// magnitude the claim key has nothing to normalize it against.
+const SPELLED_MAGNITUDES = new Map([
+  ['thousand', 'k'],
+  ['million', 'm'],
+  ['billion', 'b'],
+]);
+const SPELLED_MAGNITUDE_ALT = [...SPELLED_MAGNITUDES.keys()].join('|');
+
 const COUNT_CLAIM_RE = new RegExp(
   // LAZY (`{0,N}?`), so the number binds to the NEAREST noun in the window
   // rather than the farthest. Greedy, the quantifier consumed as many filler
@@ -123,8 +266,23 @@ const COUNT_CLAIM_RE = new RegExp(
   // one a human reads. #2279's wide-window cases are unaffected — "~5 live
   // Cloud Run deployments" still yields "5 deployments", because there is only
   // one noun to bind to.
-  String.raw`\b(\d[\d,.]*(?:[kKmMbB]\b)?)\s*\+?\s*(?:[A-Za-z][A-Za-z-]*\s+){0,${MODIFIER_WINDOW}}?(${METRIC_NOUNS.join('|')})\b`,
-  'gi'
+  //
+  // A number glued to letters by a hyphen is a standard's identifier, not a
+  // count: "EIP-712 signed offers" is not a claim of 712 offers, nor
+  // "ERC-4626 vaults" one of 4626 vaults. Without the lookbehind, a tailored
+  // bullet that drops a word the source had inside the modifier window (so
+  // the source yields no claim and the bullet does) fails the gate.
+  //
+  // 1C is an ERP software name, not a count: "1C warehouse and order workflows"
+  // must not become the invented metric "1 workflows".
+  //
+  // Modifiers are any letters (\p{L}), not ASCII only, so German, French and
+  // Spanish modifiers with diacritics ("veröffentlichte") no longer end the
+  // window. `(?:[\p{L}\p{N}]+-)*` lets the counted noun close a hyphenated
+  // compound ("318 TryHackMe-Rooms"): German writes the modifier and the noun
+  // as one hyphenated token, which a whitespace-only window never saw.
+  String.raw`(?<![A-Za-z]-)\b(?!1C\b)(\d[\d,.]*(?:[kKmMbB]\b|\s+(?:${SPELLED_MAGNITUDE_ALT})\b)?)\s*\+?\s*(?:\p{L}[\p{L}\p{M}-]*\s+){0,${MODIFIER_WINDOW}}?(?:[\p{L}\p{N}]+-)*(${METRIC_NOUNS.join('|')})(?![\p{L}\p{N}])`,
+  'giu'
 );
 const NOUN_SYNONYMS = new Map([
   ['repos', 'repositories'],
@@ -137,12 +295,177 @@ const NOUN_SYNONYMS = new Map([
   // restating a source's "20 staff" is a paraphrase, not a fabrication.
   ['personnel', 'staff'],
   ['labs', 'laboratories'],
+  // German forms fold to the English canonical noun (see METRIC_NOUNS).
+  ['mitarbeiter', 'employees'],
+  ['mitarbeitern', 'employees'],
+  ['mitarbeiterinnen', 'employees'],
+  ['mitarbeitende', 'employees'],
+  ['mitarbeitenden', 'employees'],
+  ['teammitglieder', 'employees'],
+  ['teammitgliedern', 'employees'],
+  ['kunden', 'customers'],
+  ['nutzer', 'users'],
+  ['nutzern', 'users'],
+  ['entwickler', 'engineers'],
+  ['entwicklern', 'engineers'],
+  ['entwicklerinnen', 'engineers'],
+  ['ingenieure', 'engineers'],
+  ['ingenieuren', 'engineers'],
+  ['ingenieurinnen', 'engineers'],
+  ['projekte', 'projects'],
+  ['projekten', 'projects'],
+  ['standorte', 'locations'],
+  ['standorten', 'locations'],
+  ['zertifikate', 'certifications'],
+  ['zertifikaten', 'certifications'],
+  ['blogbeiträge', 'posts'],
+  ['blogbeiträgen', 'posts'],
+  ['beiträge', 'posts'],
+  ['beiträgen', 'posts'],
+  ['werkzeuge', 'tools'],
+  ['werkzeugen', 'tools'],
+  // French forms fold to the English canonical noun (see METRIC_NOUNS).
+  ['collaborateurs', 'employees'],
+  ['collaboratrices', 'employees'],
+  ['salariés', 'employees'],
+  ['salariées', 'employees'],
+  ['employés', 'employees'],
+  ['employées', 'employees'],
+  ['personnes', 'people'],
+  ['utilisateurs', 'users'],
+  ['utilisatrices', 'users'],
+  ['ingénieurs', 'engineers'],
+  ['ingénieures', 'engineers'],
+  ['développeurs', 'engineers'],
+  ['développeuses', 'engineers'],
+  ['techniciens', 'technicians'],
+  ['techniciennes', 'technicians'],
+  ['opérateurs', 'operators'],
+  ['opératrices', 'operators'],
+  ['équipes', 'teams'],
+  ['stagiaires', 'interns'],
+  ['apprentis', 'apprentices'],
+  ['alternants', 'apprentices'],
+  ['étudiants', 'students'],
+  ['étudiantes', 'students'],
+  ['apprenants', 'learners'],
+  ['formateurs', 'instructors'],
+  ['enseignants', 'teachers'],
+  ['chercheurs', 'researchers'],
+  ['bénévoles', 'volunteers'],
+  ['entreprises', 'companies'],
+  ['sociétés', 'companies'],
+  ['partenaires', 'partners'],
+  ['fournisseurs', 'vendors'],
+  ['prestataires', 'contractors'],
+  ['sous-traitants', 'contractors'],
+  ['pays', 'countries'],
+  ['projets', 'projects'],
+  ['chantiers', 'sites'],
+  ['usines', 'plants'],
+  ['bâtiments', 'buildings'],
+  ['agences', 'locations'],
+  ['magasins', 'locations'],
+  ['outils', 'tools'],
+  ['serveurs', 'servers'],
+  ['rapports', 'reports'],
+  ['déploiements', 'deployments'],
+  ['formations', 'courses'],
+  ['clientes', 'clients'],
+  ['recrutements', 'hires'],
 ]);
+// One claim, however it is spelled (#5348). Each pattern below is a spelling of
+// a percentage, an amount of money or a multiplier, and canonicalMetric() folds
+// every match onto one key: `45 percent` / `45 per cent` / `45%` -> `45%`,
+// `USD 3M` / `3 million dollars` / `$3M` -> `$3m`, `10-fold` / `10x` -> `10x`.
+// With only the symbol spellings recognized, the same inflated figure blocked
+// as `45%` and passed as `45 percent`, so whether the gate caught a number
+// depended on wording an LLM rewriter picks freely.
+//
+// Currency codes are matched case-sensitively: lowercase "eur" or "gbp" in prose
+// is not a currency. A bare "pound(s)" is left out because it is also a weight.
+const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
 const SIMPLE_CLAIM_PATTERNS = [
-  /\b\d+(?:\.\d+)?\s?%/g,
-  /(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?[kKmMbB])?/g,
+  /\b\d+(?:\.\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
+  new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
+  new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
+  new RegExp(String.raw`\b\d[\d,.]*${MAGNITUDE_ALT}?\s?-?\s?(?:(?:USD|EUR|GBP)\b|(?:[Dd]ollars?|[Ee]uros?)\b)`, 'gu'),
   /\b\d+(?:\.\d+)?\s?x\b/gi,
+  /\b\d+(?:\.\d+)?\s?-?\s?fold\b/gi,
 ];
+
+const CURRENCY_SYMBOLS = new Map([
+  ['$', '$'], ['us$', '$'], ['usd', '$'], ['dollar', '$'], ['dollars', '$'],
+  ['€', '€'], ['eur', '€'], ['euro', '€'], ['euros', '€'],
+  ['£', '£'], ['gbp', '£'],
+]);
+
+/**
+ * Fold one SIMPLE_CLAIM_PATTERNS match onto the key its other spellings share.
+ *
+ * Anything this does not recognize falls back to normalizeClaim, so an entry
+ * in allow_metrics written in an unusual spelling still compares the way it
+ * always did.
+ *
+ * @param {string} raw - the matched text
+ * @returns {string}
+ */
+function canonicalMetric(raw) {
+  const claim = normalizeClaim(raw);
+  const percent = /^(\d+(?:\.\d+)?) ?(?:%|percent|per ?cent|pct)$/.exec(claim);
+  if (percent) return `${percent[1]}%`;
+  const multiplier = /^(\d+(?:\.\d+)?) ?(?:x|-? ?fold)$/.exec(claim);
+  if (multiplier) return `${multiplier[1]}x`;
+  const amount = String.raw`(\d[\d.]*)(?: ?(thousand|million|billion|[kmb]))?`;
+  const lead = new RegExp(String.raw`^(\$|€|£|us\$|usd|eur|gbp) ?${amount}$`).exec(claim);
+  const trail = lead ? null : new RegExp(String.raw`^${amount} ?-? ?(usd|eur|gbp|dollars?|euros?)$`).exec(claim);
+  if (!lead && !trail) return claim;
+  const [symbol, number, magnitude] = lead ? [lead[1], lead[2], lead[3]] : [trail[3], trail[1], trail[2]];
+  const suffix = magnitude ? (SPELLED_MAGNITUDES.get(magnitude) ?? magnitude) : '';
+  return `${CURRENCY_SYMBOLS.get(symbol)}${number}${suffix}`;
+}
+
+// Spelled-out numbers, rewritten as digits before the claim patterns run, so
+// "Led forty engineers" and "Led 40 engineers" make the same claim (#5348).
+// Before, only the digit form was read, and a rewriter that spelled the
+// number out got an inflated headcount past the gate.
+//
+// "one" on its own is left alone: "one of the engineers" is not a count of
+// one engineer, and every count noun here is plural anyway. It is read only as
+// the start of "one hundred". The `-fold` multiplier is read for four and up,
+// because "a twofold approach" and "a threefold mission" are prose far more
+// often than they are metrics.
+const NUMBER_WORD_VALUES = new Map([
+  ['one', 1], ['two', 2], ['three', 3], ['four', 4], ['five', 5], ['six', 6], ['seven', 7], ['eight', 8], ['nine', 9],
+  ['ten', 10], ['eleven', 11], ['twelve', 12], ['thirteen', 13], ['fourteen', 14], ['fifteen', 15],
+  ['sixteen', 16], ['seventeen', 17], ['eighteen', 18], ['nineteen', 19],
+  ['twenty', 20], ['thirty', 30], ['forty', 40], ['fifty', 50], ['sixty', 60], ['seventy', 70],
+  ['eighty', 80], ['ninety', 90],
+]);
+const UNIT_WORDS = 'one|two|three|four|five|six|seven|eight|nine';
+const TENS_WORDS = 'twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety';
+const TEEN_WORDS = 'ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen';
+const SPELLED_NUMBER_RE = new RegExp(
+  String.raw`\b(?:(?<tens>${TENS_WORDS})(?:[-\s](?<tensUnit>${UNIT_WORDS}))?|(?<teen>${TEEN_WORDS})|(?<unit>two|three|four|five|six|seven|eight|nine)|(?<one>one)(?=\s+hundred\b))(?<hundred>\s+hundred)?\b`,
+  'gi',
+);
+const SPELLED_FOLD_RE = /\b(four|five|six|seven|eight|nine|ten|twenty|fifty|hundred|thousand)-?fold\b/gi;
+
+/** Rewrite spelled-out English numbers as digits, for metric extraction only. */
+function spellNumbers(text) {
+  return text
+    .replace(SPELLED_FOLD_RE, (_, word) => {
+      const lower = word.toLowerCase();
+      const value = lower === 'hundred' ? 100 : lower === 'thousand' ? 1000 : NUMBER_WORD_VALUES.get(lower);
+      return `${value}-fold`;
+    })
+    .replace(SPELLED_NUMBER_RE, (...args) => {
+      const groups = args.at(-1);
+      const word = (name) => NUMBER_WORD_VALUES.get(groups[name]?.toLowerCase()) ?? 0;
+      const value = word('tens') + word('tensUnit') + word('teen') + word('unit') + word('one');
+      return String(groups.hundred ? value * 100 : value);
+    });
+}
 
 /** Read a UTF-8 file when it exists, otherwise return an empty string. */
 function readIfExists(path) {
@@ -212,9 +535,70 @@ export function foldDigits(text) {
   return out.replace(/(?<!\d)(\d{1,3})[\s\u00a0\u202f](?=\d{3}(?!\d))/g, '$1');
 }
 
+const HTML_ENTITY_RE = /&(?:#(\d{1,7})|#x([\da-f]{1,6})|([a-z]{2,31}));/gi;
+const HTML_NAMED_ENTITIES = new Map([
+  ['amp', '&'], ['lt', '<'], ['gt', '>'], ['nbsp', ' '], ['quot', '"'], ['apos', "'"],
+  ['lsquo', '\u2018'], ['rsquo', '\u2019'], ['sbquo', '\u201a'], ['ldquo', '\u201c'],
+  ['rdquo', '\u201d'], ['bdquo', '\u201e'], ['laquo', '\u00ab'], ['raquo', '\u00bb'],
+  ['ndash', '\u2013'], ['mdash', '\u2014'], ['hellip', '\u2026'], ['bull', '\u2022'],
+  ['middot', '\u00b7'], ['reg', '\u00ae'], ['trade', '\u2122'], ['copy', '\u00a9'],
+  ['shy', '\u00ad'], ['zwnj', '\u200c'], ['zwj', '\u200d'], ['zerowidthspace', '\u200b'],
+]);
+// Decoded only after tags are stripped, so escaped markup stays text and an
+// escaped "&" cannot join what follows it into another entity.
+const MARKUP_ENTITY_CHARACTERS = new Set(['&', '<', '>', ' ']);
+
+/**
+ * The character an HTML entity encodes. A control character renders as white
+ * space at most, so it decodes to a space. An unknown entity, and one outside
+ * the pass asked for (`markup` decodes only `MARKUP_ENTITY_CHARACTERS`, the
+ * other pass everything else), is returned unchanged.
+ */
+function decodeHtmlEntity(entity, decimal, hex, name, markup) {
+  const codePoint = decimal ? Number(decimal) : hex ? Number.parseInt(hex, 16) : null;
+  const char = codePoint === null
+    ? HTML_NAMED_ENTITIES.get(name.toLowerCase())
+    : codePoint < 0x20 ? ' ' : (codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : undefined);
+  if (char === undefined || MARKUP_ENTITY_CHARACTERS.has(char) !== markup) return entity;
+  return char;
+}
+
+// Only the body of a LaTeX document is CV content. The preamble is package
+// names, lengths and macro definitions, and read as text it made claims of its
+// own: `\pdfgentounicode=1` above a `%%%%` banner was the metric "1%", and
+// the `0em` lengths outvoted a short CV's English in the language check
+// ("em" is Portuguese). Comments go too, since a comment runs from an
+// unescaped `%` to the end of the line. Only a LaTeX document is treated this
+// way: everywhere else `%` is a percent sign.
+const LATEX_DOCUMENT_RE = /\\documentclass\b|\\begin\{document\}/;
+const LATEX_COMMENT_RE = /(?<!\\)%.*$/gm;
+const LATEX_BODY_RE = /\\begin\{document\}([\s\S]*?)(?:\\end\{document\}|$)/;
+
+/** The body of a LaTeX document without its comments; any other text unchanged. */
+function latexBody(text) {
+  const raw = String(text);
+  if (!LATEX_DOCUMENT_RE.test(raw)) return raw;
+  const uncommented = raw.replace(LATEX_COMMENT_RE, '');
+  return LATEX_BODY_RE.exec(uncommented)?.[1] ?? uncommented;
+}
+
 /** Remove HTML, basic LaTeX commands, and excess whitespace from document text. */
-export function stripMarkup(text, { keepLineBreaks = false } = {}) {
-  return foldDigits(String(text))
+export function stripMarkup(text, { keepLineBreaks = false, keepBlankLines = false } = {}) {
+  text = latexBody(text);
+  // An entity is the character it encodes, and a default-ignorable character
+  // (zero-width space, joiner, soft hyphen, directional mark, variation
+  // selector) renders as nothing. Both are resolved before anything else reads
+  // the text, digit grouping included, so every claim pattern sees what the
+  // reader sees. Left in, either one split a word: "Kuber&shy;netes", or the
+  // same word with a zero-width space inside, was never compared with the
+  // sources, and an entity's ";" ended a tool list.
+  const visible = String(text)
+    .replace(HTML_ENTITY_RE, (entity, decimal, hex, name) => decodeHtmlEntity(entity, decimal, hex, name, false))
+    .replace(/\p{Default_Ignorable_Code_Point}/gu, '')
+    // A trademark sign is not part of the name it marks. Left in, it joined
+    // the name inside a clause, and normalization turns "\u2122" into "TM".
+    .replace(/[\u00ae\u2120\u2122]/g, '');
+  return foldDigits(visible)
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\b[^>]*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\b[^>]*>/gi, ' ')
     // Only strip things that actually look like tags: `<name …>` or `</name>`.
@@ -232,13 +616,49 @@ export function stripMarkup(text, { keepLineBreaks = false } = {}) {
     .replace(/<\/?(?:li|p|div|tr|h[1-6]|section|article|ul|ol|table|br)\b[^>\n]*>/gi, '. ')
     .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
     .replace(/\\[a-zA-Z]+\*?(?:\[[^\]]*\])?(?:\{([^}]*)\})?/g, ' $1 ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
+    // An escaped special character is the character. LaTeX writes a percent
+    // sign as `\%` (and markdown allows the same escape), and the backslash
+    // broke the digit-percent adjacency the claim pattern needs, so every
+    // percentage in a .tex CV was invisible to the gate (#5348). `\&`, `\#`
+    // and `\_` matter to names: "R\&D", "C\#".
+    .replace(/\\([%$&#_])/g, '$1')
+    // Markdown emphasis (`**bold**`, `__bold__`, `*italic*`) — the house style
+    // used to bold nearly every metric in cv.md/article-digest.md. A closing
+    // marker sitting directly against the number severed the number-noun
+    // adjacency the claim patterns require, so a bolded metric quoted verbatim
+    // from the source was reported as "invented" (#4085). Requires
+    // non-whitespace touching each marker (the standard markdown emphasis
+    // rule), so a lone unpaired asterisk — a footnote marker like "40%*", or
+    // two of them on one line — is left alone rather than paired into a false
+    // span. Single underscores are load-bearing in these sources (snake_case,
+    // env_keys.json, file paths), so only a DOUBLED underscore is stripped.
+    // Must run AFTER the LaTeX pass above: a LaTeX star-variant command
+    // (`\section*{...}`) leaves a single bare `*` behind if consumed first,
+    // and that stray star can pair with an unrelated later `*...*` span and
+    // mangle both. Bold before italic, so the italic pass never splits a
+    // `**...**` run in two. Bold may span a wrapped line (`keepLineBreaks`);
+    // italic is deliberately kept single-line, to stay conservative about the
+    // more collision-prone single-asterisk form.
+    //
+    // Deliberately NOT letter/digit-boundary-guarded (e.g. `(?<![\p{L}\p{N}_])`)
+    // even though that would preserve literal patterns like `2*3*4` or
+    // `foo*bar*baz`: a LaTeX star command directly abutting the next word
+    // (`\section*{Foo}and*emphasis*done` -> `Foo and*emphasis*done`) leaves
+    // the italic span's markers touching letters on both sides, which such a
+    // guard rejects — turning real emphasis back into a false negative. The
+    // covered CV/article-digest sources never contain literal multiplication
+    // asterisks, so this trades an untested hypothetical for a real,
+    // regression-tested case (see the LaTeX star-command test below).
+    .replace(/\*\*(\S(?:[\s\S]*?\S)?)\*\*/g, ' $1 ')
+    .replace(/__(\S(?:[\s\S]*?\S)?)__/g, ' $1 ')
+    .replace(/\*(\S(?:[^\n*]*\S)?)\*/g, ' $1 ')
+    .replace(HTML_ENTITY_RE, (entity, decimal, hex, name) => decodeHtmlEntity(entity, decimal, hex, name, true))
     // keepLineBreaks preserves a newline as a CLAUSE boundary for the plan-horizon
     // scan. Horizontal whitespace still collapses, and every claim pattern spans a
     // newline through `\s`, so extraction is unaffected either way.
     .replace(keepLineBreaks ? /[^\S\n]+/g : /\s+/g, ' ')
-    .replace(/ *\n+ */g, keepLineBreaks ? '\n' : ' ')
+    // keepBlankLines keeps each newline of a run, so a blank line stays a blank line.
+    .replace(keepLineBreaks && keepBlankLines ? / *\n */g : / *\n+ */g, keepLineBreaks ? '\n' : ' ')
     .trim();
 }
 
@@ -288,15 +708,17 @@ function looksToolShaped(rawValue) {
   // A digit anywhere marks a version or a name built on one: "n8n", "GPT-4",
   // "Python 3.11".
   if (/\d/.test(trimmed)) return true;
-  // Every word capitalised: "React", "Google Cloud", "Node.js". A single
-  // lowercase connector inside an otherwise-capitalised phrase never reaches
-  // here — TOOL_PHRASE_PATTERN caps a tool fragment at 3 words and the
-  // surrounding split on `and`/`with`/`in` already removes connectors.
+  // Every word capitalised: "React", "Google Cloud", "Node.js". A lowercase
+  // connector inside a capitalised phrase ("Kubernetes on AWS") makes it not
+  // tool-shaped, which leaves it to the prose-word check in isLikelyTool.
   return trimmed.split(/\s+/).every(word => /^[\p{Lu}]/u.test(word));
 }
 
 /**
  * Keep likely technology names while dropping ordinary prose fragments.
+ *
+ * A fragment that is exactly a `PROSE_FRAGMENTS` word, in any case, is
+ * rejected first, before the shape and source checks below.
  *
  * A fragment that does not look tool-shaped (see `looksToolShaped`) is kept
  * anyway when it is already an exact substring of the source files: a real
@@ -304,20 +726,311 @@ function looksToolShaped(rawValue) {
  * in cv.md must still pass, and rejecting it on casing alone would just trade
  * one false-positive class for another.
  *
- * A fragment that is neither tool-shaped nor source-backed is still retained
- * by default, preserving the gate's fail-closed behavior for lowercase names.
- * Only exact words observed as prose false positives are rejected through
- * `TOOL_PROSE_WORDS`; morphological suffixes are deliberately not used
- * because real products such as Spring, Unity, and Processing share them.
+ * A fragment whose every word already occurs in the source is dropped: that
+ * is the document's own vocabulary reworded, and tailoring rewords "using"
+ * sentences by design. A name the source never mentions is unaffected, so
+ * "kubernetes" in a CV that never says it stays fail-closed.
+ *
+ * Anything left is retained by default, preserving that fail-closed behavior
+ * for lowercase names. Only exact words observed as prose false positives are
+ * rejected here, through `TOOL_PROSE_WORDS`; morphological suffixes are
+ * deliberately not used because real products such as Spring, Unity, and
+ * Processing share them.
+ *
+ * Neither length nor punctuation rejects a fragment. A fragment of more than
+ * three words, or one holding a character outside letters, digits and
+ * "+#./-", used to be dropped here before any check, so "Google Cloud Vertex
+ * AI" or "AT&T Cloud" was never compared with the sources and a fabricated
+ * one passed the gate. Dropping is the fail-open direction. `toolFragments`
+ * now strips the punctuation around a name and reads a long fragment by its
+ * names, and what reaches this function goes through the checks above.
  */
 function isLikelyTool(value, sourceNormalized) {
   const normalized = normalizeFact(value);
   const words = normalized.split(' ');
-  if (!normalized || words.length > 3) return false;
-  if (!TOOL_PHRASE_PATTERN.test(value.trim())) return false;
+  if (!normalized) return false;
+  // Before the shape and source checks: the whole fragment is the prose word,
+  // so a title-cased "Building" is no more a name than "building" is.
+  if (PROSE_FRAGMENTS.has(normalized)) return false;
   if (looksToolShaped(value)) return true;
   if (sourceNormalized != null && sourceContainsFact(sourceNormalized, normalized)) return true;
+  // Every word of the fragment already occurs in the source: this is the
+  // document's own vocabulary reworded, not a technology the source never
+  // mentions. Tailoring rewords "using" sentences by design, so without this
+  // the only thing between ordinary prose and a tool claim is
+  // TOOL_PROSE_WORDS (#4004).
+  if (sourceNormalized != null && words.every(word => sourceContainsFact(sourceNormalized, word))) return false;
   return !words.some(word => TOOL_PROSE_WORDS.has(word));
+}
+
+// A word that is a quantity rather than a name: one with no letter ("30",
+// "70:20:10"), or a number with a unit of at most two letters ("3x", "12M",
+// "99.9ms", "40%").
+const QUANTITY_WORD_RE = /^(?:\P{L}*|\d[\d.,]*\p{L}{0,2}%?)$/u;
+// What the same test accepts as a measure when a digit-led word may be a name.
+// A measure is a number alone, or a number with one suffix letter from k, m, b
+// or x in either case: the suffixes the metric patterns read on a number
+// ("50k users", "1.5M users", "10x"). Any other letters make the word a name,
+// lowercase or not: "3CX", "4d", "3cx", "4me" and "12MB". The suffix cannot
+// tell a product from a unit, so "4K" and "3M" read as measures.
+const MEASURE_WORD_RE = /^(?:\P{L}*|\d[\d.,]*[kKmMbBxX]?)$/u;
+// A word of single letters joined by dots or slashes: "U.S.", "A/B", "I/O".
+const ABBREVIATION_WORD_RE = /^\p{L}(?:[./]\p{L})+\.?$/u;
+
+/**
+ * The runs of consecutive tool-shaped words in a fragment: "Salesforce" in
+ * "Salesforce across three regions". A word with a capital after a lowercase
+ * letter counts ("iOS", "macOS"), and so does a dotted name (".NET"). A
+ * quantity or an abbreviation names nothing, so it ends a run and is left
+ * out: "CAC 30%" checks CAC, and "A/B" checks nothing. A word joined by a
+ * slash to a dotted name is two names, so "Node.js/Express" checks both.
+ * `skipLoneLetter` drops a run of one letter, which is what a capture that
+ * stopped at the dot in "U.S." leaves behind. `digitNames` reads a digit-led
+ * word as a name unless it is a measure (`MEASURE_WORD_RE`), where the
+ * default also drops any word with one or two letters after its digits.
+ */
+function toolNameRuns(fragment, { skipLoneLetter = false, digitNames = false } = {}) {
+  const quantity = digitNames ? MEASURE_WORD_RE : QUANTITY_WORD_RE;
+  const runs = [];
+  let run = [];
+  const flush = () => {
+    if (run.length) runs.push(run.join(' '));
+    run = [];
+  };
+  for (const word of fragment.split(/\s+/)) {
+    const parts = word.includes('/') && word.split('/').some(isDottedName) ? word.split('/') : [word];
+    parts.forEach((part, index) => {
+      if (index > 0) flush();
+      const named = looksToolShaped(part) || /\p{Ll}\p{Lu}/u.test(part) || isDottedName(part);
+      if (named && !quantity.test(part) && !ABBREVIATION_WORD_RE.test(part)) run.push(part);
+      else flush();
+    });
+  }
+  flush();
+  return skipLoneLetter ? runs.filter(name => !/^\p{L}$/u.test(name)) : runs;
+}
+
+/**
+ * A fragment without the punctuation around it: a single quote, which cannot
+ * separate names because the same character is the apostrophe in "Moody's",
+ * or a footnote mark. A leading "." is kept (".NET"), and so is a trailing
+ * "+", "#" or "-" ("C++", "C#", "C--"). The end is trimmed one character at a
+ * time, because an end-anchored pattern rescans a run of symbols from every
+ * position in it.
+ */
+function trimToolFragment(raw) {
+  const chars = Array.from(raw.replace(/^[^\p{L}\p{N}.]+/u, ''));
+  let end = chars.length;
+  while (end > 0 && !/[\p{L}\p{N}+#-]/u.test(chars[end - 1])) end--;
+  return chars.slice(0, end).join('');
+}
+
+/**
+ * Split the text a tool trigger introduced into the fragments `isLikelyTool`
+ * judges.
+ *
+ * A list item of up to three words is returned whole. A longer one is a
+ * clause ("Salesforce across three regions"), returned as its tool-shaped
+ * words (`toolNameRuns`): read whole, it is a claim no source contains, and a
+ * truthful CV blocks.
+ *
+ * A piece that held a boundary's character (`TOOL_BOUNDARY_RE`) used to be
+ * dropped unread. The piece just inside a bracket, the piece just after one,
+ * and the piece after a colon are now read by their tool-shaped words too. A
+ * bracket holds a description as often as a name ("Java (self-hosted)"), and
+ * a colon introduces a clause as often as a list, so lowercase words there are
+ * not read as tools. The piece after "!", "?" or another sentence end
+ * (`TOOL_SENTENCE_END_RE`) begins the next sentence and is still not read. A piece before a boundary is an ordinary item:
+ * "Kubernetes" in "Kubernetes (EKS)" or "Kubernetes: cut release time".
+ */
+function toolFragments(listText) {
+  const fragments = [];
+  // Text at even indexes; the boundary between two texts at the odd index.
+  const parts = listText.split(TOOL_BOUNDARY_RE);
+  for (let index = 0; index < parts.length; index += 2) {
+    const before = parts[index - 1] ?? '';
+    const after = parts[index + 1] ?? '';
+    const pieces = parts[index].split(TOOL_LIST_SEPARATOR_RE).map(trimToolFragment);
+    pieces.forEach((piece, position) => {
+      const first = position === 0;
+      const last = position === pieces.length - 1;
+      if (!piece || (first && TOOL_SENTENCE_END_RE.test(before))) return;
+      // Pushed one at a time: spread into push(), hundreds of thousands of
+      // names overflow the call stack.
+      if ((first && /[([{)\]}:]/.test(before)) || (last && /[)\]}]/.test(after))) {
+        for (const name of toolNameRuns(piece)) fragments.push(name);
+      } else if (!DETERMINER_LEAD_RE.test(piece)) {
+        if (piece.split(/\s+/).length <= 3) fragments.push(piece);
+        else for (const name of toolNameRuns(piece, { skipLoneLetter: true })) fragments.push(name);
+      }
+    });
+  }
+  return fragments;
+}
+
+function isDottedName(word) {
+  if (!DOTTED_NAME_RE.test(word)) return false;
+  const parts = word.split('.').filter(Boolean);
+  return LETTER_RE.test(parts[0]) && LETTER_RE.test(parts[parts.length - 1]);
+}
+
+/**
+ * The dotted names among the words before the first connector of a fragment
+ * `isLikelyTool` rejected, whatever the fragment's length.
+ *
+ * The three-word limit drops "Node.js on AWS Lambda" whole, which leaves the
+ * name to the pattern that stops at the dot, and that one checks "node". A
+ * source that says "Node", or "next quarter" for "Next.js", then backs the
+ * claim. A dotted name (see `isDottedName`) names a product or a site, so
+ * these are kept without the shape and prose checks the rest of the fragment
+ * needs. A word is split at a slash first, so "Node.js/Express" yields
+ * "Node.js". The plain name beside it stays unread. Words after the connector
+ * stay unread, as in `toolNameBeforeConnector`.
+ */
+function dottedNamesBeforeConnector(value) {
+  if (!value.includes('.')) return [];
+  const words = value.trim().split(/\s+/);
+  const connector = words.findIndex(word => TOOL_PROSE_CONNECTORS.has(normalizeFact(word)));
+  return words.slice(0, connector < 0 ? words.length : connector).flatMap(word => word.split('/')).filter(isDottedName);
+}
+
+/**
+ * The tool-shaped name a connector hid inside a fragment `isLikelyTool`
+ * rejected, or '' when there is none.
+ *
+ * A prose word rejects its whole fragment, which is right for ordinary
+ * English and wrong for a name followed by a connector: in "Kubernetes on AWS"
+ * the "on" discarded Kubernetes, so the name the trigger introduced was never
+ * checked. When every prose word in the fragment is a connector
+ * (`TOOL_PROSE_CONNECTORS`), the words before the first one are that name, and
+ * they are kept if `looksToolShaped` accepts them. Any other prose word still
+ * rejects the whole fragment, so "Ops on deployment" yields nothing:
+ * "deployment" marks it as a sentence about work.
+ *
+ * Only the name before the connector is kept. What follows one is usually
+ * where or when the tool was used ("Looker on Mondays", "GCP at Initech").
+ * #4394 kept a place after "in" or "with" as a claim that allow_facts clears.
+ * Reading this position the same way would block those words too, so it is
+ * left unread.
+ *
+ * The name must be tool-shaped, so a lowercase head such as "data" in "data
+ * on Mondays" stays with `isLikelyTool` and this never widens its default
+ * acceptance. Like `isLikelyTool`, it reads at most three words, so a longer
+ * fragment such as "Kubernetes on Google Cloud" is still dropped whole.
+ */
+function toolNameBeforeConnector(value) {
+  const trimmed = value.trim();
+  if (!TOOL_PHRASE_PATTERN.test(trimmed)) return '';
+  const words = trimmed.split(/\s+/).map(word => ({ word, normalized: normalizeFact(word) }));
+  const proseWords = words.filter(({ normalized }) => TOOL_PROSE_WORDS.has(normalized));
+  if (!proseWords.every(({ normalized }) => TOOL_PROSE_CONNECTORS.has(normalized))) return '';
+  const connector = words.findIndex(({ normalized }) => TOOL_PROSE_CONNECTORS.has(normalized));
+  if (connector <= 0) return '';
+  const name = words.slice(0, connector).map(({ word }) => word).join(' ');
+  return looksToolShaped(name) ? name : '';
+}
+
+/**
+ * The values one tool fragment claims, and whether `isLikelyTool` accepted the
+ * fragment whole: the claim is then the whole fragment. When it did not, the
+ * claims are the names `dottedNamesBeforeConnector` and, with `useConnector`,
+ * `toolNameBeforeConnector` recover from it.
+ */
+function toolFragmentClaims(fragment, sourceNormalized, useConnector) {
+  const value = normalizeFact(fragment);
+  if (!value) return { whole: false, values: [] };
+  if (isLikelyTool(fragment, sourceNormalized)) return { whole: true, values: [value] };
+  const names = dottedNamesBeforeConnector(fragment);
+  if (useConnector) names.push(toolNameBeforeConnector(fragment));
+  return { whole: false, values: names.filter(Boolean).map(normalizeFact) };
+}
+
+/**
+ * A name run read out of a phrase, without the ending the phrase gave it: the
+ * quotes around it, a possessive and a lowercase hyphenated suffix. Returns ''
+ * when nothing is left that names a tool, as for "C-suite".
+ *
+ * The suffix is found by splitting at hyphens and dropping trailing
+ * all-lowercase segments, one pass over the word. An end-anchored pattern
+ * would rescan a long run of hyphens from every one of them.
+ */
+function tidyToolName(name) {
+  const parts = name.replace(POSSESSIVE_SUFFIX_RE, '').split('-');
+  let end = parts.length;
+  while (end > 1 && LOWERCASE_SEGMENT_RE.test(parts[end - 1])) end--;
+  if (end === parts.length) return trimToolFragment(parts.join('-'));
+  const stem = trimToolFragment(parts.slice(0, end).join('-'));
+  return Array.from(stem).length < 2 ? '' : stem;
+}
+
+// An employer is also named by where the work happened, with no "worked at":
+//
+//   "At Globex Corporation, I cut claim-form rendering 92%"
+//   "In my current role as a Data Scientist at Globex, I have shipped ..."
+//
+// The employer pattern in factClaims never read either, so a made-up employer in
+// the sentence a cover letter is built around was not compared with cv.md
+// (#6371). On 1,162 public letters that record each applicant's jobs, the pattern
+// read an employer in 54, and 574 hold this shape, only 24 of them with "At"
+// opening a sentence.
+//
+// A company named this way is often not an employer, because a letter also talks
+// about the company it is addressed to, which cv.md never names: "At Stripe, I
+// would ...", "the standards expected at Facebook, I have prepared ...". Blocking
+// those would stop a truthful letter, so a claim needs two things. The words
+// before the name state a job, or the name opens the clause. The verb after it
+// reports work, so intent ("I would", "I am eager", "I hope") claims nothing, and
+// neither does a clause that talks to the company ("I learned how your team ships").
+// A sentence that misses either stays unread, as all of these were before.
+// A dot only inside a word ("Booking.com"): "at Amazon. I have ..." ends a sentence.
+const AT_NAME_CHAR = "[\\p{L}\\p{N}_&'\\u2019-]";
+const AT_NAME_WORD = `\\p{Lu}${AT_NAME_CHAR}*(?:\\.${AT_NAME_CHAR}+)*`;
+const AT_NAME = `${AT_NAME_WORD}(?: (?:of |& )?${AT_NAME_WORD}){0,4}`;
+// "never" is not an adverb here and "did" is not a verb below, because each can deny
+// the job: "At Stripe, I have never worked there", "At Stripe, I did not work there".
+const WORK_ADVERBS = '(?:[a-z]+ly |also |then |further |first |later |once |often |since |still |even |not only )*';
+// Verbs a letter uses about a company it has only read about, and past intent. The
+// -eed words are here because the pattern below is reading "-ed" as the past tense.
+const NOT_WORK_VERBS = 'need|feed|proceed|succeed|exceed|speed|embed|shed|noticed|admired|appreciated|watched|visited|interviewed|attended|followed|wanted|hoped|wished';
+const PAST_VERB = `(?!(?:${NOT_WORK_VERBS})\\b)[a-z-]+ed`;
+// "was", "been" and "had" report nothing alone ("I was impressed by ...", "I have
+// been following ..."), so the words after them have to.
+const WORK_STATES = `(?:been|was|were) ${WORK_ADVERBS}(?:responsible|part|involved|instrumental|fortunate|privileged|entrusted|trained|tasked|promoted|hired|able|for|working|leading|managing|building|developing)|had the (?:distinct )?(?:privilege|pleasure|honou?r|opportunity)`;
+const WORK_VERBS = `(?:${PAST_VERB}|${WORK_STATES}|led|built|ran|run|grew|grown|wrote|written|made|won|drove|driven|took|taken|set|cut|taught|spent|oversaw|overseen|began|begun|became|become|kept|held|got|gotten|brought|sold|done|gave|given|manage|lead|oversee|own|handle|serve|work|design|build|develop|maintain|supervise|head|direct|spearhead)`;
+// "your" in the verb's own clause talks to the company. Past a comma it usually
+// doesn't: "I honed my skills, which I would bring to your team" still states a job.
+const NOT_ADDRESSED = '(?![^,;:.!?\\n]{0,200}\\byour?\\b)';
+// "At Globex, where I currently excel ..." states a job whatever the verb. Without
+// "where", the verb has to report work: "At Stripe, I currently see an opening".
+const AT_EMPLOYER_RE = new RegExp(`\\b[Aa]t (?:The )?(${AT_NAME}(?: and ${AT_NAME})?)(?:\\.?, | (?=(?:I|we)\\b))(?:where I currently|(?:where )?(?:I|we)(?:(?:['\u2019]ve| have)? ${WORK_ADVERBS}${WORK_VERBS}|['\u2019]d ${WORK_ADVERBS}${PAST_VERB}))\\b${NOT_ADDRESSED}`, 'gu');
+// The name opens the sentence, a list item, or a clause joined to the last one.
+const AT_OPENS_CLAUSE_RE = /(?:^|[;:]\s*|\b(?:and|but|then|later|while|whilst|previously|recently|currently),?\s*)[\s•‣◦⁃∙*+-]*$/iu;
+// Words that turn "as a ..." or "I am a ..." into something other than a job.
+const NOT_A_JOB = "(?:(?!\\b(?:candidate|applicant|user|customer|admirer|fan|follower|reader|visitor|believer|result|fit|interest|who|for|your)\\b)[^.;!?])*";
+const AT_JOB_LEAD_RE = new RegExp([
+  // The words between "my" and the job noun describe it ("my most recent role"). A
+  // function word means they lead somewhere else ("my interest in the role").
+  `\\b[Mm]y (?:(?!(?:in|for|of|the|to|at|with|on|an?) )[\\w-]+ ){0,3}?(?:roles?|positions?|job|tenures?|time|stint|years|experience|career)(?: as [^.;!?]*)?$`,
+  `(?<!such |well )\\b[Aa]s (?:(?:an?|the) |(?!I\\b)\\p{Lu})${NOT_A_JOB}$`,
+  `\\bI(?:['\u2019]m| am)(?: currently| presently| now)? (?:(?:an?|the) |employed\\b)${NOT_A_JOB}$`,
+  `\\bI (?:currently |presently |have )?(?:serve|served|hold|held|work|worked)\\b${NOT_A_JOB}$`,
+  '\\b(?:roles|tenures?|years|months)$',
+].join('|'), 'u');
+
+/** Employers named by "at <Name>, I ..." where the sentence states a job there. */
+function atEmployerClaims(text) {
+  const clean = stripMarkup(text, { keepLineBreaks: true });
+  const claims = [];
+  for (const match of clean.matchAll(AT_EMPLOYER_RE)) {
+    // A letter's job statement fits well inside this, and the cap keeps a page
+    // with no sentence break from being rescanned for every match.
+    const before = clean.slice(Math.max(0, match.index - 200), match.index);
+    const lead = before.slice(Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '), before.lastIndexOf('\n')) + 1).trim();
+    if (!AT_OPENS_CLAUSE_RE.test(lead) && !AT_JOB_LEAD_RE.test(lead)) continue;
+    // Without its "'s", so "Macy’s" here matches a cv.md that says "Macy's".
+    for (const name of match[1].split(' and ')) claims.push({ kind: 'employer', value: normalizeFact(name.replace(POSSESSIVE_SUFFIX_RE, '')) });
+  }
+  return claims;
 }
 
 /**
@@ -371,20 +1084,369 @@ export function factClaims(text, sourceNormalized = null) {
     // in "Head of AI") must still be allowed.
     ['title', /\b(?:[Ss]erved [Aa]s|[Ww]orked [Aa]s|[Tt]itle\s*:\s*|[Rr]ole\s*:\s*)\s*(?:an?\s+|the\s+)?([A-Z][\w/-]+(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})|\b(?:[Ww]orked [Aa]t|[Jj]oined)\s+[A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,4}\s+[Aa]s\s+(?:an?\s+|the\s+)?([A-Z][\w/-]+(?:\s+(?:of|for|and|the)\s+[A-Z][\w/-]*|\s+[A-Z][\w/-]*){0,4})/g],
     ['tool', /\b(?:using|built with|worked with|technologies?\s*:\s*|tech stack\s*:\s*)([^.;\n]+?)(?=\s+\bfor\b|[.;\n]|$)/gi],
+    // The same capture, except that a dot ends it only where no letter or
+    // digit follows. The pattern above stops inside "Node.js", "ASP.NET" and
+    // ".NET", so nothing after the dot was read: "using Node.js and Kafka"
+    // never checked Kafka. A sentence missing the space after its period
+    // ("Tableau.Grew pipeline") reads as one name here and blocks, which is
+    // the fail-closed side of that ambiguity. It stays as it is beside this one rather than being
+    // replaced, because reading through the dot can lengthen a fragment past
+    // the three words `isLikelyTool` accepts ("Node.js's event loop on AWS
+    // Lambda"), and then the name the shorter capture did check would go
+    // unchecked. `dottedNamesBeforeConnector` recovers a dotted name from such
+    // a fragment only when it stands as a word of its own, or is joined to
+    // another by a slash.
+    ['tool', /\b(?:using|built with|worked with|technologies?\s*:\s*|tech stack\s*:\s*)((?:[^.;\n]|\.(?=[\p{L}\p{N}]))+?)(?=\s+\bfor\b|\.(?![\p{L}\p{N}])|[;\n]|$)/giu],
   ];
   for (const [kind, pattern] of patterns) {
     for (const match of clean.matchAll(pattern)) {
       const rawText = kind === 'tool' ? match[1].trim() : '';
+      // "Technologies:" and "tech stack:" declare a list whatever follows them.
+      // The prose triggers do not: a determiner straight after "using" or
+      // "worked with" means the trigger is ordinary English, so the whole clause
+      // is prose and "worked with the team in London" must not yield London.
+      const declaredList = kind === 'tool' && DECLARED_TOOL_TRIGGER_RE.test(match[0]);
       const rawValues = kind === 'tool'
-        ? (/^the\s+/i.test(rawText) ? [] : rawText.split(/,|\band\b|\bwith\b|\bin\b/i))
+        // A determiner LATER in a list taints only its own fragment, so filter
+        // after the split and keep its siblings, including a name the gate has
+        // to block (#4004).
+        ? ((!declaredList && DETERMINER_LEAD_RE.test(rawText)) ? [] : toolFragments(rawText))
         : [match[1] || match[2]];
+      const connectorRule = kind === 'tool' && !WORKED_WITH_RE.test(match[0]);
       for (const raw of rawValues) {
-        const value = normalizeFact(raw);
-        if (value && (kind !== 'tool' || isLikelyTool(raw, sourceNormalized))) claims.push({ kind, value });
+        // A later item can open with its own "using": "using React, using
+        // Kubernetes". Read it after that trigger, the way the first item is
+        // read, instead of dropping the item as prose for holding "using". A
+        // determiner after it marks prose as it does after the first trigger,
+        // so that item is read whole, as it always was.
+        const afterTrigger = kind === 'tool' ? raw.replace(INNER_TOOL_TRIGGER_RE, '') : raw;
+        const innerTrigger = afterTrigger !== raw && !DETERMINER_LEAD_RE.test(afterTrigger.trim());
+        const fragment = innerTrigger ? afterTrigger : raw;
+        if (kind !== 'tool') {
+          const value = normalizeFact(fragment);
+          if (value) claims.push({ kind, value });
+          continue;
+        }
+        // A leading "a" or "an" changes nothing about whether the fragment is
+        // a tool claim. It is stripped and the rest goes through the decision a
+        // fragment with no article gets. Only when that decision claims the
+        // whole fragment does the article matter: the names in it are claimed
+        // instead, each alone, so "a Kubernetes cluster" checks "kubernetes"
+        // where the source says "Kubernetes". The names are the ones
+        // `toolNameRuns` reads: capitalised words, words with an inner
+        // capital, words with a digit that are not a measure ("3CX", "n8n"),
+        // and dotted names such as "node.js". A fragment with none of them ("a
+        // small team", "a 2024 roadmap") then claims nothing, and neither does
+        // a word that is only ever prose (`PROSE_FRAGMENTS`).
+        const trimmed = fragment.trim();
+        const article = ARTICLE_LEAD_RE.exec(trimmed);
+        const subject = article ? trimToolFragment(trimmed.slice(article[0].length)) : fragment;
+        const decision = toolFragmentClaims(subject, sourceNormalized, connectorRule || innerTrigger);
+        // One letter left from a capture that stopped at the dot of an
+        // abbreviation ("a U.S. agency" reaches here as "a U") names nothing.
+        const values = article && decision.whole
+          ? (/^\p{L}$/u.test(subject) ? [] : toolNameRuns(subject, { digitNames: true })
+            .map(tidyToolName).filter(Boolean).map(normalizeFact).filter(name => !PROSE_FRAGMENTS.has(name)))
+          : decision.values;
+        for (const value of values) claims.push({ kind, value });
       }
     }
   }
-  return claims;
+  // Pushed one at a time, like the tool names: spread into push(), a page of
+  // 150,000 statements overflows the call stack.
+  for (const claim of atEmployerClaims(text)) claims.push(claim);
+  // Report each claim once. Both tool patterns read most names, so without
+  // this every tool would be listed twice. Repeated employer and title claims
+  // collapse too, as they already did in verifyFacts.
+  const seen = new Set();
+  return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+// The fields the CV builders emit as structure rather than prose (#5348).
+// factClaims() reads an employer only after a prose trigger ("worked at",
+// "joined", "Company:"), and a built CV never phrases its employer that way: it
+// is a `job-company` span. So a payload that swapped the employer, the degree
+// or a certification rendered and passed the gate, which is the fabrication
+// AGENTS.md treats as most serious.
+//
+// Employer, education, certification and award fields BLOCK when no source contains
+// them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
+// about titles, because reframing one is sometimes the candidate's call, and a
+// second check that blocked on the same field would overrule that choice.
+// Skills lists are not read here. Rewording a skill into the posting's
+// vocabulary is the reformulation the tailoring is allowed to do.
+//
+// Templates with section partials (#2183) may use other class names, and a
+// markdown CV has no markup to read, so neither is covered.
+const STRUCTURED_HTML_FIELDS = [
+  ['job-company', 'employer', true],
+  ['edu-title', 'education', true],
+  ['edu-org', 'education', true],
+  ['cert-title', 'certification', true],
+  // Standards/authorship credits are rendered in awards too (#1411).
+  ['award-title', 'award', true],
+  ['job-role', 'title', false],
+];
+// One level of nested braces, enough for `\textbf{...}` inside an argument.
+const LATEX_ARG = String.raw`\s*\{((?:[^{}]|\{[^{}]*\})*)\}`;
+// build-cv-latex.mjs writes `\resumeSubheading{organization}{…}{title or degree}{…}`
+// for both experience and education, so the first argument is an employer or
+// an institution and the third a role or a degree. The first blocks; the third
+// is read as a title and warns, for the reason given above.
+const LATEX_SUBHEADING_RE = new RegExp(String.raw`\\resumeSubheading${LATEX_ARG}${LATEX_ARG}${LATEX_ARG}${LATEX_ARG}`, 'g');
+
+/**
+ * Find balanced (span|div) elements matching an open-tag regex.
+ * Yields { tag, openStart, contentStart, contentEnd, elementEnd }.
+ */
+function findBalancedElements(raw, openRe) {
+  const elements = [];
+  let openMatch;
+  while ((openMatch = openRe.exec(raw)) !== null) {
+    const tag = openMatch[1];
+    const openStart = openMatch.index;
+    const contentStart = openRe.lastIndex;
+    if (openMatch[0].endsWith('/>')) {
+      elements.push({ tag, openStart, contentStart, contentEnd: contentStart, elementEnd: contentStart });
+      continue;
+    }
+    const tagRe = new RegExp(String.raw`</?${tag}\b[^>]*>`, 'gi');
+    tagRe.lastIndex = contentStart;
+    let depth = 1;
+    let tagMatch;
+    let contentEnd = -1;
+    let elementEnd = -1;
+    while ((tagMatch = tagRe.exec(raw)) !== null) {
+      if (tagMatch[0].startsWith('</')) {
+        depth--;
+        if (depth === 0) {
+          contentEnd = tagMatch.index;
+          elementEnd = tagRe.lastIndex;
+          openRe.lastIndex = elementEnd;
+          break;
+        }
+      } else if (!tagMatch[0].endsWith('/>')) {
+        depth++;
+      }
+    }
+    if (elementEnd !== -1) {
+      elements.push({ tag, openStart, contentStart, contentEnd, elementEnd });
+    }
+  }
+  return elements;
+}
+
+/**
+ * Remove balanced elements matching openRe, replacing each with a space.
+ */
+function removeBalancedElements(raw, openRe) {
+  const elements = findBalancedElements(raw, openRe);
+  if (elements.length === 0) return raw;
+  let result = '';
+  let lastIndex = 0;
+  for (const el of elements) {
+    result += raw.slice(lastIndex, el.openStart) + ' ';
+    lastIndex = el.elementEnd;
+  }
+  result += raw.slice(lastIndex);
+  return result;
+}
+
+/**
+ * Extract inner contents of structured HTML elements matching class `cls`,
+ * accounting for potential nested tags of the same type (e.g. nowrap spans inside
+ * a span field like job-company, or nested divs inside edu-title).
+ */
+function extractStructuredFieldInners(raw, cls) {
+  const openRe = new RegExp(String.raw`<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])${cls}(?![\w-])[^"]*"[^>]*>`, 'gi');
+  return findBalancedElements(raw, openRe).map(el => raw.slice(el.contentStart, el.contentEnd));
+}
+
+/**
+ * Employer, education, certification, award and title claims a CV builder emitted as
+ * structured fields.
+ *
+ * @param {string} text - generated HTML or LaTeX
+ * @returns {{kind: string, value: string, line: string, blocking: boolean}[]}
+ */
+export function structuredFieldClaims(text) {
+  const raw = latexBody(text ?? '');
+  const claims = [];
+  const add = (kind, inner, blocking) => {
+    const line = stripMarkup(inner);
+    const value = normalizeFact(line);
+    if (value) claims.push({ kind, value, line, blocking });
+  };
+  for (const [cls, kind, blocking] of STRUCTURED_HTML_FIELDS) {
+    for (const inner of extractStructuredFieldInners(raw, cls)) {
+      // edu-title encloses its edu-org span or div, which is read on its own.
+      // Remove the full nested classed element (accounting for inner formatting
+      // spans); unclassed formatting spans like nowrap wrappers must be kept.
+      const withoutEduOrg = removeBalancedElements(
+        inner,
+        /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi,
+      );
+      const cleaned = removeBalancedElements(
+        withoutEduOrg,
+        /<span\b[^>]*\bclass="[^"]*"[^>]*>/gi,
+      );
+      add(kind, cleaned, blocking);
+    }
+  }
+  for (const match of raw.matchAll(LATEX_SUBHEADING_RE)) {
+    add('organization', match[1], true);
+    add('title', match[3], false);
+  }
+  const seen = new Set();
+  return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+// Association checks compare bounded records, never the joined source bag.
+// Unsupported source conventions warn; explicit contradictions in recognized
+// records block. Titles and lexical metric context remain advisory.
+function sourceExperience(text) {
+  return findExperienceSections(text).flatMap(lines => {
+    const starts = lines.flatMap((line, i) => headingText(line, 3) === null ? [] : [i]);
+    return starts.flatMap((start, i) => {
+      const block = lines.slice(start, starts[i + 1] ?? lines.length);
+      const company = headingText(block[0], 3).split(/\s+[-–—]+\s+/)[0];
+      const body = block.slice(1).filter(line => line.trim());
+      const title = boldLineText(body[0]);
+      // Keep incomplete headers as evidence of employment. Dropping one
+      // could misclassify a genuine employer mentioned elsewhere as a client.
+      return [{ company, title: title || '', dates: title && body[1] ? toPlainText(body[1]) : '', body: body.join('\n') }];
+    });
+  });
+}
+
+function sourceEducation(text) {
+  const entries = [];
+  let complete = true;
+  let inEducation = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizePandocLine(raw);
+    const heading = headingText(line, 2);
+    if (heading !== null) { inEducation = /^education$/i.test(heading); continue; }
+    if (!inEducation || !line.trim() || /^\s*[-*_]{3,}\s*$/.test(line)) continue;
+    // The flat convention used in examples/cv-example.md. A multiline or
+    // table convention needs its own parser; don't infer a tuple from prose.
+    const match = toPlainText(line).replace(/^\s*[-*+]\s+/, '').match(/^([^,]+),\s*(.+?)(?:\s*\(((?:19|20)\d{2})\))?\s*$/);
+    // Extra comma-separated detail may be a location, GPA or part of the
+    // school name. It is not evidence of a different degree-school pair.
+    if (match && !match[2].includes(',')) entries.push({ title: match[1].trim(), org: match[2].trim(), year: match[3] || '' });
+    else complete = false;
+  }
+  return { entries, complete };
+}
+
+const DATE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function dateEndpoints(value) {
+  const clean = normalizeFact(stripMarkup(value)).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
+  if (parts.length > 2) return null;
+  const dates = parts.map(part => {
+    if (/^(?:present|current|now)$/.test(part)) return { year: 'present', month: '' };
+    const m = part.trim().match(/^(?:(\d{1,2})[/.]|([a-z]+)\s+)?((?:19|20)\d{2})$/);
+    if (!m) return null;
+    const month = m[1] ? Number(m[1]) : m[2] ? DATE_MONTHS.indexOf(m[2].slice(0, 3)) + 1 : '';
+    return month === 0 || month > 12 ? null : { year: m[3], month };
+  });
+  return dates.every(Boolean) ? dates : null;
+}
+
+// null means the source does not expose enough date precision to compare.
+function datesSupported(target, source) {
+  const a = dateEndpoints(target), b = dateEndpoints(source);
+  if (!a || !b || a.length !== b.length) return null;
+  if (a.some((date, i) => date.year !== b[i].year)) return false;
+  if (a.some((date, i) => date.month && !b[i].month)) return null;
+  return a.every((date, i) => !date.month || date.month === b[i].month);
+}
+
+/** Source-bound contradictions and explicit coverage gaps in default HTML CV records. */
+export function structuredAssociationClaims(targetText, sourceTexts, config = {}) {
+  const blocked = [], advisory = [], gaps = new Set();
+  const norm = value => normalizeFact(stripMarkup(value));
+  const field = (html, cls) => extractStructuredFieldInners(html, cls).map(inner => stripMarkup(inner)).join(' ').trim();
+  const blocks = cls => extractStructuredFieldInners(String(targetText), cls);
+  const experience = sourceTexts.flatMap(sourceExperience);
+  const educationSources = sourceTexts.map(sourceEducation);
+  const education = educationSources.flatMap(source => source.entries);
+  const educationComplete = educationSources.every(source => source.complete);
+  const add = (list, kind, value) => list.push({ kind, value: norm(value) });
+  const jobs = blocks('job');
+  const jobContexts = [];
+  const allowedFacts = new Set((config.allow_facts || []).map(norm));
+  for (const job of jobs) {
+    const company = field(job, 'job-company'), role = field(job, 'job-role'), dates = field(job, 'job-period');
+    if (!company) continue;
+    const matches = experience.filter(entry => norm(entry.company) === norm(company));
+    if (!matches.length) {
+      // An explicit customer mention is evidence of the wrong relationship,
+      // not merely a name somewhere in the source. Other unknown employers
+      // are already handled by the named-field gate, or remain unverified.
+      const escaped = norm(company).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const customer = new RegExp(`\\b(?:customer|client)(?:s)?[,: ]+(?:named |called )?${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+      if (sourceTexts.some(text => customer.test(norm(text)))) add(blocked, 'employer-association', company);
+      else if (!allowedFacts.has(norm(company))) gaps.add('Employment date/title associations could not be checked for an unmatched employer.');
+      continue;
+    }
+    const byRole = matches.filter(entry => norm(entry.title) === norm(role));
+    // Dates are checked against the employer's records; a reframed title
+    // must never turn the intentionally advisory title check into a block.
+    const candidates = matches;
+    const byDate = dates ? candidates.filter(entry => datesSupported(dates, entry.dates) === true) : candidates;
+    jobContexts.push({ html: job, sources: (byDate.length ? byDate : byRole.length ? byRole : candidates).map(entry => entry.body) });
+    if (dates && !byDate.length) {
+      const results = candidates.map(entry => datesSupported(dates, entry.dates));
+      if (results.every(result => result === false)) add(blocked, 'employment-dates', `${company}: ${dates}`);
+      else gaps.add('Employment dates could not be compared at the source date precision or format.');
+    }
+    if (role && experience.some(entry => norm(entry.title) === norm(role))
+      && (!byRole.length || (dates && byDate.length && !byDate.some(entry => norm(entry.title) === norm(role))))) {
+      add(advisory, 'title-association', `${company}: ${role}`);
+    }
+  }
+  for (const item of blocks('edu-item')) {
+    const rawTitle = extractStructuredFieldInners(item, 'edu-title')[0] || '';
+    const title = norm(removeBalancedElements(rawTitle, /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi));
+    const org = field(item, 'edu-org'), year = field(item, 'edu-year');
+    if (!title || !org) { gaps.add('Education associations require both a degree and a school.'); continue; }
+    const pairs = education.filter(entry => norm(entry.org) === norm(org) && norm(entry.title) === title);
+    if (!pairs.length) {
+      if (educationComplete && education.some(entry => norm(entry.org) === norm(org)) && education.some(entry => norm(entry.title) === title)) {
+        add(blocked, 'education-association', `${title}, ${org}`);
+      } else gaps.add('Education associations could not be checked against a recognized degree, school entry.');
+    } else if (year && !pairs.some(entry => entry.year && datesSupported(year, entry.year) === true)) {
+      if (educationComplete && pairs.every(entry => entry.year && datesSupported(year, entry.year) === false)) add(blocked, 'graduation-date', `${title}, ${org}: ${year}`);
+      else gaps.add('Graduation year could not be compared with a source year.');
+    }
+  }
+  // Lexical context cannot prove a paraphrase false. Surface uncertainty, not
+  // a hard fabrication verdict, when the same number is reused for a new
+  // outcome. Never let a different bullet's figure silently support it.
+  const stop = new Set(['with', 'from', 'into', 'over', 'have', 'that', 'were', 'while', 'about', 'their', 'there', 'which', 'through', 'across', 'within', 'after', 'before', 'during', 'being', 'been', 'each', 'every', 'other', 'than', 'then', 'them', 'they', 'when', 'where', 'what', 'more', 'most', 'some', 'such', 'only', 'also', 'just', 'like', 'very', 'used', 'using']);
+  const words = text => new Set(norm(text).match(/\p{L}{4,}/gu)?.filter(word => !stop.has(word)) || []);
+  const linesWithMetrics = texts => texts.flatMap(text => text.split(/\r?\n/).map(line => ({ line, metrics: metricClaims(line) })));
+  const allSourceLines = linesWithMetrics(sourceTexts);
+  const explicitlyAllowed = allowedMetricSet('', config.allow_metrics || []);
+  for (const context of jobContexts) {
+    const sourceLines = linesWithMetrics(context.sources);
+    for (const el of findBalancedElements(context.html, /<(li)\b[^>]*>/gi)) {
+      const line = stripMarkup(context.html.slice(el.contentStart, el.contentEnd));
+      for (const metric of metricClaims(line)) {
+        if (explicitlyAllowed.has(metric)) continue;
+        const sources = sourceLines.filter(entry => entry.metrics.has(metric));
+        if (sources.some(entry => norm(entry.line).replace(/^[-*+]\s*/, '') === norm(line))) continue;
+        if (!allSourceLines.some(entry => entry.metrics.has(metric))) continue;
+        const targetWords = words(line);
+        if (!sources.some(entry => [...words(entry.line)].filter(word => targetWords.has(word)).length >= 2)) {
+          add(advisory, 'metric-context', `${metric}: ${line}`);
+        }
+      }
+    }
+  }
+  return { blocked, advisory, warnings: [...gaps] };
 }
 
 /** Split generated/source documents into bounded statements for attribution checks. */
@@ -496,6 +1558,39 @@ const HORIZON_LEAD_RE = /\b(?:the|my|our|your)?\s*(?:first|next)\s+$/i;
 // clause scope below carries the weight rather than this test alone.
 const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-Za-z]+ed\b)|['\u2019]ll\b|\b(?:plan|plans|planning|intend|intends)\s+to\b|\bgoing to\b|\blooking forward\b/i;
 
+// A DISCLOSED REQUIREMENT is a number the candidate cites from the POSTING
+// itself, in order to disclaim a gap against it -- nothing about the candidate
+// is being asserted:
+//
+//   "my background is at the individual-contributor level, without the 7+
+//   years of progressive L&D leadership ... this role's scope calls for"
+//
+// COUNT_CLAIM_RE reads that as the candidate personally claiming "7 years",
+// which cv.md never says, and the fact gate blocks generation over a number
+// that was only ever cited to be disclaimed (#3915).
+//
+// Two signals, EITHER of which is sufficient alone, mirroring the two-signal
+// design of the plan-horizon exception above -- but here each signal stands on
+// its own, because each already names a THIRD PARTY's threshold rather than
+// merely gesturing at time:
+//
+//   - a REQUIREMENT CITATION anywhere in the same clause as the number,
+//     naming what the posting/role/position/job asks for ("this role's scope
+//     calls for", "the posting requires", "this position calls for", "this
+//     job wants").
+//   - a NEGATION LEAD immediately before the number ("without (the)",
+//     "lacking", "don't have (the)", "doesn't have (the)", "do not have
+//     (the)") -- the candidate stating what they do NOT have.
+//
+// Clause-scoped for the same reason as the plan-horizon exception: a citation
+// elsewhere in the letter must not silence an unrelated number. A genuine
+// personal claim carries NEITHER signal -- "I have 12 years of experience" has
+// no negation lead and no role/posting/position/job citation nearby, and
+// "I bring 7+ years of L&D leadership" is the same shape -- so both are left
+// alone and still get checked against the sources.
+const REQUIREMENT_CITATION_RE = /\b(?:role|posting|position|job)\b[^.,;:!?\n]{0,30}\b(?:calls?\s+for|requires?|asks?\s+for|wants?)\b/gi;
+const NEGATION_LEAD_RE = /\b(?:without(?:\s+the)?|lack(?:ing)?(?:\s+the)?|don['\u2019]?t\s+have(?:\s+the)?|doesn['\u2019]?t\s+have(?:\s+the)?|do\s+not\s+have(?:\s+the)?)\s*$/i;
+
 /**
  * The CLAUSE of `text` containing `index`.
  *
@@ -509,7 +1604,7 @@ const FORWARD_MARKER_RE = /\b(?:would|will|shall|should)\b|['\u2019]d\b(?!\s+[A-
  * @param {number} index
  * @returns {string}
  */
-function clauseAround(text, index) {
+function clauseBounds(text, index, { extendCoordinated = true } = {}) {
   const isBoundary = (i) => {
     const c = text[i];
     if (c === '\n') return true;
@@ -530,12 +1625,143 @@ function clauseAround(text, index) {
   // stated once governs both halves: "I'd approach the first 90 days by
   // listening, and the first 30 days by shipping". The lookback stops at a
   // SENTENCE end, so it can never reach across "…first 99 months. I would…".
-  if (/^\s*(?:and|or|then|plus)\b/i.test(text.slice(start, end))) {
+  if (extendCoordinated && /^\s*(?:and|or|then|plus)\b/i.test(text.slice(start, end))) {
     let sentenceStart = 0;
     for (let i = start - 1; i >= 0; i--) if (isSentenceEnd(i)) { sentenceStart = i + 1; break; }
-    return text.slice(sentenceStart, end);
+    return { start: sentenceStart, end };
   }
+  return { start, end };
+}
+
+/**
+ * The CLAUSE of `text` containing `index`.
+ *
+ * Bounded by `. ! ? , ; :` and by a newline, so a marker in a neighbouring
+ * clause cannot reach the number: "grew in the first 99 months, and I would be
+ * glad to repeat it" keeps its claim, and so does the same pair soft-wrapped
+ * across two lines. A separator BETWEEN DIGITS is not a boundary, or the clause
+ * around "1.5 years" would end inside the number and lose its own marker.
+ *
+ * @param {string} text
+ * @param {number} index
+ * @returns {string}
+ */
+function clauseAround(text, index) {
+  const { start, end } = clauseBounds(text, index);
   return text.slice(start, end);
+}
+
+/**
+ * Whether `match` is a number the candidate is citing from the posting's own
+ * stated requirement (to disclaim a gap against it), rather than a personal
+ * claim about themself. See the REQUIREMENT_CITATION_RE / NEGATION_LEAD_RE
+ * commentary above for the two independent signals this checks.
+ *
+ * `allMatches` is every COUNT_CLAIM_RE hit in the document, not just this one.
+ * A citation names ONE requirement, and when two numbers share an undivided
+ * clause with no comma/semicolon between them -- "I have 12 years of
+ * experience but this role requires 7 years" -- testing the citation against
+ * the WHOLE clause would suppress BOTH, quietly waving through a genuinely
+ * fabricated "12 years" personal claim alongside the correctly-cited "7
+ * years" (flagged in review of #3917). Instead, each citation is bound
+ * directionally: an immediately preceding count in "7 years this role
+ * requires" belongs to the citation; otherwise bind the first count after the
+ * citation phrase, falling back to the nearest preceding count when none
+ * follows. Here that binds "7", while "12" gets no citation match and is left
+ * to the normal source check like any other claim.
+ *
+ * @param {string} clean
+ * @param {RegExpMatchArray} match
+ * @param {RegExpMatchArray[]} allMatches
+ * @returns {boolean}
+ */
+function isDisclosedRequirement(clean, match, allMatches) {
+  const lead = clean.slice(Math.max(0, match.index - 40), match.index);
+  if (NEGATION_LEAD_RE.test(lead)) return true;
+
+  const { start, end } = clauseBounds(clean, match.index);
+  const clause = clean.slice(start, end);
+  REQUIREMENT_CITATION_RE.lastIndex = 0;
+  const citations = [...clause.matchAll(REQUIREMENT_CITATION_RE)];
+  if (!citations.length) return false;
+
+  const numbersInClause = allMatches.filter((m) => m.index >= start && m.index < end);
+  if (!numbersInClause.length) return false;
+
+  return citations.some((citation) => {
+    const citationStart = start + citation.index;
+    const citationEnd = start + citation.index + citation[0].length;
+    const preceding = numbersInClause.filter((m) => m.index < citationStart).at(-1);
+    const precedingEnd = preceding ? preceding.index + preceding[0].length : citationStart;
+    const precedingGap = clean.slice(precedingEnd, citationStart);
+    const precedesCitation = preceding && (
+      /^\s*(?:this|that|the)?\s*$/i.test(precedingGap)
+      || (
+        /\b(?:this|that)\s*$/i.test(precedingGap)
+        && !/[,;:]|\b(?:and|but)\b/i.test(precedingGap)
+      )
+    );
+    const following = numbersInClause.find((m) => m.index >= citationEnd);
+    const cited = precedesCitation ? preceding : (following ?? preceding);
+    return cited?.index === match.index;
+  });
+}
+
+// An EMPLOYER FIGURE is a number about the company the letter is addressed to,
+// not about the candidate: "your team ran four regional sessions in July". The
+// candidate asserts nothing about themself, and cv.md can never contain it, so
+// requiring a source for it blocks every cover letter that cites what the
+// employer actually did, which is most of what makes a letter specific.
+//
+// One signal, clause-scoped like the two above: the nearest subject pronoun
+// before the number is second person ("your", "you", "you're") rather than
+// first ("I", "my", "we"). Nearest, not merely present, so the same clause can
+// hold both a third-party figure and a personal claim and each gets the right
+// verdict: "your team ran four sessions and I have three years" exempts the
+// first and still checks the second, and "I ran four sessions for your team"
+// stays a personal claim because "your" comes after the number.
+//
+// "your" and a bare "you" are only a subject when nothing first-person governs
+// them: in "I managed your 12 engineers" or "I worked with you for 12 years" the
+// candidate is the subject and the second-person word is a possessive or an
+// object, so the count stays a personal claim. The contractions ("you've",
+// "you're", ...) are always subjects and need no such check. A
+// complementizer between the two ("I read that your team ran four sessions",
+// "I admire how your team grew") starts a new clause whose subject is "your
+// team", so that case is still an employer figure. Where the two cannot be told
+// apart ("I saw your team ran four sessions", or a coordinated "I shipped 4
+// integrations and you shipped 12") the count stays checked: treating "and you" as
+// a new clause would also exempt "I thanked Sam and you for 12 years".
+const SECOND_PERSON_RE = /\b(?:your|yours|you|you['\u2019](?:re|ve|ll|d))\b/gi;
+const FIRST_PERSON_RE = /\b(?:I|I['\u2019](?:m|ve|ll|d)|me|my|mine|myself|we|we['\u2019](?:re|ve|ll|d)|our|ours)\b/gi;
+const BARE_SECOND_PERSON_RE = /^(?:you|yours?)$/i;
+// Must END the text between the two words: it has to introduce the pronoun
+// directly ("that your team"), not merely appear earlier ("because of you").
+const COMPLEMENTIZER_RE = /\b(?:that|how|what|when|where|why|because|since|while|as|if|whether)\s*$/i;
+
+/**
+ * Whether `match` is a number about the addressed employer (second-person
+ * subject nearest before it) rather than a claim about the candidate. See the
+ * SECOND_PERSON_RE / FIRST_PERSON_RE commentary above.
+ *
+ * @param {string} clean
+ * @param {RegExpMatchArray} match
+ * @returns {boolean}
+ */
+function isEmployerFigure(clean, match) {
+  // The plain clause: a clause opened by "and" must not borrow the previous
+  // clause's "your" ("I admire your team, and ran four sessions").
+  const { start } = clauseBounds(clean, match.index, { extendCoordinated: false });
+  const before = clean.slice(start, match.index);
+  const second = [...before.matchAll(SECOND_PERSON_RE)].at(-1);
+  if (!second) return false;
+  const firsts = [...before.matchAll(FIRST_PERSON_RE)];
+  // A first-person word nearer the number than the second-person one: the
+  // candidate is the nearest subject.
+  if (firsts.some((m) => m.index > second.index)) return false;
+  const first = firsts.at(-1);
+  if (!first || !BARE_SECOND_PERSON_RE.test(second[0])) return true;
+  return COMPLEMENTIZER_RE.test(before.slice(first.index + first[0].length, second.index));
 }
 
 /**
@@ -547,9 +1773,13 @@ function clauseAround(text, index) {
  * @param {string} clean
  * @returns {RegExpMatchArray[]}
  */
-function countMatches(clean) {
+function countMatches(clean, { keepPlanHorizons = false } = {}) {
   COUNT_CLAIM_RE.lastIndex = 0;
-  return [...clean.matchAll(COUNT_CLAIM_RE)].filter((match) => {
+  const allMatches = [...clean.matchAll(COUNT_CLAIM_RE)];
+  return allMatches.filter((match) => {
+    if (isDisclosedRequirement(clean, match, allMatches)) return false;
+    if (isEmployerFigure(clean, match)) return false;
+    if (keepPlanHorizons) return true;
     if (!TIME_NOUNS.has(match[2].toLowerCase())) return true;
     const lead = clean.slice(Math.max(0, match.index - 40), match.index);
     if (!HORIZON_LEAD_RE.test(lead)) return true;
@@ -557,16 +1787,933 @@ function countMatches(clean) {
   });
 }
 
+// Scope-of-ownership verbs, ranked. A CV that upgrades the verb without
+// upgrading the evidence reads as a fact and is not one: "led the migration"
+// against a source that says "contributed to the migration" is the case that
+// prompted #3685, and the numeric gate above cannot see it because no number
+// changed.
+//
+// The three tiers are the ones #3685 fixes. Inflections are listed because the
+// tier of a claim is a property of the verb, not of its conjugation, and a
+// table that only knew `led` would be bypassed by `leads` or `leading`.
+//
+// `driven` is left out on purpose. At the start of a line it is the adjective
+// ("Driven backend engineer"), never the verb, so it claimed an ownership the
+// line does not assert.
+const SCOPE_VERB_TIERS = new Map([
+  // Tier 1 — participation. Someone else owned the outcome.
+  ['contribute', 1], ['contributed', 1], ['contributes', 1], ['contributing', 1],
+  ['help', 1], ['helped', 1], ['helps', 1], ['helping', 1],
+  ['support', 1], ['supported', 1], ['supports', 1], ['supporting', 1],
+  // Tier 2 — execution. Did the work, without claiming the mandate.
+  ['build', 2], ['built', 2], ['builds', 2], ['building', 2],
+  ['implement', 2], ['implemented', 2], ['implements', 2], ['implementing', 2],
+  ['design', 2], ['designed', 2], ['designs', 2], ['designing', 2],
+  // Tier 3 — ownership. Claims the mandate as well as the work.
+  ['lead', 3], ['led', 3], ['leads', 3], ['leading', 3],
+  ['own', 3], ['owned', 3], ['owns', 3], ['owning', 3],
+  ['architect', 3], ['architected', 3], ['architects', 3], ['architecting', 3],
+  ['drive', 3], ['drove', 3], ['drives', 3], ['driving', 3],
+]);
+
+// Bullet glyphs and list markers survive stripMarkup. They have to come off
+// before the "opens with" test can see the verb, and before a claim value is
+// built: an allow_facts entry a user would actually write ("led the migration")
+// can never match a value that still carries its "- " prefix, which would leave
+// the documented escape hatch unusable on any real bulleted CV.
+const LIST_MARKER_RE = /^[\s•‣◦⁃∙*+-]+/u;
+
+/** Drop a leading list marker so a bullet and a plain sentence read the same. */
+function stripListMarker(statement) {
+  return String(statement ?? '').replace(LIST_MARKER_RE, '').trim();
+}
+
+/** The opening verb of a statement, with its tier, or null when it opens with neither. */
+function openingScopeVerb(statement) {
+  const text = stripListMarker(statement);
+  const opening = text.match(/^([\p{L}]+)/u);
+  if (!opening) return null;
+  const verb = opening[1].toLowerCase();
+  const tier = SCOPE_VERB_TIERS.get(verb);
+  if (!tier) return null;
+  // "Led to" is causation, not ownership: "led to a 40% speedup" claims a
+  // result, not a mandate. Only reachable now that the target side is split
+  // into clauses, which puts a mid-sentence "and led to ..." at the start of
+  // one, where it would otherwise read as a tier-3 ownership claim.
+  if (/^(?:lead|leads|leading|led)\s+to\b/i.test(text)) return null;
+  if (opensWithJobTitle(text)) return null;
+  return { verb, tier };
+}
+
+// "Lead backend engineer for the billing migration", "Architect for the
+// payments platform": the bare form opening a line is a job title, not a verb,
+// the same reason `driven` is left out of the table. Read as a verb it claimed
+// tier-3 ownership the line never asserts and blocked a truthful CV whose
+// source said "Contributed to the billing migration".
+//
+// Only the bare forms can be a title, and only in two shapes: followed straight
+// by a preposition ("Architect for ...", "Lead on ..."), or by a role noun
+// within the next few words with no determiner in between ("Lead backend
+// engineer"). A determiner is what marks the verb: "Lead the platform team",
+// "Lead a team of engineers" are present-tense ownership claims and stay
+// checked. The role noun is singular on purpose, so "Lead engineers through
+// the migration" still reads as the verb it is.
+const TITLE_BARE_FORM_RE = /^(?:lead|architect)$/iu;
+const TITLE_PREPOSITIONS = new Set(['for', 'on', 'of', 'at', 'in', 'with']);
+const TITLE_DETERMINERS = new Set([
+  'the', 'a', 'an', 'our', 'my', 'their', 'its', 'his', 'her', 'this', 'that',
+  'these', 'those', 'all', 'every', 'each', 'both', 'two', 'three', 'four', 'five',
+]);
+const TITLE_ROLE_NOUNS = new Set([
+  'engineer', 'developer', 'designer', 'architect', 'manager', 'scientist',
+  'analyst', 'consultant', 'programmer', 'researcher', 'administrator',
+  'specialist', 'strategist', 'technologist', 'tester', 'writer',
+]);
+const TITLE_LOOKAHEAD_WORDS = 3;
+
+/** True when a statement opens with "Lead"/"Architect" used as a job title, not as a verb. */
+function opensWithJobTitle(text) {
+  const words = String(text ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  if (words.length < 2 || !TITLE_BARE_FORM_RE.test(words[0])) return false;
+  if (TITLE_PREPOSITIONS.has(words[1])) return true;
+  for (const word of words.slice(1, 1 + TITLE_LOOKAHEAD_WORDS)) {
+    if (TITLE_DETERMINERS.has(word) || /^\p{N}/u.test(word)) return false;
+    if (TITLE_ROLE_NOUNS.has(word)) return true;
+  }
+  return false;
+}
+
+// Tier evidence a single word cannot carry. "Worked on" is the participation
+// wording #3685 names alongside "contributed to", but `worked` alone is the
+// ordinary verb of employment: "Worked at Acme Labs" asserts a job, not a
+// scope, and scoring it as tier 1 would make every employer line evidence that
+// the candidate merely participated in whatever it linked to.
+const SCOPE_PHRASE_TIERS = [
+  [/^worked\s+on\b/iu, 1],
+  [/^part\s+of\s+the\s+team\b/iu, 1],
+];
+
+const HEADING_RE = /^#{1,6}\s+/u;
+// First-person prose in article-digest.md opens with the subject, not the verb.
+const SUBJECT_PRONOUN_RE = /^(?:i|we)\s+/iu;
+
+// A clause, for scope purposes, is one work item and the verb that governs it.
+// Splitting on coordinators is the point: a source sentence can pair a weak
+// verb with one item and a strong verb with another, and the strong half must
+// not vouch for the weak one.
+//
+// This deliberately differs from `clauseAround` above, which JOINS a
+// coordinator-led clause to the one before it because a stated plan governs
+// both halves. A verb does not: "Contributed to the billing migration and led
+// the payments rewrite" makes exactly one tier-3 claim, about the rewrite.
+const SCOPE_CLAUSE_SPLIT_RE = /\s*[,;:]\s*|\s+(?:and|then|plus|while|before|after)\s+/iu;
+
+/** Split a statement into clauses, so a verb is weighed only against its own work item. */
+function scopeClauses(statement) {
+  return String(statement ?? '')
+    .split(SCOPE_CLAUSE_SPLIT_RE)
+    .map(clause => clause.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The scope tier a source clause gives its work item.
+ *
+ * Read from the verb the clause OPENS with, the rule the target side already
+ * uses. Reading the first tier word anywhere let a noun stand in for the verb:
+ * "Developed the customer support dashboard" scored tier 1 on `support` and
+ * blocked a truthful "Built the customer support dashboard".
+ *
+ * A clause that opens with a verb outside the table ("Developed", "Managed")
+ * cannot be ranked, so it supports the claim (Infinity) instead of being
+ * dropped. The gate blocks only on positive evidence that the source is weaker,
+ * and an unranked verb is not that evidence.
+ *
+ * A markdown heading has no verb. It names a role or a work item, so it takes
+ * its strongest tier word: "### Customer Support Lead" supports a tier-3 claim
+ * and "### Billing migration" supports nothing. Read as an unranked verb, any
+ * heading that names a work item would vouch for every claim about it,
+ * including "Led the migration" over "Contributed to the migration".
+ */
+function sourceClauseTier(clause, heading) {
+  const text = stripListMarker(clause).replace(HEADING_RE, '');
+  if (heading) {
+    let tier = 0;
+    for (const match of text.matchAll(/[\p{L}]+/gu)) {
+      tier = Math.max(tier, SCOPE_VERB_TIERS.get(match[0].toLowerCase()) ?? 0);
+    }
+    return tier;
+  }
+  const opening = text.replace(SUBJECT_PRONOUN_RE, '');
+  for (const [pattern, tier] of SCOPE_PHRASE_TIERS) {
+    if (pattern.test(opening)) return tier;
+  }
+  return openingScopeVerb(opening)?.tier ?? Infinity;
+}
+
+/** Content tokens of a statement, with scope verbs removed so a tier word cannot link two entries. */
+function scopeObjectTokens(text) {
+  return attributionTokens(text).filter(token => !SCOPE_VERB_TIERS.has(token));
+}
+
+/**
+ * Detect scope-verb inflation: the generated document opens a bullet with a
+ * stronger ownership verb than the source evidence for the same entry carries.
+ *
+ * Entries are linked by shared content tokens rather than by heading, the same
+ * mechanism `delegatedAuthorshipClaims` uses. `stripMarkup` removes headings
+ * before any check sees the text, so a heading-based match would need a second
+ * segmentation path for each of md/html/tex.
+ *
+ * Deliberately one-directional. A claim is reported only on positive evidence
+ * that the source is weaker: if any linked source statement carries an equal or
+ * stronger verb, or if nothing links at all, the bullet is left alone. An
+ * unsourced bullet is a different defect and belongs to the checks above.
+ */
+export function scopeInflationClaims(targetText, sourceText, language = 'en') {
+  const profile = SCOPE_PROFILES[language];
+  // Scoped per CLAUSE, not per statement. A statement-wide tier let the
+  // strongest verb in a sentence vouch for every work item in it, so
+  // "Contributed to the billing migration and led the payments rewrite"
+  // cleared "Led the billing migration" on the strength of a verb that was
+  // never about the migration.
+  const sourceClauses = profile.statements(sourceText)
+    .map(stripListMarker)
+    .flatMap((statement) => {
+      const heading = HEADING_RE.test(statement);
+      return profile.clauses(statement).map(clause => ({
+        // The whole statement is what gets quoted back, since a clause on its own
+        // reads as a fragment to whoever has to go and fix cv.md.
+        statement,
+        heading,
+        tier: profile.sourceTier(clause, heading),
+        tokens: new Set(profile.tokens(clause)),
+      }));
+    })
+    .filter(source => source.tokens.size);
+  if (!sourceClauses.length) return [];
+
+  const claims = [];
+  for (const raw of profile.statements(targetText)) {
+    const statement = stripListMarker(raw);
+    // Clause-scoped on BOTH sides. Reading only the statement-initial verb
+    // skipped a compound bullet entirely: "Contributed to the billing
+    // migration and led the payments rewrite" opens at tier 1, and the tier-3
+    // half was never compared to anything. It also skipped any bullet opening
+    // with a modifier, since factStatements does not split on commas, so
+    // "As tech lead, drove the migration" was invisible.
+    for (const clause of profile.clauses(statement)) {
+      const opening = profile.openingVerb(clause);
+      // Tier 1 is participation, so it cannot be an escalation of anything: the
+      // check is for bullets that claim execution or ownership.
+      if (!opening || opening.tier < 2) continue;
+      // DISTINCT tokens. `overlap` below counts matches rather than distinct
+      // matches, so a clause that repeats a word reached the two-token
+      // threshold on the strength of one shared token: "Owned the payments
+      // platform migration to payments v2" counted `payments` twice and linked
+      // to a source saying only "Contributed to payments", blocking a truthful
+      // bullet on an unrelated line. It also mis-sized the threshold, since a
+      // short clause repeating its only token looked like two.
+      //
+      // The source side has always wrapped in a Set, and
+      // `delegatedAuthorshipClaims` dedupes its tokens the same way.
+      const tokens = [...new Set(profile.tokens(clause))];
+      if (!tokens.length) continue;
+
+      // Two shared tokens, the threshold `delegatedAuthorshipClaims` uses, except
+      // where the bullet has only one token to share. On one token alone,
+      // "Designed the onboarding automation" linked to "Supported the onboarding
+      // revamp for new hires" and reported two unrelated work items as one
+      // inflated claim. The single-token case is kept because a short bullet is
+      // the issue's own example: "Led the migration" against "Contributed to the
+      // migration" shares exactly `migration`, and it is 100% of what the bullet
+      // says rather than a fragment of it.
+      //
+      // The threshold itself lives in the language profile (`accuses`), since
+      // a Chinese bigram is a smaller unit than an English word.
+      const overlaps = sourceClauses.map((source) => {
+        const shared = tokens.filter(token => source.tokens.has(token));
+        return { source, shared, overlap: shared.length };
+      });
+
+      // Two thresholds, because the two questions pull in opposite directions.
+      // A link that ACCUSES has to be strict, since a wrong one invents an
+      // inflation. A link that VOUCHES has to be loose, since a missed one
+      // invents the same thing. Using the strict threshold for both made
+      // "I led that payments effort end to end" fail to rescue "Led the payments
+      // rewrite", because the restatement shared only `payments`.
+      // A heading only vouches. It names the item without saying what the
+      // candidate did, so it is no evidence that the source is weaker.
+      const linked = overlaps.filter(({ shared, source }) => profile.accuses(shared, tokens) && !source.heading);
+      if (!linked.length) continue;
+      const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
+      if (vouched) continue;
+
+      const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
+      claims.push({
+        kind: 'scope',
+        // The clause is the claim; the whole bullet is what gets quoted back,
+        // since a clause on its own reads as a fragment to whoever fixes cv.md.
+        value: normalizeFact(clause),
+        line: statement,
+        sourceLine: closest.source.statement,
+      });
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
+// Adoption and reach assertions, which read as measured facts while naming no
+// number the metric gate could check. The list is #3685's, kept short on
+// purpose: every entry states that other people depend on the work, which is
+// exactly the claim a reader would try to verify with a reference.
+//
+// `across the ... org` carries a small window because the real phrasing names
+// the org ("across the engineering org"), and a literal `across the org` would
+// have missed the case the issue was filed for.
+// Each check pairs the wording to CATCH with the wording that COUNTS AS
+// EVIDENCE for it, and the two are deliberately not the same regex.
+//
+// Requiring the source to repeat the CV's exact phrasing made the gate
+// punish paraphrase, which is the one thing a tailored CV always does:
+// "Adopted by 3 teams" blocked against a source saying "Three teams adopted
+// the tool", and "company-wide" blocked against "across the whole company".
+// The source side is therefore a lemma, loose on purpose. It can only ever
+// silence a claim, never raise one, so the asymmetry costs a missed catch at
+// worst and buys back every truthful restatement.
+const ADOPTION_CHECKS = [
+  {
+    target: /\bused\s+daily\b/giu,
+    source: /\bdaily\b/iu,
+  },
+  {
+    target: /\bacross\s+the\s+(?:[\p{L}-]+\s+){0,2}org(?:ani[sz]ations?)?\b/giu,
+    source: /\bacross\s+the\b[^.;!?]{0,40}\b(?:org|organi[sz]ations?|company|business)\b|\b(?:company|org(?:ani[sz]ation)?)[-\s]?wide\b/iu,
+  },
+  {
+    // One check for both spellings. `org-wide` alone missed
+    // `organization-wide` and `organisation-wide`, so an unsourced reach claim
+    // walked straight through the gate.
+    target: /\b(?:company|org(?:ani[sz]ation)?)[-\s]?wide\b/giu,
+    source: /\b(?:company|org(?:ani[sz]ation)?)[-\s]?wide\b|\bacross\s+the\s+(?:whole\s+|entire\s+)?(?:company|org(?:ani[sz]ation)?)\b/iu,
+  },
+  {
+    target: /\badopted\s+by\b/giu,
+    source: /\badopt(?:ed|s|ing|ion)?\b/iu,
+  },
+  {
+    target: /\bstandard\s+across\b/giu,
+    // Inflection-tolerant like the other four. The bare word alone did not
+    // match the wording a source most often uses for this claim, so
+    // "Standardised the linter across every team" failed to evidence
+    // "Became standard across the platform teams" and blocked a truthful line.
+    source: /\bstandards?\b|\bstandardi[sz](?:e|es|ed|ing|ation)\b/iu,
+  },
+];
+
+/**
+ * Detect adoption or reach claims the sources never make.
+ *
+ * Matched per pattern rather than per exact phrase, so a source that states
+ * adoption in its own words still supports the generated wording. Checked
+ * against the whole source text rather than the linked entry: entry-level
+ * scoping would need the heading segmentation noted above, and the looser test
+ * only ever reports fewer claims, which is the safe direction for a gate that
+ * blocks generation.
+ */
+export function adoptionClaims(targetText, sourceText, language = 'en') {
+  const profile = SCOPE_PROFILES[language];
+  const source = stripMarkup(sourceText);
+  // Matched per STATEMENT, not across the whole flattened document. Collapsing
+  // the target first let a phrase form across a line break that neither line
+  // contains, so "...we used" followed by "Daily standups ran on it" reported
+  // `used daily` and then had no CV line to quote back, blocking generation
+  // with nothing for the user to go and fix.
+  const statements = profile.statements(targetText).map(stripListMarker);
+  const claims = [];
+  for (const { target, source: evidence } of profile.adoptionChecks) {
+    if (evidence.test(source)) continue;
+    for (const statement of statements) {
+      target.lastIndex = 0;
+      for (const match of statement.matchAll(target)) {
+        claims.push({
+          kind: 'adoption',
+          value: normalizeFact(match[0]),
+          line: statement,
+          sourceLine: null,
+        });
+      }
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
+// SOURCE-ANCHORED BULLET DRIFT (#1411).
+//
+// The scope, authorship and adoption checks above are lists of what to catch:
+// a verb tier table, a delegation regex, five adoption phrases. A list fails
+// open on every word it does not hold, so a bullet that keeps its keywords and
+// changes who did the work passes whenever the new verb is off the list:
+//
+//   source:  Used Kafka for event ingestion in the billing service
+//   CV:      Led a Kafka migration for the billing service        (passed)
+//   CV:      Spearheaded the Kafka rollout for the billing service (passed)
+//
+// This check inverts the default. Each rendered bullet is anchored to the one
+// source statement it was tailored from, the two are compared word by word,
+// and every edit has to be one of a closed set of allowed edits: deleting a
+// word, reordering, changing a word's inflection, adding or dropping a
+// function word, or a swap the user declared in `allow_swaps`. A word that
+// opens a clause, which is where a CV bullet states what the candidate did,
+// and that is none of those, blocks. Everything is decided against the
+// anchor alone, never the whole source, so a verb from another entry cannot
+// vouch for this one.
+//
+// Words added in other positions are not blocked: injecting the JD's
+// vocabulary into an existing achievement is the reformulation modes/pdf.md
+// asks for, and the named-fact checks above already block an unsourced
+// employer, title or tool in those positions.
+
+// Closed-class English words. A closed class does not grow with each bug
+// report, unlike the verb tables above; adding or dropping one of these never
+// changes who did what.
+const DRIFT_FUNCTION_WORDS = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'each', 'every', 'all', 'both', 'any', 'some',
+  'i', 'we', 'me', 'us', 'my', 'our', 'its', 'their', 'his', 'her', 'it', 'they', 'them',
+  'and', 'or', 'but', 'nor', 'so', 'yet', 'plus', 'then', 'while', 'whilst', 'as', 'than',
+  'about', 'above', 'across', 'after', 'against', 'along', 'among', 'around', 'at', 'before',
+  'behind', 'below', 'beneath', 'beside', 'between', 'beyond', 'by', 'despite', 'down', 'during',
+  'for', 'from', 'in', 'inside', 'into', 'near', 'of', 'off', 'on', 'onto', 'out', 'outside',
+  'over', 'per', 'since', 'through', 'throughout', 'to', 'toward', 'towards', 'under', 'until',
+  'up', 'upon', 'via', 'with', 'within', 'without', 'which', 'who', 'whom', 'whose', 'including',
+  'where', 'when', 'is', 'was', 'were', 'are', 'be', 'been', 'being', 'has', 'have', 'had',
+]);
+
+// Irregular verb forms, folded onto the base form so an inflection change is
+// an allowed edit ("Led" -> "Leads"). Morphology, not meaning: this table
+// never decides whether two different verbs are equivalent.
+const IRREGULAR_FORMS = new Map(Object.entries({
+  led: 'lead', built: 'build', ran: 'run', wrote: 'write', written: 'write', drove: 'drive',
+  driven: 'drive', grew: 'grow', grown: 'grow', made: 'make', took: 'take', taken: 'take',
+  began: 'begin', begun: 'begin', brought: 'bring', sold: 'sell', taught: 'teach', won: 'win',
+  held: 'hold', kept: 'keep', spent: 'spend', sent: 'send', found: 'find', gave: 'give',
+  given: 'give', met: 'meet', oversaw: 'oversee', overseen: 'oversee', understood: 'understand',
+  chose: 'choose', chosen: 'choose', rose: 'rise', risen: 'rise', knew: 'know', known: 'know',
+  saw: 'see', seen: 'see', thought: 'think', bought: 'buy', did: 'do', done: 'do', became: 'become',
+  stood: 'stand', told: 'tell', said: 'say', paid: 'pay', dealt: 'deal', struck: 'strike',
+  spoke: 'speak', spoken: 'speak', broke: 'break', broken: 'break', drew: 'draw', drawn: 'draw',
+  rebuilt: 'rebuild', rewrote: 'rewrite', rewritten: 'rewrite', undertook: 'undertake',
+  undertaken: 'undertake', shut: 'shut', cut: 'cut', set: 'set', put: 'put', let: 'let',
+}));
+
+/**
+ * The comparison keys of one word: the forms its inflections fold onto, so
+ * "led"/"leads", "use"/"used"/"using" and "migration"/"migrated" share a key.
+ * Light suffix folding in the spirit of Porter (1980), not a stemmer: it only
+ * has to make two inflections of one word meet, so it generates every
+ * plausible base and two words match when any key is shared.
+ */
+const DRIFT_KEY_CACHE = new Map();
+function driftKeys(word) {
+  // Cached: the anchor search compares every bullet word with every source
+  // statement, so the same few hundred words are folded thousands of times.
+  const cached = DRIFT_KEY_CACHE.get(word);
+  if (cached) return cached;
+  const keys = foldDriftKeys(word);
+  DRIFT_KEY_CACHE.set(word, keys);
+  return keys;
+}
+
+function foldDriftKeys(word) {
+  const w = IRREGULAR_FORMS.get(String(word).toLowerCase().replace(/['\u2019]s$/u, ''))
+    ?? String(word).toLowerCase().replace(/['\u2019]s$/u, '');
+  const bases = new Set([w]);
+  if (/ies$/u.test(w) && w.length > 4) bases.add(`${w.slice(0, -3)}y`);
+  if (/(?:ss|x|z|ch|sh)es$/u.test(w)) bases.add(w.slice(0, -2));
+  if (/[^siu]s$/u.test(w) && w.length > 3) bases.add(w.slice(0, -1));
+  if (/ied$/u.test(w) && w.length > 4) bases.add(`${w.slice(0, -3)}y`);
+  if (/[^e]ed$/u.test(w) && w.length > 3) { bases.add(w.slice(0, -2)); bases.add(w.slice(0, -1)); }
+  if (/ing$/u.test(w) && w.length > 4) { bases.add(w.slice(0, -3)); bases.add(`${w.slice(0, -3)}e`); }
+  const keys = new Set();
+  for (const base of bases) {
+    const forms = [base, IRREGULAR_FORMS.get(base) ?? base];
+    if (/([^aeiou])\1$/u.test(base)) forms.push(base.slice(0, -1));
+    for (const suffix of ['ation', 'ion']) {
+      if (base.endsWith(suffix) && base.length - suffix.length >= 4) forms.push(base.slice(0, -suffix.length));
+    }
+    for (const form of forms) {
+      keys.add(form);
+      if (/[^aeiou]e$/u.test(form) && form.length > 3) keys.add(form.slice(0, -1));
+    }
+  }
+  return keys;
+}
+
+/** Lower-cased word tokens of a statement, in order, punctuation dropped. */
+function driftWords(text) {
+  return (String(text ?? '').toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}+#'\u2019.-]*/gu) ?? [])
+    .map(word => word.replace(/[.'\u2019-]+$/u, ''))
+    .filter(Boolean);
+}
+
+// Participles that work as prepositions in CV prose ("using Salesforce",
+// "following the launch"). They stay in an anchor's words, so "Used Kafka" is
+// still the same verb as "using Kafka", but they do not count toward linking
+// two statements: one shared tool name plus "using" is not the same work.
+const DRIFT_LINK_NEUTRAL = new Set(['using', 'following', 'regarding', 'concerning', 'excluding']);
+
+/** Content words: everything outside the closed class, with no bare numbers (the metric gate owns those). */
+function driftContentWords(text) {
+  return driftWords(text).filter(word => !DRIFT_FUNCTION_WORDS.has(word) && /\p{L}/u.test(word));
+}
+
+/** The key set of a whole statement. */
+function driftKeySet(words) {
+  const keys = new Set();
+  for (const word of words) for (const key of driftKeys(word)) keys.add(key);
+  return keys;
+}
+
+/** Whether any inflection of `word` is in a key set. */
+const hasKey = (keys, word) => [...driftKeys(word)].some(key => keys.has(key));
+
+/**
+ * Rendered bullets: HTML list items, markdown list lines, and LaTeX
+ * `\item` / `\resumeItem{...}`. Only bullets are anchored. A summary sentence
+ * or a cover-letter paragraph is free prose, not a restatement of one source
+ * bullet, and is left to the checks above.
+ */
+function renderedBullets(text) {
+  const raw = latexBody(text ?? '');
+  const bullets = [];
+  const liOpen = /<(li)\b[^>]*>/gi;
+  for (const { contentStart, contentEnd } of findBalancedElements(raw, liOpen)) {
+    bullets.push(stripMarkup(raw.slice(contentStart, contentEnd)));
+  }
+  for (const match of raw.matchAll(/\\resumeItem\s*\{((?:[^{}]|\{[^{}]*\})*)\}/g)) {
+    bullets.push(stripMarkup(match[1]));
+  }
+  for (const match of raw.matchAll(/\\item\b\s*([\s\S]*?)(?=\\item\b|\\end\{|$)/g)) {
+    bullets.push(stripMarkup(match[1]));
+  }
+  if (!bullets.length) {
+    for (const line of raw.split(/\r?\n/u)) {
+      // A numbered marker is stripped too: "1) Led ..." would otherwise read
+      // "1" as the opening word and skip the check.
+      if (/^\s*(?:[-*+\u2022]|\d+[.)])\s+\S/u.test(line)) bullets.push(stripMarkup(line).replace(LIST_MARKER_RE, '').replace(/^\d+[.)]\s+/u, ''));
+    }
+  }
+  return bullets.map(bullet => bullet.replace(/^[\s.]+|[\s.]+$/gu, '').trim()).filter(Boolean);
+}
+
+/**
+ * The words in predicate position: the first word of each clause, where a CV
+ * bullet states what the candidate did (Dowty 1991: the verb, not its object,
+ * selects the agent's role). The statement-initial word always counts, since a
+ * CV bullet opens with its action verb; it blocks only when it reads as one. A later clause counts only when it
+ * opens with a past-tense verb form ("..., and wrote the renderer"), so a
+ * comma-separated list of nouns is not read as a list of predicates. A
+ * present participle is left out there because list nouns take the same
+ * ending ("for finance, marketing and engineering"). A leading label
+ * ("Pricing: Built the model") names the work, not what was done, so it is
+ * skipped and the clause after it is the statement's first, unless the label
+ * itself opens with a past-tense verb ("Led the migration: cut latency"),
+ * which would otherwise hide that verb behind the colon.
+ *
+ * Each word carries `certain`. A later clause opening with a regular "-ed"
+ * word is ambiguous: "and managed the vendors" is a verb, "and automated
+ * reporting" is an adjective before a noun. It is certain only when the word
+ * is an irregular past form ("and wrote ...") or a determiner or object
+ * pronoun follows it, the shape a verb taking its object has. A preposition
+ * after it is not enough ("and related to billing"). An uncertain word warns
+ * instead of blocking, the split #1411 agreed for checks that cannot yet tell
+ * a true reformulation from a fabrication.
+ *
+ * @returns {{word: string, certain: boolean}[]}
+ */
+// What opens a direct object: a determiner or an object pronoun. A
+// preposition does not count, since an adjective takes one as readily as a
+// verb does ("and related to billing", "and distributed across regions").
+const DRIFT_OBJECT_OPENERS = new Set([
+  'a', 'an', 'the', 'this', 'that', 'these', 'those', 'each', 'every', 'all', 'both', 'any', 'some',
+  'my', 'our', 'its', 'their', 'his', 'her', 'it', 'them', 'us', 'me',
+]);
+
+// Irregular forms that are a simple past and nothing else, so they open a
+// clause only as a verb. The rest of IRREGULAR_FORMS can also be a participle,
+// adjective or noun ("and written communication", "and thought leadership",
+// "and cut costs"), so like a regular "-ed" word they are certain only before
+// an object opener.
+const DRIFT_SIMPLE_PASTS = new Set([
+  'led', 'built', 'ran', 'wrote', 'drove', 'grew', 'made', 'took', 'began', 'brought', 'sold',
+  'taught', 'won', 'held', 'kept', 'spent', 'sent', 'gave', 'met', 'oversaw', 'understood',
+  'chose', 'rose', 'knew', 'saw', 'bought', 'did', 'became', 'stood', 'told', 'said', 'paid',
+  'dealt', 'struck', 'spoke', 'broke', 'drew', 'rebuilt', 'rewrote', 'undertook',
+]);
+
+// Simple pasts whose passive participle is the same word. Only these can be a
+// participial modifier ("built on AWS"); "wrote", "ran" or "drove" before a
+// preposition is still the candidate's action ("and wrote in Go").
+const DRIFT_SAME_FORM_PASTS = new Set([
+  'led', 'built', 'made', 'brought', 'sold', 'taught', 'won', 'held', 'kept', 'spent', 'sent', 'met',
+  'understood', 'bought', 'stood', 'told', 'said', 'paid', 'dealt', 'struck', 'rebuilt',
+]);
+
+// Prepositions that follow a passive participle used as a modifier.
+const DRIFT_PASSIVE_PREPOSITIONS = new Set([
+  'by', 'on', 'in', 'with', 'from', 'into', 'upon', 'around', 'across', 'via', 'through', 'under', 'over', 'within', 'atop',
+]);
+
+function predicateWords(statement) {
+  const words = [];
+  const isVerbal = word => /ed$/u.test(word) || IRREGULAR_FORMS.has(word);
+  // A simple past that shares its form with the passive participle ("built",
+  // "led", "made") is a modifier before a passive preposition ("a platform,
+  // built on AWS", "a team led by the CTO"), so only then does it warn.
+  const takesObject = (word, next) => DRIFT_OBJECT_OPENERS.has(next)
+    || (DRIFT_SIMPLE_PASTS.has(word) && !(DRIFT_SAME_FORM_PASTS.has(word) && DRIFT_PASSIVE_PREPOSITIONS.has(next)));
+  const text = stripListMarker(statement);
+  const label = text.match(/^([^,;:.!?]{1,60}):\s+(?=\S)/u);
+  if (label) {
+    const [first] = driftWords(label[1]);
+    if (first && isVerbal(first)) words.push({ word: first, certain: true });
+  }
+  scopeClauses(label ? text.slice(label[0].length) : text).forEach((clause, index) => {
+    let tokens = driftWords(clause);
+    while (tokens.length && (/^(?:i|we)$/u.test(tokens[0]) || /^\p{L}+ly$/u.test(tokens[0]))) tokens = tokens.slice(1);
+    if (tokens[0] === 'to' && tokens.length > 1) tokens = tokens.slice(1);
+    const [first, next] = tokens;
+    if (!first || DRIFT_FUNCTION_WORDS.has(first) || !/\p{L}/u.test(first)) return;
+    // The statement-initial word always counts. It blocks when it reads as a
+    // verb (a past or "-ing" form, or any word before an object opener:
+    // "Lead the migration"); otherwise it may be an opening modifier from the
+    // JD ("Scalable ETL pipeline built in Python"), so it warns.
+    if (index === 0) words.push({ word: first, certain: isVerbal(first) || /ing$/u.test(first) || takesObject(first, next) });
+    else if (isVerbal(first)) words.push({ word: first, certain: takesObject(first, next) });
+  });
+  return words;
+}
+
+/**
+ * Split one `allow_swaps` entry ("used -> led") into its two sides, or return
+ * null when it is not exactly two non-empty sides of words.
+ */
+function splitSwap(entry) {
+  const parts = String(entry).split(/\s*(?:->|\u2192)\s*/u);
+  if (parts.length !== 2 || parts.some(part => !driftWords(part).length)) return null;
+  return parts;
+}
+
+const SWAP_FORMAT = 'allow_swaps entries must read "source word -> CV word"';
+
+/** Parse `allow_swaps` entries ("used -> led") into source-key/target-key pairs. */
+function parseSwaps(entries = []) {
+  return entries.map((entry) => {
+    const parts = splitSwap(entry);
+    if (!parts) throw new Error(`${SWAP_FORMAT}, got: ${entry}`);
+    const [from, to] = parts;
+    // Every source-side word must be in the anchor: "used Kafka -> led" must
+    // not apply to a bullet whose source mentions Kafka but never says "used".
+    return { from: driftWords(from), to: driftKeySet(driftWords(to)) };
+  });
+}
+
+/**
+ * Detect bullets that keep their source's keywords but change what the
+ * candidate did: anchored to one source statement, a word in predicate
+ * position that the anchor does not contain in any inflection and no declared
+ * swap allows.
+ *
+ * @param {string} targetText rendered document
+ * @param {string} sourceText the user's source files, joined
+ * @param {{allowSwaps?: string[], allowFacts?: string[]}} [options]
+ *   allowFacts: single-word `allow_facts` entries, which the user has declared
+ *   true wherever they appear, so they are allowed in predicate position too.
+ * @returns {{kind: 'drift', value: string, line: string, sourceLine: string, added: string[], blocking: boolean}[]}
+ */
+export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], allowFacts = [] } = {}) {
+  const swaps = parseSwaps(allowSwaps);
+  const declared = driftKeySet(allowFacts.map(fact => String(fact).trim()).filter(fact => !/\s/u.test(fact)));
+  const sources = factStatements(sourceText)
+    .map(stripListMarker)
+    .filter(statement => !HEADING_RE.test(statement))
+    .map((statement) => {
+      const content = driftContentWords(statement);
+      return { statement, keys: driftKeySet(content) };
+    })
+    .filter(source => source.keys.size);
+  if (!sources.length) return [];
+
+  const claims = [];
+  for (const bullet of renderedBullets(targetText)) {
+    for (const statement of factStatements(bullet).map(stripListMarker)) {
+      const content = [...new Set(driftContentWords(statement))];
+      if (!content.length) continue;
+      const predicates = predicateWords(statement);
+      // Anchor: the source statement sharing the most distinct content words.
+      // Two shared words, or every word of a one-word statement: the
+      // threshold the scope and authorship checks above use to link entries.
+      const required = Math.min(2, content.filter(word => !DRIFT_LINK_NEUTRAL.has(word)).length);
+      // Shared words are counted without the bullet's own predicate words: a
+      // source that shares the verb under test ("Led ...") must not score on
+      // it, tie in as an anchor and then vouch for that verb. The threshold
+      // above still counts the whole bullet, so dropping the verb never lets
+      // one shared tool name link a bullet on its own.
+      const predicateSet = new Set(predicates.map(({ word }) => word));
+      const linking = content.filter(word => !DRIFT_LINK_NEUTRAL.has(word) && !predicateSet.has(word));
+      // Ties keep every tied statement: which one is "the" anchor would
+      // otherwise depend on the order of cv.md, and a word any of them
+      // supports is supported.
+      let anchors = [];
+      let best = 0;
+      for (const source of sources) {
+        const shared = linking.filter(word => hasKey(source.keys, word)).length;
+        if (shared > best) { best = shared; anchors = [source]; } else if (shared === best && shared) anchors.push(source);
+      }
+      if (!anchors.length || !required || best < required) continue;
+      const allowedBy = (anchor, word) => hasKey(anchor.keys, word) || hasKey(declared, word)
+        || swaps.some(swap => hasKey(swap.to, word) && swap.from.every(fromWord => hasKey(anchor.keys, fromWord)));
+      const unsupported = predicates
+        .filter(({ word }) => !anchors.some(anchor => allowedBy(anchor, word)));
+      if (!unsupported.length) continue;
+      claims.push({
+        kind: 'drift',
+        value: normalizeFact(statement),
+        line: statement,
+        sourceLine: anchors[0].statement,
+        added: [...new Set(unsupported.map(({ word }) => word))],
+        blocking: unsupported.some(({ certain }) => certain),
+      });
+    }
+  }
+  return claims.filter((claim, index, all) => (
+    all.findIndex(other => other.value === claim.value) === index
+  ));
+}
+
+/** Remediation text for a drift finding, shared by assertFacts and the CLI. */
+export function driftClaimAdvice({ added = [], sourceLine = '' }) {
+  // The source bullet's own verb, not its first content word: a labelled
+  // source ("Billing: Used Kafka ...") would otherwise suggest a swap on a noun.
+  const anchorWord = predicateWords(sourceLine)[0]?.word ?? 'source word';
+  const swap = `"${anchorWord} -> ${added[0] ?? 'cv word'}"`;
+  return `the CV opens a clause with ${added.map(word => `"${word}"`).join(', ')}, which its source bullet does not use. ` +
+    'Keep the source\'s verb, or, if the new word is true for this work, add it to cv.md ' +
+    `or declare the swap in allow_swaps in config/cv-facts.json (e.g. ${swap})`;
+}
+
+
+// Simplified Chinese (#5290). The English path above assumes space-delimited
+// words at every step: the opening verb is the first letter run, statements end
+// at ". ", clauses split on "and", and entries link on shared words. Chinese
+// has no spaces, so the first letter run is the whole clause up to the next
+// punctuation mark and no step above can read it. Each step therefore has a
+// Chinese counterpart below, and `SCOPE_PROFILES` picks the set by language.
+//
+// The tiers mean what the English ones mean. Left out on purpose, like
+// `driven`: 推动/推进, which read as causation ("推动了转化率提升") as often as
+// ownership, and 管理, which is as often the noun (项目管理) as the verb.
+const ZH_SCOPE_VERB_TIERS = new Map([
+  // Tier 1 — participation.
+  ['参与', 1], ['协助', 1], ['配合', 1], ['支持', 1], ['贡献', 1], ['辅助', 1],
+  // Tier 2 — execution.
+  ['开发', 2], ['实现', 2], ['设计', 2], ['搭建', 2], ['构建', 2], ['完成', 2], ['编写', 2],
+  // Tier 3 — ownership.
+  ['主导', 3], ['负责', 3], ['牵头', 3], ['带领', 3], ['领导', 3], ['统筹', 3], ['主持', 3],
+  ['独立完成', 3], ['独立开发', 3], ['独立负责', 3], ['从零搭建', 3], ['从0到1', 3], ['从零到一', 3],
+]);
+// Longest first, so 独立完成 wins over 完成 and 独立负责 over 负责.
+const ZH_SCOPE_VERBS = [...ZH_SCOPE_VERB_TIERS.keys()].sort((a, b) => b.length - a.length);
+const ZH_SCOPE_VERB_RE = new RegExp(`(?:${ZH_SCOPE_VERBS.join('|')})[了过]?`, 'gu');
+// First-person prose opens with the subject, as in English (SUBJECT_PRONOUN_RE).
+const ZH_SUBJECT_RE = /^(?:我们|我|本人)/u;
+// Adverbs a Chinese CV puts before the verb: 主要负责, 深度参与, 全程主导.
+// Left in, 深度参与 opened with no known verb, so as a source it ranked as
+// unranked and vouched for 主导 on the same item. 独立 is not here: it is part
+// of the tier-3 verbs (独立完成, 独立负责).
+const ZH_ADVERB_RE = /^(?:主要|深度|全程|全面|积极|具体|核心|曾经|曾|成功|共同)+/u;
+// A clause split at a comma can open with a coordinator: "，并主导了重构".
+const ZH_CONNECTOR_RE = /^(?:并且|并|同时|以及)/u;
+// The same two characters are a noun when a person or product suffix follows:
+// 负责人, 设计师, 开发者, 设计稿, 领导力. A noun opening a line claims no scope.
+// 人 is that suffix only when it does not open the object: 主导人工智能平台,
+// 负责人员招聘 and 支持人力资源系统 are the verb.
+const ZH_VERB_AS_NOUN_RE = /^(?:人(?![工员事力才脸机])|[师者稿力])/u;
+// Particles dropped before object tokens are built, so 计费系统的迁移 and
+// 计费系统迁移 read as the same item.
+const ZH_PARTICLE_RE = /[的了和与及等]/gu;
+
+// stripMarkup applies NFKC, which folds the full-width ！？；，： to their ASCII
+// forms (but not 。 or 、), so every pattern below lists both.
+
+/** Split a Chinese document into statements: 。！？；, newlines, and the block breaks stripMarkup leaves. */
+function zhFactStatements(text) {
+  const withLineBoundaries = String(text ?? '').replace(/\r?\n+/g, '。');
+  return stripMarkup(withLineBoundaries)
+    // A period ends a statement only before a space or the end, as in
+    // factStatements, so a decimal (3.5) stays inside its statement.
+    .split(/[。！？；!?;]+|[.．](?:\s+|$)/u)
+    .map(statement => statement.trim())
+    .filter(Boolean);
+}
+
+// A coordinator joins two verbs without a comma too: 参与A并主导B. It splits
+// only before a scope verb, and 并 not after 合/兼/吞, so 合并, 并发 and 并行
+// stay whole.
+const ZH_CLAUSE_SPLIT_RE = new RegExp(
+  `\\s*[，、：,:]\\s*|(?:并且|(?<![合兼吞])并|同时|以及)(?=${ZH_SCOPE_VERBS.join('|')})`,
+  'u',
+);
+
+/** Split a Chinese statement into clauses at ，、： and at a coordinator before a scope verb (并主导…). */
+function zhScopeClauses(statement) {
+  return String(statement ?? '')
+    .split(ZH_CLAUSE_SPLIT_RE)
+    .map(clause => clause.trim().replace(ZH_CONNECTOR_RE, '').trim())
+    .filter(Boolean);
+}
+
+/** A Chinese clause with its list marker, subject and leading adverbs removed, so it opens with the verb. */
+function zhClauseHead(clause) {
+  return stripListMarker(clause).replace(ZH_SUBJECT_RE, '').replace(ZH_ADVERB_RE, '').trim();
+}
+
+/** The opening verb of a Chinese clause by longest prefix, with its tier, or null. */
+function zhOpeningScopeVerb(clause) {
+  const text = zhClauseHead(clause);
+  const verb = ZH_SCOPE_VERBS.find(candidate => text.startsWith(candidate));
+  if (!verb || ZH_VERB_AS_NOUN_RE.test(text.slice(verb.length))) return null;
+  return { verb, tier: ZH_SCOPE_VERB_TIERS.get(verb) };
+}
+
+/** sourceClauseTier for Chinese: a heading takes its strongest verb, a clause its opening verb. */
+function zhSourceClauseTier(clause, heading) {
+  const text = stripListMarker(clause).replace(HEADING_RE, '');
+  if (heading) {
+    return Math.max(0, ...ZH_SCOPE_VERBS.filter(verb => text.includes(verb)).map(verb => ZH_SCOPE_VERB_TIERS.get(verb)));
+  }
+  return zhOpeningScopeVerb(text)?.tier ?? Infinity;
+}
+
+/**
+ * Object tokens of a Chinese clause: Han character bigrams, plus the Latin
+ * tool and product names a Chinese CV keeps in Latin script (Kafka, K8s).
+ * Scope verbs and particles are cut out first and break a run, so a bigram
+ * never spans them and a tier word cannot link two entries.
+ */
+function zhScopeObjectTokens(text) {
+  const rest = normalizeFact(zhClauseHead(text))
+    .replace(ZH_SCOPE_VERB_RE, ' ')
+    .replace(ZH_PARTICLE_RE, ' ');
+  const latin = (rest.match(/[a-z0-9][a-z0-9+#./-]*/gu) ?? [])
+    .map(token => token.replace(/[./-]+$/u, ''))
+    .filter(token => token.length >= 2 && /[a-z]/u.test(token) && !ATTRIBUTION_STOP_WORDS.has(token));
+  const bigrams = [];
+  for (const [run] of rest.matchAll(/\p{Script=Han}{2,}/gu)) {
+    for (let index = 0; index + 2 <= run.length; index++) bigrams.push(run.slice(index, index + 2));
+  }
+  return [...latin, ...bigrams];
+}
+
+/**
+ * Whether the tokens a Chinese bullet shares with a source clause are enough
+ * to ACCUSE: three shared bigrams, or one shared Latin name plus one bigram.
+ *
+ * One bigram is about one Chinese word, and unrelated items share one all the
+ * time (计费系统 / 日志系统 share 系统), so one is never enough. Three bigrams
+ * are about two words, the English threshold. There is no short-bullet
+ * exception as in English: a two- or three-character object is usually a
+ * generic noun (系统, 数据库), and a missed catch is the safe direction.
+ * Vouching stays at one shared token, as in English.
+ */
+function zhScopeAccuses(shared) {
+  const latin = shared.filter(token => !/\p{Script=Han}/u.test(token)).length;
+  const bigrams = shared.length - latin;
+  return bigrams >= 3 || (latin >= 1 && bigrams >= 1);
+}
+
+// The Chinese counterparts of ADOPTION_CHECKS, paired the same way: the
+// wording to catch, and a loose lemma that counts as evidence for it.
+const ZH_ADOPTION_CHECKS = [
+  { target: /被[^，。；,;]{0,12}采用|全面推广|推广至/gu, source: /采用|推广|落地/u },
+  { target: /全公司|全集团|公司级|全员/gu, source: /全公司|全集团|公司级|全员|公司范围/u },
+  { target: /日活|月活|\bDAU\b|\bMAU\b/giu, source: /日活|月活|\bDAU\b|\bMAU\b/iu },
+  // Evidence has to state reach. 服务 or 用户 alone matched 微服务, 服务端 and
+  // 用户增长, which almost every engineering cv.md contains, and so does a
+  // window across a conjunction (微服务拆分和用户增长).
+  {
+    target: /服务[^，。；,;]{0,10}用户/gu,
+    source: /(?:(?<!微)服务|覆盖)[^，。；,;和与及]{0,10}用户|用户(?:量|规模|数)|[\d万千百亿]+(?:名|位)?用户/u,
+  },
+  { target: /成为[^，。；,;]{0,8}标准/gu, source: /标准|规范/u },
+];
+
+// One entry per language the scope and adoption checks can read. English is
+// the original path, unchanged. A language without an entry is not checked,
+// and verifyFacts reports that instead of a clean pass.
+const SCOPE_PROFILES = {
+  en: {
+    statements: factStatements,
+    clauses: scopeClauses,
+    openingVerb: openingScopeVerb,
+    sourceTier: sourceClauseTier,
+    tokens: scopeObjectTokens,
+    accuses: (shared, tokens) => shared.length >= Math.min(2, tokens.length),
+    adoptionChecks: ADOPTION_CHECKS,
+  },
+  zh: {
+    statements: zhFactStatements,
+    clauses: zhScopeClauses,
+    openingVerb: zhOpeningScopeVerb,
+    sourceTier: zhSourceClauseTier,
+    tokens: zhScopeObjectTokens,
+    accuses: zhScopeAccuses,
+    adoptionChecks: ZH_ADOPTION_CHECKS,
+  },
+};
+
+/**
+ * Fold a spelled-out magnitude onto the suffix the claim set compares.
+ *
+ * metricClaims() builds the claim key as `<number><magnitude> <noun>`, so
+ * "50 million users" and "50M users" only compare equal when both sides reach the
+ * same magnitude token. normalizeClaim() lowercases the adjacent-suffix branch on
+ * its own; this covers the spelled one, and leaves a number with no magnitude —
+ * and a number whose trailing word is not a magnitude at all — untouched.
+ *
+ * @param {string} raw
+ * @returns {string}
+ */
+function compactMagnitude(raw) {
+  return raw.replace(/\s+([A-Za-z]+)$/, (whole, word) => {
+    const suffix = SPELLED_MAGNITUDES.get(word.toLowerCase());
+    return suffix === undefined ? whole : suffix;
+  });
+}
+
 /** Extract metric-like claims that require source evidence. */
-export function metricClaims(text) {
-  const clean = stripMarkup(text, { keepLineBreaks: true });
+export function metricClaims(text, { keepPlanHorizons = false } = {}) {
+  // Expand only known count units in numeric compounds, then run the same
+  // plan/disclosure filters as spaced counts. Product IDs remain untouched.
+  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true })).replace(
+    /(?<![\p{L}\p{N}-])(\d[\d,.]*)[-‑–]([\p{L}]+)(?![\p{L}])/gu,
+    (whole, number, rawNoun) => {
+      const noun = rawNoun.toLowerCase();
+      const plural = METRIC_NOUNS.includes(noun) ? noun : METRIC_NOUNS.includes(`${noun}s`) ? `${noun}s` : null;
+      return plural ? `${number} ${plural}` : whole;
+    },
+  );
   const claims = new Set();
   for (const pattern of SIMPLE_CLAIM_PATTERNS) {
-    for (const match of clean.matchAll(pattern)) claims.add(normalizeClaim(match[0]));
+    for (const match of clean.matchAll(pattern)) claims.add(canonicalMetric(match[0]));
   }
-  for (const match of countMatches(clean)) {
+  for (const match of countMatches(clean, { keepPlanHorizons })) {
     const noun = match[2].toLowerCase();
-    claims.add(normalizeClaim(`${match[1]} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
+    claims.add(normalizeClaim(`${compactMagnitude(match[1])} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
   }
   return claims;
 }
@@ -619,9 +2766,9 @@ function countShapedSpans(text) {
 /**
  * Whether this document contains count claims the extractor could not read.
  *
- * METRIC_NOUNS is an English word list, and COUNT_CLAIM_RE's modifier window is
- * `[A-Za-z]`. Percentages, currency and multipliers are language-neutral and
- * still checked everywhere — but a COUNT is checked only in English, and this
+ * METRIC_NOUNS is an English word list with German and French forms added.
+ * Percentages, currency and multipliers are language-neutral and still checked
+ * everywhere — but a COUNT is checked only in those three languages, and this
  * file's own METRIC_NOUNS comment names counts as the class that gets inflated:
  * "Managed 45 staff against a source saying 20 passed the gate silently, which
  * is the exact fabrication class this script exists to catch."
@@ -651,9 +2798,8 @@ function countShapedSpans(text) {
  *
  * TWO KNOWN BLIND SPOTS, stated rather than implied:
  *
- *   - Coincidental coverage. French "3 sites" matches the English noun, so one
- *     recognised count silences the warning for a French CV whose other counts
- *     are invisible.
+ *   - Coincidental coverage. One listed noun ("3 sites") silences the warning
+ *     for a document whose other counts use nouns outside the lexicon.
  *   - CJK. This detector needs whitespace: it locates a count by a digit run
  *     that is not preceded by a letter and is followed by one. Japanese and
  *     Chinese put digits flush against the surrounding text ("3拠点で45名"),
@@ -684,7 +2830,7 @@ export function diagnoseCoverage(targetText) {
     reason: 'no-count-claims-recognized',
     message:
       `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
-      'list is English-only — so no count in this document was checked against your sources. ' +
+      'list covers English, German and French only — so no count in this document was checked against your sources. ' +
       'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
       'them to allow_metrics in config/cv-facts.json once confirmed.',
     spans,
@@ -708,12 +2854,28 @@ export function diagnoseCoverage(targetText) {
  * instead of widening them. The union can only ever allow more, never less.
  */
 function allowedMetricSet(sourceText, allowMetrics) {
-  const allowed = new Set(metricClaims(sourceText));
+  const allowed = sourceMetricClaims(sourceText);
   for (const entry of allowMetrics || []) {
     allowed.add(normalizeClaim(entry));
-    for (const canonical of metricClaims(String(entry))) allowed.add(canonical);
+    for (const canonical of sourceMetricClaims(String(entry))) allowed.add(canonical);
   }
   return allowed;
+}
+
+// normalizeTextForATS in generate-pdf.mjs prints € and £ as currency codes, and
+// the gate reads the printed document. The metric patterns read "50 000 EUR" but
+// not "50 000 €", the way French, German and Spanish write it, so a source read
+// only as written could not back the amount it states (#6361). foldAtsGlyphs
+// does the same for titles.
+function spellAtsCurrency(text) {
+  return text.replace(/€/g, 'EUR ').replace(/£/g, 'GBP ');
+}
+
+/** Metric claims a source supports, read as written and as the text pass prints it. */
+function sourceMetricClaims(text, options) {
+  const claims = metricClaims(text, options);
+  for (const claim of metricClaims(spellAtsCurrency(text), options)) claims.add(claim);
+  return claims;
 }
 
 /** Compare generated metric claims against source text without reading files. */
@@ -743,18 +2905,137 @@ export function auditClaims(targetText, sourceText, config = {}) {
  * believing a gate is protecting them when none is loaded.
  *
  * @param {string} path absolute path to the configuration file
- * @returns {{missing: boolean, config: {allow_metrics: string[], allow_facts: string[], forbidden_phrases: string[], warn_phrases: string[]}}}
+ * @returns {{missing: boolean, config: {allow_metrics: string[], allow_facts: string[], allow_swaps: string[], forbidden_phrases: string[], warn_phrases: string[]}}}
  * @throws when the file exists but is unparseable or has a non-array key
  */
 export function loadFactConfig(path) {
-  const keys = ['allow_metrics', 'allow_facts', 'forbidden_phrases', 'warn_phrases'];
+  const keys = ['allow_metrics', 'allow_facts', 'allow_swaps', 'forbidden_phrases', 'warn_phrases'];
   if (!existsSync(path)) return { missing: true, config: Object.fromEntries(keys.map(key => [key, []])) };
   const config = JSON.parse(readFileSync(path, 'utf-8'));
   for (const key of keys) {
     if (config[key] == null) config[key] = [];
     else if (!Array.isArray(config[key])) throw new Error(`${key} must be an array in ${path}`);
   }
+  // Validated here, not only when the drift check runs, so a malformed entry
+  // fails the same way for every document and caller and names the file.
+  const badSwap = config.allow_swaps.find(entry => !splitSwap(entry));
+  if (badSwap !== undefined) throw new Error(`${SWAP_FORMAT} in ${path}, got: ${badSwap}`);
   return { missing: false, config };
+}
+
+// Function words that tell English apart from the other Latin-script market
+// languages the project ships modes for (es, pt, fr, de, it, tr). A word that
+// English shares with one of them, such as `a`, `in` or `as`, is in neither
+// set, and `per`, `do` and `no` stay out because English CVs use them.
+const ENGLISH_FUNCTION_WORDS = new Set([
+  'the', 'and', 'of', 'to', 'for', 'with', 'from', 'by', 'at', 'on', 'is', 'was',
+  'were', 'are', 'that', 'this', 'which', 'into', 'over', 'our', 'my', 'their',
+  'its', 'has', 'have', 'had', 'been', 'it', 'or', 'not', 'also',
+]);
+const OTHER_FUNCTION_WORDS = new Set([
+  'el', 'la', 'los', 'las', 'del', 'y', 'en', 'para', 'con', 'por', 'una', 'que', 'se', 'al', 'su', 'sus', 'como', 'es', 'de',
+  'le', 'les', 'des', 'du', 'et', 'pour', 'avec', 'par', 'une', 'dans', 'sur', 'au', 'aux', 'est', 'qui',
+  'der', 'die', 'das', 'den', 'dem', 'und', 'für', 'mit', 'von', 'zu', 'ein', 'eine', 'auf', 'bei', 'im', 'ist', 'sich', 'nicht',
+  'os', 'da', 'dos', 'em', 'com', 'um', 'na', 'ao', 'não',
+  'il', 'gli', 'di', 'nel', 'della', 'che', 'è',
+  've', 'bir', 'ile', 'için', 'bu', 'olarak', 'daha',
+]);
+
+/**
+ * Whether a text reads as English, for the checks whose word lists are English.
+ *
+ * A text counts as not English when letters outside the Latin script make up
+ * more than 30% of it, or when it holds at least two function words of another
+ * market language and more of them than English ones. An empty or very short
+ * text counts as English, so a document with no evidence either way is still
+ * checked. All-caps tokens are skipped, so `MIT` is not the German `mit`.
+ *
+ * @param {string} text plain text, after stripMarkup
+ * @returns {boolean}
+ */
+function looksEnglish(text) {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  const nonLatin = text.match(/(?!\p{Script=Latin})\p{L}/gu) ?? [];
+  if (letters.length && nonLatin.length / letters.length > 0.3) return false;
+  let english = 0;
+  let other = 0;
+  // Addresses are not prose. "com" is Portuguese for "with", so the contact
+  // line of a short CV (jane@example.com, github.com/jane) counted as two or
+  // three Portuguese words and outvoted its English (#5348).
+  // Start each address at a token boundary instead of retrying every suffix
+  // of a long non-address token (quadratic time for pasted text/OCR).
+  const prose = text.replace(/(?<!\S)(?:\S+@\S+|\S+:\/\/\S+)|(?<![\p{L}\p{N}-])[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+\S*/gu, ' ');
+  for (const [word] of prose.matchAll(/[\p{L}]+/gu)) {
+    if (word.length > 1 && word === word.toUpperCase()) continue;
+    const lower = word.toLowerCase();
+    if (ENGLISH_FUNCTION_WORDS.has(lower)) english++;
+    else if (OTHER_FUNCTION_WORDS.has(lower)) other++;
+  }
+  return !(other >= 2 && other > english);
+}
+
+// Characters whose Traditional and Simplified forms differ, paired by
+// position, picked from the words a CV uses. Traditional Chinese has no
+// profile yet, so a Traditional document must not be read with the Simplified
+// verb table: none of 負責, 參與, 開發 would match, and the checks would pass a
+// document they could not read.
+const TRADITIONAL_HAN = '們這個與為開發實現設計負責參協經驗從統導帶領對時會來過進業務產項數據團隊戶級員網優構編寫機處際標';
+const SIMPLIFIED_HAN = '们这个与为开发实现设计负责参协经验从统导带领对时会来过进业务产项数据团队户级员网优构编写机处际标';
+
+/**
+ * The language the scope and adoption checks read a text in: 'en', 'zh'
+ * (Simplified Chinese), or null when no profile covers it.
+ *
+ * Chinese is Han script above 30% of the letters, the bar looksEnglish already
+ * uses for "not English", with almost no kana (Japanese mixes kanji and kana)
+ * and more Simplified than Traditional forms. Everything else is decided by
+ * looksEnglish exactly as before.
+ *
+ * @param {string} text plain text, after stripMarkup
+ * @returns {'en'|'zh'|null}
+ */
+function scopeLanguage(text) {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  const han = text.match(/\p{Script=Han}/gu) ?? [];
+  if (letters.length && han.length / letters.length > 0.3) {
+    const kana = text.match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu) ?? [];
+    const traditional = han.filter(char => TRADITIONAL_HAN.includes(char)).length;
+    const simplified = han.filter(char => SIMPLIFIED_HAN.includes(char)).length;
+    if (kana.length <= han.length * 0.05 && traditional <= simplified) return 'zh';
+    return null;
+  }
+  return looksEnglish(text) ? 'en' : null;
+}
+
+/**
+ * Explain why the scope and adoption checks did not run, or return null.
+ *
+ * They compare a document with its sources in one language, with a word list
+ * per language (SCOPE_PROFILES). On a language without a list, or when the
+ * document and its sources are in different languages, they would pass a
+ * document they could not read. Reporting the gap through `coverage` keeps
+ * that from reading as "checked and clean".
+ *
+ * @param {'en'|'zh'|null} targetLanguage
+ * @param {'en'|'zh'|null} sourceLanguage
+ * @returns {string|null}
+ */
+function scopeLanguageGap(targetLanguage, sourceLanguage) {
+  if (targetLanguage && targetLanguage === sourceLanguage) return null;
+  const advice = 'Check ownership verbs and adoption claims by hand.';
+  if (targetLanguage !== 'zh' && sourceLanguage !== 'zh') {
+    const targetEnglish = targetLanguage === 'en';
+    const sourceEnglish = sourceLanguage === 'en';
+    const subject = !targetEnglish && !sourceEnglish
+      ? 'The document and its sources are'
+      : !targetEnglish ? 'The document is' : 'Its sources are';
+    return `${subject} not in English, so the scope-verb, bullet-drift and adoption checks did not run: their word lists ` +
+      `cover only English and Simplified Chinese. ${advice}`;
+  }
+  const name = language => (language === 'zh' ? 'Simplified Chinese'
+    : language === 'en' ? 'English' : 'a language the checks do not cover');
+  return `The document is in ${name(targetLanguage)} and its sources are in ${name(sourceLanguage)}, so the ` +
+    `scope-verb, bullet-drift and adoption checks did not run: they compare a document only with sources in the same language. ${advice}`;
 }
 
 /** Resolve a CLI or configuration path relative to the selected working directory. */
@@ -762,34 +3043,182 @@ function resolveInputPath(path, cwd = process.cwd()) {
   return isAbsolute(path) ? path : join(cwd, path);
 }
 
+// No name or title is this long. A tool claim has no word limit, so a capture
+// that runs on for hundreds of capitalised words, or one enormous token, can
+// reach the lookup below, and escaped into a pattern it is more than the
+// regular expression engine can compile. Such a value reads as absent, which
+// blocks, instead of throwing.
+const MAX_SOURCE_LOOKUP_LENGTH = 500;
+
+// The glyphs normalizeTextForATS in generate-pdf.mjs rewrites. The gate reads the
+// rewritten document and cv.md keeps the original, so a title copied verbatim
+// with an arrow or a dash in it read as unsourced. A dash folded in the source
+// stays a marker and not a hyphen, so that "Acme\u2014Staff Engineer" still has a
+// token boundary before the title while "Staff Engineer - Platform" matches it.
+const FOLDED_DASH = '\uE000';
+function foldAtsGlyphs(text) {
+  return text
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+    .replace(/\s*\u2192\s*/g, ' to ')
+    .replace(/\s*\u2190\s*/g, ' from ')
+    .replace(/\s*[\u2191\u2193]\s*/g, ' ')
+    .replace(/(?<![lL])\s*\u00B7\s*|\s*\u00B7\s*(?![lL])|\s+\u00B7\s*|\s*\u00B7\s+/g, ' | ')
+    .replace(/\s*\u2022\s*/g, ' | ');
+}
+
 /** Check a normalized fact as a complete token or phrase, not a substring. */
 function sourceContainsFact(sourceText, value) {
+  if (sourceSpellsFact(sourceText, value)) return true;
+  const source = foldAtsGlyphs(sourceText).replace(/[\u2014\u2013]/g, FOLDED_DASH);
+  return sourceSpellsFact(source, foldAtsGlyphs(value).replace(/[\u2014\u2013]/g, '-'));
+}
+
+function sourceSpellsFact(sourceText, value) {
+  if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
   const escaped = value
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\s+/g, '\\s+');
+    .replace(/\s+/g, '\\s+')
+    .replace(/-/g, `[-${FOLDED_DASH}]`);
   return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
 }
 
 /**
  * @param {string} targetText generated candidate-facing HTML/Markdown/text
- * @param {{ sourcePaths?: string[], configPath?: string, cwd?: string }} options
- * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], forbidden: string[], warnings: string[] }}
+ * @param {{ sourcePaths?: string[], planTexts?: string[], configPath?: string, cwd?: string }} options
+ *   planTexts: what the candidate wrote for one document, such as the answers
+ *   for a cover letter. They support only a number the document states as a
+ *   plan, never an employer, title, tool, or past experience. The rendered
+ *   letter is not passed here, or every claim in it would support itself.
+ * @returns {{ verdict: 'pass'|'warn'|'block', invented: string[], unsupportedFacts: object[], advisoryFacts: object[], forbidden: string[], warnings: string[] }}
  * @throws when the config is invalid
  */
+/**
+ * Reduce markdown links to their visible text, so a claim that spans a link is
+ * compared with the words a reader sees. Handles inline links whose target holds
+ * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
+ * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`),
+ * which are read the way CommonMark reads them (see the rules below).
+ * A bracket pair with no link target after it is left alone.
+ */
+export function collapseMarkdownLinks(text) {
+  let out = '';
+  let i = 0;
+  const opener = /\[\s*([^\][]*?)\s*\]\(/y;
+  while (i < text.length) {
+    if (text[i] === '[') {
+      opener.lastIndex = i;
+      const m = opener.exec(text);
+      if (m) {
+        let depth = 1;
+        let j = opener.lastIndex;
+        while (j < text.length && depth > 0) {
+          if (text[j] === '\\') { j += 2; continue; }
+          if (text[j] === '(') depth++;
+          else if (text[j] === ')') depth--;
+          j++;
+        }
+        if (depth === 0) {
+          out += m[1];
+          i = j;
+          continue;
+        }
+      }
+    }
+    out += text[i++];
+  }
+  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1');
+  // A definition is dropped whole. Anything that is not one, as CommonMark
+  // reads it, is text a reader sees and stays:
+  //   - it starts its line, after at most three spaces, and cannot interrupt a
+  //     paragraph, so the line above is blank or a heading, or there is none;
+  //   - its target sits on the label's line or the next one, and a target in
+  //     angle brackets may hold spaces (`<./Terraform portfolio.pdf>`);
+  //   - an optional title, quoted or in parentheses, follows on the target's
+  //     line or the next, and may wrap, but never across a blank line;
+  //   - nothing else follows on its last line.
+  // A definition right under another one starts its block only once the one
+  // above is gone, so the pass repeats until nothing changes.
+  const sp = String.raw`[^\S\r\n]`;
+  const wrap = String.raw`\r?\n(?!${sp}*$)`;
+  const title = String.raw`(?:"(?:[^"\r\n]|${wrap})*"|'(?:[^'\r\n]|${wrap})*'|\((?:[^()\r\n]|${wrap})*\))`;
+  const paragraphAbove = String.raw`^(?!${sp}{0,3}#{1,6}(?:${sp}|$))${sp}*\S[^\r\n]*\r?\n`;
+  const definition = new RegExp(String.raw`^(?<!${paragraphAbove})${sp}{0,3}\[[^\][]+\]:${sp}*(?:\r?\n${sp}*)?(?:<[^<>\r\n]*>|\S+)(?:(?:${sp}+|${sp}*\r?\n${sp}*)${title})?${sp}*(?=\r?$)`, 'gm');
+  for (let before = ''; before !== out;) {
+    before = out;
+    out = out.replace(definition, ' ');
+  }
+  return out;
+}
+
 export function verifyFacts(targetText, {
   sourcePaths = DEFAULT_SOURCES,
+  planTexts = [],
   configPath = DEFAULT_CONFIG,
   cwd = process.cwd(),
 } = {}) {
-  const sourceText = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd))).join('\n');
+  // Per file, before the join: stripMarkup keeps only the body of a LaTeX
+  // document, and run on the joined text it would discard every source read
+  // ahead of a .tex one as if it were that document's preamble.
+  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  const sourceText = sourceTexts.join('\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
-  const invented = [...targetClaims].filter(claim => !allowed.has(claim));
-  const sourceNormalized = normalizeFact(stripMarkup(sourceText));
+  const planned = plannedClaims(targetText, planTexts);
+  const invented = [...targetClaims].filter(claim => !allowed.has(claim) && !planned.has(claim));
+  // A markdown link keeps its target in the stripped source: "[Fabrikam](https://…) (Director)"
+  // reads as "[fabrikam](https://…) (director)", so a claim that spans a link, such as
+  // a "Previous Experience" line of linked employers and titles, never found its own
+  // words in the source. Only the link text is evidence, so the lookup reads that.
+  // Each file is stripped on its own. Bold may span a wrapped line, so an unpaired `**` at
+  // the end of one file paired with the first `**` of the next and left a stray `*` in the
+  // name beside it ("fabrikam* (director)").
+  // A reference definition takes a title only from the line right after it, never across a
+  // blank line, so blank lines are kept while the links collapse.
+  const sourceLookup = normalizeFact(sourceTexts
+    .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true, keepBlankLines: true })))
+    .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const unsupportedFacts = [...factClaims(targetText, sourceNormalized), ...delegatedAuthorshipClaims(targetText, sourceText)]
-    .filter(({ value }) => !sourceContainsFact(sourceNormalized, value) && !allowedFacts.has(value))
+  const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
+  const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
+  const associations = structuredAssociationClaims(targetText, sourceTexts, config);
+  const namedFacts = [
+    ...factClaims(targetText, sourceLookup),
+    ...delegatedAuthorshipClaims(targetText, sourceText),
+    ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
+  ].filter(unsourced);
+  // Scope and adoption claims resolve their own source evidence — a verb-tier
+  // comparison and a phrase lookup — so they must not be re-filtered by
+  // sourceContainsFact. That test asks whether the claim's own wording appears
+  // in the sources, which is a different question: an inflated bullet whose
+  // words happen to occur elsewhere in cv.md would be dropped, and the whole
+  // finding is that the source says something WEAKER about the same entry.
+  const scopeTargetLanguage = scopeLanguage(stripMarkup(targetText));
+  const languageGap = scopeLanguageGap(scopeTargetLanguage, scopeLanguage(stripMarkup(sourceText)));
+  const scopeFacts = languageGap ? [] : scopeInflationClaims(targetText, sourceText, scopeTargetLanguage);
+  // A bullet the scope check already reported is not reported twice: the
+  // scope finding names the tier, which is the more specific diagnosis. A
+  // scope finding the user waived in allow_facts reports nothing, so it must
+  // not hide a drift elsewhere in the same bullet.
+  const scopeLines = new Set(scopeFacts.filter(({ value }) => !allowedFacts.has(value)).map(({ line }) => line));
+  // The drift check's closed word class and inflection folding are English,
+  // so it runs only on an English document with English sources.
+  const driftFacts = (languageGap || scopeTargetLanguage !== 'en' ? [] : bulletDriftClaims(targetText, sourceText, { allowSwaps: config.allow_swaps, allowFacts: config.allow_facts }))
+    .filter(({ line }) => !scopeLines.has(line));
+  const comparedFacts = [...scopeFacts, ...driftFacts.filter(({ blocking }) => blocking), ...associations.blocked]
+    .filter(({ value }) => !allowedFacts.has(value));
+  // Adoption claims warn instead of block. The phrase list cannot see every
+  // way a source states reach, and a block makes the PDF step tell the agent to
+  // stop and fix, so a missed paraphrase would get a true bullet rewritten.
+  const advisoryFacts = [
+    ...(languageGap ? [] : adoptionClaims(targetText, sourceText, scopeTargetLanguage)),
+    ...associations.advisory,
+    ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
+    // A drift whose only new verb is ambiguous ("and automated reporting").
+    ...driftFacts.filter(({ blocking }) => !blocking),
+  ].filter(({ value }) => !allowedFacts.has(value));
+  const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
       .filter(Boolean)
@@ -800,12 +3229,22 @@ export function verifyFacts(targetText, {
   // Never downgrades a block and never creates one: a document that fails on
   // real evidence still fails on that, and a coverage gap only turns a would-be
   // 'pass' into 'warn' so the caller is told the gate could not read it.
-  const coverage = diagnoseCoverage(targetText);
+  // One coverage object, so callers that read `coverage.reason` keep working.
+  // A count gap keeps its reason and gains the scope sentence.
+  const countGap = diagnoseCoverage(targetText);
+  const priorCoverage = !languageGap ? countGap
+    : countGap ? { ...countGap, message: `${countGap.message} ${languageGap}` }
+      : { reason: 'scope-not-checked', message: languageGap, spans: [] };
+  const coverage = associations.warnings.length
+    ? { reason: 'associations-not-checked', spans: [], ...priorCoverage,
+      message: [priorCoverage?.message, ...associations.warnings].filter(Boolean).join(' ') }
+    : priorCoverage;
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
-    verdict: blocked ? 'block' : (warnings.length || coverage) ? 'warn' : 'pass',
+    verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',
     invented,
     unsupportedFacts,
+    advisoryFacts,
     forbidden,
     warnings,
     coverage,
@@ -816,15 +3255,130 @@ export function verifyFacts(targetText, {
   };
 }
 
+/**
+ * A past-experience framing of a time metric inside an assertion span, e.g.
+ * "I have 6 months of experience". When a forward marker appears later in the
+ * same clause ("…and will review incidents"), that marker must not pull the
+ * past metric into the plan set.
+ */
+const PAST_TIME_CLAIM_RE = /\b(?:have|has|had|spent|worked)\s+(?:[\p{L}\p{M}-]+\s+){0,4}\d[\d,.]*\s*\+?\s*(?:months|years|weeks|days)\b/giu;
+const PAST_PERCENT_CLAIM_RE = /\b(?:grew|increased|improved|reduced|generated|achieved|delivered|managed|led)\b[^.!?;\n]{0,80}?\d[\d,.]*\s*(?:%|(?:percent|per\s?cent|pct)\b)/giu;
+const DURATION_INTRO_RE = /^\s*(?:over|in|within|for|during|across)\b[^,;:]*?\d[\d,.]*\s*\+?\s*(?:days|weeks|months|years)\s*$/i;
+
+/**
+ * Sentence bounds at `.`, `!`, `?`, or newline — used so a duration intro
+ * ("Over 6 months, …") can inherit a forward marker from the next clause.
+ */
+function sentenceBounds(text, index) {
+  const isSentenceEnd = (i) => {
+    const c = text[i];
+    if (c === '\n') return true;
+    if (c !== '.' && c !== '!' && c !== '?') return false;
+    return !(/\d/.test(text[i - 1] ?? '') && /\d/.test(text[i + 1] ?? ''));
+  };
+  let start = 0;
+  for (let i = index - 1; i >= 0; i--) if (isSentenceEnd(i)) { start = i + 1; break; }
+  let end = text.length;
+  for (let i = index; i < text.length; i++) if (isSentenceEnd(i)) { end = i; break; }
+  return { start, end };
+}
+
+function pastClaimMetrics(span) {
+  const claims = new Set();
+  const add = (text) => {
+    for (const claim of metricClaims(text, { keepPlanHorizons: true })) claims.add(claim);
+  };
+  for (const match of span.matchAll(PAST_TIME_CLAIM_RE)) add(match[0]);
+  for (const match of span.matchAll(PAST_PERCENT_CLAIM_RE)) {
+    const markerAfterVerb = match[0].search(FORWARD_MARKER_RE) > 0;
+    if (markerAfterVerb) continue;
+    add(match[0]);
+  }
+  return claims;
+}
+
+/** A span states a plan when it has a forward marker, or it is a duration introduction in a sentence that has one. */
+function isPlanAssertion(span, sentence) {
+  if (FORWARD_MARKER_RE.test(span)) return true;
+  return DURATION_INTRO_RE.test(span) && FORWARD_MARKER_RE.test(sentence);
+}
+
+/**
+ * Metric claims in `targetText` that `planTexts` support: the plan texts hold
+ * the claim, and the target states that claim as a plan. "I will read the last
+ * 6 months of incident reviews" qualifies. "I have 6 months of
+ * incident-response experience" does not, even when a forward marker appears
+ * later in the same clause. Plan answers keep forward-looking horizon numbers
+ * so a letter can restate them ("Over 6 months, I will…").
+ *
+ * @param {string} targetText
+ * @param {string[]} planTexts
+ * @returns {Set<string>}
+ */
+function plannedClaims(targetText, planTexts) {
+  const planText = planTexts.filter(text => typeof text === 'string').join('\n');
+  if (!planText.trim()) return new Set();
+  // keepPlanHorizons: answers often say "In my first 6 months I will…"; the
+  // target-side horizon rule still drops those from invented claims, but the
+  // plan evidence must retain the number so the letter can restate it.
+  const inPlans = sourceMetricClaims(planText, { keepPlanHorizons: true });
+  const clean = spellNumbers(stripMarkup(targetText, { keepLineBreaks: true }));
+  const forward = new Set();
+  const past = new Set();
+  for (let i = 0; i < clean.length;) {
+    const { start, end } = clauseBounds(clean, i);
+    const span = clean.slice(start, end);
+    const { start: s0, end: s1 } = sentenceBounds(clean, i);
+    const sentence = clean.slice(s0, s1);
+    const planAssertion = isPlanAssertion(span, sentence);
+    const pastInSpan = pastClaimMetrics(span);
+    for (const claim of metricClaims(clean.slice(i, end))) {
+      if (pastInSpan.has(claim)) past.add(claim);
+      else if (planAssertion) forward.add(claim);
+      else past.add(claim);
+    }
+    i = end + 1;
+  }
+  return new Set([...forward].filter(claim => inPlans.has(claim) && !past.has(claim)));
+}
+
+/** Say which sources the gate read, so nobody looks for evidence it never checked. */
+export function factSourceAdvice({ letterAnswers = false } = {}) {
+  if (!letterAnswers) {
+    return 'cv.md and article-digest.md do not contain these claims. Add career evidence to one of them. A verified exception belongs in config/cv-facts.json.';
+  }
+  return [
+    'These claims are not in cv.md, article-digest.md, or the answers and inputs supplied for this letter.',
+    'Those answers support only a number the letter states as a plan, never an employer, title, tool, or past experience.',
+    'Add career evidence to cv.md or article-digest.md.',
+    'A plan stays in those answers. Do not copy that plan into cv.md.',
+    'A verified exception belongs in config/cv-facts.json.',
+  ].join(' ');
+}
+
+/**
+ * Tell the user why a scope claim blocked and how to allow it once verified.
+ *
+ * The value is the exact string `allow_facts` matches, so the user can copy it.
+ */
+export function scopeClaimAdvice({ value }) {
+  return `the source gives this work a weaker verb than the CV. If the CV is right, add "${value}" to allow_facts in config/cv-facts.json`;
+}
+
 /** Verify a document and throw when it contains a blocking unsupported claim. */
 export function assertFacts(targetText, options = {}) {
   const result = verifyFacts(targetText, options);
   if (result.verdict === 'block') {
     const details = [];
     if (result.invented.length) details.push(`metric-like claims absent from sources: ${result.invented.join(', ')}`);
-    if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map(({ kind, value }) => `${kind}=${value}`).join(', ')}`);
+    if (result.unsupportedFacts.length) details.push(`non-metric facts absent from sources: ${result.unsupportedFacts.map((claim) => {
+      const { kind, value, sourceLine } = claim;
+      if (kind === 'scope') return `${kind}=${value} (source says: ${sourceLine}; ${scopeClaimAdvice(claim)})`;
+      if (kind === 'drift') return `${kind}=${value} (source says: ${sourceLine}; ${driftClaimAdvice(claim)})`;
+      return sourceLine ? `${kind}=${value} (source says: ${sourceLine})` : `${kind}=${value}`;
+    }).join(', ')}`);
     if (result.forbidden.length) details.push(`forbidden phrases found: ${result.forbidden.join(', ')}`);
-    throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}`);
+    throw new Error(`Fact check failed${options.label ? ` for ${options.label}` : ''}: ${details.join('; ')}. ${factSourceAdvice({ letterAnswers: Array.isArray(options.planTexts) })}`);
   }
   return result;
 }
@@ -862,9 +3416,12 @@ function usage() {
        node verify-cv-facts.mjs --self-test
 
 Checks generated candidate-facing text for unsupported metrics and explicitly asserted
-non-metric facts (employers, titles, tools, and delegated-work authorship) absent
-from source files.
-Default sources: cv.md, article-digest.md
+non-metric facts (employers, titles, tools, delegated-work authorship, scope-verb
+inflation, unsourced adoption claims, and bullets whose verb drifted from the
+source bullet they restate) absent from source files.
+Default sources: cv.md and article-digest.md.
+A cover letter also reads the answers supplied for that letter, which support
+only a number the letter states as a plan. The rendered letter is not a source.
 Default config:  config/cv-facts.json (optional)`;
 }
 
@@ -1175,25 +3732,375 @@ function runSelfTest() {
     auditClaims('Reached 2B users', 'Reached 1B users.').invented,
     ['2b users']
   );
-  // The suffix must END the token, so a spelled-out magnitude and a unit that
-  // merely starts with k/m/b keep their previous normalization. Asserting on
-  // metricClaims directly (not auditClaims(...).invented) matters here: target
-  // and source text are identical, so an empty `invented` list would pass even
-  // if metricClaims extracted nothing at all — these assert the real claim a
-  // truthful CV would produce.
+  // A spelled-out magnitude belongs to the number for the same reason the suffix
+  // does, and folds onto that suffix so the two spellings of one quantity are one
+  // claim. Left in the modifier window it normalized away, and "Served 50 users"
+  // then read as evidence for "Served 50 million users".
+  //
+  // Asserting on metricClaims directly (not auditClaims(...).invented) matters
+  // here: target and source text are identical, so an empty `invented` list would
+  // pass even if metricClaims extracted nothing at all — these assert the real
+  // claim a truthful CV would produce.
   equal(
-    'a spelled-out magnitude is unaffected',
+    'a spelled-out magnitude joins the number',
     [...metricClaims('Reached 50 million users')],
+    ['50m users']
+  );
+  equal(
+    'the two spellings of one quantity compare equal',
+    auditClaims('Reached 50M users', 'Reached 50 million users.').invented,
+    []
+  );
+  equal(
+    'a spelled-out inflation is caught',
+    auditClaims('Reached 50 million users', 'Reached 50 users.').invented,
+    ['50m users']
+  );
+  equal(
+    'a decimal spelled-out magnitude joins the number',
+    [...metricClaims('Served 1.5 million customers')],
+    ['1.5m customers']
+  );
+  equal(
+    'a thousand spelled-out magnitude joins the number',
+    [...metricClaims('Served 50 thousand users')],
+    ['50k users']
+  );
+  equal(
+    'an ordinary modifier is still not a magnitude',
+    [...metricClaims('Served 50 active users')],
     ['50 users']
   );
+  equal(
+    'a word merely starting with a magnitude word is not one',
+    [...metricClaims('Served 50 millionaire users')],
+    ['50 users']
+  );
+  // The suffix must still END the token, so a unit that merely starts with k/m/b
+  // keeps its previous normalization.
   equal(
     'a unit beginning with a suffix letter is unaffected',
     [...metricClaims('Shipped 50kg servers')],
     ['50 servers']
   );
 
+  // Scope-verb inflation (#3685). Neither of the two cases below changes a
+  // number, so every check above passes them: "led" where the source says
+  // "contributed" is a fact to a reader and invisible to a metric gate.
+  const scopeOf = (target, source) => scopeInflationClaims(target, source).map(claim => claim.value);
+  const scopeSource = 'Contributed to the migration to a service architecture. Implemented the ingest pipeline.';
+
+  equal('an upgraded scope verb is caught',
+    scopeOf('Led the migration to a service architecture', scopeSource),
+    ['led the migration to a service architecture']);
+  equal('the bare phrasing of the same escalation is caught',
+    scopeOf('Led the migration', 'Contributed to the migration'), ['led the migration']);
+  equal('tier 3 over tier 2 is caught',
+    scopeOf('Architected the ingest pipeline', scopeSource), ['architected the ingest pipeline']);
+  // The gate must report the source line, not just the offending bullet: the
+  // user fixes this in cv.md, and "which line" is the whole question.
+  equal('the closest source line is reported',
+    scopeInflationClaims('Led the migration to a service architecture', scopeSource)
+      .map(claim => claim.sourceLine),
+    ['Contributed to the migration to a service architecture']);
+
+  // …and the four ways this must stay silent. A fact gate that blocks a
+  // truthful CV is the failure mode this file's history is mostly about.
+  equal('an equal verb is not an escalation',
+    scopeOf('Implemented the ingest pipeline', scopeSource), []);
+  equal('a stronger source is not an escalation',
+    scopeOf('Implemented the ingest pipeline', 'Architected the ingest pipeline.'), []);
+  equal('a bullet with no matching source entry is left alone',
+    scopeOf('Led the quarterly hiring committee', scopeSource), []);
+  equal('a source stating the mandate in another sentence is respected',
+    scopeOf('Led the payments rewrite',
+      'Contributed to the payments rewrite. I led that payments effort end to end.'), []);
+  // A source bullet that asserts no scope at all cannot be the weaker side of
+  // a comparison. Before source statements were required to carry a verb, this
+  // reported every sourced bullet whose source simply worded it differently.
+  equal('a source with no scope verb is not evidence of inflation',
+    scopeOf('Built the billing migration', 'The billing migration shipped in March.'), []);
+  // ...but "worked on" IS the participation wording #3685 names, and reading
+  // it as no-evidence let every tier-2 and tier-3 rewrite of it through.
+  equal('worked on is participation evidence',
+    scopeOf('Built the billing migration', 'Worked on the billing migration.'),
+    ['built the billing migration']);
+  equal('and the issue\'s own pairing of it',
+    scopeOf('Led the migration', 'Worked on the migration.'), ['led the migration']);
+  // `worked at` is employment, not scope. Scoring it as tier 1 would turn
+  // every employer line into evidence that the candidate merely participated
+  // in whatever it happened to share a noun with.
+  equal('worked at is not scope evidence',
+    scopeOf('Led the migration', 'Worked at Acme Labs on the migration.'), []);
+
+  // A verb governs its own work item, not every item in the sentence. The
+  // statement-wide tier let the strong half vouch for the weak one.
+  const compound = 'Contributed to the billing migration and led the payments rewrite.';
+  equal('a compound source does not lend its strong verb to the weak half',
+    scopeOf('Led the billing migration.', compound), ['led the billing migration']);
+  equal('and the half that really is tier 3 still passes',
+    scopeOf('Led the payments rewrite.', compound), []);
+  // The target side is clause-scoped too. Reading only the statement-initial
+  // verb skipped a compound bullet entirely, because it opens at tier 1 and
+  // the tier-3 half was never compared to anything.
+  equal('a compound TARGET bullet is checked clause by clause',
+    scopeOf('Contributed to the billing migration and led the payments rewrite.',
+      'Contributed to the payments rewrite.'),
+    ['led the payments rewrite']);
+  // factStatements does not split on commas, so a bullet opening with a
+  // modifier had no recognisable opening verb at all.
+  equal('a bullet opening with a modifier is still checked',
+    scopeOf('As tech lead, drove the migration.', 'Contributed to the migration.'),
+    ['drove the migration']);
+  // The whole bullet is still what gets quoted back, even though the clause is
+  // what gets claimed.
+  equal('the quoted CV line is the whole bullet, not the clause',
+    scopeInflationClaims('As tech lead, drove the migration.', 'Contributed to the migration.')
+      .map(claim => claim.line),
+    ['As tech lead, drove the migration']);
+  // "Led to" is causation, not a mandate. Splitting the target into clauses is
+  // what puts a mid-sentence "and led to ..." at the start of one, where it
+  // would otherwise read as a tier-3 ownership claim.
+  equal('led to is a result, not an ownership claim',
+    scopeOf('Refactored the pipeline and led to a faster speedup.', 'Contributed to the speedup.'),
+    []);
+  // The bare form opening a line is a job title. Read as a verb it blocked a
+  // truthful CV: a summary line naming the role, against a source bullet that
+  // says the candidate contributed to the same work item.
+  equal('a leading job title is not an ownership claim',
+    scopeOf('Lead backend engineer for the billing migration.', 'Contributed to the billing migration.'),
+    []);
+  equal('a title followed straight by a preposition is not an ownership claim',
+    scopeOf('Architect for the payments platform.', 'Contributed to the payments platform.'),
+    []);
+  // A determiner marks the verb: the present-tense bullet of a current role is
+  // still an ownership claim, and still checked.
+  equal('present-tense "Lead the ..." is still an ownership claim',
+    scopeOf('Lead the billing migration.', 'Contributed to the billing migration.'),
+    ['lead the billing migration']);
+  equal('a plural object after "Lead" is still the verb',
+    scopeOf('Lead engineers through the billing migration.', 'Contributed to the billing migration.'),
+    ['lead engineers through the billing migration']);
+
+  // Several tier words are also ordinary nouns, so scoring every token let a
+  // product name stand in for the verb: `drive` in "Google Drive" scored the
+  // clause tier 3 and vouched for any ownership claim linked to it.
+  equal('a noun homograph does not set the clause tier',
+    scopeOf('Led the Google Drive integration.', 'Built the Google Drive integration.'),
+    ['led the google drive integration']);
+
+  // One shared token is not enough to call two entries the same work item.
+  equal('a single shared token does not link unrelated entries',
+    scopeOf('Designed the onboarding automation.', 'Supported the onboarding revamp for new hires.'),
+    []);
+  // ...and it stays one token however many times the bullet repeats it.
+  // Counting matches rather than distinct matches let a repeated word clear the
+  // two-token threshold by itself.
+  equal('a repeated word is still one shared token',
+    scopeOf('Owned the payments platform migration to payments v2.', 'Contributed to payments.'),
+    []);
+  // The guard must not swing the other way: two genuinely distinct shared
+  // tokens still link, repetition or not.
+  equal('two distinct shared tokens still link',
+    scopeOf('Owned the payments platform migration to payments v2.',
+      'Contributed to the payments platform.'),
+    ['owned the payments platform migration to payments v2']);
+  // Tier 1 claims participation, so it can never be an escalation.
+  equal('a participation verb is never flagged',
+    scopeOf('Supported the billing migration', 'Worked on the billing migration.'), []);
+  // A real CV is a bullet list, and the marker survives stripMarkup. Left on,
+  // it prefixed the claim value ("- led the migration"), which no allow_facts
+  // entry a user would write can match — the escape hatch was unusable on
+  // exactly the input this check exists for.
+  equal('a bulleted CV yields the same claim as a plain sentence',
+    scopeOf('- Led the migration', '- Contributed to the migration'), ['led the migration']);
+  equal('a bulleted source is still matched',
+    scopeInflationClaims('* Led the migration', '• Contributed to the migration')
+      .map(claim => claim.sourceLine),
+    ['Contributed to the migration']);
+
+  // Unsourced adoption and reach claims (#3685), the other class that reads as
+  // a fact while naming no number.
+  const adoptionOf = (target, source) => adoptionClaims(target, source).map(claim => claim.value).sort();
+
+  equal('an unsourced adoption claim is caught',
+    adoptionOf('Internal tooling used daily across the engineering org', scopeSource),
+    ['across the engineering org', 'used daily']);
+  equal('company-wide reach with no source is caught',
+    adoptionOf('Rolled the linter out company-wide', scopeSource), ['company-wide']);
+  equal('a sourced adoption claim passes',
+    adoptionOf('Used daily by the team', 'The tool is used daily by the platform team.'), []);
+  // Matched per pattern, not per exact phrase, so a source wording its own
+  // adoption differently still supports the generated line.
+  equal('a differently worded source adoption claim still supports it',
+    adoptionOf('Used daily across the engineering org',
+      'Used daily by six teams across the wider org.'), []);
+  // Both spellings of the long form. `org-wide` alone let an unsourced reach
+  // claim through whenever the CV spelled the word out.
+  equal('organization-wide is caught',
+    adoptionOf('Rolled the linter out organization-wide.', scopeSource), ['organization-wide']);
+  equal('organisation-wide is caught too',
+    adoptionOf('Rolled the linter out organisation-wide.', scopeSource), ['organisation-wide']);
+  // The source side is a lemma on purpose. Requiring it to repeat the CV's
+  // exact phrasing punished paraphrase, which is what a tailored CV always
+  // does to a source line.
+  equal('a source that states adoption in its own words supports the claim',
+    adoptionOf('Adopted by 3 teams.', 'Three teams adopted the tool.'), []);
+  equal('and a reach claim the source words as a phrase, not a compound',
+    adoptionOf('Rolled out company-wide.', 'The tool went out across the whole company.'), []);
+  // `standard` was the one check whose source side was still a bare word, so
+  // the wording a source most often uses for this claim did not count.
+  equal('a standardised source evidences a standard-across claim',
+    adoptionOf('Became standard across the platform teams.',
+      'Standardised the linter across every team.'), []);
+  equal('and the plural noun does too',
+    adoptionOf('Became standard across the platform teams.',
+      'Set coding standards for every team.'), []);
+  equal('but a source that claims no standard at all is still caught',
+    adoptionOf('Became standard across the platform teams.', 'Implemented a linter.'),
+    ['standard across']);
+  // Matched per statement: collapsing the document first let a phrase form
+  // across a line break that neither line contains, and the resulting claim
+  // had no CV line to quote back.
+  equal('a phrase spanning two statements is not a claim',
+    adoptionOf('...we used\nDaily standups ran on it.', 'nothing relevant here'), []);
+  equal('every adoption claim carries the line it came from',
+    adoptionClaims('Built internal tooling, used daily across the engineering org.', scopeSource)
+      .every(claim => typeof claim.line === 'string' && claim.line.length > 0),
+    true);
+
+  // Simplified Chinese (#5290). Negative cases first: a bigram is a smaller
+  // unit than an English word, so a wrong link is where a false block comes from.
+  const zhScopeOf = (target, source) => scopeInflationClaims(target, source, 'zh').map(claim => claim.value);
+  equal('zh: unrelated items sharing one bigram do not link',
+    zhScopeOf('主导了计费系统迁移。', '参与了日志系统重构。'), []);
+  equal('zh: unrelated items sharing two bigrams do not link',
+    zhScopeOf('主导了订单系统性能优化。', '参与了客服工单系统。'), []);
+  equal('zh: the same Latin tool on a different item does not link',
+    zhScopeOf('主导了Kafka消息队列迁移。', '参与了Kafka集群扩容。'), []);
+  equal('zh: 参与A，主导B does not vouch for 主导A',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移，主导了支付模块重构。'), ['主导了计费系统迁移']);
+  equal('zh: 参与A，主导B still vouches for 主导B',
+    zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移，主导了支付模块重构。'), []);
+  equal('zh: a noun that starts with a verb is not a scope claim',
+    zhScopeOf('负责人：计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: 负责人 with no punctuation after it is still a noun',
+    zhScopeOf('负责人计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: an object that opens with 人 keeps the verb (主导人工智能)',
+    zhScopeOf('主导人工智能平台建设。', '参与人工智能平台建设。'), ['主导人工智能平台建设']);
+  equal('zh: 支持人工智能… is ranked, so it does not vouch for 主导',
+    zhScopeOf('主导人工智能平台建设。', '支持人工智能平台建设。'), ['主导人工智能平台建设']);
+  equal('zh: 参与A并主导B still vouches for 主导B',
+    zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移并主导了支付模块重构。'), []);
+  equal('zh: 参与A并主导B does not vouch for 主导A',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移并主导了支付模块重构。'), ['主导了计费系统迁移']);
+  equal('zh: 合并 before a scope verb is not split',
+    zhScopeOf('主导了代码合并完成流程改造。', '参与了代码合并完成流程改造。'), ['主导了代码合并完成流程改造']);
+  equal('zh: an adverb before a weaker source verb does not make it vouch',
+    zhScopeOf('主导了计费系统迁移。', '深度参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: an adverb before an equal source verb still vouches',
+    zhScopeOf('主导了计费系统迁移。', '主要负责计费系统迁移。'), []);
+  equal('zh: 独立 stays part of the verb, not a stripped adverb',
+    zhScopeOf('独立负责计费系统迁移。', '负责计费系统迁移。'), []);
+  // Positive cases.
+  equal('zh: 参与 rewritten as 主导 is caught',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: the longest verb wins (独立完成 over 完成, 协助 over 完成)',
+    zhScopeOf('独立完成数据库切换。', '协助完成数据库切换。'), ['独立完成数据库切换']);
+  equal('zh: a particle does not change the item',
+    zhScopeOf('主导计费系统的迁移。', '参与了计费系统迁移工作。'), ['主导计费系统的迁移']);
+  equal('zh: one Latin name plus one bigram links',
+    zhScopeOf('主导了Kafka迁移。', '参与Kafka迁移。'), ['主导了kafka迁移']);
+  equal('zh: 负责 to 主导 passes (same tier)',
+    zhScopeOf('主导了计费系统迁移。', '负责计费系统迁移。'), []);
+  equal('zh: a subject-led source vouches',
+    zhScopeOf('主导了计费系统迁移。', '我负责计费系统迁移。'), []);
+  equal('zh: an unranked source verb vouches',
+    zhScopeOf('主导了计费系统迁移。', '推动了计费系统迁移。'), []);
+  equal('zh: the target side is clause-scoped too',
+    zhScopeOf('参与了日志系统重构，并主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: a comma-less 并 splits the target too',
+    zhScopeOf('参与了日志系统重构并主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: a markdown bullet is read like a sentence',
+    zhScopeOf('- 主导了计费系统迁移', '- 参与了计费系统迁移'), ['主导了计费系统迁移']);
+
+  const zhAdoptionOf = (target, source) => adoptionClaims(target, source, 'zh').map(claim => claim.value).sort();
+  equal('zh: 被全公司采用 without a source warns',
+    zhAdoptionOf('内部工具被全公司采用。', '开发了内部工具。'), ['全公司', '被全公司采用']);
+  equal('zh: 推广至全公司 in the source supports it',
+    zhAdoptionOf('内部工具被全公司采用。', '内部工具已推广至全公司。'), []);
+  equal('zh: 日活 and 服务…用户 without a source warn',
+    zhAdoptionOf('服务日活十万用户。', '开发了内部工具。'), ['日活', '服务日活十万用户']);
+  equal('zh: 微服务 and 用户增长 in the source are not reach evidence',
+    zhAdoptionOf('服务十万用户。', '负责微服务拆分和用户增长平台。'), ['服务十万用户']);
+  equal('zh: a verbatim reach statement in the source supports the claim',
+    zhAdoptionOf('服务日活十万用户。', '平台服务日活十万用户。'), []);
+  equal('zh: a source that states reach supports the claim',
+    zhAdoptionOf('服务十万用户。', '平台用户规模达到十万。'), []);
+  equal('zh: a source with a user count supports the claim',
+    zhAdoptionOf('服务十万用户。', '支撑了十万用户的访问。'), []);
+  equal('zh: an English adoption phrase is not read on the zh path',
+    zhAdoptionOf('Used daily across the engineering org.', '开发了内部工具。'), []);
+
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
+}
+
+/** Print advisory facts (unsourced adoption claims, possible verb drift) for a human to confirm. */
+export function printAdvisoryFacts(facts = [], print = console.warn) {
+  for (const claim of facts) {
+    const { kind, value, line, sourceLine } = claim;
+    if (kind === 'drift') {
+      print(`  - possible verb drift: ${value}`);
+      if (line && line !== value) print(`      CV:     ${line}`);
+      if (sourceLine) print(`      source: ${sourceLine}`);
+      const advice = driftClaimAdvice(claim);
+      print(`      ${advice[0].toUpperCase()}${advice.slice(1)}`);
+      continue;
+    }
+    print(`  - unsourced ${kind} claim: ${value}`);
+    if (line && line !== value) print(`      CV: ${line}`);
+  }
+}
+
+/**
+ * Print everything that made a verdict 'warn': advisory phrases, advisory
+ * facts, and what the gate could not read.
+ *
+ * One function for the CLI and every renderer that calls assertFacts. The
+ * renderers used to print the phrases and facts themselves and leave out the
+ * coverage note, so a document the gate could not read showed a warning header
+ * with no reason under it (#5348).
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: {message: string, spans: string[]}|null}} result
+ * @param {(line: string) => void} [print]
+ */
+export function printFactWarnings(result, print = console.warn) {
+  for (const phrase of result.warnings ?? []) print(`  - advisory phrase: ${phrase}`);
+  printAdvisoryFacts(result.advisoryFacts, print);
+  if (result.coverage) {
+    print(`  - not checked: ${result.coverage.message}`);
+    for (const span of result.coverage.spans.slice(0, 8)) print(`      ${span}`);
+  }
+}
+
+/**
+ * What a second check of a document found that the first did not, ready for
+ * printFactWarnings(): a caller that checks twice has already reported the rest.
+ *
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} first
+ * @param {{warnings?: string[], advisoryFacts?: object[], coverage?: object}} second
+ * @returns {{warnings: string[], advisoryFacts: object[], coverage: object|null}|null}
+ *   null when there is nothing new.
+ */
+export function newFactWarnings(first, second) {
+  const factKey = ({ kind, value }) => `${kind}\u0000${value}`;
+  const seenFacts = new Set((first.advisoryFacts ?? []).map(factKey));
+  const seenPhrases = new Set(first.warnings ?? []);
+  const warnings = (second.warnings ?? []).filter((phrase) => !seenPhrases.has(phrase));
+  const advisoryFacts = (second.advisoryFacts ?? []).filter((fact) => !seenFacts.has(factKey(fact)));
+  const coverage = first.coverage ? null : (second.coverage ?? null);
+  return warnings.length || advisoryFacts.length || coverage ? { warnings, advisoryFacts, coverage } : null;
 }
 
 /** Run the fact validator CLI and return its process exit code. */
@@ -1213,6 +4120,16 @@ export function runCli(args = process.argv.slice(2)) {
   const targetPath = resolveInputPath(parsed.targetArg);
   if (!existsSync(targetPath)) {
     console.error(`ERROR: target file not found: ${parsed.targetArg}`);
+    return 1;
+  }
+  // An explicit --source that does not exist is a typo, not empty evidence.
+  // Read as '' it blocked every claim in the CV and told the user to "Add
+  // career evidence" to cv.md, for facts their real cv.md holds.
+  // generate-latex.mjs refuses the same case ("--source file not found"). The
+  // default sources are left alone: article-digest.md is optional.
+  const missingSources = parsed.sourcePaths.filter((p) => !existsSync(resolveInputPath(p)));
+  if (missingSources.length > 0) {
+    console.error(`ERROR: --source file not found: ${missingSources.join(', ')}`);
     return 1;
   }
   try {
@@ -1236,11 +4153,7 @@ export function runCli(args = process.argv.slice(2)) {
     }
     if (result.verdict === 'warn') {
       console.error(`CV fact check warning: ${basename(targetPath)}`);
-      for (const phrase of result.warnings) console.error(`  - advisory phrase: ${phrase}`);
-      if (result.coverage) {
-        console.error(`  - not checked: ${result.coverage.message}`);
-        for (const span of result.coverage.spans.slice(0, 8)) console.error(`      ${span}`);
-      }
+      printFactWarnings(result, console.error);
       return 0;
     }
     console.error(`CV fact check failed: ${basename(targetPath)}`);
@@ -1250,17 +4163,26 @@ export function runCli(args = process.argv.slice(2)) {
     }
     if (result.unsupportedFacts.length) {
       console.error('\nNon-metric facts absent from sources:');
-      for (const { kind, value } of result.unsupportedFacts) console.error(`  - ${kind}: ${value}`);
+      for (const claim of result.unsupportedFacts) {
+        const { kind, value, line, sourceLine } = claim;
+        console.error(`  - ${kind}: ${value}`);
+        if (line && line !== value) console.error(`      CV:     ${line}`);
+        if (sourceLine) console.error(`      source: ${sourceLine}`);
+        if (kind === 'scope' || kind === 'drift') {
+          const advice = kind === 'scope' ? scopeClaimAdvice(claim) : driftClaimAdvice(claim);
+          console.error(`      ${advice[0].toUpperCase()}${advice.slice(1)}`);
+        }
+      }
     }
     if (result.forbidden.length) {
       console.error('\nForbidden phrases found:');
       for (const phrase of result.forbidden) console.error(`  - ${phrase}`);
     }
-    console.error('\nAdd real evidence to cv.md/article-digest.md, or allow a verified exception in config/cv-facts.json.');
+    console.error(`\n${factSourceAdvice()}`);
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], advisoryFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);

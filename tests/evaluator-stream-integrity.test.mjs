@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -10,7 +10,6 @@ import { fail, linkRepoPackage, NODE, pass, rmSync, ROOT } from './helpers.mjs';
 const exec = promisify(execFile);
 const evaluation = 'Synthetic evaluation: caf\u00e9.\n---SCORE_SUMMARY---\nCOMPANY: Example\nROLE: Engineer\nSCORE: 4.2\nARCHETYPE: IC\nLEGITIMACY: High Confidence\n---END_SUMMARY---';
 const jd = 'Synthetic JD marker: build reliable software with a team of engineers.\n## Responsibilities\nWrite tests.';
-const systemText = message => typeof message.content === 'string' ? message.content : message.content.map(p => p.text).join('');
 function write(path, text) {
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, text, 'utf8');
@@ -25,13 +24,13 @@ async function fixture(engine, scenario, check) {
     for (const file of [
       `${engine}-eval.mjs`, 'path-resolver.mjs', 'profile-language.mjs',
       'reserve-report-num.mjs', 'tracker-parse.mjs', 'tracker-aliases.json',
-      'tracker-utils.mjs', 'pipeline-lock.mjs', 'lib/is-main-module.mjs',
-      'lib/context-budget.mjs', 'utils/token-tracker.mjs',
+      'tracker-utils.mjs', 'pipeline-lock.mjs', 'utils/token-tracker.mjs',
     ]) {
       const dest = join(code, file);
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(join(ROOT, file), dest);
     }
+    cpSync(join(ROOT, 'lib'), join(code, 'lib'), { recursive: true });
     linkRepoPackage(code, 'js-yaml');
     write(join(code, 'modes/_shared.md'), '## Scoring System\nUse evidence.\n');
     write(join(code, 'modes/oferta.md'), 'Evaluate the job.\n');
@@ -49,9 +48,25 @@ async function fixture(engine, scenario, check) {
       req.on('data', chunk => { raw += chunk; });
       req.on('end', () => {
         requests.push(JSON.parse(raw));
+        if (scenario.reject && (requests.length === 1 || scenario.reject.always)) {
+          res.writeHead(scenario.reject.status);
+          res.end(scenario.reject.body);
+          return;
+        }
         res.setHeader('Content-Type', engine === 'openai' ? 'text/event-stream' : 'application/x-ndjson');
         const body = Buffer.from(scenario.body ?? complete(engine));
-        if (scenario.fragment) {
+        if (scenario.disconnect) {
+          res.write(body);
+          setImmediate(() => res.destroy());
+        } else if (scenario.fragment === 'bytes') {
+          let offset = 0;
+          const next = () => {
+            if (offset === body.length) { res.end(); return; }
+            res.write(body.subarray(offset, ++offset));
+            setImmediate(next);
+          };
+          next();
+        } else if (scenario.fragment) {
           // Separate writes across turns, including inside the two-byte UTF-8 e-acute.
           const split = body.indexOf(Buffer.from('\u00e9')) + 1;
           res.write(body.subarray(0, split));
@@ -67,7 +82,7 @@ async function fixture(engine, scenario, check) {
     let output;
     try {
       output = { code: 0, ...await exec(NODE, [join(code, `${engine}-eval.mjs`), '--url',
-        engine === 'openai' ? `${url}/v1` : url, '--model', 'synthetic-test',
+        engine === 'openai' ? `${url}/v1` : url, '--model', scenario.model ?? 'synthetic-test',
         ...(scenario.args ?? []), jd], { cwd: sandbox, env, timeout: 20000, maxBuffer: 2 * 1024 * 1024 }) };
     } catch (error) {
       output = { code: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? '' };
@@ -105,18 +120,26 @@ for (const engine of ['openai', 'ollama']) {
     { name: 'fragmented UTF-8', body: complete(engine), fragment: true, ok: true },
     { name: 'terminal without trailing newline', body: complete(engine).trimEnd(), ok: true },
     { name: 'empty stream', body: '' },
+    { name: 'transport interruption', body: content(engine), disconnect: true },
+    { name: 'split bytes and CRLF', body: complete(engine).replace(/\n/g, '\r\n'), fragment: 'bytes', ok: true },
+    { name: 'invalid UTF-8', body: Buffer.concat([Buffer.from(content(engine)), Buffer.from([0xc3]), Buffer.from(terminal(engine))]) },
     { name: 'EOF before terminal', body: content(engine) },
     { name: 'in-band error after content', body: content(engine) + error },
     { name: 'malformed middle record', body: content(engine) + (engine === 'openai' ? 'data: {broken}\n\n' : '{broken}\n') + terminal(engine) },
     { name: 'truncated final record', body: content(engine) + (engine === 'openai' ? 'data: {"choices":' : '{"done":') },
     { name: 'output limit reached', body: content(engine) + terminal(engine, 'length') },
     { name: 'empty completed response', body: terminal(engine) },
+    { name: 'malformed record after successful finish', body: content(engine) + (engine === 'openai'
+      ? 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: {broken}\n\n'
+      : terminal(engine) + '{broken}\n') },
   ]) {
     await fixture(engine, scenario, ({ code, stdout, stderr, data }) => {
       if (scenario.ok) {
         assert.equal(code, 0, stderr);
         assert.ok(stdout.includes(evaluation.split('\n')[0]));
-        assert.equal(files(join(data, 'reports')).filter(f => f.endsWith('.md')).length, 1);
+        const reports = files(join(data, 'reports')).filter(f => f.endsWith('.md'));
+        assert.equal(reports.length, 1);
+        assert.ok(readFileSync(join(data, 'reports', reports[0]), 'utf8').includes(evaluation.split('\n')[0]));
         assert.equal(files(join(data, 'batch/tracker-additions')).length, 1);
       } else {
         assert.equal(code, 1, 'generation failure must exit 1');
@@ -140,7 +163,7 @@ for (const [name, body, pattern] of [
   await fixture('openai', { name, body }, ({ code, stdout, stderr, requests }) => {
     assert.equal(code, 0, stderr);
     assert.match(stdout, pattern);
-    assert.equal(requests[0].stream_options, undefined, 'do not force optional usage flags on compatible servers');
+    assert.deepEqual(requests[0].stream_options, { include_usage: true });
   });
 }
 for (const [name, body] of [
@@ -154,3 +177,98 @@ for (const [name, body] of [
     assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
   });
 }
+
+for (const engine of ['openai', 'ollama']) {
+  const event = obj => engine === 'openai'
+    ? `data: ${JSON.stringify(obj)}\n\n`
+    : JSON.stringify(obj) + '\n';
+  const measured = counts => engine === 'openai'
+    ? content(engine) + event({ choices: [{ delta: {}, finish_reason: 'stop' }] })
+      + event({ choices: [], usage: counts }) + 'data: [DONE]\n\n'
+    : content(engine) + event({ done: true, done_reason: 'stop',
+      prompt_eval_count: counts?.prompt_tokens, eval_count: counts?.completion_tokens });
+  for (const [name, counts, expected] of [
+    ['genuine measured zero', { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, /evaluation:\s+0\.0k prompt \/ 0\.0k completion/],
+    ['missing counts', undefined, /evaluation:\s+usage unavailable/],
+    ['partial counts', { prompt_tokens: 100 }, /evaluation:\s+usage unavailable/],
+    ['invalid counts', { prompt_tokens: -1, completion_tokens: 10 }, /evaluation:\s+usage unavailable/],
+    ['reported counts without total', { prompt_tokens: 300, completion_tokens: 100 }, /total:\s+0\.4k tokens/],
+  ]) {
+    await fixture(engine, { name, body: measured(counts), model: 'gpt-4o-mini' }, ({ code, stdout, stderr }) => {
+      assert.equal(code, 0, stderr);
+      assert.match(stdout, expected);
+      if (/unavailable/.test(expected.source)) assert.doesNotMatch(stdout, /total:|\$0\.0000/);
+      if (name === 'genuine measured zero') assert.match(stdout, /total:\s+0\.0k tokens \(\$0\.0000\)/);
+    });
+  }
+  const thinking = engine === 'openai'
+    ? { choices: [{ delta: { reasoning_content: 'Thinking without an answer' } }] }
+    : { message: { thinking: 'Thinking without an answer', content: '' }, done: false };
+  const toolCall = { id: 'fixture-call', type: 'function', function: { name: 'not_supported', arguments: '{}' } };
+  const tools = engine === 'openai'
+    ? { choices: [{ delta: { tool_calls: [toolCall] } }] }
+    : { message: { tool_calls: [toolCall], content: '' }, done: false };
+  for (const [name, body] of [
+    ['thinking-only terminal response', event(thinking) + terminal(engine)],
+    ['tool-only terminal response', event(tools) + terminal(engine)],
+    ['tool call mixed with text', content(engine) + event(tools) + terminal(engine)],
+  ]) {
+    await fixture(engine, { name, body }, ({ code, data }) => {
+      assert.equal(code, 1);
+      assert.deepEqual(files(join(data, 'reports')), []);
+      assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
+    });
+  }
+}
+
+await fixture('openai', { name: 'latest standard and Groq counts retained',
+  body: content('openai') + 'data: {"choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10}}\n\n'
+    + 'data: {"choices":[],"x_groq":{"usage":{"prompt_tokens":400,"completion_tokens":200}}}\n\n'
+    + terminal('openai'),
+}, ({ code, stdout, stderr }) => {
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /evaluation:\s+0\.4k prompt \/ 0\.2k completion/);
+  assert.match(stdout, /total:\s+0\.6k tokens/);
+});
+await fixture('openai', { name: 'simultaneous reasoning and answer',
+  body: 'data: ' + JSON.stringify({ choices: [{ delta: { reasoning_content: 'Reasoning', content: evaluation } }] })
+    + '\n\n' + terminal('openai'),
+}, ({ code, stdout, stderr }) => {
+  assert.equal(code, 0, stderr);
+  assert.ok(stdout.includes(evaluation));
+});
+for (const status of [400, 422]) {
+  await fixture('openai', { name: `unsupported include_usage retry (${status})`,
+    reject: { status, body: '{"error":"unsupported stream_options.include_usage"}' },
+  }, ({ code, requests, stderr }) => {
+    assert.equal(code, 0, stderr);
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests[0].stream_options, { include_usage: true });
+    assert.equal(requests[1].stream_options, undefined);
+    const { stream_options, ...first } = requests[0];
+    assert.deepEqual(requests[1], first, 'retry changes only the rejected optional field');
+  });
+}
+for (const [status, body] of [[422, '{"error":"unknown model"}'], [500, '{"error":"include_usage backend failure"}']]) {
+  await fixture('openai', { name: `unrelated HTTP ${status} is not retried`, reject: { status, body, always: true } },
+    ({ code, requests, data }) => {
+      assert.equal(code, 1);
+      assert.equal(requests.length, 1);
+      assert.deepEqual(files(join(data, 'reports')), []);
+      assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
+    });
+}
+
+for (const engine of ['openai', 'ollama']) {
+  await fixture(engine, { name: 'complete no-save response', args: ['--no-save'] }, ({ code, data, stderr }) => {
+    assert.equal(code, 0, stderr);
+    assert.deepEqual(files(join(data, 'reports')), []);
+    assert.deepEqual(files(join(data, 'batch/tracker-additions')), []);
+  });
+}
+await fixture('ollama', { name: 'done:true without optional reason',
+  body: content('ollama') + '{"done":true,"prompt_eval_count":300,"eval_count":100}',
+}, ({ code, stdout, stderr }) => {
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /total:\s+0\.4k tokens/);
+});

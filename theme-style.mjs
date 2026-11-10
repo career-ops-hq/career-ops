@@ -7,11 +7,15 @@
  * Users declare a `style:` block in config/profile.yml:
  *
  *   style:
- *     accent_color:    "#2563eb"
- *     secondary_color: "#111827"
- *     font_family:     "Outfit, Inter, sans-serif"
- *     font_size:       "10pt"
- *     margin:          "0.5in"
+ *     accent_color:     "#2563eb"
+ *     secondary_color:  "#111827"
+ *     tag_color:        "#0e7490"   # competency-tag text
+ *     tag_bg:           "#ecfeff"   # competency-tag and project-tech fill
+ *     tag_border:       "#a5f3fc"   # competency-tag border
+ *     font_family:      "Outfit, Inter, sans-serif"
+ *     font_size:        "10pt"
+ *     margin:           "0.5in"
+ *     job_break_inside: "avoid"
  *
  * These are injected as CSS custom properties into the rendered HTML before it
  * hits the PDF pipeline. The templates read them via `var(--x, <default>)`, so a
@@ -27,16 +31,43 @@
  * Pure + dependency-light (js-yaml only) so it's unit-testable without Playwright.
  */
 import { readFileSync, existsSync } from 'fs';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { getProfilePath } from './path-resolver.mjs';
 
 // Recognized style tokens → the CSS custom property each maps to. Anything not
 // listed here is ignored, so a typo or an unrelated `style:` key is inert.
 export const STYLE_VAR_MAP = {
-  accent_color:    '--accent-color',
-  secondary_color: '--secondary-color',
-  font_family:     '--font-family',
-  font_size:       '--font-size',
-  margin:          '--page-margin',
+  accent_color:     '--accent-color',
+  secondary_color:  '--secondary-color',
+  tag_color:        '--tag-color',
+  tag_bg:           '--tag-bg',
+  tag_border:       '--tag-border',
+  font_family:      '--font-family',
+  font_size:        '--font-size',
+  margin:           '--page-margin',
+  // #3242: whether a Work Experience entry may split across a page break.
+  // Each template keeps its OWN current behavior as the default (its :root
+  // token default, or the .job var() fallback where it declares none), so
+  // this is purely additive — no shipped template's default pagination
+  // changes for anyone who doesn't set this. A break-inside keyword, normally
+  // "avoid" or "auto", same contract as the other tokens. Trade-off worth
+  // knowing: "avoid" cannot help an entry taller than a full page — it still
+  // splits, just after leaving a bottom gap on the page before it.
+  job_break_inside: '--job-break-inside',
+  // Whether a Projects entry may split across a page break. Same opt-in shape
+  // as job_break_inside above, and every shipped template keeps its current
+  // behavior (auto — a project may split) as the default, so this changes
+  // nobody's layout unless they set it.
+  //
+  // What "avoid" buys: `.project-tech { break-before: avoid }` keeps a tech
+  // line attached to its description, and when the break would land there
+  // Chromium satisfies that by moving the description's LAST LINE over too.
+  // A description ending in one short word therefore opens the next page as a
+  // lone word above the tech line, with the project title left behind. Keeping
+  // the whole entry together removes that, at the cost of a bottom gap on the
+  // page before it — and on a CV already near its page budget, that gap can
+  // cost a page. That trade is why this is opt-in rather than a new default.
+  project_break_inside: '--project-break-inside',
 };
 
 /**
@@ -45,14 +76,46 @@ export const STYLE_VAR_MAP = {
  * @param {string} [profilePath]
  * @returns {Record<string,string>}
  */
-export function readStyleTokens(profilePath = 'config/profile.yml') {
+export function readStyleTokens(profilePath = getProfilePath()) {
   try {
     if (!existsSync(profilePath)) return {};
-    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     return styleTokensFrom(raw?.style);
   } catch {
     return {};
   }
+}
+
+/**
+ * Read the `cv.locked_sections` array from a profile file, folding them into
+ * canonical section keys. Missing file or absent/null section → []. File-read,
+ * YAML-parse, and type errors propagate so invalid configurations fail loudly.
+ * @param {string} [profilePath]
+ * @param {Function} [foldKey] - Optional function to fold keys, defaults to lowercase
+ * @returns {string[]}
+ */
+export function readLockedSections(profilePath = getProfilePath(), foldKey = (s) => s.toLowerCase()) {
+  if (!existsSync(profilePath)) return [];
+  const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const locked = raw?.cv?.locked_sections;
+  if (locked === undefined || locked === null) return [];
+  if (typeof locked === 'string') {
+    const trimmed = locked.trim();
+    if (!trimmed) {
+      throw new TypeError(`Invalid cv.locked_sections in ${profilePath}: string cannot be empty`);
+    }
+    return [foldKey(trimmed)];
+  }
+  if (Array.isArray(locked)) {
+    return locked.map((item, idx) => {
+      if (typeof item !== 'string' || !item.trim()) {
+        throw new TypeError(`Invalid cv.locked_sections[${idx}] in ${profilePath}: expected a non-empty string, got ${typeof item === 'string' ? 'empty string' : typeof item}`);
+      }
+      return foldKey(item.trim());
+    });
+  }
+  throw new TypeError(`Invalid cv.locked_sections in ${profilePath}: expected a string or array of strings, got ${typeof locked}`);
 }
 
 /**
@@ -82,10 +145,10 @@ export function styleTokensFrom(style) {
  * @param {string} [profilePath]
  * @returns {string[]}
  */
-export function readCvSectionOrder(profilePath = 'config/profile.yml') {
+export function readCvSectionOrder(profilePath = getProfilePath()) {
   try {
     if (!existsSync(profilePath)) return [];
-    const raw = yaml.load(readFileSync(profilePath, 'utf-8')) || {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
     return cvSectionOrderFrom(raw?.cv);
   } catch {
     return [];
@@ -111,6 +174,58 @@ export function cvSectionOrderFrom(cv) {
 }
 
 /**
+ * Read the CV page budget from a profile file (#6325):
+ *
+ *   cv:
+ *     max_pages: 1
+ *     strict_pages: true
+ *
+ * Missing file / absent block / bad YAML → {}, same as readCvSectionOrder. A
+ * key that is present but unusable comes back in `invalid`, and the caller
+ * decides what that means for the document it is rendering.
+ * @param {string} [profilePath]
+ * @returns {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}}
+ */
+export function readCvPageBudget(profilePath = getProfilePath()) {
+  try {
+    if (!existsSync(profilePath)) return {};
+    const raw = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    return cvPageBudgetFrom(raw?.cv);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Map a parsed `cv:` block to the page-budget keys it sets. A key that is
+ * present but unusable is reported in `invalid` instead of being guessed at:
+ * a typo in a stated budget must not quietly become the 2-page default. An
+ * empty key (`max_pages:`, which parses as null) reads as unset. A quoted
+ * whole number ("1") is accepted, since YAML users quote values by habit.
+ * Exported for tests.
+ * @param {unknown} cv
+ * @returns {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}}
+ */
+export function cvPageBudgetFrom(cv) {
+  if (!cv || typeof cv !== 'object' || Array.isArray(cv)) return {};
+  const budget = {};
+  const invalid = [];
+  if (cv.max_pages != null) {
+    const value = typeof cv.max_pages === 'string' && /^\s*\d+\s*$/.test(cv.max_pages)
+      ? Number(cv.max_pages)
+      : cv.max_pages;
+    if (Number.isInteger(value) && value >= 1) budget.maxPages = value;
+    else invalid.push({ key: 'max_pages', message: `cv.max_pages "${cv.max_pages}" is not a positive integer` });
+  }
+  if (cv.strict_pages != null) {
+    if (typeof cv.strict_pages === 'boolean') budget.strictPages = cv.strict_pages;
+    else invalid.push({ key: 'strict_pages', message: `cv.strict_pages "${cv.strict_pages}" is not true or false` });
+  }
+  if (invalid.length > 0) budget.invalid = invalid;
+  return budget;
+}
+
+/**
  * Build a `<style>` block declaring the custom properties on :root, or '' when
  * there is nothing to declare. Values containing CSS/HTML control characters
  * (`; { } < >`) are dropped — a custom-property value can't legitimately contain
@@ -119,8 +234,18 @@ export function cvSectionOrderFrom(cv) {
  * @returns {string}
  */
 export function buildThemeStyleBlock(tokens) {
-  const decls = Object.entries(tokens || {})
-    .filter(([, v]) => typeof v === 'string' && v.trim() && !/[;{}<>]/.test(v))
+  const entries = Object.entries(tokens || {})
+    .filter(([, v]) => typeof v === 'string' && v.trim() && !/[;{}<>]/.test(v));
+  // --font-family always resolves (every template defines it on :root), so a
+  // template rule cannot tell the user's font from its own Latin default by
+  // reading it. --font-family-override exists only when the profile set
+  // font_family, so a script block whose default must stay its own curated
+  // stack (Arabic: Segoe UI / Tahoma, which the Latin default would otherwise
+  // displace for Arabic glyphs) can still let the profile font lead:
+  // `var(--font-family-override, 'Segoe UI'), 'Segoe UI', Tahoma, ...`.
+  const font = entries.find(([cssVar]) => cssVar === '--font-family');
+  if (font) entries.push(['--font-family-override', font[1]]);
+  const decls = entries
     .map(([cssVar, v]) => `${cssVar}: ${v.trim()};`)
     .join(' ');
   if (!decls) return '';

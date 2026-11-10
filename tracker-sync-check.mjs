@@ -20,8 +20,8 @@
  *   bucket rather than being silently guessed.
  *
  * Resolution (see compareLifecycle):
- *   Tier 1 (auto-resolve) — templates/states.yml's 8 canonical states have a
- *   one-way lifecycle order: Evaluated -> Applied -> Responded -> Interview
+ *   Tier 1 (auto-resolve) — templates/states.yml's canonical states have a
+ *   one-way lifecycle order: Evaluated -> Applied -> Responded -> Assessment -> Interview
  *   -> {Offer | Rejected | Discarded | SKIP} (the last four are terminal, no
  *   further order among them, but any of them supersedes an earlier stage).
  *   If the two files disagree and one side is strictly later-stage, that's
@@ -56,13 +56,16 @@ import { readFileSync, existsSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, normalizeTextKey } from './tracker-parse.mjs';
+import { findColumn } from './process-quality.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { normalizeCompanyName, companySimilarity } from './invite-match.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId, foldStatusInput } from './tracker-utils.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -75,14 +78,10 @@ const DEFAULT_INTERVIEWS_FILE = existsSync(join(DATA_ROOT, 'data/active-intervie
 const args = process.argv.slice(2);
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
-const appsFileIdx = args.indexOf('--apps-file');
-const APPS_FILE = appsFileIdx !== -1 && args[appsFileIdx + 1] !== undefined
-  ? args[appsFileIdx + 1]
-  : DEFAULT_APPS_FILE;
-const interviewsFileIdx = args.indexOf('--interviews-file');
-const INTERVIEWS_FILE = interviewsFileIdx !== -1 && args[interviewsFileIdx + 1] !== undefined
-  ? args[interviewsFileIdx + 1]
-  : DEFAULT_INTERVIEWS_FILE;
+// flagValue reads `--flag value` and `--flag=value`; indexOf() cannot see the
+// second spelling and quietly fell back to the default file.
+const APPS_FILE = flagValue(args, '--apps-file') || DEFAULT_APPS_FILE;
+const INTERVIEWS_FILE = flagValue(args, '--interviews-file') || DEFAULT_INTERVIEWS_FILE;
 
 // --- Canonical lifecycle (templates/states.yml) ---
 // Non-terminal states are strictly ordered; terminal states have no order
@@ -109,7 +108,7 @@ const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
  * @returns {{ order: string[], terminal: Set<string>, labels: Record<string,string> }}
  */
 export function loadLifecycle(statesPath) {
-  const doc = yaml.load(readFileSync(statesPath, 'utf-8'));
+  const doc = loadYaml(readFileSync(statesPath, 'utf-8'));
   if (!doc || !Array.isArray(doc.states)) {
     throw new Error(`Malformed states file at ${statesPath}: expected a top-level "states" list`);
   }
@@ -128,36 +127,25 @@ export function loadLifecycle(statesPath) {
 
 const { order: LIFECYCLE_ORDER, terminal: TERMINAL_STATUSES, labels: CANONICAL_LABELS } = loadLifecycle(STATES_FILE);
 
-// Mirrors the ALIASES map in analyze-patterns.mjs / verify-pipeline.mjs —
 // applications.md status cell normalization (bold markers, trailing dates,
-// Spanish aliases from the shipped default modes).
-const STATUS_ALIASES = {
-  'evaluada': 'evaluated', 'condicional': 'evaluated', 'hold': 'evaluated',
-  'evaluar': 'evaluated', 'verificar': 'evaluated',
-  'aplicado': 'applied', 'enviada': 'applied', 'aplicada': 'applied',
-  'applied': 'applied', 'sent': 'applied',
-  'respondido': 'responded',
-  'entrevista': 'interview',
-  'oferta': 'offer',
-  'rechazado': 'rejected', 'rechazada': 'rejected',
-  'descartado': 'discarded', 'descartada': 'discarded',
-  'cerrada': 'discarded', 'cancelada': 'discarded',
-  'no aplicar': 'skip', 'no_aplicar': 'skip', 'monitor': 'skip', 'geo blocker': 'skip',
-};
+// localized aliases). Every alias comes from templates/states.yml through the
+// shared resolver — no table here to drift from it.
+const CANONICAL_STATES = loadCanonicalStates(STATES_FILE);
 
 /**
- * Normalize an applications.md status cell to one of the 8 canonical ids.
+ * Normalize an applications.md status cell to one of the canonical ids.
+ * An unrecognized status keeps its own folded text, which compareLifecycle()
+ * then reports as ambiguous (Tier 2) rather than guessing a stage.
  * @param {string} raw
  * @returns {string}
  */
 export function normalizeStatus(raw) {
-  const clean = String(raw ?? '').replace(/\*\*/g, '').trim().toLowerCase()
-    .replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
-  return STATUS_ALIASES[clean] || clean;
+  return resolveCanonicalStateId(raw, CANONICAL_STATES)
+    ?? foldStatusInput(String(raw ?? '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, ''));
 }
 
 // active-interviews.md's Status column tracks a per-round state (Scheduled,
-// Confirmed, Completed, Rejected, ...), not one of the 8 canonical tracker
+// Confirmed, Completed, Rejected, ...), not one of the canonical tracker
 // states directly. Only the terminal outcomes below carry unambiguous
 // tracker-status meaning; anything else (Scheduled/Confirmed/Completed/
 // Pending/unrecognized) means the row is simply present in the live
@@ -175,7 +163,7 @@ const INTERVIEW_ROUND_STATUS_MAP = {
 };
 
 /**
- * Normalize an active-interviews.md Status cell to one of the 8 canonical
+ * Normalize an active-interviews.md Status cell to one of the canonical
  * ids, defaulting to "interview" (presence in the live interview log implies
  * at least that stage) when the cell isn't a recognized terminal outcome.
  * @param {string} raw
@@ -304,13 +292,6 @@ function loadActiveInterviewsWithLines(interviewsFile) {
   return parseActiveInterviewsWithLines(readFileSync(interviewsFile, 'utf-8'));
 }
 
-// Case-insensitive column lookup — same rationale as process-quality.mjs's
-// findColumn: header wording ("Notes" vs "notes") is candidate-editable.
-function findColumn(row, name) {
-  const key = Object.keys(row || {}).find(k => k.trim().toLowerCase() === name);
-  return key ? String(row[key] ?? '') : '';
-}
-
 // --- git blame timestamp (Tier 2 tiebreak) ---
 /**
  * Last-modified timestamp (ISO 8601) for one line of a tracked file, via
@@ -347,7 +328,10 @@ export function gitBlameTimestamp(filePath, lineNum, cwd = CAREER_OPS) {
  * to fuzzy Company+Role matching when absent: a candidate is a confident
  * fuzzy match only when company-name overlap clears FUZZY_COMPANY_THRESHOLD
  * AND role-matcher.mjs's roleFuzzyMatch agrees, and exactly one such
- * candidate exists. Any ambiguity — a duplicate tracker number, or more than
+ * candidate exists. When every candidate is the same employer, a single
+ * candidate whose role equals the interview role wins over near-miss titles
+ * ("Revenue Analytics Manager" over "Revenue Analytics Manager, Platform").
+ * Any other ambiguity — a duplicate tracker number, or more than
  * one fuzzy candidate regardless of whether their scores tie — is treated as
  * no match, not a guess (CodeRabbit review on PR #1505: silently taking
  * `.find()`'s first result, or only bailing on a score tie, can pair an
@@ -387,11 +371,15 @@ export function matchInterviewRow(interviewRow, trackerEntries) {
   if (candidates.length === 0) {
     return { entry: null, method: 'unmatched', confidence: 0, note: 'No tracker reference in Notes and no confident Company+Role fuzzy match' };
   }
-  if (candidates.length > 1) {
+  const roleKey = normalizeTextKey(role);
+  const exact = candidates.filter(({ entry }) => normalizeTextKey(entry.role) === roleKey);
+  const sameEmployer = candidates.every(({ entry }) => normalizeCompanyName(entry.company) === normCompany);
+  const match = candidates.length === 1 ? candidates[0] : (sameEmployer && exact.length === 1 ? exact[0] : null);
+  if (!match) {
     return { entry: null, method: 'unmatched', confidence: candidates[0].sim, note: `Ambiguous fuzzy match — ${candidates.length} tracker rows scored for "${company}"` };
   }
 
-  return { entry: candidates[0].entry, method: 'fuzzy', confidence: Math.round(candidates[0].sim * 1000) / 1000 };
+  return { entry: match.entry, method: 'fuzzy', confidence: Math.round(match.sim * 1000) / 1000 };
 }
 
 // --- Sync report ---
@@ -764,7 +752,28 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node tracker-sync-check.mjs [--summary] [--apps-file <path>] [--interviews-file <path>] [--self-test]
+
+  --summary                 human-readable table instead of JSON
+  --apps-file <path>        override the tracker path
+  --interviews-file <path>  override the active-interviews path
+  --self-test               run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. An unknown flag (`--sumary`) used to be ignored and a
+  // `--help` fell through to the analysis; validateFlags rejects the first and
+  // answers the second. requireOperand: `--apps-file` with nothing after it
+  // must not silently fall back to the default tracker.
+  validateFlags(
+    process.argv.slice(2),
+    ['--summary', '--self-test', '--apps-file', '--interviews-file', '--help', '-h'],
+    USAGE,
+    { valueFlags: ['--apps-file', '--interviews-file'], requireOperand: true },
+  );
   if (selfTestMode) {
     runSelfTest();
   }

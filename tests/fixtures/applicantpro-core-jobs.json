@@ -1,0 +1,81 @@
+{
+  "success": true,
+  "message": "This is where the full jobs list will show",
+  "data": {
+    "jobs": [
+      {
+        "id": 9000001,
+        "title": "Learning Coordinator",
+        "city": "Springfield",
+        "subdomain": "acme-example",
+        "iso3": "USA",
+        "abbreviation": "IL",
+        "siteId": 70123,
+        "startDateRef": "Sep 02, 2026",
+        "endDateRef": "Nov 02, 2026",
+        "untilFilled": 0,
+        "orgTitle": "People",
+        "workplaceType": "Onsite",
+        "employmentType": "Full Time",
+        "payType": "Salary",
+        "payTypeFrame": "per year",
+        "minSalary": "48,000",
+        "maxSalary": "50,000",
+        "jobLocation": "Springfield, IL, United States",
+        "streetAddress": "1 Example Way",
+        "jobUrl": "https://acme-example.applicantpro.com/jobs/9000001"
+      },
+      {
+        "id": 9000002,
+        "title": "Operations Manager",
+        "city": "Shelbyville",
+        "subdomain": "acme-example",
+        "abbreviation": "IL",
+        "stateName": "Illinois",
+        "startDateRef": "Oct 15, 2026",
+        "payType": "Salary",
+        "payTypeFrame": null,
+        "minSalary": "",
+        "maxSalary": "",
+        "jobLocation": "",
+        "jobUrl": "https://acme-example.applicantpro.com/jobs/9000002"
+      },
+      {
+        "id": 9000003,
+        "title": "  Site   Technician ",
+        "city": "Capital City",
+        "abbreviation": "IL",
+        "startDateRef": "not a date",
+        "payType": "Hourly",
+        "payTypeFrame": "per hour",
+        "minSalary": "25.00",
+        "maxSalary": "30.00",
+        "jobLocation": "Capital City, IL, United States",
+        "jobUrl": "https://acme-example.applicantpro.com/jobs/9000003"
+      },
+      {
+        "id": 9000004,
+        "title": "Payroll Analyst",
+        "city": "Ogdenville",
+        "abbreviation": "IL",
+        "startDateRef": "Oct 20, 2026",
+        "payType": "Salary",
+        "payTypeFrame": "per year",
+        "minSalary": "0",
+        "maxSalary": "0",
+        "jobLocation": "Ogdenville, IL, United States",
+        "jobUrl": "https://acme-example.applicantpro.com/jobs/9000004"
+      },
+      { "id": 9000005, "title": "", "jobLocation": "Nowhere" },
+      { "title": "Row Without An Id", "jobLocation": "Nowhere" },
+      { "id": "9000006/../../admin", "title": "Hostile Id", "jobLocation": "Nowhere" },
+      { "id": 9000001, "title": "Learning Coordinator (duplicate row)", "jobLocation": "Springfield" },
+      null
+    ],
+    "jobCount": 9,
+    "jobInfoOrder": { "payInfo": 1, "postingDate": 2 },
+    "searchResultText": "Number of Jobs: 9",
+    "showPostingDate": false,
+    "showWorkplaceType": false
+  }
+}

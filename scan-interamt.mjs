@@ -15,17 +15,30 @@
  *   node scan-interamt.mjs --dry-run
  *   node scan-interamt.mjs --all            # skip date filter (use for first scan)
  *   node scan-interamt.mjs --keyword "Softwareentwickler"
+ *   node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
  */
 
 import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import * as yaml from 'js-yaml';
-import { appendToPipeline, appendToScanHistory, loadSeenUrls, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import {
+  appendToPipeline,
+  appendToScanHistory,
+  appendUnrecordedToScanHistory,
+  BROWSER_PROCESS_ENV,
+  DATA_ROOT as SCAN_DATA_ROOT,
+  PORTALS_PATH,
+  SCAN_HISTORY_PATH,
+} from './scan.mjs';
+import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
+import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -57,22 +70,38 @@ const DEFAULT_KEYWORDS = [
 
 // ── Args ─────────────────────────────────────────────────────────────
 
+// Checked by validateFlags() in the main-module block below, before main()
+// runs (#4599). Without it, --help or a mistyped --dryrun fell through to a
+// live scan that appended to data/pipeline.md.
+const KNOWN_FLAGS = ['--dry-run', '--debug', '--all', '--keyword', '--help', '-h'];
+const VALUE_FLAGS = ['--keyword'];
+
+const USAGE = `Usage:
+  node scan-interamt.mjs
+  node scan-interamt.mjs --dry-run
+  node scan-interamt.mjs --all            # skip date filter (use for first scan)
+  node scan-interamt.mjs --keyword "Softwareentwickler"
+  node scan-interamt.mjs --debug          # save a screenshot and the page HTML to output/
+  node scan-interamt.mjs --help|-h        # print this usage block and exit`;
+
 const args = process.argv.slice(2);
 const DRY_RUN    = args.includes('--dry-run');
 const DEBUG      = args.includes('--debug');
 const NO_DATE_FILTER = args.includes('--all');
-const kwIdx = args.indexOf('--keyword');
-if (kwIdx !== -1 && (args[kwIdx + 1] === undefined || args[kwIdx + 1].startsWith('--'))) {
+// flagValue/hasFlag rather than indexOf: validateFlags accepts --keyword=value
+// for a value flag, and indexOf() cannot see that form, so the scan would run
+// every keyword instead of the one asked for.
+const SINGLE_KEYWORD = flagValue(args, '--keyword') ?? null;
+if (hasFlag(args, '--keyword') && (!SINGLE_KEYWORD || SINGLE_KEYWORD.startsWith('--'))) {
   console.error('Error: --keyword requires a value, e.g. --keyword "Softwareentwickler"');
   process.exit(1);
 }
-const SINGLE_KEYWORD = kwIdx !== -1 ? args[kwIdx + 1] : null;
 
 // ── Load portals.yml ─────────────────────────────────────────────────
 
 let config = {};
 if (existsSync(PORTALS_PATH)) {
-  config = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
+  config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8')) || {};
 }
 
 const interamtSearches = config.interamt_searches || DEFAULT_KEYWORDS.map(k => ({ was: k }));
@@ -82,28 +111,11 @@ const keywords = SINGLE_KEYWORD
 
 // ── Filters ──────────────────────────────────────────────────────────
 
-const titleFilter = config.title_filter || {};
-const positiveKw = (titleFilter.positive || []).map(k => k.toLowerCase());
-const negativeKw = (titleFilter.negative || []).map(k => k.toLowerCase());
-
-function matchesTitle(title) {
-  const lower = title.toLowerCase();
-  if (negativeKw.some(k => lower.includes(k))) return false;
-  if (positiveKw.length === 0) return true;
-  return positiveKw.some(k => lower.includes(k));
-}
-
-const locFilter = config.location_filter || {};
-const locAllow = (locFilter.allow || []).map(k => k.toLowerCase());
-const locBlock = (locFilter.block || []).map(k => k.toLowerCase());
-
-function matchesLocation(loc) {
-  if (!loc) return true;
-  const lower = loc.toLowerCase();
-  if (locBlock.some(k => lower.includes(k))) return false;
-  if (locAllow.length === 0) return true;
-  return locAllow.some(k => lower.includes(k));
-}
+// title_filter, location_filter, data/blacklist.md and the seen set all go
+// through the shared admission gate in main(), built from the same scan.mjs
+// matchers every other scanner uses. The private `includes()` matchers that
+// lived here read `word:Intern` as literal text, matched "KI" inside "Kita",
+// never matched an AND group and ignored always_allow/block_hard (#5478).
 
 // ── Date helpers ─────────────────────────────────────────────────────
 
@@ -119,7 +131,7 @@ function parseDE(str) {
 function loadLastScanDate() {
   if (!existsSync(SCAN_HISTORY)) return null;
   let latest = null;
-  readFileSync(SCAN_HISTORY, 'utf-8').split('\n').slice(1).forEach(line => {
+  scanHistoryDataLines(readFileSync(SCAN_HISTORY, 'utf-8')).forEach(line => {
     const parts = line.split('\t');
     if (parts[2] !== 'interamt') return;
     const d = new Date((parts[1] || '') + 'T00:00:00Z');
@@ -272,7 +284,7 @@ async function searchInteramt(page, keyword, isFirst) {
 async function main() {
   mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
 
-  const { seen } = loadSeenUrls();
+  const gate = createAdmissionGate({ config });
   const date = localToday();
 
   const lastScanDate = NO_DATE_FILTER ? null : loadLastScanDate();
@@ -289,8 +301,16 @@ async function main() {
   const dateSkipped = [];
   const dupeSkipped = [];
   const errors = [];
+  // Searches overlap, so one offer often comes back under several keywords.
+  // Its first sighting already got the right verdict and scan-history row; a
+  // repeat must not add a skipped_dup row, which pins the URL, on top of a
+  // blacklist, location or date skip that is meant to be revisited later.
+  const handledThisRun = new Set();
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions(
+    { headless: true },
+    { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+  ));
   const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
   const page = await context.newPage();
 
@@ -316,13 +336,18 @@ async function main() {
             postedAt: pubDate ? pubDate.getTime() : undefined,
           };
 
-          if (!matchesTitle(offer.title)) { seen.add(canonical.url); titleSkipped.push(canonical); continue; }
-          if (!matchesLocation(location)) { seen.add(canonical.url); locationSkipped.push(canonical); continue; }
+          if (handledThisRun.has(canonical.url)) continue;
+          handledThisRun.add(canonical.url);
+          const reason = gate.check(canonical);
+          if (reason === 'seen') { dupeSkipped.push(canonical); continue; }
+          // Blacklist skips are counted, not written to scan-history, as in
+          // scan.mjs: removing the entry later lets the posting through again.
+          if (reason === 'blacklisted') continue;
+          if (reason === 'title') { titleSkipped.push(canonical); continue; }
+          if (reason === 'location') { locationSkipped.push(canonical); continue; }
           // Same-day offers pass: lastScanDate is the day of the last run, and an
           // offer published later that same day should not be treated as stale.
-          if (lastScanDate && pubDate && pubDate < lastScanDate) { seen.add(canonical.url); dateSkipped.push(canonical); continue; }
-          if (seen.has(canonical.url)) { dupeSkipped.push(canonical); continue; }
-          seen.add(canonical.url);
+          if (lastScanDate && pubDate && pubDate < lastScanDate) { dateSkipped.push(canonical); continue; }
           newOffers.push(canonical);
         }
       } catch (err) {
@@ -338,10 +363,12 @@ async function main() {
   if (!DRY_RUN) {
     if (newOffers.length > 0) await appendToPipeline(newOffers);
     if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
-    if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
-    if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
-    if (dateSkipped.length > 0) await appendToScanHistory(dateSkipped, date, 'skipped_date');
-    if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
+    // Every search hands the same skipped postings back, so each is recorded
+    // once per status, not once per run (#2695, as scan.mjs records its own).
+    await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
+    await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
+    await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
+    await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
   // Summary
@@ -350,6 +377,7 @@ async function main() {
   console.log(`Total found:        ${totalFound}`);
   console.log(`Filtered by title:  ${titleSkipped.length}`);
   console.log(`Filtered location:  ${locationSkipped.length}`);
+  console.log(`Blacklisted:        ${gate.counts.blacklisted}`);
   console.log(`Filtered by date:   ${dateSkipped.length}`);
   console.log(`Duplicates:         ${dupeSkipped.length}`);
   console.log(`New offers:         ${newOffers.length}`);
@@ -381,6 +409,7 @@ async function main() {
 // doing that. A module should not scan the internet as a side effect of being
 // loaded (#3510).
 if (isMainModule(import.meta.url)) {
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   main().catch(err => {
     console.error('Fatal:', err.message);
     process.exit(1);
