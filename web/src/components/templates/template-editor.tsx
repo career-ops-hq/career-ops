@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 // Edit the body of one of your own templates. Saving goes through the server,
@@ -67,6 +67,13 @@ export function TemplateEditor({ kind, name, title, onClose, onSaved }: Props) {
   };
 
   const dirty = text !== null && text !== saved;
+  // The editor opens below the whole gallery, so take focus (which also scrolls it
+  // into view) once there is a textarea to focus.
+  const loaded = text !== null;
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (loaded) areaRef.current?.focus();
+  }, [loaded]);
 
   return (
     <section aria-label={`Edit ${title}`} className="mt-4 rounded-xl border border-border bg-surface/40 p-3">
@@ -77,6 +84,7 @@ export function TemplateEditor({ kind, name, title, onClose, onSaved }: Props) {
         <Loader2 className="mt-2 size-4 animate-spin text-muted" aria-label="Opening template" />
       ) : (
         <textarea
+          ref={areaRef}
           id={fieldId}
           value={text ?? ""}
           onChange={(e) => setText(e.target.value)}

@@ -26,3 +26,9 @@ test("Save is still gated on busy as well", () => {
   assert.ok(opening, "found the Save button");
   assert.match(opening[0], /busy/);
 });
+
+test("the textarea takes focus once the template has loaded", () => {
+  assert.match(src, /<textarea\b[^>]*ref=\{areaRef\}/);
+  assert.match(src, /useEffect\(\(\) => \{[^}]*areaRef\.current\?\.focus\(\)[^}]*\}, \[loaded\]\)/);
+  assert.match(src, /const loaded = text !== null/);
+});

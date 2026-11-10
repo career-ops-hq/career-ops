@@ -45,6 +45,8 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   // Whether a list has ever loaded, read by a failing reload. Set from the load
   // handler, not during render.
   const hasListRef = useRef(false);
+  // The Edit button that opened the editor, so closing it puts focus back there.
+  const returnFocus = useRef<HTMLElement | null>(null);
 
   const load = useCallback((listIsCurrent = false) => {
     setLoadError(false);
@@ -220,7 +222,10 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
                   </button>
                   {t.layer === "user" && (
                     <>
-                      <button type="button" disabled={busy !== null || editLocks(editing, t.name).edit} title={editLocks(editing, t.name).edit ? "Close the open editor first" : undefined} onClick={() => setEditing(t.name)} className="underline">
+                      <button type="button" disabled={busy !== null || editLocks(editing, t.name).edit} title={editLocks(editing, t.name).edit ? "Close the open editor first" : undefined} onClick={(e) => {
+                          returnFocus.current = e.currentTarget;
+                          setEditing(t.name);
+                        }} className="underline">
                         Edit
                       </button>
                       <button type="button" disabled={busy !== null || editLocks(editing, t.name).rename} title={editLocks(editing, t.name).rename ? "Close the editor first" : undefined} onClick={() => ask(t.name, "rename")} className="underline">
@@ -256,7 +261,11 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
           kind={kind}
           name={editing}
           title={templates.find((t) => t.name === editing)?.displayName ?? editing}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            setEditing(null);
+            returnFocus.current?.focus();
+            returnFocus.current = null;
+          }}
           onSaved={() => setRev((n) => n + 1)}
         />
       )}
