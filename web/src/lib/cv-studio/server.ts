@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
@@ -14,6 +15,11 @@ import { unsupportedClaims } from "./rewrite.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
 
 const EDITED_SUFFIX = "-edited";
+
+export function missingDataFolderMessage(): string | null {
+  const root = careerOpsRoot();
+  return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
+}
 
 export type StudioLoad =
   | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean }
@@ -201,7 +207,7 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
   const previousHtml = fs.existsSync(editedHtml) ? fs.readFileSync(editedHtml, "utf8") : null;
   atomicWrite(editedHtml, html);
   const format = /size:\s*a4/i.test(html) ? "a4" : "letter";
-  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
+  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), dataRoot: root, html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
   // A render over a warn-only page budget exits 0 but leaves nothing at
   // editedPdf (the PDF went to a sibling .overflow.pdf draft, #6377), so the
   // exit code alone would keep an HTML and mark the tracker ready for a PDF
@@ -212,7 +218,7 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
     return { ok: false, error: undeliveredRenderError(render, editedPdf) };
   }
   const warnings = render.stderr.split("\n").map((l: string) => l.trim()).filter(Boolean);
-  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: load.reportNum });
+  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), dataRoot: root, reportNum: load.reportNum });
   if (!mark.ok) warnings.push(`PDF rendered, but the tracker's PDF column was not updated${mark.data?.error ? `: ${mark.data.error}` : "."}`);
   const index = await pdfPathStatusForReport(load.reportNum);
   return { ok: true, pdf: path.basename(editedPdf), indexed: index.status === "found" && index.path === path.resolve(editedPdf), warnings };

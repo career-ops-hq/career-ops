@@ -57,7 +57,7 @@ function runMerge(env, args = []) {
   };
   delete childEnv.CAREER_OPS_DATA_DIR;
   delete childEnv.CAREER_OPS_CODE_ROOT;
-  return execFileSync('node', [MERGE, ...args], { encoding: 'utf-8', env: childEnv });
+  return execFileSync('node', [MERGE, '--allow-headerless', ...args], { encoding: 'utf-8', env: childEnv });
 }
 function trackerRows(env) {
   // Exclude the markdown separator PRECISELY (not any `---`) so rows whose URL

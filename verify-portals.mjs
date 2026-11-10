@@ -45,6 +45,8 @@ import { isIP } from 'net';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
+import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
+import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
 import { ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
@@ -895,6 +897,20 @@ export async function verifyCompanies(
 }
 
 /**
+ * Apply an entry's `timeout_ms` and `max_response_mb` to a ctx, as scan.mjs
+ * and audit-portals.mjs do, so the check reads a board with the same limits
+ * the scan does. The ctx's fetchers are replaced in place; pass a copy when
+ * it is shared.
+ *
+ * @param {object} ctx
+ * @param {object} entry
+ * @returns {any}
+ */
+function withEntryLimits(ctx, entry) {
+  return applyEntryTimeout(applyEntryResponseCap(ctx, entry), entry);
+}
+
+/**
  * One health row for one enabled entry; the body of verifyCompanies' pool.
  *
  * @param {object} company
@@ -926,7 +942,11 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   // reads the embed page instead.
   const embedOnly = match?.ats === 'ashby' && /** @type {any} */ (company).ashby?.embed === true;
   if (match && !embedOnly) {
-    const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
+    // The entry's own board is read with its timeout_ms and max_response_mb,
+    // as scan.mjs reads it. Alternates below are other boards and keep the
+    // defaults.
+    const entryFetchJson = withEntryLimits({ fetchJson }, company).fetchJson;
+    const probe = await probeSlug(match.ats, match.slug, { fetchJson: entryFetchJson, eu: match.eu });
     if (probe.status === 'live' || probe.status === 'empty') return { name, ...probe };
     // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
     if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
@@ -942,7 +962,7 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   // already returned above, before a recognizable URL could hide it.
   if (providers && providers.size > 0) {
     if (resolved && resolved.provider) {
-      const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
+      const probe = await probeProvider(company, resolved.provider, withEntryLimits({ ...(httpCtx || makeHttpCtx()) }, company));
       return { name, ...probe };
     }
     const full = resolveProvider(company, providers);

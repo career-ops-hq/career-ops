@@ -66,7 +66,7 @@ Ele adapta seu currículo e redige suas&nbsp;respostas. <strong>Você&nbsp;clica
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">As pessoas que vieram depois de mim escreveram como foram contratadas.</p>
 
@@ -133,7 +133,7 @@ A contratação não vai se consertar sozinha. As pessoas que passam por ela pod
 
 [É aqui que o conserto é escrito](CONTRIBUTING.md). Uma sala, não um clube. **Vamos construir juntos.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: contagem de membros do servidor career-ops ao vivo"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: contagem de membros do servidor career-ops ao vivo"></a></p>
 
 ## Patrocinadores
 
@@ -510,7 +510,7 @@ O dashboard TUI em Go, os scripts Node.js e os modos do agente de IA respeitam a
 - **Dados**: tabelas Markdown + configuração YAML + arquivos TSV de lote
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -591,7 +591,7 @@ Veja [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) para todos os detalhes. Este sof
 ## Contribuidores
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Todas as pessoas que entregaram código, documentação, traduções ou testes estão listadas em

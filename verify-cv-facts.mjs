@@ -16,6 +16,7 @@ import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { findExperienceSections, headingText, boldLineText, toPlainText, normalizePandocLine } from './lib/cv-markdown.mjs';
 
 // Two roots, because this gate compares user-layer files against a user-layer
 // config and previously resolved neither from the user's data root.
@@ -134,7 +135,7 @@ const METRIC_NOUNS = [
   'enrollments', 'enrolments', 'completions', 'courses', 'certifications',
   'certificates', 'sessions', 'responses', 'surveys', 'cohorts',
   'commits', 'contributions', 'repositories', 'repos', 'modules', 'tools',
-  'servers', 'guides', 'articles', 'datasets', 'examples', 'deployments',
+  'servers', 'nodes', 'guides', 'articles', 'datasets', 'examples', 'deployments',
   'services', 'downloads', 'stars', 'lines', 'projects', 'integrations', 'tests',
   // Headcount outside software. The list above counts users, engineers and
   // repos, so a CV in operations, facilities, healthcare, education or the
@@ -1168,7 +1169,7 @@ export function factClaims(text, sourceNormalized = null) {
 // or a certification rendered and passed the gate, which is the fabrication
 // AGENTS.md treats as most serious.
 //
-// Employer, education and certification fields BLOCK when no source contains
+// Employer, education, certification and award fields BLOCK when no source contains
 // them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
 // about titles, because reframing one is sometimes the candidate's call, and a
 // second check that blocked on the same field would overrule that choice.
@@ -1182,6 +1183,8 @@ const STRUCTURED_HTML_FIELDS = [
   ['edu-title', 'education', true],
   ['edu-org', 'education', true],
   ['cert-title', 'certification', true],
+  // Standards/authorship credits are rendered in awards too (#1411).
+  ['award-title', 'award', true],
   ['job-role', 'title', false],
 ];
 // One level of nested braces, enough for `\textbf{...}` inside an argument.
@@ -1260,7 +1263,7 @@ function extractStructuredFieldInners(raw, cls) {
 }
 
 /**
- * Employer, education, certification and title claims a CV builder emitted as
+ * Employer, education, certification, award and title claims a CV builder emitted as
  * structured fields.
  *
  * @param {string} text - generated HTML or LaTeX
@@ -1296,6 +1299,154 @@ export function structuredFieldClaims(text) {
   }
   const seen = new Set();
   return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+// Association checks compare bounded records, never the joined source bag.
+// Unsupported source conventions warn; explicit contradictions in recognized
+// records block. Titles and lexical metric context remain advisory.
+function sourceExperience(text) {
+  return findExperienceSections(text).flatMap(lines => {
+    const starts = lines.flatMap((line, i) => headingText(line, 3) === null ? [] : [i]);
+    return starts.flatMap((start, i) => {
+      const block = lines.slice(start, starts[i + 1] ?? lines.length);
+      const company = headingText(block[0], 3).split(/\s+[-–—]+\s+/)[0];
+      const body = block.slice(1).filter(line => line.trim());
+      const title = boldLineText(body[0]);
+      // Keep incomplete headers as evidence of employment. Dropping one
+      // could misclassify a genuine employer mentioned elsewhere as a client.
+      return [{ company, title: title || '', dates: title && body[1] ? toPlainText(body[1]) : '', body: body.join('\n') }];
+    });
+  });
+}
+
+function sourceEducation(text) {
+  const entries = [];
+  let complete = true;
+  let inEducation = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizePandocLine(raw);
+    const heading = headingText(line, 2);
+    if (heading !== null) { inEducation = /^education$/i.test(heading); continue; }
+    if (!inEducation || !line.trim() || /^\s*[-*_]{3,}\s*$/.test(line)) continue;
+    // The flat convention used in examples/cv-example.md. A multiline or
+    // table convention needs its own parser; don't infer a tuple from prose.
+    const match = toPlainText(line).replace(/^\s*[-*+]\s+/, '').match(/^([^,]+),\s*(.+?)(?:\s*\(((?:19|20)\d{2})\))?\s*$/);
+    // Extra comma-separated detail may be a location, GPA or part of the
+    // school name. It is not evidence of a different degree-school pair.
+    if (match && !match[2].includes(',')) entries.push({ title: match[1].trim(), org: match[2].trim(), year: match[3] || '' });
+    else complete = false;
+  }
+  return { entries, complete };
+}
+
+const DATE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+function dateEndpoints(value) {
+  const clean = normalizeFact(stripMarkup(value)).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
+  if (parts.length > 2) return null;
+  const dates = parts.map(part => {
+    if (/^(?:present|current|now)$/.test(part)) return { year: 'present', month: '' };
+    const m = part.trim().match(/^(?:(\d{1,2})[/.]|([a-z]+)\s+)?((?:19|20)\d{2})$/);
+    if (!m) return null;
+    const month = m[1] ? Number(m[1]) : m[2] ? DATE_MONTHS.indexOf(m[2].slice(0, 3)) + 1 : '';
+    return month === 0 || month > 12 ? null : { year: m[3], month };
+  });
+  return dates.every(Boolean) ? dates : null;
+}
+
+// null means the source does not expose enough date precision to compare.
+function datesSupported(target, source) {
+  const a = dateEndpoints(target), b = dateEndpoints(source);
+  if (!a || !b || a.length !== b.length) return null;
+  if (a.some((date, i) => date.year !== b[i].year)) return false;
+  if (a.some((date, i) => date.month && !b[i].month)) return null;
+  return a.every((date, i) => !date.month || date.month === b[i].month);
+}
+
+/** Source-bound contradictions and explicit coverage gaps in default HTML CV records. */
+export function structuredAssociationClaims(targetText, sourceTexts, config = {}) {
+  const blocked = [], advisory = [], gaps = new Set();
+  const norm = value => normalizeFact(stripMarkup(value));
+  const field = (html, cls) => extractStructuredFieldInners(html, cls).map(inner => stripMarkup(inner)).join(' ').trim();
+  const blocks = cls => extractStructuredFieldInners(String(targetText), cls);
+  const experience = sourceTexts.flatMap(sourceExperience);
+  const educationSources = sourceTexts.map(sourceEducation);
+  const education = educationSources.flatMap(source => source.entries);
+  const educationComplete = educationSources.every(source => source.complete);
+  const add = (list, kind, value) => list.push({ kind, value: norm(value) });
+  const jobs = blocks('job');
+  const jobContexts = [];
+  const allowedFacts = new Set((config.allow_facts || []).map(norm));
+  for (const job of jobs) {
+    const company = field(job, 'job-company'), role = field(job, 'job-role'), dates = field(job, 'job-period');
+    if (!company) continue;
+    const matches = experience.filter(entry => norm(entry.company) === norm(company));
+    if (!matches.length) {
+      // An explicit customer mention is evidence of the wrong relationship,
+      // not merely a name somewhere in the source. Other unknown employers
+      // are already handled by the named-field gate, or remain unverified.
+      const escaped = norm(company).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const customer = new RegExp(`\\b(?:customer|client)(?:s)?[,: ]+(?:named |called )?${escaped}(?=$|[^\\p{L}\\p{N}])`, 'iu');
+      if (sourceTexts.some(text => customer.test(norm(text)))) add(blocked, 'employer-association', company);
+      else if (!allowedFacts.has(norm(company))) gaps.add('Employment date/title associations could not be checked for an unmatched employer.');
+      continue;
+    }
+    const byRole = matches.filter(entry => norm(entry.title) === norm(role));
+    // Dates are checked against the employer's records; a reframed title
+    // must never turn the intentionally advisory title check into a block.
+    const candidates = matches;
+    const byDate = dates ? candidates.filter(entry => datesSupported(dates, entry.dates) === true) : candidates;
+    jobContexts.push({ html: job, sources: (byDate.length ? byDate : byRole.length ? byRole : candidates).map(entry => entry.body) });
+    if (dates && !byDate.length) {
+      const results = candidates.map(entry => datesSupported(dates, entry.dates));
+      if (results.every(result => result === false)) add(blocked, 'employment-dates', `${company}: ${dates}`);
+      else gaps.add('Employment dates could not be compared at the source date precision or format.');
+    }
+    if (role && experience.some(entry => norm(entry.title) === norm(role))
+      && (!byRole.length || (dates && byDate.length && !byDate.some(entry => norm(entry.title) === norm(role))))) {
+      add(advisory, 'title-association', `${company}: ${role}`);
+    }
+  }
+  for (const item of blocks('edu-item')) {
+    const rawTitle = extractStructuredFieldInners(item, 'edu-title')[0] || '';
+    const title = norm(removeBalancedElements(rawTitle, /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])edu-org(?![\w-])[^"]*"[^>]*>/gi));
+    const org = field(item, 'edu-org'), year = field(item, 'edu-year');
+    if (!title || !org) { gaps.add('Education associations require both a degree and a school.'); continue; }
+    const pairs = education.filter(entry => norm(entry.org) === norm(org) && norm(entry.title) === title);
+    if (!pairs.length) {
+      if (educationComplete && education.some(entry => norm(entry.org) === norm(org)) && education.some(entry => norm(entry.title) === title)) {
+        add(blocked, 'education-association', `${title}, ${org}`);
+      } else gaps.add('Education associations could not be checked against a recognized degree, school entry.');
+    } else if (year && !pairs.some(entry => entry.year && datesSupported(year, entry.year) === true)) {
+      if (educationComplete && pairs.every(entry => entry.year && datesSupported(year, entry.year) === false)) add(blocked, 'graduation-date', `${title}, ${org}: ${year}`);
+      else gaps.add('Graduation year could not be compared with a source year.');
+    }
+  }
+  // Lexical context cannot prove a paraphrase false. Surface uncertainty, not
+  // a hard fabrication verdict, when the same number is reused for a new
+  // outcome. Never let a different bullet's figure silently support it.
+  const stop = new Set(['with', 'from', 'into', 'over', 'have', 'that', 'were', 'while', 'about', 'their', 'there', 'which', 'through', 'across', 'within', 'after', 'before', 'during', 'being', 'been', 'each', 'every', 'other', 'than', 'then', 'them', 'they', 'when', 'where', 'what', 'more', 'most', 'some', 'such', 'only', 'also', 'just', 'like', 'very', 'used', 'using']);
+  const words = text => new Set(norm(text).match(/\p{L}{4,}/gu)?.filter(word => !stop.has(word)) || []);
+  const linesWithMetrics = texts => texts.flatMap(text => text.split(/\r?\n/).map(line => ({ line, metrics: metricClaims(line) })));
+  const allSourceLines = linesWithMetrics(sourceTexts);
+  const explicitlyAllowed = allowedMetricSet('', config.allow_metrics || []);
+  for (const context of jobContexts) {
+    const sourceLines = linesWithMetrics(context.sources);
+    for (const el of findBalancedElements(context.html, /<(li)\b[^>]*>/gi)) {
+      const line = stripMarkup(context.html.slice(el.contentStart, el.contentEnd));
+      for (const metric of metricClaims(line)) {
+        if (explicitlyAllowed.has(metric)) continue;
+        const sources = sourceLines.filter(entry => entry.metrics.has(metric));
+        if (sources.some(entry => norm(entry.line).replace(/^[-*+]\s*/, '') === norm(line))) continue;
+        if (!allSourceLines.some(entry => entry.metrics.has(metric))) continue;
+        const targetWords = words(line);
+        if (!sources.some(entry => [...words(entry.line)].filter(word => targetWords.has(word)).length >= 2)) {
+          add(advisory, 'metric-context', `${metric}: ${line}`);
+        }
+      }
+    }
+  }
+  return { blocked, advisory, warnings: [...gaps] };
 }
 
 /** Split generated/source documents into bounded statements for attribution checks. */
@@ -1819,30 +1970,31 @@ function scopeObjectTokens(text) {
  * stronger verb, or if nothing links at all, the bullet is left alone. An
  * unsourced bullet is a different defect and belongs to the checks above.
  */
-export function scopeInflationClaims(targetText, sourceText) {
+export function scopeInflationClaims(targetText, sourceText, language = 'en') {
+  const profile = SCOPE_PROFILES[language];
   // Scoped per CLAUSE, not per statement. A statement-wide tier let the
   // strongest verb in a sentence vouch for every work item in it, so
   // "Contributed to the billing migration and led the payments rewrite"
   // cleared "Led the billing migration" on the strength of a verb that was
   // never about the migration.
-  const sourceClauses = factStatements(sourceText)
+  const sourceClauses = profile.statements(sourceText)
     .map(stripListMarker)
     .flatMap((statement) => {
       const heading = HEADING_RE.test(statement);
-      return scopeClauses(statement).map(clause => ({
+      return profile.clauses(statement).map(clause => ({
         // The whole statement is what gets quoted back, since a clause on its own
         // reads as a fragment to whoever has to go and fix cv.md.
         statement,
         heading,
-        tier: sourceClauseTier(clause, heading),
-        tokens: new Set(scopeObjectTokens(clause)),
+        tier: profile.sourceTier(clause, heading),
+        tokens: new Set(profile.tokens(clause)),
       }));
     })
     .filter(source => source.tokens.size);
   if (!sourceClauses.length) return [];
 
   const claims = [];
-  for (const raw of factStatements(targetText)) {
+  for (const raw of profile.statements(targetText)) {
     const statement = stripListMarker(raw);
     // Clause-scoped on BOTH sides. Reading only the statement-initial verb
     // skipped a compound bullet entirely: "Contributed to the billing
@@ -1850,8 +2002,8 @@ export function scopeInflationClaims(targetText, sourceText) {
     // half was never compared to anything. It also skipped any bullet opening
     // with a modifier, since factStatements does not split on commas, so
     // "As tech lead, drove the migration" was invisible.
-    for (const clause of scopeClauses(statement)) {
-      const opening = openingScopeVerb(clause);
+    for (const clause of profile.clauses(statement)) {
+      const opening = profile.openingVerb(clause);
       // Tier 1 is participation, so it cannot be an escalation of anything: the
       // check is for bullets that claim execution or ownership.
       if (!opening || opening.tier < 2) continue;
@@ -1860,12 +2012,12 @@ export function scopeInflationClaims(targetText, sourceText) {
       // threshold on the strength of one shared token: "Owned the payments
       // platform migration to payments v2" counted `payments` twice and linked
       // to a source saying only "Contributed to payments", blocking a truthful
-      // bullet on an unrelated line. It also mis-sized `required`, since a
+      // bullet on an unrelated line. It also mis-sized the threshold, since a
       // short clause repeating its only token looked like two.
       //
       // The source side has always wrapped in a Set, and
       // `delegatedAuthorshipClaims` dedupes its tokens the same way.
-      const tokens = [...new Set(scopeObjectTokens(clause))];
+      const tokens = [...new Set(profile.tokens(clause))];
       if (!tokens.length) continue;
 
       // Two shared tokens, the threshold `delegatedAuthorshipClaims` uses, except
@@ -1876,11 +2028,13 @@ export function scopeInflationClaims(targetText, sourceText) {
       // the issue's own example: "Led the migration" against "Contributed to the
       // migration" shares exactly `migration`, and it is 100% of what the bullet
       // says rather than a fragment of it.
-      const required = Math.min(2, tokens.length);
-      const overlaps = sourceClauses.map(source => ({
-        source,
-        overlap: tokens.filter(token => source.tokens.has(token)).length,
-      }));
+      //
+      // The threshold itself lives in the language profile (`accuses`), since
+      // a Chinese bigram is a smaller unit than an English word.
+      const overlaps = sourceClauses.map((source) => {
+        const shared = tokens.filter(token => source.tokens.has(token));
+        return { source, shared, overlap: shared.length };
+      });
 
       // Two thresholds, because the two questions pull in opposite directions.
       // A link that ACCUSES has to be strict, since a wrong one invents an
@@ -1890,7 +2044,7 @@ export function scopeInflationClaims(targetText, sourceText) {
       // rewrite", because the restatement shared only `payments`.
       // A heading only vouches. It names the item without saying what the
       // candidate did, so it is no evidence that the source is weaker.
-      const linked = overlaps.filter(({ overlap, source }) => overlap >= required && !source.heading);
+      const linked = overlaps.filter(({ shared, source }) => profile.accuses(shared, tokens) && !source.heading);
       if (!linked.length) continue;
       const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
       if (vouched) continue;
@@ -1969,16 +2123,17 @@ const ADOPTION_CHECKS = [
  * only ever reports fewer claims, which is the safe direction for a gate that
  * blocks generation.
  */
-export function adoptionClaims(targetText, sourceText) {
+export function adoptionClaims(targetText, sourceText, language = 'en') {
+  const profile = SCOPE_PROFILES[language];
   const source = stripMarkup(sourceText);
   // Matched per STATEMENT, not across the whole flattened document. Collapsing
   // the target first let a phrase form across a line break that neither line
   // contains, so "...we used" followed by "Daily standups ran on it" reported
   // `used daily` and then had no CV line to quote back, blocking generation
   // with nothing for the user to go and fix.
-  const statements = factStatements(targetText).map(stripListMarker);
+  const statements = profile.statements(targetText).map(stripListMarker);
   const claims = [];
-  for (const { target, source: evidence } of ADOPTION_CHECKS) {
+  for (const { target, source: evidence } of profile.adoptionChecks) {
     if (evidence.test(source)) continue;
     for (const statement of statements) {
       target.lastIndex = 0;
@@ -1996,6 +2151,175 @@ export function adoptionClaims(targetText, sourceText) {
     all.findIndex(other => other.value === claim.value) === index
   ));
 }
+
+// Simplified Chinese (#5290). The English path above assumes space-delimited
+// words at every step: the opening verb is the first letter run, statements end
+// at ". ", clauses split on "and", and entries link on shared words. Chinese
+// has no spaces, so the first letter run is the whole clause up to the next
+// punctuation mark and no step above can read it. Each step therefore has a
+// Chinese counterpart below, and `SCOPE_PROFILES` picks the set by language.
+//
+// The tiers mean what the English ones mean. Left out on purpose, like
+// `driven`: 推动/推进, which read as causation ("推动了转化率提升") as often as
+// ownership, and 管理, which is as often the noun (项目管理) as the verb.
+const ZH_SCOPE_VERB_TIERS = new Map([
+  // Tier 1 — participation.
+  ['参与', 1], ['协助', 1], ['配合', 1], ['支持', 1], ['贡献', 1], ['辅助', 1],
+  // Tier 2 — execution.
+  ['开发', 2], ['实现', 2], ['设计', 2], ['搭建', 2], ['构建', 2], ['完成', 2], ['编写', 2],
+  // Tier 3 — ownership.
+  ['主导', 3], ['负责', 3], ['牵头', 3], ['带领', 3], ['领导', 3], ['统筹', 3], ['主持', 3],
+  ['独立完成', 3], ['独立开发', 3], ['独立负责', 3], ['从零搭建', 3], ['从0到1', 3], ['从零到一', 3],
+]);
+// Longest first, so 独立完成 wins over 完成 and 独立负责 over 负责.
+const ZH_SCOPE_VERBS = [...ZH_SCOPE_VERB_TIERS.keys()].sort((a, b) => b.length - a.length);
+const ZH_SCOPE_VERB_RE = new RegExp(`(?:${ZH_SCOPE_VERBS.join('|')})[了过]?`, 'gu');
+// First-person prose opens with the subject, as in English (SUBJECT_PRONOUN_RE).
+const ZH_SUBJECT_RE = /^(?:我们|我|本人)/u;
+// Adverbs a Chinese CV puts before the verb: 主要负责, 深度参与, 全程主导.
+// Left in, 深度参与 opened with no known verb, so as a source it ranked as
+// unranked and vouched for 主导 on the same item. 独立 is not here: it is part
+// of the tier-3 verbs (独立完成, 独立负责).
+const ZH_ADVERB_RE = /^(?:主要|深度|全程|全面|积极|具体|核心|曾经|曾|成功|共同)+/u;
+// A clause split at a comma can open with a coordinator: "，并主导了重构".
+const ZH_CONNECTOR_RE = /^(?:并且|并|同时|以及)/u;
+// The same two characters are a noun when a person or product suffix follows:
+// 负责人, 设计师, 开发者, 设计稿, 领导力. A noun opening a line claims no scope.
+// 人 is that suffix only when it does not open the object: 主导人工智能平台,
+// 负责人员招聘 and 支持人力资源系统 are the verb.
+const ZH_VERB_AS_NOUN_RE = /^(?:人(?![工员事力才脸机])|[师者稿力])/u;
+// Particles dropped before object tokens are built, so 计费系统的迁移 and
+// 计费系统迁移 read as the same item.
+const ZH_PARTICLE_RE = /[的了和与及等]/gu;
+
+// stripMarkup applies NFKC, which folds the full-width ！？；，： to their ASCII
+// forms (but not 。 or 、), so every pattern below lists both.
+
+/** Split a Chinese document into statements: 。！？；, newlines, and the block breaks stripMarkup leaves. */
+function zhFactStatements(text) {
+  const withLineBoundaries = String(text ?? '').replace(/\r?\n+/g, '。');
+  return stripMarkup(withLineBoundaries)
+    // A period ends a statement only before a space or the end, as in
+    // factStatements, so a decimal (3.5) stays inside its statement.
+    .split(/[。！？；!?;]+|[.．](?:\s+|$)/u)
+    .map(statement => statement.trim())
+    .filter(Boolean);
+}
+
+// A coordinator joins two verbs without a comma too: 参与A并主导B. It splits
+// only before a scope verb, and 并 not after 合/兼/吞, so 合并, 并发 and 并行
+// stay whole.
+const ZH_CLAUSE_SPLIT_RE = new RegExp(
+  `\\s*[，、：,:]\\s*|(?:并且|(?<![合兼吞])并|同时|以及)(?=${ZH_SCOPE_VERBS.join('|')})`,
+  'u',
+);
+
+/** Split a Chinese statement into clauses at ，、： and at a coordinator before a scope verb (并主导…). */
+function zhScopeClauses(statement) {
+  return String(statement ?? '')
+    .split(ZH_CLAUSE_SPLIT_RE)
+    .map(clause => clause.trim().replace(ZH_CONNECTOR_RE, '').trim())
+    .filter(Boolean);
+}
+
+/** A Chinese clause with its list marker, subject and leading adverbs removed, so it opens with the verb. */
+function zhClauseHead(clause) {
+  return stripListMarker(clause).replace(ZH_SUBJECT_RE, '').replace(ZH_ADVERB_RE, '').trim();
+}
+
+/** The opening verb of a Chinese clause by longest prefix, with its tier, or null. */
+function zhOpeningScopeVerb(clause) {
+  const text = zhClauseHead(clause);
+  const verb = ZH_SCOPE_VERBS.find(candidate => text.startsWith(candidate));
+  if (!verb || ZH_VERB_AS_NOUN_RE.test(text.slice(verb.length))) return null;
+  return { verb, tier: ZH_SCOPE_VERB_TIERS.get(verb) };
+}
+
+/** sourceClauseTier for Chinese: a heading takes its strongest verb, a clause its opening verb. */
+function zhSourceClauseTier(clause, heading) {
+  const text = stripListMarker(clause).replace(HEADING_RE, '');
+  if (heading) {
+    return Math.max(0, ...ZH_SCOPE_VERBS.filter(verb => text.includes(verb)).map(verb => ZH_SCOPE_VERB_TIERS.get(verb)));
+  }
+  return zhOpeningScopeVerb(text)?.tier ?? Infinity;
+}
+
+/**
+ * Object tokens of a Chinese clause: Han character bigrams, plus the Latin
+ * tool and product names a Chinese CV keeps in Latin script (Kafka, K8s).
+ * Scope verbs and particles are cut out first and break a run, so a bigram
+ * never spans them and a tier word cannot link two entries.
+ */
+function zhScopeObjectTokens(text) {
+  const rest = normalizeFact(zhClauseHead(text))
+    .replace(ZH_SCOPE_VERB_RE, ' ')
+    .replace(ZH_PARTICLE_RE, ' ');
+  const latin = (rest.match(/[a-z0-9][a-z0-9+#./-]*/gu) ?? [])
+    .map(token => token.replace(/[./-]+$/u, ''))
+    .filter(token => token.length >= 2 && /[a-z]/u.test(token) && !ATTRIBUTION_STOP_WORDS.has(token));
+  const bigrams = [];
+  for (const [run] of rest.matchAll(/\p{Script=Han}{2,}/gu)) {
+    for (let index = 0; index + 2 <= run.length; index++) bigrams.push(run.slice(index, index + 2));
+  }
+  return [...latin, ...bigrams];
+}
+
+/**
+ * Whether the tokens a Chinese bullet shares with a source clause are enough
+ * to ACCUSE: three shared bigrams, or one shared Latin name plus one bigram.
+ *
+ * One bigram is about one Chinese word, and unrelated items share one all the
+ * time (计费系统 / 日志系统 share 系统), so one is never enough. Three bigrams
+ * are about two words, the English threshold. There is no short-bullet
+ * exception as in English: a two- or three-character object is usually a
+ * generic noun (系统, 数据库), and a missed catch is the safe direction.
+ * Vouching stays at one shared token, as in English.
+ */
+function zhScopeAccuses(shared) {
+  const latin = shared.filter(token => !/\p{Script=Han}/u.test(token)).length;
+  const bigrams = shared.length - latin;
+  return bigrams >= 3 || (latin >= 1 && bigrams >= 1);
+}
+
+// The Chinese counterparts of ADOPTION_CHECKS, paired the same way: the
+// wording to catch, and a loose lemma that counts as evidence for it.
+const ZH_ADOPTION_CHECKS = [
+  { target: /被[^，。；,;]{0,12}采用|全面推广|推广至/gu, source: /采用|推广|落地/u },
+  { target: /全公司|全集团|公司级|全员/gu, source: /全公司|全集团|公司级|全员|公司范围/u },
+  { target: /日活|月活|\bDAU\b|\bMAU\b/giu, source: /日活|月活|\bDAU\b|\bMAU\b/iu },
+  // Evidence has to state reach. 服务 or 用户 alone matched 微服务, 服务端 and
+  // 用户增长, which almost every engineering cv.md contains, and so does a
+  // window across a conjunction (微服务拆分和用户增长).
+  {
+    target: /服务[^，。；,;]{0,10}用户/gu,
+    source: /(?:(?<!微)服务|覆盖)[^，。；,;和与及]{0,10}用户|用户(?:量|规模|数)|[\d万千百亿]+(?:名|位)?用户/u,
+  },
+  { target: /成为[^，。；,;]{0,8}标准/gu, source: /标准|规范/u },
+];
+
+// One entry per language the scope and adoption checks can read. English is
+// the original path, unchanged. A language without an entry is not checked,
+// and verifyFacts reports that instead of a clean pass.
+const SCOPE_PROFILES = {
+  en: {
+    statements: factStatements,
+    clauses: scopeClauses,
+    openingVerb: openingScopeVerb,
+    sourceTier: sourceClauseTier,
+    tokens: scopeObjectTokens,
+    accuses: (shared, tokens) => shared.length >= Math.min(2, tokens.length),
+    adoptionChecks: ADOPTION_CHECKS,
+  },
+  zh: {
+    statements: zhFactStatements,
+    clauses: zhScopeClauses,
+    openingVerb: zhOpeningScopeVerb,
+    sourceTier: zhSourceClauseTier,
+    tokens: zhScopeObjectTokens,
+    accuses: zhScopeAccuses,
+    adoptionChecks: ZH_ADOPTION_CHECKS,
+  },
+};
 
 /**
  * Fold a spelled-out magnitude onto the suffix the claim set compares.
@@ -2018,7 +2342,16 @@ function compactMagnitude(raw) {
 
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text, { keepPlanHorizons = false } = {}) {
-  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true }));
+  // Expand only known count units in numeric compounds, then run the same
+  // plan/disclosure filters as spaced counts. Product IDs remain untouched.
+  const clean = spellNumbers(stripMarkup(text, { keepLineBreaks: true })).replace(
+    /(?<![\p{L}\p{N}-])(\d[\d,.]*)[-‑–]([\p{L}]+)(?![\p{L}])/gu,
+    (whole, number, rawNoun) => {
+      const noun = rawNoun.toLowerCase();
+      const plural = METRIC_NOUNS.includes(noun) ? noun : METRIC_NOUNS.includes(`${noun}s`) ? `${noun}s` : null;
+      return plural ? `${number} ${plural}` : whole;
+    },
+  );
   const claims = new Set();
   for (const pattern of SIMPLE_CLAIM_PATTERNS) {
     for (const match of clean.matchAll(pattern)) claims.add(canonicalMetric(match[0]));
@@ -2282,24 +2615,68 @@ function looksEnglish(text) {
   return !(other >= 2 && other > english);
 }
 
+// Characters whose Traditional and Simplified forms differ, paired by
+// position, picked from the words a CV uses. Traditional Chinese has no
+// profile yet, so a Traditional document must not be read with the Simplified
+// verb table: none of 負責, 參與, 開發 would match, and the checks would pass a
+// document they could not read.
+const TRADITIONAL_HAN = '們這個與為開發實現設計負責參協經驗從統導帶領對時會來過進業務產項數據團隊戶級員網優構編寫機處際標';
+const SIMPLIFIED_HAN = '们这个与为开发实现设计负责参协经验从统导带领对时会来过进业务产项数据团队户级员网优构编写机处际标';
+
+/**
+ * The language the scope and adoption checks read a text in: 'en', 'zh'
+ * (Simplified Chinese), or null when no profile covers it.
+ *
+ * Chinese is Han script above 30% of the letters, the bar looksEnglish already
+ * uses for "not English", with almost no kana (Japanese mixes kanji and kana)
+ * and more Simplified than Traditional forms. Everything else is decided by
+ * looksEnglish exactly as before.
+ *
+ * @param {string} text plain text, after stripMarkup
+ * @returns {'en'|'zh'|null}
+ */
+function scopeLanguage(text) {
+  const letters = text.match(/\p{L}/gu) ?? [];
+  const han = text.match(/\p{Script=Han}/gu) ?? [];
+  if (letters.length && han.length / letters.length > 0.3) {
+    const kana = text.match(/[\p{Script=Hiragana}\p{Script=Katakana}]/gu) ?? [];
+    const traditional = han.filter(char => TRADITIONAL_HAN.includes(char)).length;
+    const simplified = han.filter(char => SIMPLIFIED_HAN.includes(char)).length;
+    if (kana.length <= han.length * 0.05 && traditional <= simplified) return 'zh';
+    return null;
+  }
+  return looksEnglish(text) ? 'en' : null;
+}
+
 /**
  * Explain why the scope and adoption checks did not run, or return null.
  *
- * Their verb table and phrase list are English, so on any other language they
- * would pass a document they could not read. Reporting the gap through
- * `coverage` keeps that from reading as "checked and clean".
+ * They compare a document with its sources in one language, with a word list
+ * per language (SCOPE_PROFILES). On a language without a list, or when the
+ * document and its sources are in different languages, they would pass a
+ * document they could not read. Reporting the gap through `coverage` keeps
+ * that from reading as "checked and clean".
  *
+ * @param {'en'|'zh'|null} targetLanguage
+ * @param {'en'|'zh'|null} sourceLanguage
  * @returns {string|null}
  */
-function scopeLanguageGap(targetText, sourceText) {
-  const targetEnglish = looksEnglish(stripMarkup(targetText));
-  const sourceEnglish = looksEnglish(stripMarkup(sourceText));
-  if (targetEnglish && sourceEnglish) return null;
-  const subject = !targetEnglish && !sourceEnglish
-    ? 'The document and its sources are'
-    : !targetEnglish ? 'The document is' : 'Its sources are';
-  return `${subject} not in English, so the scope-verb and adoption checks did not run: their word lists ` +
-    'are English-only. Check ownership verbs and adoption claims by hand.';
+function scopeLanguageGap(targetLanguage, sourceLanguage) {
+  if (targetLanguage && targetLanguage === sourceLanguage) return null;
+  const advice = 'Check ownership verbs and adoption claims by hand.';
+  if (targetLanguage !== 'zh' && sourceLanguage !== 'zh') {
+    const targetEnglish = targetLanguage === 'en';
+    const sourceEnglish = sourceLanguage === 'en';
+    const subject = !targetEnglish && !sourceEnglish
+      ? 'The document and its sources are'
+      : !targetEnglish ? 'The document is' : 'Its sources are';
+    return `${subject} not in English, so the scope-verb and adoption checks did not run: their word lists ` +
+      `cover only English and Simplified Chinese. ${advice}`;
+  }
+  const name = language => (language === 'zh' ? 'Simplified Chinese'
+    : language === 'en' ? 'English' : 'a language the checks do not cover');
+  return `The document is in ${name(targetLanguage)} and its sources are in ${name(sourceLanguage)}, so the ` +
+    `scope-verb and adoption checks did not run: they compare a document only with sources in the same language. ${advice}`;
 }
 
 /** Resolve a CLI or configuration path relative to the selected working directory. */
@@ -2427,6 +2804,7 @@ export function verifyFacts(targetText, {
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
   const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
+  const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const namedFacts = [
     ...factClaims(targetText, sourceLookup),
     ...delegatedAuthorshipClaims(targetText, sourceText),
@@ -2438,14 +2816,19 @@ export function verifyFacts(targetText, {
   // in the sources, which is a different question: an inflated bullet whose
   // words happen to occur elsewhere in cv.md would be dropped, and the whole
   // finding is that the source says something WEAKER about the same entry.
-  const languageGap = scopeLanguageGap(targetText, sourceText);
-  const comparedFacts = (languageGap ? [] : scopeInflationClaims(targetText, sourceText))
+  const scopeTargetLanguage = scopeLanguage(stripMarkup(targetText));
+  const languageGap = scopeLanguageGap(scopeTargetLanguage, scopeLanguage(stripMarkup(sourceText)));
+  const comparedFacts = [
+    ...(languageGap ? [] : scopeInflationClaims(targetText, sourceText, scopeTargetLanguage)),
+    ...associations.blocked,
+  ]
     .filter(({ value }) => !allowedFacts.has(value));
   // Adoption claims warn instead of block. The phrase list cannot see every
   // way a source states reach, and a block makes the PDF step tell the agent to
   // stop and fix, so a missed paraphrase would get a true bullet rewritten.
   const advisoryFacts = [
-    ...(languageGap ? [] : adoptionClaims(targetText, sourceText)),
+    ...(languageGap ? [] : adoptionClaims(targetText, sourceText, scopeTargetLanguage)),
+    ...associations.advisory,
     ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
   ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
@@ -2462,9 +2845,13 @@ export function verifyFacts(targetText, {
   // One coverage object, so callers that read `coverage.reason` keep working.
   // A count gap keeps its reason and gains the scope sentence.
   const countGap = diagnoseCoverage(targetText);
-  const coverage = !languageGap ? countGap
+  const priorCoverage = !languageGap ? countGap
     : countGap ? { ...countGap, message: `${countGap.message} ${languageGap}` }
       : { reason: 'scope-not-checked', message: languageGap, spans: [] };
+  const coverage = associations.warnings.length
+    ? { reason: 'associations-not-checked', spans: [], ...priorCoverage,
+      message: [priorCoverage?.message, ...associations.warnings].filter(Boolean).join(' ') }
+    : priorCoverage;
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
   return {
     verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',
@@ -3192,6 +3579,79 @@ function runSelfTest() {
     adoptionClaims('Built internal tooling, used daily across the engineering org.', scopeSource)
       .every(claim => typeof claim.line === 'string' && claim.line.length > 0),
     true);
+
+  // Simplified Chinese (#5290). Negative cases first: a bigram is a smaller
+  // unit than an English word, so a wrong link is where a false block comes from.
+  const zhScopeOf = (target, source) => scopeInflationClaims(target, source, 'zh').map(claim => claim.value);
+  equal('zh: unrelated items sharing one bigram do not link',
+    zhScopeOf('主导了计费系统迁移。', '参与了日志系统重构。'), []);
+  equal('zh: unrelated items sharing two bigrams do not link',
+    zhScopeOf('主导了订单系统性能优化。', '参与了客服工单系统。'), []);
+  equal('zh: the same Latin tool on a different item does not link',
+    zhScopeOf('主导了Kafka消息队列迁移。', '参与了Kafka集群扩容。'), []);
+  equal('zh: 参与A，主导B does not vouch for 主导A',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移，主导了支付模块重构。'), ['主导了计费系统迁移']);
+  equal('zh: 参与A，主导B still vouches for 主导B',
+    zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移，主导了支付模块重构。'), []);
+  equal('zh: a noun that starts with a verb is not a scope claim',
+    zhScopeOf('负责人：计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: 负责人 with no punctuation after it is still a noun',
+    zhScopeOf('负责人计费系统迁移。', '参与了计费系统迁移。'), []);
+  equal('zh: an object that opens with 人 keeps the verb (主导人工智能)',
+    zhScopeOf('主导人工智能平台建设。', '参与人工智能平台建设。'), ['主导人工智能平台建设']);
+  equal('zh: 支持人工智能… is ranked, so it does not vouch for 主导',
+    zhScopeOf('主导人工智能平台建设。', '支持人工智能平台建设。'), ['主导人工智能平台建设']);
+  equal('zh: 参与A并主导B still vouches for 主导B',
+    zhScopeOf('主导了支付模块重构。', '参与了计费系统迁移并主导了支付模块重构。'), []);
+  equal('zh: 参与A并主导B does not vouch for 主导A',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移并主导了支付模块重构。'), ['主导了计费系统迁移']);
+  equal('zh: 合并 before a scope verb is not split',
+    zhScopeOf('主导了代码合并完成流程改造。', '参与了代码合并完成流程改造。'), ['主导了代码合并完成流程改造']);
+  equal('zh: an adverb before a weaker source verb does not make it vouch',
+    zhScopeOf('主导了计费系统迁移。', '深度参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: an adverb before an equal source verb still vouches',
+    zhScopeOf('主导了计费系统迁移。', '主要负责计费系统迁移。'), []);
+  equal('zh: 独立 stays part of the verb, not a stripped adverb',
+    zhScopeOf('独立负责计费系统迁移。', '负责计费系统迁移。'), []);
+  // Positive cases.
+  equal('zh: 参与 rewritten as 主导 is caught',
+    zhScopeOf('主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: the longest verb wins (独立完成 over 完成, 协助 over 完成)',
+    zhScopeOf('独立完成数据库切换。', '协助完成数据库切换。'), ['独立完成数据库切换']);
+  equal('zh: a particle does not change the item',
+    zhScopeOf('主导计费系统的迁移。', '参与了计费系统迁移工作。'), ['主导计费系统的迁移']);
+  equal('zh: one Latin name plus one bigram links',
+    zhScopeOf('主导了Kafka迁移。', '参与Kafka迁移。'), ['主导了kafka迁移']);
+  equal('zh: 负责 to 主导 passes (same tier)',
+    zhScopeOf('主导了计费系统迁移。', '负责计费系统迁移。'), []);
+  equal('zh: a subject-led source vouches',
+    zhScopeOf('主导了计费系统迁移。', '我负责计费系统迁移。'), []);
+  equal('zh: an unranked source verb vouches',
+    zhScopeOf('主导了计费系统迁移。', '推动了计费系统迁移。'), []);
+  equal('zh: the target side is clause-scoped too',
+    zhScopeOf('参与了日志系统重构，并主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: a comma-less 并 splits the target too',
+    zhScopeOf('参与了日志系统重构并主导了计费系统迁移。', '参与了计费系统迁移。'), ['主导了计费系统迁移']);
+  equal('zh: a markdown bullet is read like a sentence',
+    zhScopeOf('- 主导了计费系统迁移', '- 参与了计费系统迁移'), ['主导了计费系统迁移']);
+
+  const zhAdoptionOf = (target, source) => adoptionClaims(target, source, 'zh').map(claim => claim.value).sort();
+  equal('zh: 被全公司采用 without a source warns',
+    zhAdoptionOf('内部工具被全公司采用。', '开发了内部工具。'), ['全公司', '被全公司采用']);
+  equal('zh: 推广至全公司 in the source supports it',
+    zhAdoptionOf('内部工具被全公司采用。', '内部工具已推广至全公司。'), []);
+  equal('zh: 日活 and 服务…用户 without a source warn',
+    zhAdoptionOf('服务日活十万用户。', '开发了内部工具。'), ['日活', '服务日活十万用户']);
+  equal('zh: 微服务 and 用户增长 in the source are not reach evidence',
+    zhAdoptionOf('服务十万用户。', '负责微服务拆分和用户增长平台。'), ['服务十万用户']);
+  equal('zh: a verbatim reach statement in the source supports the claim',
+    zhAdoptionOf('服务日活十万用户。', '平台服务日活十万用户。'), []);
+  equal('zh: a source that states reach supports the claim',
+    zhAdoptionOf('服务十万用户。', '平台用户规模达到十万。'), []);
+  equal('zh: a source with a user count supports the claim',
+    zhAdoptionOf('服务十万用户。', '支撑了十万用户的访问。'), []);
+  equal('zh: an English adoption phrase is not read on the zh path',
+    zhAdoptionOf('Used daily across the engineering org.', '开发了内部工具。'), []);
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
