@@ -12,8 +12,10 @@ VC portfolio API/page
     ↓ seeds/vc-portfolios.mjs
 SeedCompany[]
     ↓ toPortalEntry()
-PortalEntry (careers_url set to best-guess ATS URL)
-    ↓ provider.detect() (same as portals.yml companies)
+toPortalEntries()
+    ↓
+PortalEntry candidates: Ashby, Greenhouse, Lever board URLs from the slug
+    ↓ probed in that order; a 404 moves to the next, the first board found wins
 ATS provider fetches jobs
     ↓ title_filter / location_filter / dedup
 data/pipeline.md
@@ -41,16 +43,18 @@ npm run scan:yc      # YC only
 ### Programmatic
 
 ```js
-import { fetchYCCompanies, fetchA16zCompanies, toPortalEntry, SEED_SOURCES } from './seeds/vc-portfolios.mjs';
+import { fetchYCCompanies, fetchA16zCompanies, toPortalEntries, SEED_SOURCES } from './seeds/vc-portfolios.mjs';
 
 // Fetch YC companies
 const companies = await fetchYCCompanies();
 console.log(companies[0]);
 // → { name: 'Stripe', slug: 'stripe', url: 'https://stripe.com', source: 'yc', batch: 'W11' }
 
-// Convert to a PortalEntry for ATS provider.detect()
-const entry = toPortalEntry(companies[0]);
-// → { name: 'Stripe', careers_url: 'https://job-boards.greenhouse.io/stripe', source: 'yc' }
+// Candidate PortalEntries for ATS provider.detect(), in probe order
+const candidates = toPortalEntries(companies[0]);
+// → [{ name: 'Stripe', careers_url: 'https://jobs.ashbyhq.com/stripe', source: 'yc' },
+//    { ..., careers_url: 'https://job-boards.greenhouse.io/stripe' },
+//    { ..., careers_url: 'https://jobs.lever.co/stripe' }]
 
 // Using the registry
 for (const [id, source] of Object.entries(SEED_SOURCES)) {
@@ -66,8 +70,9 @@ for (const [id, source] of Object.entries(SEED_SOURCES)) {
 | Y Combinator | `https://api.ycombinator.com/v0.1/companies` | JSON API | None |
 | a16z | `https://a16z.com/portfolio/` | Public HTML page | None |
 
-- **YC**: Fetches up to 3 pages × 1000 companies. Covers all public YC batches.
-- **a16z**: Parses the public portfolio page. Falls back gracefully if the page structure changes.
+- **YC**: Walks every page the API reports (`totalPages`). The page size is set by the API. Covers all public YC batches.
+- **a16z**: Reads the company list embedded in the public portfolio page (the `data-companies` attribute, with the inline `window.a16z_portfolio_companies` script as fallback). Acquired companies are skipped. A page that parses to zero companies fails with a warning instead of returning an empty list.
+- Neither source names a company's ATS, so each company is probed by slug on Ashby, Greenhouse and Lever. A company with no board on any of them is counted as "no board found", not as an error.
 
 ## Security
 
