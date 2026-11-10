@@ -37,7 +37,7 @@ try {
   assert.equal(b.isExcluded('output/contacts.vcf', { includeContacts: true }), false);
   assert.equal(b.isExcluded('output/caller-id.vcf'), true);
   // Copies of a contact file go with it (and are included with it); unrelated copies are not held back.
-  for (const f of ['data/contacts.tsv.bak', 'data/Connections.csv.orig', 'output/contacts.vcf.bak']) {
+  for (const f of ['data/contacts.tsv.bak', 'data/Connections.csv.orig', 'output/contacts.vcf.bak', 'data/.contacts.tsv.bak', 'data/.Connections.csv', 'output/.contacts.vcf']) {
     assert.equal(b.isExcluded(f), true, f);
     assert.equal(b.isExcluded(f, { includeContacts: true }), false, `${f} with --include-contacts`);
   }
