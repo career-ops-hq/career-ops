@@ -578,6 +578,33 @@ try {
   } else {
     fail(`workday fetch cap: expected a truncation warning, got ${JSON.stringify(capturedWarnings)}`);
   }
+  if (fetchedHugeWorkday.truncated?.reason === 'page-cap' && fetchedHugeWorkday.truncated?.fetched === 2000
+    && fetchedHugeWorkday.truncated?.total === 1_000_000 && fetchedHugeWorkday.workdayTruncated === undefined) {
+    pass('workday.fetch() marks a page-capped board with jobs.truncated, leaving workdayTruncated (retry hint) unset');
+  } else {
+    fail(`workday cap flag: truncated=${JSON.stringify(fetchedHugeWorkday.truncated)} workdayTruncated=${fetchedHugeWorkday.workdayTruncated}`);
+  }
+  {
+    const page = () => ({ total: 1_000_000, jobPostings: Array.from({ length: 20 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}` })) });
+    const { result: probed, errors: probeWarnings } = await captureConsoleErrors(() =>
+      workday.fetch({ ...entry, max_pages: 1 }, { ...mkWorkdayCtx(async () => page()), maxPages: 1 }));
+    !probed.truncated && !probeWarnings.some((w) => /truncated at/.test(w))
+      ? pass('workday.fetch() neither flags nor warns on a probe when entry and probe caps are both 1')
+      : fail(`workday probe with max_pages 1: truncated=${JSON.stringify(probed.truncated)} warnings=${JSON.stringify(probeWarnings)}`);
+    // No total and a short first page under max_pages: 1 is the natural end.
+    const { result: short, errors: shortWarnings } = await captureConsoleErrors(() =>
+      workday.fetch({ ...entry, max_pages: 1 }, mkWorkdayCtx(async () => ({ jobPostings: Array.from({ length: 5 }, (_, i) => ({ title: `Job ${i}`, externalPath: `/job/board/${i}` })) }))));
+    short.length === 5 && !short.truncated && !shortWarnings.some((w) => /truncated at/.test(w))
+      ? pass('workday.fetch() treats a short last page as complete even at max_pages (no flag, no warning)')
+      : fail(`workday short page at cap: ${short.length} jobs, truncated=${JSON.stringify(short.truncated)} warnings=${JSON.stringify(shortWarnings)}`);
+    const { result: exact } = await captureConsoleErrors(() =>
+      workday.fetch({ ...entry, max_pages: 2 }, mkWorkdayCtx(async () => ({ ...page(), total: 40 }))));
+    // total === max_pages x 20 is what Workday's server clamp reports, so a
+    // full walk to it cannot be told from a clamped one: it stays marked.
+    exact.length === 40 && exact.truncated?.reason === 'page-cap' && exact.truncated?.total === 40
+      ? pass('workday.fetch() keeps a board whose total equals max_pages x 20 marked (indistinguishable from a server clamp)')
+      : fail(`workday exact-cap board: ${exact.length} jobs, truncated=${JSON.stringify(exact.truncated)}`);
+  }
 
   // Which cap warning fires is keyed on ENTRY PROVENANCE, not on the date
   // bound (#2495). "raise max_pages on this entry for more" is only actionable

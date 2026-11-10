@@ -108,6 +108,17 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.darwinbox.in/ms/candidatev2/main/careers/jobDetails/a5',
   );
 
+  // turbohire.parseTurbohireResponse — for…of over the Result array.
+  const { parseTurbohireResponse } = await load('turbohire.mjs');
+  check(
+    'turbohire.parseTurbohireResponse',
+    () => parseTurbohireResponse(
+      { Total: 2, Result: [{ JobIdObfuscated: `${LONE}bad`, JobTitle: 'Bad Id' }, { JobIdObfuscated: 'a5', JobTitle: 'Good Id' }] },
+      'X', { tenant: 'x', origin: 'https://x.turbohire.co' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.turbohire.co/job/publicjobs/a5',
+  );
+
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
   const { parseJibeapplyResponse } = await load('jibeapply.mjs');
   const jibeEntry = { name: 'Acme', careers_url: 'https://acme.jibeapply.com/jobs' };
@@ -447,6 +458,7 @@ try {
     'thehub.mjs',
     'tkms.mjs',
     'trakstar.mjs',
+    'turbohire.mjs',
     'vdab.mjs',
     'zoho-recruit.mjs',
   ];

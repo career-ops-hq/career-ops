@@ -498,6 +498,72 @@ export async function fetchText(url, opts = {}) {
   return fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), false);
 }
 
+/**
+ * Hand a response body to `onText` piece by piece instead of buffering it.
+ *
+ * For a source that publishes one document far over DEFAULT_MAX_BODY_BYTES
+ * (Workable's job feed is about 870 MB of XML, 140 MB as brotli). The request
+ * goes through the same transport as fetchText: the IP guard, `redirect:
+ * 'error'` by default, the board signal and the negotiated compression, which
+ * the runtime decodes. What changes is the body: it is decoded as UTF-8 chunk
+ * by chunk and never held whole, and it is not stored in the HTTP cache.
+ *
+ * `opts.timeoutMs` bounds the WHOLE transfer, headers and body, so a caller
+ * passes a deadline that fits the document. `opts.maxBytes` bounds the decoded
+ * body; over it the read stops and throws `response_too_large`. `onText`
+ * returning `false` (or a promise of it) stops the read early; the body is
+ * cancelled either way, so the connection is released.
+ *
+ * A conditional request passes its validator in `opts.headers`
+ * (`If-Modified-Since`) together with `opts.acceptNotModified: true`; a 304
+ * then resolves with `notModified: true` and `onText` is never called. The
+ * response's `Last-Modified` comes back as `lastModified` (null when absent),
+ * so the caller can make the next request conditional.
+ *
+ * @param {string} url
+ * @param {FetchOptions} opts
+ * @param {(text: string) => (boolean | void | Promise<boolean | void>)} onText
+ * @returns {Promise<{ bytes: number, complete: boolean, notModified: boolean, lastModified: string | null }>} decoded bytes read, whether the body was read to its end, whether the server answered 304, and its Last-Modified
+ * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
+ */
+export async function fetchTextStream(url, opts, onText) {
+  if (typeof onText !== 'function') throw new TypeError('fetchTextStream needs an onText callback');
+  const maxBytes = resolveMaxBytes(opts?.maxBytes);
+  return fetchWithTimeout(url, opts ?? {}, async (res) => {
+    const lastModified = res.headers.get('last-modified');
+    if (res.status === 304) return { bytes: 0, complete: true, notModified: true, lastModified };
+    const reader = res.body?.getReader?.();
+    if (!reader) {
+      const text = await res.text();
+      const bytes = Buffer.byteLength(text, 'utf8');
+      if (bytes > maxBytes) throw bodyTooLarge(bytes, maxBytes);
+      if (text) await onText(text);
+      return { bytes, complete: true, notModified: false, lastModified };
+    }
+    const decoder = new TextDecoder('utf-8');
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.length;
+        if (bytes > maxBytes) throw bodyTooLarge(null, maxBytes);
+        if (await onText(decoder.decode(value, { stream: true })) === false) return { bytes, complete: false, notModified: false, lastModified };
+      }
+      const tail = decoder.decode();
+      if (tail) await onText(tail);
+      return { bytes, complete: true, notModified: false, lastModified };
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* body already closed */
+      }
+    }
+  });
+}
+
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
 // response headers — csod.mjs reads Set-Cookie to prime the session its search
 // API requires — can route through ctx instead of re-implementing fetch. Pass

@@ -22,7 +22,7 @@ const requiredGuardrails = [
 // drifted: modes/vi (#4727) shipped a _shared.md this file never opened.
 const expectedLocalizedModes = [
   'ar', 'da', 'de', 'es', 'fr', 'hi', 'id', 'it', 'ja',
-  'ko', 'nl', 'pl', 'pt', 'ru', 'sg', 'tr', 'ua', 'vi', 'zh-TW', 'zh',
+  'ko', 'nb', 'nl', 'pl', 'pt', 'ru', 'sg', 'tr', 'ua', 'vi', 'zh-TW', 'zh',
 ];
 
 const modeDirs = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
@@ -102,12 +102,24 @@ if (sourceNames.length < 6) {
   fail(`localized source-exclusivity rules leave sources unnamed: ${unnamedSources.join('; ')}`);
 }
 
-// #2395: most market sets ship no cover.md, email.md or contacto.md, so their
-// never-send rules reach a localized user only through the English file. The
-// router has to say so, or the fallback holds by accident.
+// #2395/#6627: most market sets ship no cover.md, email.md or contacto.md, and
+// even the modes they do ship only carry the rules a translator copied. A
+// scalar modes_dir must therefore layer the market files on the English canon,
+// not swap them in: the router always reads the English modes/_shared.md and
+// modes/{mode}.md first, or every uncopied rule silently disappears.
 const router = readFileSync(join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md'), 'utf8').replace(/\r\n/g, '\n');
-if (/When it provides no file for the selected mode[^\n]*load the English `modes\/\{mode\}\.md`/.test(router)) {
-  pass('router falls back to the English mode file when a market set has none');
+const layersCanon = /always read the English version first \(the English `modes\/_shared\.md` and the English `modes\/\{mode\}\.md`/.test(router);
+const englishWins = /the English rule wins/.test(router);
+const keepsTriageLean = /never adds a file the mode's section does not load/.test(router);
+const listRespectsModes = /A mode whose section loads no `_shared\.md` \(such as `triage`\) still loads only its mode file/.test(router);
+const workerPrecedence = /when a localized file contradicts an English workflow rule, follow the English rule/.test(router);
+const dedupesBaseline = /already covered by the English read, so never read it twice/.test(router);
+const workerListModes = /each declared modes_dir directory's version of that mode file, skipping a declared entry that resolves to the English modes directory already read/.test(router);
+const workerSkipsBaselineTwice = (router.match(/skipping a declared entry that resolves to the English modes directory already read/g) || []).length === 2;
+const evalFirstRouter = /use only the FIRST entry's evaluation-mode file for Blocks A-F/.test(router);
+const evalFirstWorker = /only the FIRST entry's evaluation-mode file, later entries contribute context/.test(router);
+if (layersCanon && englishWins && keepsTriageLean && listRespectsModes && workerPrecedence && dedupesBaseline && workerListModes && workerSkipsBaselineTwice && evalFirstRouter && evalFirstWorker) {
+  pass('router layers localized files on the English canon for a scalar modes_dir, with English precedence, no extra files, list dedupe, and the precedence rule carried into worker prompts');
 } else {
-  fail('router no longer says a market set without the selected mode file loads the English modes/{mode}.md');
+  fail('router layering contract regressed: canon-first=' + layersCanon + ' english-precedence=' + englishWins + ' no-extra-files=' + keepsTriageLean + ' list-respects-modes=' + listRespectsModes + ' worker-precedence=' + workerPrecedence + ' dedupes-baseline=' + dedupesBaseline + ' worker-list-modes=' + workerListModes + ' worker-skips-baseline-both-segments=' + workerSkipsBaselineTwice + ' eval-first-router=' + evalFirstRouter + ' eval-first-worker=' + evalFirstWorker);
 }

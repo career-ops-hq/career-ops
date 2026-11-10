@@ -323,6 +323,8 @@ for (const [label, linked] of [
   ['an escaped-parenthesis target', '[Fabrikam](https://fabrikam.example/x\\)(Director))'],
   ['an inline link title', '[Fabrikam](https://fabrikam.example/ "Director")'],
   ['a same-line reference-definition title', '[Fabrikam][ml]\n\n[ml]: https://fabrikam.example/ "Director"'],
+  ['a reference-definition target on the line after its label', '[Fabrikam][ml]\n\n[ml]:\n  https://fabrikam.example/x_(Director)'],
+  ['a reference-definition target in angle brackets holding a space', '[Fabrikam][ml]\n\n[ml]: <./fabrikam/x (Director).pdf>'],
 ]) {
   test(`a role that appears only in ${label} is not evidence`, () => {
     const source = join(tmp, `cv-meta-${Math.random().toString(36).slice(2)}.md`);

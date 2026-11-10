@@ -138,6 +138,17 @@ export default {
   per-posting detail on every scan, with no config switch, defeats the
   opt-in and puts the per-posting request fan-out back on the default path;
   `detailLimit` is the cap on that loop, never the thing that turns it on.
+- A teaser, summary or excerpt is not a `description`: `content_filter`
+  reads any description as the full JD, so a short blurb that lacks a
+  required keyword drops the posting. When such a blurb states where the
+  job can be done ("can be done remotely anywhere in the United States"),
+  put only that statement in `eligibilityText`, which
+  `country_eligibility_filter` reads and no other filter does. Reference:
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. When the
+  blurb can mention visa sponsorship, put it in `visaText`, which only
+  `visa_filter` reads. The whole blurb may go there, since `visa_filter`
+  matches nothing but its sponsorship keywords. Reference:
+  `providers/startup-jobs.mjs`.
 - When the payload exposes **more than one** candidate URL for a posting —
   typically an aggregator carrying the employer's upstream ATS/application
   link alongside its own posting page — `Job.url` is the employer's link, per
@@ -179,7 +190,10 @@ judge.
   modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`, `bamboohr`,
   `paylocity`, `join`), each paired with a public company directory (a
   dataset, or for `join` the ATS's own sitemap). No registry lookup;
-  joining it means adding an import and a `SOURCES` entry.
+  joining it means adding an import and a `SOURCES` entry. A ninth entry,
+  `workable`, has no directory: it reads Workable's XML job feed, which
+  already carries every posting, so no provider module's `fetch()` or
+  `enrichDate` runs for it.
 - **The `--history-seeds` pass.** Boards derived from the user's tracker and
   scan history (`history-ats-seeds.mjs`). This one does load the registry,
   but it only reaches a provider whose `id` equals a vendor label from
@@ -459,6 +473,17 @@ this ceiling, never on its own. Reference: `providers/workday.mjs`
 (`DEFAULT_MAX_PAGES`, `MAX_PAGES_CAP`, `resolveMaxPages()`). When the ceiling
 truncated the list, warn the user (`raise max_pages on this entry`) so a
 partial list is not mistaken for a complete one.
+
+Also say it in the return value, so `scan.mjs` can act on it: set
+`jobs.truncated = { reason, fetched?, total? }` on the returned array
+(`markTruncated()` in `lib/board-truncation.mjs` does this), with a short
+machine-readable `reason` such as `'page-cap'` or `'rate-limited'`. A board
+marked this way is logged `partial` in `data/portal-health.tsv` instead of
+`reachable` and listed in the run summary and the `--json` receipt (Google
+AIP-217: a partly successful read must say what it did not reach). It does
+not count toward the persistent-failure streak, because the board answered;
+consecutive partial reads get their own repeat warning instead. The older per-provider tags
+(`workdayTruncated`, `eightfoldTruncated`, ...) are still recognized.
 
 `max_pages` and `ctx.maxPages` count **pages of results**. A one-shot
 bootstrap that carries no listings — a token/cookie primer, a board-id

@@ -74,6 +74,8 @@ List `unreadable` items separately too, with URL and a reason code, when the JD 
 | # | Company | Role | Score | PDF | Recommended action |
 ```
 
+5. **Then, once per run (interactive runs only):** if the run saved at least one report, finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks".
+
 ## Format of pipeline.md
 
 Every inbox file, `data/pipeline.md` or a lane's `CAREER_OPS_PIPELINE` file, uses this format.

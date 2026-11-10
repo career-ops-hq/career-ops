@@ -1232,6 +1232,9 @@ async function cmdPipeline(ctx, options = {}) {
 }
 
 // -- APPLY --
+// Returns false when no answers were produced (no report, unreadable report, or
+// a failed request) and true otherwise, including when the user declines a
+// low-score report: that is their choice, not a failure.
 async function cmdApply(ref, ctx) {
   tracker.recordZeroToken('scan');
   tracker.recordZeroToken('evaluation');
@@ -1247,12 +1250,12 @@ async function cmdApply(ref, ctx) {
     });
     if (!located.ok) {
       console.error(`Report not found: ${ref}`);
-      return;
+      return false;
     }
     reportPath = located.path;
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
-    return;
+    return false;
   }
   try {
     reportContent = fs.readFileSync(reportPath, 'utf8');
@@ -1260,7 +1263,7 @@ async function cmdApply(ref, ctx) {
     reportContent = null;
   }
 
-  if (!reportContent) { console.error('Could not read report content.'); return; }
+  if (!reportContent) { console.error('Could not read report content.'); return false; }
 
   // Score-gate: warn and confirm before applying to low-fit roles (AGENTS.md Ethical Use)
   const scoreMatch = reportContent.match(/^\s*\*?\*?\s*(?:score|puntuaci[oó]n)\s*:\s*\*?\*?\s*(\d+(?:\.\d+)?)\s*\/\s*5/im);
@@ -1275,7 +1278,7 @@ async function cmdApply(ref, ctx) {
     rl.close();
     if (answer.trim().toLowerCase() !== 'yes') {
       console.log('Aborted.');
-      return;
+      return true;
     }
   }
 
@@ -1290,7 +1293,7 @@ async function cmdApply(ref, ctx) {
     );
   } catch (e) {
     console.error(`OpenRouter error: ${e.message}`);
-    return;
+    return false;
   }
   tracker.record('apply', resultObj.usage);
   const result = resultObj.content;
@@ -1298,6 +1301,7 @@ async function cmdApply(ref, ctx) {
   console.log('\n─── APPLICATION ANSWERS ─────────────────────────────\n');
   console.log(result);
   console.log('\n─────────────────────────────────────────────────────\n');
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1315,15 +1319,21 @@ if (invokedDirectly && ['evaluate', 'eval', 'pipeline', 'apply', 'models'].inclu
   await loadFreeModels();
 }
 
+// A command that did not do its job exits 1: a mistyped command, `apply`
+// without a report, an evaluation that saved no report, answers that were not
+// generated. A script or scheduler that checks the status read each of them as
+// a success.
 if (invokedDirectly) switch (command) {
   case 'scan':
     await cmdScan();
     break;
 
   case 'evaluate':
-  case 'eval':
-    await cmdEvaluate(args.join(' ').trim() || null, ctx);
+  case 'eval': {
+    const res = await cmdEvaluate(args.join(' ').trim() || null, ctx);
+    if (res?.success !== true) process.exitCode = 1;
     break;
+  }
 
   case 'pipeline':
     const isOneJob = args.includes('--one') || args.includes('-1') || args.includes('--limit=1');
@@ -1331,16 +1341,20 @@ if (invokedDirectly) switch (command) {
     break;
 
   case 'apply':
-    if (!args[0]) { console.error('Usage: node openrouter-runner.mjs apply <report_num|report_path>'); break; }
-    await cmdApply(args[0], ctx);
+    if (!args[0]) {
+      console.error('Usage: node openrouter-runner.mjs apply <report_num|report_path>');
+      process.exitCode = 1;
+      break;
+    }
+    if (!(await cmdApply(args[0], ctx))) process.exitCode = 1;
     break;
 
   case 'models':
     await cmdModels();
     break;
 
-  default:
-    console.log(`
+  default: {
+    const usage = `
 career-ops OpenRouter Runner
 Auto-fetches free models from OpenRouter API and rotates through them with fallback.
 
@@ -1362,7 +1376,15 @@ MODEL SELECTION:
   - Free models are fetched automatically via the OpenRouter API at runtime.
   - They are tried in sequence; if one fails the next is used automatically.
   - Pin a model:  CAREER_OPS_MODEL=deepseek/deepseek-r1:free node openrouter-runner.mjs eval <url>
-`);
+`;
+    if (command === undefined || ['help', '--help', '-h'].includes(command)) {
+      console.log(usage);
+    } else {
+      // A mistyped command (`evalute`) ran nothing, so it must not exit 0.
+      console.error(`openrouter-runner.mjs: unknown command "${command}"\n${usage}`);
+      process.exitCode = 1;
+    }
+  }
 }
 
 if (invokedDirectly && ['scan', 'evaluate', 'eval', 'pipeline', 'apply'].includes(command)) {

@@ -68,6 +68,7 @@ import { closesAtIso } from '../lib/posting-close.mjs';
 import { fetchJsonWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_URL = 'https://jobsearch.api.jobtechdev.se/search';
 
@@ -303,6 +304,11 @@ export default {
     const byUrl = new Map();
     const errors = [];
     let succeeded = 0;
+    // Why the walk stopped short of a keyword's own end, if it did: the
+    // returned array says so (`jobs.truncated`) so scan.mjs logs the board
+    // `partial` instead of `reachable`. The first cause seen wins.
+    /** @type {'page-cap'|'source-cap'|'fetch-error'|null} */
+    let truncatedReason = null;
 
     for (const keyword of keywords) {
       let keywordFailed = false;
@@ -328,9 +334,12 @@ export default {
           if (page === 1) {
             keywordFailed = true;
             errors.push(`"${keyword}": ${(err && /** @type {Error} */ (err).message) || err}`);
+          } else {
+            // A later page failing keeps the pages already collected: recall-first,
+            // the same trade arbeitsagentur.mjs and jobbankca.mjs make. The board
+            // is then only partly read.
+            truncatedReason ??= 'fetch-error';
           }
-          // A later page failing keeps the pages already collected: recall-first,
-          // the same trade arbeitsagentur.mjs and jobbankca.mjs make.
           break;
         }
 
@@ -348,13 +357,9 @@ export default {
           // ceiling, not on the source. Which ceiling decides which advice is
           // useful — raising max_pages cannot buy a page the source does not
           // serve.
-          warnTruncated(
-            keyword,
-            maxPages,
-            keywordRows,
-            maxPages >= MAX_PAGES_CAP ? 'source' : 'entry',
-            entryName,
-          );
+          const ceiling = maxPages >= MAX_PAGES_CAP ? 'source' : 'entry';
+          warnTruncated(keyword, maxPages, keywordRows, ceiling, entryName);
+          truncatedReason ??= ceiling === 'source' ? 'source-cap' : 'page-cap';
         }
       }
       if (!keywordFailed) succeeded++;
@@ -367,6 +372,8 @@ export default {
       throw new Error(`platsbanken: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
 
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    if (truncatedReason) markTruncated(jobs, truncatedReason, { fetched: jobs.length });
+    return jobs;
   },
 };
