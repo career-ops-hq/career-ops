@@ -203,3 +203,30 @@ try {
 } finally {
   rmSync(dryDir, { recursive: true, force: true });
 }
+
+const liveDir = mkdtempSync(join(tmpdir(), 'ats-full-timeout-liveness-'));
+try {
+  const { preload } = prepare(liveDir);
+  const stopped = await stopSweep(liveDir, preload, ['--liveness']);
+  const text = pipeline(liveDir);
+  const sawRole = textHasUrl(stopped.stderr, FIRST);
+  const sigterm = stopped.signal === 'SIGTERM';
+  let partial = null;
+  if (existsSync(checkpointPath(liveDir))) partial = readCheckpoint(liveDir).partialSave ?? null;
+  if (!signalReachesHandler && sawRole && sigterm && !textHasUrl(text, FIRST) && !stopped.stdout.includes('"stoppedEarly"')) {
+    pass('windows ends a liveness sweep before the handler can write');
+  } else if (
+    signalReachesHandler
+    && !textHasUrl(text, FIRST)
+    && stopped.stdout.includes('"stoppedEarly":true')
+    && stopped.stdout.includes('"saved":false')
+    && partial?.saved === false
+    && partial?.postingsKept >= 1
+  ) {
+    pass('a liveness stop keeps the roles in the checkpoint and does not write pipeline.md');
+  } else {
+    fail(`liveness stop wrote unverified roles: pipeline=${textHasUrl(text, FIRST)} partial=${JSON.stringify(partial)} status=${stopped.status}\nstdout=${stopped.stdout.slice(-400)}`);
+  }
+} finally {
+  rmSync(liveDir, { recursive: true, force: true });
+}

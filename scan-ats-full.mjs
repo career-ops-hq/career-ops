@@ -285,6 +285,23 @@ export function datasetFingerprint(list) {
   return createHash('sha1').update(JSON.stringify(list)).digest('hex').slice(0, 16);
 }
 
+/**
+ * A resume compares the checkpoint to the company list only when that list
+ * has a stable order. A source that restarts (the Workable feed) has no
+ * offset to validate, and reading its URL as JSON trips the feed's download
+ * limit, then fails the resume because the body is not a company array.
+ *
+ * @param {{ current?: { name?: string } } | null | undefined} checkpoint
+ * @param {Record<string, { restartOnResume?: boolean }> | null | undefined} sources
+ * @returns {boolean}
+ */
+export function checkpointComparesCompanyList(checkpoint, sources) {
+  const name = checkpoint?.current?.name;
+  const source = name ? sources?.[name] : null;
+  if (!source) return false;
+  return source.restartOnResume !== true;
+}
+
 // Dataset entries are external input destined for URL interpolation — reject
 // anything outside a conservative slug charset.
 const SLUG_RE = /^[A-Za-z0-9._-]+$/;
@@ -1682,7 +1699,7 @@ async function main() {
   // scheduled resume has to drop the checkpoint before its offers and counters
   // are copied, or a changed list exits 1 on every later run. --resume stays
   // strict.
-  if (checkpoint?.current?.name && SOURCES[checkpoint.current.name]) {
+  if (checkpointComparesCompanyList(checkpoint, SOURCES)) {
     const sourceName = checkpoint.current.name;
     const source = SOURCES[sourceName];
     const { list } = await loadCompanyList(sourceName, source.dataset, source.parseDataset);
@@ -1776,7 +1793,8 @@ async function main() {
           kept = filterBlacklistedOffers(newOffers.slice(), blacklist, {
             includeBlacklisted: opts.includeBlacklisted,
           }).offers;
-          if (!opts.dryRun && kept.length) {
+          // --liveness verifies before any write. This stop cannot run that check.
+          if (!opts.dryRun && !opts.liveness && kept.length) {
             if (!existsSync(PIPELINE_PATH)) {
               mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
               writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
