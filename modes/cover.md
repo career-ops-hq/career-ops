@@ -358,7 +358,7 @@ Run:
 node generate-cover-letter.mjs --payload /tmp/cover-payload-{company-slug}.json
 ```
 
-Report the output path and file size.
+If the command prints a line starting `Cover letter was not written`, the letter was NOT written. Report that, name the draft path from that line, and tell the candidate to trim the letter and rerun. Report the output path and file size only when the success line `Cover letter PDF:` appears.
 
 ---
 

@@ -501,46 +501,128 @@ function collectInputText(value) {
   return [];
 }
 
-/** Parse a payload, run the fact gate, and render the cover-letter PDF. */
-async function main() {
-  const { values: args } = parseArgs({
-    options: {
-      payload: { type: "string" },
-      out:     { type: "string" },
-      format:  { type: "string" },
-      country: { type: "string" },
-      report:  { type: "string" },
-      help:    { type: "boolean", short: "h" },
-    },
-    strict: false,
-  });
+/** A cover letter is one page by convention; a CV's default budget is 2. */
+export const DEFAULT_COVER_MAX_PAGES = 1;
 
-  if (args.help || !args.payload) {
-    console.log(`
+const USAGE = `
 Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN]
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN] [--max-pages N] [--strict-pages]
 
-  --payload   Path to the JSON payload file (required)
-  --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4). Defaults to
-              config/profile.yml page_format, then letter.
-  --country   Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
-              only when page_format is "auto". Defaults to the payload's country.
-  --report    Link the PDF to a tracker report number in data/pdf-index.tsv
-`);
-    process.exit(args.help ? 0 : 1);
+  --payload       Path to the JSON payload file (required)
+  --out           Override output path from payload (optional)
+  --format        Override output PDF page format (letter|a4). Defaults to
+                  config/profile.yml page_format, then letter.
+  --country       Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
+                  only when page_format is "auto". Defaults to the payload's country.
+  --report        Link the PDF to a tracker report number in data/pdf-index.tsv
+  --max-pages     Preferred letter length in pages (default: ${DEFAULT_COVER_MAX_PAGES})
+  --strict-pages  Fail instead of warning when the letter is longer than --max-pages
+`;
+
+/** Flags that take a value (#6373). parseCoverArgs() requires one for each. */
+const VALUE_FLAGS = ["payload", "out", "format", "country", "report", "max-pages"];
+
+/**
+ * Parse and validate the CLI flags.
+ *
+ * Strict on purpose (#6373). With `strict: false` an unknown flag (a typo, or
+ * --max-pages / --strict-pages, which this script did not declare) was dropped
+ * without a word, and a string flag given no value swallowed the next flag:
+ * `--report --out x.pdf` set report to "--out" and wrote the PDF to the
+ * default path. Every case is now an error that names the flag.
+ *
+ * @param {string[]} argv
+ * @returns {{ ok: true, args: object } | { ok: false, error: string }}
+ */
+export function parseCoverArgs(argv) {
+  // Help wins over every other check, wherever it sits in argv (E0d).
+  if (argv.includes("--help") || argv.includes("-h")) return { ok: true, args: { help: true } };
+  // Node's strict parser reports a value-less flag as "argument is ambiguous",
+  // which names no requirement. A bare value flag (no `=`) that is last, or that
+  // is followed by another flag, is caught here so the message names the flag.
+  // The next token is never taken as its value.
+  for (let i = 0; i < argv.length; i++) {
+    const name = /^--([a-z-]+)$/.exec(argv[i])?.[1];
+    if (VALUE_FLAGS.includes(name) && (i + 1 >= argv.length || argv[i + 1].startsWith("-"))) {
+      return { ok: false, error: `--${name} requires a value, e.g. --${name}=VALUE.` };
+    }
+  }
+  let values;
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        payload:        { type: "string" },
+        out:            { type: "string" },
+        format:         { type: "string" },
+        country:        { type: "string" },
+        report:         { type: "string" },
+        "max-pages":    { type: "string" },
+        "strict-pages": { type: "boolean" },
+        help:           { type: "boolean", short: "h" },
+      },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  if (values.help) return { ok: true, args: values };
+  // `--payload=` names no file. Without this check main() read it as "no payload"
+  // and printed the usage, which does not say what was wrong.
+  if (values.payload !== undefined && values.payload.trim() === "") {
+    return { ok: false, error: "--payload requires a value, e.g. --payload=VALUE." };
   }
 
   // Supplied flags are validated like generate-pdf.mjs does. A typo that fell
   // through to the profile or the payload would print a letter on the wrong sheet.
   // `auto` is a profile or payload value, never a sheet, so --format rejects it.
-  if (args.format !== undefined && !normalizePageFormat(args.format)) {
-    console.error(`Invalid format "${args.format}". Use: ${[...PAGE_FORMATS].join(", ")}`);
+  if (values.format !== undefined && !normalizePageFormat(values.format)) {
+    return { ok: false, error: `Invalid format "${values.format}". Use: ${[...PAGE_FORMATS].join(", ")}` };
+  }
+  if (values.country !== undefined && !pageFormatForCountry(values.country)) {
+    return { ok: false, error: `Invalid country "${values.country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.` };
+  }
+  // Checked as typed, not trimmed: `--report=' 42 '` is not a report number.
+  if (values.report !== undefined && !/^\d+$/.test(values.report)) {
+    return { ok: false, error: `Invalid --report "${values.report}". Use a numeric report number, e.g. --report=42.` };
+  }
+  // An empty --out= would otherwise be read as "not given" by main(), which
+  // then writes to the payload's own destination: a flag the caller typed,
+  // silently ignored.
+  if (values.out !== undefined && values.out.trim() === "") {
+    return { ok: false, error: 'Invalid --out "". Give a path inside output/, e.g. --out output/acme-cover.pdf.' };
+  }
+  const maxPagesInput = values["max-pages"];
+  const maxPages = maxPagesInput === undefined ? DEFAULT_COVER_MAX_PAGES : Number(maxPagesInput);
+  // Digits only, checked as typed: Number() would accept "1e0", "0x2", " 2 " and "2.0".
+  if (!(maxPagesInput === undefined || /^\d+$/.test(maxPagesInput)) || !Number.isInteger(maxPages) || maxPages < 1) {
+    return { ok: false, error: `Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1.` };
+  }
+  return {
+    ok: true,
+    args: {
+      ...values,
+      report: values.report,
+      maxPages,
+      strictPages: Boolean(values["strict-pages"]),
+    },
+  };
+}
+
+/** Parse a payload, run the fact gate, and render the cover-letter PDF. */
+async function main() {
+  const parsed = parseCoverArgs(process.argv.slice(2));
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    console.error(USAGE);
     process.exit(1);
   }
-  if (args.country !== undefined && !pageFormatForCountry(args.country)) {
-    console.error(`Invalid country "${args.country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.`);
-    process.exit(1);
+  const args = parsed.args;
+
+  if (args.help || !args.payload) {
+    console.log(USAGE);
+    process.exit(args.help ? 0 : 1);
   }
 
   const payloadPath = resolve(args.payload);
@@ -611,18 +693,27 @@ Usage:
       console.error(`CV fact check warning: cover letter`);
       printFactWarnings(printedWarnings, console.error);
     }
-    await renderHtmlToPdf(printed, outputPath, {
+    const rendered = await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
       format: args.format,
       country: args.country || payload.country,
       reportNum: args.report,
+      maxPages: args.maxPages,
+      strictPages: args.strictPages,
       // Declared, never inferred: this script always renders a cover letter, and
       // the manifest must not file it as the report's CV (#3887).
       kind: 'cover',
       inputPath: payloadPath,
     });
+    // A warn-only overflow writes only a sibling draft and returns its path (#6458).
+    // The output path was not written, so do not announce it: name the draft instead.
+    // The exit code stays 0; --strict-pages already threw above.
+    if (rendered?.draftPath) {
+      console.error(`\nCover letter was not written to ${payload.output_path}: it is ${rendered.pageCount} pages, over the allowed ${args.maxPages}. The draft is ${rendered.draftPath}. Trim the letter and rerun to write the output path.`);
+      return;
+    }
     console.log(`\nCover letter PDF: ${payload.output_path}`);
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");

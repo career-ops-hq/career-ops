@@ -450,7 +450,7 @@ If the user says yes, run the full cover letter flow from `modes/cover.md` in sl
 5. Ask the four prompts: why / problems / approach / tone (Step 6)
 6. Draft in chat, wait for approval (Steps 7-8)
 7. Generate cover letter PDF via `node generate-cover-letter.mjs` (Step 9)
-8. Report both PDF paths
+8. Report both PDF paths. If the cover letter command printed `Cover letter was not written`, the letter was NOT written: name the draft path from that line instead, and tell the candidate to trim and rerun (see `modes/cover.md` Step 9)
 
 Do not auto-generate the cover letter PDF without going through the interactive steps above.
 

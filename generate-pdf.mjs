@@ -1385,10 +1385,12 @@ export function reorderCvSections(html, order) {
  * force content under the limit.
  *
  * @param {number} pageCount - Actual pages in the rendered PDF.
- * @param {{ maxPages?: number, strictPages?: boolean }} [options]
+ * @param {{ maxPages?: number, strictPages?: boolean, kind?: string }} [options]
+ *   `kind` names the artifact in the message: a cover letter that overflows
+ *   is reported as one, with advice that fits a letter, not as "CV is N pages".
  * @returns {void}
  */
-export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false } = {}) {
+export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false, kind = 'cv' } = {}) {
   if (!Number.isInteger(pageCount) || pageCount < 1) {
     throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
   }
@@ -1397,12 +1399,16 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
 
   const actualLabel = 'pages';
   const allowedLabel = maxPages === 1 ? 'page' : 'pages';
+  const isCover = kind === 'cover';
   const message =
-    `CV is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
-    'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
+    `${isCover ? 'Cover letter' : 'CV'} is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
+    (isCover
+      ? 'Shorten the opening, the profile intro, or the achievements, then regenerate.'
+      : 'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.');
 
   if (strictPages) {
-    throw new Error(`${message} (strict page budget: --strict-pages or cv.strict_pages)`);
+    // A cover letter has no cv.* profile key, so its message names only the flag.
+    throw new Error(`${message} (strict page budget: ${isCover ? '--strict-pages' : '--strict-pages or cv.strict_pages'})`);
   }
 
   console.warn(`⚠️  ${message} Overflow is warning-only by default; use --strict-pages to reject it.`);
@@ -2473,7 +2479,11 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       // with the draft it wrote instead of the output path (#6377); the
       // warning is repeated on the page count alone, so a painter still
       // running from before drafts existed is reported honestly too.
-      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
+      enforcePageBudget(result.pageCount, {
+        maxPages: opts.maxPages ?? 2,
+        strictPages: false,
+        kind: resolveArtifactKind(opts.kind, outputPath).kind ?? 'cv',
+      });
       if (result.draftPath) {
         console.warn(`⚠️  Overflow draft: ${result.draftPath} (nothing was written to the output path). Trim and rerun to write ${result.outputPath}.`);
         console.log(`📊 Pages: ${result.pageCount}`);
@@ -2562,7 +2572,9 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // loop and the profile reader validate it, but a direct caller does not, and
   // an unusable value would skip the strict-overflow branch below, replace the
   // PDF at outputPath, and only then be rejected by enforcePageBudget().
-  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false };
+  // `kind` names the artifact in an overflow message: a cover letter is reported
+  // as one, not as "CV is N pages" (#6373).
+  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false, kind: artifactKind };
   assertValidMaxPages(budget.maxPages);
 
   // Reject an escaping destination before creating directories, launching
