@@ -206,14 +206,18 @@ try {
   ].join('\n');
   const descJobs = parseStartupJobsFeed(descriptionXml);
   // A teaser that names a stack keyword and visa sponsorship still yields no
-  // description, while the location keeps coming from its last line.
-  if (descJobs[0] && !('description' in descJobs[0]) && descJobs[0].location === 'Berlin, Germany') {
-    pass('a keyword-bearing teaser sets no job.description, and the location is still read from its last line');
+  // description, while the location keeps coming from its last line and the
+  // teaser reaches visa_filter as plain-text visaText.
+  if (
+    descJobs[0] && !('description' in descJobs[0]) && descJobs[0].location === 'Berlin, Germany' &&
+    descJobs[0].visaText === 'Run Kubernetes clusters; we offer visa sponsorship. Berlin, Germany'
+  ) {
+    pass('a keyword-bearing teaser sets no job.description, carries plain-text visaText, and still yields the location');
   } else {
     fail(`markup row = ${JSON.stringify(descJobs[0])}`);
   }
-  if (descJobs.length === 3 && descJobs.slice(1).every((j) => !('description' in j) && j.location === '')) {
-    pass('an item with no (or an empty) <description> is kept, without a description field');
+  if (descJobs.length === 3 && descJobs.slice(1).every((j) => !('description' in j) && !('visaText' in j) && j.location === '')) {
+    pass('an item with no (or an empty) <description> is kept, without description or visaText');
   } else {
     fail(`description-less rows = ${JSON.stringify(descJobs.slice(1))}`);
   }

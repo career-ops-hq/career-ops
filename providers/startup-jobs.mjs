@@ -1,5 +1,6 @@
 // @ts-check
 import { decodeEntities } from './_html-entities.mjs';
+import { htmlToText } from './_html-to-text.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Startup Jobs provider — the board-wide public RSS feed at
@@ -58,10 +59,13 @@ import { decodeEntities } from './_html-entities.mjs';
 // excerpt for the same reason, and providers/paylocity.mjs leaves out its
 // ~110-char snippet.
 //
+// The teaser goes to `visaText` instead, which only visa_filter reads, so a
+// teaser that says "we offer visa sponsorship" (or "no sponsorship") still
+// counts as visa evidence. None of the 50 said either, but nothing stops a
+// teaser from saying it. visa_filter matches only its sponsorship keywords,
+// so a teaser without them gets the same decision as no text.
+//
 // What the other description readers lose (same 50 items):
-// - visa_filter with `require_mention: true` rejects these postings with or
-//   without the teaser: none of the 50 mentions visas or sponsorship, and a
-//   missing description fails require_mention by design.
 // - country_eligibility_filter: none of the 50 carries eligibility wording,
 //   and the teaser's location line still reaches location_filter as
 //   `location`.
@@ -213,11 +217,12 @@ function maskCdataAndComments(str) {
  * `<description>` whose last line is the location (optionally followed by
  * " · {comp range}"). No structured company/location fields are offered.
  *
- * The `<description>` is read for the location only and is not carried as
- * `description`: it is a short teaser, not the JD (see the header comment).
+ * The `<description>` is not carried as `description`: it is a short teaser,
+ * not the JD (see the header comment). It supplies the location and, as
+ * plain text, `visaText`.
  *
  * @param {string} xml - raw RSS feed body
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, visaText?: string, postedAt?: number}>}
  */
 export function parseStartupJobsFeed(xml) {
   if (typeof xml !== 'string') {
@@ -276,6 +281,10 @@ export function parseStartupJobsFeed(xml) {
       url,
     };
     if (postedAt !== undefined) job.postedAt = postedAt;
+    // Location above reads the raw lines; visaText is the teaser flattened to
+    // plain text by the shared helper.
+    const visaText = htmlToText(description);
+    if (visaText) job.visaText = visaText;
     jobs.push(job);
   }
 

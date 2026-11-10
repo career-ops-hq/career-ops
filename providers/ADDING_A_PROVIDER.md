@@ -144,7 +144,11 @@ export default {
   job can be done ("can be done remotely anywhere in the United States"),
   put only that statement in `eligibilityText`, which
   `country_eligibility_filter` reads and no other filter does. Reference:
-  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`.
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. When the
+  blurb can mention visa sponsorship, put it in `visaText`, which only
+  `visa_filter` reads. The whole blurb may go there, since `visa_filter`
+  matches nothing but its sponsorship keywords. Reference:
+  `providers/startup-jobs.mjs`.
 - When the payload exposes **more than one** candidate URL for a posting —
   typically an aggregator carrying the employer's upstream ATS/application
   link alongside its own posting page — `Job.url` is the employer's link, per
