@@ -514,10 +514,16 @@ export async function fetchText(url, opts = {}) {
  * returning `false` (or a promise of it) stops the read early; the body is
  * cancelled either way, so the connection is released.
  *
+ * A conditional request passes its validator in `opts.headers`
+ * (`If-Modified-Since`) together with `opts.acceptNotModified: true`; a 304
+ * then resolves with `notModified: true` and `onText` is never called. The
+ * response's `Last-Modified` comes back as `lastModified` (null when absent),
+ * so the caller can make the next request conditional.
+ *
  * @param {string} url
  * @param {FetchOptions} opts
  * @param {(text: string) => (boolean | void | Promise<boolean | void>)} onText
- * @returns {Promise<{ bytes: number, complete: boolean }>} decoded bytes read, and whether the body was read to its end
+ * @returns {Promise<{ bytes: number, complete: boolean, notModified: boolean, lastModified: string | null }>} decoded bytes read, whether the body was read to its end, whether the server answered 304, and its Last-Modified
  * @throws {HttpError} On a non-2xx response.
  * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
  */
@@ -525,13 +531,15 @@ export async function fetchTextStream(url, opts, onText) {
   if (typeof onText !== 'function') throw new TypeError('fetchTextStream needs an onText callback');
   const maxBytes = resolveMaxBytes(opts?.maxBytes);
   return fetchWithTimeout(url, opts ?? {}, async (res) => {
+    const lastModified = res.headers.get('last-modified');
+    if (res.status === 304) return { bytes: 0, complete: true, notModified: true, lastModified };
     const reader = res.body?.getReader?.();
     if (!reader) {
       const text = await res.text();
       const bytes = Buffer.byteLength(text, 'utf8');
       if (bytes > maxBytes) throw bodyTooLarge(bytes, maxBytes);
       if (text) await onText(text);
-      return { bytes, complete: true };
+      return { bytes, complete: true, notModified: false, lastModified };
     }
     const decoder = new TextDecoder('utf-8');
     let bytes = 0;
@@ -541,11 +549,11 @@ export async function fetchTextStream(url, opts, onText) {
         if (done) break;
         bytes += value.length;
         if (bytes > maxBytes) throw bodyTooLarge(null, maxBytes);
-        if (await onText(decoder.decode(value, { stream: true })) === false) return { bytes, complete: false };
+        if (await onText(decoder.decode(value, { stream: true })) === false) return { bytes, complete: false, notModified: false, lastModified };
       }
       const tail = decoder.decode();
       if (tail) await onText(tail);
-      return { bytes, complete: true };
+      return { bytes, complete: true, notModified: false, lastModified };
     } finally {
       try {
         await reader.cancel();

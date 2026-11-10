@@ -61,6 +61,17 @@ const server = createServer(async (req, res) => {
     res.write('<job>first</job>');
     return; // never ends
   }
+  if (req.url === '/conditional') {
+    const lastModified = 'Tue, 10 Nov 2026 05:16:04 GMT';
+    if (req.headers['if-modified-since'] === lastModified) {
+      res.writeHead(304, { 'last-modified': lastModified });
+      res.end();
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'application/xml', 'last-modified': lastModified });
+    res.end('<source></source>');
+    return;
+  }
   if (req.url === '/redirect') {
     res.writeHead(302, { location: '/doc' });
     res.end();
@@ -103,6 +114,16 @@ try {
       let err = null;
       try { await fetchTextStream(`${base}/doc`, { maxBytes: 64 * 1024 }, () => {}); } catch (e) { err = e; }
       check(err?.code === 'response_too_large', 'a decoded body over maxBytes throws response_too_large', err?.message);
+    }
+    {
+      const first = await fetchTextStream(`${base}/conditional`, {}, () => {});
+      check(first.notModified === false && first.lastModified === 'Tue, 10 Nov 2026 05:16:04 GMT', 'a 200 reports its Last-Modified');
+      let called = false;
+      const again = await fetchTextStream(`${base}/conditional`, {
+        headers: { 'if-modified-since': first.lastModified },
+        acceptNotModified: true,
+      }, () => { called = true; });
+      check(again.notModified === true && again.bytes === 0 && !called, 'a conditional request answered 304 resolves notModified, and the callback never runs');
     }
     {
       let err = null;
