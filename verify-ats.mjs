@@ -571,7 +571,7 @@ function auditAts(html, opts = {}) {
   // genuinely different words need their own alternative.
   //
   // career-ops ships evaluation modes for ar, da, de, es, fr, hi, id, it, ja,
-  // ko, nl, pl, pt, ru, tr, ua, vi, zh and zh-TW, and before this every one of
+  // ko, nb, nl, pl, pt, ru, tr, ua, vi, zh and zh-TW, and before this every one of
   // them failed the gate on a structurally perfect CV. The Skills and
   // experience terms are taken from the `| Skills |` and `| Career history |`
   // rows of each modes/<lang>/README.md rather than invented here; the
@@ -580,8 +580,8 @@ function auditAts(html, opts = {}) {
   // Each term must START a word: `formation` must not be found inside
   // `Information`, nor `formacion` inside `Informacion`. `\b` is ASCII-only, so
   // the boundary is "not preceded by a letter or digit" in any script. Terms
-  // stay open on the right (`experien`, `competen`) and the German, Dutch and
-  // Danish compounds that put the key word LAST are listed whole.
+  // stay open on the right (`experien`, `competen`) and the German, Dutch,
+  // Danish and Norwegian compounds that put the key word LAST are listed whole.
   const startsWord = (terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})`, 'u');
   const required = [
     { name: 'Experience', re: startsWord([
@@ -592,6 +592,7 @@ function auditAts(html, opts = {}) {
       'doswiadczenie', 'przebieg kariery',                 // pl
       'deneyim',                                           // tr
       'erhvervserfaring', 'karriereforlob',                // da
+      'erfaring', 'arbeidserfaring', 'yrkeserfaring',      // nb: compounds put it last
       'riwayat karier', 'pengalaman',                      // id
       'parcours professionnel',                            // fr
       'trayectoria', 'trajetoria',                         // es pt
@@ -614,6 +615,7 @@ function auditAts(html, opts = {}) {
       'wyksztalcenie',                                     // pl
       'egitim',                                            // tr
       'uddannelse',                                        // da
+      'utdanning',                                         // nb
       'pendidikan',                                        // id
       '学歴',                                                // ja
       '학력',                                                // ko
@@ -632,6 +634,7 @@ function auditAts(html, opts = {}) {
       'umiejetnosci',                                      // pl
       'beceri',                                            // tr
       'kompetenc', 'kernkompetenc',                        // da + pl/pt variants
+      'kompetanse', 'kjernekompetanse', 'ferdigheter',     // nb
       'keahlian',                                          // id
       'スキル',                                              // ja
       '역량', '기술',                                          // ko
@@ -906,6 +909,7 @@ function runSelfTest() {
       pl: ['Doświadczenie zawodowe', 'Wykształcenie', 'Umiejętności'],
       tr: ['İş deneyimi', 'Eğitim', 'Beceriler'],
       da: ['Erhvervserfaring', 'Uddannelse', 'Kompetencer'],
+      nb: ['Arbeidserfaring', 'Utdanning', 'Kompetanse'],
       id: ['Pengalaman kerja', 'Pendidikan', 'Keahlian'],
       ja: ['職務経歴', '学歴', 'スキル'],
       ko: ['경력', '학력', '역량'],
@@ -948,7 +952,7 @@ function runSelfTest() {
     check(`"${heading}" does not pass for Education`, hasIssue(noEdu.issues, 'missing standard section'));
   }
   // ...while the compounds that put the key word last are still recognized.
-  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring']) {
+  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring', 'Arbeidserfaring', 'Yrkeserfaring']) {
     const compound = auditAts(buildCleanHtml({ experience: `<div class="section"><div class="section-title">${heading}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>` }));
     check(`compound heading "${heading}" is recognized for Experience`, !hasIssue(compound.issues, 'missing standard section'));
   }
