@@ -15,6 +15,7 @@ import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { materializeTailoredCv } from "@/lib/cv-from-json.mjs";
+import { saveBuiltCv } from "@/lib/pdf-run-save.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
@@ -622,27 +623,24 @@ export async function POST(req: Request) {
             // settles. close() happens once rendering finishes, not here.
             pdfRenderPromise = (async () => {
               try {
-                const built = await materializeTailoredCv({
-                  envelope,
-                  coreRoot: resolveCodeRoot(process.cwd(), process.env),
-                  dataRoot: careerOpsRoot(),
-                  cvTemplate,
-                  userTemplatesDir,
-                  reportFile: pdfPaths.reportFile,
-                  htmlPath: pdfPaths.html,
-                  finalPdf: pdfPaths.finalPdf,
-                  ats: body.ats === true,
+                await saveBuiltCv({
+                  build: () => materializeTailoredCv({
+                    envelope,
+                    coreRoot: resolveCodeRoot(process.cwd(), process.env),
+                    dataRoot: careerOpsRoot(),
+                    cvTemplate,
+                    userTemplatesDir,
+                    reportFile: pdfPaths.reportFile,
+                    htmlPath: pdfPaths.html,
+                    finalPdf: pdfPaths.finalPdf,
+                    ats: body.ats === true,
+                  }),
+                  isClosed: () => closed,
+                  onError: (error) => send({ type: "error", msg: error.slice(0, 200) }),
+                  onWarnings: sendWarnings,
+                  save: (built) => saveCv(pdfPaths, { html: built.html }),
+                  render: (built) => renderPdf(pdfPaths, envelope.format, built.ats),
                 });
-                // cancel() can flip closed during this await. Do not save or render after that.
-                if (closed) return;
-                if (!built.ok) {
-                  send({ type: "error", msg: built.error.slice(0, 200) });
-                  return;
-                }
-                sendWarnings(built.warnings);
-                if (saveCv(pdfPaths, { html: built.html })) {
-                  await renderPdf(pdfPaths, envelope.format, built.ats);
-                }
               } catch (e) {
                 send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
               } finally {
