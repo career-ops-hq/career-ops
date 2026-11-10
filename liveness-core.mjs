@@ -155,6 +155,27 @@ export const BOT_CHALLENGE_PATTERNS = [
   /please complete the security check/i,
 ];
 
+// Cloudflare titles its own interstitials, whatever the site's branding in the
+// body: "Just a moment..." for a managed challenge, "Attention Required! |
+// Cloudflare" for a block. A site-branded challenge body can be long, and a
+// reader that keeps a long page does not judge it by phrases a real posting may
+// quote, so it matches the title of the page that settled instead (#6713).
+// Callers check it only on an HTTP error: a challenge the browser passes
+// reloads the real posting under its own title.
+const CLOUDFLARE_INTERSTITIAL_TITLES = [
+  { re: /^just a moment\.{0,3}(?:…)?$/i, kind: 'challenge page' },
+  { re: /^attention required!?\s*\|\s*cloudflare$/i, kind: 'block page' },
+];
+
+/**
+ * @param {string} title - the rendered page title
+ * @returns {string|null} the interstitial kind, or null
+ */
+export function cloudflareInterstitial(title) {
+  const text = String(title ?? '').trim();
+  return CLOUDFLARE_INTERSTITIAL_TITLES.find(({ re }) => re.test(text))?.kind ?? null;
+}
+
 const EXPIRED_URL_PATTERNS = [
   /[?&]error=true/i,
   /recruiting\.paylocity\.com\/recruiting\/jobs\/jobnotfound(?:\/|\?|#|$)/i,
