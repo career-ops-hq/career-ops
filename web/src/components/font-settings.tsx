@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
 import {
-  ROLES, DEFAULTS, applyAppearance, loadAppearance, saveAppearance,
+  ROLES, DEFAULTS, applyAppearance, loadAppearance, loadAppearanceFromServer, saveAppearance,
   type Appearance, type FontChoice, type RoleId,
 } from "@/lib/appearance";
+import { normalizeAppearance } from "@/lib/ui-state.mjs";
 
 const COMMON = ["Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri", "Georgia", "Cambria", "Trebuchet MS", "Consolas", "Courier New"];
 const opt = { background: "var(--bg)", color: "var(--fg)" };
@@ -17,18 +18,37 @@ export function FontSettings() {
   const [fonts, setFonts] = useState<string[]>(COMMON);
   const [msg, setMsg] = useState("");
 
+  // Controls stay disabled until the saved copy has loaded, so an edit never
+  // writes a stale cache over settings changed in another browser.
+  const [ready, setReady] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     setA(loadAppearance());
     const onChange = () => setA(loadAppearance());
     window.addEventListener("appearancechange", onChange);
+    loadAppearanceFromServer()
+      .then((s) => {
+        if (s) setA(s);
+      })
+      .catch(() => {})
+      .finally(() => setReady(true));
     return () => window.removeEventListener("appearancechange", onChange);
   }, []);
 
-  const update = (next: Appearance) => {
-    if (!saveAppearance(next)) return setMsg("Could not save (font file too large?). Try a smaller font file.");
+  // Apply at once; save after the user pauses (sliders fire on every step, and
+  // the saved file can hold large font data).
+  const update = (raw: Appearance) => {
+    const next = normalizeAppearance(raw) as Appearance;
     applyAppearance(next);
     setA(next);
     setMsg("");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      saveAppearance(next).then((ok) => {
+        if (!ok) setMsg("Could not save to your data folder. The setting applies now but will be lost on reload (font file too large?).");
+      });
+    }, 400);
   };
   const setFont = (id: RoleId, f: FontChoice | null) => {
     const fonts = { ...a.fonts };
@@ -57,6 +77,7 @@ export function FontSettings() {
       <h2 className="font-display text-xl tracking-tight text-landing">Appearance</h2>
       <p className="mt-1 text-sm text-muted">Fonts, text size and page width. Saved in your career-ops data folder (config/ui-appearance.json), so they follow you across browsers.</p>
 
+      <fieldset disabled={!ready} className="contents">
       <span className={cn(label, "mt-8")}>Page width</span>
       <div className="flex gap-2">
         {([["small", "Small", "Centered, narrow"], ["medium", "Medium", "Wider, still centered"], ["full", "Full", "Uses the whole window"]] as const).map(([w, name, hint]) => (
@@ -82,6 +103,7 @@ export function FontSettings() {
               <p className="mb-2 text-xs text-faint">{r.hint}</p>
               <div className="flex flex-wrap items-center gap-2">
                 <select
+                  aria-label={`${r.label} font`}
                   className="rounded-md border border-border px-2 py-1.5 text-xs"
                   style={opt}
                   value={cur?.kind === "system" ? cur.family : ""}
@@ -111,14 +133,15 @@ export function FontSettings() {
         {([["uiSize", "Interface", 80, 140], ["previewSize", "Preview text", 80, 160]] as const).map(([k, name, min, max]) => (
           <div key={k} className="flex items-center gap-3 text-sm">
             <span className="w-28 text-foreground">{name}</span>
-            <input type="range" min={min} max={max} step={5} value={a[k]} className="flex-1 accent-[var(--color-brand)]"
+            <input type="range" aria-label={`${name} text size`} min={min} max={max} step={5} value={a[k]} className="flex-1 accent-[var(--color-brand)]"
               onChange={(e) => update({ ...a, [k]: Number(e.target.value) })} />
             <span className="w-12 text-right text-xs text-muted">{a[k]}%</span>
           </div>
         ))}
         <button className={btn} onClick={() => update(DEFAULTS)}>Reset everything to defaults</button>
       </div>
-      {msg && <p className="mt-2 text-xs text-red-500">{msg}</p>}
+      </fieldset>
+      {msg && <p role="alert" className="mt-2 text-xs text-red-500">{msg}</p>}
     </div>
   );
 }

@@ -46,8 +46,9 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
     const a = loadAppearance();
     const order = ["small", "medium", "full"] as const;
     const next = { ...a, width: order[(order.indexOf(a.width) + 1) % 3] };
-    saveAppearance(next);
     applyAppearance(next);
+    window.dispatchEvent(new Event("appearancechange")); // keep the Config page in step
+    void saveAppearance(next);
   };
   return (
     <JobsProvider>

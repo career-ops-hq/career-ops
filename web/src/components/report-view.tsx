@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { companySlug } from "@/lib/company-slug.mjs";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
@@ -184,7 +185,7 @@ export function ReportView({
                   </Link>
                 )}
                 <Link
-                  href={`/output?company=${encodeURIComponent((companyName ?? "").toLowerCase().match(/[a-z0-9]+/g)?.join("-") ?? "")}`}
+                  href={`/output?company=${encodeURIComponent(companySlug(companyName)?.slug ?? "")}`}
                   className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
                 >
                   Preparation files

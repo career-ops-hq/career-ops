@@ -47,7 +47,13 @@ export async function GET(req: NextRequest) {
   const type = TYPES[path.extname(full).toLowerCase()];
   if (!type) return new Response("unsupported", { status: 415 });
   try {
-    return new Response(new Uint8Array(fs.readFileSync(full)), { headers: { "content-type": type } });
+    // A symlink inside output/ must not lead outside it: re-check on real paths.
+    const real = fs.realpathSync(full);
+    if (!resolveInside(fs.realpathSync(base), real)) return new Response("forbidden", { status: 403 });
+    const headers: Record<string, string> = { "content-type": type, "x-content-type-options": "nosniff" };
+    // Generated HTML is untrusted: serve it sandboxed so scripts cannot reach the app's origin.
+    if (type.startsWith("text/html")) headers["content-security-policy"] = "sandbox";
+    return new Response(new Uint8Array(fs.readFileSync(real)), { headers });
   } catch {
     return new Response("not found", { status: 404 });
   }

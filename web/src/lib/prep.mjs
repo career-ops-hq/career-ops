@@ -1,7 +1,9 @@
 // Pure helpers for the Preparation page (output viewer + prep checklist).
 import path from "node:path";
 
-/** Resolve `rel` inside `base`; returns null when it would escape `base`. */
+/** Resolve `rel` inside `base`; returns null when it would escape `base`.
+ *  Lexical only: it does not follow symlinks, so callers that read the file must
+ *  also re-check the realpath (see api/output/route.ts). */
 export function resolveInside(base, rel) {
   const root = path.resolve(base);
   const full = path.resolve(root, rel);

@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, isValidElement, useEffect, useMemo, useState } from "react";
+import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseTaskItems, tickKey, countDone } from "@/lib/prep.mjs";
@@ -51,7 +51,7 @@ function Row({ n, depth, sel, onSel }: { n: TNode; depth: number; sel: string | 
         onClick={() => onSel(n.path)}
         style={pad}
         title={n.path}
-        className={`flex w-full items-center gap-1.5 rounded py-1 pr-2 text-left text-sm hover:bg-surface ${sel === n.path ? "bg-surface font-medium text-brand" : ""}`}
+        className={`flex w-full items-center gap-1.5 rounded py-1 pr-2 text-left text-sm hover:bg-surface ${sel === n.path ? "bg-surface font-medium text-brand-text" : ""}`}
       >
         <Icon className="size-4 shrink-0 text-muted" />
         <span className="truncate">{n.name}</span>
@@ -61,9 +61,9 @@ function Row({ n, depth, sel, onSel }: { n: TNode; depth: number; sel: string | 
   const Icon = open ? FolderOpen : Folder;
   return (
     <div>
-      <button onClick={() => setOpen(!open)} style={pad} className="flex w-full items-center gap-1.5 rounded py-1 pr-2 text-left text-sm hover:bg-surface">
+      <button onClick={() => setOpen(!open)} style={pad} aria-expanded={open} className="flex w-full items-center gap-1.5 rounded py-1 pr-2 text-left text-sm hover:bg-surface">
         <ChevronRight className={`size-3.5 shrink-0 text-muted transition-transform ${open ? "rotate-90" : ""}`} />
-        <Icon className="size-4 shrink-0 text-brand" />
+        <Icon className="size-4 shrink-0 text-brand-text" />
         <span className="truncate">{n.name}</span>
       </button>
       {open && sorted(n).map((c) => <Row key={c.path} n={c} depth={depth + 1} sel={sel} onSel={onSel} />)}
@@ -77,42 +77,79 @@ export function OutputViewer() {
   const [text, setText] = useState("");
   const [showTree, setShowTree] = useState(true);
   const [prog, setProg] = useState<Progress>({ ticks: {}, tasks: {} });
+  const [progError, setProgError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [missing, setMissing] = useState("");
   const [newTask, setNewTask] = useState("");
   const company = sel?.split("/")[0] ?? null;
 
+  // Progress: the server file is the truth. If it cannot be read (damaged file),
+  // saving is switched off so ticking a box never overwrites it.
+  const progRef = useRef<Progress>(prog);
+  const canSave = useRef(false);
+  const chain = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
-    fetch("/api/prep-progress").then((r) => r.json()).then((d) => setProg({ ticks: d.ticks ?? {}, tasks: d.tasks ?? {} })).catch(() => {});
+    fetch("/api/prep-progress")
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || "Could not read your saved progress.");
+        const p = { ticks: d.ticks ?? {}, tasks: d.tasks ?? {} };
+        progRef.current = p;
+        canSave.current = true;
+        setProg(p);
+      })
+      .catch((e) => setProgError(e instanceof Error ? e.message : "Could not read your saved progress."))
+      .finally(() => setLoaded(true));
   }, []);
-  const saveProg = (next: Progress) => {
+  // Writes run one after another, each sending the latest state, so an older
+  // request can never land after a newer one.
+  const mutate = (fn: (p: Progress) => Progress) => {
+    if (!canSave.current) return;
+    const next = fn(progRef.current);
+    progRef.current = next;
     setProg(next);
-    fetch("/api/prep-progress", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) }).catch(() => {});
+    chain.current = chain.current.then(() =>
+      fetch("/api/prep-progress", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(next) })
+        .then((r) => setProgError(r.ok ? "" : "Could not save your progress."))
+        .catch(() => setProgError("Could not save your progress.")),
+    );
   };
   const isDone = (file: string, t: string, mark: boolean) => prog.ticks[tickKey(file, t)] ?? mark;
-  const toggleTick = (file: string, t: string, to: boolean) => saveProg({ ...prog, ticks: { ...prog.ticks, [tickKey(file, t)]: to } });
+  const toggleTick = (file: string, t: string, to: boolean) => mutate((p) => ({ ...p, ticks: { ...p.ticks, [tickKey(file, t)]: to } }));
   const myTasks = (company && prog.tasks[company]) || [];
-  const setTasks = (list: Task[]) => company && saveProg({ ...prog, tasks: { ...prog.tasks, [company]: list } });
+  const setTasks = (list: Task[]) => company && mutate((p) => ({ ...p, tasks: { ...p.tasks, [company]: list } }));
   const items = parseTaskItems(text);
   const itemsDone = sel ? countDone(sel, items, prog.ticks) : 0;
 
   useEffect(() => {
-    fetch("/api/output").then((r) => r.json()).then((d) => {
-      const list: F[] = d.files ?? [];
-      // ?company=slug opens that company's folder and its most useful file
-      const slug = new URLSearchParams(window.location.search).get("company");
-      if (slug) {
-        const mine = list.filter((f) => f.path.split("/")[0] === slug);
-        const pick = ["interview-prep.md", "evaluation.md"].map((n) => mine.find((f) => f.path.endsWith("/" + n))).find(Boolean) ?? mine[0];
-        if (pick) setSel(pick.path);
-      }
-      setFiles(list);
-    });
+    fetch("/api/output")
+      .then((r) => r.json())
+      .then((d) => {
+        const list: F[] = d.files ?? [];
+        // ?company=slug opens that company's folder and its most useful file
+        const slug = new URLSearchParams(window.location.search).get("company");
+        if (slug) {
+          const mine = list.filter((f) => f.path.split("/")[0] === slug);
+          const pick = ["interview-prep.md", "evaluation.md"].map((n) => mine.find((f) => f.path.endsWith("/" + n))).find(Boolean) ?? mine[0];
+          if (pick) setSel(pick.path);
+          else setMissing(slug);
+        }
+        setFiles(list);
+      })
+      .catch(() => setFiles([]));
   }, []);
 
   const tree = useMemo(() => buildTree(files), [files]);
   const ext = sel?.split(".").pop()?.toLowerCase();
   useEffect(() => {
     setText("");
-    if (sel && (ext === "md" || ext === "json" || ext === "txt")) fetch(url(sel)).then((r) => r.text()).then(setText);
+    if (!sel || !(ext === "md" || ext === "json" || ext === "txt")) return;
+    const ac = new AbortController();
+    fetch(url(sel), { signal: ac.signal })
+      .then((r) => (r.ok ? r.text() : ""))
+      .then(setText)
+      .catch(() => {});
+    return () => ac.abort();
   }, [sel, ext]);
 
   return (
@@ -129,23 +166,24 @@ export function OutputViewer() {
               <input type="checkbox" checked={t.done} className="mt-1 accent-[var(--color-brand)]"
                 onChange={(e) => setTasks(myTasks.map((x) => (x.id === t.id ? { ...x, done: e.target.checked } : x)))} />
               <span className={`flex-1 ${t.done ? "text-faint line-through" : ""}`}>{t.text}</span>
-              <button onClick={() => setTasks(myTasks.filter((x) => x.id !== t.id))} className="text-faint opacity-0 hover:text-fg group-hover:opacity-100" title="Remove">
+              <button onClick={() => setTasks(myTasks.filter((x) => x.id !== t.id))} className="text-faint opacity-0 hover:text-foreground focus:opacity-100 group-hover:opacity-100" title="Remove" aria-label={`Remove task ${t.text}`}>
                 <Trash2 className="size-3.5" />
               </button>
             </label>
           ))}
           {!!myTasks.length && <p className="mt-1 text-xs text-faint">{myTasks.filter((t) => t.done).length}/{myTasks.length} done</p>}
           <form className="mt-1 flex gap-1" onSubmit={(e) => { e.preventDefault(); if (newTask.trim()) { setTasks([...myTasks, { id: String(Date.now()), text: newTask.trim(), done: false }]); setNewTask(""); } }}>
-            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…"
+            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task"
               className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs" />
-            <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-fg" title="Add"><Plus className="size-3.5" /></button>
+            <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task"><Plus className="size-3.5" /></button>
           </form>
         </div>
       )}
+      {loaded && progError && <p role="alert" className="text-xs text-red-500">{progError}</p>}
       </div>}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded border border-border">
         <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-1.5 text-xs text-muted">
-          <button onClick={() => setShowTree(!showTree)} title={showTree ? "Hide file list" : "Show file list"} className="hover:text-fg">
+          <button onClick={() => setShowTree(!showTree)} title={showTree ? "Hide file list" : "Show file list"} aria-label={showTree ? "Hide file list" : "Show file list"} className="hover:text-foreground">
             {showTree ? <PanelLeftClose className="size-4" /> : <PanelLeftOpen className="size-4" />}
           </button>
           <span className="min-w-0 flex-1 truncate">{sel}</span>
@@ -153,16 +191,18 @@ export function OutputViewer() {
             <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-brand-text">Checklist {itemsDone}/{items.length}</span>
           )}
           {sel && (
-            <a href={url(sel)} download={sel.split("/").pop()} className="flex items-center gap-1 hover:text-fg">
+            <a href={url(sel)} download={sel.split("/").pop()} className="flex items-center gap-1 hover:text-foreground">
               <Download className="size-3.5" />Download
             </a>
           )}
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {!sel ? (
-            <p className="p-4 text-sm text-muted">Open a folder and pick a file.</p>
+            <p className="p-4 text-sm text-muted">
+              {missing ? `No preparation files found for “${missing}”. Generate its CV or interview prep, or pick a file from the list.` : "Open a folder and pick a file."}
+            </p>
           ) : ext === "pdf" || ext === "html" ? (
-            <iframe src={url(sel)} className="h-full w-full" />
+            <iframe src={url(sel)} title={sel} sandbox={ext === "html" ? "" : undefined} className="h-full w-full" />
           ) : ext === "md" ? (
             <div className="report-prose p-6">
               <ReactMarkdown

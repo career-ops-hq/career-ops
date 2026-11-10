@@ -1,6 +1,7 @@
-import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { readJsonObject } from "@/lib/json-body";
+import { normalizeAppearance, readJsonFile, writeJsonAtomic } from "@/lib/ui-state.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,18 +10,27 @@ export const dynamic = "force-dynamic";
 // the user across browsers instead of being tied to one browser's localStorage.
 const file = () => path.join(careerOpsRoot(), "config", "ui-appearance.json");
 
+// Missing file -> null (defaults). A damaged file is an error the user can act
+// on, never an empty default that the next save would overwrite.
 export async function GET() {
   try {
-    return Response.json(JSON.parse(fs.readFileSync(file(), "utf8")));
+    const raw = readJsonFile(file(), null);
+    return Response.json(raw === null ? null : normalizeAppearance(raw));
   } catch {
-    return Response.json(null);
+    return Response.json(
+      { error: "config/ui-appearance.json could not be read. Fix or delete it, then reload." },
+      { status: 500 },
+    );
   }
 }
 
 export async function PUT(req: Request) {
-  const body = await req.json();
-  if (!body || typeof body !== "object") return new Response("bad body", { status: 400 });
-  fs.mkdirSync(path.dirname(file()), { recursive: true });
-  fs.writeFileSync(file(), JSON.stringify(body));
-  return Response.json({ ok: true });
+  const body = await readJsonObject(req);
+  if (!body) return Response.json({ error: "Expected a JSON object." }, { status: 400 });
+  try {
+    writeJsonAtomic(file(), normalizeAppearance(body));
+    return Response.json({ ok: true });
+  } catch {
+    return Response.json({ error: "Could not write config/ui-appearance.json." }, { status: 500 });
+  }
 }
