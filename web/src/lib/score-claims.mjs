@@ -12,7 +12,7 @@ export function scoringDimensions() {
     { name: "North Star alignment", detail: "How close the role is to the career goal in your profile. This moves the score." },
     { name: "Compensation", detail: "Pay the posting states. When the posting states none, this is unknown and does not move the score." },
     { name: "Cultural signals", detail: "Culture evidence in the posting. No evidence means unknown, not a middle score, and unknown does not move the score." },
-    { name: "Red flags", detail: "Hard stops and warnings. These move the score down." },
+    { name: "Red flags", detail: "Warnings can move the score down. A hard stop forces Skip and does not change the score." },
   ];
 }
 
@@ -40,8 +40,9 @@ export function scoreBandSummary() {
 
 export function leverCopy() {
   return {
+    sectionTitle: "Score and recommendation",
     holdingTitle: "Holding it down",
-    holdingHint: "Hard stops. The rubric counts these as red flags, so they lower the score.",
+    holdingHint: "Hard stops force Skip. They do not change the score.",
     closeTitle: "CV gaps",
     closeHint: "Gaps in the match between your CV and the role. The match dimension can move the score.",
     verifyTitle: "Check the evidence",

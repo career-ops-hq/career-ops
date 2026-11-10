@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  COMP_SCORE_FLAG,
   CULTURE_SCORE_FLAG,
   NO_INVENTED_PAY_RULE,
   UNKNOWN_COMP_SENTENCE,
@@ -101,6 +102,7 @@ test('a stated salary is kept, and a training-data line is still removed', () =>
   ), `${JD_WITH_PAY}\nMarket context is not required.`);
   assert.equal(out.includes('Training-data'), false);
   assert.equal(out.includes('$140,000'), true);
+  assert.equal(out.includes(COMP_SCORE_FLAG), false);
   assert.match(out, /compensation: "supported"/);
   assert.equal(out.includes(UNKNOWN_COMP_SENTENCE), false);
   assert.match(out, /Cultural signals: 4\/5/);
@@ -169,6 +171,28 @@ test('the CLI evaluators use the shared pay rule and run the normalizer', () => 
   assert.match(read('modes/_shared.md'), /does not move the global score/);
   assert.match(read('modes/oferta.md'), /Do not invent a salary/);
   assert.match(read('modes/triage.md'), /Unknown comp does\s+not move the score/);
+});
+
+test('a CV budget figure stays when the posting states no pay', () => {
+  const budget = '| Budget ownership | high | Strong | CV | Managed a $2M budget |';
+  const out = normalizeEvaluationText(`## B) Match with CV\n\n${budget}\n\n${reply()}`, JD_NO_PAY);
+  assert.equal(out.includes(budget), true);
+  assert.equal(out.includes('$140,000'), false);
+  assert.equal(out.includes('Estimated salary'), false);
+});
+
+test('a removed pay estimate that moved the score asks for a re-check', () => {
+  const out = normalizeEvaluationText(reply(), JD_NO_PAY);
+  assert.equal(out.includes('lowers the score'), false);
+  assert.equal(out.split(COMP_SCORE_FLAG).length - 1, 1);
+  assert.match(out, /^SCORE:\s*4\.2\s*$/m);
+  const quiet = reply().replace('The compensation estimate lowers the score.\n', '');
+  const noClaim = normalizeEvaluationText(quiet, JD_NO_PAY);
+  assert.equal(noClaim.includes(COMP_SCORE_FLAG), false);
+  assert.match(noClaim, /^SCORE:\s*4\.2\s*$/m);
+  const twice = normalizeEvaluationText(out, JD_NO_PAY);
+  assert.equal(twice.split(COMP_SCORE_FLAG).length - 1, 1);
+  assert.equal(twice.split(UNKNOWN_COMP_SENTENCE).length - 1, 1);
 });
 
 test('a neutralized culture line flags that the score was not recalculated', () => {

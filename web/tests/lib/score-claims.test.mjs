@@ -31,12 +31,22 @@ test("the band lines come from the shared table", () => {
 
 test("holding-it-down copy is limited to red flags", () => {
   const copy = leverCopy();
-  assert.match(copy.holdingHint, /red flags/i);
+  const redFlags = scoringDimensions().find((row) => row.name === "Red flags");
+  assert.match(redFlags.detail, /hard stop forces Skip/i);
+  assert.match(redFlags.detail, /does not change the score/i);
+  assert.match(copy.holdingHint, /force Skip/i);
+  assert.match(copy.holdingHint, /do not change the score/i);
+  assert.equal(/lower the score|move the score down/i.test(copy.holdingHint), false);
   assert.equal(/requirement/i.test(copy.holdingHint), false);
+  assert.match(copy.sectionTitle, /score/i);
+  assert.match(copy.sectionTitle, /recommendation/i);
   assert.match(copy.verifyHint, /does not change the 1 to 5 score/);
   const screen = readFileSync(path.join(HERE, "../../src/components/score-methodology.tsx"), "utf8");
   assert.equal(screen.includes("six dimensions"), false);
   assert.equal(screen.includes("Overall"), false);
+  const levers = readFileSync(path.join(HERE, "../../src/components/score-levers.tsx"), "utf8");
+  assert.match(levers, /copy\.sectionTitle/);
+  assert.equal(levers.includes("What would change this score"), false);
 });
 
 test("a missing requirement is not returned as a score lever", () => {
