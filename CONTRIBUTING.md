@@ -247,7 +247,8 @@ without declaring it.
 Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),
 or omit `--lang` to check every locale. `--json` emits machine-readable results;
 `--summary` prints language totals. The checker runs offline with Node alone and
-reports drift without failing.
+reports drift without failing; `--fail-under N` is the opt-in exception, exiting
+1 when any selected locale's coverage is below N%, for a CI gate you configure.
 It checks existing mode files, including nested interview modes, and files
 promised in each locale's README. Languages shipping only the core subset are
 not penalized for modes they have not translated.
