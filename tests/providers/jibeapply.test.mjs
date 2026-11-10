@@ -359,10 +359,12 @@ try {
 
   // A probe allowed more pages still propagates a later-page failure.
   let probeThrew = false;
+  let probeErr = null;
+  probePages.length = 0;
   console.error = () => {};
-  try { await probeFetch(2); } catch { probeThrew = true; } finally { console.error = originalConsoleError; }
-  if (probeThrew) pass('jibeapply.fetch() propagates a page failure during a probe');
-  else fail('jibeapply probe should throw on a later-page failure');
+  try { await probeFetch(2); } catch (e) { probeThrew = true; probeErr = e; } finally { console.error = originalConsoleError; }
+  if (probeThrew && probeErr?.message === 'HTTP 503' && probePages.join(',') === '1,2') pass('jibeapply.fetch() propagates a page failure during a probe');
+  else fail(`jibeapply probe should throw the original page-2 error after requesting pages 1,2; got ${probeErr?.message}, pages=${probePages}`);
 
   // fetch() with explicit entry.api (non-jibeapply.com host)
   let explicitApiUrl = null;
