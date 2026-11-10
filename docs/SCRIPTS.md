@@ -1008,8 +1008,8 @@ Possible JSON responses:
 | `up-to-date` | Local version matches remote |
 | `update-available` | Newer version exists (includes `local`, `remote`, `changelog`) |
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
-| `offline` | Could not reach GitHub |
-| `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release |
+| `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
+| `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
@@ -1802,6 +1802,7 @@ These have no `npm run` binding — modes and agents call them with
 | `node install-latex-engine.mjs [--check] [--force] [--json] [--help]` | Opt-in local LaTeX engine: downloads a pinned tectonic release for this platform, verifies its SHA-256 before extracting, and places it in the repo root (gitignored) where `generate-latex.mjs` looks first. Downloads are bounded by a timeout and a size cap. No-op when tectonic is already available (a pdflatex-only host still gets tectonic, which the CJK template needs); `--check` never downloads |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
 | `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
+| `node evidence-freshness.mjs` | Opt-in. Before Block A in `oferta` and `auto-pipeline`, once per run in batch: says whether the GitHub evidence behind `cv.md` is stale (age of the newest `output/github-evidence-*.json`, plus PRs authored and merged since in repos the user does not own, from one metadata-only `gh search prs`). Read-only, always exit 0, JSON on stdout. See [evidence-freshness.mjs](#evidence-freshnessmjs) |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs [--help]` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA); the engine behind the `plugins.mjs` new/add commands, which `--help` points at |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
@@ -1901,6 +1902,61 @@ Reachable from a mode as the payload stage of `ats` — see [`modes/ats.md`](../
 workflow, including the rule that the three lints are relayed to the user and never applied by the agent.
 
 Self-test: `node ats-payload.mjs --self-test`.
+
+---
+
+## evidence-freshness.mjs
+
+Says whether the GitHub evidence an evaluation scores against is stale.
+`oferta`, `auto-pipeline` and batch workers read `cv.md`, `article-digest.md`
+and the profile, and GitHub work reaches those only when the user runs
+`expand`, whose optional step (`github-evidence.mjs`) writes
+`output/github-evidence-{date}.{md,json}`. The modes run this once, after their
+gates and before Block A. `batch-runner.sh` runs it once per batch run, before
+the first offer, and appends the JSON to every worker's prompt, so a batch
+makes one `gh` call however many offers it has.
+
+The check is opt-in: it does nothing (status `disabled`, no `gh` call) unless
+`config/profile.yml` sets `evidence_freshness.enabled: true`.
+
+```bash
+node evidence-freshness.mjs   # JSON on stdout, always exit 0
+```
+
+- Finds the newest `output/github-evidence-{YYYY-MM-DD}.json` (a file that does
+  not parse, or that records another `user`, is skipped) and reads
+  `candidate.github` from the profile, normalized the way `expand` does it.
+- Makes one metadata-only call through the user's existing `gh auth`:
+  `gh search prs --author <user> --merged --merged-at ">=<scan time>" --limit 100 --json repository -- -user:<user>`.
+  Only the count is kept, no repo names or titles. The lower bound is the scan
+  file's modification time when it falls on the file's date, otherwise the start
+  of that day, so PRs merged earlier on the scan day are not counted again. PRs
+  in the user's own repos are left out, since `github-evidence.mjs` never counts
+  them as evidence. One search page, so a count of 100 is reported as `100+`
+  (`newMergedPrsTruncated`).
+- `stale` is true when `newMergedPrs` reaches `min_new_merged_prs` (default 5)
+  or the scan is more than `max_age_days` old (default 30), from
+  `config/profile.yml` → `evidence_freshness`. With no scan on record it is true
+  once there is at least one merged PR to find. Invalid values keep their
+  default and are reported on stderr.
+- Output: `status`, `stale`, `reason`, `notice` (the one line the modes show
+  when stale), `user`, `lastScan`, `scanFile`, `daysSince`, `newMergedPrs`,
+  `newMergedPrsTruncated`, `thresholds`.
+- `status` is `ok`, or one of `no-github` (`candidate.github` unset or not a
+  username, or the profile is missing or unreadable), `disabled` (the default:
+  `enabled` is not `true`),
+  `gh-unavailable` (`gh` not installed or not logged in) and `gh-query-failed`,
+  each with `stale: false` and a `reason`. It never blocks: the exit code is
+  always `0`.
+
+It writes nothing and never runs `expand` or `github-evidence.mjs`. The modes
+show the notice and continue, never change a score because of it, and record it
+in the report as Machine Summary `evidence_freshness` (`fresh` / `stale` /
+`not_evaluated`, schema in `batch/batch-prompt.md`) plus a
+`**GitHub evidence:**` header line when stale. A `--mode match` batch gets the
+same run-wide result: its report has no Machine Summary, so the worker puts the
+value in the final JSON (`evidence_freshness`, see `batch/batch-prompt-match.md`)
+and adds the same header line when stale. Unattended runs ask nothing.
 
 ---
 

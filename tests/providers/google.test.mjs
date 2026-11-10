@@ -1,7 +1,6 @@
 // tests/providers/google.test.mjs — google provider contract.
 import { pass, fail, ROOT } from '../helpers.mjs';
 import { join } from 'path';
-import { readFileSync } from 'fs';
 import { pathToFileURL } from 'url';
 
 console.log('\nProvider — google');
@@ -9,6 +8,8 @@ console.log('\nProvider — google');
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/google.mjs')).href);
   const provider = mod.default;
+  const { resolveMaxPages } = mod;
+  const PAGE_SIZE = 20; // must match providers/google.mjs
 
   if (provider.id === 'google') pass('google.id is "google"');
   else fail(`google.id is ${JSON.stringify(provider.id)}`);
@@ -25,46 +26,143 @@ try {
   if (typeof provider.fetch === 'function') pass('google.fetch() is callable');
   else fail('google.fetch() is not a function');
 
-  // Following a redirect lets a compromised host bounce the scanner to an
-  // internal address and have the response parsed as job data.
-  // ── behaviour: robots.txt compliance is the point of this provider ────────
+  // A ctx whose fetchText answers per URL. `respond(call)` returns the HTML for
+  // that request; `call.url` carries the query string (q, page). redirect:'error'
+  // is recorded so the robots/SSRF guard can be asserted. A no-op sleep keeps
+  // pacing and retry backoff instant.
   const recordingCtx = (respond) => {
     const calls = [];
     const fetchText = async (url, opts = {}) => { const call = { url, opts, n: calls.length }; calls.push(call); return respond(call); };
-    return { calls, ctx: { transport: 'http', fetchText, fetchJson: async () => { throw new Error('google must not call fetchJson'); } } };
+    return { calls, ctx: { transport: 'http', sleep: async () => {}, fetchText, fetchJson: async () => { throw new Error('google must not call fetchJson'); } } };
   };
-  const RESULTS_HTML = `<!doctype html><a href="/about/careers/applications/jobs/results/123456789-senior-business-strategy-manager">x</a>
-    <a href="/about/careers/applications/jobs/results/987654321-corporate-development-lead">y</a>`;
-  const ENTRY = { name: 'Google', google: { queries: ['business strategy', 'corporate development'], location: 'United States' } };
+  // Run `fn` with console.error captured; returns the lines it logged.
+  const captureErrors = async (fn) => {
+    const real = console.error;
+    const lines = [];
+    console.error = (...args) => lines.push(args.join(' '));
+    try { await fn(); } finally { console.error = real; }
+    return lines;
+  };
+  // page= of a recorded request URL (null on page 1, which omits the param).
+  const pageOf = (url) => new URLSearchParams(url.split('?')[1] || '').get('page');
+  const qOf = (url) => new URLSearchParams(url.split('?')[1] || '').get('q');
+  // A bare-link results page (no card markup -> slug title + entry name).
+  const link = (id, slug = 'role') => `<a href="/about/careers/applications/jobs/results/${id}-${slug}">x</a>`;
+  const linkPage = (ids) => `<!doctype html>${ids.map((id) => link(id)).join('\n')}`;
+  // A full page of PAGE_SIZE distinct ids starting at `start`.
+  const fullPageIds = (start) => Array.from({ length: PAGE_SIZE }, (_, i) => String(start + i));
 
+  const ENTRY = { name: 'Google', google: { queries: ['business strategy', 'corporate development'], location: 'United States' } };
+  const RESULTS_HTML = linkPage(['123456789', '987654321']); // short page -> one request per query
+
+  // ── request shape: sort_by=date, redirect guard, page= only past page 1 ──
   {
     const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
     const jobs = await provider.fetch(ENTRY, ctx);
 
-    // google.com/robots.txt disallows every results URL carrying page=, for
-    // every crawler. No request this provider builds may contain it.
-    calls.every((c) => !/[?&]page=/.test(c.url))
-      ? pass('google.fetch() never sends the robots-disallowed page= parameter')
-      : fail(`google sent a paginated URL: ${calls.map((c) => c.url).join(' ')}`);
-
     calls.every((c) => /[?&]sort_by=date\b/.test(c.url))
-      ? pass('google.fetch() asks for the newest postings (sort_by=date) on its single page')
+      ? pass('google.fetch() asks for the newest postings (sort_by=date) on every request')
       : fail(`google URLs missing sort_by=date: ${calls.map((c) => c.url).join(' ')}`);
 
-    calls.length === 2
-      ? pass('google.fetch() makes exactly one request per query (2 queries -> 2 requests)')
-      : fail(`google made ${calls.length} requests for 2 queries`);
+    calls.every((c) => c.opts?.redirect === 'error')
+      ? pass('google.fetch() passes redirect:"error" on every request')
+      : fail(`google redirect opts: ${JSON.stringify(calls.map((c) => c.opts))}`);
+
+    // Each query here is a short page (2 links < PAGE_SIZE), so the walk stops
+    // after page 1 and page 1 never carries the page= parameter.
+    calls.length === 2 && calls.every((c) => pageOf(c.url) === null)
+      ? pass('google.fetch() makes one request per query on a short page, and page 1 omits page=')
+      : fail(`google short-page requests: ${calls.map((c) => c.url).join(' ')}`);
 
     const j = jobs.find((x) => x.externalId === '123456789');
-    j && j.title === 'Senior Business Strategy Manager'
-      && j.url === 'https://www.google.com/about/careers/applications/jobs/results/123456789-senior-business-strategy-manager'
+    j && j.title === 'Role'
+      && j.url === 'https://www.google.com/about/careers/applications/jobs/results/123456789-role'
       && j.company === 'Google'
       ? pass('google.fetch() falls back to the slug title and entry name for a bare link with no card markup')
       : fail(`google mapping: ${JSON.stringify(jobs)}`);
+  }
 
-    calls.every((c) => c.opts?.redirect === 'error')
-      ? pass('google.fetch() passes redirect:"error" on every recorded request')
-      : fail(`google redirect opts: ${JSON.stringify(calls.map((c) => c.opts))}`);
+  // ── pagination: walks pages, 1-based page= from page 2, dedups, stops short ──
+  {
+    const query = (url) => {
+      const page = Number(pageOf(url) || '1');
+      if (page === 1) return linkPage(fullPageIds(100));          // 20 cards
+      if (page === 2) return linkPage(fullPageIds(200));          // 20 cards
+      if (page === 3) return linkPage(['300', '301', '302']);     // short -> last
+      return linkPage([]); // never reached
+    };
+    const { ctx, calls } = recordingCtx((c) => query(c.url));
+    const jobs = await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 10 }, ctx);
+
+    calls.map((c) => pageOf(c.url) ?? 'none').join(',') === 'none,2,3'
+      ? pass('google.fetch() walks pages, omitting page= on page 1 and sending the 1-based number after it')
+      : fail(`google page sequence: ${calls.map((c) => pageOf(c.url) ?? 'none')}`);
+    jobs.length === PAGE_SIZE * 2 + 3 && new Set(jobs.map((j) => j.externalId)).size === jobs.length
+      ? pass('google.fetch() returns every page deduped (20 + 20 + 3 = 43 unique)')
+      : fail(`google paginated jobs: ${jobs.length}`);
+  }
+
+  // A page that re-serves ids already seen in this query stops the walk.
+  {
+    const { ctx, calls } = recordingCtx(() => linkPage(fullPageIds(500)));
+    const jobs = await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 10 }, ctx);
+    calls.length === 2 && jobs.length === PAGE_SIZE
+      ? pass('google.fetch() stops when a page repeats ids already seen in the same query')
+      : fail(`google re-serve stop: ${calls.length} requests, ${jobs.length} jobs`);
+  }
+
+  // ── max_pages caps the per-query walk and warns; raising it adds pages ──
+  {
+    const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(1000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
+    let jobs;
+    const logged = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 2 }, ctx); });
+    calls.length === 2 && jobs.length === PAGE_SIZE * 2
+      ? pass('google.fetch() stops at max_pages when every page is full')
+      : fail(`google max_pages cap: ${calls.length} requests, ${jobs?.length} jobs`);
+    logged.some((l) => /hit the 2-page cap on at least one query — raise max_pages/.test(l))
+      ? pass('google.fetch() warns when the page cap truncated a query')
+      : fail(`google cap warning: ${JSON.stringify(logged)}`);
+  }
+  {
+    const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(2000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
+    await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 4 }, ctx);
+    calls.length === 4
+      ? pass('google.fetch() walks more pages when max_pages is raised')
+      : fail(`google raised max_pages made ${calls.length} requests`);
+  }
+  {
+    // A short page that lands exactly on the cap is the end of the results,
+    // not a truncation: no cap warning.
+    const { ctx, calls } = recordingCtx((c) => (Number(pageOf(c.url) || '1') === 1 ? linkPage(fullPageIds(3000)) : linkPage(['3100', '3101'])));
+    const logged = await captureErrors(() => provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 2 }, ctx));
+    calls.length === 2 && !logged.some((l) => /-page cap/.test(l))
+      ? pass('google.fetch() does not warn when the last page allowed is a short one')
+      : fail(`google short page at the cap: ${calls.length} requests, ${JSON.stringify(logged)}`);
+  }
+
+  // resolveMaxPages(): positive integer up to the hard ceiling, else the default.
+  resolveMaxPages({}) === 10 && resolveMaxPages({ max_pages: 3 }) === 3
+    && resolveMaxPages({ max_pages: 99999 }) === 50
+    && resolveMaxPages({ max_pages: 0 }) === 10 && resolveMaxPages({ max_pages: 'many' }) === 10
+    ? pass('resolveMaxPages() honours a positive integer up to the 50-page ceiling')
+    : fail('resolveMaxPages() wrong');
+
+  // A later query whose first page overlaps an earlier query still walks its own
+  // deeper pages (cross-query overlap must not shortcut the walk).
+  {
+    const q1p1 = fullPageIds(100);
+    const query = (url) => {
+      const page = Number(pageOf(url) || '1');
+      if (qOf(url) === 'alpha') return page === 1 ? linkPage(q1p1) : linkPage(['150', '151']); // full, then short (new ids)
+      // 'beta' page 1 re-serves alpha's 20 ids (all overlap byId), page 2 is new.
+      return page === 1 ? linkPage(q1p1) : linkPage(['900', '901']);
+    };
+    const { ctx, calls } = recordingCtx((c) => query(c.url));
+    const jobs = await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] }, max_pages: 10 }, ctx);
+    const ids = new Set(jobs.map((j) => j.externalId));
+    calls.length === 4 && ids.size === PAGE_SIZE + 2 + 2 && ids.has('900') && ids.has('901')
+      ? pass('google.fetch() walks a later query\'s deeper pages even when its first page overlaps an earlier query')
+      : fail(`google cross-query overlap: ${calls.length} requests, ${ids.size} unique ids`);
   }
 
   // The live page's card markup (trimmed from a 2026-09-24 results page). The
@@ -110,23 +208,61 @@ try {
       : fail(`google decoded markup: ${JSON.stringify(j && [j.title, j.company, j.location])}`);
   }
 
-  // max_pages does not apply here: pages past the first are unreachable without
-  // the disallowed parameter, so raising it must not add requests.
+  // ── probe: ctx.maxPages walks one query, one page, one request ──
   {
-    const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
-    await provider.fetch({ ...ENTRY, max_pages: 25 }, ctx);
-    calls.length === 2 && calls.every((c) => !/[?&]page=/.test(c.url))
-      ? pass('google.fetch() ignores max_pages — one page per query is all robots.txt allows')
-      : fail(`google with max_pages=25 made ${calls.length} requests`);
+    const { ctx, calls } = recordingCtx(() => linkPage(fullPageIds(100))); // a full page
+    await provider.fetch(ENTRY, { ...ctx, maxPages: 1 });
+    calls.length === 1 && pageOf(calls[0].url) === null
+      ? pass('google.fetch() spends exactly one request under ctx.maxPages, even with a full page and two queries')
+      : fail(`google probe made ${calls.length} requests: ${calls.map((c) => c.url)}`);
   }
 
-  // The probe spends one query, not the whole list.
+  // ── error handling ──
   {
-    const { ctx, calls } = recordingCtx(() => RESULTS_HTML);
-    await provider.fetch(ENTRY, { ...ctx, maxPages: 1 });
-    calls.length === 1
-      ? pass('google.fetch() spends one request under ctx.maxPages')
-      : fail(`google probe made ${calls.length} requests`);
+    // First request fails -> throws (broken board, not an empty one).
+    const boom = Object.assign(new Error('Service Unavailable'), { status: 503 });
+    const { ctx } = recordingCtx(() => { throw boom; });
+    let threw = null;
+    try { await provider.fetch({ name: 'Google', google: { queries: ['strategy'] } }, ctx); } catch (e) { threw = e; }
+    threw === boom
+      ? pass('google.fetch() throws when the first request fails, rather than reading as empty')
+      : fail(`google first-request failure: ${threw?.message}`);
+  }
+  {
+    // A later page fails -> keep the pages already collected and warn, without
+    // misfiring the max_pages warning.
+    const err404 = Object.assign(new Error('Not Found'), { status: 404 });
+    const query = (url) => { if (Number(pageOf(url) || '1') >= 2) throw err404; return linkPage(fullPageIds(100)); };
+    const { ctx } = recordingCtx((c) => query(c.url));
+    let jobs; let logged;
+    logged = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 5 }, ctx); });
+    jobs?.length === PAGE_SIZE && logged.some((l) => /stopped "strategy" at page 2/.test(l)) && !logged.some((l) => /raise max_pages/.test(l))
+      ? pass('google.fetch() keeps the pages collected when a later page fails, warns, and does not blame max_pages')
+      : fail(`google later-page failure: ${jobs?.length} jobs, ${JSON.stringify(logged)}`);
+  }
+  {
+    // A later query whose first request fails keeps the earlier query's jobs,
+    // warns, and does not throw.
+    const err404 = Object.assign(new Error('Not Found'), { status: 404 });
+    const query = (url) => { if (qOf(url) === 'beta') throw err404; return linkPage(['4000', '4001']); };
+    const { ctx } = recordingCtx((c) => query(c.url));
+    let jobs; let threw = null;
+    const logged = await captureErrors(async () => {
+      try { jobs = await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] } }, ctx); } catch (e) { threw = e; }
+    });
+    !threw && jobs?.length === 2 && logged.some((l) => /stopped "beta" at page 1/.test(l))
+      ? pass('google.fetch() keeps an earlier query\'s jobs when a later query\'s first request fails, and warns')
+      : fail(`google later-query failure: threw=${threw?.message} jobs=${jobs?.length} ${JSON.stringify(logged)}`);
+  }
+  {
+    // While probing, a rejection propagates unwrapped (verify-portals needs it).
+    const boom = Object.assign(new Error('budget'), { status: 503 });
+    const { ctx } = recordingCtx(() => { throw boom; });
+    let threw = null;
+    try { await provider.fetch(ENTRY, { ...ctx, maxPages: 1 }); } catch (e) { threw = e; }
+    threw === boom
+      ? pass('google.fetch() propagates a fetch rejection unwrapped during a probe')
+      : fail(`google probe rejection: ${threw?.message}`);
   }
 
 } catch (e) {

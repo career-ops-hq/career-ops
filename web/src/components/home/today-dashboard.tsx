@@ -35,7 +35,6 @@ export function TodayDashboard({
   reasons,
   legitimacy,
   inbox,
-  inBetween,
   applyFacts = {},
 }: {
   applications: Application[];
@@ -241,7 +240,7 @@ export function TodayDashboard({
               Open pipeline
             </Link>
           </div>
-          {inBetween && <QuickEvaluate />}
+          <QuickEvaluate />
         </div>
       </section>
 

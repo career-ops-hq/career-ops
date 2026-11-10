@@ -1,5 +1,5 @@
 // tests/docs-only-change.test.mjs — what counts as a docs-only change, and what
-// test.yml does with the answer (#6402).
+// test.yml does with the answer (#6402, #5723).
 //
 // The failure that matters is a wrong "yes": it removes checks from code and
 // stays green. So most cases here are things that must NOT count as docs, and
@@ -166,6 +166,53 @@ test('a merge that changes nothing is not docs-only', () => {
   assert.match(reason, /empty/);
 });
 
+/**
+ * A clone holding what actions/checkout gives a merge_group run with
+ * fetch-depth: 2: the entry's squash commit and its parent, which is the head of
+ * the entry ahead of it. Returns the clone and the sha after each change.
+ */
+function queueCheckout(...changes) {
+  const origin = tempDir();
+  git(origin, 'init', '-q', '-b', 'main');
+  write(origin, 'scan.mjs', 'export {};\n');
+  write(origin, 'README.md', '# hello\n');
+  commitAll(origin, 'main');
+  const shas = [git(origin, 'rev-parse', 'HEAD').trim()];
+  for (const change of changes) {
+    change(origin);
+    commitAll(origin, 'an entry');
+    shas.push(git(origin, 'rev-parse', 'HEAD').trim());
+  }
+  const clone = join(tempDir(), 'clone');
+  git(dirname(clone), 'clone', '-q', '--depth=2', pathToFileURL(origin).href, clone);
+  return { clone, shas };
+}
+
+const editDocs = (repo) => write(repo, 'docs/a.md', 'changed\n');
+const editCode = (repo) => write(repo, 'scan.mjs', 'export const x = 1;\n');
+
+test('a docs entry in the merge queue is docs-only', () => {
+  const { clone, shas } = queueCheckout(editDocs);
+  assert.equal(classifyCheckout(clone, shas[0]).docsOnly, true);
+});
+
+test('a code entry in the merge queue is not docs-only', () => {
+  const { clone, shas } = queueCheckout(editCode);
+  assert.equal(classifyCheckout(clone, shas[0]).docsOnly, false);
+});
+
+test('a docs entry behind a code entry is judged on its own change', () => {
+  const { clone, shas } = queueCheckout(editCode, editDocs);
+  assert.equal(classifyCheckout(clone, shas[1]).docsOnly, true);
+});
+
+test('a queue base that is not on disk is not docs-only', () => {
+  const { clone, shas } = queueCheckout(editCode, editDocs);
+  const { docsOnly, reason } = classifyCheckout(clone, shas[0]);
+  assert.equal(docsOnly, false);
+  assert.match(reason, /could not read the diff/);
+});
+
 // ── The command line, as the workflow step runs it ──────────────────────────
 
 function runScript(cwd, env = {}, args = []) {
@@ -176,6 +223,14 @@ test('the script writes its answer to GITHUB_OUTPUT', () => {
   const clone = prCheckout((repo) => write(repo, 'docs/a.md', 'changed\n'));
   const output = join(tempDir(), 'output');
   const r = runScript(clone, { GITHUB_OUTPUT: output });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(readFileSync(output, 'utf8'), 'docs_only=true\n');
+});
+
+test('the script reads the queue base from MERGE_GROUP_BASE_SHA', () => {
+  const { clone, shas } = queueCheckout(editDocs);
+  const output = join(tempDir(), 'output');
+  const r = runScript(clone, { GITHUB_OUTPUT: output, MERGE_GROUP_BASE_SHA: shas[0] });
   assert.equal(r.status, 0, r.stderr);
   assert.equal(readFileSync(output, 'utf8'), 'docs_only=true\n');
 });
@@ -233,6 +288,12 @@ test('the optional jobs skip on a docs-only PR, and a failed classifier runs the
     assert.match(job.if, /!cancelled\(\)/, name);
     assert.match(job.if, /needs\.changes\.outputs\.docs_only != 'true'/, name);
   }
+});
+
+test('the classifier runs in the merge queue too, and is told the base', () => {
+  assert.equal(jobs.changes.if, undefined, 'a condition here could leave the queue on the full matrix unnoticed');
+  const step = jobs.changes.steps.find((s) => s.id === 'classify');
+  assert.equal(step.env.MERGE_GROUP_BASE_SHA, '${{ github.event.merge_group.base_sha }}');
 });
 
 test('the classifier sees both parents of the test merge', () => {

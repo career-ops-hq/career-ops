@@ -49,16 +49,18 @@ export const VETERAN_MIN_REPORTS = 5;
 
 // The drawing for the star ask ("yours is missing"). `next` prints it in a fenced
 // block of its own so the agent copies it exactly. Star ask only, never the manifesto.
-// The emoji closes its row: a terminal that draws it one column wider shifts nothing.
+// Each emoji closes its row: a terminal that draws it one column wider shifts nothing.
+// Never U+2B50 (⭐): some terminals (Claude Code on macOS among them) draw it as a
+// text "*" plus a space. 🌟, ✨ and 💫 draw as emoji.
 export const STAR_ART = Object.freeze([
   " +          . '",
-  "        o  ⭐",
+  "        o  🌟",
   "       / \\",
-  "*-----*   *-----*",
+  "*-----*   *-----*  ✨",
   " `.           .'",
   "    *       *",
   "   /  .-*-.  \\",
-  "  *-'       '-*",
+  "  *-'       '-*  💫",
 ]);
 
 const REPORT_FILE = /^\d{3,}-.+\.md$/;
@@ -95,7 +97,7 @@ export function askText(ask, { reports = 0 } = {}) {
       ? `You've run ${reports} evaluations with career-ops so far. It's free and collects nothing about you, `
       : 'If this report saved you some time: career-ops is free and collects nothing about you, ';
     return opening
-      + "so we can't tell whether it helped. A Star on GitHub (the button at the top right of the page) "
+      + "so we can't tell whether it helped. A Star on GitHub 🌟 (the button at the top right of the page) "
       + 'is one of the few ways we find out, '
       + 'and it helps the next job seeker find career-ops. '
       + `Say "yes" and I'll open the page (${STAR_URL}). I won't ask for a star again.`;
