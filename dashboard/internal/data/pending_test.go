@@ -417,3 +417,27 @@ func TestPendingRowsMatchTheSharedParityFixture(t *testing.T) {
 		}
 	}
 }
+
+func TestPendingURLKeyNormalizesLightly(t *testing.T) {
+	same := [][2]string{
+		{"https://Jobs.Example.com", "https://jobs.example.com/"},
+		{"HTTPS://jobs.example.com:443/a", "https://jobs.example.com/a"},
+		{"http://jobs.example.com:80/a?b=1", "http://jobs.example.com/a?b=1"},
+	}
+	for _, pair := range same {
+		if pendingURLKey(pair[0]) != pendingURLKey(pair[1]) {
+			t.Errorf("%q and %q should join", pair[0], pair[1])
+		}
+	}
+	different := [][2]string{
+		{"https://jobs.example.com/a", "https://jobs.example.com/b"},
+		{"https://jobs.example.com:8443/a", "https://jobs.example.com/a"},
+		{"https://jobs.example.com/a?id=1", "https://jobs.example.com/a?id=2"},
+		{"local:jds/a.md", "local:jds/A.md"},
+	}
+	for _, pair := range different {
+		if pendingURLKey(pair[0]) == pendingURLKey(pair[1]) {
+			t.Errorf("%q and %q should stay apart", pair[0], pair[1])
+		}
+	}
+}

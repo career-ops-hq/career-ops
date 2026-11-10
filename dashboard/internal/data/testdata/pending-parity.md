@@ -22,5 +22,7 @@
 - [ ] https://jobs.example.com/acme/112 | Acme | Lead | Remote | | extra | cells | rank: 2/5 — weak
 - [ ] HTTPS://jobs.example.com/acme/113 | Acme | Upper scheme | rank: 4.2/5
 - [ ] https://jobs.example.com/acme/114 | Acme | Zero | Remote | rank: 0/5 — no match
+- [ ] https://jobs.example.com/acme/115 | Acme | Non-breaking space | posted: 2026-10-03 | rank: 3.5/5 — nbsp reason
+ - [ ] https://jobs.example.com/acme/116 |﻿Acme | Indented with NBSP | Oslo　
 
 ## Processed

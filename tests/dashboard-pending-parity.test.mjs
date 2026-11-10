@@ -51,6 +51,22 @@ check('the Go heading fold maps each Latin letter as NFD and dropping U+0300-U+0
   }
 });
 
+check('every heading in lib/pipeline-sections.mjs uses only letters the Go fold can match', () => {
+  // The fold table above covers U+00C0-U+017F. A heading with another letter
+  // that NFD decomposes (Vietnamese, Cyrillic й) would pass the pair check and
+  // still fail to match a hand-typed variant in Go. Hangul syllables decompose
+  // too, but both sides compare them as typed, so they are allowed.
+  const from = new Set([...goSource.match(/headingFoldFrom = "([^"]*)"/)[1]]);
+  const js = jsSource.match(/const SECTION_PAIRS = \[([\s\S]*?)\n\];/)[1];
+  for (const [, a, b] of js.matchAll(/\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]/g)) {
+    for (const ch of a + b) {
+      const cp = ch.codePointAt(0);
+      if (ch.normalize('NFD') === ch || from.has(ch) || (cp >= 0xac00 && cp <= 0xd7a3)) continue;
+      assert.fail(`heading "${a}"/"${b}" uses ${ch} (U+${cp.toString(16).toUpperCase()}), which the Go fold in pending.go does not cover`);
+    }
+  }
+});
+
 const fixtureDir = join(ROOT, 'dashboard', 'internal', 'data', 'testdata');
 const webTable = join(ROOT, 'web', 'src', 'lib', 'pipeline-table.mjs');
 const webRank = join(ROOT, 'web', 'src', 'lib', 'core', 'inbox-rank.mjs');

@@ -118,5 +118,21 @@
     "location": "Remote",
     "posted": "",
     "rank": 0
+  },
+  {
+    "url": "https://jobs.example.com/acme/115",
+    "company": "Acme",
+    "role": "Non-breaking space",
+    "location": "",
+    "posted": "2026-10-03",
+    "rank": 3.5
+  },
+  {
+    "url": "https://jobs.example.com/acme/116",
+    "company": "Acme",
+    "role": "Indented with NBSP",
+    "location": "Oslo",
+    "posted": "",
+    "rank": null
   }
 ]

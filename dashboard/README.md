@@ -36,6 +36,10 @@ rows are read at startup and on each reload (`r`, or after a status change),
 never on a timer. A missing `pipeline.md` is an empty Inbox; one that cannot
 be read keeps the rows already shown and says why.
 
+The tab reads `data/pipeline.md` under the data root, as the web inbox does.
+It does not follow `CAREER_OPS_PIPELINE`: a second search lane's inbox is not
+shown.
+
 ## Prerequisites and running
 
 Requires Go 1.26+ (`go.mod`). From the repo root:

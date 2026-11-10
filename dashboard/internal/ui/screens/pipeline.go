@@ -374,6 +374,10 @@ type PipelineModel struct {
 	pending     []data.PendingRow
 	pendingView []data.PendingRow
 	pendingSort string
+	// pendingErr is the last failed Inbox read, shown on the tab until a read
+	// succeeds. A flash alone is cleared by the next key, which left an
+	// unreadable inbox looking empty.
+	pendingErr string
 }
 
 // IsTextInputActive returns true if the search or any other text input is currently focused
@@ -461,6 +465,7 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	// current ones over so a failed Inbox read keeps showing them.
 	reloaded.pending = m.pending
 	reloaded.pendingSort = m.pendingSort
+	reloaded.pendingErr = m.pendingErr
 	reloaded.viewMode = m.viewMode
 	// Preserve search state across refresh — otherwise pressing `r` silently drops a
 	// committed query and the user loses their place mid-investigation.
@@ -585,9 +590,14 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		m.flash = "Tracker unavailable; showing previous applications: " + msg.Err
 		return m, nil
 	case PipelinePendingFailedMsg:
+		m.pendingErr = msg.Err
 		m.flash = fmt.Sprintf(i18n.Current.InboxUnavailable, msg.Err)
 		return m, nil
 	case pipelineStartDiscardPickerMsg:
+		// The status change that starts this flow came from a tracker tab; if
+		// the user has since moved to the read-only Inbox, go back to ALL so the
+		// picker never commits from the Inbox screen (#5269).
+		m.leavePendingTab()
 		// Issue 1380: initialise the discard reason picker state.
 		// Merge predicted reasons (from report) with canonical fallback options.
 		seen := make(map[string]bool)
@@ -1126,6 +1136,7 @@ func (m PipelineModel) handleDiscardPicker(msg tea.KeyMsg) (PipelineModel, tea.C
 }
 
 func (m PipelineModel) StartHiredFlow(app model.CareerApplication) (PipelineModel, tea.Cmd) {
+	m.leavePendingTab()
 	m.hiredApp = app
 	m.hiredStep = 1
 	return m, nil

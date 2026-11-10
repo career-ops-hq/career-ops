@@ -421,3 +421,66 @@ func TestInboxLabelsInEveryLanguage(t *testing.T) {
 		}
 	}
 }
+
+func TestInboxKeepsShowingAFailedRead(t *testing.T) {
+	// At startup there are no earlier rows. The error must stay on the tab
+	// after the flash is gone, not turn into "no pending rows".
+	m := onInbox(t, newInboxModel(t, nil))
+	m, _ = m.Update(PipelinePendingFailedMsg{Err: "read data/pipeline.md: permission denied"})
+	m, _ = press(m, "j") // any key clears the flash
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, i18n.Current.InboxEmpty) {
+		t.Fatalf("an unreadable inbox reads as empty:\n%s", view)
+	}
+	if !strings.Contains(view, "permission denied") {
+		t.Fatalf("the read error left the Inbox after one key:\n%s", view)
+	}
+
+	// With earlier rows the rows stay, and the summary says they are stale.
+	m = onInbox(t, newInboxModel(t, inboxRows()))
+	m, _ = m.Update(PipelinePendingFailedMsg{Err: "permission denied"})
+	m, _ = press(m, "j")
+	if s := ansi.Strip(m.renderMetrics()); !strings.Contains(s, "permission denied") || len(m.pendingView) != 3 {
+		t.Fatalf("summary = %q with %d rows", s, len(m.pendingView))
+	}
+	apps := inboxTrackerApps()
+	m = m.WithReloadedData(apps, data.ComputeMetrics(apps))
+	if m.pendingErr == "" {
+		t.Fatal("a tracker reload dropped the Inbox read error")
+	}
+	m.SetPendingRows(inboxRows())
+	if m.pendingErr != "" || strings.Contains(ansi.Strip(m.renderMetrics()), "permission denied") {
+		t.Fatal("a successful read kept the old error")
+	}
+}
+
+func TestTrackerWriteFlowsNeverRunOnTheInbox(t *testing.T) {
+	// A status change started on a tracker tab can finish after the user has
+	// moved to the Inbox. Its picker or hired flow must not run there.
+	m := onInbox(t, newInboxModel(t, inboxRows()))
+	app := inboxTrackerApps()[0]
+	m, _ = m.Update(pipelineStartDiscardPickerMsg{app: app, newStatus: "Discarded"})
+	if m.onPendingTab() || !m.discardPicker {
+		t.Fatalf("discard picker: on Inbox = %v, picker open = %v; want ALL with the picker", m.onPendingTab(), m.discardPicker)
+	}
+
+	m = onInbox(t, newInboxModel(t, inboxRows()))
+	m, _ = m.StartHiredFlow(app)
+	if m.onPendingTab() || m.hiredStep != 1 {
+		t.Fatalf("hired flow: on Inbox = %v, step %d; want ALL and step 1", m.onPendingTab(), m.hiredStep)
+	}
+}
+
+func TestKeyListRowCountFollowsTheList(t *testing.T) {
+	// The count was a fixed 19 for 20 tracker bindings, so on a narrow
+	// terminal the last binding could not be scrolled to.
+	m := newInboxModel(t, inboxRows())
+	m.width = 40
+	if got := m.keyHelpRowCount(); got != 20 {
+		t.Fatalf("narrow tracker key list = %d rows, want 20", got)
+	}
+	m = onInbox(t, m)
+	if got := m.keyHelpRowCount(); got != len(pendingHelpItems()) {
+		t.Fatalf("narrow Inbox key list = %d rows, want %d", got, len(pendingHelpItems()))
+	}
+}

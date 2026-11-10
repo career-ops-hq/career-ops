@@ -60,8 +60,22 @@ func (m *PipelineModel) SetPendingRows(rows []data.PendingRow) {
 		selected = row.URL
 	}
 	m.pending = rows
+	m.pendingErr = ""
 	m.applyFilterAndSort()
 	m.restorePendingCursor(selected)
+}
+
+// leavePendingTab moves to ALL when the Inbox is active. Flows that write the
+// tracker (the discard reason picker, the hired flow) call it, so they never
+// run on the read-only tab.
+func (m *PipelineModel) leavePendingTab() {
+	if !m.onPendingTab() {
+		return
+	}
+	m.activeTab = defaultTabIndex()
+	m.applyFilterAndSort()
+	m.cursor = 0
+	m.scrollOffset = 0
 }
 
 // restorePendingCursor puts the cursor back on url, or keeps it in range.
@@ -393,10 +407,16 @@ func (m PipelineModel) renderPendingLine(row data.PendingRow, selected bool) str
 func (m PipelineModel) renderPendingBodyWindow(start, height int) []string {
 	if len(m.pendingView) == 0 {
 		msg := i18n.Current.InboxEmpty
-		if len(m.pending) > 0 {
+		color := m.theme.Subtext
+		switch {
+		case len(m.pending) > 0:
 			msg = i18n.Current.NoOffersMatch
+		case m.pendingErr != "":
+			// Unreadable is not empty: say so instead of "no pending rows".
+			msg = sanitizeFlash(fmt.Sprintf(i18n.Current.InboxUnavailable, m.pendingErr))
+			color = m.theme.Peach
 		}
-		empty := lipgloss.NewStyle().Foreground(m.theme.Subtext).Padding(1, 2).Render(msg)
+		empty := lipgloss.NewStyle().Foreground(color).Padding(1, 2).Width(max(1, m.width)).Render(msg)
 		lines := strings.Split(empty, "\n")
 		return lines[:min(len(lines), max(height, 0))]
 	}
@@ -447,6 +467,11 @@ func (m PipelineModel) renderPendingSummary() string {
 	}
 	parts := []string{lipgloss.NewStyle().Foreground(m.theme.Text).
 		Render(fmt.Sprintf(i18n.Current.InboxSummary, len(m.pending), unranked))}
+	if m.pendingErr != "" {
+		// The rows shown are from the last good read, or there are none.
+		parts = []string{lipgloss.NewStyle().Foreground(m.theme.Peach).
+			Render(sanitizeFlash(fmt.Sprintf(i18n.Current.InboxUnavailable, m.pendingErr)))}
+	}
 	for _, s := range pendingStatuses {
 		if counts[s] > 0 {
 			parts = append(parts, lipgloss.NewStyle().Foreground(m.pendingStatusColor(s)).

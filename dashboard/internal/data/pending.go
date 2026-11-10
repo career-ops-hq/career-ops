@@ -101,7 +101,7 @@ func foldHeading(text string) string {
 		}
 		return r
 	}, text)
-	return strings.TrimSpace(strings.ToLower(folded))
+	return trimJS(strings.ToLower(folded))
 }
 
 var sectionKinds = func() map[string]string {
@@ -113,19 +113,44 @@ var sectionKinds = func() map[string]string {
 	return m
 }()
 
+// jsSpace is what JavaScript's \s and String.prototype.trim treat as white
+// space. Go's \s and strings.TrimSpace differ (no NBSP or BOM; U+0085 added),
+// so the patterns below, written as they are in the Node readers, are compiled
+// with this class, and cells are trimmed with trimJS.
+const jsSpace = `\t\n\x{0B}\f\r \x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}\x{FEFF}`
+
+func isJSSpace(r rune) bool {
+	switch {
+	case r == '\t', r == '\n', r == 0x0B, r == '\f', r == '\r', r == ' ', r == 0xA0, r == 0x1680,
+		r >= 0x2000 && r <= 0x200A, r == 0x2028, r == 0x2029, r == 0x202F, r == 0x205F, r == 0x3000, r == 0xFEFF:
+		return true
+	}
+	return false
+}
+
+func trimJS(s string) string { return strings.TrimFunc(s, isJSSpace) }
+
+// jsRegexp compiles a pattern copied from a Node reader, reading \s and \S as
+// JavaScript does.
+func jsRegexp(pattern string) *regexp.Regexp {
+	pattern = strings.ReplaceAll(pattern, `\S`, "[^"+jsSpace+"]")
+	pattern = strings.ReplaceAll(pattern, `\s`, "["+jsSpace+"]")
+	return regexp.MustCompile(pattern)
+}
+
 var (
 	// Same patterns as lib/pipeline-sections.mjs sectionKind and the
 	// sync-batch-input.mjs section end.
 	reSectionHeading = regexp.MustCompile(`^##[ \t]+(.+?)[ \t]*$`)
-	reAnyHeading     = regexp.MustCompile(`^##\s`)
+	reAnyHeading     = jsRegexp(`^##\s`)
 	// web/src/lib/pipeline-table.mjs parseInbox, unchecked rows only. A `- [!]`
 	// row (a posting set aside for the user) does not match, as it does not there.
-	rePendingItem = regexp.MustCompile(`^\s*-\s*\[ \]\s*(.+)$`)
-	reRowTarget   = regexp.MustCompile(`(?i)^(?:https?://|local:\S)`)
-	reLabeled     = regexp.MustCompile(`(?i)^(posted|trust|yrs|note|rank):\s(.*)$`)
+	rePendingItem = jsRegexp(`^\s*-\s*\[ \]\s*(.+)$`)
+	reRowTarget   = jsRegexp(`(?i)^(?:https?://|local:\S)`)
+	reLabeled     = jsRegexp(`(?i)^(posted|trust|yrs|note|rank):\s(.*)$`)
 	rePostedDate  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	// parseRankStamp in web/src/lib/core/inbox-rank.mjs.
-	reRankStamp = regexp.MustCompile(`(\d+(?:\.\d+)?)\s*/\s*5\s*[—–-]\s*(.+)`)
+	reRankStamp = jsRegexp(`(\d+(?:\.\d+)?)\s*/\s*5\s*[—–-]\s*(.+)`)
 )
 
 // sectionKind reports whether a line opens the Pending or Processed section,
@@ -185,7 +210,7 @@ func parsePendingLine(line string) (PendingRow, bool) {
 	}
 	cells := strings.Split(m[1], "|")
 	for i := range cells {
-		cells[i] = strings.TrimSpace(cells[i])
+		cells[i] = trimJS(cells[i])
 	}
 	urlIndex := -1
 	for i, cell := range cells {
@@ -202,7 +227,7 @@ func parsePendingLine(line string) (PendingRow, bool) {
 	for i := urlIndex + 1; i < len(cells); i++ {
 		if i >= urlIndex+3 {
 			if lm := reLabeled.FindStringSubmatch(cells[i]); lm != nil {
-				labels[strings.ToLower(lm[1])] = strings.TrimSpace(lm[2])
+				labels[strings.ToLower(lm[1])] = trimJS(lm[2])
 				continue
 			}
 		}
@@ -240,11 +265,11 @@ func parsePendingLine(line string) (PendingRow, bool) {
 // no rank, because rank-pipeline.mjs never writes one and a hand-edited 9/5
 // shown as 5.0 would read as the best row in the list.
 func parseRankStamp(stamp string) (float64, string, bool) {
-	m := reRankStamp.FindStringSubmatch(strings.TrimSpace(stamp))
+	m := reRankStamp.FindStringSubmatch(trimJS(stamp))
 	if m == nil {
 		return 0, "", false
 	}
-	reason := strings.TrimSpace(m[2])
+	reason := trimJS(m[2])
 	score, err := strconv.ParseFloat(m[1], 64)
 	if reason == "" || err != nil || math.IsNaN(score) || score < 0 || score > 5 {
 		return 0, "", false
@@ -252,10 +277,14 @@ func parseRankStamp(stamp string) (float64, string, bool) {
 	return math.Round(score*10) / 10, reason, true
 }
 
-// pendingURLKey compares two spellings of a posting URL the way
-// sync-batch-input.mjs stores them in batch-input.tsv (`new URL(raw).href`):
-// scheme and host lower-cased, a default port dropped, and an empty path
-// written as "/". Anything else, including a `local:` target, is its own key.
+// pendingURLKey is a light normalization of an http(s) URL, used to dedupe
+// rows and to join a row to batch-input.tsv: scheme and host lower-cased, a
+// default port dropped, and an empty path written as "/". Those are the
+// differences sync-batch-input.mjs's `new URL(raw).href` most often makes to
+// a URL copied from pipeline.md. It is not a full WHATWG serializer: an
+// internationalized host, dot segments or an unencoded space are compared as
+// written. Anything that is not an http(s) URL with a host, including a
+// `local:` target, is its own key.
 func pendingURLKey(raw string) string {
 	raw = strings.TrimSpace(raw)
 	u, err := url.Parse(raw)
