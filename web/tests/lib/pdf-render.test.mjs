@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -20,6 +20,7 @@ import {
   markTrackerReady,
   cleanupPdfScratch,
   renderAndMarkPdf,
+  failureReason,
 } from "../../src/lib/pdf-render.mjs";
 
 // A fake stdio stream: emits raw Buffers, or decoded strings once the code
@@ -39,6 +40,13 @@ function fakeStream() {
 // real async timing for these tests. `writes` is a file the fake "renderer"
 // creates before closing, the way generate-pdf.mjs leaves a PDF at the final
 // path; a route without it stands in for a render that wrote nothing there.
+//
+// Each write also moves the file's mtime to a time of its own. The fake writes
+// the same bytes in place, so inode and size never change between two renders,
+// and on Windows two writes inside one filesystem clock tick would share an
+// mtime too: `pdfFingerprint` would see no change and a replaced PDF would read
+// as kept (#6668). A real render takes seconds, so its mtime always moves.
+let fakeRenderMtime = 1_700_000_000;
 function fakeChild({ stdout = "", stderr = "", stderrChunks = null, exitCode = 0, spawnError = null, writes = null } = {}) {
   const child = new EventEmitter();
   child.stdout = fakeStream();
@@ -51,7 +59,11 @@ function fakeChild({ stdout = "", stderr = "", stderrChunks = null, exitCode = 0
     if (stdout) child.stdout.push(Buffer.from(stdout));
     if (stderrChunks) for (const chunk of stderrChunks) child.stderr.push(chunk);
     else if (stderr) child.stderr.push(Buffer.from(stderr));
-    if (writes) writeFileSync(writes, "%PDF-fake");
+    if (writes) {
+      writeFileSync(writes, "%PDF-fake");
+      fakeRenderMtime += 10;
+      utimesSync(writes, fakeRenderMtime, fakeRenderMtime);
+    }
     child.emit("close", exitCode);
   });
   return child;
@@ -728,3 +740,64 @@ test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("failureReason: keeps the failing line, drops the advisories printed before it", () => {
+  // Given stderr where a voice-check warning precedes the real failure
+  const stderr = [
+    "\u26a0\ufe0f  Voice check warning for cv-web-423.html: an en dash. The build continues.",
+    "\u274c PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X",
+  ].join("\n");
+
+  // Then only the failure line is reported
+  assert.equal(
+    failureReason(stderr),
+    "\u274c PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X",
+  );
+});
+
+test("failureReason: keeps the detail lines that follow the failure header", () => {
+  const stderr = [
+    "⚠️  Voice check warning for cv-web-423.html: an en dash. The build continues.",
+    "❌ PDF generation failed: Locked section 'education' was modified during tailoring.",
+    "Expected (normalized): bs computer science",
+    "Found (normalized): phd computer science",
+  ].join("\n");
+
+  assert.equal(
+    failureReason(stderr),
+    [
+      "❌ PDF generation failed: Locked section 'education' was modified during tailoring.",
+      "Expected (normalized): bs computer science",
+      "Found (normalized): phd computer science",
+    ].join("\n"),
+  );
+});
+
+test("renderAndMarkPdf: a failed render with advisories before the failure surfaces only the failure", async () => {
+  // Reverting the caller to `error: render.stderr` must fail this test, which the
+  // direct failureReason tests above cannot catch.
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "423");
+  writeFileSync(pdfPaths.html, "<html></html>");
+  const failure = "❌ PDF generation failed: Fact check failed for cv-web-423.html: non-metric facts absent from sources: employer=X";
+  const stderr = [
+    "⚠️  Voice check warning for cv-web-423.html: an en dash. The build continues.",
+    failure,
+  ].join("\n");
+  const { spawnFn } = makeRouterSpawn({
+    "generate-pdf.mjs": { exitCode: 1, stderr },
+    "mark-pdf-ready.mjs": { exitCode: 0 },
+  });
+  try {
+    const result = await renderAndMarkPdf({ spawnFn, execPath: "node", coreRoot: "/root", pdfPaths, format: "letter", reportNum: "423" });
+    assert.deepEqual(result, { kind: "render-failed", error: failure });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("failureReason: no failure marker -> whole stderr; empty -> generic message", () => {
+  assert.equal(failureReason("boom"), "boom");
+  assert.equal(failureReason(""), "PDF rendering failed.");
+});
+

@@ -1294,13 +1294,19 @@ async function main() {
     if (!written) out.pendingEntries = snippets.join('');
     console.log(JSON.stringify(out, null, 2));
   }
-  process.exit(0);
+  // No process.exit(0) here: main() returns, and the process exits 0 once the
+  // event loop drains. On Windows, Node 24 aborts when process.exit() runs right
+  // after a request (nodejs/node#56645): it prints a libuv assertion and exits
+  // with a crash code instead of 0, the crash reported in #3788. Measured
+  // 2026-11-08 on Node 24.14.1: a run that resolved one BambooHR board, or found
+  // no Greenhouse, Ashby or BambooHR board, aborted 4 times out of 4. The exits
+  // earlier in main() run before any request, so they keep process.exit().
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`discover-ats: ${err?.stack || err?.message || err}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the end of main()
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent } from "react";
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent, type PointerEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download, FileText } from "lucide-react";
@@ -17,7 +17,7 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
 import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
@@ -32,6 +32,7 @@ import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omiss
 import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
 import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
 import { listEntrySync } from "@/lib/history-back.mjs";
+import { pipelineFindRolesHref } from "@/lib/scan-on-load.mjs";
 
 type Tab = (typeof PIPELINE_TABS)[number];
 type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
@@ -131,7 +132,7 @@ export function PipelineView({
   );
   const { q, setQ, setParams, cancelPendingSearch } = useListSearch(params, commitParams, qRef);
   // Typing stays local until the URL catches up, so include it when leaving.
-  const detailQuery = pipelineQuery(params.toString(), q);
+  const liveListQuery = pipelineQuery(params.toString(), q);
   // The list entry has to carry that search too. Otherwise Back compares the
   // return link with an older URL and opens a fresh list at the top.
   function syncTypedSearch(event: MouseEvent<HTMLAnchorElement>) {
@@ -246,6 +247,60 @@ export function PipelineView({
   // runs at low priority, and React drops a stale render when the next
   // keystroke arrives, so typing no longer waits on the whole table.
   const deferredQ = useDeferredValue(q);
+  // The rendered link keeps the deferred search, so a keystroke does not
+  // re-render every row. A click reads the box as it is now. The list URL is
+  // written after commit, so a render React abandons cannot change it.
+  const detailQuery = pipelineQuery(params.toString(), deferredQ);
+  const paramsText = params.toString();
+  const paramsRef = useRef(paramsText);
+  const routerRef = useRef(router);
+  // followDetail stays the same function across keystrokes so a memoized row
+  // can skip the render. The ref still sees the latest list-entry write.
+  const syncSearchRef = useRef(syncTypedSearch);
+  useLayoutEffect(() => {
+    paramsRef.current = paramsText;
+    routerRef.current = router;
+    syncSearchRef.current = syncTypedSearch;
+  }, [paramsText, router, syncTypedSearch]);
+  const followDetail = useCallback((event: MouseEvent<HTMLAnchorElement>, n: string) => {
+    const href = trackerDetailHref(n, paramsRef.current, qRef.current);
+    event.currentTarget.href = href;
+    syncSearchRef.current(event);
+    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1;
+    if (modified) return;
+    event.preventDefault();
+    routerRef.current.push(href);
+  }, []);
+  const stampDetail = useCallback((event: PointerEvent<HTMLAnchorElement>, n: string) => {
+    event.currentTarget.href = trackerDetailHref(n, paramsRef.current, qRef.current);
+  }, []);
+  const onStatusSaved = useCallback(
+    (r: Application, status: string, restoreFocus: boolean) => {
+      const key = applicationKey(r);
+      const focusedRow = document.activeElement?.closest("tr");
+      if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+        activeTab.current?.focus();
+      }
+      setAnnouncement(`Application #${r.n} status saved as ${status}.`);
+      startTransition(() => {
+        showSavedStatus({ key, status });
+        router.refresh();
+      });
+    },
+    [tab, router, showSavedStatus],
+  );
+  const onHeldSave = useCallback((
+    key: string,
+    n: string,
+    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
+  ) => {
+    // A clear event has no application number. Adding one
+    // makes the object fail the event union.
+    const update = event.type === "clear"
+      ? { type: "clear" as const, key }
+      : { ...event, key, n };
+    setHeldSaves((prev) => reduceHeldSave(prev, update));
+  }, []);
 
   const query = deferredQ.trim();
   const matchesFilters = useCallback(
@@ -385,13 +440,20 @@ export function PipelineView({
   const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
   const allSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selected.has(k));
 
-  function toggleRow(key: string, shift: boolean) {
+  // Same function every render, so a checkbox tick repaints one row.
+  // The ref holds the filtered keys for a Shift-click range.
+  const filteredKeysRef = useRef(filteredKeys);
+  useLayoutEffect(() => {
+    filteredKeysRef.current = filteredKeys;
+  });
+  const toggleRow = useCallback((key: string, shift: boolean) => {
     // Read the anchor now. The updater runs later, after it moves to this row.
     const from = anchor.current;
     anchor.current = key;
+    const keys = filteredKeysRef.current;
     setSelected((prev) => {
       if (shift && from) {
-        const range = rangeKeys(filteredKeys, from, key);
+        const range = rangeKeys(keys, from, key);
         if (range) {
           const next = new Set(prev);
           for (const item of range) next.add(item);
@@ -403,7 +465,7 @@ export function PipelineView({
       else next.add(key);
       return next;
     });
-  }
+  }, []);
 
   function downloadCsv() {
     const url = URL.createObjectURL(new Blob([trackerCsv(filtered)], { type: "text/csv;charset=utf-8" }));
@@ -762,7 +824,7 @@ export function PipelineView({
           </button>
           {selectedRows.length >= 2 && selectedRows.length <= COMPARE_MAX && (
             <Link
-              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}${detailQuery ? `&${detailQuery}` : ""}`}
+              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}${liveListQuery ? `&${liveListQuery}` : ""}`}
               onClick={syncTypedSearch}
               className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand-text"
             >
@@ -886,104 +948,23 @@ export function PipelineView({
               {mountedRows.map((r, i) => {
                 // The cursor is an index into filtered, not into the window.
                 const index = span.start + i;
-                const company = companyPresentation(r);
                 const key = applicationKey(r);
-                const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
-                const posting = postingHref(r.url);
                 return (
-                  <tr key={key} data-application-key={key} aria-rowindex={index + 2} data-tracker-cursor={cursor === index ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", cursor === index && "bg-brand-soft/60")}>
-                    <td className="w-8 px-3 py-3">
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
-                        checked={selected.has(key)}
-                        onChange={(event) => {
-                          const native = event.nativeEvent;
-                          toggleRow(key, "shiftKey" in native && native.shiftKey === true);
-                        }}
-                      />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
-                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="transition-colors group-hover:text-brand-text">
-                        #{r.n}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 font-medium">
-                      <Link href={detailHref} onClick={syncTypedSearch} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
-                        <CompanyLogo name={company.logoName} size={20} />
-                        <span className="block max-w-64 truncate" title={company.label}>{company.label}</span>
-                      </Link>
-                    </td>
-                  <td className="px-4 py-3 text-muted">
-                    <div className="flex items-center gap-2">
-                      <Link href={detailHref} tabIndex={-1} onClick={syncTypedSearch} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
-                      {r.closesAt ? (
-                        <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
-                      ) : null}
-                      {posting && (
-                        <a
-                          href={posting}
-                          target="_blank"
-                          rel="noreferrer"
-                          title={posting}
-                          className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
-                        >
-                          {postingLabel(posting)}
-                          <ExternalLink className="size-3" />
-                        </a>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted">
-                    <StatusSelect
-                      n={r.n}
-                      current={r.status}
-                      inline
-                      applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
-                      heldSave={heldSaves.get(key)}
-                      onHeldSave={(event) => {
-                        // A clear event has no application number. Adding one
-                        // makes the object fail the event union.
-                        const update = event.type === "clear"
-                          ? { type: "clear" as const, key }
-                          : { ...event, key, n: r.n };
-                        setHeldSaves((prev) => reduceHeldSave(prev, update));
-                      }}
-                      onSaved={(status, restoreFocus) => {
-                        // If this focused row leaves its tab, preserve a useful
-                        // focus target. Do not interrupt someone using search.
-                        const focusedRow = document.activeElement?.closest("tr");
-                        if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
-                          activeTab.current?.focus();
-                        }
-                        setAnnouncement(`Application #${r.n} status saved as ${status}.`);
-                        startTransition(() => {
-                          showSavedStatus({ key, status });
-                          router.refresh();
-                        });
-                      }}
-                    />
-                  </td>
-                  <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
-                  <td className="whitespace-nowrap px-4 py-3">
-                    {hasCv.has(r.n) ? (
-                      <a
-                        href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        title="Open the tailored CV PDF"
-                        className="inline-flex items-center gap-1.5 text-brand-text hover:underline"
-                      >
-                        <FileText aria-hidden="true" className="size-3.5" /> PDF
-                      </a>
-                    ) : (
-                      <span className="text-faint">—</span>
-                    )}
-                  </td>
-                  </tr>
+                  <TrackerRow
+                    key={key}
+                    r={r}
+                    rowIndex={index}
+                    selected={selected.has(key)}
+                    isCursor={cursor === index}
+                    hasCv={hasCv.has(r.n)}
+                    detailQuery={detailQuery}
+                    heldSave={heldSaves.get(key)}
+                    onToggle={toggleRow}
+                    onSaved={onStatusSaved}
+                    onHeldSave={onHeldSave}
+                    onOpen={followDetail}
+                    onArm={stampDetail}
+                  />
                 );
               })}
               {span.end < filtered.length && (
@@ -1028,6 +1009,121 @@ export function PipelineView({
     </PageFrame>
   );
 }
+
+const TrackerRow = memo(function TrackerRow({
+  r,
+  rowIndex,
+  selected,
+  isCursor,
+  hasCv,
+  detailQuery,
+  heldSave,
+  onToggle,
+  onSaved,
+  onHeldSave,
+  onOpen,
+  onArm,
+}: {
+  r: Application;
+  rowIndex: number;
+  selected: boolean;
+  isCursor: boolean;
+  hasCv: boolean;
+  detailQuery: string;
+  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
+  onToggle: (key: string, shift: boolean) => void;
+  onSaved: (r: Application, status: string, restoreFocus: boolean) => void;
+  onHeldSave: (
+    key: string,
+    n: string,
+    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
+  ) => void;
+  onOpen: (event: MouseEvent<HTMLAnchorElement>, n: string) => void;
+  onArm: (event: PointerEvent<HTMLAnchorElement>, n: string) => void;
+}) {
+  const company = companyPresentation(r);
+  const key = applicationKey(r);
+  const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
+  const posting = postingHref(r.url);
+  const open = (event: MouseEvent<HTMLAnchorElement>) => onOpen(event, r.n);
+  const arm = (event: PointerEvent<HTMLAnchorElement>) => onArm(event, r.n);
+  return (
+    <tr data-application-key={key} aria-rowindex={rowIndex + 2} data-tracker-cursor={isCursor ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", isCursor && "bg-brand-soft/60")}>
+      <td className="w-8 px-3 py-3">
+        <input
+          type="checkbox"
+          aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
+          checked={selected}
+          onChange={(event) => {
+            const native = event.nativeEvent;
+            onToggle(key, "shiftKey" in native && native.shiftKey === true);
+          }}
+        />
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
+        <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
+          #{r.n}
+        </Link>
+      </td>
+      <td className="px-4 py-3 font-medium">
+        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+          <CompanyLogo name={company.logoName} size={20} />
+          <span className="block max-w-64 truncate" title={company.label}>{company.label}</span>
+        </Link>
+      </td>
+      <td className="px-4 py-3 text-muted">
+        <div className="flex items-center gap-2">
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
+          {r.closesAt ? (
+            <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
+          ) : null}
+          {posting && (
+            <a
+              href={posting}
+              target="_blank"
+              rel="noreferrer"
+              title={posting}
+              className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
+            >
+              {postingLabel(posting)}
+              <ExternalLink className="size-3" />
+            </a>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-muted">
+        <StatusSelect
+          n={r.n}
+          current={r.status}
+          inline
+          applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+          heldSave={heldSave}
+          onHeldSave={(event) => onHeldSave(key, r.n, event)}
+          onSaved={(status, restoreFocus) => onSaved(r, status, restoreFocus)}
+        />
+      </td>
+      <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+      <td className="whitespace-nowrap px-4 py-3">
+        {hasCv ? (
+          <a
+            href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
+            target="_blank"
+            rel="noreferrer"
+            title="Open the tailored CV PDF"
+            className="inline-flex items-center gap-1.5 text-brand-text hover:underline"
+          >
+            <FileText aria-hidden="true" className="size-3.5" /> PDF
+          </a>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </td>
+    </tr>
+  );
+});
 
 function emptyStateView(
   state: TrackerEmptyState,
@@ -1101,10 +1197,10 @@ function InboxEmpty({ tracked }: { tracked: number }) {
         )}
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
         <Link
-          href="/explore?run=1"
+          href={pipelineFindRolesHref()}
           className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
         >
-          <Compass className="size-4" /> {tracked > 0 ? "Run a free scan" : "Run your first free scan"} <ArrowRight className="size-4" />
+          <Compass className="size-4" /> Find roles <ArrowRight className="size-4" />
         </Link>
         <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
           Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}

@@ -77,7 +77,7 @@ and never touched by `update-system.mjs` (see
 | `oferta-signals/` | Block G posting-legitimacy signal checks that `oferta.md` reads on demand, not routable modes |
 | `pdf/` | Opt-in passes inside the `pdf` flow, not routable modes — `hm-audit.md` is the hiring-manager read of a tailored CV, run between the fact gate and PDF render when `--hm-audit` is passed |
 | `regional/` | Market calibration modes — `eu-swe.md` (routed as `eu-swe`) calibrates applications for European SWE roles (advisory only) |
-| `ar/ da/ de/ es/ fr/ hi/ id/ it/ ja/ ko/ nl/ pl/ pt/ ru/ sg/ tr/ ua/ vi/ zh/ zh-TW/` | Language and market modes: the core modes translated or adapted for a market (`sg/` is English for Singapore), with market-specific vocabulary; each has its own README |
+| `ar/ da/ de/ es/ fr/ hi/ id/ it/ ja/ ko/ nb/ nl/ pl/ pt/ ru/ sg/ tr/ ua/ vi/ zh/ zh-TW/` | Language and market modes: the core modes translated or adapted for a market (`sg/` is English for Singapore), with market-specific vocabulary; each has its own README |
 
 ## Conventions
 

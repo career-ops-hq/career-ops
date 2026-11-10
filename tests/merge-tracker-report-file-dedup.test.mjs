@@ -39,7 +39,7 @@ function addTsv(env, name, cols) {
   writeFileSync(join(env.addDir, name), cols.join('\t'));
 }
 function runMerge(env, args = []) {
-  return execFileSync('node', [MERGE, ...args], {
+  return execFileSync('node', [MERGE, '--allow-headerless', ...args], {
     encoding: 'utf-8',
     env: { ...process.env, CAREER_OPS_TRACKER: env.tracker, CAREER_OPS_ADDITIONS: env.addDir, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir) },
   });
@@ -135,7 +135,7 @@ ok('the report-file tier does not stat every existing row\'s report', () => {
       'syncBuiltinESMExports();',
       "process.on('exit', () => fs.writeFileSync(process.env.COUNT_STAT_FILE, String(n)));",
     ].join('\n'));
-    execFileSync('node', ['--import', pathToFileURL(counter).href, MERGE], {
+    execFileSync('node', ['--import', pathToFileURL(counter).href, MERGE, '--allow-headerless'], {
       encoding: 'utf-8',
       env: {
         ...process.env,

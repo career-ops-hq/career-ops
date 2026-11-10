@@ -70,6 +70,21 @@ A hit needs a hard rule and a JD sentence that states the fact breaking it. An i
 
 Before Block A or any tracker, report, or CV write, if the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named), ask which agency this posting came through and wait for an explicit answer. Follow `modes/_shared.md` → **Agency confirmation handoff**: a delegated/headless worker returns `needs_confirmation` with the posting identity, evidence, and question, then stops without artifacts. The parent asks and resumes only with the user's explicit answer for this posting. Never write `Company: ?` / Via first and seek confirmation afterward. After confirmation, retain `?` for an unknown employer and the confirmed agency in Via.
 
+## GitHub evidence freshness
+
+GitHub work reaches `cv.md` and `article-digest.md` only when the user runs `expand`, whose optional GitHub evidence step writes `output/github-evidence-{date}.json`. After the gates above and before Block A, run this once:
+
+```bash
+node evidence-freshness.mjs
+```
+
+It is read-only, always exits 0, and prints JSON: the last scan date (`lastScan`, `null` when none), `daysSince`, `newMergedPrs` (PRs the user authored and merged since that scan in repos they do not own), `stale` and `reason`. Its one metadata-only `gh search prs` call runs through the user's existing `gh auth`; it is not a WebSearch query and does not count against the **Bounded Research Budget** below. The check is opt-in: unless `config/profile.yml` → `evidence_freshness.enabled` is `true`, it prints status `disabled` and makes no call. Thresholds live in the same block (stale at 5 merged PRs or after 30 days by default, or with no scan on record once there is a merged PR to find).
+
+- **`"stale": true`** → translate its `notice` (the script prints it in English) into `language.output` and make it the first line of the reply, followed by a localized equivalent of "Run `expand`, then re-evaluate?" in `language.output`, and continue the evaluation without waiting. In an unattended run, do not ask.
+- **Anything else** (`stale: false`, including the statuses `no-github`, `gh-unavailable`, `gh-query-failed` and `disabled`) → say nothing and continue.
+- Never run `expand` or `github-evidence.mjs` from here (they write files, and `expand` needs the user's confirmation), and never change a score, block or decision because of this check: it says what the evidence may be missing, not what that work shows.
+- Record it in the report: Machine Summary `evidence_freshness` (schema in `batch/batch-prompt.md`), and, only when stale, the header line `**GitHub evidence:** {notice}` with the notice translated into `language.output`. If the script cannot run (no shell, an older install), record `not_evaluated` and continue.
+
 ## Bounded Research Budget
 
 Company, compensation, and hiring-signal research must be a single-pass lookup, not an open-ended investigation. This mode is an evaluation workflow, not deep company research.
@@ -443,6 +458,7 @@ Every jurisdiction splits work into two buckets under different names: an "emplo
 | Canada | "T4A", "independent contractor", "self-employed", "invoice for services" |
 | US | "1099", "independent contractor", "W-2 not provided" |
 | UK | "self-employed", "umbrella company", "outside IR35" / "inside IR35" |
+| Norway | "oppdragstaker", "selvstendig næringsdrivende", "fakturere" / "faktura", "via eget ENK" / "via eget AS", "konsulentoppdrag", "oppdragsavtale" (vs. "arbeidsavtale"; arbeidsmiljøloven § 1-8) |
 | Other jurisdictions | "labour contract" vs "employment contract" phrasing, "service agreement", "consulting agreement" (e.g., 劳务合同 vs 劳动合同 in China) |
 
 Plus a jurisdiction-agnostic structural check — **"contract position" alone is not enough to trigger this**, since plenty of legitimate fixed-term *employee* roles use that phrase. Only flag when the JD has explicit contractor-status wording (asks the candidate to "invoice," or to operate as a "consultant"/"freelancer," rather than being "hired"/"employed") **and** at least one corroborating omission (no benefits language, no vacation/PTO mention, no defined end date, no standard employment-standards phrasing, no mention of statutory deductions/withholding).
@@ -588,14 +604,14 @@ Close the report body with a `## Risk Summary` block directly after the `## Verd
 
 **Aggregation only, zero new judgment.** Each row quotes or links the verdict already produced by its source signal. The summary never re-scores, re-weights, or overrides — if a row looks wrong, the fix belongs in the source signal, not here.
 
-Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **`— not evaluated` is a first-class state:** when a signal could not run, say so explicitly rather than omitting the row, so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it found no redflags file), not a fourth free-floating state.
+Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **`— not evaluated` is a first-class state:** when a signal could not run, say so explicitly rather than omitting the row, so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it found no redflags file), not a fourth free-floating state. A redflags file marked unverified is the plain `— not evaluated` state, not this exception: the file exists, so the row must not say that no sessions exist.
 
 | Signal | Source | Row rendering |
 |--------|--------|---------------|
 | Posting legitimacy | Block G assessment tier | `✅ High Confidence`, or `⚠️ {tier} — {one-line reason}` for Proceed with Caution / Suspicious |
 | Employment classification | Employment classification signal inside Block G | `✅ clear` when the check ran and found nothing; `⚠️ contractor-style language: "{quoted phrase}"` when the flag fired; `— not evaluated` when the check could not run |
 | Culture screen | Culture screen field in Block A | `✅ pass`, or `⚠️ caution — {evidence}` / `⚠️ fail — {evidence}`; `— not evaluated` when no screen was run |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet`. **Unverified file:** if the file contains the marker `<!-- career-ops:redflags-unverified -->`, `interview-redflag` kept it without a real-interview session to back it (it may rest on practice or mock sessions), so never surface its warning level: render `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)`. Look for the marker, never for the note's wording: the note is written in the user's output language, the marker never is |
 | AI claims vs. infrastructure | AI/infrastructure mismatch check in Block G, when present | If this report contains that check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | AI-screening disclosure | AI-screening disclosure signal in Block G (Signal 15), when present | If this report contains that check: `✅ discloses AI use` when (a) fired, `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` when only (b) fired (corroborating-only, never a compliance verdict), `— no jurisdiction match` when neither fired because the candidate's jurisdiction has no table row; otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | Fixed-term contract | Fixed-term disclosure signal in Block G (Signal 16) | `ℹ️ fixed term — "{quoted phrase}"` when explicit fixed-term language is present; otherwise `✅ no fixed term disclosed`; `— not evaluated` only when no JD text was available |
@@ -625,7 +641,7 @@ Block format:
 | Accommodation notice | ℹ️ Ontario, Canada requires the notice; posting is silent |
 ```
 
-Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose.
+Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose. The map and the block agree row by row: an Interview red flags row that shows no warning level (no redflags file, or one marked unverified) is `interview_redflags: "not_evaluated"`, never the level written in the file.
 
 ---
 
@@ -690,6 +706,8 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 
 Before saving the report, apply `modes/_shared.md` → Evidence confidence for the Global Score. After Risk Summary, include `## Score Evidence` with one row per scoring dimension (`CV match`, `North Star alignment`, `Compensation`, `Cultural signals`, `Red flags`): evidence status (`supported`, `partial`, `unknown`), concrete source or observation, and unresolved question. Follow it with `**Evidence confidence:** {High | Medium | Low} — {main reason}` and up to three verification priorities. This is confidence in the score's evidence, separate from Block G's posting-legitimacy tier. Mirror the five statuses and priorities in Machine Summary `score_evidence` and `confidence_gaps` using the canonical schema in `batch/batch-prompt.md`.
 
+After `## Score Evidence`, add one line `**Positioning band:** {challenge | target | safety_net | out_of_scope | unknown} - {one sentence naming the evidence}` and mirror it in Machine Summary `positioning_band`, `positioning_band_reason` and `positioning_band_evidence` (rules in `batch/batch-prompt.md`, the schema source of truth). It is optional context beside the Global Score and never changes it; use `unknown` rather than guessing, and never classify from the title alone.
+
 **ALWAYS** after generating blocks A-G:
 
 ### 1. Save report .md
@@ -723,6 +741,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **Work Auth:** {✅ Sponsors | ➖ Not needed | ⚠️ Unstated | ⛔ No sponsorship}
 **PDF:** {path or pending}
+**GitHub evidence:** {the freshness check's `notice`, translated into `language.output`; this line only when it reported stale}
 
 {the `## Verdict (lead)` sentence, copied verbatim}
 
@@ -864,3 +883,5 @@ If — and only if — the user **explicitly stated a role-specific desired numb
 `{tracker#}` is the row's `#` **after** the merge in step 2, read from `merge-tracker.mjs`'s output. Write this line after merging, never before: until then the row has no number, and the report number is not a safe stand-in because the merge assigns a different `#` when that one is taken.
 
 Never infer a desired number from the JD, the score, or past conversations. The profile default (`config/profile.yml` → `compensation.target_range`) needs no line — `salary-gap.mjs` reads it as the fallback. The advertised figure also needs no line: the report's `advertised_comp` **is** the advertised observation.
+
+**Last step: the community ask (interactive runs only).** When `oferta` runs on its own, not as a step of `auto-pipeline` or `pipeline` (they ask once, at their own end), and this run saved its evaluation report, finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks": it prints at most one ask, and the whole ask ends your reply. The star's comes with a drawing in a fenced block: copy the block exactly, then the sentence. When it prints nothing, say nothing about it. A run that stopped before writing its report (a gate, a closed posting) does not ask: the script counts every report on disk, not this run's.
