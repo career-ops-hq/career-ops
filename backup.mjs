@@ -129,6 +129,17 @@ function templateUserFiles(dataRoot, warnings, failed) {
 const isAgentSetting = (lower) => lower.startsWith('.claude/') || lower === 'opencode.json'
   || lower === 'plugins.local' || lower.startsWith('plugins.local/');
 
+// Editor leftovers of a contact file (`.contacts.tsv.swp`, `contacts.tsv.bak`,
+// `contacts.tsv.orig`) hold the same details, so they are held back with it.
+const EDITOR_SUFFIX = /\.(swp|swo|swx|bak|orig|old|save)$/;
+function isContactFile(lower) {
+  const dir = lower.slice(0, lower.lastIndexOf('/') + 1);
+  let name = lower.slice(dir.length).replace(/^\./, '');
+  while (EDITOR_SUFFIX.test(name) || name.endsWith('~')) name = name.replace(EDITOR_SUFFIX, '').replace(/~$/, '');
+  const stripped = dir + name;
+  return name.endsWith('.vcf') || CONTACT_FILES.some((f) => stripped === f.toLowerCase());
+}
+
 /**
  * Never copied: secrets, rebuildable caches, lock/temp files, and (unless
  * `includeContacts`) the files holding other people's contact details.
@@ -146,7 +157,7 @@ export function isExcluded(relPath, { includeContacts = false, skipAgentSettings
   if (lower === 'data/cache' || lower.startsWith('data/cache/')) return true;
   if (skipAgentSettings && isAgentSetting(lower)) return true;
   // Any .vcf is a vCard export from contacts.mjs, which takes a custom path.
-  if (!includeContacts && (name.endsWith('.vcf') || CONTACT_FILES.some((f) => lower === f.toLowerCase()))) return true;
+  if (!includeContacts && isContactFile(lower)) return true;
   // plugins.lock is a User Layer file (USER_PATHS), not a transient lock.
   if (lower === 'plugins.lock') return false;
   return /\.(lock|tmp|tick|part)$/.test(name) || name.endsWith('~');
