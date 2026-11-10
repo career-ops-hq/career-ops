@@ -143,8 +143,13 @@ export function TodayDashboard({
   // for why "first six in the array" was a bug waiting for #3529.
   const ranked = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
   const applyTarget = useMemo(
-    () => pickApplyNext(applications, scoreNum, (row) => reasons[row.n]?.decision ?? ""),
-    [applications, reasons],
+    () => pickApplyNext(
+      applications,
+      scoreNum,
+      (row) => reasons[row.n]?.decision ?? "",
+      (row) => legitimacy[row.n],
+    ),
+    [applications, reasons, legitimacy],
   );
   const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page

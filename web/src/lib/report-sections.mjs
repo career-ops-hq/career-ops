@@ -111,8 +111,14 @@ export function isVerdictHeading(heading) {
 /** Public methodology apply/don't-apply line (career-ops.org + ReportView). */
 export const APPLY_LINE = 4.0;
 
-/** @param {unknown} legitimacy */
-function flaggedPosting(legitimacy) {
+/**
+ * Caution or suspicious legitimacy. Same tiers as the Today grouping and the
+ * quiet Apply control. A high-confidence or unknown tier is not flagged.
+ *
+ * @param {unknown} legitimacy
+ * @returns {boolean}
+ */
+export function flaggedPosting(legitimacy) {
   const s = String(legitimacy ?? "").toLowerCase();
   // Turkish reports (modes/tr/is-ilani.md) write the tier in Turkish:
   // Dikkatli İlerle (caution), Şüpheli (suspicious). Chinese reports

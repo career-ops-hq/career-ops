@@ -253,6 +253,20 @@ test("a hard stop does not remove a Skip or override an Apply", () => {
   assert.equal(rows[0].score, "4.9/5");
 });
 
+test("a legitimacy-flagged Apply is not the one-click target", () => {
+  const rows = [
+    queued("1", "4.8/5", "Fixture Flagged Apply"),
+    queued("2", "4.2/5", "Fixture Clean Apply"),
+  ];
+  const legitimacy = { "1": "Proceed with Caution", "2": "High Confidence" };
+  const target = pickApplyNext(rows, scoreOf, () => "Apply", (row) => legitimacy[row.n]);
+  assert.equal(target?.company, "Fixture Clean Apply");
+  assert.equal(
+    pickApplyNext([rows[0]], scoreOf, () => "Apply", (row) => legitimacy[row.n]),
+    null,
+  );
+});
+
 test("an Applied row is not Apply next", () => {
   const rows = [
     { ...queued("1", "4.9/5", "Fixture Already"), status: "Applied" },

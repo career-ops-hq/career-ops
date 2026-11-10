@@ -42,7 +42,12 @@ export default async function Home() {
     return entry;
   };
   const shown = pickAwaitingDecision(applications, scoreNum);
-  const applyTarget = pickApplyNext(applications, scoreNum, (app) => readApp(app).reason?.decision ?? "");
+  const applyTarget = pickApplyNext(
+    applications,
+    scoreNum,
+    (app) => readApp(app).reason?.decision ?? "",
+    (app) => readApp(app).legitimacy,
+  );
   const awaiting = includeApplyTarget(shown, applyTarget);
   for (const app of awaiting) {
     const entry = readApp(app);

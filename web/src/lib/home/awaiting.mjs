@@ -1,5 +1,5 @@
 import { canonStatus } from "../status-alias.mjs";
-import { applyLineLabel } from "../report-sections.mjs";
+import { applyLineLabel, flaggedPosting } from "../report-sections.mjs";
 
 // states.yml forbids a date in the status cell, but real trackers carry one
 // anyway ("Evaluated 2026-08-21") and /^evaluat/i tolerated that. canonStatus()
@@ -92,17 +92,19 @@ export function groupAwaiting(awaiting, legitimacyOf = () => undefined) {
 /**
  * The one-click target. The stored call decides. Score and date order match
  * the cards and pick which Apply. A Skip, Research first, Consider, or
- * missing call is not a target. The score cell is not rewritten.
+ * missing call is not a target. A legitimacy-flagged posting is not a target
+ * either. The next unflagged Apply is. The score cell is not rewritten.
  *
  * @template {{date?: string, score?: string, status?: string, n?: string}} T
  * @param {T[]} applications
  * @param {(score: string) => number} scoreOf
  * @param {(row: T) => string | null | undefined} [decisionOf]
+ * @param {(row: T) => string | null | undefined} [legitimacyOf]
  * @returns {T | null}
  */
-export function pickApplyNext(applications, scoreOf, decisionOf = () => "") {
+export function pickApplyNext(applications, scoreOf, decisionOf = () => "", legitimacyOf = () => "") {
   const ordered = pickAwaitingDecision(applications, scoreOf, Infinity);
-  return ordered.find((row) => decisionOf(row) === "Apply") ?? null;
+  return ordered.find((row) => decisionOf(row) === "Apply" && !flaggedPosting(legitimacyOf(row))) ?? null;
 }
 
 /**
