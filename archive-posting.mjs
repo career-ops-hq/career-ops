@@ -31,6 +31,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { captureSlug, reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { cloudflareInterstitial } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -56,27 +57,12 @@ const VALUE_FLAGS = ['--company', '--role', '--report'];
 // nearby.
 const NON_CONTENT_PAGE_MAX_CHARS = 600;
 
-// Cloudflare titles its own interstitials, whatever the site's branding in the
-// body: "Just a moment..." for a managed challenge, "Attention Required! |
-// Cloudflare" for a block. A site-branded challenge body can run past
-// NON_CONTENT_PAGE_MAX_CHARS and use none of the phrases detectNonContentMarker
-// knows ("Humans only", "Ray ID:"), so the body check never fires on it
-// (#6713). Matched on the title of the page that settled, and only on an HTTP
-// error: a challenge the browser passes reloads the real posting under its own
-// title, and that capture is kept.
-const CLOUDFLARE_INTERSTITIAL_TITLES = [
-  { re: /^just a moment\.{0,3}(?:…)?$/i, kind: 'challenge page' },
-  { re: /^attention required!?\s*\|\s*cloudflare$/i, kind: 'block page' },
-];
-
-/**
- * @param {string} title - the rendered page title
- * @returns {string|null} the interstitial kind, or null
- */
-function cloudflareInterstitial(title) {
-  const text = String(title ?? '').trim();
-  return CLOUDFLARE_INTERSTITIAL_TITLES.find(({ re }) => re.test(text))?.kind ?? null;
-}
+// A Cloudflare interstitial is recognised by its title instead
+// (cloudflareInterstitial, liveness-core.mjs): a site-branded challenge body
+// can run past NON_CONTENT_PAGE_MAX_CHARS and use none of the phrases
+// detectNonContentMarker knows ("Humans only", "Ray ID:"), so the body check
+// never fires on it (#6713). A challenge the browser passes reloads the real
+// posting under its own title, and that capture is kept.
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 

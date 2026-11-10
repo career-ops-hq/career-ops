@@ -8,7 +8,7 @@ console.log('\nProvider — cryptocurrencyjobs');
 
 try {
   const ccj = (await import(pathToFileURL(join(ROOT, 'providers/cryptocurrencyjobs.mjs')).href)).default;
-  const { parseCryptocurrencyJobsRss, splitTitle } = await import(pathToFileURL(join(ROOT, 'providers/cryptocurrencyjobs.mjs')).href);
+  const { parseCryptocurrencyJobsRss, splitTitle, teaserLocationClause } = await import(pathToFileURL(join(ROOT, 'providers/cryptocurrencyjobs.mjs')).href);
 
   if (ccj.id === 'cryptocurrencyjobs') pass('cryptocurrencyjobs.id is "cryptocurrencyjobs"');
   else fail(`cryptocurrencyjobs.id is ${JSON.stringify(ccj.id)}`);
@@ -66,6 +66,39 @@ try {
     pass('parseCryptocurrencyJobsRss never sets description from the feed teaser');
   } else {
     fail(`parseCryptocurrencyJobsRss set a description: ${JSON.stringify(jobs.map(j => j.description))}`);
+  }
+
+  // #6747: the teaser's location clause is the feed's only country signal.
+  // It travels as `eligibilityText`, which country_eligibility_filter reads
+  // and content_filter does not; an item without a teaser carries no key.
+  if (jobs[0]?.eligibilityText === 'is 100% remote with no geographical restrictions' &&
+      !('eligibilityText' in jobs[1])) {
+    pass('parseCryptocurrencyJobsRss carries the teaser location clause as eligibilityText, and omits it without a teaser');
+  } else {
+    fail(`parseCryptocurrencyJobsRss eligibilityText = ${JSON.stringify(jobs.map(j => j.eligibilityText))}`);
+  }
+
+  // One case per live clause shape (2026-11-09), plus the clause-less teaser
+  // that ends at "This is a full-time position".
+  const teaser = (rest) => `Acme is looking to hire a Rust Engineer to join their team. ${rest}`;
+  const clauseCases = [
+    ['This is a full-time position that is 100% remote with no geographical restrictions. Work remotely from anywhere.',
+      'is 100% remote with no geographical restrictions. Work remotely from anywhere'],
+    ['This is a full-time position that can be done remotely anywhere in the United States, or Canada.',
+      'can be done remotely anywhere in the United States, or Canada'],
+    ['This is a contract position that can be done remotely anywhere in Philippines or Vietnam.',
+      'can be done remotely anywhere in Philippines or Vietnam'],
+    ['This is a part-time position that is based in New York NY.', 'is based in New York NY'],
+    ['This is a full-time position that can be based in London, or New York NY.', 'can be based in London, or New York NY'],
+    ['This is a full-time position that can be done remotely anywhere in the United States or on-site in New York NY, or San Francisco CA.',
+      'can be done remotely anywhere in the United States or on-site in New York NY, or San Francisco CA'],
+    ['This is a full-time position', ''],
+  ];
+  const clauseWrong = clauseCases.filter(([rest, want]) => teaserLocationClause(teaser(rest)) !== want);
+  if (clauseWrong.length === 0 && teaserLocationClause('') === '' && teaserLocationClause(null) === '') {
+    pass('teaserLocationClause extracts every live clause shape and returns "" without one');
+  } else {
+    fail(`teaserLocationClause wrong: ${JSON.stringify(clauseWrong.map(([rest]) => teaserLocationClause(teaser(rest))))}`);
   }
 
   if (parseCryptocurrencyJobsRss('').length === 0 && parseCryptocurrencyJobsRss(null).length === 0) {
