@@ -199,13 +199,22 @@ const API = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${ID}`;
 
   // Reserve-then-wait, so back-to-back callers queue instead of all reading the
   // same "last request" timestamp and firing together.
-  const started = Date.now();
-  const first = await throttleProviderRequest('test-provider-linkedin-rung', 60);
-  const second = await throttleProviderRequest('test-provider-linkedin-rung', 60);
-  const elapsed = Date.now() - started;
-  check('the first request through a throttled provider does not wait', first === 0, String(first));
-  // `second` shrinks by the gap between calls, so check it waited and the pair spans the interval.
-  check('the second waits out the interval', second > 0 && elapsed >= 55, `waited=${second} elapsed=${elapsed}`);
+  // A fixed clock keeps the waits exact however slow the runner is.
+  const realNow = Date.now;
+  let clock = 1_000;
+  Date.now = () => clock;
+  try {
+    const first = await throttleProviderRequest('test-provider-linkedin-rung', 60);
+    clock += 10;
+    const second = await throttleProviderRequest('test-provider-linkedin-rung', 60);
+    clock += 1_000;
+    const late = await throttleProviderRequest('test-provider-linkedin-rung', 60);
+    check('the first request through a throttled provider does not wait', first === 0, String(first));
+    check('the second waits out the rest of the interval', second === 50, String(second));
+    check('a request after the reserved slot has passed does not wait', late === 0, String(late));
+  } finally {
+    Date.now = realNow;
+  }
   check('a provider with no declared interval never waits',
     (await throttleProviderRequest('test-provider-linkedin-rung-unthrottled', 0)) === 0);
 }
