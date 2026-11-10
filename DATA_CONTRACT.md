@@ -149,6 +149,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/it/*` | Italian language modes |
 | `modes/ja/*` | Japanese language modes |
 | `modes/ko/*` | Korean language modes |
+| `modes/nb/*` | Norwegian (Bokmål) language modes |
 | `modes/nl/*` | Dutch language modes |
 | `modes/pl/*` | Polish language modes |
 | `modes/pt/*` | Portuguese language modes |

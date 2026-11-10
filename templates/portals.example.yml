@@ -246,7 +246,11 @@
 # restriction ("US-based candidates only" vs. "US or Canada eligible")
 # often lives only in the job description BODY TEXT. This filter reads that
 # text (same field content_filter reads) and cross-references it against
-# your own country from `location.country` above.
+# your own country from `location.country` above. It also reads a board's
+# eligibility line when the board states one outside the description:
+# CryptocurrencyJobs says "can be done remotely anywhere in the United
+# States", which a phrase like "remotely anywhere in the united states"
+# matches and none of the example phrases below do.
 #
 # Semantics (case-insensitive substring), same "don't penalize missing
 # data" discipline as location_filter:

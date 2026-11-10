@@ -32,6 +32,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
+import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -637,7 +638,12 @@ function splitSkillsSection(cvText) {
  * @returns {{existing: string[], supportedByResume: string[], gap: string[]}}
  */
 function classifySkillGaps(jdSkills, cvText) {
-  const { namedSkillsText, proseText } = splitSkillsSection(cvText);
+  // Only what a reader of the CV sees is evidence: a link's text, not its target,
+  // the rule verify-cv-facts.mjs applies (#6606). "[infrastructure modules](
+  // https://github.com/jane/terraform-modules)" says nothing about Terraform, but
+  // its URL put Terraform in supportedByResume, which modes/pdf.md offers to the
+  // tailored CV's Skills section.
+  const { namedSkillsText, proseText } = splitSkillsSection(collapseMarkdownLinks(cvText));
 
   // Canonical skill sets present in each CV region. Folding BOTH the JD token
   // and the CV text through skill-extract.mjs's canonicalize() is what closes
