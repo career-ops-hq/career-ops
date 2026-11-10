@@ -83,3 +83,22 @@ test('the line after a bracketed word ending a line of prose is still read', (t)
   }, 'cv.md');
   assert.deepEqual(r.missing, []);
 });
+
+// Only a real definition is dropped. CommonMark reads a target in angle
+// brackets with a space in it as one target, a title as never crossing a blank
+// line, and a `[label]:` line inside a paragraph as text.
+for (const [label, md, missing] of [
+  ['a target in angle brackets holding a space, on the next line', '[tf]:\n  <./Terraform portfolio.pdf>', ['Terraform']],
+  ['a target in angle brackets holding a space, on the label line', '[tf]: <./Terraform portfolio.pdf> "Portfolio"', ['Terraform']],
+  ['a title wrapped onto a second line', '[tf]: https://example.com/infra\n"Terraform\nmodules"', ['Terraform']],
+  ['quoted text that crosses a blank line is no title', '[tf]: https://example.com/infra\n"Wrote the Terraform modules\n\nthe team still uses"', []],
+  ['a [label]: line inside a paragraph', 'Infrastructure as code, mostly\n[daily]:\nTerraform', []],
+  ['a [label]: in the middle of a line', 'Infrastructure [daily]: Terraform', []],
+]) {
+  test(`reference definitions: ${label}`, (t) => {
+    const r = coverage(t, {
+      'cv.md': `## Experience\n- Wrote the [infrastructure modules][tf] the team still uses.\n\n${md}\n\n## Skills\nGo, Docker\n`,
+    }, 'cv.md');
+    assert.deepEqual(r.missing, missing);
+  });
+}
