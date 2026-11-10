@@ -65,6 +65,8 @@ import { mergeProviderPlugins } from './plugins/_engine.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
+import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 import { DEFAULT_SMALL_THRESHOLD, isSmallBoard, smallBoardDetail } from './lib/small-board.mjs';
 
 // Anchored, not cwd-relative. Both paths below used to be bare relative
@@ -270,7 +272,10 @@ export async function auditCompanies(companies, {
       let result = { provider: providerId, scanMethod: entry.scan_method || null };
       if (providerId) {
         try {
-          const ctx = httpCtx || { ...makeHttpCtx(), maxPages: AUDIT_MAX_PAGES };
+          // Same per-entry response cap scan.mjs applies, so a board that sets
+          // max_response_mb is audited with the limit it is scanned with. The ctx is
+          // copied because the cap and the timeout replace its fetchers, and httpCtx is shared.
+          const ctx = applyEntryTimeout(applyEntryResponseCap({ ...(httpCtx || { ...makeHttpCtx(), maxPages: AUDIT_MAX_PAGES }) }, entry), entry);
           result.jobs = (await resolved.provider.fetch(entry, ctx)) || [];
         } catch (err) {
           result.error = err?.message || String(err);

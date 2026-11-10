@@ -71,7 +71,7 @@ import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.
 import join, { parseCompanySitemap } from './providers/join.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilterOrExit, matchedTitleKeywords, loadSeenUrls, seenJobKey, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -618,6 +618,16 @@ export function classifyPostingDate(job, cutoff) {
   return 'keep';
 }
 
+// #6020. content_filter.rescue_title_misses is not applied here.
+// listingMayMatch() below skips a whole board when no title on it matches,
+// before any posting body is downloaded; that precheck is what makes a sweep of
+// a full public directory affordable, and rescuing title misses would mean
+// downloading every board. Say so instead of ignoring the key silently.
+export const RESCUE_TITLE_MISSES_IGNORED_WARNING = '⚠️  content_filter.rescue_title_misses is ignored by scan-ats-full.mjs: it skips boards by title before downloading descriptions. Title misses are dropped here as without the key; scan.mjs and scan-dayforce.mjs apply it.';
+export function warnRescueTitleMissesIgnored(contentFilter, warn = console.error) {
+  if (contentFilter?.rescueTitleMisses === true) warn(RESCUE_TITLE_MISSES_IGNORED_WARNING);
+}
+
 // Can this board hold a match? Asked of a provider's cheap listing (titles and
 // dates, no posting bodies) before its full fetch. Only the two checks that
 // need no body run here, the same ones processJobs() starts with, so a board
@@ -827,12 +837,12 @@ export function passesFilters(job, { titleFilter, locationFilter, contentFilter,
 // Prefer a provider's own scoped dedup key over URL normalization when the
 // provider can derive one — e.g. workday.mjs's requisition ID, which
 // collapses the same posting served under several sites of one tenant
-// (different paths, sometimes different hosts) that normalizeUrlForDedup
+// (different paths, sometimes different hosts) that seenJobKey
 // can't recognize as duplicates (#3439). `provider` is optional so this stays
 // safe to call for seed-pass offers, which carry no SOURCES entry to look one
 // up from. Falls back to the pre-#3439 behavior whenever no key is derived.
 export function dedupTokenFor(job, provider) {
-  return provider?.dedupKey?.(job) || normalizeUrlForDedup(job.url);
+  return provider?.dedupKey?.(job) || seenJobKey(job.url);
 }
 
 // Resolve an offer's provider from its recorded `source` string — shared by
@@ -988,7 +998,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) 
         titleFilterConfig: opts.titleFilterConfig,
       })) continue;
       // provider is always one of SEED_PROVIDERS (greenhouse/lever/ashby) here —
-      // none currently define dedupKey, so this is the same normalizeUrlForDedup
+      // none currently define dedupKey, so this is the same seenJobKey
       // behavior as before; kept via the shared helper so the two dedup sites
       // in this file can't quietly drift apart (#3439).
       const dedupToken = dedupTokenFor(job, provider);
@@ -1283,7 +1293,8 @@ async function main() {
   opts.workplacePolicy = config?.location_filter?.workplace_policy;
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
-  const contentFilter = buildContentFilter(config?.content_filter);
+  const contentFilter = buildContentFilterOrExit(config?.content_filter);
+  warnRescueTitleMissesIgnored(contentFilter);
   // Opt-in, and the opt-in IS the key: `domain_filter` does not exist in any
   // portals.yml written before this feature, so every existing install keeps
   // its exact behaviour and nobody loses a board without having asked for the
@@ -1339,7 +1350,7 @@ async function main() {
   // extraTokensFor: a historical scan-history.tsv row records the URL it was
   // FIRST seen on, so without this a Workday requisition seen last run under
   // site A's URL wouldn't be recognized when this run only sees it under
-  // site B — the plain normalizeUrlForDedup comparison never matches across
+  // site B — the plain seenJobKey comparison never matches across
   // sites, and only fresh-run offers were reseeded with the provider key
   // (#3439). `portal` here is scan-history.tsv's recorded `offer.source`, so
   // providerForSource resolves it the same way the checkpoint reseed above

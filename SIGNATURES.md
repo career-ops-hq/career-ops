@@ -218,3 +218,9 @@ public commit with a stated reason.
 - @sayyidmibrahiim | Ibrahim | 2026-11-03 | "ai ops" | id:106948724 | src:https://github.com/career-ops-hq/career-ops/discussions/6422 | n:170
 - @taattieee | 2026-11-04 | "Make job applications less monotonous!" | id:100685678 | src:https://github.com/career-ops-hq/career-ops/discussions/6487 | n:171
 - @beatrizfsvieira8 | Beatriz | 2026-11-05 | id:352906915 | src:https://github.com/career-ops-hq/career-ops/discussions/6537 | n:172
+- @moizghumann | moiz ghuman | 2026-11-07 | "Anyone can build anything now. hiring metrics should evaluate grit, hunger to grow and vibe fit more than ever now" | id:68769670 | src:https://github.com/career-ops-hq/career-ops/discussions/6651 | n:173
+- @LucasAzLima | Lucas de Azevedo Lima | 2026-11-07 | id:28840603 | src:https://github.com/career-ops-hq/career-ops/discussions/6666 | n:174
+- @Bossku888 | 2026-11-08 | id:290774118 | src:https://github.com/career-ops-hq/career-ops/discussions/6689 | n:175
+- @marichikajoshi | Marichika Joshi | 2026-11-09 | "Front end developer" | id:86568342 | src:https://github.com/career-ops-hq/career-ops/discussions/6723 | n:176
+- @amolkadutech-afk | 2026-11-09 | id:234717522 | src:https://github.com/career-ops-hq/career-ops/discussions/6781 | n:177
+- @jf-xia | Jack | 2026-11-10 | "Great AI assistant career operation, thanks." | id:18513205 | src:https://github.com/career-ops-hq/career-ops/discussions/6797 | n:178

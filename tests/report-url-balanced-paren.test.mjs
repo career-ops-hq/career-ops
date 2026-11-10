@@ -70,7 +70,7 @@ for (const [input, expected] of cases) {
       CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(join(work, 'adds')),
       CAREER_OPS_PDF_INDEX: join(work, 'data/pdf-index.tsv'),
     };
-    const merge = () => execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], { cwd: ROOT, encoding: 'utf8', env, timeout: 30000 });
+    const merge = () => execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], { cwd: ROOT, encoding: 'utf8', env, timeout: 30000 });
 
     // First evaluation: no url field, so the key comes from the report header.
     writeFileSync(

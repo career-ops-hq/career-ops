@@ -64,7 +64,7 @@ CV'ni uyarlar ve cevaplarının taslağını&nbsp;yazar. <strong>Gönder'e&nbsp;
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">Benden sonra gelenler, nasıl işe alındıklarını yazdı.</p>
 
@@ -131,7 +131,7 @@ Gönder'e bastıktan sonraki sessizlik seninle ilgili değil. Aynı şeyi gören
 
 [Düzeltme burada yazılıyor](CONTRIBUTING.md). Bir kulüp değil, bir oda. **Birlikte inşa edelim.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops sunucusunun canlı üye sayısı"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: career-ops sunucusunun canlı üye sayısı"></a></p>
 
 ## Sponsorlar
 
@@ -508,7 +508,7 @@ Go dashboard TUI, Node.js betikleri ve yapay zekâ ajan modlarının tümü bu �
 - **Veri**: Markdown tabloları + YAML yapılandırması + TSV toplu dosyaları
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -589,7 +589,7 @@ Tüm ayrıntılar için bkz. [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md). Bu yaz�
 ## Katkıda Bulunanlar
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Kod, belge, çeviri veya test katkısı yapan herkes

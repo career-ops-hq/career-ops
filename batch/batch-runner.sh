@@ -113,6 +113,8 @@ PAUSE_FILE="$BATCH_DIR/batch-runner.paused"
 THROTTLE_FILE="$BATCH_DIR/batch-runner.throttled"
 STATE_LOCK_DIR="$BATCH_DIR/.batch-state.lock"
 STATE_LOCK_PID_FILE="$STATE_LOCK_DIR/pid"
+STATE_LOCK_FLOCK_FILE="$BATCH_DIR/.batch-state.flock"
+STATE_LOCK_FLOCK=0
 STATE_LOCK_TIMEOUT_SECONDS=30
 MAIN_PID="${BASHPID:-$$}"
 
@@ -136,6 +138,7 @@ RATE_LIMIT_SLEEP=300
 WORKER_TIMEOUT=1800
 THIN_ACTION=webfetch   # webfetch | skip | browser-extract: what to do when the JD is still empty after the prefetch and the ATS API fallback
 BATCH_PAUSED=false
+EVIDENCE_FRESHNESS_JSON=""   # set once per run by check_evidence_freshness
 STATUS_ONLY=false
 STATUS_FULL=true
 WATCH_MODE=false
@@ -565,6 +568,10 @@ release_state_lock() {
 }
 
 run_with_state_lock() {
+  if [[ "$STATE_LOCK_FLOCK" == "1" ]]; then
+    run_with_state_flock "$@" || return $?
+    return 0
+  fi
   acquire_state_lock || return $?
 
   local status=0
@@ -575,6 +582,53 @@ run_with_state_lock() {
   fi
 
   release_state_lock
+  return "$status"
+}
+
+# The mkdir lock is only as atomic as mkdir(1). On Ubuntu 26.04 mkdir is uutils
+# coreutils, and before uutils 0.11.0 it checks that the directory is absent,
+# then creates it, and exits 0 when a racing mkdir made it in between. Two
+# workers both took the lock, reserved the same report number and rewrote
+# batch-state.tsv together, with nothing printed (#6362). flock(1) leaves the
+# excluding to the kernel. main() calls this once, before any worker starts,
+# so every worker takes the same lock. Without flock (stock macOS, Git Bash)
+# mkdir(1) is atomic and the mkdir lock stays, as it does on a file system
+# that refuses flock.
+select_state_lock() {
+  command -v flock >/dev/null 2>&1 || return 0
+  if { flock -x -n 9; } 2>/dev/null 9>>"$STATE_LOCK_FLOCK_FILE"; then
+    STATE_LOCK_FLOCK=1
+  else
+    echo "WARN: flock cannot lock $STATE_LOCK_FLOCK_FILE; using the mkdir state lock." >&2
+  fi
+}
+
+# Polls every 0.1s up to STATE_LOCK_TIMEOUT_SECONDS, like the mkdir lock
+# (BusyBox flock has no -w). The lock lives on fd 9, open only inside this
+# function, so the workers, their CLI and the PDF painter never inherit it. A
+# program started inside the critical section does inherit it, and holds the
+# lock until it exits (9>&- would not stop that: bash saves fd 9 to another
+# descriptor that the program still gets), so start nothing long-lived there.
+# The lock file is never removed: a worker waiting on the old file and one
+# locking a new one would both get in.
+run_with_state_flock() {
+  local status=1 waited=0
+  local max_waits=$((STATE_LOCK_TIMEOUT_SECONDS * 10))
+  {
+    while true; do
+      if flock -x -n 9; then
+        status=0
+        "$@" || status=$?
+        break
+      fi
+      if (( waited >= max_waits )); then
+        echo "ERROR: Timed out waiting for state lock at $STATE_LOCK_FLOCK_FILE" >&2
+        break
+      fi
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+  } 9>>"$STATE_LOCK_FLOCK_FILE"
   return "$status"
 }
 
@@ -731,8 +785,12 @@ log_discard() {
 }
 
 
+# The mode a plain redirect gives a new file (0644 under umask 022). mktemp
+# creates 0600, and the state file keeps the mode it has always had.
+STATE_FILE_MODE=$(printf '%o' "$(( 0666 & ~0$(umask) ))")
+
 # Update or insert state for an offer.
-# Caller must hold STATE_LOCK_DIR while this runs.
+# Caller must hold the state lock (run_with_state_lock) while this runs.
 update_state_unlocked() {
   local id="$1" url="$2" status="$3" started="$4" completed="$5" report_num="$6" score="$7" error="$8" retries="$9"
 
@@ -750,7 +808,12 @@ update_state_unlocked() {
     init_state
   fi
 
-  local tmp="$STATE_FILE.tmp"
+  # A tmp file of its own per rewrite, beside the state file so mv stays a
+  # rename. With one shared $STATE_FILE.tmp, two rewrites that overlapped
+  # truncated and renamed each other's file: rows doubled and mv failed (#6362).
+  local tmp
+  tmp=$(mktemp "$STATE_FILE.tmp.XXXXXX") || return 1
+  chmod "$STATE_FILE_MODE" "$tmp" 2>/dev/null || true
   local found=false
 
   # Write header
@@ -781,7 +844,10 @@ update_state_unlocked() {
       "$id" "$url" "$status" "$started" "$completed" "$report_num" "$score" "$error" "$retries" >> "$tmp"
   fi
 
-  mv "$tmp" "$STATE_FILE"
+  if ! mv -f "$tmp" "$STATE_FILE"; then
+    rm -f "$tmp"
+    return 1
+  fi
 }
 
 update_state() {
@@ -1505,6 +1571,17 @@ process_offer() {
   fi
 
 
+  # The run-wide evidence freshness result (Step 1.7). The same text for every
+  # offer, so it keeps the resolved prompt byte-identical across the run.
+  if [[ -n "$EVIDENCE_FRESHNESS_JSON" ]]; then
+    {
+      printf '\n\n---\n\n'
+      printf '## Runtime: GitHub evidence freshness\n\n'
+      printf 'The runner ran `node evidence-freshness.mjs` once for this batch run. Its JSON output:\n\n'
+      printf '%s\n' "$EVIDENCE_FRESHNESS_JSON" | sed 's/^/    /'
+    } >> "$resolved_prompt"
+  fi
+
   # Build the launch command for the configured CLI.
   # For claude the model is resolved once per run from spend_tier unless --model
   # was passed; other CLIs take --model verbatim. Building claude's command in an
@@ -1951,6 +2028,26 @@ process_offer() {
   fi
 }
 
+# GitHub evidence freshness (#5674): one check for the whole run, not one per
+# worker. The check makes a `gh search prs` call and its answer is the same for
+# every offer, so the runner makes it once and every worker reads the result
+# from its prompt. It is opt-in: with evidence_freshness.enabled not true it
+# reports status "disabled" without any network call, and workers get nothing.
+check_evidence_freshness() {
+  [[ -f "$PROJECT_DIR/evidence-freshness.mjs" ]] || return 0
+  local out status
+  out=$(node "$PROJECT_DIR/evidence-freshness.mjs" 2>/dev/null) || return 0
+  status=$(printf '%s\n' "$out" | sed -n 's/^  "status": "\(.*\)",$/\1/p')
+  [[ -z "$status" || "$status" == "disabled" ]] && return 0
+  EVIDENCE_FRESHNESS_JSON="$out"
+  if printf '%s\n' "$out" | grep -q '^  "stale": true,$'; then
+    echo "GitHub evidence: stale (checked once for this run; see each report header)"
+  else
+    echo "GitHub evidence: $status (checked once for this run)"
+  fi
+  echo ""
+}
+
 # Merge tracker additions into applications.md
 merge_tracker() {
   echo ""
@@ -2175,6 +2272,7 @@ main() {
   if [[ "$DRY_RUN" == "false" ]]; then
     acquire_lock
     rm -f "$PAUSE_FILE" "$THROTTLE_FILE"
+    select_state_lock
   fi
 
   init_state
@@ -2325,6 +2423,7 @@ main() {
     exit 0
   fi
 
+  check_evidence_freshness
   # --skip-pdf must not start a painter, even when the parent shell already opted in.
   if [[ "$SKIP_PDF" == "true" ]]; then
     unset CAREER_OPS_PDF_SHARED

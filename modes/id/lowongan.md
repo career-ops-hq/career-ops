@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Format tracker:**
 
 ```markdown
-| # | Tanggal | Perusahaan | Role | Score | Status | PDF | Report |
+| # | Tanggal | Perusahaan | Role | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Observasi gaji (hanya angka yang diinginkan)

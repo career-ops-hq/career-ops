@@ -8,6 +8,7 @@ import { instrumentSerif } from "@/lib/fonts";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
+import { shouldStartScanOnLoad } from "@/lib/scan-on-load.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -80,9 +81,8 @@ export function ExplorerView({
       void loadFresh();
     } else {
       initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
-      // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
-      // banner (the "matches found from your CV, free" reveal).
-      if (sp.get("run") === "1" && sp.get("preset") !== CHINA_PRESET) {
+      // Onboarding hand-off: ?run=1 on Explore starts the scan. Pipeline never does.
+      if (shouldStartScanOnLoad(window.location.pathname, window.location.search)) {
         setFirstRun(true);
         void discover();
       }

@@ -10,6 +10,14 @@ Two things this log deliberately is not: a ranking, and a promise. Rule 4 says i
 
 ---
 
+## Rule 6 changed (2026-11-08)
+
+Until 2026-11-08, rule 6 made a source's `robots.txt` a gate: a `Disallow` covering the listing paths a provider reads was a stop. It no longer is. `robots.txt` is written for crawlers that index or copy a site; a provider reads a posting on one person's machine so that person can understand it and, if it fits, apply on the employer's page. What stays a stop: a login or a user account, a CAPTCHA, and an operator who asks career-ops not to read their source ([open an issue](https://github.com/career-ops-hq/career-ops/issues/new) to ask).
+
+The rule 6 notes in the entries below stay as the record of the old rule. The sources it kept out or narrowed (Lagou, TopDev, CareerLink and TurboHire in [Evaluated, not supported](SUPPORTED_JOB_BOARDS.md#evaluated-not-supported); jobspresso's feed path) can come back, or be widened, through a source proposal or a PR. Google's first results page was one of these; it was widened to page through the results on 2026-11-08 ([#6694](https://github.com/career-ops-hq/career-ops/issues/6694)). Thanks to @benbalter for the rule 6 checks in #5774 and #5776: they are why each of those cases is easy to find.
+
+---
+
 ## remotli.ch
 
 | | |
@@ -153,7 +161,7 @@ A general job board with one host per Latin American country. Only the Colombian
 
 **Rule 5 (aggregation stays in core).** Verified in code: the provider reads one search URL per entry, on a `<country>.computrabajo.com` host only.
 
-**Rule 6 (`robots.txt`).** Checked on 2026-10-23: one GET of `https://co.computrabajo.com/robots.txt` with career-ops' default User-Agent, HTTP 200, a single `User-agent: *` group. Its `Disallow` lines cover `/ofertas-de-trabajo/` with filter parameters (`*by=`, `*pubdate=`, ...), `/hojas-de-vida/`, `/curriculums/`, `/empresas/` filters, `/Ajax/`, `/_services/` and `/go/`; none covers the search page the provider fetches (`/trabajo-de-sistemas?by=publicationtime&p=N`). A configured search URL under `/ofertas-de-trabajo/` would fall under the `*by=` rule once the provider adds `by=publicationtime`; the shipped entry's path is not under it. Other country hosts: unverified.
+**Rule 6 (`robots.txt`).** Checked on 2026-10-23: one GET of `https://co.computrabajo.com/robots.txt` with career-ops' default User-Agent, HTTP 200, a single `User-agent: *` group. Its `Disallow` lines cover `/ofertas-de-trabajo/` with filter parameters (`*by=`, `*pubdate=`, ...), `/hojas-de-vida/`, `/curriculums/`, `/empresas/` filters, `/Ajax/`, `/_services/` and `/go/`; none covers the search page the provider fetches (`/trabajo-de-sistemas?by=publicationtime&p=N`). A configured search URL under `/ofertas-de-trabajo/` fell under the `*by=` rule once the provider added `by=publicationtime`, so the provider used to drop the sort on that path; after the [rule 6 change](#rule-6-changed-2026-11-08) (2026-11-08, #6691) the sort is sent on every path (#6694). Other country hosts: unverified.
 
 ---
 
@@ -219,10 +227,55 @@ A general job board for Colombia. Measured: one GET of `https://www.magneto365.c
 | **Provider** | `providers/jobspresso.mjs` |
 | **PR** | [#1320](https://github.com/career-ops-hq/career-ops/pull/1320) · rule 6 re-check in issue [#5774](https://github.com/career-ops-hq/career-ops/issues/5774) |
 | **Merged** | 2026-06-29, before this policy existed (2026-08-04) |
-| **Status** | Listed; feed URL moved to the query-free path on 2026-11-05 |
+| **Status** | Listed; query string `?posts_per_page=100` enabled on 2026-11-09 (#6694) |
 
 Re-read against rule 6 after a contributor checked the live `robots.txt` in [#5774](https://github.com/career-ops-hq/career-ops/issues/5774).
 
-**Rule 6 (the source's own `robots.txt`).** Checked on 2026-10-23 and again on 2026-11-05: one GET of `https://jobspresso.co/robots.txt`, HTTP 200. Under `User-agent: *` it disallows `/*?` and sets `Crawl-delay: 3`; its only `Allow` lines are `/*.css` and `/*.js`. No group names career-ops. `/*?` covered the URL the provider originally fetched, `/?feed=job_feed`, the same shape as Lagou in the [Evaluated, not supported](SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table. Unlike Lagou, a usable request without a query string exists: WordPress serves the same feed at `https://jobspresso.co/feed/job_feed/`, which is the URL the feed's own `<atom:link rel="self">` names. On 2026-11-05 it answered HTTP 200 `application/rss+xml` with no redirect, and returned the same 10 items as the query-string URL. `/*?` does not cover it, so the provider now reads that path, once per scan.
+**Rule 6 (the source's own `robots.txt`).** Checked on 2026-10-23 and again on 2026-11-05: one GET of `https://jobspresso.co/robots.txt`, HTTP 200. Under `User-agent: *` it disallows `/*?` and sets `Crawl-delay: 3`; its only `Allow` lines are `/*.css` and `/*.js`. No group names career-ops. `/*?` covered the URL the provider originally fetched, `/?feed=job_feed`. Following the Rule 6 update in #6691 and #6694 where robots.txt is no longer a gate for providers, the feed requests `?posts_per_page=100` (within Crawl-delay: 3, 1 request per scan) to return 100 items instead of 10.
 
 **Rules 1 to 5.** Not re-verified here.
+
+---
+
+## jobicy.com
+
+| | |
+|---|---|
+| **Proposed by** | provider by [#1260](https://github.com/career-ops-hq/career-ops/pull/1260); rule 3 re-check in this PR |
+| **Provider** | `providers/jobicy.mjs` |
+| **PR** | [#1260](https://github.com/career-ops-hq/career-ops/pull/1260) · rule 3 re-check: this PR |
+| **Merged** | 2026-06-29, before this policy existed (2026-08-04) |
+| **Status** | Listed; walks the whole 7-day feed since this PR |
+
+Re-read against rule 3 after the feed's documentation ([jobi.cy/apidocs](https://jobi.cy/apidocs), updated 2026-10-19) turned out to describe cursor pagination the provider never used.
+
+**Rule 3 (complete inventory, no paid placement).** The provider read one page, `?count=50`. Measured on 2026-11-05 with career-ops' default User-Agent, no key, cookie or session: the feed is a 7-day window served newest first, 100 postings a page, and one full walk of its `nextCursor` returned 1,358 postings over 14 pages (largest page 0.9 MB), zero duplicates, published 2026-10-30 to 2026-11-05. The 50 the provider read were 3.7% of the board and had all been published the same day. The provider now follows `nextCursor` until the feed reports `hasMore: false`, up to `max_pages` (default 25, max 100), and warns when that cap cuts the walk short. The public payload has no promoted or sponsored field, and the documentation states the order: publication time, newest first, listing id as tie-breaker. The optional `geo` / `industry` / `tag` keys are the feed's own documented filters, chosen by the user per entry; with `geo=argentina` the same walk returned 124 postings over 2 pages.
+
+**Rule 2 (canonical URL).** For a public request the payload carries one URL per posting, the Jobicy listing page; the employer's ATS link is a field of the paid Commercial API only. Jobicy's fair-use terms also ask that apply links from the free API keep pointing at the Jobicy page, so `url` stays that page.
+
+**Rule 6 (the source's own `robots.txt`).** Checked on 2026-11-05: one GET of `https://jobicy.com/robots.txt`, HTTP 200. Its `User-agent: *` group disallows query shapes such as `/*?s=`, `/*?p=`, `/*?q=`, `/*?offset=0` and `/*api_access_key=`, and paths such as `/search/` and `/job-listings/`; none covers `/api/v2/remote-jobs` with `count`, `cursor`, `geo`, `industry` or `tag`. It also carries `Content-Signal: ai-train=yes, search=yes, ai-input=yes`. No group names career-ops.
+
+**Fair use.** The documentation asks integrations to start an automated pass no more than once an hour and to follow its cursor pages in order. One scan is one pass per `provider: jobicy` entry, with 250 ms between pages.
+
+**Rules 1, 4 and 5.** Not re-verified here.
+
+## tes.com
+
+| | |
+|---|---|
+| **Proposed by** | [#6685](https://github.com/career-ops-hq/career-ops/issues/6685) |
+| **Provider** | `providers/tes.mjs` |
+| **PR** | this PR |
+| **Status** | Listed |
+
+UK and international teaching jobs from schools and other education employers. Tes publishes no API; the search page at `https://www.tes.com/jobs/search` fills itself from a public tRPC query, `GET /jobs/api/trpc/jobs.search?batch=1&input=<json>`, which the provider reads with the input shape the page sends (captured 2026-11-09).
+
+**Rule 1 (real, attributed, free).** Every posting names its school or employer and is free to read and apply to; no account is needed to read a posting.
+
+**Rule 2 (canonical URL).** The search payload carries one URL per posting, the Tes vacancy page (`canonicalUrl`), and `url` is that page. The per-posting detail query (`jobs.getById`) also exposes the school's own application link (`item.application.url`, for example an international-school ATS), but reading it costs one request per posting, about 5,700 for the whole board, so the provider does not read it. The Tes vacancy page links to it. A bounded, opt-in detail pass that carries that link is a possible follow-up.
+
+**Rule 3 (complete inventory, no paid placement).** Measured on 2026-11-09 with career-ops' default User-Agent, no key, cookie or session: sorted by `date`, the board returned 5,679 postings over 114 pages of 50, zero duplicate URLs, the last page short and the next one empty. A `limit` above 50 passes the endpoint's validation (`<= 100`) but returns zero rows, so the page size is 50. Rows carry a `promoted` flag and the payload a `sponsoredJobIds` list; the provider keeps every row in the order the date sort returns and never moves or filters by either. The optional `keywords` key is Tes's own search, chosen by the user per entry; the endpoint ignores `locations`, which the provider therefore does not send.
+
+**Rule 6 (read like a visitor).** The requests are the ones the public search page makes, one per page, 250 ms apart, bounded by `max_pages` (default 150, cap 400). `robots.txt` (checked 2026-11-09) disallows `/auth/`, `/registration/`, attachment paths and `/api/career-profile`, `/api/job-application` and `/api/schools` at the root; none covers `/jobs/api/trpc/jobs.search` or `/jobs/vacancy/`.
+
+**Rules 4 and 5.** The provider reads only Tes; nothing is ranked or merged at the source.

@@ -135,9 +135,30 @@ try {
       && full.location === 'Springfield, IL') pass('parseDetail reads title, decoded description, posted date and location');
   else fail(`full detail: ${JSON.stringify(full)}`);
   const odd = mod.parseDetail(fixture('applicantpro-detail-odd.html'));
-  if (odd.title === 'Operations Manager - Midwest' && !('employmentType' in odd) && !('validThrough' in odd) && !('salary' in odd)) {
-    pass('parseDetail takes the JSON-LD title and ignores validThrough, employmentType and baseSalary');
+  if (odd.title === 'Operations Manager - Midwest' && !('employmentType' in odd) && !('validThrough' in odd) && !('closesAt' in odd) && !('salary' in odd)) {
+    pass('parseDetail takes the JSON-LD title and ignores a far-future validThrough, employmentType and baseSalary');
   } else fail(`odd detail: ${JSON.stringify(odd)}`);
+  const isoClose = mod.parseDetail('<script type="application/ld+json">{"@type":"JobPosting","title":"Analyst","validThrough":"2026-11-02"}</script>');
+  if (isoClose.closesAt === '2026-11-02' && isoClose.title === 'Analyst' && !('validThrough' in isoClose)) {
+    pass('parseDetail copies a real validThrough day to closesAt');
+  } else fail(`iso close detail: ${JSON.stringify(isoClose)}`);
+  // Live tenants write every validThrough as "YYYY-MM-DD 00:00:00THH:MM".
+  // The full fixture carries that shape with a real deadline.
+  if (full.closesAt === '2026-11-02') pass('parseDetail reads the close day from the tenant shape "YYYY-MM-DD 00:00:00T23:59"');
+  else fail(`tenant-shape close day: ${JSON.stringify(full.closesAt)}`);
+  const vendorShape = (posted, through) => mod.parseDetail(`<script type="application/ld+json">{"@type":"JobPosting","title":"Analyst","datePosted":"${posted}","validThrough":"${through}"}</script>`);
+  const fiveYears = vendorShape('2026-08-06 00:00:00', '2031-08-06 00:00:00T23:59');
+  if (!('closesAt' in fiveYears)) pass('a validThrough five years after posting is the tenant default, not a close day');
+  else fail(`five-year placeholder became a close day: ${JSON.stringify(fiveYears)}`);
+  const withinTwoYears = vendorShape('2026-08-06 00:00:00', '2028-08-05 00:00:00T23:59');
+  if (withinTwoYears.closesAt === '2028-08-05') pass('a validThrough within two years of posting stays a close day');
+  else fail(`two-year close day: ${JSON.stringify(withinTwoYears)}`);
+  const badDay = vendorShape('2026-08-06 00:00:00', '2026-02-31 00:00:00T23:59');
+  if (!('closesAt' in badDay)) pass('the tenant shape with an impossible day gives no close day');
+  else fail(`impossible tenant-shape day: ${JSON.stringify(badDay)}`);
+  const noPosted = mod.parseDetail('<script type="application/ld+json">{"@type":"JobPosting","title":"Analyst","validThrough":"2026-11-24 00:00:00T23:59"}</script>');
+  if (noPosted.closesAt === '2026-11-24') pass('the tenant shape gives a close day when datePosted is missing');
+  else fail(`tenant shape without datePosted: ${JSON.stringify(noPosted)}`);
   if (Object.keys(mod.parseDetail('<html>no json-ld</html>')).length === 0
       && Object.keys(mod.parseDetail('<script type="application/ld+json">{not json</script>')).length === 0
       && Object.keys(mod.parseDetail(null)).length === 0) pass('parseDetail tolerates pages with no or broken JSON-LD');
