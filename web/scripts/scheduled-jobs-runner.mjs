@@ -238,6 +238,35 @@ function stoppedSweepResult(startedAt, attempt, saved, postingsKept) {
   };
 }
 
+function outageStoppedMessage(parsed) {
+  const count = Number(parsed.postingsKept);
+  const known = Number.isFinite(count);
+  const saved = parsed.saved === true;
+  let message;
+  if (saved && known) {
+    message = `Resolver stopped the sweep. Saved ${count} matching role${count === 1 ? "" : "s"}.`;
+  } else if (saved !== true && known && count > 0) {
+    message = `Resolver stopped the sweep. ${count} matching role${count === 1 ? "" : "s"} were not saved.`;
+  } else {
+    message = "Resolver stopped the sweep.";
+  }
+  if (parsed.outageCheckpointWritten === true) {
+    message += " The next run continues this sweep.";
+  }
+  return message;
+}
+
+function outageStoppedResult(startedAt, attempt, parsed) {
+  const count = Number(parsed.postingsKept);
+  return {
+    state: "failed",
+    attempt,
+    rolesFound: parsed.saved === true && Number.isFinite(count) ? count : 0,
+    durationMs: Date.now() - startedAt,
+    message: outageStoppedMessage(parsed),
+  };
+}
+
 /*
  * Keep the temporary portal overlay scoped to each retry. A thrown setup or
  * spawn error is retryable just like a non-zero scanner exit, while cleanup
@@ -282,6 +311,9 @@ export function executeJob(root, job, options = {}) {
         const engine = job.engine || "full";
         if (engine === "full") {
           const parsed = parseFullScanResult(result.stdout || "");
+          if (parsed?.stoppedByOutage === true) {
+            return outageStoppedResult(startedAt, attempt, parsed);
+          }
           if (parsed && parsed.stoppedEarly !== true) {
             const rolesFound = extractRolesFound(engine, result.stdout || "");
             return {

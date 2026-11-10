@@ -1972,6 +1972,9 @@ async function main() {
   // Run-level, because resolverOutage below is per-source and long out of
   // scope by the time the checkpoint's fate is decided at the end of main().
   let stoppedByOutage = false;
+  // True only when the outage branch's own write succeeded. A failed write
+  // must not be reported as a resume point.
+  let outageCheckpointWritten = false;
 
   for (const name of opts.ats.filter((ats) => SOURCES[ats])) {
     const source = SOURCES[name];
@@ -2273,6 +2276,7 @@ async function main() {
           current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
           counters: snapshotCounters(),
         });
+        outageCheckpointWritten = checkpointWritten;
       }
       writeStopCheckpoint = () => false;
       liveCounters = restingCounters;
@@ -2424,6 +2428,7 @@ async function main() {
       // it a caller can't tell a stopped run from a complete one except by
       // stat'ing the checkpoint file itself.
       stoppedByOutage,
+      outageCheckpointWritten,
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,

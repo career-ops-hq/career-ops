@@ -893,3 +893,60 @@ test("a full scan that exits 0 at the time limit is not a finished empty run", (
     fs.rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test("a resolver outage is an incomplete sweep, and a missed checkpoint does not promise a resume", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-outage-"));
+  writePortals(temp);
+  const job = { id: JOB_ID, engine: "full", filters: {}, timezone: "UTC" };
+  try {
+    const kept = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedByOutage: true,
+          saved: true,
+          postingsKept: 4,
+          outageCheckpointWritten: true,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(kept.state, "failed");
+    assert.equal(kept.rolesFound, 4);
+    assert.equal(kept.message, "Resolver stopped the sweep. Saved 4 matching roles. The next run continues this sweep.");
+
+    const uncheckpointed = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedByOutage: true,
+          saved: true,
+          postingsKept: 4,
+          outageCheckpointWritten: false,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(uncheckpointed.state, "failed");
+    assert.equal(uncheckpointed.rolesFound, 4);
+    assert.equal(uncheckpointed.message, "Resolver stopped the sweep. Saved 4 matching roles.");
+
+    const unsaved = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedByOutage: true,
+          saved: false,
+          postingsKept: 2,
+          outageCheckpointWritten: false,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(unsaved.state, "failed");
+    assert.equal(unsaved.rolesFound, 0);
+    assert.equal(unsaved.message, "Resolver stopped the sweep. 2 matching roles were not saved.");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
