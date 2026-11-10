@@ -340,6 +340,7 @@ try {
 
   // A health probe caps the walk at ctx.maxPages; with maxPages 1 only page 1 is requested.
   const probePages = [];
+  const page2Error = new Error('HTTP 503');
   const probeFetch = (maxPages) => jibeapply.fetch(entry, {
     transport: 'http',
     maxPages,
@@ -347,7 +348,7 @@ try {
     fetchJson: async (url) => {
       const pg = new URL(url).searchParams.get('page') || '1';
       probePages.push(pg);
-      if (pg === '2') throw new Error('HTTP 503');
+      if (pg === '2') throw page2Error;
       return { totalCount: 40, count: 10, jobs: Array.from({ length: 10 }, (_, i) => ({ title: `J${i}`, slug: `j${i}` })) };
     },
   });
@@ -363,7 +364,7 @@ try {
   probePages.length = 0;
   console.error = () => {};
   try { await probeFetch(2); } catch (e) { probeThrew = true; probeErr = e; } finally { console.error = originalConsoleError; }
-  if (probeThrew && probeErr?.message === 'HTTP 503' && probePages.join(',') === '1,2') pass('jibeapply.fetch() propagates a page failure during a probe');
+  if (probeThrew && probeErr === page2Error && probePages.join(',') === '1,2') pass('jibeapply.fetch() propagates a page failure during a probe');
   else fail(`jibeapply probe should throw the original page-2 error after requesting pages 1,2; got ${probeErr?.message}, pages=${probePages}`);
 
   // fetch() with explicit entry.api (non-jibeapply.com host)
