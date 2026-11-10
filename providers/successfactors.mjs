@@ -82,6 +82,23 @@ const CSB_DEFAULT_LOCALES = ['de_DE', 'en_US'];
 // locale for jobs published in several languages.
 const CSB_LOCALE_PRIORITY = ['de_DE', 'en_US', 'en_GB', 'en_EN'];
 
+// Host guard, applied before any robots/provider request: a SuccessFactors board
+// is a public https site on a named domain (jobs.sap.com, jobs.zf.com,
+// jobs.schaeffler.com, careers.te.com, *.successfactors.eu/.com, ...). Branded
+// RMK domains are tenant-chosen and cannot be listed, so the allowlist is
+// "public named host": no credentials, no loopback/private/link-local/metadata
+// address, no bare IP, no non-default port, and https only.
+/** @param {URL} u */
+export function isAllowedHost(u) {
+  if (u.protocol !== 'https:') return false;
+  if (u.username || u.password || u.port) return false;
+  const h = u.hostname.toLowerCase().replace(/\.$/, '');
+  if (!h.includes('.') || h.startsWith('[')) return false; // single-label or IPv6 literal
+  if (/^\d+(?:\.\d+){0,3}$/.test(h) || /^0x[0-9a-f]+$/i.test(h)) return false; // IPv4 in any spelling
+  if (/(^|\.)(localhost|local|internal|localdomain|home\.arpa|lan)$/.test(h)) return false;
+  return true;
+}
+
 /** @param {import('./_types.js').PortalEntry} entry */
 export function resolveConfig(entry) {
   const raw = entry.api || entry.careers_url || '';
@@ -91,7 +108,7 @@ export function resolveConfig(entry) {
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  if (!isAllowedHost(u)) return null;
   // Preserve a brand/tenant path prefix when the configured URL carries one —
   // some holding companies run several acquired brands off one shared RMK
   // instance, disambiguated by a path segment instead of a separate domain
@@ -534,7 +551,7 @@ export default {
 
   async fetch(entry, ctx) {
     const cfg = resolveConfig(entry);
-    if (!cfg) throw new Error(`successfactors: cannot resolve origin for ${entry.name}`);
+    if (!cfg) throw new Error(`successfactors: cannot resolve a public https host for ${entry.name}`);
 
     // Explicit opt-in goes straight to CSB. RMK tenants (the majority) run the
     // tile scraper; only when it comes back empty — the CSB empty-shell

@@ -457,6 +457,20 @@ try {
       fail(`successfactors CSB parallel pages: ${jobs.length} jobs, ${pagesAsked.length} requests, peak ${peak} in flight, first=${jobs[0]?.title} last=${jobs.at(-1)?.title}`);
     }
   }
+  // Host guard: supported branded hosts pass; unsafe hosts are rejected before any request.
+  {
+    const ok = ['https://jobs.sap.com', 'https://jobs.zf.com/search/', 'https://jobs.schaeffler.com', 'https://jobs.hensoldt.net', 'https://careers.te.com/search/', 'https://career5.successfactors.eu/careers', 'https://careers.nemetschek.com/Bluebeam/'];
+    const bad = ['http://jobs.zf.com', 'https://localhost', 'https://127.0.0.1', 'https://10.0.0.5', 'https://169.254.169.254/latest', 'https://2130706433', 'https://[::1]', 'https://intranet', 'https://jobs.corp.internal', 'https://user:pw@jobs.zf.com', 'https://jobs.zf.com:8443'];
+    const okFail = ok.filter((u) => !successfactorsModule.resolveConfig({ name: 'T', careers_url: u }));
+    const badFail = bad.filter((u) => successfactorsModule.resolveConfig({ name: 'T', careers_url: u }));
+    let requests = 0;
+    let threw = 0;
+    for (const u of bad) {
+      try { await sf.fetch({ name: 'T', careers_url: u }, { sleep: async () => {}, fetchText: async () => { requests++; return ''; }, fetchJson: async () => { requests++; return {}; } }); } catch { threw++; }
+    }
+    if (okFail.length === 0 && badFail.length === 0 && requests === 0 && threw === bad.length) pass('successfactors host guard accepts the supported branded hosts and rejects unsafe hosts before any request');
+    else fail(`successfactors host guard wrong: okRejected=${okFail}, badAccepted=${badFail}, requests=${requests}, threw=${threw}/${bad.length}`);
+  }
   // Truncation warnings and the opt-in cap raise.
   {
     const warns = [];
