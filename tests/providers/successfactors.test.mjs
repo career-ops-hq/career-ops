@@ -562,6 +562,15 @@ try {
       jobs = await sf.fetch({ name: 'FlakyCsb', careers_url: 'https://careers.flakycsb.example', max_pages: 200 }, { sleep: async () => {}, fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a>'), fetchJson: async () => { csbCalls++; return csbCalls === 1 ? { totalJobs: 1, jobSearchResult: [rec('1')] } : { totalJobs: 0, jobSearchResult: [] }; } });
       if (jobs.length === 1 && warns.some((w) => /keeping the probed posting/.test(w))) pass('successfactors keeps the probed posting when the raised full read comes back empty');
       else fail(`successfactors probe result lost: ${jobs.length} jobs, warns=${JSON.stringify(warns)}`);
+      // A full read that rejects, or that returns other jobs but not the probed one, still carries the probed posting and warns.
+      for (const mode of ['reject', 'other']) {
+        warns.length = 0;
+        let n = 0;
+        jobs = await sf.fetch({ name: `Partial-${mode}`, careers_url: 'https://careers.partial.example', max_pages: 200 }, { sleep: async () => {}, fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a>'), fetchJson: async () => { n++; if (n === 1) return { totalJobs: 1, jobSearchResult: [rec('1')] }; if (mode === 'reject') throw new Error('boom'); return { totalJobs: 1, jobSearchResult: [rec('2')] }; } });
+        const ids = jobs.map((j) => j.url).join(' ');
+        if (jobs.some((j) => /Role 1\b/.test(j.title)) && warns.some((w) => /keeping the probed posting/.test(w)) && (mode === 'reject' ? jobs.length === 1 : jobs.length === 2)) pass(`successfactors keeps the probed posting on a ${mode} full read and warns`);
+        else fail(`successfactors partial CSB (${mode}) wrong: ${jobs.length} jobs, ${ids}, warns=${JSON.stringify(warns)}`);
+      }
       // RMK fullness uses raw tile rows: a full last page containing one title-less tile still counts as capped.
       warns.length = 0;
       const badTile = '<li class="job-tile job-id-999999"><a data-url="/job/x/999999/" href="#"></a></li>';

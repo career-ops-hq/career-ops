@@ -570,13 +570,21 @@ export default {
     const raised = resolveLimits(entry, 'csb').raised;
     const probed = await fetchCsb(entry, cfg, ctx, { probe: true, quiet: raised });
     if (raised && probed.length > 0) {
-      const full = await fetchCsb(entry, cfg, ctx);
-      // A partial failure of the full read (the locale that held the probed job
-      // errored while another came back empty) must not turn a board the probe
-      // just saw into zero postings.
-      if (full.length === 0) {
-        console.error(`⚠️  successfactors: ${entry.name} full read at the raised limits returned no postings after the probe found one — keeping the probed posting`);
-        return probed;
+      // The probe just saw a posting, so a failed or partial full read (the locale
+      // that held it rejected or came back empty) must not shrink the board:
+      // keep the probed posting and say so.
+      let full = [];
+      let failure = null;
+      try {
+        full = await fetchCsb(entry, cfg, ctx);
+      } catch (err) {
+        failure = err;
+      }
+      const have = new Set(full.map((j) => j.url));
+      const missing = probed.filter((j) => !have.has(j.url));
+      if (failure || missing.length > 0) {
+        console.error(`⚠️  successfactors: ${entry.name} full read at the raised limits ${failure ? `failed (${failure.message})` : 'missed a posting the probe found'} — keeping the probed posting; the result may be partial`);
+        return [...full, ...missing];
       }
       return full;
     }
