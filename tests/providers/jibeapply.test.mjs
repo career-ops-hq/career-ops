@@ -317,6 +317,44 @@ try {
     fail(`jibeapply failed-page board should carry jibeapplyTruncated, got ${fetchedFlaky.jibeapplyTruncated}`);
   }
 
+  // A page failure on a board past the ceiling reports the fetch error, not the ceiling.
+  const failCeil = [];
+  console.error = (msg) => failCeil.push(msg);
+  try {
+    await jibeapply.fetch(absurdEntry, {
+      transport: 'http',
+      fetchText: async () => { throw new Error('fetchText not expected'); },
+      fetchJson: async (url) => {
+        if (new URL(url).searchParams.get('page') === '2') throw new Error('HTTP 503');
+        return { totalCount: 10_000_000, count: 10, jobs: [{ title: 'A', slug: 'a' }] };
+      },
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
+  if (failCeil.some(w => /page 2 fetch failed/.test(w)) && !failCeil.some(w => /provider ceiling|raise the cap/.test(w))) {
+    pass('jibeapply.fetch() does not print ceiling guidance when pagination stopped on a fetch error');
+  } else {
+    fail(`jibeapply fail-vs-ceiling warnings wrong: ${JSON.stringify(failCeil)}`);
+  }
+
+  // A health probe (ctx.maxPages set) propagates a later-page failure instead of returning partial jobs.
+  let probeThrew = false;
+  console.error = () => {};
+  try {
+    await jibeapply.fetch(entry, {
+      transport: 'http',
+      maxPages: 1,
+      fetchText: async () => { throw new Error('fetchText not expected'); },
+      fetchJson: async (url) => {
+        if (new URL(url).searchParams.get('page') === '2') throw new Error('HTTP 503');
+        return { totalCount: 40, count: 10, jobs: Array.from({ length: 10 }, (_, i) => ({ title: `J${i}`, slug: `j${i}` })) };
+      },
+    });
+  } catch { probeThrew = true; } finally { console.error = originalConsoleError; }
+  if (probeThrew) pass('jibeapply.fetch() propagates a page failure during a probe');
+  else fail('jibeapply probe should throw on a later-page failure');
+
   // fetch() with explicit entry.api (non-jibeapply.com host)
   let explicitApiUrl = null;
   const brandedEntry = { name: 'Widget Co', careers_url: 'https://jobs.widgetco.com/jobs', api: 'https://jobs.widgetco.com/api/jobs?internal=false' };

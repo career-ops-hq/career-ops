@@ -133,6 +133,7 @@ export default {
     // Set when the board is cut short (page cap or a failed page), so a caller can tell a
     // partial board from a complete one without reading stderr (the workdayTruncated convention).
     let truncated = false;
+    let pageFailed = false;
 
     if (total > pageSize && pageSize > 0) {
       const maxPages = resolveMaxPages(entry);
@@ -149,6 +150,9 @@ export default {
         try {
           json = await ctx.fetchJson(u2.toString(), { redirect: 'error' });
         } catch (err) {
+          // A health probe (ctx.maxPages set) must see the failure, not first-page jobs as success.
+          if (ctx.maxPages != null) throw err;
+          pageFailed = true;
           console.error(`⚠️  jibeapply: ${entry.name} page ${page} fetch failed — ${err.message} (returning ${allJobs.length} jobs fetched so far)`);
           truncated = true;
           break;
@@ -160,7 +164,8 @@ export default {
       // but a tenant that actually exceeds it needs to be surfaced —
       // otherwise the user has no way to notice postings are missing from
       // their scan.
-      if (Math.ceil(total / pageSize) > maxPages) {
+      // Not when a page failed: the scan stopped on the fetch error, already reported above.
+      if (!pageFailed && Math.ceil(total / pageSize) > maxPages) {
         truncated = true;
         const atCap = maxPages >= MAX_PAGES_CAP;
         if (atCap) {
