@@ -154,7 +154,7 @@ function editorLeftover(name) {
 function isContactFile(dir, base) {
   // A hidden copy (`.contacts.tsv.bak`, `.Connections.csv`) is the same data.
   const n = base.replace(/^\./, '');
-  return n.endsWith('.vcf') || CONTACT_FILES.some((f) => dir + n === f.toLowerCase());
+  return base.endsWith('.vcf') || n.endsWith('.vcf') || CONTACT_FILES.some((f) => dir + n === f.toLowerCase());
 }
 
 /**
