@@ -302,6 +302,35 @@ export function checkpointComparesCompanyList(checkpoint, sources) {
   return source.restartOnResume !== true;
 }
 
+/**
+ * Companies and errors a stop should report. The sweep total is bumped by
+ * the whole list up front. Retired boards and the unfinished tail come back
+ * off until the source folds them in. Retry errors stay in the local count
+ * until that fold, so they are added here and not again afterwards.
+ *
+ * @param {{ phase?: string, totalCompaniesScanned?: number, totalErrors?: number, entries?: number, lastDone?: number, deadBoardsSkipped?: number, errors?: number }} [state]
+ * @returns {{ totalCompaniesScanned: number, totalErrors: number }}
+ */
+export function stoppedScanCounts({
+  phase = 'folded',
+  totalCompaniesScanned = 0,
+  totalErrors = 0,
+  entries = 0,
+  lastDone = 0,
+  deadBoardsSkipped = 0,
+  errors = 0,
+} = {}) {
+  if (phase === 'folded') return { totalCompaniesScanned, totalErrors };
+  const unfinished = Math.max(0, entries - lastDone);
+  const scanned = phase === 'retry'
+    ? totalCompaniesScanned - unfinished
+    : totalCompaniesScanned - unfinished - deadBoardsSkipped;
+  return {
+    totalCompaniesScanned: Math.max(0, scanned),
+    totalErrors: totalErrors + errors,
+  };
+}
+
 // Dataset entries are external input destined for URL interpolation — reject
 // anything outside a conservative slug charset.
 const SLUG_RE = /^[A-Za-z0-9._-]+$/;
@@ -1775,12 +1804,10 @@ async function main() {
   // Live deltas for the partial (stoppedEarly) report, so a mid-source SIGTERM
   // reports the work ACTUALLY done. totalCompaniesScanned is bumped by a whole
   // source's planned entries up front, and its errors fold into totalErrors only
-  // once it finishes — the handler applies the same correction the checkpoint uses.
+  // once it finishes. The handler and the checkpoint both read stoppedScanCounts.
   let writeStopCheckpoint = () => false;
-  let curEntries = 0;
-  let curDone = 0;
-  let curErrors = 0;
-  let curDeadSkipped = 0;
+  const restingCounters = () => stoppedScanCounts({ totalCompaniesScanned, totalErrors });
+  let liveCounters = restingCounters;
   if (opts.json) {
     let flushed = false;
     process.on('SIGTERM', () => {
@@ -1831,17 +1858,18 @@ async function main() {
             dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
             source: o.source,
           }));
+          const live = liveCounters();
           process.stdout.write(JSON.stringify({
             date,
             sources: opts.ats,
             stoppedEarly: true,
             companiesAvailable: totalCompaniesAvailable,
-            companiesScanned: Math.max(0, totalCompaniesScanned - (curEntries - curDone) - curDeadSkipped),
+            companiesScanned: live.totalCompaniesScanned,
             capHit,
             datasetStatus,
             postingsKept: partial.length,
             postingsDroppedNoDate: droppedNoDate,
-            unreachableBoards: totalErrors + curErrors,
+            unreachableBoards: live.totalErrors,
             domainFilterActive: Boolean(domainFilter),
             domainGatedBoards,
             domainGatedPostings,
@@ -1976,7 +2004,6 @@ async function main() {
     }
     const entries = entriesAll.slice(startAt);
     totalCompaniesScanned += entries.length;
-    curEntries = entries.length; curDone = 0; curErrors = 0; curDeadSkipped = 0;
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     // This source's slice of the provider id cache (provider-id-cache.mjs).
@@ -2011,17 +2038,25 @@ async function main() {
     }
     const deferredIndices = () => [...deferred.values()].map((d) => d.index);
     let checkpointPhase = 'sweep';
+    liveCounters = () => stoppedScanCounts({
+      phase: checkpointPhase,
+      totalCompaniesScanned,
+      totalErrors,
+      entries: entries.length,
+      lastDone,
+      deadBoardsSkipped,
+      errors,
+    });
     writeStopCheckpoint = (partialSave) => {
       if (opts.dryRun) return false;
+      const live = liveCounters();
       const counters = checkpointPhase === 'folded'
         ? snapshotCounters()
         : {
             ...snapshotCounters(),
             totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
-            totalCompaniesScanned: checkpointPhase === 'retry'
-              ? totalCompaniesScanned - (entries.length - lastDone)
-              : totalCompaniesScanned - (entries.length - lastDone) - deadBoardsSkipped,
-            totalErrors: totalErrors + errors,
+            totalCompaniesScanned: live.totalCompaniesScanned,
+            totalErrors: live.totalErrors,
           };
       return writeCheckpoint({
         ...checkpointBase(),
@@ -2114,7 +2149,6 @@ async function main() {
       }
     }, ({ done, resumeAt }) => {
       lastDone = done;
-      curDone = done; curErrors = errors; curDeadSkipped = deadBoardsSkipped;
       lastResumeAt = resumeAt;
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
@@ -2219,6 +2253,7 @@ async function main() {
         });
       }
       writeStopCheckpoint = () => false;
+      liveCounters = restingCounters;
       log(`\n  ⛔ stopped ${name}/${resolverOutageCompany}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
@@ -2230,13 +2265,13 @@ async function main() {
       break;
     }
     completedSources.add(name);
-    // Source finished and folded into the totals — clear the live deltas so a
-    // SIGTERM between sources reports the totals, not this source's slice twice.
-    curEntries = 0; curDone = 0; curErrors = 0; curDeadSkipped = 0;
+    // Source finished and folded into the totals. A stop between sources
+    // reports those totals, not this source's slice a second time.
     if (!opts.dryRun) {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
     writeStopCheckpoint = () => false;
+    liveCounters = restingCounters;
     log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
   }
 
