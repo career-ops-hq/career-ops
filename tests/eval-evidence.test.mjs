@@ -315,11 +315,47 @@ test('removing a score claim drops the sentence instead of leaving a period', ()
   assert.equal(mixed.includes(kept), true);
   assert.equal(mixed.includes('. .'), false);
   assert.equal(mixed.includes('Salary uncertainty lowers the score'), false);
-  const only = normalizeEvaluationText(
-    reply().replace('The compensation estimate lowers the score.', 'The compensation estimate lowers the score.'),
-    JD_NO_PAY,
-  );
+  const only = normalizeEvaluationText(reply(), JD_NO_PAY);
   assert.equal(only.includes('\n.\n') || only.includes('\n.'), false);
+});
+
+test('a salary in another currency counts, and a customer base or revenue figure does not', () => {
+  assert.equal(postingStatesPay('Gehalt: 60.000 €'), true);
+  assert.equal(postingStatesPay('Salary: 120000 USD'), true);
+  assert.equal(postingStatesPay('15 000 – 20 000 PLN'), true);
+  assert.equal(postingStatesPay('₹80,000 to ₹120,000'), true);
+  assert.equal(postingStatesPay('Løn 500.000 kr'), true);
+  assert.equal(postingStatesPay('customer base of 10k+'), false);
+  assert.equal(postingStatesPay('annual revenue of $50M'), false);
+  assert.equal(postingStatesPay('the product range is 10,000 units'), false);
+  const revenue = normalizeEvaluationText(reply(), 'Annual revenue of $50M. Customer base of 10k+.');
+  assert.equal(revenue.includes('$140,000'), false);
+  assert.match(revenue, /compensation: "unknown"/);
+  const local = normalizeEvaluationText(reply(), 'Gehalt: 60.000 €');
+  assert.equal(local.includes('Advertised range'), true);
+  assert.equal(local.includes(UNKNOWN_COMP_SENTENCE), false);
+});
+
+test('a training-data role line stays, and a culture note is not a pay guess', () => {
+  const role = 'The role owns training data for the vision model.';
+  const note = 'Based on my knowledge, the team publishes its on-call rota.';
+  const out = normalizeEvaluationText(`${role}\n${note}\n${reply()}`, JD_NO_PAY);
+  assert.equal(out.includes(role), true);
+  assert.equal(out.includes(note), true);
+  assert.equal(out.includes('Training-data estimate'), false);
+  const guess = normalizeEvaluationText(`Based on my knowledge the salary is about $150,000.\n${reply()}`, JD_NO_PAY);
+  assert.equal(guess.includes('Based on my knowledge the salary'), false);
+});
+
+test('a cited culture signal stays when it also says there is no evidence of one trait', () => {
+  const line = 'Cultural signals: 4/5. The posting cites a 4-day week, and there is no evidence of meeting-heavy culture.';
+  const out = normalizeEvaluationText(reply().replace(
+    'Cultural signals: 3/5 by default, no evidence in the posting.',
+    line,
+  ), JD_WITH_PAY);
+  assert.equal(out.includes(line), true);
+  assert.equal(out.includes(CULTURE_SCORE_FLAG), false);
+  assert.match(out, /culture: "supported"/);
 });
 
 test('a culture line that already says unknown is not rewritten or flagged', () => {
