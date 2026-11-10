@@ -236,3 +236,44 @@ const board = (answers, calls) => async (p) => {
     fail(`probeSeedBoards detect handling wrong — ${JSON.stringify({ r: r.provider?.id, none })}`);
   }
 }
+
+// ── runSeedScan: per-host cap on concurrent probes ───────────────────
+// Each company can cost a request at each ATS API, and those APIs serve every
+// board from one host. With 20 companies in flight, an uncapped probe sends 20
+// requests to api.ashbyhq.com at once; runSeedScan caps each host at the
+// directory sweeps' single-host limit (6).
+
+{
+  const { runSeedScan } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
+  const inFlight = new Map();
+  const peak = new Map();
+  const ctx = {
+    async fetchJson(url) {
+      const h = new URL(url).hostname;
+      inFlight.set(h, (inFlight.get(h) || 0) + 1);
+      peak.set(h, Math.max(peak.get(h) || 0, inFlight.get(h)));
+      await new Promise((r) => setTimeout(r, 15));
+      inFlight.set(h, inFlight.get(h) - 1);
+      throw httpError(404);
+    },
+  };
+  const companies = Array.from({ length: 40 }, (_, i) => ({ name: `Co ${i}`, slug: `co-${i}`, url: '', source: 'test' }));
+  seeds.SEED_SOURCES.__capTest = { fetch: async () => companies, label: 'cap test' };
+  const realError = console.error;
+  console.error = () => {};
+  let result;
+  try {
+    result = await runSeedScan('__capTest', { limit: Infinity, sinceDays: 3, verbose: false }, ctx, new Set(), 'cap test');
+  } finally {
+    console.error = realError;
+    delete seeds.SEED_SOURCES.__capTest;
+  }
+  const hosts = [...peak.keys()].sort();
+  const maxPeak = Math.max(...peak.values());
+  if (result.noBoard === 40 && result.errors === 0
+    && hosts.length === 3 && maxPeak <= 6 && peak.get('api.ashbyhq.com') === 6) {
+    pass(`runSeedScan: at most 6 concurrent probes per ATS host (peaks ${hosts.map((h) => `${h}=${peak.get(h)}`).join(', ')}); all-404 companies count as no board`);
+  } else {
+    fail(`runSeedScan per-host cap wrong — ${JSON.stringify({ noBoard: result?.noBoard, errors: result?.errors, peak: Object.fromEntries(peak) })}`);
+  }
+}

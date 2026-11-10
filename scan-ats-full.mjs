@@ -1000,15 +1000,22 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) 
   const offers = [];
   let errors = 0;
   let noBoard = 0;
+  // Ashby, Greenhouse and Lever each answer every board from one API host, and
+  // each company may be probed on all three, so CONCURRENCY companies in flight
+  // can mean CONCURRENCY requests at one host. Cap each host the way the
+  // directory sweeps are capped (see SINGLE_HOST_CONCURRENCY). The key is the
+  // candidate's board host, which maps one-to-one to its ATS.
+  const withHostSlot = createKeyedLimiter(SINGLE_HOST_CONCURRENCY);
+  const fetchBoard = (p, entry) => {
+    let hostKey;
+    try { hostKey = new URL(entry.careers_url).hostname.toLowerCase(); } catch { hostKey = p.id || 'unknown'; }
+    return withHostSlot(hostKey, () => p.fetch(entry, withIdCache(ctx, idCaches, p)));
+  };
 
   await parallelEach(capped, CONCURRENCY, async (company) => {
     let probe;
     try {
-      probe = await probeSeedBoards(
-        toPortalEntries(company),
-        SEED_PROVIDERS,
-        (p, entry) => p.fetch(entry, withIdCache(ctx, idCaches, p)),
-      );
+      probe = await probeSeedBoards(toPortalEntries(company), SEED_PROVIDERS, fetchBoard);
     } catch (err) {
       errors++;
       if (opts.verbose) console.error(`  ✗ ${seedId}/${company.name}: ${err.message}`);
