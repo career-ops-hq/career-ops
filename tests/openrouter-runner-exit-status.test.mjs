@@ -24,9 +24,12 @@ writeFileSync(stub, 'globalThis.fetch = async () => { throw new Error("fetch stu
 const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(OPENROUTER_|CAREER_OPS_)/.test(k)));
 env.CAREER_OPS_ROOT = root;
 env.CAREER_OPS_MODEL = 'test/model';
-// Empty, not absent: the runner fills an absent key from the checkout's .env,
-// which on a configured checkout holds a real one.
+// Empty, not absent: the runner fills an absent variable from the checkout's
+// .env. On a configured checkout that is a real key, and a profile path would
+// point loadContext(), which runs for every command, at the developer's own
+// profile. An empty CAREER_OPS_PROFILE reads the profile under `root`.
 env.OPENROUTER_API_KEY = '';
+env.CAREER_OPS_PROFILE = '';
 
 function run(...args) {
   const r = spawnSync(NODE, ['--import', pathToFileURL(stub).href, join(ROOT, 'openrouter-runner.mjs'), ...args], {
