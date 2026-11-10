@@ -3,6 +3,7 @@
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { employmentTypeField } from './_employment-type.mjs';
 
 // Lever provider — hits the public postings endpoint.
 // Auto-detects from careers_url via jobs.(eu.)?lever.co/<slug>.
@@ -260,6 +261,10 @@ export default {
       // Lever's posting uuid; the v0 board API exposes no employer requisition
       // field, so requisitionId stays unset rather than being inferred.
       externalId: coerceId(j.id),
+      // `categories.commitment` is free text each employer writes ("Full-time",
+      // "Internship", "Fixed-Term", "Contractor"). "Permanent" states the term,
+      // not the type, and is left off with anything else unrecognized.
+      ...employmentTypeField(j.categories?.commitment),
     }));
     if (/** @type {any} */ (json).leverTruncated) /** @type {any} */ (mapped).leverTruncated = /** @type {any} */ (json).leverTruncated;
     return mapped;

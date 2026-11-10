@@ -14,6 +14,7 @@
 import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { employmentTypeField } from './_employment-type.mjs';
 
 // verify-portals.mjs probes Ashby boards with it too, so both read the same board.
 export const ASHBY_TIMEOUT_MS = 30_000;
@@ -464,6 +465,8 @@ async function fetchFromEmbed(entry, ctx) {
       // currency. An absent date means "unknown", never
       // "stale", so nothing is invented here. workplaceType is folded into
       // location above, exactly as on the API path, and not emitted on its own.
+      // employmentType carries the same values as on the API path.
+      ...employmentTypeField(p.employmentType),
     };
   }).filter((/** @type {any} */ j) => j && j.title && j.url);
 }
@@ -553,6 +556,9 @@ export default {
       description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',
       salary: parseCompensation(j),
       postedAt: toEpochMs(j.publishedAt),
+      // "FullTime" | "PartTime" | "Intern" | "Contract" | "Temporary".
+      // Left off when absent or unrecognized (_employment-type.mjs).
+      ...employmentTypeField(j.employmentType),
     }));
   },
 };
