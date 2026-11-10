@@ -1,14 +1,29 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
-import { fetchTextWithRetry } from './_http.mjs';
+import { fetchTextWithRetry, sleep } from './_http.mjs';
 
 // Deutsche Bahn provider — single-company (pattern: ibm/dassault/rheinmetall).
-// DB's careers run on the custom db.jobs portal (the branded Avature front,
-// jobs.deutschebahngroup.careers, just 302-redirects into it). The search page
-// exposes a server-rendered results endpoint that paginates over bare HTTP:
+// DB's postings live in an Avature tenant (jobs.deutschebahngroup.careers,
+// which also hosts login and applications); db.jobs is the custom search
+// front over them, and the two share job ids. db.jobs's search page exposes a
+// server-rendered results endpoint that paginates over bare HTTP:
 //
-//   GET {origin}/service/search/de-de/{searchId}?query=&sort=score&itemsPerPage=20&pageNum={N}
+//   GET {origin}/service/search/de-de/{searchId}?query=&sort=pubExternalDate_tdt&itemsPerPage=1000&pageNum={N}
+//
+// A posting db.jobs can't render blanks any page that holds it: the page
+// comes back as the results shell with neither hits nor a result count.
+// Such a posting sorts first under `score` (an empty query) and under
+// ascending publication date, and last under descending date, so the walk
+// sorts newest-first (the order db.jobs's own Stellensuche link uses), which
+// keeps it out of the pages MAX_JOBS reaches and keeps the most recent
+// postings.
+//
+// The order of postings that tie on the sort key (thousands share a
+// publication date) differs from one request to the next, under every sort
+// db.jobs offers, so consecutive pages overlap and skip postings at their
+// boundaries. A large page keeps those boundaries rare: db.jobs doesn't cap
+// the page size, and one 1000-hit page covers MAX_JOBS in a single request.
 //
 // {searchId} is the DB search-config id (5441588 at time of writing) — it's
 // stable per portal, so we pin it via the api:/careers_url. Each result is:
@@ -17,14 +32,19 @@ import { fetchTextWithRetry } from './_http.mjs';
 //     …<ul class="m-search-hit__items"><li …><i aria-label="Arbeitsort"></i> {City, Country} </li>…</ul>
 //   </a>
 // data-job-id is the dedup key; the href resolves to the public posting.
+// Every results page also carries the total hit count:
+//   <span class="result-count" data-count="3.596">3.596 Stellen</span>
+// (German thousands separator; data-count="0" on a genuinely empty search).
 //
 // The board is large (thousands of postings, mostly rail operations) — rely on
 // title/location filters; MAX_JOBS + max_pages bound the walk.
 
-const ITEMS_PER_PAGE = 20; // DB's default page size
-const MAX_PAGES = 60; // safety cap on request count (60*20 = 1200 postings)
+const ITEMS_PER_PAGE = 1000; // see header: large pages keep tie-order drift rare
+const MAX_PAGES = 5; // safety cap on request count (5*1000 = 5000 postings)
 const MAX_JOBS = 1000; // cap total postings pulled
 const PAGE_DELAY_MS = 150; // polite pacing between page requests
+const PAGE_TIMEOUT_MS = 30_000; // a 1000-hit page is ~4MB and takes several seconds
+const SORT = 'pubExternalDate_tdt'; // newest first; see header for why not `score`
 
 /** @param {string} s */
 function clean(s) {
@@ -91,6 +111,82 @@ export function parseHits(html, origin) {
   return out;
 }
 
+/**
+ * Number of hit anchors the page carries, before parseHits drops malformed
+ * or repeated rows — the page size the source actually returned.
+ * @param {string} html
+ */
+export function countHitAnchors(html) {
+  if (typeof html !== 'string') return 0;
+  return (html.match(/<a\b[^>]*class="[^"]*m-search-hit\b[^"]*"/gi) || []).length;
+}
+
+/**
+ * Total hit count from the results header, or null when the page has no
+ * results section (the shell db.jobs renders for a page it can't render).
+ * @param {string} html
+ */
+export function parseResultCount(html) {
+  if (typeof html !== 'string') return null;
+  const m = html.match(/class="result-count"[^>]*data-count="([\d.]+)"/);
+  if (!m) return null;
+  const n = Number(m[1].replace(/\./g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * A page parseHits found nothing on must carry no posting-shaped link
+ * (`?jobId={digits}`, the query every hit href ends in); one that does still
+ * has postings the hit selector no longer matches. Applies to every page: on
+ * a later page the results header always carries the board total, so this
+ * is the only signal separating the end of the board from a markup change.
+ * @param {string} html @param {string} url
+ */
+export function assertNoUnparsedHits(html, url) {
+  if (!/href="[^"]*[?&](?:amp;)?jobId=\d+/.test(String(html ?? ''))) return;
+  throw new Error(`deutschebahn: ${url} still contains posting links but no hit could be parsed — the listing markup changed`);
+}
+
+/**
+ * Number of distinct posting ids linked on the page (`?jobId={digits}`) that
+ * no hit anchor carries — postings the hit selector misses on a page where it
+ * still matches others (a hit variant with a different class). Every
+ * posting link on a results page belongs to a hit anchor, so any surplus is
+ * a selector gap.
+ * @param {string} html
+ */
+export function countMissedPostingLinks(html) {
+  if (typeof html !== 'string') return 0;
+  const idOf = (s) => s.match(/[?&](?:amp;)?jobId=(\d+)/)?.[1];
+  const hitIds = new Set();
+  for (const a of html.match(/<a\b[^>]*class="[^"]*m-search-hit\b[^"]*"[^>]*>/gi) || []) {
+    const id = idOf(a);
+    if (id) hitIds.add(id);
+  }
+  const missed = new Set();
+  for (const link of html.match(/href="[^"]*[?&](?:amp;)?jobId=\d+/g) || []) {
+    const id = idOf(link);
+    if (id && !hitIds.has(id)) missed.add(id);
+  }
+  return missed.size;
+}
+
+/**
+ * A first page with no parsed hits is a genuinely empty board only when its
+ * results header says data-count="0" and it carries no posting-shaped link. A
+ * missing header (db.jobs rendered the results shell) or a
+ * positive count (the hit markup changed) is a broken scan and throws, so it
+ * never reads as "DB has no jobs".
+ * @param {string} html @param {string} url
+ */
+export function assertEmptyFirstPage(html, url) {
+  assertNoUnparsedHits(html, url);
+  const count = parseResultCount(html);
+  if (count === 0) return;
+  if (count === null) throw new Error(`deutschebahn: ${url} rendered the results shell with no hits and no result count — db.jobs blanks a page holding a posting it can't render, or the search request is no longer served`);
+  throw new Error(`deutschebahn: ${url} reports ${count} postings but no hit could be parsed — the listing markup changed`);
+}
+
 /** Resolve the page cap: positive integer `max_pages`, else default. */
 function resolveMaxPages(entry) {
   const v = entry?.max_pages;
@@ -112,31 +208,87 @@ export default {
     const cfg = resolveConfig(entry);
     if (!cfg) throw new Error(`deutschebahn: cannot resolve db.jobs search id for ${entry.name}`);
 
-    const wait = (ms) => (ctx.sleep ? ctx.sleep(ms) : new Promise((r) => setTimeout(r, ms)));
     const maxPages = resolveMaxPages(entry);
     const jobs = [];
     const seen = new Set();
 
-    // Each page is a ~450KB HTML fragment; on a walk of up to 60 pages, an
-    // occasional single-page timeout/abort is a transient blip, not a board
-    // failure — fetchTextWithRetry absorbs it instead of failing the whole scan.
+    // Each page is a multi-megabyte HTML document; an occasional timeout/abort
+    // on one is a transient blip, not a board failure — fetchTextWithRetry
+    // absorbs it instead of failing the whole scan.
 
+    // Why the walk stopped: `cap` (max_pages ran out after a full page) unless
+    // an exit below names another reason.
+    let stopReason = 'cap';
+    let lastHtml = '';
     for (let page = 0; page < maxPages; page++) {
-      if (page > 0) await wait(PAGE_DELAY_MS);
-      const url = `${cfg.searchBase}?qli=true&query=&sort=score&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
-      const html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error' });
+      if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
+      const url = `${cfg.searchBase}?qli=true&query=&sort=${SORT}&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
+      let html;
+      try {
+        html = await fetchTextWithRetry(ctx, url, { headers: { accept: 'text/html' }, redirect: 'error', timeoutMs: PAGE_TIMEOUT_MS });
+      } catch (err) {
+        // A failed first page is a dead board, and a liveness probe needs the
+        // rejection unwrapped (verify-portals reads ProbePageBudgetReached by
+        // type) — both propagate. A later page that exhausts its retries
+        // keeps the pages already collected.
+        if (page === 0 || ctx?.maxPages) throw err;
+        console.warn(`deutschebahn: ${entry.name}: page ${page} failed (${err?.message ?? err}) — keeping the ${jobs.length} collected so far`);
+        stopReason = 'fetch-error';
+        break;
+      }
+      lastHtml = html;
       const rows = parseHits(html, cfg.origin);
-      if (rows.length === 0) break; // past the last page
+      if (rows.length === 0) {
+        stopReason = 'complete';
+        if (page === 0) {
+          assertEmptyFirstPage(html, url);
+        } else {
+          assertNoUnparsedHits(html, url);
+          // An empty page whose offset is still inside the reported total
+          // means the walk was cut short, not that the board ended. The
+          // pages already collected are kept (a mid-scan failure keeps
+          // partials); the warning keeps the truncation from passing as a
+          // complete board.
+          const count = parseResultCount(html);
+          if (count !== null && page * ITEMS_PER_PAGE < count) {
+            console.warn(`deutschebahn: ${entry.name}: page ${page} came back empty with ${count} postings reported — keeping the ${jobs.length} collected so far`);
+          }
+        }
+        break; // past the last page
+      }
 
-      let fresh = 0;
       for (const row of rows) {
         if (seen.has(row.id)) continue;
         seen.add(row.id);
-        fresh++;
         jobs.push({ title: row.title, url: row.url, company: entry.name, location: row.location });
       }
-      if (fresh === 0) break; // server clamped pageNum / looped
-      if (jobs.length >= MAX_JOBS) break;
+      // Postings the hit selector misses beside ones it matches: the parsed
+      // rows stand (a partial gap is not a dead board), and the warning keeps
+      // the gap from passing silently. Checked before either stop below.
+      const missed = countMissedPostingLinks(html);
+      if (missed > 0) {
+        console.warn(`deutschebahn: ${entry.name}: page ${page} links ${missed} posting(s) no hit anchor carries — the hit markup may have a new variant`);
+      }
+      if (jobs.length >= MAX_JOBS) {
+        stopReason = 'max-jobs';
+        break;
+      }
+      // The stop reads the hit count the source returned, never the parsed or
+      // post-dedup count: tie-order drift can make a full page repeat earlier
+      // hits while later pages still hold unseen postings.
+      if (countHitAnchors(html) < ITEMS_PER_PAGE) {
+        stopReason = 'complete'; // short page: the board ended
+        break;
+      }
+    }
+    // max_pages ran out on a full page: warn so a truncated board doesn't
+    // pass as complete, unless the reported total shows the walk already
+    // covered the whole board.
+    if (stopReason === 'cap') {
+      const count = parseResultCount(lastHtml);
+      if (count === null || maxPages * ITEMS_PER_PAGE < count) {
+        console.warn(`deutschebahn: ${entry.name}: stopped at ${maxPages} pages (${jobs.length} postings); raise max_pages on this entry`);
+      }
     }
     return jobs.slice(0, MAX_JOBS);
   },

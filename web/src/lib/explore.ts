@@ -4,6 +4,9 @@
 // can never drift between the two halves. Server-only logic (spawning the scanner,
 // writing temp files) lives in lib/core/{scan,portals,pipeline}.ts.
 
+export type EmployerSource = "tencent" | "bytedance" | "meituan";
+export type DiscoverySource = AtsSource | EmployerSource;
+export type EmployerScanOutcome = { state: "complete" | "partial" | "failed"; message: string };
 export type AtsSource = "greenhouse" | "lever" | "ashby" | "workday";
 export const ATS_SOURCES: AtsSource[] = ["greenhouse", "lever", "ashby", "workday"];
 export const ATS_LABEL: Record<AtsSource, string> = {
@@ -17,6 +20,8 @@ export const ATS_LABEL: Record<AtsSource, string> = {
  *  buildTitleFilter / buildLocationFilter semantics; sinceDays/ats/limitPerAts map
  *  to scan-ats-full.mjs's --since / --ats / --limit. */
 export type ExploreFilters = {
+  preset?: "china-employers";
+  employers?: EmployerSource[];
   positive: string[];
   negative: string[];
   allow: string[];
@@ -40,6 +45,10 @@ export const DEFAULT_FILTERS: ExploreFilters = {
   limitPerAts: 150,
 };
 
+/** Banded title-vs-profile overlap (web/src/lib/title-fit.mjs). Words, not
+ *  numbers, so it can't be mistaken for the evaluation's real 1–5 / A–F. */
+export type FitBand = "strong" | "related" | "weak";
+
 export type DiscoveredOffer = {
   url: string;
   company: string;
@@ -47,10 +56,17 @@ export type DiscoveredOffer = {
   location: string;
   /** YYYY-MM-DD, or "" when the engine reported n/a (AI offers always "") */
   postedAt: string;
+  /** Provider evidence carried through review for the conditional Inbox gate. */
+  geographyEvidence?: Record<string, unknown>;
   ats: string;
   source: string;
   /** which positive keyword matched the title (transparency, e.g. "ai" in "Nail") */
   matchedKeyword?: string;
+  /** free, zero-token triage hint computed at discovery time from the posting
+   *  TITLE vs config/profile.yml target roles (#3260). Recommendation layer
+   *  only — never filters or orders anything; Evaluate gives the real A–F.
+   *  Scan offers only; AI offers already carry why + confidence. */
+  fit?: { band: FitBand; score: number };
   /** optional free-text ranking signal preserved to pipeline.md by the canonical
    *  writer (scan.mjs formatPipelineOffer). Generic and source-agnostic — an
    *  importer can attach a note; the deterministic scan omits it. */
@@ -89,6 +105,11 @@ export type ScanEvent =
       capHit?: boolean;
       datasetStatus?: Record<string, "ok" | "stale" | "empty">;
       postingsDroppedNoDate?: number;
+      // Sources whose results are missing (ran out of time or crashed) while the
+      // others finished — a partial result, never "all caught up".
+      incomplete?: string[];
+      employerOutcome?: EmployerScanOutcome;
+      employerSources?: { id: string; state: string; reason?: string }[];
     }
   | { kind: "log"; line: string }
   | { kind: "error"; message: string }
@@ -124,6 +145,11 @@ export function parseExplorePatch(
   merge = false,
 ): ExploreFilters {
   const next: ExploreFilters = { ...base, ats: [...base.ats] };
+  if (raw.preset === "china-employers") next.preset = "china-employers";
+  else if (raw.preset !== undefined) next.preset = undefined;
+  if (raw.employers !== undefined && Array.isArray(raw.employers)) {
+    next.employers = [...new Set(raw.employers.filter((id): id is EmployerSource => ["tencent", "bytedance", "meituan"].includes(String(id))))];
+  }
   const lists: [keyof ExploreFilters, string][] = [
     ["positive", "positive"],
     ["negative", "negative"],
@@ -148,6 +174,10 @@ export function parseExplorePatch(
 /** URL <-> filters codec (so a search is shareable/restorable). */
 export function filtersToParams(f: ExploreFilters): string {
   const sp = new URLSearchParams();
+  if (f.preset === "china-employers") {
+    sp.set("preset", f.preset);
+    sp.set("employers", (f.employers ?? []).join(","));
+  }
   if (f.positive.length) sp.set("q", f.positive.join(","));
   if (f.negative.length) sp.set("not", f.negative.join(","));
   if (f.allow.length) sp.set("loc", f.allow.join(","));
@@ -164,6 +194,8 @@ export function paramsToFilters(sp: URLSearchParams, base: ExploreFilters = DEFA
   const split = (s: string | null) => (s ? s.split(",") : undefined);
   return parseExplorePatch(
     {
+      preset: sp.get("preset") ?? undefined,
+      employers: sp.has("employers") ? (sp.get("employers") || "").split(",") : undefined,
       positive: split(sp.get("q")),
       negative: split(sp.get("not")),
       allow: split(sp.get("loc")),

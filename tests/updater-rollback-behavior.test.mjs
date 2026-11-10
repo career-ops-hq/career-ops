@@ -12,20 +12,24 @@
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { pass, fail } from './helpers.mjs';
-import { gitIn, removeAdditionsNotInHead, staleSystemFiles } from '../update-system.mjs';
+import { pass, fail, hermeticGitRunner } from './helpers.mjs';
+import { removeAdditionsNotInHead, staleSystemFiles } from '../update-system.mjs';
 
 // A throwaway git repo plus a ctx that binds the rollback helper's git runner
 // and filesystem root to it, so nothing touches the real working tree.
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'co-rollback-'));
-  const g = (...args) => gitIn(dir, ...args);
+  // Not the updater's own `gitIn`: that one inherits the environment, and an
+  // ambient GIT_CONFIG_COUNT pair is applied after every config file, the two
+  // pins below included (#3801).
+  const g = hermeticGitRunner(dir);
   g('init', '-q', '-b', 'main', '.');
   g('config', 'user.email', 'test@example.com');
   g('config', 'user.name', 'Test');
-  // `gitIn` inherits the environment, so the contributor's GLOBAL git config
-  // applies inside this throwaway repo. With `commit.gpgsign = true` set
-  // globally (1Password's ssh signer, gpg-agent, a hardware key) every commit
+  // The two pins below predate the hermetic runner and stay as the file-layer
+  // half. Run through `gitIn`, the contributor's GLOBAL git config applied
+  // inside this throwaway repo. With `commit.gpgsign = true` set globally
+  // (1Password's ssh signer, gpg-agent, a hardware key) every commit
   // below fails, and because these are execFileSync calls the failure is not a
   // red assertion: the process DIES here and every later section of the suite
   // silently never runs, so `Results:` never prints (#2754). A global

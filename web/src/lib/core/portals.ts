@@ -6,6 +6,8 @@ import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { DEFAULT_FILTERS, cleanChips, type ExploreFilters } from "@/lib/explore";
 import { profileTargetKeywords } from "@/lib/profile-keywords.mjs";
+import { getProfilePath } from "@/lib/core/profile-path.mjs";
+import { workplacePolicyConfig } from "./workplace-policy.mjs";
 
 /**
  * ACL for portals.yml — the core's scan-filter config (a CONTRACT entry-point,
@@ -36,7 +38,22 @@ import { serializePortals } from "./portals-serialize.mjs";
 /** Write the ephemeral filter file to a temp path; caller cleans it up. */
 export function writeTempPortals(f: FilterLists): string {
   const file = path.join(os.tmpdir(), `career-ops-explore-${randomUUID()}.yml`);
-  fs.writeFileSync(file, serializePortals(f), "utf8");
+  // Conditional workplace policy is a profile constraint, not a search chip.
+  // Keep it in ad-hoc scans too; malformed config must not disable the guard.
+  let text = serializePortals(f);
+  let policy: unknown;
+  try {
+    const parsed = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), "portals.yml"), "utf8"));
+    policy = workplacePolicyConfig(parsed);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (policy !== undefined) {
+    const overlay = (yaml.load(text) || {}) as Record<string, unknown>;
+    overlay.location_filter = { ...(overlay.location_filter as Record<string, unknown> || {}), workplace_policy: policy };
+    text = yaml.dump(overlay, { noRefs: true, lineWidth: 120 });
+  }
+  fs.writeFileSync(file, text, "utf8");
   return file;
 }
 
@@ -48,9 +65,9 @@ export function cleanupTempPortals(file: string): void {
   }
 }
 
-function loadYaml(rel: string): Record<string, unknown> | null {
+function loadYaml(file: string): Record<string, unknown> | null {
   try {
-    const doc = yaml.load(fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8"));
+    const doc = yaml.load(fs.readFileSync(file, "utf8"));
     return doc && typeof doc === "object" ? (doc as Record<string, unknown>) : null;
   } catch {
     return null;
@@ -67,7 +84,7 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
   const filters: ExploreFilters = { ...DEFAULT_FILTERS, ats: [...DEFAULT_FILTERS.ats] };
   const seededFrom: string[] = [];
 
-  const portals = loadYaml("portals.yml");
+  const portals = loadYaml(path.join(careerOpsRoot(), "portals.yml"));
   if (portals) {
     const tf = (portals.title_filter ?? {}) as Record<string, unknown>;
     const lf = (portals.location_filter ?? {}) as Record<string, unknown>;
@@ -86,7 +103,7 @@ export function seedExploreFilters(): { filters: ExploreFilters; seededFrom: str
     // core on BOTH fields — `primary` read as a string when it is a list,
     // `archetypes` spread raw when its entries are objects — so this fallback
     // returned nothing for every profile.yml the app itself writes.
-    const fromRoles = listFrom(profileTargetKeywords(loadYaml("config/profile.yml")));
+    const fromRoles = listFrom(profileTargetKeywords(loadYaml(getProfilePath(careerOpsRoot()))));
     if (fromRoles.length) {
       filters.positive = fromRoles;
       seededFrom.push("profile.yml");

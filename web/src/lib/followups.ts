@@ -45,7 +45,7 @@ export type CadenceEntry = {
   appliedDate: string;
   company: string;
   role: string;
-  status: "applied" | "responded" | "interview";
+  status: "applied" | "responded" | "assessment" | "interview";
   score: string;
   notes: string;
   reportPath: string | null;
@@ -88,11 +88,11 @@ export function urgencyTone(u: string): "bad" | "warn" | "info" | "muted" {
   return "muted";
 }
 
-/** Status badge tone per spec: interview=green, responded=blue, else neutral. */
+/** Status badge tone per spec: interview=green, responded/assessment=blue, else neutral. */
 export function followupStatusTone(status: string): "good" | "info" | "muted" {
   const s = status.toLowerCase();
   if (s.includes("interview")) return "good";
-  if (s.includes("responded")) return "info";
+  if (s.includes("responded") || s.includes("assessment")) return "info";
   return "muted";
 }
 
@@ -107,8 +107,8 @@ export function relativeDays(daysUntil: number): string {
 /** 7/14-day escalation for "days since" cells: amber bold ≥7, red bold ≥14. */
 export function daysHeatClass(days: number | null): string {
   if (days == null) return "text-faint";
-  if (days >= 14) return "font-bold text-red-600 dark:text-red-400";
-  if (days >= 7) return "font-bold text-amber-600 dark:text-amber-400";
+  if (days >= 14) return "font-bold text-red-700 dark:text-red-400";
+  if (days >= 7) return "font-bold text-amber-800 dark:text-amber-400";
   return "";
 }
 

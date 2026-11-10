@@ -52,6 +52,18 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // deel.parseDeelBoard — .map() over the board's jobPostings array.
+  const { parseDeelBoard } = await load('deel.mjs');
+  const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
+  check(
+    'deel.parseDeelBoard',
+    () => parseDeelBoard(
+      deelPage([{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'ok-5', title: 'Good Id' }]),
+      { slug: 'x', company: 'X' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.deel.com/x/job-details/ok-5/overview',
+  );
+
   // bamboohr.parseBambooHRResponse — .map() over one page.
   const { parseBambooHRResponse } = await load('bamboohr.mjs');
   check(
@@ -61,6 +73,50 @@ try {
       'X', 'https://x.bamboohr.com',
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
+  );
+
+  // hibob.parseHibobJobAds — for…of over jobAdDetails; id feeds the posting URL.
+  const { parseHibobJobAds } = await load('hibob.mjs');
+  check(
+    'hibob.parseHibobJobAds',
+    () => parseHibobJobAds(
+      { jobAdDetails: [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'a5', title: 'Good Id' }] },
+      'https://x.careers.hibob.com', 'X',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.careers.hibob.com/jobs/a5',
+  );
+
+  // keka.parseKekaResponse — for…of over the top-level jobs array.
+  const { parseKekaResponse } = await load('keka.mjs');
+  check(
+    'keka.parseKekaResponse',
+    () => parseKekaResponse(
+      [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 5, title: 'Good Id' }],
+      'X', 'https://x.keka.com',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.keka.com/careers/jobdetails/5',
+  );
+
+  // darwinbox.parseDarwinboxResponse — for…of over the data array.
+  const { parseDarwinboxResponse } = await load('darwinbox.mjs');
+  check(
+    'darwinbox.parseDarwinboxResponse',
+    () => parseDarwinboxResponse(
+      { status: 'success', data: [{ id: `${LONE}bad`, title: 'Bad Id' }, { id: 'a5', title: 'Good Id' }] },
+      'X', { origin: 'https://x.darwinbox.in', companyId: 'main' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.darwinbox.in/ms/candidatev2/main/careers/jobDetails/a5',
+  );
+
+  // turbohire.parseTurbohireResponse — for…of over the Result array.
+  const { parseTurbohireResponse } = await load('turbohire.mjs');
+  check(
+    'turbohire.parseTurbohireResponse',
+    () => parseTurbohireResponse(
+      { Total: 2, Result: [{ JobIdObfuscated: `${LONE}bad`, JobTitle: 'Bad Id' }, { JobIdObfuscated: 'a5', JobTitle: 'Good Id' }] },
+      'X', { tenant: 'x', origin: 'https://x.turbohire.co' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.turbohire.co/job/publicjobs/a5',
   );
 
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
@@ -95,6 +151,37 @@ try {
       'Acme',
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
+  );
+
+  // dover.parseDoverPage — for…of over results[]; id builds the apply URL (the dedup key).
+  const { parseDoverPage } = await load('dover.mjs');
+  check(
+    'dover.parseDoverPage',
+    () => parseDoverPage(
+      { results: [
+        { id: `${LONE}bad`, title: 'Bad', locations: [] },
+        { id: 'g-1', title: 'Good', locations: [] },
+      ] },
+      { companyName: 'Acme', companySegment: 'Acme' },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/g-1'),
+  );
+
+  // notion.parseCollectionRows — for…of over blockIds; the row's page id builds
+  // the posting URL. Ids are checked against a uuid regex instead of encoded.
+  const { parseCollectionRows } = await load('notion.mjs');
+  const notionRow = (id, title) => ({ value: { id, type: 'page', properties: { title: [[title]] } } });
+  const goodId = '00000000-0000-4000-8000-000000000001';
+  check(
+    'notion.parseCollectionRows',
+    () => parseCollectionRows(
+      {
+        result: { reducerResults: { collection_group_results: { blockIds: [`${LONE}bad`, goodId] } } },
+        recordMap: { block: { [`${LONE}bad`]: notionRow(`${LONE}bad`, 'Bad'), [goodId]: notionRow(goodId, 'Good') } },
+      },
+      { collectionId: 'c', origin: 'https://acme.notion.site', companyName: 'Acme' },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/00000000000040008000000000000001'),
   );
 
   // phenom.parseRefineSearch — for…of over refineSearch.data.jobs; jobId is the dedup key.
@@ -145,6 +232,18 @@ try {
       normalizeHubJob({ id: 'g-1', title: 'Good' }),
     ],
     ([bad, good]) => bad === null && good !== null && good.url.includes('g-1'),
+  );
+
+  // bulldogjob.parseBulldogjobPage — for…of over __NEXT_DATA__ pageProps.jobs; id feeds the board URL.
+  const { parseBulldogjobPage } = await load('bulldogjob.mjs');
+  const bulldogjobHtml = (jobs) => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { totalCount: jobs.length, jobs } } })}</script>`;
+  check(
+    'bulldogjob.parseBulldogjobPage',
+    () => parseBulldogjobPage(bulldogjobHtml([
+      { id: `${LONE}bad`, position: 'Bad', company: { name: 'Acme' } },
+      { id: 'g-1', position: 'Good', company: { name: 'Acme' } },
+    ])).rows,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('/g-1'),
   );
 
   // manfred.normalizeManfredOffer — slug feeds the URL; a bad one must yield null.
@@ -199,6 +298,122 @@ try {
     ),
     (jobs) => jobs.length === 1 && jobs[0].url.includes('g-1'),
   );
+
+  // apple.parseSearchPage — for…of over the SSR hydration blob's searchResults;
+  // id, slug and team code are all host-supplied URL segments.
+  const { parseSearchPage: appleParse } = await load('apple.mjs');
+  const applePage = (searchResults) => `<script>window.__staticRouterHydrationData = JSON.parse(${JSON.stringify(JSON.stringify({ loaderData: { search: { searchResults, totalRecords: searchResults.length } } }))});</script>`;
+  check(
+    'apple.parseSearchPage',
+    () => appleParse(applePage([
+      { id: `${LONE}bad`, postingTitle: 'Bad Id', transformedPostingTitle: 'bad-id' },
+      { id: '200000001', postingTitle: 'Bad Slug', transformedPostingTitle: `${LONE}bad` },
+      { id: '200000002', postingTitle: 'Bad Team', transformedPostingTitle: 'bad-team', team: { teamCode: `${LONE}x` } },
+      { id: '200000003', postingTitle: 'Good', transformedPostingTitle: 'good' },
+    ]), 'https://jobs.apple.com/en-us/search?page=1', 'Apple').jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.apple.com/en-us/details/200000003/good',
+  );
+
+  // platsbanken.postingUrl — the ad id is the only segment of the permalink, and
+  // the helper's null (rather than a throw) is what lets one bad row drop.
+  const { postingUrl: platsbankenPostingUrl } = await load('platsbanken.mjs');
+  check(
+    'platsbanken.postingUrl',
+    () => [
+      platsbankenPostingUrl(`${LONE}bad`),
+      platsbankenPostingUrl('31581608'),
+    ],
+    ([bad, good]) => bad === null && good === 'https://arbetsformedlingen.se/platsbanken/annonser/31581608',
+  );
+
+  // polymer.parsePolymerPage — a job_post_url off jobs.polymer.co is rebuilt
+  // from the posting id, so a lone surrogate in that id drops one row.
+  const { parsePolymerPage } = await load('polymer.mjs');
+  check(
+    'polymer.parsePolymerPage',
+    () => parsePolymerPage(
+      { items: [
+        { id: `${LONE}bad`, title: 'Bad Id', job_post_url: 'https://evil.example/nope' },
+        { id: 1008, title: 'Good Id', job_post_url: 'https://evil.example/nope' },
+      ], meta: { is_last: true, count: 2 } },
+      'Acme',
+      'acme',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://jobs.polymer.co/acme/1008',
+  );
+
+  // zoho-recruit.parseZohoJobsPage — for…of over the id="jobs" records; id feeds the posting URL.
+  const { parseZohoJobsPage } = await load('zoho-recruit.mjs');
+  const zohoRecord = (id, title) => ({ id, Posting_Title: title, Is_Locked: false, Publish: true });
+  check(
+    'zoho-recruit.parseZohoJobsPage',
+    () => parseZohoJobsPage(
+      `<input type="hidden" value="${JSON.stringify([zohoRecord(`${LONE}bad`, 'Bad Id'), zohoRecord('101', 'Good Id')]).replace(/"/g, '&#34;')}" id="jobs">`,
+      { origin: 'https://acme.zohorecruit.com' },
+      'Acme',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.zohorecruit.com/jobs/Careers/101',
+  );
+
+  // paylocity.parsePaylocityBoard — for…of over window.pageData.Jobs; JobId feeds the posting URL.
+  const { parsePaylocityBoard } = await load('paylocity.mjs');
+  check(
+    'paylocity.parsePaylocityBoard',
+    () => parsePaylocityBoard(
+      `<script>window.pageData = ${JSON.stringify({ Jobs: [{ JobId: `${LONE}bad`, JobTitle: 'Bad Id' }, { JobId: 101, JobTitle: 'Good Id' }] })};</script>`,
+      'Acme',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/101',
+  );
+
+  // remote-com.parseRemoteJobs — for…of over jobs[]; public_id feeds the posting URL.
+  const { parseRemoteJobs } = await load('remote-com.mjs');
+  check(
+    'remote-com.parseRemoteJobs',
+    () => parseRemoteJobs({ jobs: [{ title: 'Bad Id', public_id: `${LONE}bad` }, { title: 'Good Id', public_id: 'good-1' }] }),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://apply.remote.com/jobs/good-1',
+  );
+
+  // trakstar.parseTrakstarPage — an off-host hosted_url is rebuilt from the
+  // opening id, so a lone surrogate in that id drops one row.
+  const { parseTrakstarPage } = await load('trakstar.mjs');
+  check(
+    'trakstar.parseTrakstarPage',
+    () => parseTrakstarPage(
+      { meta: { total: 2 }, objects: [
+        { id: `${LONE}bad`, title: 'Bad Id', hosted_url: 'https://evil.example/nope' },
+        { id: 'good1', title: 'Good Id', hosted_url: 'https://evil.example/nope' },
+      ] },
+      'Acme',
+      'acme',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.hire.trakstar.com/jobs/good1/',
+  );
+
+  // aldi-nord.parseQueryResponse — for…of over results[]; slugTitle and postingId feed the posting URL.
+  const { parseQueryResponse } = await load('aldi-nord.mjs');
+  check(
+    'aldi-nord.parseQueryResponse',
+    () => parseQueryResponse(
+      { total: 2, hasNextPage: false, results: [
+        { postingId: `${LONE}1`, slugTitle: 'bad-id', title: 'Bad Id' },
+        { postingId: '101', slugTitle: 'good-id', title: 'Good Id' },
+      ] },
+      { host: 'www.aldi-nord.de', detailPath: '/karriere/detail/', locale: 'de-DE', company: 'Acme' },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.aldi-nord.de/karriere/detail/good-id-101.html',
+  );
+
+  // talentlink.parseJobsResponse — for…of over the FO jobs[]; id feeds the posting URL.
+  const { parseJobsResponse: parseTalentlinkJobs, parseCriteria: parseTalentlinkCriteria } = await load('talentlink.mjs');
+  check(
+    'talentlink.parseJobsResponse',
+    () => parseTalentlinkJobs(
+      { globals: { jobsCount: 2 }, jobs: [{ id: `${LONE}bad`, jobFields: { jobTitle: 'Bad Id' } }, { id: 101, jobFields: { jobTitle: 'Good Id' } }] },
+      { detailPage: 'https://acme.recruitmentplatform.com/details.html', company: 'Acme', locations: parseTalentlinkCriteria(null) },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.recruitmentplatform.com/details.html?jobId=101',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -223,9 +438,41 @@ try {
   // Every provider that routes a job-URL segment through the helper. Each must
   // import _safe-url.mjs and call safeEncodeURIComponent; dropping either is the
   // regression this list catches.
+  //
+  // One provider per line, in alphabetical order: PRs that add different
+  // providers then touch different lines, which reduces merge conflicts.
   const CONVERTED = [
-    'alibaba.mjs', 'arbeitsagentur.mjs', 'bamboohr.mjs', 'feishu-jobs.mjs', 'garena.mjs', 'jibeapply.mjs',
-    'manfred.mjs', 'meituan.mjs', 'mokahr.mjs', 'phenom.mjs', 'thehub.mjs', 'tkms.mjs', 'vdab.mjs',
+    'aldi-nord.mjs',
+    'alibaba.mjs',
+    'apple.mjs',
+    'arbeitsagentur.mjs',
+    'bamboohr.mjs',
+    'bulldogjob.mjs',
+    'darwinbox.mjs',
+    'deel.mjs',
+    'dover.mjs',
+    'feishu-jobs.mjs',
+    'garena.mjs',
+    'hibob.mjs',
+    'jibeapply.mjs',
+    'kalibrr.mjs',
+    'keka.mjs',
+    'manfred.mjs',
+    'meituan.mjs',
+    'mokahr.mjs',
+    'paylocity.mjs',
+    'phenom.mjs',
+    'platsbanken.mjs',
+    'polymer.mjs',
+    'remote-com.mjs',
+    'talentlink.mjs',
+    'techinasia.mjs',
+    'thehub.mjs',
+    'tkms.mjs',
+    'trakstar.mjs',
+    'turbohire.mjs',
+    'vdab.mjs',
+    'zoho-recruit.mjs',
   ];
 
   // Bare `encodeURIComponent` on a url line that is reviewed as safe: the value
@@ -234,6 +481,7 @@ try {
   const ALLOWLIST = {
     'csod.mjs': 'corpName comes from portals.yml (careers_url), not from the API response',
     '4dayweek.mjs': 'slug is already validated against SLUG_RE, which rejects a surrogate before this line',
+    'dover.mjs': 'the API URL segment is the board uuid from portals.yml (careers_url), already restricted to UUID_RE',
   };
 
   let files;

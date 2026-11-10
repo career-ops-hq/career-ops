@@ -5,7 +5,8 @@
  * HIRED.md is the ledger. Each entry is one machine-readable comment line
  * (the source of truth) followed by its rendered card; this script APPENDS
  * new entries, regenerates every rendered card from the comments, bumps
- * docs/hired-count.json (what the README badge reads) and regenerates
+ * docs/hired-count.json (the README badge, docs/hired-badge.svg, is redrawn from
+ * it by .github/scripts/readme-badges.mjs in the hired-wall workflow) and regenerates
  * docs/hired-wall.svg (the three most recent card-level stories shown under
  * the hero). One writer for all four surfaces so they cannot drift apart.
  *
@@ -209,6 +210,14 @@ async function main() {
   if (args.includes('--help') || args.includes('-h')) { console.log(USAGE); return; }
   const bad = validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (bad) { process.exitCode = 1; return; }
+  // Writing is opt-in: a bare run (or one with only modifiers such as
+  // --fetch-avatars) would otherwise fall through to the rebuild below and
+  // rewrite three tracked files, bumping updatedAt to today (#4896).
+  if (!hasFlag(args, '--rebuild') && !hasFlag(args, '--add')) {
+    console.error(`hired-wall-build: pass --rebuild or --add; nothing was written.\n\n${USAGE}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const root = flagValue(args, '--root') || HERE;
   const wallPath = join(root, 'HIRED.md');

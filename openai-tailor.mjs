@@ -16,15 +16,29 @@
  *   OPENAI_MODEL (or --model)   — the model id
  */
 
+import { randomUUID } from 'crypto';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import * as yaml from 'js-yaml';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { validateLockedSections, sectionKey } from './generate-pdf.mjs';
+import { readLockedSections } from './theme-style.mjs';
+import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { endpointHeaders } from './lib/endpoint-headers.mjs';
+
+// Ambient guard over global fetch (idempotent); the explicit gate below is the
+// primary layer.
+installPiiInterceptor();
 
 try {
   const { config } = await import('dotenv');
-  config();
+  // The data root's .env first: doctor.mjs, remember-cli.mjs, scan.mjs and the
+  // plugin engine all read it there. The working directory's .env, the only one
+  // read before, still supplies what the data root's leaves unset.
+  config({ path: [join(getCareerOpsRoot(), '.env'), join(process.cwd(), '.env')] });
 } catch { /* dotenv optional */ }
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -38,7 +52,7 @@ const PATHS = {
   writing:  join(ROOT, 'modes', '_writing.md'),
   pdfMode:  join(ROOT, 'modes', 'pdf.md'),
   cv:       join(DATA_ROOT, 'cv.md'),
-  profile:  join(DATA_ROOT, 'config', 'profile.yml'),
+  profile:  getProfilePath(),
   template: join(ROOT, 'templates', 'cv-template.html'),
   output:   join(DATA_ROOT, 'output'),
 };
@@ -71,6 +85,9 @@ if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
 
   ENV
     OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL, OPENAI_TIMEOUT_MS
+    CAREER_OPS_MAX_TOKENS  Output cap per tailored CV (default 32768). Keeps a
+                     gateway like OpenRouter from reserving credit for the
+                     model's whole output window (HTTP 402 on a low balance).
 
   EXAMPLES
     OPENAI_API_KEY=sk-... node openai-tailor.mjs --jd ./jds/job.txt --report reports/001-company-2026-01-01.md
@@ -116,18 +133,8 @@ if (!existsSync(reportPath)) {
 const jdText = readFileSync(jdPath, 'utf-8').trim();
 const reportText = readFileSync(reportPath, 'utf-8').trim();
 
-// Attempt to parse company slug and candidate name
+// The report filename identifies the application being tailored.
 const reportFilename = basename(reportPath);
-const match = reportFilename.match(/^\d+-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}\.md$/);
-const companySlug = match ? match[1] : 'unknown-company';
-
-// Extract role from report header (e.g., "# Evaluation: Company - Role Title")
-let roleSlug = 'role';
-const roleMatch = reportText.match(/^#\s+Evaluation:\s+[^-]+\s+-\s+(.+?)$/m);
-if (roleMatch && roleMatch[1]) {
-  roleSlug = roleMatch[1]
-    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
 
 // ---------------------------------------------------------------------------
 // Endpoint + security guard.
@@ -190,8 +197,11 @@ const sharedContext  = readFile(PATHS.shared, 'modes/_shared.md', false);
 // engines that read the eval-core _shared.md alone.
 const writingContext = readFile(PATHS.writing, 'modes/_writing.md', false);
 const pdfModeLogic   = readFile(PATHS.pdfMode, 'modes/pdf.md', false);
-const cvContent      = readFile(PATHS.cv, 'cv.md', true);
-const profileContent = readFile(PATHS.profile, 'config/profile.yml', true);
+// Opt-in privacy filter (privacy.redact_contact_info in config/profile.yml):
+// keep name/contact details out of the prompt sent to the model.
+const profileYmlRaw  = readFile(PATHS.profile, 'config/profile.yml', true);
+const cvContent      = redactIfEnabled(readFile(PATHS.cv, 'cv.md', true), profileYmlRaw);
+const profileContent = redactIfEnabled(profileYmlRaw, profileYmlRaw);
 const templateHtml   = readFile(PATHS.template, 'templates/cv-template.html', true);
 
 // ---------------------------------------------------------------------------
@@ -260,34 +270,75 @@ export function buildSystemMessage(prompt, host) {
 }
 
 // ---------------------------------------------------------------------------
+// Output cap, as in openai-eval.mjs. With no limit in the request, a gateway
+// budgets the call for the model's whole output window: OpenRouter reserves
+// prompt + max output at the model's price before generating anything, and
+// answers HTTP 402 when the balance cannot cover that reservation, even when
+// the tailored CV costs cents. The variable and its default are openai-eval's,
+// so one setting covers both steps of the budget workflow.
+const DEFAULT_MAX_TOKENS = 32768;
+
+// Same host gate as buildSystemMessage: api.openai.com's reasoning models
+// reject `max_tokens` and take `max_completion_tokens`, which its other chat
+// models accept as well; gateways and local servers read `max_tokens`.
+function buildTokenLimit(limit, host) {
+  return host === 'api.openai.com' ? { max_completion_tokens: limit } : { max_tokens: limit };
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
-const timeoutMs = parseInt(process.env.OPENAI_TIMEOUT_MS || '300000', 10);
-if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
-  console.error(`❌  Invalid OPENAI_TIMEOUT_MS: "${process.env.OPENAI_TIMEOUT_MS}" — must be a positive integer (milliseconds).`);
+// Digits only (parseInt read "300s" as a 300 ms timeout) and at most 2^31-1 ms:
+// AbortSignal.timeout() fires a longer delay after 1 ms, and throws past 2^32-1.
+const timeoutRaw = (process.env.OPENAI_TIMEOUT_MS || '300000').trim();
+const timeoutMs = /^\d+$/.test(timeoutRaw) ? Number(timeoutRaw) : NaN;
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+  console.error(`❌  Invalid OPENAI_TIMEOUT_MS: "${process.env.OPENAI_TIMEOUT_MS}" — must be a positive integer of at most 2147483647 (milliseconds).`);
+  process.exit(1);
+}
+
+// Empty means unset, as for every other variable here. Digits only, so "8k"
+// is refused instead of being read as 8.
+const maxTokensEnv = process.env.CAREER_OPS_MAX_TOKENS?.trim();
+const maxTokens = maxTokensEnv ? (/^\d+$/.test(maxTokensEnv) ? Number(maxTokensEnv) : NaN) : DEFAULT_MAX_TOKENS;
+if (!(maxTokens > 0)) {
+  console.error(`❌  Invalid CAREER_OPS_MAX_TOKENS: "${process.env.CAREER_OPS_MAX_TOKENS}" — must be a positive integer (output tokens).`);
   process.exit(1);
 }
 
 console.log(`\n🔒  Privacy: your cv.md + JD will be sent to ${endpointHost}.`);
-console.log(`🤖  Calling ${modelName} via ${endpointHost}... this may take a minute.\n`);
+console.log(`🤖  Calling ${modelName} via ${endpointHost} (output cap ${maxTokens} tokens)... this may take a minute.\n`);
 
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// OpenCode Go answers HTTP 400 MissingSessionID to a request with no session
+// id, and its docs ask for an own user agent: the same headers openai-eval.mjs
+// sends (#5825), for opencode.ai only. One tailoring run is one conversation.
+// https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+let careerOpsVersion;
+// VERSION may carry a release-please marker ("1.38.0 # x-release-please-version").
+try { careerOpsVersion = readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim().split(/\s+/)[0] || undefined; } catch { /* default User-Agent version */ }
+Object.assign(headers, endpointHeaders(endpointHost, randomUUID(), careerOpsVersion));
 
 let tailoredHtml;
 try {
+  // Privacy gate: the full serialized tailoring request is inspected before the
+  // network call. Nothing is sent when a protected value is present.
+  const requestBody = JSON.stringify({
+    model:    modelName,
+    messages: [
+      buildSystemMessage(systemPrompt, endpointHost),
+      { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` },
+    ],
+    stream:      false,
+    temperature: 0.2,
+    ...buildTokenLimit(maxTokens, endpointHost),
+  });
+  assertLlmRequestAllowed(endpoint, requestBody);
   const res = await fetch(endpoint, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      model:    modelName,
-      messages: [
-        buildSystemMessage(systemPrompt, endpointHost),
-        { role: 'user',   content: `EVALUATION REPORT:\n\n${reportText}\n\nJOB DESCRIPTION:\n\n${jdText}\n\nNow, generate and output the fully filled HTML CV matching the rules above. Output ONLY raw HTML.` },
-      ],
-      stream:      false,
-      temperature: 0.2,
-    }),
+    body: requestBody,
     signal: AbortSignal.timeout(timeoutMs),
   });
 
@@ -295,11 +346,24 @@ try {
     const body = await res.text();
     console.error(`❌  API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
+    if (res.status === 402) {
+      console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
+      console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
+    }
     process.exit(1);
   }
 
   const data = await res.json();
   tailoredHtml = data.choices?.[0]?.message?.content?.trim();
+  // Before the empty check: a thinking model can spend the whole cap on
+  // reasoning, and then this is the only explanation the user gets. A reply
+  // cut off at the cap is a CV without its last sections, and saving it would
+  // hand that to generate-pdf as the tailored CV, so nothing is saved.
+  if (data.choices?.[0]?.finish_reason === 'length') {
+    console.error(`❌  The reply stopped at the ${maxTokens}-token output cap, so the tailored CV is cut short. Nothing was saved.`);
+    console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
+    process.exit(1);
+  }
   if (!tailoredHtml) {
     console.error('❌  The endpoint returned an empty response.');
     process.exit(1);
@@ -312,6 +376,10 @@ try {
 // Clean up markdown block wrapping if the LLM adds it despite instructions
 tailoredHtml = tailoredHtml.replace(/^\s*```(html)?\s*/i, '').replace(/\s*```\s*$/, '');
 
+// The model only saw placeholders when redaction is on; put the real name and
+// contact details back so the tailored CV never ships with "Candidate Name".
+tailoredHtml = restoreIfEnabled(tailoredHtml, profileYmlRaw);
+
 // ---------------------------------------------------------------------------
 // Save tailored HTML
 // ---------------------------------------------------------------------------
@@ -322,7 +390,7 @@ try {
 
   let candidateName = 'candidate';
   try {
-    const profile = yaml.load(profileContent);
+    const profile = loadYaml(profileYmlRaw);
     if (profile && profile.name) {
       candidateName = profile.name;
     }
@@ -332,18 +400,28 @@ try {
   candidateName = candidateName
     .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
-  const filename = `cv-${candidateName}-${companySlug}.html`;
+  // Reports identify applications; one employer can have several requisitions
+  // with the same title. Re-tailoring one report may replace its own artifact.
+  const artifactStem = `cv-${candidateName}-${reportFilename.replace(/\.md$/i, '')}`;
+  const filename = `${artifactStem}.html`;
   const htmlPath = join(PATHS.output, filename);
+
+  const lockedKeys = readLockedSections(PATHS.profile, sectionKey);
+  const cvMarkdown = readFileSync(PATHS.cv, 'utf-8');
+  validateLockedSections(tailoredHtml, cvMarkdown, lockedKeys);
 
   writeFileSync(htmlPath, tailoredHtml, 'utf-8');
   console.log(`\n✅  Tailored HTML saved: ${htmlPath}`);
 
   // Print next steps
-  const pdfFilename = `cv-${candidateName}-${companySlug}-${roleSlug}-${new Date().toISOString().split('T')[0]}.pdf`;
+  const pdfFilename = `${artifactStem}.pdf`;
   const reportNumMatch = reportFilename.match(/^(\d+)-/);
   const reportNum = reportNumMatch ? reportNumMatch[1] : '001';
+  const pdfPaths = [`output/${filename}`, `output/${pdfFilename}`]
+    .map(path => /^[A-Za-z0-9._@+/-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`)
+    .join(' ');
 
-  console.log(`\n📄  Next step (generate PDF):\n    node generate-pdf.mjs output/${filename} output/${pdfFilename} --format=letter --report=${reportNum}\n`);
+  console.log(`\n📄  Next step (generate PDF):\n    node generate-pdf.mjs ${pdfPaths} --format=letter --report=${reportNum}\n`);
 
 } catch (err) {
   console.warn(`⚠️   Could not save HTML: ${err.message}`);

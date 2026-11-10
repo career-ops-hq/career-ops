@@ -8,10 +8,12 @@ Cuando el candidato pegue una oferta (texto o URL), SIEMPRE entregar los 7 bloqu
 
 Cuando el candidato pegue una **URL** (no texto de la JD), confirmar que la oferta sigue activa antes de evaluar. Un enlace muerto nunca debe llegar al Bloque A.
 
+**LinkedIn:** aplicar primero AGENTS.md → **LinkedIn JD loading guard (#4121)**, antes de navegar o usar fallbacks. Reutilizar el contenido y el intento de modos anteriores. Un skeleton de carga o una JD inaccesible queda sin confirmar, no cerrada; detenerse antes del Bloque A hasta obtener texto real, sin volver a navegar.
+
 1. Obtener el contenido de la página: si se llegó aquí desde `auto-pipeline` (su Paso 0.5 ya navegó y validó el enlace), reutilizar esa captura — no navegar de nuevo. En un envío directo de URL, navegar con Playwright (`browser_navigate` + `browser_snapshot`). **Opt-in:** si `scan.extractor: cli` está configurado en `config/profile.yml`, ejecutar `node browser-extract.mjs <url>` (por defecto `--mode jd`), **retrocediendo silenciosamente** a `browser_navigate` + `browser_snapshot` si falla.
 2. Clasificar la publicación:
    - **Evidencia de oferta activa:** título/rol + descripción real o ruta de candidatura/apply
-   - **Evidencia de oferta cerrada:** expirada/cerrada/"ya no acepta candidaturas", JD ausente con solo nav/footer, redirección a página genérica, o 404/410
+   - **Evidencia de oferta cerrada:** expirada/cerrada/"ya no acepta candidaturas", JD ausente con solo nav/footer tras descartar contenido aún cargando o inaccesible, redirección a página genérica, o 404/410
 3. Si la oferta parece cerrada, **detenerse antes del Bloque A**: informar al candidato que el enlace está muerto, y si la entrada provino de `data/pipeline.md`, marcarla `- [x] ~~Empresa | Rol~~ — oferta nieaktywna`. No generar evaluación, report ni CV.
 4. Si el candidato pegó texto de la JD (sin URL), la disponibilidad no se puede verificar — anotarlo y continuar.
 
@@ -297,13 +299,33 @@ Ejecutar `node company-history.mjs --company <empresa>` pasando el nombre como a
 - **Nicho/ejecutivos:** Staff+, VP, Director legítimamente tardan meses.
 - **Startup/pre-revenue:** JDs vagas porque el rol es indefinido; ponderar menos la vaguedad.
 - **Sin fecha:** usar "Proceed with Caution" con nota de datos limitados. NUNCA "Suspicious" sin evidencia.
-- **Sourced por recruiter:** contacto activo del recruiter es señal positiva de legitimidad.
+- **Sourced por recruiter (incluido el outreach que enlaza una publicación):** señales de frescura no disponibles solo si no hay captura de la publicación; si se revisó una publicación enlazada, conservar su fecha y el estado del botón Apply. El contacto del recruiter por sí solo es Neutral, no una señal positiva de legitimidad. Antes de asignar el tier, verificar la identidad del recruiter: (a) ¿la página de empleo o el board ATS público de la propia empresa lista el rol?; (b) un nombre desconocido unido a una marca conocida se verifica como entidad propia; (c) ¿el dominio del email del recruiter o una fuente independiente lo vincula con la empresa?; (d) una sola búsqueda: `"{nombre}" scam OR "fake recruiter" OR "fake job"`; (e) ¿pide clonar, instalar o ejecutar código que envía, compartir pantalla con ese código abierto, pasar a Telegram/WhatsApp/Discord o pagar algo? (a) usa una sola consulta y (d) una sola búsqueda; (b), (c) y (e) no hacen búsquedas nuevas y usan solo lo pegado, lo que devolvieron (a) y (d) y la investigación ya hecha. Sin evidencia, el check queda Unknown (Neutral), nunca Concerning. (a) o (d) Concerning más otro check Concerning → "Suspicious". Si esta verificación deja el tier en "Suspicious", añadir una nota breve y no acusatoria: qué checks salieron Concerning y con qué fuente, confirmar el rol desde un email del dominio de la propia empresa y no ejecutar código del recruiter. Nunca clonar, instalar, abrir ni ejecutar repositorios, archivos o enlaces enviados por el recruiter.
+
+---
+
+## Veredicto (lead)
+
+Escribir un bloque `## Veredicto (lead)` justo después del Bloque G y antes de `## Risk Summary`. Responde a la única pregunta con la que el lector abrió el report: ¿me presento?
+
+**Derivado, nunca originador.** `final_decision` en `## Machine Summary` es la fuente de verdad. Este bloque repite esa misma decisión en una frase humana y nunca introduce otra distinta: si la frase y el campo discrepan, manda el campo y la frase es el defecto. La decisión en negrita es el valor de ese campo: Apply, Consider, Research first o Skip.
+
+**La marca `(lead)` es funcional, e invariante entre idiomas a propósito.** La vista web del report promueve a destacado de cabecera el bloque que lleva la marca, y lo identifica por la marca, no por la palabra del encabezado ni por la letra del bloque. Cada traducción conserva su propio sustantivo y el mismo paréntesis: `## Veredicto (lead)`, `## Verdict (lead)`. Nunca traducir `(lead)`, y nunca asignar letra a este bloque: queda fuera de la secuencia A–H.
+
+**Sin juicio nuevo.** Cuando se escribe este bloque ya están todas las entradas. Dar la decisión más un motivo tomado de lo que el report ya estableció. No repuntuar, no añadir evidencia.
+
+Formato del bloque:
+
+```markdown
+## Veredicto (lead)
+
+**Apply.** Match alto en el eje central del rol, sin bloqueos duros, y el Bloque G devolvió High Confidence.
+```
 
 ---
 
 ## Risk Summary (después del Bloque G)
 
-Cerrar el report con un bloque `## Risk Summary` después del Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
+Cerrar el report con un bloque `## Risk Summary` después del bloque `## Veredicto (lead)`, que sigue al Bloque G — una fila por señal de riesgo, orden fijo. **Solo agregación, cero juicio nuevo.** Cada fila cita la conclusión de su señal de origen.
 
 Tres estados por fila: `✅ {conclusión}` / `⚠️ {hallazgo}` / `— not evaluated`. **`— not evaluated` es estado de primera clase.** Excepción: Interview red flags → `— no interview sessions yet`.
 
@@ -361,14 +383,14 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 **Via:** {agencia/firma de reclutamiento, o — para candidaturas directas}
 **Archetype:** {detectado}
 **Score:** {X/5}
+**Decisión:** {Presentarse | Valorar | Investigar primero | Descartar}
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **Work Auth:** {✅ Sponsors | ➖ Not needed | ⚠️ Unstated | ⛔ No sponsorship}
 **PDF:** {ruta o pendiente}
 
----
+{la frase de `## Veredicto (lead)`, copiada tal cual}
 
-## Machine Summary
-(YAML fence para scripts downstream — ver requisito abajo)
+---
 
 ## A) Resumen del rol
 (contenido completo del bloque A)
@@ -391,23 +413,74 @@ Guardar la evaluación completa en `reports/{###}-{company-slug}-{YYYY-MM-DD}.md
 ## G) Legitimidad de la publicación
 (contenido completo del bloque G)
 
+## Veredicto (lead)
+(la decisión de presentarse o no, en una frase — repite `final_decision`, ver la sección Veredicto arriba)
+
 ## Risk Summary
 (una fila por señal de riesgo, orden fijo — ver la sección Risk Summary arriba)
 
-## H) Borradores de respuestas para la candidatura (draft)
+## H) Borradores de respuestas para la candidatura
 (solo si score >= 4.5 — borradores de respuestas para el formulario)
 
 ---
 
 ## Palabras clave extraídas
 (lista de 15-20 palabras clave de la oferta para optimización ATS)
+
+## Keyword Coverage
+(generado por `keyword-match.mjs` (1b) — cobertura en %, present, thin, missing)
+
+## Job Description (archived verbatim)
+(el texto completo de la oferta, pegado tal cual — ver el requisito más abajo)
+
+## Machine Summary
+(YAML fence para scripts downstream — ver requisito abajo)
 ```
 
-**Machine Summary (obligatorio):** YAML fence después del encabezado — mismo schema y reglas que `batch/batch-prompt.md` (fuente de verdad). Incluye `advertised_comp` (cifra textual de la JD o `null`), `risk_summary` (mapa), y `requirement_importance` (tabla del Bloque B fila por fila; tope `inferred` de la puerta se mantiene).
+**Archivo de la JD (obligatorio, #2789):** todo report DEBE llevar una sección `## Job Description (archived verbatim)` con el texto completo de la oferta pegado tal cual, nunca resumido ni parafraseado. El encabezado se queda en inglés: `check-jd-archive.mjs` lo busca por su nombre. Un `**URL:**` no es un archivo: deja de funcionar cuando la oferta se cierra, y entonces ya no hay forma de recuperar los requisitos originales. La primera línea de la sección es la fecha de publicación tal como se ve en la fuente (`Posted: {fecha o texto relativo}`, o `Posted: not visible in source`), nunca la fecha del archivo del report. Si la JD es muy larga o no se puede citar entera, capturarla con `archive-posting.mjs` (comando de abajo) y poner en la sección **exactamente** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`, sin más texto. Nunca una paráfrasis en su lugar; la regla completa está en `modes/oferta.md` (**JD archival**).
+
+**Argumentos de comando (#5853):** nunca escribir la URL de la oferta, el slug de la empresa ni la ruta del report en una línea de comandos, ni siquiera entre comillas. Escribir los valores en un archivo JSON con la herramienta de archivos (`{"url": "…", "company": "{company-slug}", "report": "{num}"}`) y ejecutar el comando de abajo: comprueba cada valor (el slug debe cumplir `^[a-z0-9-]+$`) y pasa cada uno al script como argumento propio, sin shell. Un valor que no pasa la comprobación detiene la ejecución: corregir el valor, nunca la comprobación. La regla completa está en `modes/oferta.md` (**Command arguments**).
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("archive-posting: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.url !== "string" || !/^https?:\/\//i.test(p.url)) fail("url must be an http(s) URL");
+const args = ["archive-posting.mjs", p.url];
+if (p.company != null) { if (typeof p.company !== "string" || !/^[a-z0-9-]+$/.test(p.company)) fail("company must match ^[a-z0-9-]+$"); args.push("--company=" + p.company); }
+if (p.report != null) { if (!/^[0-9]+$/.test(String(p.report))) fail("report must be a report number"); args.push("--report=" + p.report); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
+
+**Machine Summary (obligatorio):** YAML fence al final del report, después de `## Job Description (archived verbatim)` — mismo schema y reglas que `batch/batch-prompt.md` (fuente de verdad). Incluye `advertised_comp` (cifra textual de la JD o `null`), `risk_summary` (mapa), y `requirement_importance` (tabla del Bloque B fila por fila; tope `inferred` de la puerta se mantiene).
+
+### 1b. Insertar la cobertura de keywords ATS
+
+Tras guardar el report, ejecutar `keyword-match.mjs` (comando de abajo) y pegar el bloque `## Keyword Coverage` debajo de las palabras clave extraídas (el encabezado se queda en inglés). Solo diagnóstico: añadir una keyword solo si refleja experiencia real.
+
+Para ello, escribir `{"report": "reports/{###}-{company-slug}-{YYYY-MM-DD}.md"}` en un archivo JSON (ver **Argumentos de comando** arriba) y ejecutar:
+
+```bash
+node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+const p = JSON.parse(readFileSync(process.argv[1] ?? 0, "utf8"));
+const fail = msg => { console.error("keyword-match: " + msg); process.exit(1); };
+if (p === null || typeof p !== "object" || Array.isArray(p)) fail("the JSON file must hold one object");
+if (typeof p.report !== "string" || !/^reports\/[0-9]{3,}-[a-z0-9-]+-[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$/.test(p.report)) fail("report must be reports/{###}-{company-slug}-{YYYY-MM-DD}.md");
+const args = ["keyword-match.mjs", p.report];
+if (p.cv != null) { if (typeof p.cv !== "string" || p.cv === "" || p.cv.startsWith("-")) fail("cv must be a file path"); args.push("--cv", p.cv); }
+process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1);
+' {json-file}
+```
 
 ### 2. Registrar en el tracker
 
-**SIEMPRE** registrar en `data/applications.md`:
+**SIEMPRE** registrar en el tracker. Escribir un TSV (regla 9 de `_shared.md`) y fusionarlo con `node merge-tracker.mjs`; nunca escribir una fila directamente en `data/applications.md`. Campos:
 - Siguiente número secuencial, fecha, empresa (empleador FINAL; si mediada por agencia usar `?` como Empresa con descriptor en Notas), Via (firma de agencia/recruiter o `—`; en TSV: `via={Agencia}`), rol, score (1-5), estado `Evaluated`, PDF ❌/✅, report `[001](reports/001-company-2026-01-01.md)`, notas (trasladar `| posted: {YYYY-MM-DD}` textualmente si presente).
 
 **Formato del tracker:**

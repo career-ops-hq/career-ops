@@ -11,7 +11,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fenceArgs, fencingReport, isFencingNotice } from "../../src/lib/cli-fencing.mjs";
+import { fenceArgs, fencingReport, isCliAllowedForCapabilities, isFencingNotice } from "../../src/lib/cli-fencing.mjs";
 import { CAPS, KNOWN_KINDS, capabilitiesFor } from "../../src/lib/worker-capabilities.mjs";
 import { scopeFrom } from "../../src/lib/claude-invocation.mjs";
 
@@ -44,6 +44,14 @@ test("the fixture these guards read still looks like itself", () => {
     assert.equal(fencingReport({ cliId: id, cliName: id, capabilities: CAPS.workspaceWrite }).level, "full",
       `${id} must still be fenceable`);
   }
+});
+
+test("Hermes is blocked for write-capable run kinds", () => {
+  assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("pdf")), true, "Hermes must remain available for pdf/read-only runs");
+  assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("research")), true, "Hermes must remain available for research runs");
+  assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("evaluate")), true, "evaluate no longer writes, so Hermes may run it");
+  assert.equal(isCliAllowedForCapabilities("hermes", capabilitiesFor("fix-portal")), false, "Hermes must be blocked for fix-portal");
+  assert.equal(isCliAllowedForCapabilities("claude", capabilitiesFor("fix-portal")), true, "fenced runtimes must remain available for write-capable runs");
 });
 
 test("a local read-only worker gets a true read-only sandbox", () => {

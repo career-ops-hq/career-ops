@@ -14,9 +14,11 @@ import {
   codexStreamArgs,
   completedReportNames,
   hasNewCompletedReport,
+  newCompletedReportNum,
   isFatalClaudeStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
+  noOutputError,
   parseClaudeEvent,
   parseCodexEvent,
   parseGrokEvent,
@@ -315,13 +317,18 @@ test("Claude system init becomes the ready status", () => {
   assert.deepEqual(event, { status: "Agent ready" });
 });
 
-test("Claude result usage becomes tokens + cost", () => {
+test("Claude result usage counts cache reads with every reported token category", () => {
   const event = parseClaudeEvent(JSON.stringify({
     type: "result",
-    usage: { input_tokens: 100, output_tokens: 20, cache_creation_input_tokens: 5 },
+    usage: {
+      input_tokens: 100,
+      output_tokens: 20,
+      cache_creation_input_tokens: 5,
+      cache_read_input_tokens: 500,
+    },
     total_cost_usd: 0.012,
   }));
-  assert.deepEqual(event, { tokens: 125, costUsd: 0.012 });
+  assert.deepEqual(event, { tokens: 625, costUsd: 0.012 });
 });
 
 test("Claude result without usage is ignored, not zeroed", () => {
@@ -526,6 +533,12 @@ test("reservation churn alone does not count as persistence", () => {
   assert.equal(hasNewCompletedReport(before, ["020-existing.md", "022-RESERVED.md"]), false);
 });
 
+test("newCompletedReportNum is the leading number of the new report", () => {
+  const before = ["020-existing.md", "021-RESERVED.md"];
+  assert.equal(newCompletedReportNum(before, ["020-existing.md", "021-new-company.md"]), 21);
+  assert.equal(newCompletedReportNum(before, ["020-existing.md", "022-RESERVED.md"]), null);
+});
+
 test("codexStreamArgs turns on the JSONL that parseCodexEvent reads", () => {
   // Given/When: the structured-stream argv for a prompt. This is the invocation
   // /api/run uses; CliSpec.args stays plain `["exec", prompt]` because every other
@@ -596,10 +609,11 @@ import { killMsForKind, timeoutMessage, RUN_MAX_DURATION_S } from "../../src/lib
 
 test("evaluate's kill budget gives real headroom, not the old 285s floor (#3124)", () => {
   const ms = killMsForKind("evaluate");
+  assert.equal(ms, 740_000, "evaluate leaves 60s under maxDuration for report-persist");
   assert.ok(ms > 285_000, `evaluate must exceed the 285s that killed real runs, got ${ms}ms`);
   assert.ok(ms < RUN_MAX_DURATION_S * 1000, "must stay under maxDuration so the SIGTERM is graceful, not a hard cutoff");
   assert.equal(killMsForKind("pdf"), 600_000, "pdf keeps its post-agent render headroom");
-  assert.equal(killMsForKind("fix-portal"), killMsForKind("evaluate"), "non-pdf kinds share the evaluate budget");
+  assert.equal(killMsForKind("fix-portal"), 780_000, "kinds with no post-agent phase keep the longer budget");
 });
 
 test("a timed-out run reads as a timeout, never as 'didn't save a report' (#3124)", () => {
@@ -607,4 +621,53 @@ test("a timed-out run reads as a timeout, never as 'didn't save a report' (#3124
   assert.match(msg, /780s time limit/, "the message names the limit it hit");
   assert.match(msg, /re-run|Claude Code/i, "it offers a next step");
   assert.doesNotMatch(msg, /didn't save a report/i, "a timeout must not be blamed on the CLI's ability to write");
+});
+
+// A CLI can exit 0 and still do nothing. Antigravity prints the reason to stderr
+// ("a tool required the "command" permission that headless mode cannot prompt
+// for") and exits cleanly with an empty stdout. The route captured that line but
+// dropped it on the clean-exit branch, so the user saw only "is it installed and
+// authenticated?" for a CLI that was installed and signed in.
+const AGY_PERMISSION_LINE =
+  'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.';
+
+test("a clean exit with no output now carries the CLI's own stderr reason", () => {
+  const msg = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: true,
+    stderrSnippet: AGY_PERMISSION_LINE.slice(0, 200),
+  });
+  assert.match(msg, /^The CLI produced no output — is it installed and authenticated\? \(jetski: no output produced/);
+  assert.match(msg, /headless mode cannot prompt for/);
+  assert.ok(msg.endsWith("(career-ops is best on Claude Code.)"), "the Claude Code tip stays last");
+});
+
+test("with no stderr snippet the messages are exactly what they were before", () => {
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: true, stderrSnippet: null }),
+    "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)",
+  );
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: false }),
+    "The CLI exited with an error — is it installed and authenticated?",
+  );
+});
+
+test("a non-clean exit still appends the snippet", () => {
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: false, stderrSnippet: "Error: connection refused" }),
+    "The CLI exited with an error — is it installed and authenticated? (Error: connection refused)",
+  );
+});
+
+test("no error when the CLI produced text or reported its own structured error", () => {
+  assert.equal(noOutputError({ emittedText: true, sawError: false, cleanExit: true, stderrSnippet: "Error: x" }), null);
+  assert.equal(noOutputError({ emittedText: false, sawError: true, cleanExit: false, stderrSnippet: "Error: x" }), null);
+});
+
+test("the generic stderr classifier flags the Antigravity permission line, so the snippet exists", () => {
+  // Without this the helper has nothing to append: the route only keeps a stderr
+  // line the classifier flags.
+  assert.equal(isFatalGenericStderr(AGY_PERMISSION_LINE), true);
 });

@@ -3,6 +3,8 @@
 import { instrumentSerif } from "@/lib/fonts";
 import { HeroGlow } from "@/components/hero-glow";
 import { CvIngest } from "@/components/cv/cv-ingest";
+import { LinkedInPaste } from "@/components/linkedin-paste";
+import { OnboardingProgress } from "@/components/home/onboarding-progress";
 
 // The first-run takeover: when cv.md is missing, the CV-upload hero IS the home.
 // One input, value-coming framing (not a form), the same product chrome (HeroGlow
@@ -37,6 +39,12 @@ export function FirstRunHome() {
           </div>
         </div>
       </section>
+      <LinkedInPaste />
+      {/* What comes after the CV, visible from the first second: the same checklist
+          that keeps growing on Today once the CV is in. */}
+      <div className="mt-6">
+        <OnboardingProgress compact />
+      </div>
     </div>
   );
 }

@@ -4,7 +4,7 @@
 
 ## Liveness sweep
 
-**URLs を処理する前に必ず実行する。** Scanner が headless/batch mode で追加した entries は、Playwright が使えなかったため `**Verification:** unconfirmed (batch mode)` を持つ。つまり liveness は未確認。Sweep なしでは dead postings が 1 tab ずつ evaluation に到達し、phantom roles に時間と tokens を使ってしまう（8 件の stale URLs がある inbox なら 8 回分の無駄な evaluations になる）。
+**URLs を処理する前に必ず実行する。** Inbox の entries は通常 liveness 未確認である。`scan.mjs` は `--verify` 付きで実行しない限り各 posting がまだ open かを確認せずに追加し、user が貼り付けた URL は一度も確認されていない。Sweep なしでは dead postings が 1 tab ずつ evaluation に到達し、phantom roles に時間と tokens を使ってしまう（8 件の stale URLs がある inbox なら 8 回分の無駄な evaluations になる）。
 
 Per-URL loop の前に、zero-token liveness checker で pending URLs をまとめて sweep する：
 
@@ -18,7 +18,7 @@ Per-URL loop の前に、zero-token liveness checker で pending URLs をまと�
 
 ## Workflow
 
-1. **Read** `data/pipeline.md` → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
+1. **Read** `data/pipeline.md` (`grep -n -m 20 '^- \[ \] ' data/pipeline.md` で検索し、各バッチの後にこの実行で Pending に残した items だけが出るまで検索を繰り返し、ファイル全体は読まない) → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
 2. **For each surviving pending URL**:
    a. `node reserve-report-num.mjs` を実行して次の `REPORT_NUM` を atomically claim する（report が書き込まれたら `node reserve-report-num.mjs --release <num>` で sentinel を release）
    b. **Extract JD** using Playwright（browser_navigate + browser_snapshot）→ WebFetch → WebSearch

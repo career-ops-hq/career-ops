@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { ROOT, NODE, rmSync } from './helpers.mjs';
+import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { acquireTrackerLock, canonicalizeTrackerPath, trackerLockDirFor } from '../tracker-utils.mjs';
 
 const SCRIPT = join(ROOT, 'reply-watch.mjs');
 
@@ -21,13 +23,13 @@ function setupWorkspace() {
   return { tmp, dataDir, trackerFile };
 }
 
-function runReplyWatch(tmp, trackerFile, candidatesFile = null, input = '') {
+function runReplyWatch(tmp, trackerFile, candidatesFile = null, input = '', timeoutMs = 30000) {
   const args = candidatesFile ? [candidatesFile] : [];
   return spawnSync(NODE, [SCRIPT, ...args], {
     cwd: tmp,
     input,
     encoding: 'utf-8',
-    timeout: 30000,
+    timeout: timeoutMs,
     env: { ...process.env, CAREER_OPS_TRACKER: trackerFile }
   });
 }
@@ -43,7 +45,7 @@ test('status-log.tsv is created and appended on a confirmed tracker update', () 
   }]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res.status, 0, res.stderr);
+  assert.equal(res.status, 0, describeSpawn(res));
 
   const trackerContent = readFileSync(trackerFile, 'utf-8');
   assert.match(trackerContent, /\| 1 \|.+?\| Interview \|/);
@@ -75,7 +77,7 @@ test('No status-log entry is written on a no-op re-run', () => {
 
   // Run 2
   const res2 = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res2.status, 0);
+  assert.equal(res2.status, 0, describeSpawn(res2));
 
   const logContent2 = readFileSync(logFile, 'utf-8').trim().split('\n');
   assert.equal(logContent2.length, 1, 'No duplicate entry for alreadyCurrent');
@@ -98,7 +100,7 @@ test('Status-log append failure does not abort the tracker update', () => {
   mkdirSync(logFile);
 
   const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
-  assert.equal(res.status, 0);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stderr || res.stdout, /failed to append to status-log\.tsv/);
 
   // Tracker is still updated
@@ -114,7 +116,7 @@ test('reply-watch.mjs with no candidates prints the count line and exits 0', () 
   writeFileSync(candFile, JSON.stringify([]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile);
-  assert.equal(res.status, 0);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stdout, /0 application updates need review/);
 
   rmSync(tmp, { recursive: true, force: true });
@@ -131,7 +133,7 @@ test('reply-watch.mjs skips Noise candidates from status recommendations', () =>
   }]));
 
   const res = runReplyWatch(tmp, trackerFile, candFile);
-  assert.equal(res.status, 0);
+  assert.equal(res.status, 0, describeSpawn(res));
   assert.match(res.stdout, /Type: Noise/);
   assert.doesNotMatch(res.stdout, /Suggested status updates to apply:/);
 
@@ -139,4 +141,72 @@ test('reply-watch.mjs skips Noise candidates from status recommendations', () =>
   assert.doesNotMatch(trackerContent, /\| Interview \|/);
 
   rmSync(tmp, { recursive: true, force: true });
+});
+
+test('reply-watch.mjs renders and applies one confirmed update per company-wide rejection row', () => {
+  const { tmp, dataDir, trackerFile } = setupWorkspace();
+  writeFileSync(trackerFile, [
+    '# Applications', '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|---|---|---|---|---|---|---|---|',
+    '| 1 | 2026-06-01 | Acme Air | Backend Engineer | 4.0/5 | Applied | ❌ | - | |',
+    '| 2 | 2026-06-02 | Acme Air | Product Designer | 4.0/5 | Evaluated | ❌ | - | |',
+    '| 3 | 2026-07-01 | Acme Air | Finance Analyst | 4.0/5 | Interview | ❌ | - | |',
+    '',
+  ].join('\n'));
+  const candFile = join(tmp, 'company-wide.json');
+  writeFileSync(candFile, JSON.stringify([{
+    message_id: 'company-wide',
+    received_at: '2026-06-20T12:00:00Z',
+    from: 'careers@acmeair.com',
+    subject: 'Thank you for your interest in Acme Air',
+    body_snippet: 'Unfortunately, we will not be moving forward with your application.',
+    signal: 'rejection',
+  }]));
+
+  const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
+  assert.equal(res.status, 0, describeSpawn(res));
+  assert.match(res.stdout, /company-wide rejection \(2 applications\)/);
+  assert.match(res.stdout, /#1 Acme Air \(Backend Engineer\): Applied → Rejected/);
+  assert.match(res.stdout, /#2 Acme Air \(Product Designer\): Evaluated → Rejected/);
+  assert.doesNotMatch(res.stdout, /#3 Acme Air \(Finance Analyst\).*→ Rejected/);
+
+  const tracker = readFileSync(trackerFile, 'utf-8');
+  assert.match(tracker, /\| 1 \|.+?\| Rejected \|/);
+  assert.match(tracker, /\| 2 \|.+?\| Rejected \|/);
+  assert.match(tracker, /\| 3 \|.+?\| Interview \|/);
+  const log = readFileSync(join(dataDir, 'status-log.tsv'), 'utf-8').trim().split('\n');
+  assert.equal(log.length, 2);
+
+  rmSync(tmp, { recursive: true, force: true });
+});
+
+test('a reply-watch run killed while set-status waits on the tracker lock reports how far the child got', async () => {
+  const { tmp, trackerFile } = setupWorkspace();
+  const candFile = join(tmp, 'cands.json');
+  writeFileSync(candFile, JSON.stringify([{
+    message_id: 'lock-contention', from: 'hr@acme.com',
+    subject: 'Acme — Backend Engineer', body_snippet: 'We invite you to interview.',
+  }]));
+
+  // Hold the tracker lock so reply-watch's set-status call blocks past the
+  // spawn timeout. The child dies ETIMEDOUT mid-update waiting on set-status
+  // lock contention; the failure message must say how far it got from its
+  // captured stdout/stderr.
+  // Canonicalize the path so the lock matches set-status's even under a
+  // symlinked temp dir (macOS /var -> /private/var); otherwise nothing waits.
+  const lock = await acquireTrackerLock(trackerLockDirFor(canonicalizeTrackerPath(trackerFile)));
+  try {
+    const startedAt = Date.now();
+    const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n', 5000);
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(elapsedMs < 20000, `runReplyWatch took ${elapsedMs}ms (expected < 20000ms); ${describeSpawn(res)}`);
+    assert.equal(res.error?.code, 'ETIMEDOUT', describeSpawn(res));
+    const message = describeSpawn(res);
+    assert.match(message, /Suggested status updates to apply/);
+    assert.match(message, /#1 Acme \(Backend Engineer\): Applied → Interview/);
+  } finally {
+    lock.release();
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

@@ -37,6 +37,15 @@
  *      role but never merges titles that differ by a city, country, language,
  *      segment or seniority word.
  *
+ *   3. SAME SOURCE. A repost is the same site listing the role again under a
+ *      new URL. scan-history.tsv mixes many sources — the employer's ATS, job
+ *      boards, aggregators, alert emails — and one live opening is routinely
+ *      picked up by two of them on different days: the ATS scan finds it on
+ *      Monday, a job-board copy arrives on Thursday. Grouped across sources,
+ *      that reads as a repost even though the opening was listed once and
+ *      never changed. Membership therefore also requires the same source host
+ *      (see sourceHost); a cross-source sighting is a duplicate, not a repost.
+ *
  * ONE CASE THE TITLE RULE CANNOT SETTLE: a multi-employer aggregator. Its board
  * carries many different employers' postings under its own name, so identical
  * titles there are genuinely different jobs and every rule above rests on an
@@ -46,10 +55,24 @@
  * on a real history, an aggregator's clusters are indistinguishable by shape
  * from legitimate ones.
  *
+ * RETENTION. scan-history.tsv is append-only by contract — its rows are the
+ * scanner's "seen" ledger, which is why a column may not be reordered
+ * (DATA_CONTRACT.md) — but nothing ever removed a row, so an installation that
+ * scans for a couple of years re-parses its entire history on every run.
+ * --retain-days N drops rows older than N days. Because that changes the
+ * ledger, it is opt-in and previewable (--dry-run), and three kinds of row are
+ * never dropped regardless of age, because their meaning does not decay:
+ * `skipped_invalid_url`, `skipped_blocked_host`, and `cooldown:*` (which names
+ * its own expiry). A row whose date cannot be parsed is kept too; a retention
+ * pass may not guess. Counts go to stderr, so `--json` on stdout stays
+ * parseable.
+ *
  * Run: node detect-reposts.mjs             (JSON to stdout)
  *      node detect-reposts.mjs --summary   (human-readable table)
  *      node detect-reposts.mjs --window 60 (override 90-day window)
  *      node detect-reposts.mjs --min-span 7 (override 1-day minimum span)
+ *      node detect-reposts.mjs --retain-days 180 (drop rows older than 180 days first)
+ *      node detect-reposts.mjs --retain-days 180 --dry-run (report, write nothing)
  *      node detect-reposts.mjs --self-test
  *      node detect-reposts.mjs --help
  *
@@ -62,16 +85,27 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 // Namespace import, not default: js-yaml 5.x drops the default export, and
 // #2656 migrated the rest of the repo for exactly that reason.
-import * as yaml from 'js-yaml';
+import { loadYaml } from './lib/yaml-document.mjs';
 
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { flagValue, validateFlags, safeIntFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { parseDate } from './lib/parse-date.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { parseScanHistoryLine, scanHistoryLineHasColumn } from './lib/scan-history-columns.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
-const SCAN_HISTORY_PATH = join(CAREER_OPS, 'data/scan-history.tsv');
+// Same resolution scan.mjs uses, lane override included (scan.mjs's
+// SCAN_HISTORY_PATH). This matters more here than it used to: reading the wrong
+// lane only misreported, but a retention pass that ignored the override would
+// DELETE rows from the default lane while leaving the selected one untouched.
+// docs/SCRIPTS.md gives a lane its own CAREER_OPS_SCAN_HISTORY for exactly this
+// reason, since the file is the dedup source.
+const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || join(CAREER_OPS, 'data/scan-history.tsv');
 // Same resolution scan.mjs uses, so a sandboxed run overrides both together.
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
 const DEFAULT_WINDOW_DAYS = 90;
@@ -92,14 +126,16 @@ const MIN_REPOST_SPAN_DAYS = 1;
 // the shape git merges most willingly: two branches can each add a flag here and
 // merge without a conflict, leaving whichever landed second working in every
 // file except this one. That is how --min-span arrived rejected (#2919).
-const KNOWN_FLAGS = ['--window', '--min-span', '--summary', '--self-test', '--help', '-h'];
-const VALUE_FLAGS = ['--window', '--min-span'];
+const KNOWN_FLAGS = ['--window', '--min-span', '--summary', '--self-test', '--help', '-h', '--retain-days', '--dry-run'];
+const VALUE_FLAGS = ['--window', '--min-span', '--retain-days'];
 
 const USAGE = `Usage:
   node detect-reposts.mjs                       # full JSON repost clusters to stdout
   node detect-reposts.mjs --summary             # human-readable table
   node detect-reposts.mjs --window 60           # override the default 90-day window
   node detect-reposts.mjs --min-span 7          # override the default 1-day minimum span
+  node detect-reposts.mjs --retain-days 180     # drop rows older than 180 days first
+  node detect-reposts.mjs --retain-days 180 --dry-run  # report what would be dropped
   node detect-reposts.mjs --self-test           # run the in-memory test suite
   node detect-reposts.mjs --help                # print this usage block and exit`;
 
@@ -117,24 +153,15 @@ const windowDays = intFlag('--window', DEFAULT_WINDOW_DAYS);
 const minSpanDays = intFlag('--min-span', MIN_REPOST_SPAN_DAYS);
 
 // --- Date helpers ---
-function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 function daysBetween(d1, d2) {
   return Math.round((d2.getTime() - d1.getTime()) / (1000 * 60 * 60 * 24));
 }
 
 // --- Parse scan-history.tsv ---
-// Format: url, first_seen, portal, title, company, status, location, ...,
-//         normalized_company (trailing col 12, additive — see scan.mjs).
-// The normalized_company column is preferred as the clustering key when
-// present; rows written before it existed (fewer columns) simply lack it and
-// carry `normCompany: ''`, so a consumer normalizes the raw company on the fly.
+// Columns as declared in lib/scan-history-columns.mjs. The normalized_company
+// column is preferred as the clustering key when present; rows written before
+// it existed simply lack it and carry `normCompany: ''`, so a consumer
+// normalizes the raw company on the fly.
 export function parseScanHistory(content) {
   const lines = content.split('\n').filter(line => line.trim());
   if (lines.length === 0) return [];
@@ -144,24 +171,23 @@ export function parseScanHistory(content) {
   // don't have a header row, and slice(1) would silently lose row 0.
   const hasHeader = /^\s*url\s*\t/i.test(lines[0]);
   for (const line of lines.slice(hasHeader ? 1 : 0)) {
-    const cols = line.split('\t');
-    if (cols.length < 5) continue;
-    const [url, firstSeen, portal = '', title = '', company = '', status = 'added', location = ''] = cols;
-    const date = parseDate(firstSeen);
-    if (!url || !date) continue;
+    if (!scanHistoryLineHasColumn(line, 'company')) continue;
+    const row = parseScanHistoryLine(line);
+    const date = parseDate(row.first_seen);
+    if (!row.url || !date) continue;
     rows.push({
-      url: url.trim(),
+      url: row.url.trim(),
       date,
-      dateStr: firstSeen.trim(),
-      portal: portal.trim(),
-      title: title.trim(),
-      company: company.trim(),
-      status: (status || 'added').trim(),
-      location: (location || '').trim(),
-      // Trailing normalized-company key (col 12, 0-indexed 11). '' for older
-      // rows that predate the column — companyKey() falls back to normalizing
-      // the raw name so old and new rows still cluster on the same key.
-      normCompany: (cols[11] || '').trim(),
+      dateStr: row.first_seen.trim(),
+      portal: row.portal.trim(),
+      title: row.title.trim(),
+      company: row.company.trim(),
+      status: (row.status || 'added').trim(),
+      location: row.location.trim(),
+      // '' for older rows that predate the normalized_company column —
+      // companyKey() falls back to normalizing the raw name so old and new
+      // rows still cluster on the same key.
+      normCompany: row.normalized_company.trim(),
     });
   }
   return rows;
@@ -204,16 +230,14 @@ export function companyKey(row) {
 // that card would be titled with the normalized key — "joinupch" rather than
 // "joinup.ch". Map.has() is identical to Set.has() on the matching path.
 // BOTH collections, not just tracked_companies. A multi-employer board is far
-// likelier to live under `job_boards` — that is what the section is for — and
-// the two entries this template ships the flag on (Founderful, joinup.ch) are
-// both there. Reading only one collection made the shipped default load ZERO
-// aggregators while looking configured, which is the worst version of this: a
-// flag the user can see in their own config and that silently does nothing.
+// likelier to live under `job_boards` — that is what the section is for — so
+// reading only one collection would leave a flag the user can see in their own
+// config silently doing nothing.
 export function loadAggregatorCompanies(portalsPath = PORTALS_PATH) {
   const found = new Map();
   try {
     if (!existsSync(portalsPath)) return found;
-    const doc = yaml.load(readFileSync(portalsPath, 'utf-8'));
+    const doc = loadYaml(readFileSync(portalsPath, 'utf-8'));
     for (const entries of [doc?.tracked_companies, doc?.job_boards]) {
       if (!Array.isArray(entries)) continue;
       for (const entry of entries) {
@@ -290,6 +314,180 @@ export function titleIdentityKey(title) {
 function loadScanHistory(path = SCAN_HISTORY_PATH) {
   if (!existsSync(path)) return [];
   return parseScanHistory(readFileSync(path, 'utf-8'));
+}
+
+// --- Retention ---
+//
+// Statuses whose verdict is about the URL rather than the posting, so it cannot
+// become outdated: an invalid URL does not become valid because time passed,
+// and a blocked host does not become reachable. `cooldown:*` carries its own
+// expiry, so age is not the rule that governs it either. Everything else
+// describes a sighting, and a sighting older than the user's retention window
+// is what --retain-days exists to forget.
+export const PRUNE_PROTECTED_SCAN_HISTORY_STATUSES = new Set([
+  'skipped_invalid_url',
+  'skipped_blocked_host',
+]);
+
+/**
+ * Decide which scan-history rows a retention pass would drop. Pure: touches no
+ * files, exported so the policy can be tested without a temp data root.
+ *
+ * The result carries two views of the same decision. `lines` is the retained
+ * text, convenient for reading. `keepIndexes` is the positions in the `\n`-split
+ * source, and it is the one a writer must use: reading the file as text decodes
+ * it lossily where it is not valid UTF-8, so a retained line that carried such a
+ * byte would be corrupted by writing `lines` back. A caller holding the original
+ * bytes rebuilds from `keepIndexes` instead (see rebuildScanHistoryBytes).
+ *
+ * @param {string} content - Full scan-history.tsv contents.
+ * @param {number} retainDays - Drop rows whose first_seen is strictly older than this.
+ * @param {{today?: Date|string}} [options] - Comparison day. Defaults to the local calendar day;
+ *   a string is read as a calendar day (UTC midnight), which is what lib/local-today.mjs documents.
+ * @returns {{lines: string[], keepIndexes: number[], pruned: Array<{url: string, status: string, firstSeen: string, ageDays: number}>, totalRows: number, keptRows: number}}
+ */
+export function planScanHistoryPrune(content, retainDays, { today = localToday() } = {}) {
+  // localToday() answers with a calendar day, and this repo's date arithmetic
+  // parses one at UTC midnight rather than at the current instant — the line
+  // lib/local-today.mjs draws. A Date is taken as-is so tests can pin an instant.
+  const todayDate = today instanceof Date ? today : parseDate(today);
+  if (!todayDate) throw new Error(`planScanHistoryPrune: unreadable "today" (${today})`);
+  const source = String(content ?? '').split('\n');
+  const keepIndexes = [];
+  const pruned = [];
+  let totalRows = 0;
+  let firstContentLine = true;
+  for (let index = 0; index < source.length; index += 1) {
+    const line = source[index];
+    if (!line.trim()) { keepIndexes.push(index); continue; }
+    // Same header rule parseScanHistory() applies: only the first non-blank
+    // line can be the header, and only when it starts with a `url` column.
+    if (firstContentLine) {
+      firstContentLine = false;
+      if (/^\s*url\s*\t/i.test(line)) { keepIndexes.push(index); continue; }
+    }
+    totalRows += 1;
+    let row;
+    try {
+      row = scanHistoryLineHasColumn(line, 'company') ? parseScanHistoryLine(line) : null;
+    } catch {
+      row = null;
+    }
+    // Unreadable rows are kept: a retention pass must not be the thing that
+    // silently deletes a row it could not understand.
+    if (!row || !String(row.url || '').trim()) { keepIndexes.push(index); continue; }
+    const status = String(row.status || 'added').trim();
+    if (PRUNE_PROTECTED_SCAN_HISTORY_STATUSES.has(status) || status.startsWith('cooldown:')) {
+      keepIndexes.push(index);
+      continue;
+    }
+    const date = parseDate(row.first_seen);
+    if (!date) { keepIndexes.push(index); continue; }
+    const ageDays = daysBetween(date, todayDate);
+    // "Older than N days": a row exactly N days old is still inside the window,
+    // so retention N keeps the same span a window of N would.
+    if (ageDays > retainDays) {
+      pruned.push({ url: String(row.url).trim(), status, firstSeen: String(row.first_seen || '').trim(), ageDays });
+      continue;
+    }
+    keepIndexes.push(index);
+  }
+  return {
+    lines: keepIndexes.map(index => source[index]),
+    keepIndexes,
+    pruned,
+    totalRows,
+    keptRows: totalRows - pruned.length,
+  };
+}
+
+/**
+ * Split a buffer on `\n` without decoding it, mirroring `String.prototype.split`
+ * exactly: the separator is dropped and a trailing newline still yields a final
+ * empty piece. U+000A is a single byte in UTF-8, and no multi-byte sequence
+ * contains 0x0A, so the piece count matches the decoded split for any input,
+ * valid UTF-8 or not.
+ *
+ * @param {Buffer} bytes
+ * @returns {Buffer[]}
+ */
+function splitByteLines(bytes) {
+  const slices = [];
+  let start = 0;
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] === 0x0a) {
+      slices.push(bytes.subarray(start, index));
+      start = index + 1;
+    }
+  }
+  slices.push(bytes.subarray(start));
+  return slices;
+}
+
+/**
+ * Reassemble a scan history from the byte slices that survived a retention
+ * pass, keeping every retained line exactly as it was on disk.
+ *
+ * This exists because the decision has to decode a line to read its date and
+ * status, and `Buffer.toString('utf-8')` is lossy on invalid input: it writes
+ * U+FFFD over the offending bytes. A line the pass decided to keep must come
+ * back unchanged anyway, so the writer takes the positions and copies the
+ * original slices instead of re-encoding the text it read.
+ *
+ * @param {Buffer} bytes - The file as read, before any decode.
+ * @param {number[]} keepIndexes - Positions from planScanHistoryPrune().
+ * @returns {Buffer}
+ */
+export function rebuildScanHistoryBytes(bytes, keepIndexes) {
+  const slices = splitByteLines(bytes);
+  const parts = [];
+  for (const index of keepIndexes) {
+    if (!Number.isInteger(index) || index < 0 || index >= slices.length) {
+      throw new Error(`rebuildScanHistoryBytes: line ${index} is outside a ${slices.length}-line file`);
+    }
+    parts.push(slices[index]);
+    // Every piece except the last was followed by a newline in the source, so
+    // the separator is reproduced rather than invented: a file with no trailing
+    // newline keeps not having one.
+    if (index < slices.length - 1) parts.push(Buffer.from('\n'));
+  }
+  return Buffer.concat(parts);
+}
+
+/**
+ * Apply a retention pass to the real scan history, under the lock every scanner
+ * appends through. The whole file is replaced, so reading it outside the lock
+ * would drop a scanner's fresh rows; reading it here, inside, is the point.
+ *
+ * The file is read as bytes and the backup is those bytes verbatim. Decoding is
+ * only how the decision reads a row: it is lossy where the file is not valid
+ * UTF-8, so the result is rebuilt from the original slices (see
+ * rebuildScanHistoryBytes) rather than from the text that was decoded.
+ *
+ * Counts go to stderr, leaving stdout for the repost report.
+ */
+async function pruneScanHistory(retainDays, { dryRun = false, path = SCAN_HISTORY_PATH } = {}) {
+  if (!existsSync(path)) {
+    console.error('scan-history prune: no data/scan-history.tsv — nothing to prune.');
+    return;
+  }
+  await withPipelineLock(path, () => {
+    const bytes = readFileSync(path);
+    const plan = planScanHistoryPrune(bytes.toString('utf-8'), retainDays);
+    const summary = `scan-history prune: ${plan.totalRows} row(s) read, ${plan.pruned.length} older than ${retainDays} day(s), ${plan.keptRows} kept`;
+    if (plan.pruned.length === 0) {
+      console.error(`${summary} (nothing to prune)`);
+      return;
+    }
+    if (dryRun) {
+      console.error(`${summary} (dry-run — no changes written)`);
+      return;
+    }
+    const backupPath = `${path}.bak`;
+    writeFileSync(backupPath, bytes);
+    writeFileAtomic(path, rebuildScanHistoryBytes(bytes, plan.keepIndexes));
+    console.error(`${summary} (backup: ${backupPath})`);
+  });
 }
 
 // --- Core detection ---
@@ -397,8 +595,29 @@ function detectRepostsInGroup(rows, windowDays, minSpan = MIN_REPOST_SPAN_DAYS) 
   return results;
 }
 
+// The site a posting URL belongs to, for constraint 3 of the header: hostname,
+// lowercased, without `www.`. A two-letter regional prefix is folded only on
+// sites known to serve one board under per-country subdomains
+// (`de.linkedin.com` and `www.linkedin.com` are one site), so two unrelated
+// tenants such as `ca.example.com` and `www.example.com` stay apart. Greenhouse
+// serves the same board under several hosts (the set prepare-application.mjs
+// recognises), so they fold to one. Unparseable URLs keep the raw string, so
+// they never merge with anything but themselves.
+const REGIONAL_SUBDOMAIN_SITES = new Set(['linkedin.com', 'indeed.com']);
+const GREENHOUSE_HOSTS = new Set(['boards.greenhouse.io', 'job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io', 'greenhouse.io']);
+
+export function sourceHost(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ''); } catch { return String(url); }
+  if (GREENHOUSE_HOSTS.has(host)) return 'greenhouse.io';
+  const labels = host.split('.');
+  if (labels.length > 2 && labels[0] === 'www') labels.shift();
+  else if (labels.length > 2 && /^[a-z]{2}$/.test(labels[0]) && REGIONAL_SUBDOMAIN_SITES.has(labels.slice(1).join('.'))) labels.shift();
+  return labels.join('.');
+}
+
 // Group one company's rows into title groups: all rows sharing a
-// titleIdentityKey land in one group.
+// titleIdentityKey and a sourceHost land in one group.
 //
 // This is a single O(N) bucketing pass. It replaced a nested loop that compared
 // every pair of titles with roleFuzzyMatch, and then an inverted token index
@@ -422,7 +641,7 @@ function groupRowsByTitle(rows) {
   const groups = [];
   const groupOfKey = new Map();
   for (const row of rows) {
-    const key = titleIdentityKey(row.title);
+    const key = `${titleIdentityKey(row.title)}\u0000${sourceHost(row.url)}`;
     let idx = groupOfKey.get(key);
     if (idx === undefined) {
       idx = groups.length;
@@ -608,6 +827,23 @@ function runSelfTest() {
     scanRow('https://jobs.example.com/initech/2', '2026-01-10', 'Channel Account Manager - Spain', 'Initech'),
   ];
   check(detectReposts(perCountry, DEFAULT_WINDOW_DAYS).length === 0, 'two countries\' requisitions are not a repost');
+
+  // Shape 4 — one opening picked up by two sources on different days: the
+  // employer's ATS first, a job-board copy later. Same company, same title,
+  // different URLs, a real span — and still one listing, not a repost.
+  const crossSource = [
+    scanRow('https://jobs.ashbyhq.com/hooli/1', '2026-01-10', 'Senior Product Manager', 'Hooli'),
+    scanRow('https://www.jobboard.example/jobs/hooli-senior-pm-77', '2026-01-14', 'Senior Product Manager', 'Hooli'),
+  ];
+  check(detectReposts(crossSource, DEFAULT_WINDOW_DAYS).length === 0, 'one opening seen on two sources is not a repost');
+  check(
+    detectReposts([...crossSource, scanRow('https://jobs.ashbyhq.com/hooli/2', '2026-02-20', 'Senior Product Manager', 'Hooli')], DEFAULT_WINDOW_DAYS).length === 1,
+    'the same source re-listing the role under a new URL is still a repost',
+  );
+  check(sourceHost('https://de.linkedin.com/jobs/view/1') === sourceHost('https://www.linkedin.com/jobs/view/2'), 'regional subdomains are one source');
+  check(sourceHost('https://ca.example.com/jobs/1') !== sourceHost('https://www.example.com/jobs/1'), 'a two-letter subdomain of an unknown site stays its own source');
+  check(sourceHost('https://boards.greenhouse.io/acme/jobs/1') === sourceHost('https://job-boards.greenhouse.io/acme/jobs/2'), 'Greenhouse host aliases are one source');
+  check(sourceHost('https://job-boards.eu.greenhouse.io/acme/jobs/1') === 'greenhouse.io', 'the EU Greenhouse host folds too');
   check(
     detectReposts(perCountry, DEFAULT_WINDOW_DAYS, 0).length === 0,
     'a trailing country word splits the titles even with the span floor disabled',
@@ -783,6 +1019,29 @@ if (isMainModule(import.meta.url)) {
   if (selfTestMode) {
     runSelfTest();
   }
+
+  // --retain-days is validated by hand rather than through safeIntFlag: that
+  // helper falls back to a default on an unparseable value, which is right for
+  // a display window and wrong for a pass that deletes rows. A typo must stop
+  // the run, not silently pick a retention the user never asked for.
+  const retainRaw = flagValue(args, '--retain-days');
+  let retainDays = null;
+  if (retainRaw !== undefined) {
+    const parsed = Number(retainRaw);
+    if (!Number.isInteger(parsed) || parsed < 1) {
+      console.error(`Invalid --retain-days "${retainRaw}". Use a positive whole number of days, e.g. --retain-days 180.`);
+      process.exit(1);
+    }
+    retainDays = parsed;
+  }
+  const dryRun = args.includes('--dry-run');
+  if (dryRun && retainDays === null) {
+    console.error('--dry-run needs --retain-days N; it previews a retention pass and nothing else.');
+    process.exit(1);
+  }
+  // Before the read below, so the report describes the retained file rather
+  // than clusters the pass just removed.
+  if (retainDays !== null) await pruneScanHistory(retainDays, { dryRun });
 
   const rows = loadScanHistory();
   const aggregators = loadAggregatorCompanies();

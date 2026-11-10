@@ -17,7 +17,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
-import { pass, fail, rmSync, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, rmSync, NODE, ROOT, isolatedBatchStatePath } from './helpers.mjs';
 
 console.log('\nmerge-tracker.mjs — tracker number validation (#3706 review)');
 
@@ -56,9 +56,9 @@ function mergeOne(shape, num) {
     writeFileSync(join(adds, 'a.tsv'), shapes[shape](num));
     let out = '';
     try {
-      out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
         encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds },
+        env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(adds) },
       });
     } catch (e) { out = String(e.stdout ?? '') + String(e.stderr ?? ''); }
     const row = readFileSync(tracker, 'utf-8').split('\n').find((l) => /^\|\s*\d/.test(l));

@@ -72,7 +72,7 @@ export function parseSoftgardenDate(raw) {
   if (y < 100) y += 2000;
   if (month < 1 || month > 12 || day < 1 || day > 31) return undefined;
   const ms = Date.UTC(y, month - 1, day);
-  return Number.isFinite(ms) ? ms : undefined;
+  return new Date(ms).getUTCDate() === day ? ms : undefined;
 }
 
 /**

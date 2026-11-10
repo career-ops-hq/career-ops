@@ -4,7 +4,16 @@
 
 candidate:
   full_name: "Jane Smith"
+  # Optional. Professional headline shown directly under the name on the CV
+  # (modes/pdf.md's candidate.title). Tailor it to the JD's own title wording
+  # when your real level supports it — never inflate. Omit or leave blank for
+  # no title element.
+  # title: "Senior Backend Engineer"
   email: "jane@example.com"
+  # Optional. Total years of professional experience. portals.yml
+  # experience_filter compares it with the minimum each JD states; nothing
+  # reads it unless that filter is on. A number (2.5 is fine).
+  # years_of_experience: 6
   # Optional. Any other mailboxes that are also you. Follow-up contact extraction uses these to
   # avoid reporting your own address as somebody to chase, when a tracker note happens to cite it.
   # alternate_emails:
@@ -90,6 +99,24 @@ location:
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
+# Optional. Only read by the Singapore market mode (modes/sg/): your work
+# status there. One of: citizen | pr | pass-holder | foreign. Omit → the mode
+# treats you as foreign (Employment Pass sponsorship required) and says so.
+# sg:
+#   work_status: "foreign"
+
+# Optional. If you have a documented disability, some jurisdictions run
+# affirmative/quota hiring for it (e.g. Brazil's Lei de Cotas, Lei 8.213/91 --
+# employers with 100+ staff must reserve 2-5% of roles for PcD candidates).
+# Setting this does NOT disclose anything automatically -- it only lets
+# evaluation mode (modes/oferta.md -> Block A "PcD-quota check") notice when
+# a JD is already advertising a quota-designated opening and treat that as a
+# positive opportunity signal. Actual disclosure on an application form is
+# ALWAYS a separate, per-application, candidate-confirmed decision (see
+# modes/apply.md -- self-identification questions are never auto-answered).
+# disability:
+#   br_pcd_quota_eligible: true
+
 language:
   # Human-facing output language for reports, tracker notes, PDFs, cover
   # letters, outreach, and form answers. Use an ISO language code such as
@@ -98,6 +125,22 @@ language:
   # vocabulary/rules, while output selects the prose language.
   output: en
   # modes_dir: modes/de  # optional: use DACH market vocabulary while still writing in English
+  # modes_dir can also be a LIST of declared candidate markets, for a
+  # candidate genuinely running parallel campaigns in more than one market at
+  # once (e.g. applying in both DACH and China simultaneously) — not for
+  # switching sequentially. The FIRST entry is primary (drives the
+  # evaluation-mode file); every declared market's _shared.md is loaded into
+  # context, and which one applies to a given JD is judged from the JD's own
+  # market signals (hiring-entity jurisdiction, currency, benefits/legal
+  # vocabulary), never from the JD's language alone. See AGENTS.md "Output
+  # Language vs Market Modes" for the full contract.
+  # modes_dir: [modes/de, modes/zh]
+
+# Optional. Set enabled to false to turn follow-ups off: no follow-up dates
+# are scheduled or computed, and the web app hides the Follow-ups page.
+# The first LinkedIn outreach suggestion (`contacto`) stays on.
+# follow_ups:
+#   enabled: true
 
 # Optional follow-up cadence preferences for `node followup-cadence.mjs`.
 # CLI flags still win for one-off runs (for example `--applied-days 10`).
@@ -109,6 +152,46 @@ language:
 #   responded_subsequent_days: 3
 #   interview_thankyou_days: 1
 
+# (Optional) Rename the session after the posting it handles, e.g.
+# "VP Infrastructure, Acme Health", in hosts that let the agent set its own
+# session title. Scans and single evaluations also show their progress, e.g.
+# "Career-ops scan (checking, 5/15)" or "VP Infrastructure, Acme Health (CV)".
+# Skipped in batch and ofertas, in headless runs, and in hosts with no rename
+# tool. Default: auto.
+# Set to off to keep your own titles.
+# session_title: auto
+
+# Optional. Private repos the `expand` mode's GitHub evidence step
+# (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
+# Empty by default: a private repo appears only by name and PR and commit counts,
+# never with PR titles or commit dates, until you add it here yourself as
+# "owner/repo". Only PR and commit metadata and document file names are read by
+# default, never source code or commit messages. README content is read only when
+# you separately set read_readmes: true. Nothing reaches cv.md without your
+# confirmation.
+# github_evidence:
+#   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
+#   read_readmes: false               # opt in to reading allowlisted READMEs
+# The same step lists document file names (docs/ and top-level documents) for
+# your public repos and allowlisted ones; your other private repos show document
+# counts only.
+# Add `skip_document_listing: true` under `github_evidence` to skip document
+# names and tree queries while keeping PR and commit evidence enabled.
+
+# Optional, off by default. The stale GitHub evidence check
+# (`node evidence-freshness.mjs`) that `oferta` and `auto-pipeline` run before
+# Block A, and the batch runner runs once per batch run. It compares the newest
+# output/github-evidence-*.json from `expand` with the PRs you authored and
+# merged since then in repos you do not own, through one `gh search prs` call
+# with your logged-in `gh`. Stale at min_new_merged_prs PRs or once the scan is
+# older than max_age_days; with no scan on record, as soon as there is a merged
+# PR to find. It adds one line to the reply and the report, and never changes a
+# score. Set enabled to true to turn it on.
+# evidence_freshness:
+#   enabled: false
+#   min_new_merged_prs: 5
+#   max_age_days: 30
+
 # Controls which model tier evaluates your offers. Valid values:
 #   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
 #   standard -- balanced model, no extended thinking. Default if this key is absent.
@@ -116,16 +199,31 @@ language:
 # See the tier -> model mapping table in modes/_shared.md.
 spend_tier: standard
 
+# (Optional) Paper size for every generated PDF: "letter", "a4" or "auto".
+# One setting for the CV, the cover letter and the HTML body width, so they
+# cannot disagree. Absent means letter. An explicit --format flag or a payload
+# page_format still wins for a single render.
+# "auto" picks the sheet from the employer's country (payload `country`, or
+# --country on the renderers): Letter where Unicode CLDR lists it as the
+# primary size, A4 everywhere else, letter when the country is unknown.
+# page_format: letter
+
 # (Optional) Visual theming for the generated CV and cover-letter PDFs (#1837).
 # Each token is injected as a CSS custom property that overrides the template
 # default — omit the block (or any key) to keep the built-in look unchanged.
-# Only these five keys are recognized; anything else is ignored.
+# Only these seven keys are recognized; anything else is ignored.
 # style:
-#   accent_color:    "#2563eb"           # section headings, competency tags, project badges
-#   secondary_color: "#111827"           # company/institution names, header gradient's 2nd stop
-#   font_family:     "Outfit, Inter, sans-serif"
-#   font_size:       "10pt"              # base body text size
-#   margin:          "0.5in"             # page margin (@page)
+#   accent_color:     "#2563eb"           # section headings, competency tags, project badges
+#   secondary_color:  "#111827"           # company/institution names, header gradient's 2nd stop
+#   font_family:      "Outfit, Inter, sans-serif"
+#   font_size:        "10pt"              # base body text size
+#   margin:           "0.5in"             # page margin (@page)
+#   job_break_inside: "avoid"             # keep each role whole (one taller than a page still splits);
+#                                         # "auto" lets roles split. Unset: the template's own default
+#   project_break_inside: "avoid"         # keep each project whole — removes the one-word widow a
+#                                         # description can leave above its tech line, at the cost of a
+#                                         # bottom gap (and a page, on a CV already near its budget).
+#                                         # "auto" lets projects split. Unset: the template's own default
 
 cv:
   output_format: "html" # "html" (default), "latex", or "text" (tailored markdown, no PDF)
@@ -133,9 +231,10 @@ cv:
   # Find it in your Canva design URL: https://www.canva.com/design/DAxxxxxxx/...
   # The ID starts with "D" and is 11 characters long.
   # canva_resume_design_id: "DAxxxxxxxxx"
-  # Which CV template to use by default. Value is the kebab-case name of a file
-  # in templates/ named cv-template.<name>.html (e.g. "modern" ->
-  # templates/cv-template.modern.html). Leave unset/commented to use the built-in
+  # Which CV template to use by default. Value is the kebab-case name of a
+  # cv-template.<name>.html file. Built-in templates live in templates/; put your
+  # own in {DATA_ROOT}/data/templates/ (e.g. cv-template.modern.html, selected
+  # with template: modern). Leave unset/commented to use the built-in
   # templates/cv-template.html. You can also pick per-generation just by asking
   # (e.g. "use the modern template").
   # template: modern
@@ -162,20 +261,41 @@ cv:
   #
   # This exists so the order can live in your profile instead of in
   # templates/cv-template.html, which update-system.mjs restores on every update.
-  # cv.md stays the source of truth: the section-order guard still compares the
-  # rendered CV against it, and still fails if they disagree.
+  # cv.md stays the baseline: the section-order guard validates that the rendered
+  # CV matches either cv.md's section order or the canonical tailored order
+  # (modes/pdf.md), and fails if it diverges from both (unless --allow-reorder is set).
   # sections: [skills, education, certifications, awards]
+  #
+  # (Optional) Page budget for every rendered CV PDF (#6325). Without it a CV
+  # may run to 2 pages. Past the budget the render is kept as a sibling
+  # {name}.overflow.pdf draft and the real PDF path is left untouched (#6377):
+  # with a warning by default, or as a failed render with strict_pages: true.
+  # Students, new graduates and early-career candidates usually want 1. A
+  # --max-pages or --strict-pages flag on generate-pdf.mjs still wins for a
+  # single render.
+  # A value that is set but unusable (max_pages: 0, strict_pages: "yes") stops
+  # a CV render with a message naming it, rather than falling back to 2 pages,
+  # unless a flag passed for that render overrides the key.
+  # max_pages: 1
+  # strict_pages: true
+
+  # Sections that the AI must never remove, shorten, or paraphrase during CV generation or tailoring.
+  # (Enforced programmatically in HTML/PDF pipeline via build-cv-html and generate-pdf; LaTeX pipeline is not covered yet.)
+  # locked_sections:
+  #   - "Open Source Contributions"
+  #   - "GitHub Projects"
 
 # ── Culture Screen ───────────────────────────────────────────────────────────
 #
 # Enforces structural capping on the "Cultural signals" dimension during evaluation.
 #
 # culture_screen:
-#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first).
+#   # What you actively look for in a team culture (e.g. org size, meeting frequency, async-first, hiring process).
 #   # If absent/commented, the dimension is scored qualitatively without a hard cap.
 #   require:
 #     - "Small, flat teams (under 15 engineers)"
 #     - "Async-first communication, low meeting overhead"
+#     - "Practical interview processes (pair programming, system design); avoid multiple LeetCode rounds or unpaid take-home assignments over ~6 hours"
 #   # If true, the dimension is capped at 2/5 if the JD lacks any evidence for the required criteria.
 #   # If false (or absent), lack of evidence defaults to a neutral 3/5.
 #   deprioritize_if_absent: true
@@ -267,6 +387,10 @@ cover_letter:
 #                   silently, so nothing breaks. `doctor` reports the active mode.
 # scan:
 #   extractor: mcp   # mcp (default) | cli
+#   timeout_seconds: 230   # web Explore scan budget (seconds) before the run is
+#                          # stopped; default 230. A broad ATS sweep probes every
+#                          # company in a source — raise this to let a large scan
+#                          # finish (bounded by the API route's 300s cap if deployed).
 
 # ── Auto-PDF threshold ──────────────────────────────────────────────────────
 #

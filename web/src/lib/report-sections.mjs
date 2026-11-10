@@ -51,21 +51,17 @@ const HEADING_LETTER = /^(?:Block\s+([A-Z])(?:[).:]|\s)|([A-Z])[).:])/i;
 
 /**
  * Display form of a section heading: author-letter prefix and the trailing
- * "(lead)" / "(verdict)" / "(draft)" marker removed. Falls back to the original
- * when stripping would leave nothing.
- *
- * "(draft)" joins the list because the modes now write it on the draft-answers
- * block, where it is what `parseDraftAnswersBlockH` locates the block by in
- * the sixteen languages whose heading is neither `H)` nor the English name
- * (#3884). It is an authoring signal like the other two, so it is stripped
- * here for the same reason: the reader needs it, the viewer must not see it.
+ * "(lead)" / "(verdict)" marker removed. Falls back to the original when
+ * stripping would leave nothing.
  * @param {string} h
  * @returns {string}
  */
+import { isStarTableHeader, parsePipeTable } from "./report-tables.mjs";
+
 export function cleanHeading(h) {
   const stripped = h
     .replace(HEADING_PREFIX, "")
-    .replace(/\s*\((?:lead|verdict|draft)\)\s*$/i, "")
+    .replace(/\s*\((?:lead|verdict)\)\s*$/i, "")
     .trim();
   return stripped || h.trim();
 }
@@ -112,12 +108,135 @@ export function isVerdictHeading(heading) {
   return /^verdict$/i.test(cleanHeading(heading));
 }
 
+/** Public methodology apply/don't-apply line (career-ops.org + ReportView). */
+export const APPLY_LINE = 4.0;
+
+/** @param {unknown} legitimacy */
+function flaggedPosting(legitimacy) {
+  const s = String(legitimacy ?? "").toLowerCase();
+  // Turkish reports (modes/tr/is-ilani.md) write the tier in Turkish:
+  // Dikkatli İlerle (caution), Şüpheli (suspicious). Chinese reports
+  // (modes/zh/oferta.md, modes/zh-TW/oferta.md) write it in Chinese:
+  // 谨慎推进 / 審慎推進 (caution), 疑似虚假 / 疑似虛假 (suspicious).
+  return /caut|precau|suspic|sospech|scam|fake|dikkatli|şüpheli|谨慎|審慎|疑似/.test(s);
+}
+
+/**
+ * A score above the line on a flagged posting is not a recommendation, so the
+ * label never contradicts the legitimacy badge next to it.
+ *
+ * @param {unknown} score
+ * @param {unknown} [legitimacy]
+ * @returns {string | null} "Recommended" | "Check the posting first" | "Below the apply line" | null
+ */
+export function applyLineLabel(score, legitimacy) {
+  if (score == null || score === "") return null;
+  const n = typeof score === "number" ? score : Number(String(score).match(/(\d+(?:\.\d+)?)/)?.[1]);
+  if (!Number.isFinite(n)) return null;
+  if (n < APPLY_LINE) return "Below the apply line";
+  return flaggedPosting(legitimacy) ? "Check the posting first" : "Recommended";
+}
+
+/**
+ * Block-G legitimacy tier → badge tone. Matches the same localized tiers as
+ * flaggedPosting (English, Spanish, Turkish, Chinese).
+ *
+ * @param {string} l
+ * @returns {"good" | "warn" | "bad" | "muted"}
+ */
+export function legitimacyTone(l) {
+  const s = l.toLowerCase();
+  if (s.includes("high") || s.includes("confian") || s.includes("legit") || s.includes("güven") || s.includes("高置信") || s.includes("高信心")) return "good";
+  if (s.includes("caution") || s.includes("precau") || s.includes("caut") || s.includes("dikkatli") || s.includes("谨慎") || s.includes("審慎")) return "warn";
+  if (s.includes("suspic") || s.includes("sospech") || s.includes("scam") || s.includes("fake") || s.includes("şüpheli") || s.includes("疑似")) return "bad";
+  return "muted";
+}
+
+/**
+ * Apply is the primary CTA only when the methodology says apply. Below 4.0 or
+ * a caution/suspicious legitimacy tier, keep the control but drop brand fill
+ * so it does not out-shout the verdict (#4206).
+ *
+ * @param {{ score?: unknown, legitimacy?: unknown }} opts
+ * @returns {boolean}
+ */
+export function applyCtaQuiet(opts) {
+  return applyLineLabel(opts?.score) === "Below the apply line" || flaggedPosting(opts?.legitimacy);
+}
+
+/**
+ * Block B (CV Match / gaps) is the only lettered section that stays open.
+ * Interview Plan is letter F in current oferta.md — never treat F as lead.
+ * @param {{ letter?: string | null, heading?: string }} section
+ * @returns {boolean}
+ */
+export function isLeadSection(section) {
+  if (section?.letter === "B") return true;
+  return /\b(cv match|match with cv)\b/i.test(cleanHeading(section?.heading ?? ""));
+}
+
+/**
+ * First non-table paragraph — the one-line "why this score" for the verdict card.
+ * @param {string} md
+ * @returns {string}
+ */
+export function firstProseParagraph(md) {
+  const withoutTables = String(md ?? "")
+    .split("\n")
+    .map((l) => (/^\s*\|/.test(l) ? "" : l))
+    .join("\n");
+  return (
+    withoutTables
+      .split(/\n{2,}/)
+      .map((p) => p.replace(/^#+\s+/, "").trim())
+      .find((p) => p && !/^[-*]{3,}$/.test(p) && !/^\*\*[^*]+:\*\*/.test(p)) ?? ""
+  );
+}
+
+/**
+ * Score-why paragraph for the verdict card. Prefers a real Verdict block, then
+ * the body intro, then the header lede (oferta.md puts the one-liner above ---).
+ * @param {{ report?: string, intro?: string, verdictContent?: string }} opts
+ * @returns {string}
+ */
+export function verdictReason(opts) {
+  const fromVerdict = firstProseParagraph(opts?.verdictContent ?? "");
+  if (fromVerdict) return plainInline(fromVerdict);
+  const fromIntro = firstProseParagraph(opts?.intro ?? "");
+  if (fromIntro) return plainInline(fromIntro);
+  const header = String(opts?.report ?? "").split(/^---\s*$/m)[0] ?? "";
+  const stripped = header
+    .replace(/^#\s+.*$/m, "")
+    .replace(/^\s*\*\*[^*]+:\*\*.*$/gm, "")
+    .trim();
+  return plainInline(firstProseParagraph(stripped));
+}
+
+/**
+ * The verdict card renders the reason as plain text, so inline Markdown
+ * (`**Apply.**`, `code`, links) would show its raw markers.
+ * @param {string} text
+ * @returns {string}
+ */
+function plainInline(text) {
+  return String(text ?? "")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1$2")
+    .replace(/`([^`]+)`/g, "$1");
+}
+
 /**
  * Split a report body on `## ` headings. Everything before the first one is
  * the intro.
  * @param {string} body
  * @returns {{ intro: string, sections: Section[] }}
  */
+function normalizeNewlines(text) {
+  return String(text ?? "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
 export function splitSections(body) {
   /** @type {string[]} */
   const intro = [];
@@ -125,7 +244,7 @@ export function splitSections(body) {
   const sections = [];
   /** @type {{ heading: string, letter: string | null, lines: string[] } | null} */
   let cur = null;
-  for (const line of body.split("\n")) {
+  for (const line of normalizeNewlines(body).split("\n")) {
     const h = line.match(/^##\s+(.*)$/);
     if (h) {
       if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
@@ -139,4 +258,48 @@ export function splitSections(body) {
   }
   if (cur) sections.push({ heading: cur.heading, letter: cur.letter, content: cur.lines.join("\n").trim() });
   return { intro: intro.join("\n").trim(), sections };
+}
+
+const PREVIEW_MAX = 96;
+
+/**
+ * One-line preview for a collapsed report section. A STAR table gets its story
+ * count, then prose wins. A section that is only a table gets "Field: value"
+ * pairs for a two-column table or a row count otherwise, never the raw
+ * `| --- |` separator.
+ *
+ * @param {string} md
+ * @returns {string}
+ */
+export function sectionPreview(md) {
+  const clip = (s) => (s.length > PREVIEW_MAX ? s.slice(0, PREVIEW_MAX).trimEnd() + "…" : s);
+  const plain = (s) => s.replace(/[*_`>#|]/g, "").replace(/\s+/g, " ").trim();
+  const table = parsePipeTable(md);
+  const n = table?.rows.length ?? 0;
+  if (table && isStarTableHeader(table.header)) return `${n} interview stor${n === 1 ? "y" : "ies"}`;
+  const text = plain(
+    md
+      .replace(/^#+\s.*$/gm, "")
+      .replace(/```[\s\S]*?```/g, "")
+      .replace(/^\s*\|.*$/gm, ""),
+  );
+  if (text) return clip(text.split(/(?<=[.!?])\s/)[0] ?? text);
+  if (!table) return "";
+  if (table.header.length === 2) {
+    return clip(table.rows.map(([k, v]) => `${plain(k ?? "")}: ${plain(v ?? "")}`).join(" · "));
+  }
+  return `${n} row${n === 1 ? "" : "s"}`;
+}
+
+/**
+ * Archetype strings are job titles. Unlabeled, they sit under the real role
+ * and read as a second title.
+ *
+ * @param {unknown} value
+ * @returns {string}
+ */
+export function archetypeCaption(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return `Archetype: ${text}`;
 }

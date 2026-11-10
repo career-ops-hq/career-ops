@@ -4,14 +4,22 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages] [--skip-fact-check]
- *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
  *
  * --batch renders every document in a JSON manifest (an array of
  * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
  * relaunching per document. One failing document is isolated and recorded; the
  * rest still render. Results are written to <manifest>.results.json and the
- * process exits non-zero if any document failed (#2384).
+ * process exits non-zero if any document failed (#2384). Relative input and
+ * output paths in the manifest resolve against the manifest's folder, not
+ * process.cwd().
+ *
+ * A single-file relative path is different. It is taken from the current
+ * directory when that location is already inside the tracker workspace, and
+ * otherwise from the workspace root. `output/cv.html` then finds the file
+ * whether you launch from the repo or from a checkout whose data root lives
+ * elsewhere. Absolute paths stay absolute.
  *
  * --report links the generated PDF to its tracker/report number and records
  * the linkage in data/pdf-index.tsv so downstream tools (e.g. the TUI
@@ -24,30 +32,70 @@
  * role) rather than accidentally scrambled by an agent. Without this flag,
  * any divergence from cv.md's section order still fails generation.
  *
+ * --allow-nonchronological downgrades the work-experience ordering guard from
+ * a thrown error to a console warning. By default a CV whose experience entries
+ * are not newest-first fails generation: promoting "the most relevant role" to
+ * the top is a functional-resume technique that buries the candidate's most
+ * recent senior title and reads as concealment to ATS parsers and recruiters.
+ *
  * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
- * The actual page count is checked after Chromium writes the PDF; overflow
- * warns with trimming guidance by default. --strict-pages turns that warning
- * into a hard rejection without publishing the render as successful.
+ * The actual page count is read from the PDF Chromium produced, before anything
+ * is written to the output path. An overflow never lands there: the render goes
+ * to a sibling {output}.overflow.pdf draft for inspection, and the output path
+ * keeps whatever it held. By default that is a warning and the process still
+ * exits 0; --strict-pages turns it into a hard rejection. Either way the draft
+ * is never logged as a successful render or indexed in data/pdf-index.tsv.
+ *
+ * --strict-fact-check makes a `warn` verdict from the fact gate fatal, the same
+ * way --strict-pages makes a page-budget overflow fatal. The gate's `warn`
+ * covers findings that are advisory by nature — claims it could not read
+ * (`#5348`), a missing config/cv-facts.json — so a careful caller may still
+ * want them to stop a render instead of scrolling past them. The warnings are
+ * printed exactly as they are without the flag; only the exit changes. It does
+ * not make the gate RUN: --skip-fact-check, or a workspace with no cv.md, still
+ * means no gate, and combining the two is rejected rather than silently
+ * honouring one over the other. A `block` verdict already fails without it.
  *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { chromium } from 'playwright';
 import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
 import { readFile } from 'fs/promises';
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
-import { getCareerOpsRoot } from './path-resolver.mjs';
-import { readStyleTokens, injectThemeStyle, readCvSectionOrder } from './theme-style.mjs';
-import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRoot } from './tracker-utils.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections, readCvPageBudget } from './theme-style.mjs';
+import { validateCvExperienceOrder } from './cv-experience-order.mjs';
+import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
+import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
-const workspaceRoot = resolveWorkspaceRoot(trackerPath);
+// Derive the workspace root from the uncanonicalized tracker path (#3169): a
+// repo that symlinks only its data/ out (the #524 workaround) must still resolve
+// cv.md, config/ and output/ inside the repo, not follow data/ to the symlink
+// target. resolveWorkspaceRootFor canonicalizes the derived root itself, so the
+// spelling the rest of the module compares against stays canonical as before.
+const workspaceRoot = resolveWorkspaceRootFor(getCareerOpsRoot());
 const PDF_PAGE_MARGIN = '0.6in';
+
+/**
+ * The profile a render reads. An explicit root is the workspace the caller
+ * named, so the environment does not redirect it. Otherwise CAREER_OPS_PROFILE
+ * names the file outright, and without it the profile sits in the workspace
+ * (which CAREER_OPS_TRACKER can move off the data root, #2471).
+ */
+function workspaceProfilePath(explicitRoot) {
+  if (explicitRoot) return getProfilePath(explicitRoot);
+  return hasProfileOverride() ? getProfilePath() : getProfilePath(workspaceRoot);
+}
 
 // Canonical tracker workspace: realpath so a symlinked ancestor (e.g. macOS
 // /var -> /private/var) is compared like-for-like by assertInsideWorkspace.
@@ -65,15 +113,31 @@ const PDF_PAGE_MARGIN = '0.6in';
 // self-correcting the moment it does. Same defect class as #3159.
 let __rootCache = { key: null, root: null, canonical: null };
 function refreshRootCache() {
-  const key = process.env.CAREER_OPS_TRACKER || '';
-  if (__rootCache.key !== key) {
-    // Always re-derive: falling back to the import-time const when the variable
-    // is unset would hand back the very value the poisoned import froze.
-    const root = resolveWorkspaceRoot(resolveTrackerPath(__dirname));
-    __rootCache = { key, root, canonical: realpathSync(root) };
+  // Derive the root on EVERY call and key the cache on the resolved value.
+  //
+  // The root can move three ways: CAREER_OPS_TRACKER, CAREER_OPS_ROOT /
+  // CAREER_OPS_DATA_DIR, and the .career-ops-data marker file. Keying on the
+  // environment alone misses the marker, which is a file on disk and can change
+  // while the environment does not, so the cache would keep serving a stale
+  // workspace. The resolved root is the one value that captures all three, and
+  // what is memoised is only realpathSync(), the syscall worth avoiding.
+  //
+  // getCareerOpsRoot(), not __dirname: the data root is the env vars, then a
+  // .career-ops-data marker, then the repo, and only the last of those is the
+  // script's own directory. With the user layer outside the checkout this
+  // derived the workspace from the CODE directory, so every path under the
+  // real data root read as an escape and the PDF was refused (#4389). Line 49
+  // already used getCareerOpsRoot(), so the two disagreed inside one module.
+  //
+  // Same #3169 derivation as the import-time const: resolveWorkspaceRootFor works
+  // from the uncanonicalized tracker so a symlinked data/ stays in the repo.
+  const root = resolveWorkspaceRootFor(getCareerOpsRoot());
+  if (__rootCache.key !== root) {
+    __rootCache = { key: root, root, canonical: realpathSync(root) };
   }
   return __rootCache;
 }
+
 // Two accessors on purpose, so each call site keeps the exact semantics it had:
 // the containment guard compares canonical forms (a symlinked ancestor must not
 // read as an escape), while the manifest/output helpers work in the lexical form
@@ -136,8 +200,48 @@ function assertInsideWorkspace(absPath, label) {
   return absPath;
 }
 
+/**
+ * Resolve one single-file input or output argument.
+ *
+ * A relative path that already lands inside the workspace keeps the current
+ * directory, so launching from the repo is unchanged. A relative path that
+ * would land outside is read from the workspace root instead. That is the
+ * split-layout case: the shell is in the checkout, CAREER_OPS_ROOT points at
+ * the data directory, and `output/cv.html` means the workspace file. An
+ * absolute path is unchanged. The containment guard below still runs on the
+ * result, so a `..` segment cannot escape.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+function resolvePdfCliPath(p) {
+  if (isAbsolute(p)) return resolve(p);
+  const fromCwd = resolve(p);
+  try {
+    return assertInsideWorkspace(fromCwd, 'input');
+  } catch (err) {
+    if (!/escapes the tracker workspace/.test(err?.message || '')) throw err;
+    return resolve(workspaceRoot, p);
+  }
+}
+
 // Ensure output directory exists (fresh setup)
 mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
+
+/**
+ * Say what normalizeTextForATS() rewrote, so a changed character in a document
+ * going to an employer is never a silent one.
+ *
+ * @param {Record<string, number>} replacements - Count per kind of rewrite.
+ * @param {(line: string) => void} [print] - Where the line goes.
+ * @returns {void}
+ */
+function reportAtsReplacements(replacements, print = console.log) {
+  const total = Object.values(replacements).reduce((a, b) => a + b, 0);
+  if (total === 0) return;
+  const breakdown = Object.entries(replacements).map(([k, v]) => `${k}=${v}`).join(', ');
+  print(`🧹 ATS normalization: ${total} replacements (${breakdown})`);
+}
 
 /**
  * Normalize text for ATS compatibility by converting problematic Unicode.
@@ -148,7 +252,29 @@ mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
  *
  * Only touches body text — preserves CSS, JS, tag attributes, and URLs.
  * Returns { html, replacements } so the caller can log what was changed.
+ *
+ * In body text it also keeps each hyphenated word on one line (#4908).
+ * Chromium may break a line after a hard hyphen, and no CSS turns that off,
+ * so "go-to-market" lands in the PDF text layer as "go-" and "to-market" on
+ * separate lines: some extractors join the halves without the hyphen, others
+ * keep the line break, and either way the term an ATS matches on is gone. A
+ * white-space:nowrap span changes the line breaking only, never the text.
+ * The span covers the whole whitespace-delimited run ("30-40%", "$1-2M"), so
+ * its edges sit where the text already breaks: the fact gate turns tags into
+ * spaces, and a span around "30-40" alone would read as "40 %". CJK text has
+ * no spaces, so a run there is a whole clause: only the hyphenated Latin word
+ * inside it is wrapped, and CJK characters, which may break anywhere, never
+ * count as part of one.
  */
+const WORD_CHAR = String.raw`[[\p{L}\p{N}]--[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]]`;
+const HYPHENATED_WORD_SOURCE = String.raw`(?<![${WORD_CHAR}\-])${WORD_CHAR}+(?:-${WORD_CHAR}+)+(?![${WORD_CHAR}\-])`;
+const HYPHENATED_WORD = new RegExp(HYPHENATED_WORD_SOURCE, 'v');
+const HYPHENATED_WORDS = new RegExp(HYPHENATED_WORD_SOURCE, 'gv');
+const CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
+// Longer runs (an identifier, a pasted slug) stay breakable rather than risk
+// overflowing a narrow column.
+const HYPHENATED_RUN_MAX = 40;
+
 function normalizeTextForATS(html) {
   const replacements = {};
   const bump = (key, n) => { replacements[key] = (replacements[key] || 0) + n; };
@@ -163,15 +289,35 @@ function normalizeTextForATS(html) {
     }
   );
 
+  // The nowrap span is markup, so it must not land where text is plain
+  // (<title>, <textarea>, <option>, the raw-text elements) or foreign
+  // (<svg>, <math>).
+  let plainUntil = null;
+  const text = (t) => (plainUntil ? sanitizeText(t) : keepHyphenatedWordsWhole(sanitizeText(t)));
+  // A real tag ends at the first `>` outside a quoted attribute value, so a
+  // `title="a > b"` is not split into a tag and a run of "text". A quote
+  // opens a value only right after `=` (`title=don't` is unquoted), and
+  // comments and declarations are matched whole first. Each alternative
+  // starts differently, so a tag left open never backtracks.
+  const TAG = /<!--[\s\S]*?-->|<![^>]*>|<\/?[A-Za-z](?:[^>=]|=\s*"[^"]*"|=\s*'[^']*'|=(?!\s*["']))*>/y;
   let out = '';
   let i = 0;
   while (i < masked.length) {
     const lt = masked.indexOf('<', i);
-    if (lt === -1) { out += sanitizeText(masked.slice(i)); break; }
-    out += sanitizeText(masked.slice(i, lt));
-    const gt = masked.indexOf('>', lt);
+    if (lt === -1) { out += text(masked.slice(i)); break; }
+    out += text(masked.slice(i, lt));
+    TAG.lastIndex = lt;
+    const gt = TAG.test(masked) ? TAG.lastIndex - 1 : masked.indexOf('>', lt);
     if (gt === -1) { out += masked.slice(lt); break; }
-    out += masked.slice(lt, gt + 1);
+    const tag = masked.slice(lt, gt + 1);
+    const name = /^<\/?([A-Za-z][\w:-]*)/.exec(tag)?.[1].toLowerCase();
+    // An <option> holds only text and its end tag is optional, so any tag
+    // after it closes it.
+    if (plainUntil && (plainUntil === 'option' || (tag[1] === '/' && name === plainUntil))) plainUntil = null;
+    if (!plainUntil && tag[1] !== '/' && !tag.endsWith('/>') && /^(?:title|textarea|option|svg|math|xmp|plaintext|noembed|noframes|iframe|noscript)$/.test(name || '')) {
+      plainUntil = name;
+    }
+    out += tag;
     i = gt + 1;
   }
 
@@ -194,7 +340,12 @@ function normalizeTextForATS(html) {
     t = t.replace(/\s*\u2190\s*/g, () => { bump('left-arrow', 1); return ' from '; });
     t = t.replace(/\s*[\u2191\u2193]\s*/g, () => { bump('vert-arrow', 1); return ' '; });
     // Middle dot and bullet glyphs garble in some extractors \u2014 replace with pipe.
-    t = t.replace(/\s*\u00B7\s*/g, () => { bump('middot', 1); return ' | '; });
+    // Catalan l·l is a letter pair inside a word (intel·ligència), not a separator.
+    t = t.replace(/\s*\u00B7\s*/g, (m, at, all) => {
+      if (m === '\u00B7' && /[lL]/.test(all[at - 1] ?? '') && /[lL]/.test(all[at + 1] ?? '')) return m;
+      bump('middot', 1);
+      return ' | ';
+    });
     t = t.replace(/\s*\u2022\s*/g, () => { bump('bullet', 1); return ' | '; });
     // Currency symbols sometimes stripped by font-subsetted PDFs \u2014 spell out
     // the unambiguous ones. \u00A5 is intentionally NOT converted: it maps to both
@@ -207,7 +358,36 @@ function normalizeTextForATS(html) {
       bump('markdown-bold', 1);
       return `<strong>${inner}</strong>`;
     });
+    // Markdown italic, as cv.md writes titles (_Game Title_). Both underscores
+    // must sit on a word boundary, and a path separator is not one, so
+    // snake_case, a_b and docs/_draft_/cv.md stay literal. Text-only elements
+    // (<title>, <textarea>, ...) would show <em> as literal text, so skip them.
+    if (!plainUntil) {
+      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (match, inner, at, whole) => {
+        // Underscores inside an email address are the address. Underscores
+        // around the whole address enclose its @, and are italics.
+        const word = /\S*$/.exec(whole.slice(0, at))[0] + /^\S*/.exec(whole.slice(at))[0];
+        if (word.includes('@') && !inner.includes('@')) return match;
+        bump('markdown-italic', 1);
+        return `<em>${inner}</em>`;
+      });
+    }
     return t;
+  }
+
+  function keepHyphenatedWordsWhole(text) {
+    if (!text || !text.includes('-')) return text;
+    const wrap = (s) => {
+      bump('hyphen-nowrap', 1);
+      return `<span style="white-space:nowrap">${s}</span>`;
+    };
+    // sanitizeText may have inserted <strong> markup, and a masked <script> or
+    // <style> is a placeholder token; only wrap the text runs between them.
+    return text.split(/(<[^>]*>|\u0000MASK\d+\u0000)/).map((part, n) => (n % 2 ? part : part.replace(/\S+/g, (run) => {
+      if (!HYPHENATED_WORD.test(run)) return run;
+      if (CJK.test(run)) return run.replace(HYPHENATED_WORDS, (w) => (w.length > HYPHENATED_RUN_MAX ? w : wrap(w)));
+      return run.length > HYPHENATED_RUN_MAX ? run : wrap(run);
+    }))).join('');
   }
 }
 
@@ -290,6 +470,43 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // Spanish — the same failure again: with no entries here, a Spanish CV
+  // rendered in the documented modes/pdf.md order (Experiencia before Formación)
+  // was rejected against a cv.md listing Formación first, and --allow-reorder was
+  // the only way through. The vocabulary is what generated Spanish CVs render
+  // (Perfil Profesional, Competencias Clave, Experiencia Profesional, Formación,
+  // Certificaciones, Habilidades) plus each section's everyday synonyms. Keys are
+  // folded through foldDiacritics below, so accented and unaccented spellings
+  // both resolve.
+  ['perfil', 'summary'],
+  ['perfil profesional', 'summary'],
+  ['resumen', 'summary'],
+  ['resumen profesional', 'summary'],
+  ['competencias', 'competencies'],
+  ['competencias clave', 'competencies'],
+  ['competencias principales', 'competencies'],
+  ['experiencia', 'experience'],
+  ['experiencia profesional', 'experience'],
+  ['experiencia laboral', 'experience'],
+  ['trayectoria profesional', 'experience'],
+  ['proyectos', 'projects'],
+  ['proyectos destacados', 'projects'],
+  ['proyectos personales', 'projects'],
+  ['proyectos y laboratorios', 'projects'],
+  ['formación', 'education'],
+  ['formación académica', 'education'],
+  ['educación', 'education'],
+  ['estudios', 'education'],
+  ['certificaciones', 'certifications'],
+  ['certificados', 'certifications'],
+  ['premios', 'awards'],
+  ['reconocimientos', 'awards'],
+  ['premios y reconocimientos', 'awards'],
+  ['habilidades', 'skills'],
+  ['habilidades técnicas', 'skills'],
+  ['conocimientos técnicos', 'skills'],
+  ['herramientas e idiomas', 'skills'],
+  ['intereses', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -491,6 +708,103 @@ export function validateCvSectionOrder(html, cvMarkdown, { allowReorder = false 
   throw new Error(message);
 }
 
+function normalizeForComparison(text) {
+  if (!text) return '';
+  return text
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&#?[a-z0-9]+;/gi, ' ')
+    .replace(/[#*`_~|•·]/g, ' ') // Strip markdown and bullet chars
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ') // Strip punctuation to be safe against ATS transformations
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * Excerpts of two normalized section bodies around the first place they differ,
+ * so a locked-section failure shows what changed rather than an entire section.
+ * A whole Experience section runs to thousands of characters, which the web UI
+ * would cut off before the changed text. Equal-length windows of `context`
+ * characters either side of the divergence; an ellipsis marks each cut end.
+ * @param {string} expected
+ * @param {string} found
+ * @param {number} [context]
+ * @returns {[string, string]}
+ */
+export function lockedSectionExcerpts(expected, found, context = 80) {
+  let i = 0;
+  const max = Math.min(expected.length, found.length);
+  while (i < max && expected[i] === found[i]) i++;
+  const start = Math.max(0, i - context);
+  const cut = (text) => {
+    const end = Math.min(text.length, i + context);
+    return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+  };
+  return [cut(expected), cut(found)];
+}
+
+/**
+ * Validate that sections marked as locked in config/profile.yml are identical
+ * (ignoring formatting) between the source cv.md and the rendered HTML.
+ * @param {string} html 
+ * @param {string} cvMarkdown 
+ * @param {string[]} lockedKeys 
+ */
+export function validateLockedSections(html, cvMarkdown, lockedKeys) {
+  if (!lockedKeys || lockedKeys.length === 0) return;
+
+  const htmlSections = html.matchAll(/<[^>]+class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi);
+  const renderedMap = new Map();
+  let lastKey = null;
+  let lastIndex = 0;
+  for (const match of htmlSections) {
+    if (lastKey) {
+      renderedMap.set(lastKey, html.substring(lastIndex, match.index));
+    }
+    lastKey = sectionKey(match[1]);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastKey) {
+    renderedMap.set(lastKey, html.substring(lastIndex));
+  }
+
+  // Each heading's section runs to the next heading of the same or a higher
+  // level, measured from that heading itself: a cv.md that opens with a
+  // `# Name` title must not swallow the `##` sections below it. When two
+  // headings fold to the same key, the shallower (then the first) one wins.
+  const sourceLines = cvMarkdown.split(/\r?\n/);
+  const headings = [];
+  sourceLines.forEach((line, index) => {
+    const heading = line.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*#*\s*$/);
+    if (heading) headings.push({ index, level: heading[1].length, key: sectionKey(heading[2]) });
+  });
+  const sourceMap = new Map();
+  const sourceLevels = new Map();
+  headings.forEach((heading, i) => {
+    if (sourceLevels.has(heading.key) && sourceLevels.get(heading.key) <= heading.level) return;
+    const next = headings.slice(i + 1).find(other => other.level <= heading.level);
+    const end = next ? next.index : sourceLines.length;
+    const body = sourceLines.slice(heading.index + 1, end);
+    sourceMap.set(heading.key, body.length ? body.join('\n') + '\n' : '');
+    sourceLevels.set(heading.key, heading.level);
+  });
+
+  for (const key of lockedKeys) {
+    if (!sourceMap.has(key)) {
+      const availableKeys = Array.from(sourceMap.keys()).map(k => `'${k}'`).join(', ');
+      throw new Error(`Configured locked_section '${key}' not found in cv.md. Available sections: ${availableKeys}`);
+    }
+    const sourceNorm = normalizeForComparison(sourceMap.get(key));
+    const renderedRaw = renderedMap.get(key) || '';
+    const renderedNorm = normalizeForComparison(renderedRaw);
+
+    if (sourceNorm !== renderedNorm) {
+      const [expectedExcerpt, foundExcerpt] = lockedSectionExcerpts(sourceNorm, renderedNorm);
+      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${expectedExcerpt}\nFound (normalized): ${foundExcerpt}`);
+    }
+  }
+}
+
 /**
  * Every canonical section key the alias table can produce, in template order.
  * Derived from the table rather than restated so the two cannot drift.
@@ -539,6 +853,74 @@ function displayTitle(raw) {
   const kept = points.slice(0, DISPLAY_TITLE_MAX - 1);
   while (kept.length > 0 && /\p{M}/u.test(kept[kept.length - 1])) kept.pop();
   return `${kept.join('')}…`;
+}
+
+// Application portals reported to reject longer values (#5629). Advisory only.
+const PORTAL_LENGTH_LIMIT = 64;
+const NAMED_ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', hellip: '…', ndash: '–', mdash: '—' };
+
+// Plain text of the first <div> whose class list holds the whole token
+// `header-title`, in any attribute order. Tags inside it are skipped by a
+// character scan and entities are decoded in one pass, so no text is rebuilt
+// by repeated pattern replacement.
+function headlineText(html) {
+  for (const m of html.matchAll(/<div\b([^>]*)>/gi)) {
+    const cls = /(?:^|\s)class\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(m[1]);
+    const tokens = (cls?.[1] ?? cls?.[2] ?? '').split(/\s+/);
+    if (!tokens.includes('header-title')) continue;
+    const start = m.index + m[0].length;
+    // The matching </div>: count nested <div> opens and closes from here.
+    let depth = 1;
+    let end = html.length;
+    for (const t of html.slice(start).matchAll(/<(\/?)div\b[^>]*>/gi)) {
+      depth += t[1] ? -1 : 1;
+      if (depth === 0) { end = start + t.index; break; }
+    }
+    const inner = html.slice(start, end);
+    let text = '';
+    let inTag = false;
+    for (const ch of inner) {
+      if (ch === '<') inTag = true;
+      else if (ch === '>' && inTag) inTag = false;
+      else if (!inTag) text += ch;
+    }
+    return text.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (whole, ref) => {
+      if (ref[0] === '#') {
+        const code = ref[1].toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+        return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
+      }
+      return NAMED_ENTITIES[ref.toLowerCase()] ?? whole;
+    }).trim();
+  }
+  return '';
+}
+
+/**
+ * Warn, never fail, when the CV headline or the output PDF filename is longer
+ * than some application portals accept (#5629). Reads the headline from the
+ * rendered header-title element, so it judges what actually prints.
+ *
+ * @param {string} html - The CV HTML about to be rendered.
+ * @param {string} outputPath - Destination PDF path (only the basename counts).
+ * @param {number} [limit] - Length above which a warning is printed.
+ * @returns {string[]} The warning messages printed (empty when none).
+ */
+export function warnLongPortalFields(html, outputPath, limit = PORTAL_LENGTH_LIMIT) {
+  const warnings = [];
+  const plain = headlineText(html);
+  if (plain) {
+    const len = [...plain].length;
+    if (len > limit) {
+      warnings.push(`CV headline is ${len} characters (limit ${limit}): "${displayTitle(plain)}". Some application portals reject longer values; aim for a job title plus two or three keywords.`);
+    }
+  }
+  const name = basename(outputPath || '');
+  const nameLen = [...name].length;
+  if (nameLen > limit) {
+    warnings.push(`Output filename is ${nameLen} characters (limit ${limit}): "${displayTitle(name)}". Some application portals reject longer file names; use a shorter name.`);
+  }
+  for (const w of warnings) console.warn(`⚠️  ${w}`);
+  return warnings;
 }
 
 /**
@@ -1013,29 +1395,70 @@ export function reorderCvSections(html, order) {
  * force content under the limit.
  *
  * @param {number} pageCount - Actual pages in the rendered PDF.
- * @param {{ maxPages?: number, strictPages?: boolean }} [options]
+ * @param {{ maxPages?: number, strictPages?: boolean, kind?: string }} [options]
  * @returns {void}
  */
-export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false } = {}) {
+export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false, kind = 'cv' } = {}) {
   if (!Number.isInteger(pageCount) || pageCount < 1) {
     throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
   }
-  if (!Number.isInteger(maxPages) || maxPages < 1) {
-    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
-  }
+  assertValidMaxPages(maxPages);
   if (pageCount <= maxPages) return;
 
   const actualLabel = 'pages';
   const allowedLabel = maxPages === 1 ? 'page' : 'pages';
+  const isCover = kind === 'cover';
   const message =
-    `CV is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
-    'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
+    `${isCover ? 'Cover letter' : 'CV'} is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
+    (isCover
+      ? 'Shorten the opening, the profile intro, or the achievements, then regenerate.'
+      : 'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.');
 
   if (strictPages) {
-    throw new Error(`${message} (--strict-pages requested)`);
+    throw new Error(`${message} (strict page budget: ${isCover ? '--strict-pages' : '--strict-pages or cv.strict_pages'})`);
   }
 
-  console.warn(`⚠️  ${message} Continuing because overflow is warning-only by default; use --strict-pages to reject it.`);
+  console.warn(`⚠️  ${message} Overflow is warning-only by default; use --strict-pages to reject it.`);
+}
+
+/**
+ * Write an over-budget render to a sibling draft next to the output path, so
+ * the output path only ever holds a PDF inside its page budget (#6325, #6377).
+ *
+ * The first free name is taken, so the draft never replaces a file already
+ * there: a CV can legitimately be named cv.overflow.pdf, or another render may
+ * be writing it. 'wx' creates the file or fails with EEXIST in one step, so
+ * two concurrent renders cannot both claim the same name.
+ *
+ * @param {string} outputPath - The PDF path the caller asked for.
+ * @param {Buffer} pdfBuffer - The rendered PDF.
+ * @returns {string} The draft path that was written.
+ */
+function writeOverflowDraft(outputPath, pdfBuffer) {
+  const draftBase = outputPath.replace(/\.pdf$/i, '');
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? `${draftBase}.overflow.pdf` : `${draftBase}.overflow-${n}.pdf`;
+    try {
+      writeFileSync(candidate, pdfBuffer, { flag: 'wx' });
+      return candidate;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+  }
+}
+
+/**
+ * Throw unless a page budget is a positive integer. enforcePageBudget() checks
+ * it after a render; renderInPage() checks it before one, so a bad value never
+ * reaches the output path.
+ *
+ * @param {unknown} maxPages
+ * @returns {void}
+ */
+function assertValidMaxPages(maxPages) {
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
+  }
 }
 
 /**
@@ -1130,9 +1553,15 @@ export function isWorkspaceOutputPath(pathValue, rootDir = currentWorkspaceRoot(
   }
 }
 
-export function injectPrintPageCss(html, format = 'a4') {
-  const normalizedFormat = String(format || 'a4').toLowerCase();
-  const pageSize = normalizedFormat === 'letter' ? 'Letter' : 'A4';
+export function injectPrintPageCss(html, format, country) {
+  // The only place the sheet size is set: page.pdf() below runs with
+  // preferCSSPageSize, so this @page rule IS the paper. It resolves through
+  // lib/page-format.mjs so a caller that passes nothing gets the user's
+  // configured size instead of a fallback private to this file.
+  const pageSize = PAGE_CSS_SIZE[resolvePageFormat(format, {
+    profilePath: workspaceProfilePath(),
+    country,
+  })];
   // Read --page-margin (set by the template's own :root default, and overridden
   // by injectThemeStyle's block when style.margin is configured) instead of
   // hardcoding PDF_PAGE_MARGIN outright — this @page rule is injected last, so a
@@ -1157,46 +1586,259 @@ export function injectPrintPageCss(html, format = 'a4') {
   return `${pageStyle}\n${html}`;
 }
 
+/** The artifact kinds data/pdf-index.tsv keys on, alongside the report number. */
+export const ARTIFACT_KINDS = ['cv', 'cover'];
+
+/**
+ * Decide which artifact a render produces, for the manifest's `kind` column.
+ *
+ * Resolved here rather than in the CLI because every path converges on
+ * renderInPage(): the CLI, the --batch manifest, generate-cover-letter.mjs, and
+ * the ad-hoc scripts that call the exported renderHtmlToPdf() directly. A
+ * caller that forgets to declare a cover letter is the normal case, not the
+ * exceptional one, so the default has to be derived rather than assumed to be
+ * a CV (#3887).
+ *
+ * Precedence, most specific first:
+ *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
+ *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *      the cover check so a company whose own name starts with "Cover" keeps
+ *      its CV filed as a CV.
+ *   3. `cover` as the leading or trailing token: both real conventions, the
+ *      `cover-...` prefix and the `{company}-{role}-cover.pdf` suffix that
+ *      generate-cover-letter.mjs writes.
+ *   4. 'cv', the overwhelmingly common render.
+ *
+ * Anchored to the ends of the name on purpose: an unanchored "cover" would read
+ * a company or role carrying the word mid-name as a cover letter, and --kind is
+ * the escape hatch for a name that signals nothing either way.
+ *
+ * @param {string|undefined} explicit - A caller-declared kind, if any.
+ * @param {string} [outputPath] - Destination PDF path, used for inference.
+ * @returns {{kind: 'cv'|'cover'|null, source: 'declared'|'name'|'default'}}
+ *   `kind` is null when `explicit` is not a recognized kind, so the caller can
+ *   reject it rather than silently rendering something else.
+ */
+export function resolveArtifactKind(explicit, outputPath) {
+  if (explicit !== undefined && explicit !== null && String(explicit).trim() !== '') {
+    const declared = String(explicit).trim().toLowerCase();
+    return ARTIFACT_KINDS.includes(declared)
+      ? { kind: declared, source: 'declared' }
+      : { kind: null, source: 'declared' };
+  }
+
+  const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
+  if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
+    return { kind: 'cover', source: 'name' };
+  }
+  return { kind: 'cv', source: 'default' };
+}
+
+/**
+ * Infer the report number from the output or input file name when --report is
+ * missing. The number is a run of exactly three digits bounded by `-` or `_`
+ * in the file's basename (`cv-ana-042-acme-2026-10-30.pdf` -> `042`); the
+ * output name is tried first, then the input name. Directories are ignored.
+ *
+ * An ATS variant (an `ats` token in the name) is never inferred: modes/pdf.md
+ * renders it without --report on purpose, because an indexed ATS PDF would
+ * replace the styled CV the dashboard opens for that report.
+ *
+ * @param {string} [outputPath] - Destination PDF path.
+ * @param {string} [inputPath] - Source HTML path.
+ * @returns {{reportNum: string, from: string}|null} The number and the path it
+ *   came from, or null when neither name carries one.
+ */
+export function inferReportNumber(outputPath, inputPath) {
+  for (const p of [outputPath, inputPath]) {
+    const name = basename(p || '');
+    if (!name) continue;
+    if (/(^|[-_])ats([-_.]|$)/i.test(name)) return null;
+    const m = name.match(/[-_](\d{3})[-_]/);
+    if (m) return { reportNum: m[1], from: p };
+  }
+  return null;
+}
+
+/**
+ * Merge one generated-PDF row into the manifest's existing data lines.
+ *
+ * The manifest holds one row per report number AND artifact kind, so a CV and
+ * a cover letter for the same application coexist (#3887). Superseding on the
+ * report number alone meant whichever document was generated last deleted the
+ * other, and readers that resolve "the PDF for report N" then returned a cover
+ * letter as the CV.
+ *
+ * @param {string[]} existingLines - Current manifest lines, comments included.
+ * @param {{reportNum: string, pdf: string, html: string, format: string, date: string, kind?: 'cv'|'cover'}} row
+ * @returns {string[]} Data lines to write, the incoming row last.
+ */
+export function applyManifestRow(existingLines, row) {
+  // "008" and "8" are the same report - zero-padded report-link form vs
+  // unpadded tracker-# form. Normalize so replacement rows match.
+  const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
+  const incomingKind = row.kind === 'cover' ? 'cover' : 'cv';
+
+  const kept = existingLines.filter((line) => {
+    if (!line.trim() || line.startsWith('#')) return false;
+    const fields = line.split('\t');
+    if (fields[1] === row.pdf) return false;
+    if (!row.reportNum || normKey(fields[0]) !== normKey(row.reportNum)) return true;
+    // Same report: the incoming row supersedes only its own kind's slot. A
+    // legacy row carries no kind, so an incoming CV claims it (the manifest
+    // must not grow a duplicate every time an untagged row's CV is
+    // regenerated) while an incoming cover letter leaves it alone rather than
+    // guessing that an unmarked row was a cover.
+    const existingKind = (fields[5] || '').trim();
+    return incomingKind === 'cover'
+      ? existingKind !== 'cover'
+      : existingKind === 'cover';
+  });
+
+  kept.push([row.reportNum || '', row.pdf, row.html, row.format, row.date, incomingKind].join('\t'));
+  return kept;
+}
+
 /**
  * Record a generated PDF in data/pdf-index.tsv so tools can map a tracker
  * report number to the exact PDF (and its source HTML for regeneration).
  *
- * Columns: report \t pdf \t html \t format \t date — paths relative to the
- * tracker workspace with forward slashes. One row per PDF path; when a report
- * number is given, older rows for that report are dropped too (regenerated
- * CVs supersede stale entries). The file is gitignored: it references
- * gitignored output/ artifacts and is meaningless on another machine.
+ * Columns: report \t pdf \t html \t format \t date \t kind - paths relative to
+ * the tracker workspace with forward slashes. One row per PDF path, and one row
+ * per (report number, kind) so a report's CV and its cover letter coexist while
+ * a regenerated document still supersedes its own stale entry. kind is appended
+ * last because find.mjs, outcome.mjs and the web reader all parse this file
+ * positionally; a reordered header would break them silently. The file is
+ * gitignored: it references gitignored output/ artifacts and is meaningless on
+ * another machine.
  */
-function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
+async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
   const manifestPath = resolvePdfIndexPath(trackerPath);
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
-  const date = new Date().toISOString().slice(0, 10);
-  // "008" and "8" are the same report — zero-padded report-link form vs
-  // unpadded tracker-# form. Normalize so replacement rows match.
-  const normKey = (s) => (s || '').trim().replace(/^0+(?=\d)/, '');
-
-  let lines = [];
-  if (existsSync(manifestPath)) {
-    lines = readFileSync(manifestPath, 'utf-8').split('\n').filter((line) => {
-      if (!line.trim() || line.startsWith('#')) return false;
-      const fields = line.split('\t');
-      if (fields[1] === relPDF) return false;
-      if (reportNum && normKey(fields[0]) === normKey(reportNum)) return false;
-      return true;
-    });
-  }
-
-  lines.push([reportNum || '', relPDF, relHTML, format, date].join('\t'));
+  const date = localToday();
 
   mkdirSync(dirname(manifestPath), { recursive: true });
-  writeFileSync(
-    manifestPath,
-    '# report\tpdf\thtml\tformat\tdate — written by generate-pdf.mjs, do not edit\n' +
-      lines.join('\n') + '\n'
-  );
-  return relPDF;
+  // Read, supersede and write under one lock, and publish atomically. Every
+  // render is its own process (batch-runner.sh --parallel N starts N workers,
+  // each running generate-pdf.mjs), and this is a read-modify-write of one
+  // shared file: two renders that read the same manifest each wrote back their
+  // own row plus the old rows, so whichever wrote last erased the other's row.
+  return withPipelineLock(manifestPath, () => {
+    const existing = existsSync(manifestPath)
+      ? readFileSync(manifestPath, 'utf-8').split('\n')
+      : [];
+    const lines = applyManifestRow(existing, {
+      reportNum,
+      pdf: relPDF,
+      html: relHTML,
+      format,
+      date,
+      kind,
+    });
+
+    writeFileAtomic(
+      manifestPath,
+      '# report\tpdf\thtml\tformat\tdate\tkind - written by generate-pdf.mjs, do not edit\n' +
+        lines.join('\n') + '\n'
+    );
+    return relPDF;
+  });
+}
+
+/**
+ * Fact gate shared by the single-file and --batch paths.
+ *
+ * generate-cover-letter.mjs already blocks on assertFacts before importing
+ * Playwright, on the reasoning that a failed gate must not leave a misleading
+ * artifact behind. A tailored CV is the same class of document and carries the
+ * numbers a reader acts on, but the CV path enforced the gate only as an
+ * instructed step in the mode prompts — so a programmatic caller (a bridge, a
+ * script, a batch run) rendered inflated metrics in silence. One function for
+ * both paths, because the batch run is exactly that caller and for a while it
+ * was the path with no gate at all.
+ *
+ * Callers pass the normalized HTML and the HTML from before ATS normalization.
+ * They skip the call when --skip-fact-check is set or the workspace has no cv.md.
+ *
+ * @param {string} html - Normalized HTML, as it will be printed.
+ * @param {string} label - Document name for the error and warning lines.
+ * @param {string} [rawHtml] - HTML before ATS normalization, so an em dash is still visible.
+ * @param {{strictFactCheck?: boolean}} [options] - `strictFactCheck` makes a `warn` verdict fatal.
+ * @returns {Promise<void>} Resolves when the document passes, or only warns without strict mode.
+ * @throws {Error} When the voice check or the fact gate rejects the document, or a warning is fatal under strict mode.
+ */
+async function runFactGate(html, label, rawHtml = html, { strictFactCheck = false } = {}) {
+  // Imported lazily, by the callers' guard. A static import is resolved at module
+  // load whether or not the gate runs, and the page-budget/batch suites copy
+  // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
+  // that isn't copied made every one of those suites die with
+  // ERR_MODULE_NOT_FOUND before reaching the behaviour under test. Those
+  // fixtures also ship no cv.md, so the gate is never entered there. If the
+  // module is genuinely missing in a real workspace this throws and the render
+  // fails, which is the correct direction to fail for a fact gate.
+  const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
+  const { voiceIssues, voiceTellMessage, voiceDashWarning, candidateOwnWords } = await import('./cv-voice.mjs');
+  const inputs = factGateInputs();
+  // The voice check allows wording the CV, voice-dna.md, and the cv-facts
+  // allow lists already have. article-digest.md backs facts, not phrasing.
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const source = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  const found = voiceIssues(rawHtml, `${source}\n${candidateOwnWords(workspaceRoot)}`);
+  const voiceError = voiceTellMessage(found, label);
+  if (voiceError) throw new Error(voiceError);
+  const dashWarning = voiceDashWarning(found, label);
+  if (dashWarning) console.warn(`⚠️  ${dashWarning}`);
+  const factCheck = assertFacts(html, { label, ...inputs });
+  // Ahead of the verdict, because it qualifies it: with no config the phrase
+  // lists are empty, so a "passed" below covers metrics and facts only.
+  if (factCheck.configMissing) {
+    console.warn('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+  }
+  if (factCheck.verdict === 'warn') {
+    console.warn(`⚠️  CV fact check warning: ${label}`);
+    printFactWarnings(factCheck, console.warn);
+    // Same output either way; only the exit differs. Thrown AFTER the warnings
+    // print, so a CI log carries the reason the render stopped.
+    if (strictFactCheck) {
+      throw new Error(`Fact check failed for ${label} (--strict-fact-check: a warning is fatal)`);
+    }
+  } else {
+    console.log(`✅ Fact check passed: ${label}`);
+  }
+}
+
+/**
+ * The files the fact gate checks a CV against, from the same workspace this
+ * render reads cv.md and the profile from.
+ *
+ * verify-cv-facts defaults to the DATA root's cv.md, article-digest.md and
+ * config/cv-facts.json. This module reads cv.md (the probe that decides
+ * whether the gate runs, and the section-order and locked-section guards) and
+ * config/profile.yml from workspaceRoot, which is a different directory
+ * whenever CAREER_OPS_TRACKER points outside the data root (#2471, #3169). With
+ * the defaults one render read two cv.md files: the guards and the run-or-skip
+ * decision used the workspace's, the fact check the data root's, so a number
+ * absent from the CV this render validated could still pass.
+ *
+ * @returns {{sourcePaths: string[], configPath: string}}
+ */
+function factGateInputs() {
+  return {
+    sourcePaths: [resolve(workspaceRoot, 'cv.md'), resolve(workspaceRoot, 'article-digest.md')],
+    configPath: resolve(workspaceRoot, 'config', 'cv-facts.json'),
+  };
+}
+
+/**
+ * Say that the fact gate did not run, rather than letting a render with no
+ * "Fact check" line read like one that passed. `--skip-fact-check` is the
+ * explicit opt-out and stays quiet.
+ */
+function warnFactGateNotRun() {
+  console.warn(`⚠️  Fact check did not run: no cv.md at ${resolve(workspaceRoot, 'cv.md')} — this CV was not checked against your sources.`);
 }
 
 /**
@@ -1208,25 +1850,71 @@ function updatePDFManifest(reportNum, pdfPath, htmlPath, format) {
 async function generatePDF() {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
+  let strictFactCheck = false;
 
   // Parse arguments
-  let inputPath, outputPath, format = 'a4', reportNum = '', allowReorder = false;
-  let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
+  // Empty, not 'cv': an omitted --kind must fall through to inference from the
+  // output filename rather than pinning every render to a CV.
+  // Supplied and value are separate questions: `--kind=` yields '', which is
+  // falsy, so a guard reading the value alone waves the flag through.
+  let kindFlag = '', kindSupplied = false, reportSupplied = false;
+  // No flag seen yet: null, not a paper size. The default belongs to
+  // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
+  let inputPath, outputPath, format = null, country = null, reportNum = '', allowReorder = false, allowNonChronological = false;
+  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
       format = arg.split('=')[1].toLowerCase();
+    } else if (arg.startsWith('--country=')) {
+      country = arg.slice('--country='.length);
+    } else if (arg === '--country') {
+      // A flag missing its operand, not an absent flag: left alone it falls through
+      // to the positional arms and the render succeeds on the default sheet.
+      country = '';
     } else if (arg.startsWith('--report=')) {
+      reportSupplied = true;
       reportNum = arg.split('=')[1].trim();
+    } else if (arg === '--report') {
+      // Same missing-operand case as --kind below. Swallowed, the render writes
+      // no manifest row for the report the caller named. The value is CLEARED as
+      // well as marked supplied: the last occurrence of a flag is the caller's
+      // final intent, and this one carries no operand, so `--report=7 --report`
+      // must not keep the 7.
+      reportSupplied = true;
+      reportNum = '';
+    } else if (arg === '--kind') {
+      // A flag missing its operand, not an absent flag. Left unhandled it falls
+      // through to the positional arms below and is dropped silently, so the
+      // render infers a kind the caller never asked for. Marked supplied AND
+      // cleared, so `--kind=cover --kind` cannot reuse the earlier operand.
+      kindSupplied = true;
+      kindFlag = '';
+    } else if (arg.startsWith('--kind=')) {
+      kindSupplied = true;
+      kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
       batchManifestPath = arg.slice('--batch='.length);
+    } else if (arg === '--max-pages') {
+      // A flag missing its operand, not an absent flag. Left alone it falls
+      // through to the positional arms, and cv.max_pages from the profile would
+      // then set the budget the caller meant to set here (#6325). Marked
+      // supplied and made invalid, so the check below rejects it by name.
+      maxPagesSupplied = true;
+      maxPagesInput = '';
+      maxPages = NaN;
     } else if (arg.startsWith('--max-pages=')) {
+      maxPagesSupplied = true;
       maxPagesInput = arg.slice('--max-pages='.length);
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
       allowReorder = true;
+    } else if (arg === '--allow-nonchronological') {
+      allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
+    } else if (arg === '--strict-fact-check') {
+      strictFactCheck = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
     } else if (!inputPath) {
@@ -1236,15 +1924,77 @@ async function generatePDF() {
     }
   }
 
+  // A --kind that was passed and is unusable is a hard error: silently filing a
+  // cover letter as a CV is the failure the flag exists to prevent. Checked
+  // before any rendering work starts.
+  // resolveArtifactKind treats an empty value as "not supplied" and falls back
+  // to filename inference, which is what the per-entry batch path needs. So an
+  // empty value cannot be caught by its return, and the CLI has to reject it
+  // here: the caller typed the flag, and silently inferring instead is the
+  // substitution the flag exists to prevent.
+  if (reportSupplied && !reportNum) {
+    console.error('Invalid --report "". Use a numeric report number, e.g. --report=42.');
+    process.exit(1);
+  }
+
+  if (kindSupplied && (!kindFlag || !resolveArtifactKind(kindFlag).kind)) {
+    console.error(`Invalid --kind "${kindFlag}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+    process.exit(1);
+  }
+
   if (!Number.isInteger(maxPages) || maxPages < 1) {
     console.error(`Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1 or --max-pages=2.`);
     process.exit(1);
   }
 
+  // Contradictory pair, rejected for the same reason --kind is rejected with
+  // --batch: one flag asks for the gate to run and be fatal, the other asks for
+  // it not to run at all. Letting either win silently turns a CI gate into a
+  // no-op the day someone adds --skip-fact-check to a shared invocation.
+  if (strictFactCheck && skipFactCheck) {
+    console.error('--strict-fact-check cannot be combined with --skip-fact-check: one runs the fact gate, the other skips it.');
+    process.exit(1);
+  }
+
+  // #6325: cv.max_pages / cv.strict_pages in config/profile.yml, read once and
+  // applied per document by pageBudgetFor().
+  const flagBudget = { maxPages, maxPagesSupplied, strictPages };
+  const profileBudget = readCvPageBudget(workspaceProfilePath());
+
+  // Resolve the format before the batch branch, so a batch and a single render
+  // inherit the same configured size and a bad --format fails the same way in
+  // both. An explicit flag is still rejected loudly: falling through to the
+  // profile would print a typo on whatever size happened to be configured.
+  if (format !== null) {
+    const normalized = normalizePageFormat(format);
+    if (!normalized) {
+      console.error(`Invalid format "${format}". Use: ${[...PAGE_FORMATS].join(', ')}`);
+      process.exit(1);
+    }
+    format = normalized;
+  }
+  // --country only matters under `page_format: auto`. It is validated like
+  // --format, because a typo that quietly fell back to the default would print a
+  // German employer's CV on Letter.
+  if (country !== null) {
+    const sheet = pageFormatForCountry(country);
+    if (!sheet) {
+      console.error(`Invalid country "${country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.`);
+      process.exit(1);
+    }
+    country = country.trim().toUpperCase();
+  }
+  // The pre-resolution flag travels to the batch so an entry's own country can
+  // still steer `auto`; the resolved size below would already have settled it.
+  const flagFormat = format;
+  format = resolvePageFormat(format, { profilePath: workspaceProfilePath(), country });
+
   // Batch mode (#2384): render every document in the manifest through one
-  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder to
-  // all entries; each entry supplies its own input/output and may override
-  // format/reportNum. Takes no positional input/output.
+  // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
+  // --allow-nonchronological to all entries (a CV entry with no page flag
+  // takes the profile's cv.max_pages/cv.strict_pages, #6325); each entry supplies its own
+  // input/output and may override format/reportNum. Takes no positional
+  // input/output.
   if (batchManifestPath) {
     // --report keys a single PDF to one tracker row; a batch renders N distinct
     // CVs, so one global --report would mislabel them all. Per-entry "reportNum"
@@ -1254,16 +2004,27 @@ async function generatePDF() {
       console.error('--report is not valid with --batch. Set "reportNum" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, maxPages, strictPages, allowReorder });
+    // Same reasoning for --kind, and the same consequence if it is ignored
+    // instead. runBatchFromManifest is not given the flag, so a global
+    // --kind=cover leaves every entry on filename inference; one whose name is
+    // not cover-shaped is filed as a CV and its row supersedes the report's real
+    // CV slot in pdf-index.tsv. Per-entry "kind" is the channel that works.
+    if (kindSupplied) {
+      console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
+      process.exit(1);
+    }
+    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck, strictFactCheck });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--report=NNN] [--allow-reorder] [--max-pages=N] [--strict-pages]');
-    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--allow-reorder] [--max-pages=N] [--strict-pages]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
-    console.error('{input, output, format?, reportNum?}) through one shared Chromium and writes');
+    console.error('{input, output, format?, country?, reportNum?, kind?}) through one shared Chromium and writes');
     console.error('<manifest>.results.json; it exits non-zero if any document fails.');
+    console.error('Relative input and output paths in the manifest resolve against the');
+    console.error("manifest's own folder, not the current directory.");
     console.error('');
     console.error('This script only converts an already-built HTML file to PDF.');
     console.error('The input HTML is produced by the pdf mode: the agent fills cv-template.html');
@@ -1273,13 +2034,25 @@ async function generatePDF() {
     process.exit(1);
   }
 
+  // No --report: take the 3-digit report number from the file names, the way
+  // modes/pdf.md names them (output/cv-{candidate}-{report}-{company}-...).
+  // Only for a single render; a batch carries reportNum per entry. Printed, so
+  // a wrong guess is visible; --report always wins.
+  if (!reportSupplied) {
+    const inferred = inferReportNumber(outputPath, inputPath);
+    if (inferred) {
+      reportNum = inferred.reportNum;
+      console.warn(`⚠️  No --report given: using report ${inferred.reportNum} from the file name "${basename(inferred.from)}". Pass --report=NNN to set it explicitly.`);
+    }
+  }
+
   if (reportNum && !/^\d+$/.test(reportNum)) {
     console.error(`Invalid --report "${reportNum}". Use the numeric tracker/report number, e.g. --report=018`);
     process.exit(1);
   }
 
-  inputPath = resolve(inputPath);
-  outputPath = resolve(outputPath);
+  inputPath = resolvePdfCliPath(inputPath);
+  outputPath = resolvePdfCliPath(outputPath);
 
   // Path-traversal guard: keep the PDF write inside the tracker-owned workspace
   // so a crafted output argument cannot escape into another user's directory.
@@ -1297,17 +2070,18 @@ async function generatePDF() {
     process.exit(1);
   }
 
-  // Validate format
-  const validFormats = ['a4', 'letter'];
-  if (!validFormats.includes(format)) {
-    console.error(`Invalid format "${format}". Use: ${validFormats.join(', ')}`);
-    process.exit(1);
-  }
-
   console.log(`📄 Input:  ${inputPath}`);
   console.log(`📁 Output: ${outputPath}`);
   console.log(`📏 Format: ${format.toUpperCase()}`);
-  console.log(`📐 Page budget: ${maxPages}${strictPages ? ' (strict)' : ' (warning only)'}`);
+  let budget;
+  try {
+    budget = pageBudgetFor(resolveArtifactKind(kindFlag, outputPath).kind, flagBudget, profileBudget);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  const budgetSource = budget.fromProfile.length > 0 ? ` — ${budget.fromProfile.join(' and ')} from config/profile.yml` : '';
+  console.log(`📐 Page budget: ${budget.maxPages}${budget.strictPages ? ' (strict)' : ' (warning only)'}${budgetSource}`);
 
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
@@ -1316,6 +2090,15 @@ async function generatePDF() {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
+  // Drop the optional sections that came in as a bare header — a title with
+  // nothing under it (#3986). The builders already strip these from the payload
+  // side, but neither builder is on every path here: the web pdf flow has the
+  // agent emit finished HTML, which reaches this script with the empty wrappers
+  // still in place. Deciding from the rendered content covers both, and running
+  // it before the reorder and the guard means they judge the document that will
+  // actually be printed. A CV with nothing empty comes through unchanged.
+  html = stripEmptyRenderedSections(html);
+
   // Apply the user's declared section order (config/profile.yml `cv.sections`)
   // before the guard runs, so the guard judges the document that will be
   // printed. Anchored to workspaceRoot, NOT __dirname: readStyleTokens() reads
@@ -1323,59 +2106,75 @@ async function generatePDF() {
   // __dirname anchor made CAREER_OPS_TRACKER split one logical profile across
   // two files — style from the workspace, section order from the checkout —
   // and validated the workspace's CV against the checkout's declared order.
-  html = reorderCvSections(html, readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml')));
+  html = reorderCvSections(html, readCvSectionOrder(workspaceProfilePath()));
 
   validateCvSectionOrder(html, cvMarkdown, { allowReorder });
+  validateCvExperienceOrder(html, { allowNonChronological });
+  validateLockedSections(html, cvMarkdown, readLockedSections(workspaceProfilePath(), sectionKey));
 
+  const rawHtml = html;
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
-  const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
-  if (totalReplacements > 0) {
-    const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
-    console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
-  }
+  // After normalization, so the length is that of the text that prints.
+  warnLongPortalFields(html, outputPath);
+  reportAtsReplacements(normalized.replacements);
 
-  // Fact gate. generate-cover-letter.mjs already blocks on assertFacts before
-  // importing Playwright, on the reasoning that a failed gate must not leave a
-  // misleading artifact behind. A tailored CV is the same class of document and
-  // carries the numbers a reader acts on, but the CV path enforced the gate only
-  // as an instructed step in the mode prompts — so a programmatic caller (a
-  // bridge, a script, a batch run) rendered inflated metrics in silence. Gate the
-  // normalized HTML, which is the document that actually prints.
-  if (!skipFactCheck && cvMarkdown) {
-    // Imported lazily, INSIDE the guard. A static import is resolved at module
-    // load whether or not this branch runs, and the page-budget/batch suites copy
-    // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
-    // that isn't copied made every one of those suites die with
-    // ERR_MODULE_NOT_FOUND before reaching the behaviour under test. Those
-    // fixtures also ship no cv.md, so this branch is never entered there. If the
-    // module is genuinely missing in a real workspace this throws and the render
-    // fails, which is the correct direction to fail for a fact gate.
-    const { assertFacts } = await import('./verify-cv-facts.mjs');
-    const factCheck = assertFacts(html, { label: basename(inputPath) });
-    // Ahead of the verdict, because it qualifies it: with no config the phrase
-    // lists are empty, so a "passed" below covers metrics and facts only.
-    if (factCheck.configMissing) {
-      console.warn('⚠️  No config/cv-facts.json — forbidden/advisory phrase checks did not run.');
-    }
-    if (factCheck.verdict === 'warn') {
-      console.warn(`⚠️  CV fact check warning: ${basename(inputPath)}`);
-      for (const phrase of factCheck.warnings) console.warn(`  - advisory phrase: ${phrase}`);
-    } else {
-      console.log('✅ Fact check passed');
-    }
+  // Fact gate, on the normalized HTML: the document that actually prints.
+  if (!skipFactCheck) {
+    if (cvMarkdown) await runFactGate(html, basename(inputPath), rawHtml, { strictFactCheck });
+    else warnFactGateNotRun();
   }
 
   return renderHtmlToPdf(html, outputPath, {
     format,
     baseDir: dirname(inputPath),
     reportNum,
+    kind: kindFlag,
     inputPath,
-    maxPages,
-    strictPages,
-    styleTokens: readStyleTokens(resolve(workspaceRoot, 'config', 'profile.yml')),
+    maxPages: budget.maxPages,
+    strictPages: budget.strictPages,
+    styleTokens: readStyleTokens(workspaceProfilePath()),
   });
+}
+
+/**
+ * The page budget for one document (#6325). A flag always wins. With none, a
+ * CV takes cv.max_pages / cv.strict_pages from config/profile.yml, so a
+ * one-page preference holds on every render path: agents, batch workers and
+ * the web UI all spawn this CLI, and none of them could remember the flag. A
+ * cover letter keeps the flag-or-default budget, since a cv.* key says nothing
+ * about it. Exported for tests.
+ *
+ * Throws when a CV would read a key that is set but unusable: a typo in a
+ * stated budget must not quietly print a 2-page CV. A flag that covers the
+ * key, or a cover letter, never reads it, so neither is stopped.
+ *
+ * @param {string|null} kind - From resolveArtifactKind().
+ * @param {{maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}} flags
+ * @param {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}} profile - From readCvPageBudget().
+ * @returns {{maxPages: number, strictPages: boolean, fromProfile: string[]}}
+ */
+export function pageBudgetFor(kind, flags, profile = {}) {
+  const budget = { maxPages: flags.maxPages, strictPages: flags.strictPages, fromProfile: [] };
+  if (kind !== 'cv') return budget;
+  const read = (profile.invalid || []).filter((p) =>
+    (p.key === 'max_pages' && !flags.maxPagesSupplied) || (p.key === 'strict_pages' && !flags.strictPages));
+  if (read.length > 0) {
+    throw new Error(
+      `Invalid page budget in config/profile.yml: ${read.map((p) => p.message).join('; ')}. ` +
+      'Fix the value, or pass --max-pages / --strict-pages for this render.',
+    );
+  }
+  if (!flags.maxPagesSupplied && profile.maxPages !== undefined) {
+    budget.maxPages = profile.maxPages;
+    budget.fromProfile.push('cv.max_pages');
+  }
+  if (!flags.strictPages && profile.strictPages === true) {
+    budget.strictPages = true;
+    budget.fromProfile.push('cv.strict_pages');
+  }
+  return budget;
 }
 
 /**
@@ -1384,7 +2183,8 @@ async function generatePDF() {
  * The manifest is a JSON array of {input, output, format?, reportNum?}. Each
  * entry is validated and its HTML read + ATS-normalized independently: a bad
  * entry (missing file, bad format, escaping output path, scrambled section
- * order) is recorded as a failure and skipped so it can never sink the rest of
+ * order, a metric or fact the sources do not back) is recorded as a failure and
+ * skipped so it can never sink the rest of
  * the batch. Surviving entries render through one shared Chromium (renderBatch).
  *
  * A results manifest is always written next to the input manifest as
@@ -1394,7 +2194,7 @@ async function generatePDF() {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, maxPages: number, strictPages: boolean, allowReorder: boolean}} globals
+ * @param {{format: string, flagFormat?: string|null, country?: string|null, flagBudget: {maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}, profileBudget: {maxPages?: number, strictPages?: boolean}, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean, strictFactCheck?: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -1433,7 +2233,6 @@ async function runBatchFromManifest(manifestPath, globals) {
     process.exit(1);
   }
 
-  const validFormats = ['a4', 'letter'];
   const results = new Array(manifest.length).fill(null);
   const entries = [];
 
@@ -1445,11 +2244,14 @@ async function runBatchFromManifest(manifestPath, globals) {
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  // One profile governs the whole batch, so the declared order is read once
-  // rather than per entry. Anchored to workspaceRoot for the same reason the
-  // single render is: it is the anchor readStyleTokens() and the cv.md read
-  // already use, so one profile.yml supplies every setting.
-  const cvSectionOrder = readCvSectionOrder(resolve(workspaceRoot, 'config', 'profile.yml'));
+  // Once for the batch, not once per entry.
+  if (!globals.skipFactCheck && !cvMarkdown) warnFactGateNotRun();
+  // Read one workspace profile for the batch. The working directory must not
+  // choose a different theme from the single-document render.
+  const profilePath = workspaceProfilePath();
+  const cvSectionOrder = readCvSectionOrder(profilePath);
+  const styleTokens = readStyleTokens(profilePath);
+  const lockedKeys = readLockedSections(profilePath, sectionKey);
 
   for (let i = 0; i < manifest.length; i++) {
     const spec = manifest[i];
@@ -1458,13 +2260,33 @@ async function runBatchFromManifest(manifestPath, globals) {
         throw new Error('each entry needs a string "input" and "output"');
       }
 
-      const entryFormat = (spec.format || globals.format).toLowerCase();
-      if (!validFormats.includes(entryFormat)) {
-        throw new Error(`invalid format "${entryFormat}" (use: ${validFormats.join(', ')})`);
+      if (spec.format && !normalizePageFormat(spec.format)) {
+        throw new Error(`invalid format "${spec.format}" (use: ${[...PAGE_FORMATS].join(', ')})`);
+      }
+      if (spec.country != null && !pageFormatForCountry(spec.country)) {
+        throw new Error(`invalid country "${spec.country}" (use a two-letter ISO 3166-1 code)`);
+      }
+      const entryFormat = resolvePageFormat(spec.format || globals.flagFormat, {
+        profilePath,
+        country: spec.country ?? globals.country,
+      });
+
+      // An OMITTED kind falls through to inference from the entry's output name.
+      // A kind that is present but empty is a different thing: the manifest
+      // author asked for one, and inferring instead can file a cover letter as a
+      // CV and replace the report's CV row. Same distinction the --kind flag
+      // draws above, on the path that actually renders the batch.
+      const entryKindSupplied = Object.prototype.hasOwnProperty.call(spec, 'kind');
+      const entryKind = (spec.kind ?? '').toString().trim();
+      if (entryKindSupplied && (!entryKind || !resolveArtifactKind(entryKind).kind)) {
+        throw new Error(`invalid kind "${entryKind}" (use: ${ARTIFACT_KINDS.join(', ')})`);
       }
 
+      // Present but empty is a supplied value, same as kind above: reportNum is
+      // what keys the manifest row, so accepting '' writes the render nowhere.
+      const entryReportSupplied = Object.prototype.hasOwnProperty.call(spec, 'reportNum');
       const entryReport = (spec.reportNum ?? '').toString().trim();
-      if (entryReport && !/^\d+$/.test(entryReport)) {
+      if (entryReportSupplied && (!entryReport || !/^\d+$/.test(entryReport))) {
         throw new Error(`invalid reportNum "${entryReport}" (use the numeric report number)`);
       }
 
@@ -1485,12 +2307,23 @@ async function runBatchFromManifest(manifestPath, globals) {
       }
 
       let html = await readFile(entryInput, 'utf-8');
-      // Same order as the single render: reorder first so the guard judges the
-      // document that will actually be printed. Without this the batch path
-      // rendered N CVs with cv.sections silently inert.
+      // Same order as the single render: strip the bare-header sections, then
+      // reorder, so the guard judges the document that will actually be
+      // printed. Without this the batch path rendered N CVs with cv.sections
+      // silently inert.
+      html = stripEmptyRenderedSections(html);
       html = reorderCvSections(html, cvSectionOrder);
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
+      validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
+      validateLockedSections(html, cvMarkdown, lockedKeys);
+      const rawHtml = html;
       html = normalizeTextForATS(html).html;
+      warnLongPortalFields(html, entryOutput);
+      // Same gate, same guard and same place as the single render. A blocked
+      // entry throws into the catch below: it is recorded as failed and never
+      // reaches Chromium, and the rest of the batch still renders.
+      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput), rawHtml, { strictFactCheck: globals.strictFactCheck === true });
+      const entryBudget = pageBudgetFor(resolveArtifactKind(entryKind, entryOutput).kind, globals.flagBudget, globals.profileBudget);
 
       entries.push({
         _idx: i,
@@ -1499,9 +2332,11 @@ async function runBatchFromManifest(manifestPath, globals) {
         format: entryFormat,
         baseDir: dirname(entryInput),
         reportNum: entryReport,
+        kind: entryKind,
         inputPath: entryInput,
-        maxPages: globals.maxPages,
-        strictPages: globals.strictPages,
+        maxPages: entryBudget.maxPages,
+        strictPages: entryBudget.strictPages,
+        styleTokens,
       });
     } catch (err) {
       console.error(`❌ Skipping batch entry ${i} (${spec?.output ?? '?'}): ${err.message}`);
@@ -1609,6 +2444,14 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
+// Keep the PDF module's existing launch API while delegating the executable
+// choice to the same resolver every other browser-backed feature uses.
+export async function launchChromium(options = {}) {
+  const { chromium } = await import('playwright');
+  const { projectRoot, ...launchOptions } = options;
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
+}
+
 /**
  * Render an HTML string to a PDF file via headless Chromium.
  *
@@ -1632,10 +2475,54 @@ export async function inlineLocalFonts(html) {
  *   strictPages?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
  * }} [opts]
- * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
+ * @returns {Promise<{outputPath: string, pageCount: number, size: number, draftPath?: string}>}
+ *   `draftPath` is set when the render ran over a warn-only page budget: the
+ *   PDF is at that sibling draft and nothing was written to outputPath.
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  // Checked before the shared painter as well as in renderInPage(): the request
+  // reaches the painter as JSON, which turns NaN into null, and the painter
+  // would read that as no budget, paint with the default 2 and replace the PDF.
+  assertValidMaxPages(opts.maxPages ?? 2);
+  // A passed launchBrowser is a test double and always paints in this process.
+  // The shared painter is only for the batch, which opts in with the env var,
+  // and the painter process itself must not dial its own socket.
+  if (!opts.launchBrowser
+    && process.env.CAREER_OPS_PDF_SHARED === '1'
+    && process.env.CAREER_OPS_PDF_SERVER_PROCESS !== '1') {
+    try {
+      const { renderViaSharedPdfServer } = await import('./lib/pdf-server.mjs');
+      const result = await renderViaSharedPdfServer(
+        html,
+        outputPath,
+        { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
+        fileURLToPath(import.meta.url),
+        getCareerOpsRoot(),
+      );
+      // The painter's own output goes nowhere, so repeat it here. A strict
+      // overflow already came back as an error. A warn-only one comes back
+      // with the draft it wrote instead of the output path (#6377); the
+      // warning is repeated on the page count alone, so a painter still
+      // running from before drafts existed is reported honestly too.
+      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false, kind: resolveArtifactKind(opts.kind, outputPath).kind ?? 'cv' });
+      if (result.draftPath) {
+        console.warn(`⚠️  Overflow draft: ${result.draftPath} (nothing was written to the output path). Trim and rerun to write ${result.outputPath}.`);
+        console.log(`📊 Pages: ${result.pageCount}`);
+        return result;
+      }
+      console.log(`✅ PDF generated: ${result.outputPath}`);
+      console.log(`📊 Pages: ${result.pageCount}`);
+      console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);
+      return result;
+    } catch (err) {
+      if (err?.code !== 'PDF_SERVER_UNAVAILABLE') throw err;
+      console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
+    }
+  }
+  const launchBrowser = opts.launchBrowser || ((options) => launchChromium({
+    ...options,
+    projectRoot: opts.workspaceRoot || getCareerOpsRoot(),
+  }));
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });
@@ -1676,8 +2563,8 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
 async function renderInPage(browser, html, outputPath, opts = {}) {
-  const format = opts.format || 'a4';
   const outputRoot = opts.workspaceRoot || workspaceRoot;
+  const format = resolvePageFormat(opts.format, { profilePath: workspaceProfilePath(opts.workspaceRoot), country: opts.country });
   const requestedBaseDir = resolve(opts.baseDir || outputRoot);
   // Temporary HTML is an output too: never let an external input path or
   // caller-supplied baseDir choose an arbitrary directory. If the requested
@@ -1690,6 +2577,24 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   ) ? requestedBaseDir : resolve(outputRoot);
   const reportNum = opts.reportNum || '';
   const inputPath = opts.inputPath || '';
+  // Every render path converges here, so the manifest's kind is decided here
+  // too rather than in each caller (#3887). A null kind means the caller
+  // declared one this manifest cannot key on: the CLI and the batch loop
+  // validate before rendering, but a direct renderHtmlToPdf() caller has
+  // nothing else in front of it, and applyManifestRow() reads null as 'cv' —
+  // so an unrecognized kind would evict the report's real CV row and hand the
+  // apply flow the wrong document. Rejected here, before the page renders, so
+  // a mislabelled artifact never reaches disk either.
+  const { kind: artifactKind } = resolveArtifactKind(opts.kind, outputPath);
+  if (!artifactKind) {
+    throw new Error(`Invalid artifact kind "${opts.kind}". Use: ${ARTIFACT_KINDS.join(', ')}`);
+  }
+  // The page budget is checked here for the same reason. The CLI, the batch
+  // loop and the profile reader validate it, but a direct caller does not, and
+  // an unusable value would skip the strict-overflow branch below, replace the
+  // PDF at outputPath, and only then be rejected by enforcePageBudget().
+  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false, kind: artifactKind };
+  assertValidMaxPages(budget.maxPages);
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
@@ -1703,10 +2608,10 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // properties so the templates' var(--x, <default>) reads pick them up (#1837).
   // No `style:` block → no tokens → byte-identical output. Both the CV path and
   // the cover-letter path flow through here, so both are themed from one place.
-  const styleTokens = opts.styleTokens ?? readStyleTokens();
+  const styleTokens = opts.styleTokens ?? readStyleTokens(workspaceProfilePath(opts.workspaceRoot));
   html = injectThemeStyle(html, styleTokens);
 
-  html = injectPrintPageCss(html, format);
+  html = injectPrintPageCss(html, format, opts.country);
   html = await inlineLocalFonts(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
@@ -1763,26 +2668,48 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
-    // Write PDF only after rendering has completed. Renderer cleanup still runs
-    // if an injected browser fails before producing a buffer.
-    await writeFile(outputPath, pdfBuffer);
-
     // Read the root page-tree count so page-like text in streams is ignored.
     const pageCount = countRenderedPdfPages(pdfBuffer);
 
-    // Strict overflow leaves the draft on disk but stops before success logs
-    // and manifest publication. Default overflow warns and continues.
-    enforcePageBudget(pageCount, {
-      maxPages: opts.maxPages ?? 2,
-      strictPages: opts.strictPages ?? false,
-    });
+    // An overflow never reaches outputPath, strict or not. A caller that
+    // restores its own inputs on failure (CV Studio restores the edited HTML)
+    // would otherwise hold an HTML and a PDF from two revisions, and
+    // cv.strict_pages makes strict renders reachable from the web UI (#6325).
+    // In warn-only mode the agent-driven pdf flow trims and re-renders after the
+    // warning, so a PDF at the final name was one the tool had already flagged,
+    // and the manifest pointed the dashboard at it (#6377). The render goes to a
+    // sibling draft for inspection either way; strict then fails, warn-only
+    // returns before success logs and manifest publication, exit code 0.
+    if (pageCount > budget.maxPages) {
+      const hadPrevious = existsSync(outputPath);
+      const draftPath = writeOverflowDraft(outputPath, pdfBuffer);
+      if (budget.strictPages) {
+        try {
+          enforcePageBudget(pageCount, budget);
+        } catch (err) {
+          err.message += ` Rejected draft: ${draftPath} (${hadPrevious ? 'the existing PDF was left unchanged' : 'nothing was written to the output path'}).`;
+          throw err;
+        }
+      }
+      enforcePageBudget(pageCount, budget);
+      // One line a caller can read back: the web layer treats this render as
+      // not delivered, since it only sees the exit code and stderr.
+      console.warn(`⚠️  Overflow draft: ${draftPath} (${hadPrevious ? 'the existing PDF at the output path was left unchanged' : 'nothing was written to the output path'}). Trim and rerun to write ${outputPath}.`);
+      console.log(`📊 Pages: ${pageCount}`);
+      return { outputPath, draftPath, pageCount, size: pdfBuffer.length };
+    }
+
+    // Write PDF only after rendering has completed. Renderer cleanup still runs
+    // if an injected browser fails before producing a buffer. The atomic write
+    // keeps the previous PDF intact if this write fails partway.
+    writeFileAtomic(outputPath, pdfBuffer);
 
     console.log(`✅ PDF generated: ${outputPath}`);
     console.log(`📊 Pages: ${pageCount}`);
     console.log(`📦 Size: ${(pdfBuffer.length / 1024).toFixed(1)} KB`);
 
     try {
-      updatePDFManifest(reportNum, outputPath, inputPath, format);
+      await updatePDFManifest(reportNum, outputPath, inputPath, format, artifactKind);
       console.log(`🔗 Manifest: data/pdf-index.tsv updated${reportNum ? ` (report ${reportNum})` : ' (no --report given)'}`);
     } catch (err) {
       // The PDF itself succeeded — never fail the run over manifest bookkeeping.
@@ -1835,10 +2762,12 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
  * @param {Array<{html: string, outputPath: string, format?: string, baseDir?: string,
  *   reportNum?: string, inputPath?: string, maxPages?: number, strictPages?: boolean}>} entries
  * @param {{launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>}} [opts]
- * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
+ * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, draftPath?: string, error?: string}>>}
+ *   `draftPath` is set on an entry that rendered over a warn-only page budget:
+ *   it is ok, but the PDF is at the draft, and nothing was written to outputPath.
  */
 export async function renderBatch(entries, opts = {}) {
-  const launchBrowser = opts.launchBrowser || ((options) => chromium.launch(options));
+  const launchBrowser = opts.launchBrowser || launchChromium;
   const results = [];
   let browser = null;
   try {
@@ -1858,7 +2787,9 @@ export async function renderBatch(entries, opts = {}) {
     for (const entry of entries) {
       try {
         const r = await renderInPage(browser, entry.html, entry.outputPath, entry);
-        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size });
+        // A warn-only overflow is not a failure, but its PDF is the draft, not
+        // outputPath, and the results manifest says so (#6377).
+        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size, ...(r.draftPath ? { draftPath: r.draftPath } : {}) });
       } catch (err) {
         console.error(`❌ Batch entry failed (${entry.outputPath}): ${err.message}`);
         results.push({ outputPath: entry.outputPath, ok: false, error: err.message });
@@ -1874,12 +2805,39 @@ export async function renderBatch(entries, opts = {}) {
   }
 }
 
+async function runPdfServer() {
+  const { startPdfServer } = await import('./lib/pdf-server.mjs');
+  const server = await startPdfServer({
+    rootDir: __dirname,
+    launchBrowser: (options) => launchChromium({
+      ...options,
+      projectRoot: process.env.CAREER_OPS_PDF_BROWSER_ROOT || getCareerOpsRoot(),
+    }),
+    render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
+  });
+  if (server.alreadyRunning) return;
+  let shuttingDown = false;
+  const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    server.close().then(() => process.exit(0), () => process.exit(0));
+  };
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+  await server.closed;
+}
+
 const isMain = isMainModule(import.meta.url);
-if (isMain) {
+if (isMain && process.argv[2] === '--pdf-server') {
+  runPdfServer().then(() => process.exit(0), (err) => {
+    console.error(`❌ PDF browser failed: ${err.message}`);
+    process.exit(1);
+  });
+} else if (isMain) {
   generatePDF().catch((err) => {
     console.error('❌ PDF generation failed:', err.message);
     process.exit(1);
   });
 }
 
-export { normalizeTextForATS, sectionKey };
+export { normalizeTextForATS, reportAtsReplacements, sectionKey };

@@ -40,6 +40,23 @@ const CODEX_READ_ONLY = "read-only";
 const CODEX_WORKSPACE_WRITE = "workspace-write";
 
 /**
+ * Refuse Hermes for workers that write. This is a check by name, outside FENCERS,
+ * and it covers Hermes alone: every other runtime passes, including the ones
+ * absent from FENCERS, which still run write-capable workers with their default
+ * access (fencingReport reports them as unfenced). Hermes is limited to workers
+ * whose capability record has `writes: false` because career-ops has no verified
+ * way to translate that record into Hermes's own approval/sandbox controls.
+ *
+ * @param {string} cliId
+ * @param {import("./worker-capabilities.mjs").Capabilities} capabilities
+ * @returns {boolean}
+ */
+export function isCliAllowedForCapabilities(cliId, { writes }) {
+  return cliId !== "hermes" || !writes;
+}
+
+
+/**
  * Pick the Codex sandbox policy for a capability record.
  *
  * Note it is `network: "fetch"` — not web access as such — that forces

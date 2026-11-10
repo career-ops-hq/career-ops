@@ -6,7 +6,7 @@
 import { createServer } from 'node:http';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { pass, fail, ROOT } from './helpers.mjs';
+import { pass, fail, ROOT, withLocalServerAs } from './helpers.mjs';
 
 console.log('\nShared User-Agent constants');
 
@@ -46,10 +46,12 @@ else fail(`MACOS_BROWSER_LIKE_USER_AGENT drifted from the pinned literal: got ${
     res.end('{"ok":true}');
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  // The provider guard refuses a loopback destination, so the request goes to
+  // a public-looking origin and the transport is pointed at the local server.
+  const base = 'http://ua.example.test';
 
   try {
-    await fetchJson(base, { timeoutMs: 2_000 });
+    await withLocalServerAs(base, `http://127.0.0.1:${server.address().port}`, () => fetchJson(`${base}/`, { timeoutMs: 2_000 }));
   } finally {
     await new Promise((r) => server.close(r));
   }
