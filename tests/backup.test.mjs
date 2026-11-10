@@ -241,6 +241,19 @@ try {
     assert.equal(dirRun.failed.length, 1);
     assert.equal(dirRun.failed[0].path, join('output', 'private'));
     assert.equal(existsSync(join(tmp, 'backup', 'locked-dir', 'output', 'ok.md')), true);
+
+    // An unreadable templates/ folder is a failure, not a silent omission.
+    const lockedTpl = join(tmp, 'locked-tpl-root');
+    put(lockedTpl, 'cv.md', 'cv');
+    put(lockedTpl, 'templates/cv-jane-acme.html', 'generated');
+    chmodSync(join(lockedTpl, 'templates'), 0o000);
+    let tplFail;
+    try {
+      tplFail = b.runBackup({ dataRoot: lockedTpl, dest: join(tmp, 'backup', 'locked-tpl') });
+    } finally {
+      chmodSync(join(lockedTpl, 'templates'), 0o700);
+    }
+    assert.equal(tplFail.failed.some((f) => f.path === 'templates'), true);
     assert.equal(existsSync(join(tmp, 'backup', 'bad', 'data', 'ok.md')), true);
     pass('an I/O error on one file does not abort the run');
   }
@@ -336,6 +349,18 @@ try {
     if (savedOverride === undefined) delete process.env.CAREER_OPS_PROFILE;
     else process.env.CAREER_OPS_PROFILE = savedOverride;
   }
+  // Without an override, a profile elsewhere (the process-wide data root) is not consulted.
+  const noOvRoot = join(tmp, 'no-ov-root');
+  put(noOvRoot, 'cv.md', 'cv');
+  put(noOvRoot, 'templates/cv-template.mine.html', 'not selected here');
+  const savedNoOv = process.env.CAREER_OPS_PROFILE;
+  delete process.env.CAREER_OPS_PROFILE;
+  try {
+    b.runBackup({ dataRoot: noOvRoot, dest: join(tmp, 'backup', 'no-ov') });
+  } finally {
+    if (savedNoOv !== undefined) process.env.CAREER_OPS_PROFILE = savedNoOv;
+  }
+  assert.equal(existsSync(join(tmp, 'backup', 'no-ov', 'templates', 'cv-template.mine.html')), false);
   const ovHas = (f) => existsSync(join(tmp, 'backup', 'ov', 'templates', f));
   assert.deepEqual(['cv-template.mine.html', 'cv-template.other.html'].map(ovHas), [true, false]);
 

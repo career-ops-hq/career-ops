@@ -39,7 +39,7 @@ import { fileURLToPath } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
-import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import {
   LOCAL_PATHS_FILE,
   USER_PATHS,
@@ -68,14 +68,14 @@ const CONTACT_FILES = ['data/Connections.csv', 'data/contacts.tsv', 'data/reply-
  * brings the declarations back. A declaration file that cannot be parsed falls
  * back to the built-in list and says so in `warnings`.
  */
-export function backupPaths(dataRoot, warnings = []) {
+export function backupPaths(dataRoot, warnings = [], failed = []) {
   let paths = [...USER_PATHS];
   try {
     paths = effectiveUserPaths(dataRoot);
   } catch (error) {
     warnings.push(`${error.message}; backing up the built-in user paths only.`);
   }
-  return [...new Set([...paths, LOCAL_PATHS_FILE, ...templateUserFiles(dataRoot, warnings)].map((p) => p.replace(/\/+$/, '')))];
+  return [...new Set([...paths, LOCAL_PATHS_FILE, ...templateUserFiles(dataRoot, warnings, failed)].map((p) => p.replace(/\/+$/, '')))];
 }
 
 /**
@@ -85,11 +85,11 @@ export function backupPaths(dataRoot, warnings = []) {
  * cannot), so this reuses its recognizers and looks one folder down for packs,
  * as the updater does.
  */
-function templateUserFiles(dataRoot, warnings) {
+function templateUserFiles(dataRoot, warnings, failed) {
   // Both the data-root profile and the CAREER_OPS_PROFILE override can select a
   // variant; a file either one selects is yours (DATA_CONTRACT.md).
   const variants = {};
-  const profiles = new Set([getProfilePath(dataRoot), getProfilePath()]);
+  const profiles = new Set([getProfilePath(dataRoot), ...(hasProfileOverride() ? [getProfilePath()] : [])]);
   for (const profile of profiles) {
     if (!existsSync(profile)) continue;
     try {
@@ -105,7 +105,9 @@ function templateUserFiles(dataRoot, warnings) {
   const listDir = (relDir) => {
     try {
       return readdirSync(join(dataRoot, relDir), { withFileTypes: true }).map((e) => ({ rel: `${relDir}/${e.name}`, entry: e }));
-    } catch {
+    } catch (error) {
+      // An absent folder is normal; an unreadable one would silently drop user templates.
+      if (error.code !== 'ENOENT') failed.push({ path: relDir, error: `could not list for template files: ${error.message}` });
       return [];
     }
   };
@@ -394,7 +396,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     result.warnings.push(`${LOCAL_PATHS_FILE} in the checkout is not read when the data root is elsewhere; back up fork-local files it declares separately.`);
   }
   let skippedAgentFiles = 0;
-  for (const entry of backupPaths(dataRoot, result.warnings)) {
+  for (const entry of backupPaths(dataRoot, result.warnings, result.failed)) {
     // Count what a synced destination leaves out, from the effective backup
     // paths themselves (declared ones such as .claude/settings.local.json too),
     // so the warning below appears only when a settings file was really skipped.
