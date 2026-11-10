@@ -580,8 +580,11 @@ export default {
       } catch (err) {
         failure = err;
       }
-      const have = new Set(full.map((j) => j.url));
-      const missing = probed.filter((j) => !have.has(j.url));
+      // Compare by the CSB posting id (the url ends /{id}-{locale}); the slug and the
+      // locale can differ between the two reads of the same posting.
+      const idOf = (j) => /\/(\d+)-[A-Za-z_]+\/?$/.exec(j.url)?.[1] ?? j.url;
+      const have = new Set(full.map(idOf));
+      const missing = probed.filter((j) => !have.has(idOf(j)));
       if (failure || missing.length > 0) {
         console.error(`⚠️  successfactors: ${entry.name} full read at the raised limits ${failure ? `failed (${failure.message})` : 'missed a posting the probe found'} — keeping the probed posting; the result may be partial`);
         return [...full, ...missing];

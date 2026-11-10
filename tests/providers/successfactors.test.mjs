@@ -571,6 +571,12 @@ try {
         if (jobs.some((j) => /Role 1\b/.test(j.title)) && warns.some((w) => /keeping the probed posting/.test(w)) && (mode === 'reject' ? jobs.length === 1 : jobs.length === 2)) pass(`successfactors keeps the probed posting on a ${mode} full read and warns`);
         else fail(`successfactors partial CSB (${mode}) wrong: ${jobs.length} jobs, ${ids}, warns=${JSON.stringify(warns)}`);
       }
+      // The same CSB id under another locale and slug in the full read is not "missed": no duplicate, no warning.
+      warns.length = 0;
+      let m = 0;
+      jobs = await sf.fetch({ name: 'SameId', careers_url: 'https://careers.sameid.example', max_pages: 200 }, { sleep: async () => {}, fetchText: async (u) => (/tile-search/.test(u) ? '<!DOCTYPE html>' : '<a href="/search/?locale=en_US">en</a><a href="/search/?locale=de_DE">de</a>'), fetchJson: async (_u, o) => { m++; const loc = JSON.parse(o.body).locale; if (m === 1) return { totalJobs: 1, jobSearchResult: [{ response: { id: '7', unifiedStandardTitle: 'Role 7', unifiedUrlTitle: 'Old-Slug' } }] }; return loc === 'de_DE' ? { totalJobs: 1, jobSearchResult: [{ response: { id: '7', unifiedStandardTitle: 'Rolle 7', unifiedUrlTitle: 'Neuer-Slug' } }] } : { totalJobs: 0, jobSearchResult: [] }; } });
+      if (jobs.length === 1 && warns.every((w) => !/probed posting/.test(w))) pass('successfactors compares the probed posting by CSB id across locales and slugs');
+      else fail(`successfactors id comparison wrong: ${jobs.length} jobs, urls=${jobs.map((j) => j.url)}, warns=${JSON.stringify(warns)}`);
       // RMK fullness uses raw tile rows: a full last page containing one title-less tile still counts as capped.
       warns.length = 0;
       const badTile = '<li class="job-tile job-id-999999"><a data-url="/job/x/999999/" href="#"></a></li>';
