@@ -18,6 +18,8 @@ import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
@@ -190,12 +192,31 @@ export async function POST(req: Request) {
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
   // Hold the tracker guard through evaluation persistence / PDF marking. Build
-  // the prompt inside the same try so preparation failures release it too.
+  // the prompt inside the same try so preparation failures release it too. It is
+  // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
   let child;
   let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // Read the JD here, not in the worker: WebFetch drops script content, so a
+    // board that renders its JD from script data looks like an empty shell to the
+    // worker and the run ends as "Needs review" on a live posting. null (plain
+    // boards, any miss) leaves the worker on its WebFetch path.
+    const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
+    // The caller went away while the JD was being read: do not start a worker for nobody.
+    if (req.signal.aborted) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return new Response(null, { status: 499 });
+    }
+    // A partial JD must not reach a worker that could score and save it as the
+    // whole posting, so refuse here instead of trusting the prompt to stop it.
+    if (isTruncatedJd(prefetch?.text)) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
+    }
+    const prefetchedJd = prefetch?.text ?? null;
+    const closedEvidence = prefetch?.closedEvidence ?? null;
     if (evaluationInstructions) {
       instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
     }
@@ -214,6 +235,8 @@ export async function POST(req: Request) {
       coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
       profile: profileRef(careerOpsRoot()),
       evaluationInstructions: instructionFile?.reference,
+      prefetchedJd,
+      closedEvidence,
     });
 
     const isClaude = cliId === "claude";
