@@ -38,7 +38,8 @@
  * to the MCP path silently). An empty/near-empty jd-mode extraction is one of
  * those hard errors (`code: "empty_text"`) rather than a successful-looking
  * empty JD — the documented silent fallback only fires if the tool actually
- * reports failure. Reuses liveness-browser.mjs's SSRF host guard and
+ * reports failure. So is a Cloudflare challenge or block page served in place
+ * of the posting (`code: "bot_challenge"`). Reuses liveness-browser.mjs's SSRF host guard and
  * realistic-UA context so it isn't instantly bot-walled.
  */
 
@@ -49,7 +50,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
 import { HTML_TAG_RE } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
@@ -1087,6 +1088,25 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
 }
 
 /**
+ * A Cloudflare challenge or block page served in place of the posting, as a
+ * jd-mode failure, or null. Pure — exported for tests.
+ *
+ * jdFailure() never rejects a result above the length floor, and a
+ * site-branded challenge body clears it (#6713: 838 characters, "Humans
+ * only"), so the interstitial was emitted as the JD. Cloudflare titles the page
+ * itself, and archive-posting.mjs refuses the same pages by that title on an
+ * HTTP error (#6724). `bot_challenge` is the code liveness gives the same wall.
+ *
+ * @param {{ status?: number, pageTitle?: string, url?: string }} page
+ */
+export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) {
+  if (!(status >= 400)) return null;
+  const kind = cloudflareInterstitial(pageTitle);
+  if (!kind) return null;
+  return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
+}
+
+/**
  * Write a jd-mode result to stdout, or fail with `empty_text` when the
  * extraction came back empty enough to be useless.
  *
@@ -1333,7 +1353,9 @@ export async function readDom(page) {
     const fullBody = document.body?.innerText || '';
     const bodyText = fullBody.length > 4000 ? `${fullBody.slice(0, 2000)}\n…\n${fullBody.slice(-2000)}` : fullBody;
 
-    return { title, text, anchors, jsonLdDescription, jsonLdTitle, bodyText };
+    // The document's own title, which `title` above passes over for an <h1>:
+    // challengeFailure() reads it.
+    return { title, text, anchors, jsonLdDescription, jsonLdTitle, bodyText, pageTitle: document.title || '' };
   });
 }
 
@@ -1406,7 +1428,7 @@ async function main() {
       return route.continue();
     });
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
     await page.waitForTimeout(HYDRATION_WAIT_MS); // let SPAs hydrate
 
     // Belt-and-suspenders: never emit content read from a private final URL.
@@ -1422,7 +1444,13 @@ async function main() {
     if (mode === 'listing') {
       process.stdout.write(JSON.stringify(normalizeListing(raw.anchors, finalUrl, max)));
     } else {
-      emitJd(normalizeJd(raw, finalUrl, maxChars), maxChars);
+      const challenge = challengeFailure({ status: response?.status() ?? 0, pageTitle: raw.pageTitle, url: finalUrl });
+      if (challenge) {
+        console.error(JSON.stringify(challenge));
+        process.exitCode = 1;
+      } else {
+        emitJd(normalizeJd(raw, finalUrl, maxChars), maxChars);
+      }
     }
   } catch (err) {
     console.error(JSON.stringify({ error: `navigation error: ${String(err.message).split('\n')[0]}`, code: 'navigation_error' }));
