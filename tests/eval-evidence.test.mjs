@@ -284,3 +284,80 @@ test('a culture cap with no evidence is left as written', () => {
   assert.equal(out.includes(capped), true);
   assert.equal(out.includes(CULTURE_SCORE_FLAG), false);
 });
+
+test('a funding figure is not pay, and a bare range under a compensation heading is', () => {
+  assert.equal(postingStatesPay('Raised $50M Series B. 10k+ customers. 10,000 employees.'), false);
+  assert.equal(postingStatesPay('Compensation\n\n$120,000 to $150,000'), true);
+  assert.equal(postingStatesPay('## Salary\n90k to 110k GBP'), true);
+  const funding = normalizeEvaluationText(reply(), 'Raised $50M Series B. Competitive salary.');
+  assert.equal(funding.includes('$140,000'), false);
+  assert.match(funding, /compensation: "unknown"/);
+  const ranged = normalizeEvaluationText(reply(), 'Compensation\n\n$120,000 to $150,000');
+  assert.equal(ranged.includes('$140,000'), true);
+  assert.equal(ranged.includes(UNKNOWN_COMP_SENTENCE), false);
+});
+
+test('a prose compensation line does not keep the nested score evidence', () => {
+  const text = `Compensation: Medium\n\n${reply()}`;
+  const out = normalizeEvaluationText(text, JD_NO_PAY);
+  assert.match(out, /^Compensation: Medium$/m);
+  assert.match(out, /compensation: "unknown"/);
+  assert.match(out, /culture: "unknown"/);
+});
+
+test('removing a score claim drops the sentence instead of leaving a period', () => {
+  const kept = 'Compensation does not affect the score.';
+  const both = reply().replace(
+    'The compensation estimate lowers the score.',
+    `${kept} Salary uncertainty lowers the score.`,
+  );
+  const mixed = normalizeEvaluationText(both, JD_NO_PAY);
+  assert.equal(mixed.includes(kept), true);
+  assert.equal(mixed.includes('. .'), false);
+  assert.equal(mixed.includes('Salary uncertainty lowers the score'), false);
+  const only = normalizeEvaluationText(
+    reply().replace('The compensation estimate lowers the score.', 'The compensation estimate lowers the score.'),
+    JD_NO_PAY,
+  );
+  assert.equal(only.includes('\n.\n') || only.includes('\n.'), false);
+});
+
+test('a culture line that already says unknown is not rewritten or flagged', () => {
+  const line = 'Cultural signals: unknown; no evidence in the posting.';
+  const out = normalizeEvaluationText(reply().replace(
+    'Cultural signals: 3/5 by default, no evidence in the posting.',
+    line,
+  ), JD_WITH_PAY);
+  assert.equal(out.includes(line), true);
+  assert.equal(out.includes(CULTURE_SCORE_FLAG), false);
+  assert.match(out, /culture: "supported"/);
+});
+
+test('a localized lead and header follow the score', () => {
+  const text = reply({ score: '2.4', decision: 'Apply' })
+    .replace('## Verdict (lead)', '## Werdykt (lead)')
+    .replace('**Apply.**', '**Aplikuj.**')
+    .replace('**Decision:** Apply', '**Decyzja:** Aplikuj');
+  const out = normalizeEvaluationText(text, JD_WITH_PAY);
+  assert.match(out, /final_decision: "Skip"/);
+  assert.match(out, /\*\*Decyzja:\*\* Pomiń/);
+  assert.match(out, /\*\*Pomiń\.\*\*/);
+  assert.equal(out.includes('**Aplikuj.**'), false);
+  const danish = reply({ score: '4.2', decision: 'Skip' })
+    .replace('## Verdict (lead)', '## Konklusion (lead)')
+    .replace('**Skip.**', '**Spring over.**')
+    .replace('**Decision:** Skip', '**Beslutning:** Spring over');
+  const kept = normalizeEvaluationText(danish, JD_WITH_PAY);
+  assert.match(kept, /\*\*Beslutning:\*\* Søg/);
+  assert.match(kept, /\*\*Søg\.\*\*/);
+});
+
+test('an unknown lead call is flagged and left in place', () => {
+  const text = reply({ score: '2.4', decision: 'Apply' }).replace('**Apply.**', '**Go for it.**');
+  const out = normalizeEvaluationText(text, JD_WITH_PAY);
+  assert.match(out, /\*\*Go for it\.\*\*/);
+  assert.match(out, /not a known decision word/);
+  assert.match(out, /final_decision: "Skip"/);
+  const twice = normalizeEvaluationText(out, JD_WITH_PAY);
+  assert.equal(twice.split('not a known decision word').length - 1, 1);
+});
