@@ -388,7 +388,10 @@ function withTimeout(run, timeoutMs) {
  * Fetch one origin's robots.txt and reduce it to a policy: either the body to
  * match paths against, or a verdict that holds for every path on the origin.
  */
-async function loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects }) {
+async function loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects, allowedRedirectHosts = [] }) {
+  const tenantHost = new URL(origin).hostname.toLowerCase();
+  const bare = (h) => h.replace(/^www\./, '');
+  const allowedHosts = new Set(allowedRedirectHosts.map((h) => String(h).toLowerCase()));
   let target = `${origin}/robots.txt`;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const parsed = new URL(target);
@@ -426,6 +429,13 @@ async function loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, m
         target = new URL(location, target).href;
       } catch {
         return deny('robots_redirect_refused', `redirected to an invalid URL`);
+      }
+      // A robots.txt redirect may stay on the tenant host (www toggle
+      // included) or go to an explicitly allowed host; anywhere else the
+      // answer is not this tenant's policy, so the check fails closed.
+      const nextHost = new URL(target).hostname.toLowerCase();
+      if (bare(nextHost) !== bare(tenantHost) && !allowedHosts.has(nextHost)) {
+        return deny('robots_redirect_refused', `redirected to another host (${nextHost})`);
       }
       continue;
     }
@@ -468,6 +478,9 @@ export function clearRobotsCache() {
  * @param {string} [opts.userAgent] - Sent on the robots.txt request.
  * @param {string} [opts.productToken] - The robots.txt group to obey.
  * @param {number} [opts.maxRedirects]
+ * @param {string[]} [opts.allowedRedirectHosts] - Hosts a robots.txt redirect
+ *   may reach besides the tenant host and its www twin; any other target is
+ *   refused (`robots_redirect_refused`).
  * @returns {Promise<{allowed: boolean, code: string, reason: string}>}
  *   `reason` reads after "robots.txt ", e.g. "answered HTTP 503".
  */
@@ -480,6 +493,7 @@ export async function robotsAllows(url, opts = {}) {
     userAgent = DEFAULT_USER_AGENT,
     productToken = ROBOTS_PRODUCT_TOKEN,
     maxRedirects = ROBOTS_MAX_REDIRECTS,
+    allowedRedirectHosts = [],
   } = opts;
 
   let parsed;
@@ -499,7 +513,7 @@ export async function robotsAllows(url, opts = {}) {
   const origin = parsed.origin;
   let pending = cache.get(origin);
   if (!pending) {
-    pending = loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects })
+    pending = loadPolicy(origin, { fetchImpl, resolver, timeoutMs, userAgent, maxRedirects, allowedRedirectHosts })
       .catch((err) => deny('robots_fetch_error', `check failed (${String(err?.message ?? err).split('\n')[0]})`));
     cache.set(origin, pending);
   }
