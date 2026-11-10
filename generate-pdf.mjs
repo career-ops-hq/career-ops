@@ -2635,6 +2635,8 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
         left: '0',
       },
       preferCSSPageSize: true,
+      tagged: true,
+      outline: true,
     });
 
     // Read the root page-tree count so page-like text in streams is ignored.
