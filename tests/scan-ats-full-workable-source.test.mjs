@@ -37,6 +37,9 @@ check(parseArgs(['node', 'scan-ats-full.mjs', '--ats', 'workable']).ats.join() =
   check(res.status === 'ok' && res.list.length === 1 && seen[0].cutoff === 123 && seen[0].titleFilter === titleFilter,
     "loadSourceList() builds a feed source's list from the sweep's window and title filter");
 
+  const staleRes = await loadSourceList('workable', { ...src, loadDataset: async () => ({ list: [{ company: 'Acme GmbH', jobs: [] }], status: 'stale' }) }, {});
+  check(staleRes.status === 'stale' && staleRes.list.length === 1, "a loader's own 'stale' status (an expired feed copy) reaches the report");
+
   const realError = console.error;
   const warnings = [];
   console.error = (m) => warnings.push(String(m));

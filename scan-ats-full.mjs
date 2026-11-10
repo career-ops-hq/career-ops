@@ -31,7 +31,8 @@
  * read from join.com's own company sitemap. Each is cached in data/cache/ for
  * 24h. Workable has no directory: its public XML job feed carries every
  * tenant's postings, so that source reads the feed once per run (about 140 MB
- * compressed) and is not cached (see loadWorkableFeed in providers/workable.mjs).
+ * compressed) and keeps it for one hour, the feed's own update period (see
+ * workableFeedCache below and loadWorkableFeed in providers/workable.mjs).
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -53,14 +54,17 @@
  */
 
 import { captureWorkplaceEvidence } from './providers/_country.mjs';
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, createReadStream, createWriteStream } from 'fs';
+import { once } from 'node:events';
+import { finished } from 'node:stream/promises';
+import { createGunzip, createGzip } from 'node:zlib';
 import { createHash } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
-import { makeHttpCtx, fetchJson, fetchText, fetchTextHead } from './providers/_http.mjs';
+import { makeHttpCtx, fetchJson, fetchText, fetchTextHead, fetchTextStream } from './providers/_http.mjs';
 import { withConnectionScope, withAbortScope } from './providers/_connection-scope.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
@@ -451,7 +455,7 @@ export const SOURCES = {
     // Workable publishes every tenant's postings in one hourly XML feed, so
     // there is no company directory to walk and nothing to fetch per board:
     // loadDataset reads the feed once (loadWorkableFeed in
-    // providers/workable.mjs) and hands back
+    // providers/workable.mjs, through workableFeedCache) and hands back
     // one board per employer with its postings attached, already narrowed to
     // the --since window and the title filter. The rest of the sweep (domain
     // gate, location and content filters, blacklist, dedup) runs per employer
@@ -463,8 +467,17 @@ export const SOURCES = {
     // saved from being added twice.
     restartOnResume: true,
     dataset: WORKABLE_FEED_URL,
-    loadDataset: ({ cutoff, includeUndated, titleFilter }) => loadWorkableFeed({ cutoffMs: cutoff, includeUndated, titleFilter })
-      .then(({ companies }) => companies),
+    loadDataset: async ({ cutoff, includeUndated, titleFilter, cacheDir }) => {
+      const cache = workableFeedCache(cacheDir ? { cacheDir } : {});
+      try {
+        const { companies } = await loadWorkableFeed({ cutoffMs: cutoff, includeUndated, titleFilter, fetchStream: cache.fetchStream });
+        cache.commit();
+        return { list: companies, status: cache.from === 'stale-cache' ? 'stale' : 'ok' };
+      } catch (err) {
+        cache.discard();
+        throw err;
+      }
+    },
     toEntry: (row) => (row && typeof row.company === 'string' && row.company
       ? { name: row.company, ...(row.website ? { website: row.website } : {}), jobs: Array.isArray(row.jobs) ? row.jobs : [] }
       : null),
@@ -651,12 +664,134 @@ export async function loadCompanyList(name, url, parseDataset, { cacheDir = CACH
 export async function loadSourceList(name, source, datasetOpts, { loadCompanyListFn = loadCompanyList } = {}) {
   if (typeof source?.loadDataset !== 'function') return loadCompanyListFn(name, source.dataset, source.parseDataset);
   try {
-    const list = await source.loadDataset(datasetOpts);
-    return { list: Array.isArray(list) ? list : [], status: 'ok' };
+    const loaded = await source.loadDataset(datasetOpts);
+    // A loader answers its list, or { list, status } when it can say more
+    // (a list read from an expired cache is 'stale').
+    const list = Array.isArray(loaded) ? loaded : loaded?.list;
+    const status = !Array.isArray(loaded) && ['ok', 'stale'].includes(loaded?.status) ? loaded.status : 'ok';
+    return { list: Array.isArray(list) ? list : [], status };
   } catch (err) {
     console.error(`⚠️  ${name}: could not read ${source.dataset} — ${err.message}`);
     return { list: [], status: 'empty' };
   }
+}
+
+// Workable lets one client download its job feed about once an hour (a second
+// request inside the hour is answered 429 with Retry-After: 3600), and the
+// feed itself is rebuilt hourly. So the download is kept, gzipped, for that
+// hour: a second run inside it, or a source restarted by --resume, reads the
+// copy instead of being refused. Past the hour the feed is downloaded again; if
+// that is refused before any of it arrived, the expired copy is read and the
+// source reports 'stale', as an expired directory cache does.
+export const WORKABLE_FEED_CACHE_TTL_MS = 60 * 60 * 1000;
+const WORKABLE_FEED_CACHE_FILE = 'workable.xml.gz';
+
+/**
+ * A fetchTextStream stand-in for loadWorkableFeed that serves and keeps the
+ * feed copy. A fresh download is written to a temporary file and becomes the
+ * copy only on commit(), after the caller accepted the whole document, so a
+ * copy is always a complete feed; discard() drops a download the caller
+ * refused.
+ *
+ * @param {{ cacheDir?: string, ttlMs?: number, fetchStream?: typeof fetchTextStream, now?: () => number }} [opts]
+ */
+export function workableFeedCache({ cacheDir = CACHE_DIR, ttlMs = WORKABLE_FEED_CACHE_TTL_MS, fetchStream = fetchTextStream, now = Date.now } = {}) {
+  const file = path.join(cacheDir, WORKABLE_FEED_CACHE_FILE);
+  const tmp = `${file}.tmp-${process.pid}`;
+  /** @type {'network' | 'cache' | 'stale-cache'} */
+  let from = 'network';
+  const ageMs = () => (existsSync(file) ? now() - statSync(file).mtimeMs : Infinity);
+  const removeQuietly = (p) => { try { unlinkSync(p); } catch { /* not there */ } };
+
+  async function readCopy(onText) {
+    const decoder = new TextDecoder('utf-8');
+    let bytes = 0;
+    for await (const chunk of createReadStream(file).pipe(createGunzip())) {
+      bytes += chunk.length;
+      if (await onText(decoder.decode(chunk, { stream: true })) === false) return { bytes, complete: false };
+    }
+    const tail = decoder.decode();
+    if (tail) await onText(tail);
+    return { bytes, complete: true };
+  }
+
+  async function stream(url, opts, onText) {
+    if (ageMs() < ttlMs) {
+      from = 'cache';
+      return readCopy(onText);
+    }
+    // The copy is written only once text arrives, so a refused request never
+    // touches the disk. A failure to write it costs the copy, not the read.
+    /** @type {import('node:zlib').Gzip | null} */
+    let gzip = null;
+    /** @type {import('node:fs').WriteStream | null} */
+    let out = null;
+    let writeFailed = false;
+    const sink = () => {
+      if (!gzip) {
+        mkdirSync(cacheDir, { recursive: true });
+        gzip = createGzip({ level: 1 });
+        out = createWriteStream(tmp);
+        gzip.on('error', () => { writeFailed = true; });
+        out.on('error', () => { writeFailed = true; });
+        gzip.pipe(out);
+      }
+      return gzip;
+    };
+    const closeSink = async (keep) => {
+      if (!gzip) return;
+      if (keep && !writeFailed) {
+        gzip.end();
+        await finished(out).catch(() => { writeFailed = true; });
+      } else {
+        gzip.destroy();
+        out.destroy();
+        await finished(out).catch(() => {});
+      }
+      if (!keep || writeFailed) removeQuietly(tmp);
+    };
+    let delivered = false;
+    try {
+      const result = await fetchStream(url, opts, async (text) => {
+        delivered = true;
+        if (!writeFailed) {
+          const g = sink();
+          if (!g.write(text)) await Promise.race([once(g, 'drain'), once(g, 'error')]).catch(() => {});
+        }
+        return onText(text);
+      });
+      await closeSink(true);
+      from = 'network';
+      return result;
+    } catch (err) {
+      await closeSink(false);
+      // Only a refusal that delivered nothing can fall back: once part of the
+      // feed reached the caller, the copy would be read on top of it.
+      if (!delivered && existsSync(file)) {
+        from = 'stale-cache';
+        return readCopy(onText);
+      }
+      if (err?.status === 429) {
+        const retryS = Number(err.retryAfter);
+        const when = Number.isFinite(retryS) ? new Date(now() + retryS * 1000).toISOString() : 'later';
+        throw new Error(`Workable serves its job feed about once an hour and refused this request (HTTP 429); try again after ${when}`);
+      }
+      throw err;
+    }
+  }
+
+  return {
+    fetchStream: stream,
+    get from() { return from; },
+    /** Keep a fresh download as the copy. */
+    commit() {
+      if (from === 'network' && existsSync(tmp)) renameSyncWithRetry(tmp, file);
+    },
+    /** Drop a download the caller refused. */
+    discard() {
+      removeQuietly(tmp);
+    },
+  };
 }
 
 // Date gate for one posting in a reverse (fresh-first) scan:
