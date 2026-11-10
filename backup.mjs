@@ -86,11 +86,17 @@ export function backupPaths(dataRoot, warnings = []) {
  * as the updater does.
  */
 function templateUserFiles(dataRoot, warnings) {
-  let variants = {};
-  const profile = getProfilePath(dataRoot);
-  if (existsSync(profile)) {
+  // Both the data-root profile and the CAREER_OPS_PROFILE override can select a
+  // variant; a file either one selects is yours (DATA_CONTRACT.md).
+  const variants = {};
+  const profiles = new Set([getProfilePath(dataRoot), getProfilePath()]);
+  for (const profile of profiles) {
+    if (!existsSync(profile)) continue;
     try {
-      variants = configuredTemplateVariantsFromProfileSource(readFileSync(profile, 'utf8'));
+      const configured = configuredTemplateVariantsFromProfileSource(readFileSync(profile, 'utf8'));
+      for (const [kind, name] of Object.entries(configured)) {
+        variants[kind] = [...new Set([variants[kind], name].flat().filter(Boolean))];
+      }
     } catch (error) {
       warnings.push(`${profile} could not be read for its configured template variants (${error.message}); they are not backed up.`);
     }

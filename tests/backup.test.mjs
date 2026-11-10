@@ -320,6 +320,25 @@ try {
   );
   assert.equal(tplRun.failed.length, 0);
 
+  // A variant selected only by the CAREER_OPS_PROFILE override is yours too.
+  const ovRoot = join(tmp, 'ov-root');
+  put(ovRoot, 'cv.md', 'cv');
+  put(ovRoot, 'config/profile.yml', 'cv:\n  template: standard\n');
+  put(ovRoot, 'templates/cv-template.mine.html', 'selected by the override');
+  put(ovRoot, 'templates/cv-template.other.html', 'unselected');
+  const overrideProfile = join(tmp, 'override-profile.yml');
+  writeFileSync(overrideProfile, 'cv:\n  template: mine\n');
+  const savedOverride = process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_PROFILE = overrideProfile;
+  try {
+    b.runBackup({ dataRoot: ovRoot, dest: join(tmp, 'backup', 'ov') });
+  } finally {
+    if (savedOverride === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = savedOverride;
+  }
+  const ovHas = (f) => existsSync(join(tmp, 'backup', 'ov', 'templates', f));
+  assert.deepEqual(['cv-template.mine.html', 'cv-template.other.html'].map(ovHas), [true, false]);
+
   // A declaration file that cannot be parsed falls back to the built-in list.
   const decl = join(tmp, 'decl-root');
   put(decl, 'cv.md', 'cv');
