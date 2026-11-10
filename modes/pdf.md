@@ -6,7 +6,7 @@ Optional passes:
 
 ## Dashboard
 
-A dashboard PDF run asks the model for the JSON Input Schema inside a `<<cv-json>>` envelope. The server builds the HTML with `build-cv-html.mjs`, then runs the title check, the structure check, and the keyword check. Roles stay newest-first, so the chronological guard stays on. When the model returns JSON, the server also writes the ATS PDF beside the styled PDF. That ATS render omits `--report`, so the index still points at the styled PDF. Apply uploads the ATS file when it is on disk, and the styled PDF when it is not. The report keyword panel scores the tailored HTML when that file exists for the report.
+A dashboard PDF run asks the model for the JSON Input Schema inside a `<<cv-json>>` envelope. The server builds the HTML with `build-cv-html.mjs`, then runs the title check, the structure check, and the keyword check. Roles stay newest-first, so the chronological guard stays on. Apply uploads the styled PDF. The server writes an ATS PDF only when that run sets `ats` to true, the same opt-in as `--ats` on the CLI. That ATS render omits `--report`, so the index still points at the styled PDF. The report keyword panel scores the tailored HTML when that file exists for the report.
 
 ## Full pipeline
 

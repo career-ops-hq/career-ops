@@ -1,4 +1,4 @@
-import fs from "node:fs";
+import path from "node:path";
 
 /**
  * Sibling path for the ATS PDF. Always inserts `-ats-` before the date.
@@ -15,13 +15,15 @@ export function atsPdfPath(styledPdf) {
 }
 
 /**
- * @param {string|null|undefined} styledPdf
- * @param {(path: string) => boolean} [exists]
- * @returns {string|null}
+ * A company slug can end in `ats`, so a lone `…-ats-YYYY-MM-DD.pdf` stays.
+ * @param {string[]} names
+ * @returns {string[]}
  */
-export function preferAtsPdf(styledPdf, exists = fs.existsSync) {
-  if (!styledPdf) return null;
-  const ats = atsPdfPath(styledPdf);
-  if (ats !== styledPdf && exists(ats)) return ats;
-  return styledPdf;
+export function styledCvNames(names) {
+  const siblings = new Set();
+  for (const name of names) {
+    const sibling = path.basename(atsPdfPath(name));
+    if (sibling && sibling !== name) siblings.add(sibling);
+  }
+  return names.filter((name) => !siblings.has(name));
 }

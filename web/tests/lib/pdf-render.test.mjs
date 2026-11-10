@@ -760,7 +760,7 @@ test("atsPdfPath: a company slug ending in ats still gets its own sibling", () =
   );
 });
 
-test("renderAndMarkPdf: a styled rerun with no ATS removes the previous ATS PDF", async () => {
+test("renderAndMarkPdf: a styled rerun with no ATS leaves the previous ATS PDF", async () => {
   const dir = makeScratchDir();
   const pdfPaths = makePdfPaths(dir, "12");
   writeFileSync(pdfPaths.html, "<html>styled</html>");
@@ -780,9 +780,9 @@ test("renderAndMarkPdf: a styled rerun with no ATS removes the previous ATS PDF"
       reportNum: "12",
     });
     assert.equal(result.kind, "rendered");
-    assert.equal(existsSync(staleAts), false);
+    assert.equal(readFileSync(staleAts, "utf8"), "old-ats");
     assert.equal(readFileSync(pdfPaths.finalPdf, "utf8"), "%PDF-fake");
-    assert.ok(result.warnings.some((warning) => warning.includes("previous ATS PDF") && warning.includes("styled PDF")));
+    assert.ok(!result.warnings.some((warning) => warning.includes("previous ATS PDF")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

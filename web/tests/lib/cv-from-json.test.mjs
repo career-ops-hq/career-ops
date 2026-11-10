@@ -76,7 +76,7 @@ test("restoreNewestFirst puts a later-starting role back above an earlier one", 
   assert.equal(sameYear.experience[0].company, "Initech");
 });
 
-test("a JSON envelope builds HTML, warns on a drifted title, and writes the ATS sibling", async () => {
+test("a JSON envelope builds HTML and warns on a drifted title without an ATS sibling", async () => {
   const dir = mkdtempSync(path.join(tmpdir(), "cv-json-"));
   const saved = {
     root: process.env.CAREER_OPS_ROOT,
@@ -113,9 +113,8 @@ test("a JSON envelope builds HTML, warns on a drifted title, and writes the ATS 
     assert.ok(result.warnings.some((warning) => warning.includes("Lead Analyst") && warning.includes("Analyst")));
     assert.ok(result.warnings.some((warning) => /newest-first/i.test(warning)));
     assert.ok(result.warnings.some((warning) => warning.includes("Zorblax")));
-    assert.equal(result.ats.finalPdf, path.join(dir, "output", "cv-jane-doe-018-acme-ats-2026-11-05.pdf"));
-    assert.equal(existsSync(result.ats.html), true);
-    assert.match(readFileSync(result.ats.html, "utf8"), /Jane Doe/);
+    assert.equal(result.ats, null);
+    assert.equal(existsSync(htmlPath.replace(/\.html$/i, ".ats.html")), false);
   } finally {
     if (saved.root === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = saved.root;
@@ -150,6 +149,7 @@ test("a marker format replaces a disagreeing page_format in the built CV", async
       dataRoot: dir,
       htmlPath,
       finalPdf: path.join(dir, "output", "cv-jane-doe-018-acme-2026-11-05.pdf"),
+      ats: true,
     });
     assert.equal(result.ok, true, result.error);
     assert.match(result.html, /max-width:\s*210mm/);

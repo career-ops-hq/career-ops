@@ -113,6 +113,7 @@ function structureWarnings(structure) {
  * @param {string} [args.reportFile]
  * @param {string} args.htmlPath
  * @param {string} args.finalPdf
+ * @param {boolean} [args.ats]
  * @returns {Promise<{ok: true, html: string, warnings: string[], ats: {html: string, finalPdf: string}|null} | {ok: false, error: string}>}
  */
 export async function materializeTailoredCv({
@@ -124,6 +125,7 @@ export async function materializeTailoredCv({
   reportFile,
   htmlPath,
   finalPdf,
+  ats = false,
 }) {
   if (envelope?.kind === "html" && typeof envelope.html === "string") {
     return { ok: true, html: envelope.html, warnings: [], ats: null };
@@ -193,8 +195,10 @@ export async function materializeTailoredCv({
     warnings.push(...await keywordWarnings(coreRoot, dataRoot, report, htmlPath));
   }
 
-  const ats = await buildAtsVariant({ coreRoot, dataRoot, payload, htmlPath, finalPdf, warnings });
-  return { ok: true, html, warnings, ats };
+  const atsVariant = ats === true
+    ? await buildAtsVariant({ coreRoot, dataRoot, payload, htmlPath, finalPdf, warnings })
+    : null;
+  return { ok: true, html, warnings, ats: atsVariant };
 }
 
 function reportPath(dataRoot, reportFile) {

@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; ats?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
   const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
@@ -631,6 +631,7 @@ export async function POST(req: Request) {
                   reportFile: pdfPaths.reportFile,
                   htmlPath: pdfPaths.html,
                   finalPdf: pdfPaths.finalPdf,
+                  ats: body.ats === true,
                 });
                 if (!built.ok) {
                   send({ type: "error", msg: built.error.slice(0, 200) });

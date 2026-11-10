@@ -15,7 +15,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { atsPdfPath } from "./apply/ats-pdf.mjs";
 import { dataFolderMissingMessage } from "./core/data-root.mjs";
 
 /**
@@ -173,8 +172,7 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
 
 /**
  * Exit 0 can still write nothing (#6377). `delivered` is the new file at
- * `finalPdf`, same rule as spawnGeneratePdf. `ok` alone would leave a previous
- * ATS PDF in place and let Apply upload it.
+ * `finalPdf`, same rule as spawnGeneratePdf.
  * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", dataRoot?: string}} args
  * @returns {Promise<{ok: boolean, delivered: boolean, stderr: string}>}
  */
@@ -347,31 +345,6 @@ export function failureReason(stderr) {
 }
 
 /**
- * Drop the ATS sibling of a styled PDF this run did not replace.
- * Never the styled path itself: a company slug ending in `ats` used to
- * make those two paths the same file.
- * @param {string} styledPdf
- * @param {string[]} warnings
- */
-function removePreviousAts(styledPdf, warnings) {
-  const stale = atsPdfPath(styledPdf);
-  if (!stale || stale === styledPdf) return;
-  let existed = false;
-  try {
-    existed = fs.existsSync(stale);
-  } catch {
-    return;
-  }
-  if (!existed) return;
-  try {
-    fs.rmSync(stale, { force: true });
-    warnings.push(`Removed the previous ATS PDF ${path.basename(stale)}. Apply will use the styled PDF.`);
-  } catch (err) {
-    warnings.push(`Could not remove the previous ATS PDF ${path.basename(stale)}: ${err.message}`);
-  }
-}
-
-/**
  * Render the tailored HTML to a PDF, then mark the tracker's PDF column
  * ready — only after the render is CONFIRMED successful, never
  * optimistically. Always cleans up scratch files, whether the render
@@ -407,11 +380,6 @@ export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, 
         : (atsRender.stderr || "render failed");
       warnings.push(`ATS PDF was not created: ${why}. Apply will use the styled PDF.`);
     }
-  } else if (render.delivered) {
-    // This run replaced the styled PDF and did not write a new ATS sibling.
-    // Apply prefers the sibling whenever the file exists, so the previous
-    // one would be uploaded in place of the CV just rendered.
-    removePreviousAts(pdfPaths.finalPdf, warnings);
   }
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
 

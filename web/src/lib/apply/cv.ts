@@ -6,7 +6,7 @@ import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
-import { preferAtsPdf } from "./ats-pdf.mjs";
+import { styledCvNames } from "./ats-pdf.mjs";
 import { cvUploadName } from "./upload-name.mjs";
 
 /**
@@ -27,7 +27,7 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
     const reportNumber = reportNumberFor(id, app, report?.file ?? null);
     if (!reportNumber) return null;
     const result = await pdfPathStatusForReport(String(reportNumber));
-    return result.status === "found" ? preferAtsPdf(result.path) : null;
+    return result.status === "found" ? result.path : null;
   }
 
   const c = (company ?? "").trim();
@@ -48,11 +48,11 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
   // `key.first` is deliberately NOT used as a fallback: matching a company by
   // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
   // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
-  const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
+  const matches = styledCvNames(files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug)));
   if (!matches.length) return null;
   const sorted = sortNewestFirst(dir, matches);
   if (!sorted.length) return null;
-  return preferAtsPdf(path.join(dir, sorted[0]));
+  return path.join(dir, sorted[0]);
 }
 
 /**
