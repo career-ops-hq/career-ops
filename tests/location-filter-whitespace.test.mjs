@@ -47,9 +47,13 @@ test('a no-break space in a US always_allow entry still turns on the state expan
   assert.equal(accepts('Dublin, Ireland', '', 'Engineer'), false);
 });
 
-test('a worldwide label with a no-break space passes a country-only allow list', () => {
+// Whitespace is not a qualifier: a doubled or no-break space still spells the
+// exact label (#6553). Qualified labels stay rejected in location-filter-worldwide.
+test('a worldwide label with a no-break or doubled space passes a country-only allow list', () => {
   const accepts = buildLocationFilter({ allow: ['Germany'] });
   assert.equal(accepts(`Anywhere in the${NBSP}world`, '', 'Engineer'), true);
+  assert.equal(accepts('Anywhere  in the World', '', 'Engineer'), true);
+  assert.equal(accepts('Worldwide  except Canada', '', 'Engineer'), false);
 });
 
 test('ISO codes keep their case-sensitive match next to a no-break space (#6605)', () => {
