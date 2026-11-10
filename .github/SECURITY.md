@@ -27,7 +27,7 @@ Security issues in the following are in scope:
 - **Web dashboard** (`web/`) — anything reachable while it is running, including cross-origin requests from a page the user visits, requests from other hosts on the same network, and command injection through its API
 - **Templates** (`templates/`) — XSS in generated HTML/PDF
 - **Configuration** — secrets exposure, unsafe defaults
-- **Agent instructions** (`AGENTS.md`, `modes/`, `batch/`) — prompt injection through untrusted input (a job posting, company page, recruiter email or application form) that makes the agent write files outside a mode's normal output, reveal secrets, or submit or send anything without the user's review
+- **Agent instructions** (`AGENTS.md`, `modes/`, `batch/`) — prompt injection through untrusted input (a job posting, company page, recruiter email or application form) that makes the agent write files outside a mode's normal output, reveal secrets, or submit or send anything the user has not explicitly approved, even a draft they have already reviewed
 
 ## Out of Scope
 
