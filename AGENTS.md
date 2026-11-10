@@ -400,6 +400,7 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 | Dutch (NL/BE) | `modes/nl/` | `vacature` / `solliciteren` | vakantiegeld, proeftijd, opzegtermijn, pensioen |
 | Polish (Poland) | `modes/pl/` | `oferta` / `aplikuj` | Umowa o pracę, B2B, ZUS, okres wypowiedzenia, urlop |
 | Danish (Denmark) | `modes/da/` | `oferta` / `apply` | løn, opsigelsesvarsel, ferie, overenskomst, A-kasse |
+| Norwegian, Bokmål (Norway) | `modes/nb/` | `stilling` / `soknad` | fast ansettelse, prøvetid, oppsigelsestid, tariffavtale, feriepenger, OTP |
 | Russian | `modes/ru/` | `oferta` / `apply` | ТК РФ, оклад, испытательный срок, самозанятый, ДМС |
 | Ukrainian (Ukraine) | `modes/ua/` | `oferta` / `apply` | ФОП, КЗпП, оклад, випробувальний термін |
 | Chinese, Simplified | `modes/zh/` | `oferta` / `apply` | 五险一金, 试用期, 年终奖, 劳动合同, 竞业 |

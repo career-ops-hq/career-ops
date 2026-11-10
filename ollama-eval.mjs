@@ -263,6 +263,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileContent,
   customContent,
   jdText,
+  jdInContext: false, // The user message carries the JD; still budget it once.
   maxTokens: numCtx, // matches options.num_ctx below
 });
 
