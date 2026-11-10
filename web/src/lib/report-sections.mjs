@@ -51,8 +51,14 @@ const HEADING_LETTER = /^(?:Block\s+([A-Z])(?:[).:]|\s)|([A-Z])[).:])/i;
 
 /**
  * Display form of a section heading: author-letter prefix and the trailing
- * "(lead)" / "(verdict)" marker removed. Falls back to the original when
- * stripping would leave nothing.
+ * "(lead)" / "(verdict)" / "(draft)" marker removed. Falls back to the original
+ * when stripping would leave nothing.
+ *
+ * "(draft)" joins the list because the evaluation modes write it on the
+ * draft-answers block (#4272), and it is the first rule `parseDraftAnswersBlockH`
+ * finds that block by, in any language and under any letter (#3884). It is an
+ * authoring signal like the other two, so it is stripped here for the same
+ * reason: the reader needs it, the viewer must not see it.
  * @param {string} h
  * @returns {string}
  */
@@ -61,7 +67,7 @@ import { isStarTableHeader, parsePipeTable } from "./report-tables.mjs";
 export function cleanHeading(h) {
   const stripped = h
     .replace(HEADING_PREFIX, "")
-    .replace(/\s*\((?:lead|verdict)\)\s*$/i, "")
+    .replace(/\s*\((?:lead|verdict|draft)\)\s*$/i, "")
     .trim();
   return stripped || h.trim();
 }

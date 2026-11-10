@@ -235,7 +235,7 @@ Nazwy pól w nagłówku (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF
 ## Score Evidence
 (pięć wymiarów, status dowodu, otwarte pytania, Evidence confidence, priorytety)
 
-## H) Szkice odpowiedzi do aplikacji
+## H) Szkice odpowiedzi do aplikacji (draft)
 (tylko jeśli score >= 4.5 -- szkice odpowiedzi do formularza aplikacyjnego)
 
 ---

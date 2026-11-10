@@ -777,7 +777,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## Score Evidence
 (five scoring dimensions, evidence status and source, unresolved questions, evidence-confidence tier, and verification priorities)
 
-## H) Draft Application Answers
+## H) Draft Application Answers (draft)
 (only if score >= 4.5 — draft answers for the application form)
 
 ---
