@@ -672,7 +672,7 @@ async function main() {
       console.error(`CV fact check warning: cover letter`);
       printFactWarnings(printedWarnings, console.error);
     }
-    await renderHtmlToPdf(printed, outputPath, {
+    const renderResult = await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
@@ -686,7 +686,7 @@ async function main() {
       kind: 'cover',
       inputPath: payloadPath,
     });
-    console.log(`\nCover letter PDF: ${payload.output_path}`);
+    console.log(`\nCover letter PDF: ${renderResult?.draftPath || outputPath}`);
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");
     console.error(err.message);
