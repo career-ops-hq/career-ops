@@ -349,16 +349,23 @@ try {
     if (savedOverride === undefined) delete process.env.CAREER_OPS_PROFILE;
     else process.env.CAREER_OPS_PROFILE = savedOverride;
   }
-  // Without an override, a profile elsewhere (the process-wide data root) is not consulted.
+  // Without an override, a profile elsewhere (the process-wide data root) is not consulted,
+  // even when that profile selects the variant.
   const noOvRoot = join(tmp, 'no-ov-root');
   put(noOvRoot, 'cv.md', 'cv');
   put(noOvRoot, 'templates/cv-template.mine.html', 'not selected here');
-  const savedNoOv = process.env.CAREER_OPS_PROFILE;
+  const globalRoot = join(tmp, 'global-root');
+  put(globalRoot, 'config/profile.yml', 'cv:\n  template: mine\n');
+  const savedEnv = { profile: process.env.CAREER_OPS_PROFILE, root: process.env.CAREER_OPS_ROOT };
   delete process.env.CAREER_OPS_PROFILE;
+  process.env.CAREER_OPS_ROOT = globalRoot;
   try {
     b.runBackup({ dataRoot: noOvRoot, dest: join(tmp, 'backup', 'no-ov') });
   } finally {
-    if (savedNoOv !== undefined) process.env.CAREER_OPS_PROFILE = savedNoOv;
+    for (const [key, value] of [['CAREER_OPS_PROFILE', savedEnv.profile], ['CAREER_OPS_ROOT', savedEnv.root]]) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
   assert.equal(existsSync(join(tmp, 'backup', 'no-ov', 'templates', 'cv-template.mine.html')), false);
   const ovHas = (f) => existsSync(join(tmp, 'backup', 'ov', 'templates', f));
