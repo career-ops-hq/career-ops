@@ -13,7 +13,7 @@ import { StringDecoder } from "node:string_decoder";
 import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, utimesSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { atsPdfPath } from "../../src/lib/apply/ats-pdf.mjs";
+import { atsPdfPath, styledCvNames } from "../../src/lib/apply/ats-pdf.mjs";
 import {
   pdfRunOutcome,
   writeCvHtml,
@@ -793,13 +793,41 @@ test("pdfRunOutcome: a JSON envelope with no HTML still proceeds to the builder"
   assert.deepEqual(outcome, { ok: true });
 });
 
-test("atsPdfPath: a company slug ending in ats still gets its own sibling", () => {
-  const styled = "/output/cv-jane-8-ats-2026-07-26.pdf";
-  assert.equal(atsPdfPath(styled), "/output/cv-jane-8-ats-ats-2026-07-26.pdf");
-  assert.notEqual(atsPdfPath(styled), styled);
-  assert.equal(
-    atsPdfPath("/output/cv-jane-8-acme-2026-07-26.pdf"),
-    "/output/cv-jane-8-acme-ats-2026-07-26.pdf",
+test("atsPdfPath: the ATS suffix cannot be a styled PDF for a company whose slug ends in ats", () => {
+  const acme = "/output/cv-jane-8-acme-2026-07-26.pdf";
+  const acmeAtsStyled = "/output/cv-jane-8-acme-ats-2026-07-26.pdf";
+  assert.equal(atsPdfPath(acme), "/output/cv-jane-8-acme-2026-07-26.ats.pdf");
+  assert.notEqual(atsPdfPath(acme), acmeAtsStyled);
+  assert.equal(atsPdfPath(acmeAtsStyled), "/output/cv-jane-8-acme-ats-2026-07-26.ats.pdf");
+  const atsCompany = "/output/cv-jane-8-ats-2026-07-26.pdf";
+  assert.equal(atsPdfPath(atsCompany), "/output/cv-jane-8-ats-2026-07-26.ats.pdf");
+  assert.notEqual(atsPdfPath(atsCompany), atsCompany);
+  assert.equal(atsPdfPath(atsPdfPath(acme)), atsPdfPath(acme));
+});
+
+test("styledCvNames: a .ats.pdf is never a styled CV, and a lone older -ats- name stays", () => {
+  assert.deepEqual(styledCvNames(["cv-jane-8-acme-2026-07-26.ats.pdf"]), []);
+  assert.deepEqual(
+    styledCvNames([
+      "cv-jane-8-acme-2026-07-26.pdf",
+      "cv-jane-8-acme-2026-07-26.ats.pdf",
+    ]),
+    ["cv-jane-8-acme-2026-07-26.pdf"],
+  );
+  assert.deepEqual(
+    styledCvNames(["cv-jane-doe-ats-2026-01-01.pdf"]),
+    ["cv-jane-doe-ats-2026-01-01.pdf"],
+  );
+  assert.deepEqual(
+    styledCvNames(["cv-jane-doe-acme-engineer-ats-2026-01-01.pdf"]),
+    ["cv-jane-doe-acme-engineer-ats-2026-01-01.pdf"],
+  );
+  assert.deepEqual(
+    styledCvNames([
+      "cv-jane-doe-acme-engineer-ats-2026-01-01.pdf",
+      "cv-jane-doe-acme-engineer-2026-01-01.pdf",
+    ]),
+    ["cv-jane-doe-acme-engineer-2026-01-01.pdf"],
   );
 });
 

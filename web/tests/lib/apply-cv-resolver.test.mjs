@@ -210,6 +210,45 @@ test('resolveTailoredCv: a styled PDF whose company slug ends in ats still resol
   });
 });
 
+test('resolveTailoredCv: a lone .ats.pdf is not uploaded as the styled CV', async () => {
+  await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.ats.pdf']], async () => {
+    assert.equal(await resolveTailoredCv('Acme'), null);
+  });
+});
+
+test('resolveTailoredCv: Apply uploads the styled PDF when a newer .ats.pdf exists', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', 0],
+      ['cv-jane-doe-acme-engineer-2026-01-01.ats.pdf', 10000],
+    ],
+    async (outputDir) => {
+      const result = await resolveTailoredCv('Acme');
+      assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    },
+  );
+});
+
+test('resolveTailoredCv: a company whose slug ends in ats still resolves when the other company is present', async () => {
+  await withFixture(
+    [
+      ['cv-jane-8-acme-2026-07-26.pdf', 0],
+      ['cv-jane-8-acme-ats-2026-07-26.pdf', 10000],
+    ],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCv('Acme'), join(outputDir, 'cv-jane-8-acme-2026-07-26.pdf'));
+      assert.equal(await resolveTailoredCv('Acme ATS'), join(outputDir, 'cv-jane-8-acme-ats-2026-07-26.pdf'));
+    },
+  );
+});
+
+test('locateTailoredPdf: a lone .ats.pdf is not served as the styled CV', async () => {
+  await withFixture([['cv-jane-doe-acme-engineer-2026-01-01.ats.pdf']], async () => {
+    const result = await locateTailoredPdf({ n: '', company: 'Acme', application: '', kind: 'cv' });
+    assert.equal('status' in result ? result.status : 0, 404);
+  });
+});
+
 test('resolveTailoredCv: an application number uploads the indexed PDF when an ATS sibling exists', async () => {
   await withFixture([], async (outputDir) => {
     const root = dirname(outputDir);
