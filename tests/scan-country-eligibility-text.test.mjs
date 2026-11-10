@@ -100,6 +100,7 @@ ${countryFilter ? COUNTRY_FILTER : ''}tracked_companies:
       cwd: dir,
       env: { ...childEnv, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals },
       encoding: 'utf-8',
+      timeout: 60_000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const p = join(dir, 'data', 'pipeline.md');
