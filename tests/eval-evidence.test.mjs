@@ -175,10 +175,15 @@ test('the CLI evaluators use the shared pay rule and run the normalizer', () => 
 
 test('a CV budget figure stays when the posting states no pay', () => {
   const budget = '| Budget ownership | high | Strong | CV | Managed a $2M budget |';
-  const out = normalizeEvaluationText(`## B) Match with CV\n\n${budget}\n\n${reply()}`, JD_NO_PAY);
+  const payroll = '| Budget ownership | high | Strong | CV | Managed a $2M payroll budget |';
+  const out = normalizeEvaluationText(`## B) Match with CV\n\n${budget}\n${payroll}\n\n${reply()}`, JD_NO_PAY);
   assert.equal(out.includes(budget), true);
+  assert.equal(out.includes(payroll), true);
   assert.equal(out.includes('$140,000'), false);
   assert.equal(out.includes('Estimated salary'), false);
+  const invented = normalizeEvaluationText('Role payroll is $2M, copied from nowhere.', JD_NO_PAY);
+  assert.equal(invented.includes('$2M'), false);
+  assert.equal(invented.includes('payroll'), false);
 });
 
 test('a removed pay estimate that moved the score asks for a re-check', () => {
@@ -193,6 +198,34 @@ test('a removed pay estimate that moved the score asks for a re-check', () => {
   const twice = normalizeEvaluationText(out, JD_NO_PAY);
   assert.equal(twice.split(COMP_SCORE_FLAG).length - 1, 1);
   assert.equal(twice.split(UNKNOWN_COMP_SENTENCE).length - 1, 1);
+});
+
+test('a salary line that moves the score is removed and flagged', () => {
+  const text = reply().replace(
+    'The compensation estimate lowers the score.',
+    'Salary uncertainty lowers the score.',
+  );
+  const out = normalizeEvaluationText(text, JD_NO_PAY);
+  assert.equal(out.includes('Salary uncertainty lowers the score'), false);
+  assert.equal(out.split(COMP_SCORE_FLAG).length - 1, 1);
+  assert.match(out, /^SCORE:\s*4\.2\s*$/m);
+});
+
+test('a negated score-impact sentence stays and does not flag the score', () => {
+  const kept = 'Compensation does not affect the score.';
+  const text = reply().replace('The compensation estimate lowers the score.', kept);
+  const out = normalizeEvaluationText(text, JD_NO_PAY);
+  assert.equal(out.includes(kept), true);
+  assert.equal(out.includes(COMP_SCORE_FLAG), false);
+  assert.match(out, /^SCORE:\s*4\.2\s*$/m);
+  const both = reply().replace(
+    'The compensation estimate lowers the score.',
+    `${kept} Salary uncertainty lowers the score.`,
+  );
+  const mixed = normalizeEvaluationText(both, JD_NO_PAY);
+  assert.equal(mixed.includes(kept), true);
+  assert.equal(mixed.includes('Salary uncertainty lowers the score'), false);
+  assert.equal(mixed.split(COMP_SCORE_FLAG).length - 1, 1);
 });
 
 test('a neutralized culture line flags that the score was not recalculated', () => {
