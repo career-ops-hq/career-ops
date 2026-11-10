@@ -144,6 +144,20 @@ test('a missing score does not become Skip', () => {
   assert.match(out, /## Verdict \(lead\)\n\n\*\*Apply\.\*\*/);
 });
 
+test('a hard stop with no score still becomes Skip', () => {
+  const text = reply({
+    decision: 'Apply',
+    hardStops: '\n  - "Requires a clearance the profile does not list"',
+  }).replace(/^score:.*$/m, 'score:').replace(/^SCORE:.*$/m, 'SCORE:');
+  assert.equal(readGlobalScore(text), null);
+  const out = normalizeEvaluationText(text, JD_WITH_PAY);
+  assert.match(out, /final_decision: "Skip"/);
+  assert.match(out, /\*\*Decision:\*\* Skip/);
+  assert.match(out, /## Verdict \(lead\)\n\n\*\*Skip\.\*\*/);
+  assert.match(out, /^SCORE:\s*$/m);
+  assert.doesNotMatch(out, /^score:\s*\d/m);
+});
+
 test('an earlier bold Apply line stays and the verdict line follows the score', () => {
   const text = `**Apply.** Stated before the verdict.\n\n${reply({ score: '2.4', decision: 'Apply' })}`;
   const out = normalizeEvaluationText(text, JD_WITH_PAY);
