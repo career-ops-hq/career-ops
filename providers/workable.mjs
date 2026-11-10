@@ -558,7 +558,6 @@ export function createFeedJobSplitter(onBlock) {
  *   includeUndated?: boolean,
  *   titleFilter: (title: string, companySlug?: string) => boolean,
  *   fetchStream?: typeof fetchTextStream,
- *   url?: string,
  *   timeoutMs?: number,
  *   maxBytes?: number,
  *   maxKeptRows?: number,
@@ -567,7 +566,7 @@ export function createFeedJobSplitter(onBlock) {
  */
 export async function loadWorkableFeed({
   cutoffMs, includeUndated = false, titleFilter,
-  fetchStream = fetchTextStream, url = WORKABLE_FEED_URL,
+  fetchStream = fetchTextStream,
   timeoutMs = WORKABLE_FEED_TIMEOUT_MS, maxBytes = WORKABLE_FEED_MAX_BYTES,
   maxKeptRows = WORKABLE_FEED_MAX_KEPT_ROWS,
 }) {
@@ -603,7 +602,9 @@ export async function loadWorkableFeed({
     rowsByUrl.set(key, rows);
   });
 
-  const { bytes } = await fetchStream(url, { timeoutMs, maxBytes, redirect: 'error' }, (text) => { splitter.push(text); });
+  // A fixed literal URL, so there is no host to check before the request;
+  // redirect: 'error' keeps the response on that host.
+  const { bytes } = await fetchStream(WORKABLE_FEED_URL, { timeoutMs, maxBytes, redirect: 'error' }, (text) => { splitter.push(text); });
   stats.bytes = bytes;
   if (!splitter.sawSource) {
     throw new Error('workable feed: unexpected response — no <source> element');
