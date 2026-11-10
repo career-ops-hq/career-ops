@@ -297,6 +297,7 @@ test("keepTailoredHtml: replaces a read-only sibling with the new CV", () => {
     assert.equal(readFileSync(sibling, "utf8"), "new cv");
     assert.deepEqual(warnings, []);
     assert.equal(tailoredCvForKeywordMatch(pdf), sibling);
+    assert.equal(readdirSync(dir).some((name) => name.startsWith(".cv-html-")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -315,6 +316,7 @@ test("keepTailoredHtml: a failed copy does not leave the previous sibling select
     assert.equal(tailoredCvForKeywordMatch(pdf), null);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /HTML was not kept for the CV Studio/);
+    assert.equal(readdirSync(dir).some((name) => name.startsWith(".cv-html-")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -307,13 +307,26 @@ export function cleanupPdfScratch(scratchDir, prefix) {
  */
 export function keepTailoredHtml(pdfPaths, warnings) {
   const published = pdfPaths.finalPdf.replace(/\.pdf$/i, ".html");
+  let stagingDir;
   try {
-    // copyFileSync leaves a read-only sibling where it is. Keyword matching
-    // then scores that old CV against the PDF this render just replaced.
+    // Remove the sibling first so a failed publish cannot leave the previous
+    // CV selectable. The new file is copied aside and renamed into place, so
+    // a reader never scores a half-written HTML file.
     fs.rmSync(published, { force: true });
-    fs.copyFileSync(pdfPaths.html, published);
+    stagingDir = fs.mkdtempSync(path.join(path.dirname(published), ".cv-html-"));
+    const staged = path.join(stagingDir, "tailored.html");
+    fs.copyFileSync(pdfPaths.html, staged);
+    fs.renameSync(staged, published);
   } catch (err) {
     warnings.push(`PDF rendered, but its HTML was not kept for the CV Studio: ${err.message}`);
+  } finally {
+    if (stagingDir) {
+      try {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      } catch (err) {
+        warnings.push(`Could not remove temporary CV HTML: ${err.message}`);
+      }
+    }
   }
 }
 
