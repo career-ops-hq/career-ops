@@ -31,8 +31,9 @@
  * read from join.com's own company sitemap. Each is cached in data/cache/ for
  * 24h. Workable has no directory: its public XML job feed carries every
  * tenant's postings, so that source reads the feed once per run (about 140 MB
- * compressed) and keeps it for one hour, the feed's own update period (see
- * workableFeedCache below and loadWorkableFeed in providers/workable.mjs).
+ * compressed), keeps a copy, and on later runs downloads it again only when
+ * Workable says it changed (see workableFeedCache below and loadWorkableFeed
+ * in providers/workable.mjs).
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -676,15 +677,17 @@ export async function loadSourceList(name, source, datasetOpts, { loadCompanyLis
   }
 }
 
-// Workable lets one client download its job feed about once an hour (a second
-// request inside the hour is answered 429 with Retry-After: 3600), and the
-// feed itself is rebuilt hourly. So the download is kept, gzipped, for that
-// hour: a second run inside it, or a source restarted by --resume, reads the
-// copy instead of being refused. Past the hour the feed is downloaded again; if
-// that is refused before any of it arrived, the expired copy is read and the
-// source reports 'stale', as an expired directory cache does.
-export const WORKABLE_FEED_CACHE_TTL_MS = 60 * 60 * 1000;
+// Workable rebuilds its job feed about once an hour and refuses a second
+// download inside the hour (HTTP 429, Retry-After up to 3600). It answers a
+// conditional request, though: the feed carries Last-Modified, and a GET with
+// that date in If-Modified-Since gets 304 with no body and no refusal. So the
+// last download is kept, gzipped, beside its Last-Modified, and every run asks
+// whether the feed changed: on 304 it reads the copy, on 200 it keeps the new
+// download. When the request is refused before any of the feed arrived, the
+// copy is read and the source reports 'stale', as an expired directory cache
+// does.
 const WORKABLE_FEED_CACHE_FILE = 'workable.xml.gz';
+const WORKABLE_FEED_META_FILE = 'workable.xml.json';
 
 /**
  * A fetchTextStream stand-in for loadWorkableFeed that serves and keeps the
@@ -693,15 +696,26 @@ const WORKABLE_FEED_CACHE_FILE = 'workable.xml.gz';
  * copy is always a complete feed; discard() drops a download the caller
  * refused.
  *
- * @param {{ cacheDir?: string, ttlMs?: number, fetchStream?: typeof fetchTextStream, now?: () => number }} [opts]
+ * @param {{ cacheDir?: string, fetchStream?: typeof fetchTextStream, now?: () => number }} [opts]
  */
-export function workableFeedCache({ cacheDir = CACHE_DIR, ttlMs = WORKABLE_FEED_CACHE_TTL_MS, fetchStream = fetchTextStream, now = Date.now } = {}) {
+export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTextStream, now = Date.now } = {}) {
   const file = path.join(cacheDir, WORKABLE_FEED_CACHE_FILE);
+  const metaFile = path.join(cacheDir, WORKABLE_FEED_META_FILE);
   const tmp = `${file}.tmp-${process.pid}`;
   /** @type {'network' | 'cache' | 'stale-cache'} */
   let from = 'network';
-  const ageMs = () => (existsSync(file) ? now() - statSync(file).mtimeMs : Infinity);
+  /** Last-Modified of the download in `tmp`, written beside the copy on commit(). */
+  let downloadedLastModified = null;
   const removeQuietly = (p) => { try { unlinkSync(p); } catch { /* not there */ } };
+  const copyLastModified = () => {
+    if (!existsSync(file)) return null;
+    try {
+      const value = JSON.parse(readFileSync(metaFile, 'utf-8'))?.lastModified;
+      return typeof value === 'string' && value.trim() ? value.trim() : null;
+    } catch {
+      return null;
+    }
+  };
 
   async function readCopy(onText) {
     const decoder = new TextDecoder('utf-8');
@@ -716,10 +730,10 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, ttlMs = WORKABLE_FEED_
   }
 
   async function stream(url, opts, onText) {
-    if (ageMs() < ttlMs) {
-      from = 'cache';
-      return readCopy(onText);
-    }
+    const validator = copyLastModified();
+    const requestOpts = validator
+      ? { ...opts, headers: { ...(opts?.headers ?? {}), 'if-modified-since': validator }, acceptNotModified: true }
+      : opts;
     // The copy is written only once text arrives, so a refused request never
     // touches the disk. A failure to write it costs the copy, not the read.
     /** @type {import('node:zlib').Gzip | null} */
@@ -752,7 +766,7 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, ttlMs = WORKABLE_FEED_
     };
     let delivered = false;
     try {
-      const result = await fetchStream(url, opts, async (text) => {
+      const result = await fetchStream(url, requestOpts, async (text) => {
         delivered = true;
         if (!writeFailed) {
           const g = sink();
@@ -760,8 +774,14 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, ttlMs = WORKABLE_FEED_
         }
         return onText(text);
       });
+      if (result?.notModified) {
+        await closeSink(false);
+        from = 'cache';
+        return readCopy(onText);
+      }
       await closeSink(true);
       from = 'network';
+      downloadedLastModified = typeof result?.lastModified === 'string' ? result.lastModified : null;
       return result;
     } catch (err) {
       await closeSink(false);
@@ -783,9 +803,12 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, ttlMs = WORKABLE_FEED_
   return {
     fetchStream: stream,
     get from() { return from; },
-    /** Keep a fresh download as the copy. */
+    /** Keep a fresh download as the copy, with the date the next run asks about. */
     commit() {
-      if (from === 'network' && existsSync(tmp)) renameSyncWithRetry(tmp, file);
+      if (from !== 'network' || !existsSync(tmp)) return;
+      renameSyncWithRetry(tmp, file);
+      if (downloadedLastModified) writeFileSync(metaFile, JSON.stringify({ lastModified: downloadedLastModified }), 'utf-8');
+      else removeQuietly(metaFile);
     },
     /** Drop a download the caller refused. */
     discard() {
@@ -1771,10 +1794,12 @@ async function main() {
       log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping (its list is not read again)`);
       continue;
     }
-    // Stats are accumulated BEFORE the completed-source skip: on --resume a
-    // source finished before the checkpoint was written still contributed its
-    // companies to the sweep, so it must still count toward the availability /
-    // cap figures the final report and --json output show.
+    // For every other source, stats are accumulated BEFORE the completed-source
+    // skip: on --resume a source finished before the checkpoint was written
+    // still contributed its companies to the sweep, so it must still count
+    // toward the availability / cap figures the final report and --json output
+    // show. Reading its list again is cheap, since the list comes from the 24h
+    // directory cache.
     const { list, status } = await loadSourceList(name, source, { cutoff, includeUndated: opts.includeUndated, titleFilter });
     datasetStatus[name] = status;
     datasetSizes[name] = list.length;
