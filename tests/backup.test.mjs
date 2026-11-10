@@ -379,7 +379,9 @@ try {
   const savedOverride = process.env.CAREER_OPS_PROFILE;
   process.env.CAREER_OPS_PROFILE = overrideProfile;
   try {
-    b.runBackup({ dataRoot: ovRoot, dest: join(tmp, 'backup', 'ov') });
+    const ovRun = b.runBackup({ dataRoot: ovRoot, dest: join(tmp, 'backup', 'ov') });
+    // The active profile lives outside the data root, so the run says it was not copied.
+    assert.ok(ovRun.warnings.some((w) => w.includes('CAREER_OPS_PROFILE') && w.includes('not copied')));
   } finally {
     if (savedOverride === undefined) delete process.env.CAREER_OPS_PROFILE;
     else process.env.CAREER_OPS_PROFILE = savedOverride;

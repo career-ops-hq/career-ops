@@ -91,6 +91,12 @@ function templateUserFiles(dataRoot, warnings, failed) {
   // variant; a file either one selects is yours (DATA_CONTRACT.md).
   const variants = {};
   const profiles = new Set([getProfilePath(dataRoot), ...(hasProfileOverride() ? [getProfilePath()] : [])]);
+  if (hasProfileOverride()) {
+    const rel = relative(resolve(dataRoot), resolve(getProfilePath()));
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      warnings.push(`CAREER_OPS_PROFILE points at ${getProfilePath()}, outside the data root; it is not copied. Back that profile up separately.`);
+    }
+  }
   for (const profile of profiles) {
     // The same reader the template resolver uses (inline mappings included). A
     // missing profile is "none"; any other read or parse error is a failure.
