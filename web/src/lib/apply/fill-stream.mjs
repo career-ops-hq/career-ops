@@ -1,3 +1,5 @@
+import { gapHoldsEditor } from "./handoff-gate.mjs";
+
 /**
  * Consume full-fill NDJSON. Only a terminal record confirms completion; EOF is
  * an interruption. Return to the editor on failure so answers remain retryable.
@@ -89,23 +91,27 @@ export async function readFillResult(response, onStep, isCurrent, signal) {
  * stays up and the drafted answers stay put.
  *
  * @param {{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string}} result
- * @returns {{status: "done", issue: string} | {status: "ready", error?: string, gaps?: {level: "warn", code: string, message: string, field?: string}[]}}
+ * @returns {{status: "done", issue: string, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error?: string, gaps?: {level: "warn", code: string, message: string, field?: string}[]}}
  */
 export function screenForFill(result) {
-  if (result.status === "done" && Array.isArray(result.gaps) && result.gaps.length) {
-    return { status: /** @type {const} */ ("ready"), gaps: result.gaps };
+  if (result.status !== "done") {
+    return { status: /** @type {const} */ ("ready"), error: result.error };
   }
-  if (result.status === "done" && result.filled) {
-    return {
+  const gaps = Array.isArray(result.gaps) ? result.gaps : [];
+  const blocking = gaps.some((gap) => gapHoldsEditor(gap));
+  if (blocking || (gaps.length > 0 && !result.filled)) {
+    return { status: /** @type {const} */ ("ready"), gaps };
+  }
+  if (result.filled) {
+    const done = {
       status: /** @type {const} */ ("done"),
       issue: "AI filled the form for you — review every answer on the real form, then submit it yourself.",
     };
+    if (gaps.length) done.gaps = gaps;
+    return done;
   }
-  if (result.status === "done") {
-    return {
-      status: /** @type {const} */ ("ready"),
-      error: "AI did its best but couldn't finish. Check the real form before trying again.",
-    };
-  }
-  return { status: /** @type {const} */ ("ready"), error: result.error };
+  return {
+    status: /** @type {const} */ ("ready"),
+    error: "AI did its best but couldn't finish. Check the real form before trying again.",
+  };
 }

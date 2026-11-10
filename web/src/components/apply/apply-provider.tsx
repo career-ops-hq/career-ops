@@ -408,10 +408,12 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
           const seen = new Set(prev.map((i) => i.message));
           return [...prev, ...gaps.filter((i) => i.message && !seen.has(i.message))];
         });
-        setStatus("ready");
-      } else if (outcome.status === "done") {
+      }
+      if (outcome.status === "done") {
         setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: outcome.issue }]);
         setStatus("done");
+      } else if ("gaps" in outcome && outcome.gaps?.length) {
+        setStatus("ready");
       } else {
         setError(outcome.error || "The agent couldn't finish. Check the real form before trying again.");
         setStatus(outcome.status);

@@ -85,6 +85,34 @@ test("gaps keep the editor up even when the stream says the fill finished", () =
   assert.equal(outcome.error, undefined);
 });
 
+test("a completed handoff keeps a résumé warning on the success screen", () => {
+  const gaps = [{
+    level: "warn",
+    code: "cv-resolve",
+    message: "Could not resolve the résumé.",
+  }];
+  const outcome = screenForFill({ status: "done", filled: true, gaps });
+  assert.equal(outcome.status, "done");
+  assert.equal(outcome.issue, "AI filled the form for you — review every answer on the real form, then submit it yourself.");
+  assert.deepEqual(outcome.gaps, gaps);
+});
+
+test("a blocking gap still holds the editor when a résumé warning is also present", () => {
+  const gaps = [
+    { level: "warn", code: "cv-resolve", message: "Could not resolve the résumé." },
+    {
+      level: "warn",
+      code: "screening-empty",
+      field: "Visa sponsorship",
+      message: "Required sponsorship question is still empty (Visa sponsorship). Fill it on this page before the employer form opens.",
+    },
+  ];
+  const outcome = screenForFill({ status: "done", filled: true, gaps });
+  assert.equal(outcome.status, "ready");
+  assert.deepEqual(outcome.gaps, gaps);
+  assert.equal(outcome.error, undefined);
+});
+
 test("an empty gaps list does not change a completed fill", async () => {
   assert.deepEqual(await read(responseFor([record({ t: "done", filled: true, gaps: [] })])), { status: "done", filled: true });
 });

@@ -135,6 +135,16 @@ export function handoffDecision({
 const HANDOFF_GAP = new Set(["screening-empty", "resume-missing"]);
 
 /**
+ * A screening or résumé gap keeps the editor up. A warning such as an optional
+ * résumé that failed to resolve does not.
+ *
+ * @param {{ code?: string } | null | undefined} gap
+ */
+export function gapHoldsEditor(gap) {
+  return !!gap && HANDOFF_GAP.has(gap.code);
+}
+
+/**
  * Drop the empty-field warnings a retry asks about again. The element type
  * stays whatever the caller stored, so a list of apply issues comes back as
  * that same list.
