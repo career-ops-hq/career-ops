@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -219,8 +220,39 @@ test("two builds of one report keep their own CV", async () => {
     assert.doesNotMatch(first.html, /Grace Hopper/);
     assert.match(second.html, /Grace Hopper/);
     assert.doesNotMatch(second.html, /Ada Lovelace/);
-    const published = readFileSync(htmlPath, "utf8");
-    assert.ok(published === first.html || published === second.html);
+    assert.equal(existsSync(htmlPath), false);
+  } finally {
+    if (savedRoot === undefined) delete process.env.CAREER_OPS_ROOT;
+    else process.env.CAREER_OPS_ROOT = savedRoot;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an ATS payload that cannot be saved still returns the styled CV", async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), "cv-ats-miss-"));
+  const savedRoot = process.env.CAREER_OPS_ROOT;
+  process.env.CAREER_OPS_ROOT = dir;
+  const realWrite = fs.writeFileSync;
+  t.mock.method(fs, "writeFileSync", (file, data, ...rest) => {
+    if (String(file).endsWith("cv.ats.json")) {
+      throw Object.assign(new Error("ENOSPC: no space left on device"), { code: "ENOSPC" });
+    }
+    return realWrite(file, data, ...rest);
+  });
+  try {
+    writeFileSync(path.join(dir, "cv.md"), CV_MD);
+    const result = await materializeTailoredCv({
+      envelope: { ok: true, kind: "json", format: "letter", payload: payload(), warnings: [] },
+      coreRoot: CORE,
+      dataRoot: dir,
+      htmlPath: path.join(dir, "cv.html"),
+      finalPdf: path.join(dir, "out.pdf"),
+      ats: true,
+    });
+    assert.equal(result.ok, true, result.error);
+    assert.match(result.html, /Jane Doe/);
+    assert.equal(result.ats, null);
+    assert.ok(result.warnings.some((warning) => warning.includes("no space left") && warning.includes("styled PDF")));
   } finally {
     if (savedRoot === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = savedRoot;

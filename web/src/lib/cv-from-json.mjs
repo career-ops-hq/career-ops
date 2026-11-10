@@ -238,8 +238,8 @@ export async function materializeTailoredCv({
     const atsVariant = ats === true
       ? await buildAtsVariant({ coreRoot, dataRoot, payload, scratch, finalPdf, warnings })
       : null;
-    fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
-    fs.writeFileSync(htmlPath, html);
+    // The route saves htmlPath once the client is still connected. Writing it
+    // here would publish a CV the route then drops on disconnect.
     fs.rmSync(scratch.json, { force: true });
     fs.rmSync(scratch.atsJson, { force: true });
     keepScratch = Boolean(atsVariant);
@@ -303,7 +303,18 @@ async function buildAtsVariant({ coreRoot, dataRoot, payload, scratch, finalPdf,
     const message = String(finding.message ?? "").slice(0, 180);
     warnings.push(`ATS lint ${finding.code}: ${message}`);
   }
-  fs.writeFileSync(scratch.atsJson, JSON.stringify(folded.payload));
+  try {
+    const body = JSON.stringify(folded.payload);
+    if (typeof body !== "string") {
+      warnings.push("ATS PDF was not created: the ATS payload was empty. Apply will use the styled PDF.");
+      return null;
+    }
+    fs.writeFileSync(scratch.atsJson, body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warnings.push(`ATS PDF was not created: ${message}. Apply will use the styled PDF.`);
+    return null;
+  }
   const built = await runNode(dataRoot, [
     path.join(coreRoot, "build-cv-html.mjs"),
     scratch.atsJson,
