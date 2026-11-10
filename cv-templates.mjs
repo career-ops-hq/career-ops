@@ -853,9 +853,10 @@ const isScopeBarrier = (e) => (e.ns === 'html' ? HTML_SCOPE.has(e.name) : isSpec
 // Where script data ends. The tokenizer's escape states change what a `</script` means: after
 // `<!--` it is still script data, and after `<script` inside that it ends only the inner script.
 function scriptEnd(html, from) {
-  // `--!>` is deliberately absent: it ends a comment (see scanHtml) but not the escaped
-  // states, where the tokenizer reads `--!` as text and stays escaped (probed).
-  const marks = /<!--|-->|<\/?script(?=[\t\n\f\r />])/gi;
+  // `--!>` is matched so the comment-end pattern is complete, but it changes no state: it ends
+  // a comment (see scanHtml) but not the escaped states, where the tokenizer reads `--!` as
+  // text and stays escaped (probed).
+  const marks = /<!--|--!?>|<\/?script(?=[\t\n\f\r />])/gi;
   marks.lastIndex = from;
   let state = 0; // 0 script data, 1 escaped, 2 double escaped
   for (let m; (m = marks.exec(html));) {
@@ -863,6 +864,8 @@ function scriptEnd(html, from) {
     if (mark === '<!--') {
       if (state === 0) state = 1;
       marks.lastIndex = m.index + 2; // its two dashes can open `-->`
+    } else if (mark === '--!>') {
+      // deliberately no state change: `--!` is text in the escaped states (probed)
     } else if (mark[0] === '-') {
       if (state !== 0) state = 0;
     } else if (mark === '<script') {
