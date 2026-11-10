@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
-import { keywordsInText, loadStudio, renderEditedPdf, saveEdits } from "@/lib/cv-studio/server";
+import { keywordsInText, loadStudio, missingDataFolderMessage, renderEditedPdf, saveEdits } from "@/lib/cv-studio/server";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { parseEdits } from "@/lib/cv-studio/studio.mjs";
 import { createPutOrder } from "@/lib/cv-studio/put-order.mjs";
@@ -16,6 +16,8 @@ const saving = new Set<string>();
 const putOrder = createPutOrder();
 
 export async function GET(_req: Request, { params }: RouteContext) {
+  const missing = missingDataFolderMessage();
+  if (missing) return NextResponse.json({ error: missing }, { status: 400 });
   const load = await loadStudio((await params).n);
   if (!load.ok) return NextResponse.json({ error: load.reason }, { status: NOT_FOUND[load.reason] });
   return NextResponse.json(load);
@@ -26,6 +28,8 @@ export async function GET(_req: Request, { params }: RouteContext) {
 export async function PUT(req: Request, { params }: RouteContext) {
   const body = await readJsonObject<{ edits?: unknown; tab?: unknown; rev?: unknown }>(req);
   if (!body) return NextResponse.json({ error: "bad json" }, { status: 400 });
+  const missing = missingDataFolderMessage();
+  if (missing) return NextResponse.json({ error: missing }, { status: 400 });
   const load = await loadStudio((await params).n);
   if (!load.ok) return NextResponse.json({ error: load.reason }, { status: NOT_FOUND[load.reason] });
   const parsed = parseEdits(body.edits, load.doc.sourceHash);
@@ -41,6 +45,8 @@ export async function POST(req: Request, { params }: RouteContext) {
   const n = (await params).n;
   const body = await readJsonObject<{ op?: string; edits?: unknown; text?: unknown; tab?: unknown; rev?: unknown }>(req);
   if (!body) return NextResponse.json({ error: "bad json" }, { status: 400 });
+  const missing = missingDataFolderMessage();
+  if (missing) return NextResponse.json({ error: missing }, { status: 400 });
   if (body.op === "keywords") {
     if (typeof body.text !== "string" || body.text.length > 2000) return NextResponse.json({ error: "text required" }, { status: 400 });
     const keywords = await keywordsInText(n, body.text);

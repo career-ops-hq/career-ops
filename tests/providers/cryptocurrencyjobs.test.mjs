@@ -25,7 +25,9 @@ try {
     '<title>Cryptocurrency Jobs</title>',
     '<item><title><![CDATA[Senior Backend Engineer at Acme Protocol]]></title>',
     '<link>https://cryptocurrencyjobs.co/engineering/acme-senior-backend/</link>',
-    '<description><![CDATA[We are hiring a backend engineer. 100% remote.]]></description>',
+    // The live feed's teaser template, here naming a stack keyword (Solidity)
+    // so the description assertion below can't pass by accident.
+    '<description><![CDATA[Acme Protocol is looking to hire a Senior Backend Engineer (Solidity) to join their team. This is a full-time position that is 100% remote with no geographical restrictions.]]></description>',
     '<pubDate>Wed, 01 Apr 2026 10:00:00 GMT</pubDate></item>',
     '<item><title>Solidity Engineer at Beta Labs</title>',
     '<guid>https://cryptocurrencyjobs.co/engineering/beta-solidity/</guid></item>',
@@ -56,10 +58,14 @@ try {
     fail(`parseCryptocurrencyJobsRss guid fallback failed: ${JSON.stringify(jobs[1])}`);
   }
 
-  if (jobs[0]?.description === 'We are hiring a backend engineer. 100% remote.' && !('description' in (jobs[1] || {}))) {
-    pass('parseCryptocurrencyJobsRss populates description when present and omits it when absent');
+  // The feed's <description> is a one-sentence teaser, not the JD. scan.mjs's
+  // content_filter passes a job with no description but drops one whose text
+  // lacks a required keyword, so the teaser must never become `description`,
+  // even when it happens to name a keyword.
+  if (jobs.length === 2 && jobs.every(j => !('description' in j))) {
+    pass('parseCryptocurrencyJobsRss never sets description from the feed teaser');
   } else {
-    fail(`parseCryptocurrencyJobsRss description handling = ${JSON.stringify(jobs[0]?.description)}`);
+    fail(`parseCryptocurrencyJobsRss set a description: ${JSON.stringify(jobs.map(j => j.description))}`);
   }
 
   if (parseCryptocurrencyJobsRss('').length === 0 && parseCryptocurrencyJobsRss(null).length === 0) {

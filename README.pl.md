@@ -614,7 +614,7 @@ Zobacz [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) po pełne szczegóły. To opro
 ## Współtwórcy
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Każda osoba, która dostarczyła kod, dokumentację, tłumaczenia lub testy, jest wymieniona w
