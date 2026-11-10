@@ -331,6 +331,27 @@ export function stoppedScanCounts({
   };
 }
 
+/**
+ * Finish one source. An outage bumped the scan total by the whole list, so
+ * the unattempted tail comes off before the phase is folded. A stop during
+ * the cache save then reports boards that were actually contacted.
+ *
+ * @param {{ totalCompaniesScanned?: number, entries?: number, lastDone?: number, resolverOutage?: boolean }} [state]
+ * @returns {{ totalCompaniesScanned: number, phase: 'folded' }}
+ */
+export function foldSourceScan({
+  totalCompaniesScanned = 0,
+  entries = 0,
+  lastDone = 0,
+  resolverOutage = false,
+} = {}) {
+  const unfinished = resolverOutage ? Math.max(0, entries - lastDone) : 0;
+  return {
+    totalCompaniesScanned: Math.max(0, totalCompaniesScanned - unfinished),
+    phase: 'folded',
+  };
+}
+
 // Dataset entries are external input destined for URL interpolation — reject
 // anything outside a conservative slug charset.
 const SLUG_RE = /^[A-Za-z0-9._-]+$/;
@@ -2222,7 +2243,16 @@ async function main() {
     }
     totalErrors += errors;
     totalRetiredBoardsSkipped += deadBoardsSkipped;
-    checkpointPhase = 'folded';
+    // Correct the outage tail before the phase folds and before the cache
+    // save. A stop during that save reads the folded totals as they stand.
+    const folded = foldSourceScan({
+      totalCompaniesScanned,
+      entries: entries.length,
+      lastDone,
+      resolverOutage,
+    });
+    totalCompaniesScanned = folded.totalCompaniesScanned;
+    checkpointPhase = folded.phase;
     if (!opts.dryRun) {
       saveDeadBoardsBestEffort(deadBoards);
       await saveProviderIdCacheBestEffort(idCaches);
@@ -2231,14 +2261,6 @@ async function main() {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
       stoppedByOutage = true;
-      // The counter was bumped by the FULL entries.length up front, but the
-      // breaker left entries.length - lastDone boards unattempted. Correct the
-      // live counter, not just the checkpoint payload: this run's own summary
-      // and --json would otherwise report companies nobody ever contacted as
-      // scanned. Correcting it here also gives the checkpoint the right figure
-      // for free — a resumed run re-adds its own slice, so a checkpoint holding
-      // the full slice makes the completed portion count twice.
-      totalCompaniesScanned -= entries.length - lastDone;
       // Pin the resume point here rather than leaving the last periodic write
       // to stand for it. That one fires every CHECKPOINT_EVERY companies, so
       // it can be up to 500 boards behind where the breaker actually stopped —
