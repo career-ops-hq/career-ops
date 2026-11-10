@@ -3097,11 +3097,11 @@ function sourceSpellsFact(sourceText, value) {
  * Reduce markdown links to their visible text, so a claim that spans a link is
  * compared with the words a reader sees. Handles inline links whose target holds
  * balanced parentheses or a title (`[a](https://x/Foo_(bar) "t")`), reference
- * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`, the
- * title on the same line or on the line right after it).
+ * links (`[a][id]`, `[a][]`) and their definitions (`[id]: https://x "t"`),
+ * which are read the way CommonMark reads them (see the rules below).
  * A bracket pair with no link target after it is left alone.
  */
-function collapseMarkdownLinks(text) {
+export function collapseMarkdownLinks(text) {
   let out = '';
   let i = 0;
   const opener = /\[\s*([^\][]*?)\s*\]\(/y;
@@ -3127,9 +3127,28 @@ function collapseMarkdownLinks(text) {
     }
     out += text[i++];
   }
-  return out
-    .replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1')
-    .replace(/(?:^|[^\S\r\n])\[[^\][]+\]:[^\S\r\n]*\S+(?:[^\S\r\n]+(?:"[^"]*"|'[^']*'|\([^)]*\))|\r?\n[^\S\r\n]*(?:"[^"]*"|'[^']*'|\([^)]*\)))?[^\S\r\n]*(?=\r?$)/gm, ' ');
+  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1');
+  // A definition is dropped whole. Anything that is not one, as CommonMark
+  // reads it, is text a reader sees and stays:
+  //   - it starts its line, after at most three spaces, and cannot interrupt a
+  //     paragraph, so the line above is blank or a heading, or there is none;
+  //   - its target sits on the label's line or the next one, and a target in
+  //     angle brackets may hold spaces (`<./Terraform portfolio.pdf>`);
+  //   - an optional title, quoted or in parentheses, follows on the target's
+  //     line or the next, and may wrap, but never across a blank line;
+  //   - nothing else follows on its last line.
+  // A definition right under another one starts its block only once the one
+  // above is gone, so the pass repeats until nothing changes.
+  const sp = String.raw`[^\S\r\n]`;
+  const wrap = String.raw`\r?\n(?!${sp}*$)`;
+  const title = String.raw`(?:"(?:[^"\r\n]|${wrap})*"|'(?:[^'\r\n]|${wrap})*'|\((?:[^()\r\n]|${wrap})*\))`;
+  const paragraphAbove = String.raw`^(?!${sp}{0,3}#{1,6}(?:${sp}|$))${sp}*\S[^\r\n]*\r?\n`;
+  const definition = new RegExp(String.raw`^(?<!${paragraphAbove})${sp}{0,3}\[[^\][]+\]:${sp}*(?:\r?\n${sp}*)?(?:<[^<>\r\n]*>|\S+)(?:(?:${sp}+|${sp}*\r?\n${sp}*)${title})?${sp}*(?=\r?$)`, 'gm');
+  for (let before = ''; before !== out;) {
+    before = out;
+    out = out.replace(definition, ' ');
+  }
+  return out;
 }
 
 export function verifyFacts(targetText, {
