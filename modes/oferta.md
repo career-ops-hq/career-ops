@@ -458,6 +458,7 @@ Every jurisdiction splits work into two buckets under different names: an "emplo
 | Canada | "T4A", "independent contractor", "self-employed", "invoice for services" |
 | US | "1099", "independent contractor", "W-2 not provided" |
 | UK | "self-employed", "umbrella company", "outside IR35" / "inside IR35" |
+| Norway | "oppdragstaker", "selvstendig næringsdrivende", "fakturere" / "faktura", "via eget ENK" / "via eget AS", "konsulentoppdrag", "oppdragsavtale" (vs. "arbeidsavtale"; arbeidsmiljøloven § 1-8) |
 | Other jurisdictions | "labour contract" vs "employment contract" phrasing, "service agreement", "consulting agreement" (e.g., 劳务合同 vs 劳动合同 in China) |
 
 Plus a jurisdiction-agnostic structural check — **"contract position" alone is not enough to trigger this**, since plenty of legitimate fixed-term *employee* roles use that phrase. Only flag when the JD has explicit contractor-status wording (asks the candidate to "invoice," or to operate as a "consultant"/"freelancer," rather than being "hired"/"employed") **and** at least one corroborating omission (no benefits language, no vacation/PTO mention, no defined end date, no standard employment-standards phrasing, no mention of statutory deductions/withholding).
@@ -603,14 +604,14 @@ Close the report body with a `## Risk Summary` block directly after the `## Verd
 
 **Aggregation only, zero new judgment.** Each row quotes or links the verdict already produced by its source signal. The summary never re-scores, re-weights, or overrides — if a row looks wrong, the fix belongs in the source signal, not here.
 
-Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **`— not evaluated` is a first-class state:** when a signal could not run, say so explicitly rather than omitting the row, so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it found no redflags file), not a fourth free-floating state.
+Three states per row: `✅ {clear verdict}` / `⚠️ {finding}` / `— not evaluated`. **`— not evaluated` is a first-class state:** when a signal could not run, say so explicitly rather than omitting the row, so an all-✅ summary can be trusted. **Named exception:** the Interview red flags row renders its not-evaluated case as `— no interview sessions yet` — a documented, more specific phrasing of the same "not evaluated" concept for that one row (the cross-reference check did run; it found no redflags file), not a fourth free-floating state. A redflags file marked unverified is the plain `— not evaluated` state, not this exception: the file exists, so the row must not say that no sessions exist.
 
 | Signal | Source | Row rendering |
 |--------|--------|---------------|
 | Posting legitimacy | Block G assessment tier | `✅ High Confidence`, or `⚠️ {tier} — {one-line reason}` for Proceed with Caution / Suspicious |
 | Employment classification | Employment classification signal inside Block G | `✅ clear` when the check ran and found nothing; `⚠️ contractor-style language: "{quoted phrase}"` when the flag fired; `— not evaluated` when the check could not run |
 | Culture screen | Culture screen field in Block A | `✅ pass`, or `⚠️ caution — {evidence}` / `⚠️ fail — {evidence}`; `— not evaluated` when no screen was run |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (from `interview-redflag` mode) | **Cross-reference, not a copy:** if the file exists, surface its current warning level plus a relative link — `[{level}](../interview-prep/{company-slug}-redflags.md)` (relative to `reports/`); otherwise `— no interview sessions yet`. **Unverified file:** if the file contains the marker `<!-- career-ops:redflags-unverified -->`, `interview-redflag` kept it without a real-interview session to back it (it may rest on practice or mock sessions), so never surface its warning level: render `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)`. Look for the marker, never for the note's wording: the note is written in the user's output language, the marker never is |
 | AI claims vs. infrastructure | AI/infrastructure mismatch check in Block G, when present | If this report contains that check, mirror its verdict (`✅ consistent` / `⚠️ {finding}`); otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | AI-screening disclosure | AI-screening disclosure signal in Block G (Signal 15), when present | If this report contains that check: `✅ discloses AI use` when (a) fired, `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` when only (b) fired (corroborating-only, never a compliance verdict), `— no jurisdiction match` when neither fired because the candidate's jurisdiction has no table row; otherwise `— not evaluated`. The row activates automatically once the check exists — no ordering dependency |
 | Fixed-term contract | Fixed-term disclosure signal in Block G (Signal 16) | `ℹ️ fixed term — "{quoted phrase}"` when explicit fixed-term language is present; otherwise `✅ no fixed term disclosed`; `— not evaluated` only when no JD text was available |
@@ -640,7 +641,7 @@ Block format:
 | Accommodation notice | ℹ️ Ontario, Canada requires the notice; posting is silent |
 ```
 
-Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose.
+Mirror the block into `## Machine Summary` as a `risk_summary:` map (exact key names and enum values in `batch/batch-prompt.md`, the Machine Summary source of truth) so downstream scripts consume it without re-parsing prose. The map and the block agree row by row: an Interview red flags row that shows no warning level (no redflags file, or one marked unverified) is `interview_redflags: "not_evaluated"`, never the level written in the file.
 
 ---
 
@@ -704,6 +705,8 @@ Apply all language rules from `_writing.md` Professional Writing section to the 
 ## Post-evaluation
 
 Before saving the report, apply `modes/_shared.md` → Evidence confidence for the Global Score. After Risk Summary, include `## Score Evidence` with one row per scoring dimension (`CV match`, `North Star alignment`, `Compensation`, `Cultural signals`, `Red flags`): evidence status (`supported`, `partial`, `unknown`), concrete source or observation, and unresolved question. Follow it with `**Evidence confidence:** {High | Medium | Low} — {main reason}` and up to three verification priorities. This is confidence in the score's evidence, separate from Block G's posting-legitimacy tier. Mirror the five statuses and priorities in Machine Summary `score_evidence` and `confidence_gaps` using the canonical schema in `batch/batch-prompt.md`.
+
+After `## Score Evidence`, add one line `**Positioning band:** {challenge | target | safety_net | out_of_scope | unknown} - {one sentence naming the evidence}` and mirror it in Machine Summary `positioning_band`, `positioning_band_reason` and `positioning_band_evidence` (rules in `batch/batch-prompt.md`, the schema source of truth). It is optional context beside the Global Score and never changes it; use `unknown` rather than guessing, and never classify from the title alone.
 
 **ALWAYS** after generating blocks A-G:
 

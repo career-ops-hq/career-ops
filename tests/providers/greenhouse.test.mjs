@@ -528,6 +528,103 @@ try {
     }
   }
 
+  // Oversized board: content=true overflows → plain list; with the opt-in,
+  // bodies for title-kept postings only, capped, paced, retried, no redirects.
+  {
+    const tooLarge = () => Object.assign(new Error('HTTP body exceeded maxBytes of 10485760'), { code: 'response_too_large' });
+    const listing = { jobs: [
+      { id: 1, title: 'Strategy Manager', absolute_url: 'https://job-boards.greenhouse.io/big/jobs/1', location: { name: 'Costa Mesa' } },
+      { id: 2, title: 'Welder', absolute_url: 'https://job-boards.greenhouse.io/big/jobs/2', location: { name: 'Costa Mesa' } },
+      { id: 3, title: 'Strategy Lead', absolute_url: 'https://job-boards.greenhouse.io/big/jobs/3', location: { name: 'Costa Mesa' } },
+    ] };
+    const optIn = { name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big', greenhouse: { fetchDetails: true } };
+    const run = async (entry, extra = {}) => {
+      const calls = [];
+      const sleeps = [];
+      const warn = console.warn; const err = console.error;
+      console.warn = () => {}; console.error = () => {};
+      try {
+        const rows = await greenhouse.fetch(entry, {
+          titleWanted: (t) => /strategy/i.test(t),
+          sleep: async (ms) => { sleeps.push(ms); },
+          fetchJson: async (url, opts) => {
+            calls.push({ url, opts });
+            if (url.includes('content=true')) throw tooLarge();
+            if (/\/jobs\/\d+$/.test(url)) {
+              if (extra.detail) return extra.detail(url);
+              return { id: 1, content: '&lt;p&gt;Lead strategy.&lt;/p&gt;' };
+            }
+            // A fresh copy per call: the provider writes bodies onto the jobs it
+            // was given, and one run must never see another run's bodies.
+            return structuredClone(listing);
+          },
+          ...(extra.ctx || {}),
+        });
+        return { rows, calls, sleeps };
+      } finally { console.warn = warn; console.error = err; }
+    };
+    const details = (calls) => calls.filter((c) => /\/jobs\/\d+$/.test(c.url));
+
+    const on = await run(optIn);
+    const strat = on.rows.find((r) => r.title === 'Strategy Manager');
+    const welder = on.rows.find((r) => r.title === 'Welder');
+    if (on.rows.length === 3 && strat?.description === 'Lead strategy.' && welder && welder.description === undefined
+      && !details(on.calls).some((c) => c.url.endsWith('/jobs/2')) && details(on.calls).length === 2) {
+      pass('greenhouse.fetch() with fetchDetails reads an oversized board from the plain list, fetching bodies only for title-kept postings');
+    } else {
+      fail(`greenhouse oversized fallback rows=${JSON.stringify(on.rows)} calls=${JSON.stringify(on.calls.map((c) => c.url))}`);
+    }
+    if (on.calls.length > 0 && on.calls.every((c) => c.opts?.redirect === 'error')) {
+      pass('greenhouse.fetch() refuses redirects on the list, the plain-list fallback and every detail request');
+    } else {
+      fail(`greenhouse redirect opts: ${JSON.stringify(on.calls.map((c) => c.opts))}`);
+    }
+
+    // A percent-encoded slug in an explicit api: stays encoded once in detail URLs.
+    const encoded = await run({ name: 'Big', api: 'https://boards-api.greenhouse.io/v1/boards/%62ig/jobs', greenhouse: { fetchDetails: true } });
+    const encodedDetails = details(encoded.calls).map((c) => c.url);
+    if (encodedDetails.length === 2 && encodedDetails.every((u) => u.startsWith('https://boards-api.greenhouse.io/v1/boards/%62ig/jobs/'))) {
+      pass('greenhouse.fetch() keeps a percent-encoded board slug encoded once in detail URLs');
+    } else {
+      fail(`greenhouse encoded slug detail URLs: ${JSON.stringify(encodedDetails)}`);
+    }
+
+    const off = await run({ name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' });
+    if (off.rows.length === 3 && details(off.calls).length === 0) pass('greenhouse.fetch() fetches no detail without the fetchDetails opt-in');
+    else fail(`greenhouse detail without opt-in: ${JSON.stringify(off.calls.map((c) => c.url))}`);
+
+    const probe = await run(optIn, { ctx: { maxPages: 1 } });
+    if (details(probe.calls).length === 0) pass('greenhouse.fetch() fetches no detail during a health probe');
+    else fail(`greenhouse detail during probe: ${JSON.stringify(probe.calls.map((c) => c.url))}`);
+
+    const capped = await run({ ...optIn, greenhouse: { fetchDetails: true, detailLimit: 1 } });
+    if (details(capped.calls).length === 1) pass('greenhouse.fetch() caps detail requests at detailLimit');
+    else fail(`greenhouse detailLimit: ${details(capped.calls).length} detail calls`);
+
+    let attempts = 0;
+    const flaky = await run(optIn, { detail: () => { attempts++; if (attempts === 1) throw Object.assign(new Error('HTTP 503'), { status: 503 }); return { content: 'ok' }; } });
+    if (flaky.rows.find((r) => r.title === 'Strategy Manager')?.description === 'ok') pass('greenhouse.fetch() retries a transient detail failure before giving up the body');
+    else fail(`greenhouse detail retry: ${JSON.stringify(flaky.rows)}`);
+
+    let notFoundCalls = 0;
+    const failing = await run(optIn, { detail: () => { notFoundCalls++; throw Object.assign(new Error('HTTP 404'), { status: 404 }); } });
+    const failedBodies = failing.rows.filter((r) => /strategy/i.test(r.title)).map((r) => r.description);
+    if (failing.rows.length === 3 && failing.sleeps.includes(200) && notFoundCalls === 2
+      && failedBodies.length === 2 && failedBodies.every((d) => d === undefined)) pass('greenhouse.fetch() keeps postings whose detail fetch failed, paced between attempts, and does not retry a 404');
+    else fail(`greenhouse detail failure: rows=${failing.rows.length} sleeps=${JSON.stringify(failing.sleeps)} calls=${notFoundCalls} bodies=${JSON.stringify(failedBodies)}`);
+
+    try {
+      await greenhouse.fetch(
+        { name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' },
+        { fetchJson: async () => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); } },
+      );
+      fail('greenhouse.fetch() must not swallow a non-size error');
+    } catch (e) {
+      if (/404/.test(e.message)) pass('greenhouse.fetch() still throws a non-size error');
+      else fail(`greenhouse.fetch() threw ${e.message}`);
+    }
+  }
+
 } catch (e) {
   fail(`greenhouse provider tests crashed: ${e.message}`);
 }

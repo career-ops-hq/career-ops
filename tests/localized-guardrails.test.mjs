@@ -22,7 +22,7 @@ const requiredGuardrails = [
 // drifted: modes/vi (#4727) shipped a _shared.md this file never opened.
 const expectedLocalizedModes = [
   'ar', 'da', 'de', 'es', 'fr', 'hi', 'id', 'it', 'ja',
-  'ko', 'nl', 'pl', 'pt', 'ru', 'sg', 'tr', 'ua', 'vi', 'zh-TW', 'zh',
+  'ko', 'nb', 'nl', 'pl', 'pt', 'ru', 'sg', 'tr', 'ua', 'vi', 'zh-TW', 'zh',
 ];
 
 const modeDirs = readdirSync(join(ROOT, 'modes'), { withFileTypes: true })
