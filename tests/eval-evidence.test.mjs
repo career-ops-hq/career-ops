@@ -306,6 +306,13 @@ test('a funding figure is not pay, and a bare range under a compensation heading
   const funding = normalizeEvaluationText(reply(), 'Raised $50M Series B. Competitive salary.');
   assert.equal(funding.includes('$140,000'), false);
   assert.match(funding, /compensation: "unknown"/);
+  assert.equal(postingStatesPay('Competitive salary after we raised $50M Series B.'), false);
+  assert.equal(postingStatesPay('Competitive salary at our 10,000-employee company.'), false);
+  assert.equal(postingStatesPay('Salary $140,000 for a team of 200 employees.'), true);
+  assert.equal(postingStatesPay('Competitive salary of $140,000.'), true);
+  const sameSentence = normalizeEvaluationText(reply(), 'Competitive salary after we raised $50M Series B.');
+  assert.equal(sameSentence.includes('$140,000'), false);
+  assert.match(sameSentence, /compensation: "unknown"/);
   const ranged = normalizeEvaluationText(reply(), 'Compensation\n\n$120,000 to $150,000');
   assert.equal(ranged.includes('$140,000'), true);
   assert.equal(ranged.includes(UNKNOWN_COMP_SENTENCE), false);
