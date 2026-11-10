@@ -32,7 +32,7 @@ function payload() {
     candidate: {
       name: "Jane Doe",
       title: "Senior Analyst",
-      email: "jane@example.com",
+      email: "jane.example",
       location: "Example City",
     },
     summary: "Analyst who ships the weekly report.",
