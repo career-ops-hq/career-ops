@@ -45,6 +45,39 @@ test("the CV disk check uses the report number, not the tracker row", async () =
   }
 });
 
+test("Apply is ready only when this report's indexed CV is on disk", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cv-apply-ready-"));
+  try {
+    await mkdir(join(root, "output"), { recursive: true });
+    await mkdir(join(root, "data"), { recursive: true });
+    await writeFile(join(root, "output", "cv-fixture-co.pdf"), "%PDF-1.1\n");
+    process.env.CAREER_OPS_ROOT = root;
+    process.env.CAREER_OPS_PDF_INDEX = join(root, "data", "pdf-index.tsv");
+    process.env.CAREER_OPS_CODE_ROOT = repo;
+
+    await writeFile(join(root, "data", "pdf-index.tsv"), "");
+    const loose = await readCvDiskForRows([{ n: "7", company: "Fixture Co", reportNumber: 7 }]);
+    assert.equal(loose["7"].exists, true);
+    assert.equal(loose["7"].applyPdfReady, false);
+
+    const noReport = await readCvDiskForRows([{ n: "7", company: "Fixture Co", reportNumber: null }]);
+    assert.equal(noReport["7"].exists, true);
+    assert.equal(noReport["7"].applyPdfReady, false);
+
+    await writeFile(join(root, "data", "pdf-index.tsv"), "7\toutput/cv-fixture-co.pdf\t\t\t2026-11-06\tcv\n");
+    const indexed = await readCvDiskForRows([{ n: "7", company: "Fixture Co", reportNumber: 7 }]);
+    assert.equal(indexed["7"].exists, true);
+    assert.equal(indexed["7"].applyPdfReady, true);
+
+    await writeFile(join(root, "data", "pdf-index.tsv"), "7\toutput/missing-cv.pdf\t\t\t2026-11-06\tcv\n");
+    const missing = await readCvDiskForRows([{ n: "7", company: "Fixture Co", reportNumber: 7 }]);
+    assert.equal(missing["7"].exists, false);
+    assert.equal(missing["7"].applyPdfReady, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("an untagged cover row is not a CV on disk, and an untagged cv row is", async () => {
   const root = await mkdtemp(join(tmpdir(), "cv-disk-cover-"));
   try {
