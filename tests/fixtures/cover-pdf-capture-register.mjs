@@ -14,6 +14,9 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   if (process.env.COVER_PDF_CAPTURE) {
     writeFileSync(process.env.COVER_PDF_CAPTURE, JSON.stringify({ outputPath, opts }));
   }
+  if (process.env.COVER_PDF_SIMULATE_OVERFLOW === '1') {
+    return { outputPath, draftPath: outputPath + '.overflow.pdf', pageCount: 2, size: 0 };
+  }
   return { outputPath, pageCount: 1, size: 0 };
 }
 `);
