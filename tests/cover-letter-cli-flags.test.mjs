@@ -97,7 +97,7 @@ test('an overflowing cover letter is reported as a cover letter, not a CV', () =
   assert.throws(() => enforcePageBudget(3, { maxPages: 2, strictPages: true }), (err) => err.message.startsWith('CV is 3 pages'));
 });
 
-function runCover(flags) {
+function runCover(flags, extraEnv = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-cover-flags-'));
   mkdirSync(join(dir, 'output'));
   writeFileSync(join(dir, 'cv.md'), 'Avery Quinn builds ledger services.\n');
@@ -117,7 +117,7 @@ function runCover(flags) {
     cwd: dir,
     encoding: 'utf-8',
     timeout: 60_000,
-    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', COVER_PDF_CAPTURE: capture },
+    env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', COVER_PDF_CAPTURE: capture, ...extraEnv },
   });
   const captured = existsSync(capture) ? JSON.parse(readFileSync(capture, 'utf-8')) : null;
   const outputFiles = readdirSync(join(dir, 'output'));
@@ -142,6 +142,24 @@ test('CLI: --max-pages and --strict-pages reach the renderer', () => {
   assert.equal(res.captured.opts.strictPages, true);
   assert.equal(res.captured.opts.reportNum, '12');
   assert.equal(res.captured.opts.kind, 'cover');
+});
+
+test('CLI: an overflow reports its draft path instead of a nonexistent final PDF', () => {
+  const res = runCover([], { COVER_PDF_SIMULATE_OVERFLOW: '1' });
+  assert.equal(res.status, 0, res.stdout + res.stderr);
+  assert.match(res.stdout, /Cover letter PDF: .*letter\\.pdf\\.overflow\\.pdf/);
+  assert.doesNotMatch(res.stdout, /Cover letter PDF: .*letter\\.pdf\\s*$/m);
+});
+
+test('strict cover-letter budget error never recommends CV-only settings', () => {
+  assert.throws(
+    () => enforcePageBudget(2, { kind: 'cover', maxPages: 1, strictPages: true }),
+    (err) => err.message.includes('--strict-pages') && !err.message.includes('cv.strict_pages'),
+  );
+  assert.throws(
+    () => enforcePageBudget(3, { maxPages: 2, strictPages: true }),
+    /cv\\.strict_pages/,
+  );
 });
 
 test('CLI: with no page flags the renderer gets the 1-page warning-only default', () => {
