@@ -270,6 +270,20 @@ try {
     assert.equal(syncedRun.warnings.some((w) => /agent-tool settings.*not copied.*dropbox/.test(w)), true);
     assert.equal(existsSync(join(warnHome, 'Dropbox', 'Backups', 'career-ops', '.claude', 'settings.json')), false);
     assert.equal(existsSync(join(warnHome, 'Dropbox', 'Backups', 'career-ops', 'cv.md')), true);
+    // No warning when nothing was skipped: shipped .claude/skills/ is not a settings file.
+    const skillsRoot = join(tmp, 'skills-root');
+    put(skillsRoot, 'cv.md', 'cv');
+    put(skillsRoot, '.claude/skills/career-ops/SKILL.md', 'shipped');
+    const skillsRun = b.runBackup({ dataRoot: skillsRoot, dest: join(warnHome, 'Dropbox', 'Backups', 'skills') });
+    assert.equal(skillsRun.warnings.some((w) => /agent-tool settings/.test(w)), false);
+    // A declared settings file is counted and left out too.
+    const declRoot = join(tmp, 'decl-agent-root');
+    put(declRoot, 'cv.md', 'cv');
+    put(declRoot, 'config/local-paths.txt', '.claude/settings.local.json\n');
+    put(declRoot, '.claude/settings.local.json', '{}');
+    const declRun = b.runBackup({ dataRoot: declRoot, dest: join(warnHome, 'Dropbox', 'Backups', 'decl') });
+    assert.equal(declRun.warnings.some((w) => /1 agent-tool settings file\(s\).*not copied/.test(w)), true);
+    assert.equal(existsSync(join(warnHome, 'Dropbox', 'Backups', 'decl', '.claude', 'settings.local.json')), false);
     const localRun = b.runBackup({ dataRoot: warnRoot, dest: join(tmp, 'backup', 'warn-local') });
     assert.equal(localRun.warnings.some((w) => /agent-tool settings/.test(w)), false);
     assert.equal(existsSync(join(tmp, 'backup', 'warn-local', '.claude', 'settings.json')), true);

@@ -387,7 +387,17 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   if (resolve(dataRoot) !== resolve(CODE_ROOT) && existsSync(join(CODE_ROOT, LOCAL_PATHS_FILE))) {
     result.warnings.push(`${LOCAL_PATHS_FILE} in the checkout is not read when the data root is elsewhere; back up fork-local files it declares separately.`);
   }
+  let skippedAgentFiles = 0;
   for (const entry of backupPaths(dataRoot, result.warnings)) {
+    // Count what a synced destination leaves out, from the effective backup
+    // paths themselves (declared ones such as .claude/settings.local.json too),
+    // so the warning below appears only when a settings file was really skipped.
+    if (syncedTo && isAgentSetting(entry.toLowerCase())) {
+      try {
+        skippedAgentFiles += listEntry(dataRoot, entry, { include: { includeContacts }, onError: () => {} }).length;
+      } catch { /* unreadable: nothing to count */ }
+      continue;
+    }
     let files;
     try {
       files = listEntry(dataRoot, entry, {
@@ -423,8 +433,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
       }
     }
   }
-  if (syncedTo && ['.claude/settings.json', '.claude/hooks', 'opencode.json', 'plugins.local'].some((f) => existsSync(join(dataRoot, f)))) {
-    result.warnings.push(`agent-tool settings (.claude/, opencode.json, plugins.local/) were not copied: the destination is in a ${syncedTo} folder and they can contain tokens. Back them up to a folder that is not synced.`);
+  if (skippedAgentFiles > 0) {
+    result.warnings.push(`${skippedAgentFiles} agent-tool settings file(s) (.claude/, opencode.json, plugins.local/) were not copied: the destination is in a ${syncedTo} folder and they can contain tokens. Back them up to a folder that is not synced.`);
   }
   if (!dryRun && result.found > 0) {
     try {
