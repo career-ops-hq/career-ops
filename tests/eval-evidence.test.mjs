@@ -338,9 +338,11 @@ test('a salary in another currency counts, and a customer base or revenue figure
 
 test('a training-data role line stays, and a culture note is not a pay guess', () => {
   const role = 'The role owns training data for the vision model.';
+  const accuracy = 'The role uses training data to estimate model accuracy.';
   const note = 'Based on my knowledge, the team publishes its on-call rota.';
-  const out = normalizeEvaluationText(`${role}\n${note}\n${reply()}`, JD_NO_PAY);
+  const out = normalizeEvaluationText(`${role}\n${accuracy}\n${note}\n${reply()}`, JD_NO_PAY);
   assert.equal(out.includes(role), true);
+  assert.equal(out.includes(accuracy), true);
   assert.equal(out.includes(note), true);
   assert.equal(out.includes('Training-data estimate'), false);
   const guess = normalizeEvaluationText(`Based on my knowledge the salary is about $150,000.\n${reply()}`, JD_NO_PAY);
