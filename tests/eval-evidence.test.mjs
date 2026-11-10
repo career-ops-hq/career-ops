@@ -325,6 +325,8 @@ test('a salary in another currency counts, and a customer base or revenue figure
   assert.equal(postingStatesPay('15 000 – 20 000 PLN'), true);
   assert.equal(postingStatesPay('₹80,000 to ₹120,000'), true);
   assert.equal(postingStatesPay('Løn 500.000 kr'), true);
+  assert.equal(postingStatesPay('Salary: 120000 TRY'), true);
+  assert.equal(postingStatesPay('Join 25 try-out sessions'), false);
   assert.equal(postingStatesPay('customer base of 10k+'), false);
   assert.equal(postingStatesPay('annual revenue of $50M'), false);
   assert.equal(postingStatesPay('the product range is 10,000 units'), false);
