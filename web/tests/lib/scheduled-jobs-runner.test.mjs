@@ -826,15 +826,18 @@ test("a full scan that exits 0 at the time limit is not a finished empty run", (
   // the record the runner can still read.
   const timedOut = Object.assign(new Error("spawnSync node ETIMEDOUT"), { code: "ETIMEDOUT" });
   try {
-    writeCheckpoint(temp, {
-      version: 1,
-      current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 },
-      partialSave: { saved: true, postingsKept: 2 },
-    });
     let attempts = 0;
     const saved = executeJob(temp, job, {
-      spawnFn: () => {
+      spawnFn: (_node, _command, opts) => {
         attempts += 1;
+        // The fallback write keeps an older savedAt. The run id is what
+        // makes this count belong to this attempt.
+        writeCheckpoint(temp, {
+          version: 1,
+          current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 },
+          savedAt: "2020-01-01T00:00:00.000Z",
+          partialSave: { saved: true, postingsKept: 2, runId: opts.env.CAREER_OPS_SCAN_RUN },
+        });
         return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
       },
     });
@@ -843,15 +846,24 @@ test("a full scan that exits 0 at the time limit is not a finished empty run", (
     assert.equal(saved.rolesFound, 2);
     assert.equal(saved.message, "Sweep stopped before it finished. Saved 2 matching roles. The next run continues this sweep.");
 
+    writeCheckpoint(temp, {
+      version: 1,
+      current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 },
+      savedAt: new Date().toISOString(),
+      partialSave: { saved: true, postingsKept: 9, runId: "1999-1-00000000-0000-4000-8000-000000000000" },
+    });
     attempts = 0;
-    const unknown = executeJob(temp, job, {
+    const stale = executeJob(temp, job, {
       spawnFn: () => {
         attempts += 1;
         return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
       },
     });
-    // The checkpoint above still says the roles were saved. A timeout with
-    // no partial record must not borrow the finished-empty label.
+    assert.equal(attempts, 1);
+    assert.equal(stale.state, "failed");
+    assert.equal(stale.rolesFound, 0);
+    assert.equal(stale.message, "Sweep stopped before it finished. The next run continues this sweep.");
+
     writeCheckpoint(temp, { version: 1, current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 } });
     attempts = 0;
     const unfinished = executeJob(temp, job, {
@@ -864,8 +876,6 @@ test("a full scan that exits 0 at the time limit is not a finished empty run", (
     assert.equal(unfinished.state, "failed");
     assert.equal(unfinished.rolesFound, 0);
     assert.equal(unfinished.message, "Sweep stopped before it finished. The next run continues this sweep.");
-    assert.equal(unknown.state, "failed");
-    assert.notEqual(unknown.message, "Scan finished with 0 matching roles.");
 
     attempts = 0;
     const unsaved = executeJob(temp, job, {

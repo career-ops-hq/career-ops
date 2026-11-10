@@ -227,6 +227,15 @@ export function changedFilterKeys(cp, fingerprints) {
   return Object.keys(fingerprints).filter((k) => cp.filters[k] !== fingerprints[k]);
 }
 
+// The scheduled runner sets this. A timeout drops the handler's stdout, and
+// the fallback checkpoint write keeps the previous savedAt, so the run id
+// is what ties partialSave to the attempt that produced it.
+function currentScanRunId() {
+  const raw = process.env.CAREER_OPS_SCAN_RUN;
+  if (typeof raw !== 'string' || !/^[0-9]+-[1-9]-[0-9a-f-]{36}$/i.test(raw)) return null;
+  return raw;
+}
+
 // Never throws: this runs from parallelEach's `finally`, so an escaping error
 // (ENOSPC, EACCES, read-only volume) would reject the whole sweep and discard
 // every in-memory match from a multi-hour run — the checkpoint killing the work
@@ -1861,7 +1870,12 @@ async function main() {
           }
         }
         try {
-          const partialSave = { saved, postingsKept: kept.length };
+          const runId = currentScanRunId();
+          const partialSave = {
+            saved,
+            postingsKept: kept.length,
+            ...(runId ? { runId } : {}),
+          };
           // The stop write is the resume point. If it fails, a checkpoint
           // already on disk still lets the next run continue. With neither,
           // the report must not promise a resume.

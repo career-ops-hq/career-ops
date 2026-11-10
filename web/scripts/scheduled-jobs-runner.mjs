@@ -288,6 +288,7 @@ export function executeJob(root, job, options = {}) {
       const command = buildScanCommand(job);
       const args = [...command.args];
       if (command.script === "scan-ats-full.mjs" && hasResumableCheckpointShape(root)) args.push("--resume-if-compatible");
+      const scanRunId = `${startedAt}-${attempt}-${randomUUID()}`;
       const result = spawnFn(
         process.execPath,
         [command.script, ...args],
@@ -297,6 +298,10 @@ export function executeJob(root, job, options = {}) {
             ...process.env,
             CAREER_OPS_ROOT: root,
             CAREER_OPS_PORTALS: tempPortals,
+            // The scanner stamps this on partialSave. A timeout drops stdout,
+            // and a fallback checkpoint write keeps the previous savedAt, so
+            // the timestamp cannot say which attempt saved the roles.
+            CAREER_OPS_SCAN_RUN: scanRunId,
             // The scanner runs with cwd = the checkout; a relative override is
             // resolved here, the way the web resolves it, so both read one file.
             ...(process.env.CAREER_OPS_PROFILE?.trim() ? { CAREER_OPS_PROFILE: getProfilePath(root) } : {}),
@@ -329,11 +334,20 @@ export function executeJob(root, job, options = {}) {
             return stoppedSweepResult(startedAt, attempt, parsed.saved, parsed.postingsKept, parsed.checkpointAvailable === true);
           }
           // spawnSync with a timeout drops the handler's stdout and still reports status 0.
+          // partialSave counts only when this attempt stamped it. An older
+          // count stays in the checkpoint and is not reported as this run's.
           if (result.error?.code === "ETIMEDOUT") {
             const checkpoint = readFullCheckpoint(root);
             const partial = checkpoint?.partialSave;
+            const thisRun = partial?.runId === scanRunId;
             const available = Boolean(checkpoint?.current) && hasResumableCheckpointShape(root);
-            return stoppedSweepResult(startedAt, attempt, partial?.saved, partial?.postingsKept, available);
+            return stoppedSweepResult(
+              startedAt,
+              attempt,
+              thisRun ? partial.saved : undefined,
+              thisRun ? partial.postingsKept : undefined,
+              available,
+            );
           }
           return {
             state: "failed",

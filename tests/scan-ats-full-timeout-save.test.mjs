@@ -97,6 +97,8 @@ function readCheckpoint(dir) {
   return JSON.parse(readFileSync(checkpointPath(dir), 'utf-8'));
 }
 
+const SCAN_RUN_ID = '1700000000000-1-00000000-0000-4000-8000-000000000001';
+
 function stopSweep(dir, preload, extraArgs) {
   return new Promise((resolve) => {
     const child = spawn(NODE, [
@@ -104,7 +106,7 @@ function stopSweep(dir, preload, extraArgs) {
       join(ROOT, 'scan-ats-full.mjs'),
       '--ats', 'greenhouse', '--limit', String(COMPANIES), '--since', '7', '--json',
       ...extraArgs,
-    ], { cwd: dir, env: childEnv(dir, 'stop') });
+    ], { cwd: dir, env: { ...childEnv(dir, 'stop'), CAREER_OPS_SCAN_RUN: SCAN_RUN_ID } });
     let stdout = '';
     let stderr = '';
     let killed = false;
@@ -136,19 +138,21 @@ try {
   const cpExists = existsSync(checkpointPath(dir));
   let resumeAt = null;
   let partialSaved = null;
+  let partialRunId = null;
   if (cpExists) {
     const cp = readCheckpoint(dir);
     resumeAt = cp.current?.resumeAt ?? null;
     partialSaved = cp.partialSave?.saved === true ? cp.partialSave.postingsKept : null;
+    partialRunId = cp.partialSave?.runId ?? null;
   }
   const sawFirstRole = textHasUrl(stopped.stderr, FIRST);
   const sigtermSent = stopped.signal === 'SIGTERM';
   if (!signalReachesHandler && sawFirstRole && sigtermSent && !saved && !cpExists && !stopped.stdout.includes('"stoppedEarly"')) {
     pass('windows ends the sweep before the save handler can run');
-  } else if (signalReachesHandler && saved && cpExists && resumeAt >= 1 && partialSaved >= 1 && stopped.status === 0 && stopped.stdout.includes('"checkpointAvailable":true')) {
+  } else if (signalReachesHandler && saved && cpExists && resumeAt >= 1 && partialSaved >= 1 && partialRunId === SCAN_RUN_ID && stopped.status === 0 && stopped.stdout.includes('"checkpointAvailable":true')) {
     pass('a timed-out full sweep keeps the role it already found and a resume point');
   } else {
-    fail(`timed-out sweep dropped its role: pipeline=${saved} checkpoint=${cpExists} resumeAt=${resumeAt} partialSaved=${partialSaved} status=${stopped.status} signal=${stopped.signal}\nstdout=${stopped.stdout.slice(-400)}\nstderr=${stopped.stderr.slice(-400)}`);
+    fail(`timed-out sweep dropped its role: pipeline=${saved} checkpoint=${cpExists} resumeAt=${resumeAt} partialSaved=${partialSaved} runId=${partialRunId} status=${stopped.status} signal=${stopped.signal}\nstdout=${stopped.stdout.slice(-400)}\nstderr=${stopped.stderr.slice(-400)}`);
   }
 
   if (saved && cpExists) {
