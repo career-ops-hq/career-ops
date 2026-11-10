@@ -132,6 +132,29 @@
 #     daterange: 7
 #     max_pages: 5
 
+# -- TopDev keyword searches (optional, Vietnam) --
+# Read by scan-topdev.mjs (`npm run scan:topdev`), a separate Playwright scanner
+# for TopDev (topdev.vn), a Vietnam-wide job board with no reachable listing
+# API: a bare fetch answers HTTP 200, but the search results are hydrated in the
+# browser, so the postings are not in the HTML. Same architectural pattern as
+# scan-interamt.mjs and scan-dayforce.mjs.
+#
+# `keyword` is required and is submitted to TopDev's own search. `location` is
+# optional and narrows by the board's region id — only Ho Chi Minh, Hanoi and Da
+# Nang have ever been observed, so any other value is rejected rather than
+# guessed into the URL; omit it for a nationwide search. `max_pages` is optional
+# (default 5, cap 50).
+#
+# Results are still filtered by title_filter/location_filter below, and
+# data/blacklist.md applies.
+#
+# topdev_searches:
+#   - keyword: "backend"
+#     location: "Ho Chi Minh"
+#     max_pages: 5
+#   - keyword: "data engineer"
+#     location: "Hanoi"
+
 # -- Dayforce (Ceridian) Recruiting boards (optional) --
 # Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
 # scanner for Dayforce career sites (jobs.dayforcehcm.com). Dayforce's job

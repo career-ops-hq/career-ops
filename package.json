@@ -43,6 +43,7 @@
     "scan:yc": "node scan-ats-full.mjs --seeds yc",
     "scan:interamt": "node scan-interamt.mjs",
     "scan:dayforce": "node scan-dayforce.mjs",
+    "scan:topdev": "node scan-topdev.mjs",
     "scan:seek": "node scan-seek.mjs",
     "company:funded": "node company-funded.mjs",
     "validate:portals": "node validate-portals.mjs",
