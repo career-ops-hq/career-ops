@@ -811,8 +811,8 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTex
         // A missing header is unknown, not 0 seconds.
         const raw = typeof err.retryAfter === 'string' ? err.retryAfter.trim() : '';
         const retryS = raw === '' ? NaN : Number(raw);
-        const when = Number.isFinite(retryS) && retryS >= 0 ? new Date(now() + retryS * 1000).toISOString() : 'later';
-        throw new Error(`Workable serves its job feed about once an hour and refused this request (HTTP 429); try again after ${when}`);
+        const when = Number.isFinite(retryS) && retryS >= 0 ? `after ${new Date(now() + retryS * 1000).toISOString()}` : 'later';
+        throw new Error(`Workable serves its job feed about once an hour and refused this request (HTTP 429); try again ${when}`);
       }
       throw err;
     }

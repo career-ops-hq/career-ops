@@ -118,7 +118,7 @@ try {
       'with no copy, a 429 says when to try again and writes nothing', err8?.message);
     let err8b = null;
     try { await load(workableFeedCache({ cacheDir: empty, now: () => at, fetchStream: network({ failWith: http429(null) }) })); } catch (e) { err8b = e; }
-    check(/try again after later/.test(err8b?.message ?? ''), 'a 429 without Retry-After does not name the current time as the retry time', err8b?.message);
+    check(/try again later$/.test(err8b?.message ?? ''), 'a 429 without Retry-After does not name the current time as the retry time', err8b?.message);
   } finally {
     rmSync(empty, { recursive: true, force: true });
   }
