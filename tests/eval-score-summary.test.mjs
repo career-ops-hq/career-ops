@@ -41,6 +41,15 @@ const BOLD = `${BLOCKS}
 **LEGITIMACY:** High Confidence
 ---END_SUMMARY---
 `;
+const BULLETED = `${BLOCKS}
+---SCORE_SUMMARY---
+• COMPANY: Marrowfield Grocers
+• ROLE: Senior Data Analyst
+• SCORE: 4.3
+• ARCHETYPE: Data Analyst
+• LEGITIMACY: High Confidence
+---END_SUMMARY---
+`;
 const NO_BLOCK = `${BLOCKS}\n**Overall score: 4.3/5.** Worth applying.\n`;
 
 test('parseScoreSummary reads plain keys', () => {
@@ -62,6 +71,10 @@ test('parseScoreSummary drops a /5 that ends the sentence, and keeps any other s
   assert.equal(score('4.2/5.5'), '4.2/5.5');
 });
 
+test('parseScoreSummary reads summaries with • bullets', () => {
+  assert.deepEqual(parseScoreSummary(BULLETED), parseScoreSummary(PLAIN));
+});
+
 test('parseScoreSummary returns null without a block and empty strings for absent keys', () => {
   assert.equal(parseScoreSummary(NO_BLOCK), null);
   const partial = parseScoreSummary('---SCORE_SUMMARY---\nSCORE: 3.1\n---END_SUMMARY---');
@@ -69,6 +82,7 @@ test('parseScoreSummary returns null without a block and empty strings for absen
   assert.equal(partial.role, '');
   assert.equal(partial.score, '3.1');
 });
+
 
 const hook = (dir) => {
   const file = join(dir, 'fetch.mjs');
