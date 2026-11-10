@@ -7,11 +7,13 @@ import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusFor
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
+import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
 import { escapeHtml, htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
+import { restoreFullPdfIndex } from "./restore-pdf.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
 
 const EDITED_SUFFIX = "-edited";
@@ -147,6 +149,22 @@ export function saveEdits(reportNum: string, edits: StudioEdits) {
   const file = editsPath(reportNum);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   atomicWrite(file, JSON.stringify(edits, null, 2) + "\n");
+}
+
+/** Point Apply back at the full PDF after Reset, when that file is still on disk. */
+export async function restoreIndexedFullPdf(reportNum: string): Promise<{ restored: boolean; reason?: "missing" }> {
+  const indexPath = await resolvePdfIndexPath();
+  if (!indexPath || !fs.existsSync(indexPath)) return { restored: false };
+  const text = fs.readFileSync(indexPath, "utf8");
+  const root = careerOpsRoot();
+  const outputDir = path.resolve(root, "output");
+  const result = restoreFullPdfIndex(text, reportNum, (rel) => {
+    const abs = path.resolve(root, rel);
+    return abs.startsWith(`${outputDir}${path.sep}`) && fs.existsSync(abs);
+  });
+  if (!result.restored) return { restored: false, reason: result.reason };
+  atomicWrite(indexPath, result.text.endsWith("\n") ? result.text : `${result.text}\n`);
+  return { restored: true };
 }
 
 export async function keywordsInText(n: string, text: string): Promise<string[] | null> {

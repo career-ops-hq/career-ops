@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
-import { keywordsInText, loadStudio, missingDataFolderMessage, renderEditedPdf, saveEdits } from "@/lib/cv-studio/server";
+import { keywordsInText, loadStudio, missingDataFolderMessage, renderEditedPdf, restoreIndexedFullPdf, saveEdits } from "@/lib/cv-studio/server";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { parseEdits } from "@/lib/cv-studio/studio.mjs";
 import { createPutOrder } from "@/lib/cv-studio/put-order.mjs";
@@ -51,6 +51,11 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (typeof body.text !== "string" || body.text.length > 2000) return NextResponse.json({ error: "text required" }, { status: 400 });
     const keywords = await keywordsInText(n, body.text);
     return keywords ? NextResponse.json({ keywords }) : NextResponse.json({ error: "no-report" }, { status: 404 });
+  }
+  if (body.op === "restore-full-pdf") {
+    const load = await loadStudio(n);
+    if (!load.ok) return NextResponse.json({ error: load.reason }, { status: NOT_FOUND[load.reason] });
+    return NextResponse.json(await restoreIndexedFullPdf(load.reportNum));
   }
   if (body.op !== "save") return NextResponse.json({ error: "unknown op" }, { status: 400 });
   const load = await loadStudio(n);
