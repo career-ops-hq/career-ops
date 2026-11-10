@@ -97,13 +97,58 @@ const COUNTRY_ALIASES = [
   ['ES', 'espana'], ['ES', 'esp'],
 ].map(([code, name]) => ({ code, name, match: word(name) }));
 const PROSE_WORD_CODES = new Set(['in', 'as', 'at', 'be', 'is', 'it', 'no', 'so', 'to', 'do', 'me', 'my', 'am']);
+// A USPS code in "City, ST", or before a US country token, is a state.
+// "City, Region, CC", "Remote - DE", and a bare code stay ISO countries.
+const USPS_STATE_CODES = new Set(['al', 'ak', 'az', 'ar', 'ca', 'co', 'ct', 'de', 'fl', 'ga', 'hi', 'id', 'il', 'in', 'ia', 'ks', 'ky', 'la', 'me', 'md', 'ma', 'mi', 'mn', 'ms', 'mo', 'mt', 'ne', 'nv', 'nh', 'nj', 'nm', 'ny', 'nc', 'nd', 'oh', 'ok', 'or', 'pa', 'ri', 'sc', 'sd', 'tn', 'tx', 'ut', 'vt', 'va', 'wa', 'wv', 'wi', 'wy']);
+const US_COUNTRY_PLACE_TOKENS = new Set(['us', 'usa', 'u.s.', 'u.s.a.', 'united states', 'united states of america']);
+const WORKPLACE_PLACE_WORDS = new Set(['remote', 'hybrid', 'onsite', 'on', 'site', 'in', 'office', 'based', 'work', 'from', 'home', 'anywhere', 'global', 'worldwide']);
+const cityWords = (head) => head.replace(/[-–—:|/]+/g, ' ').split(/\s+/).filter(word => word && !WORKPLACE_PLACE_WORDS.has(word));
+const trailingUspsCode = (head) => {
+  const match = /(?:^|[^\p{L}\p{M}\p{N}])([a-z]{2})$/u.exec(head);
+  return match && USPS_STATE_CODES.has(match[1]) ? match[1] : '';
+};
+const uspsStateCodesBeatingIso = (text) => {
+  const ignore = new Set();
+  for (const raw of text.split(/[;·|]/)) {
+    const place = raw.trim();
+    if (!place) continue;
+    const parts = place.split(',').map(part => part.trim()).filter(Boolean);
+    const last = parts.at(-1) || '';
+    if (parts.length >= 2 && US_COUNTRY_PLACE_TOKENS.has(last)) {
+      const code = trailingUspsCode(parts.at(-2));
+      if (code) ignore.add(code);
+      continue;
+    }
+    if (parts.length >= 3 && /^[a-z]{2}$/.test(last)) {
+      if (USPS_STATE_CODES.has(last) && parts.at(-2) === last) ignore.add(last);
+      continue;
+    }
+    if (parts.length === 2 && USPS_STATE_CODES.has(last)) {
+      const headCode = trailingUspsCode(parts[0]);
+      if (headCode && headCode === parts[0]) {
+        ignore.add(headCode);
+        ignore.add(last);
+      } else if (cityWords(parts[0]).length) ignore.add(last);
+      continue;
+    }
+    if (parts.length === 1 && !/-\s*[a-z]{2,3}$/.test(place)) {
+      const code = trailingUspsCode(place);
+      if (code && code !== place && cityWords(place.slice(0, place.length - code.length)).length) ignore.add(code);
+    }
+  }
+  return ignore;
+};
 const countries = (text, codes = false) => {
   const found = new Set([...COUNTRY_NAMES, ...COUNTRY_ALIASES].filter(c => c.match.test(text)).map(c => c.code));
-  if (codes) for (const token of text.split(/[,;/|()\s-]+/)) {
-    if (/^[a-z]{2,3}$/.test(token) && !PROSE_WORD_CODES.has(token)) {
-      const name = fold(countryNameFromIso(token));
-      const c = COUNTRY_NAMES.find(c => c.name === name);
-      if (c) found.add(c.code);
+  if (codes) {
+    const stateCodes = uspsStateCodesBeatingIso(text);
+    for (const token of text.split(/[,;/|()\s-]+/)) {
+      if (stateCodes.has(token)) continue;
+      if (/^[a-z]{2,3}$/.test(token) && !PROSE_WORD_CODES.has(token)) {
+        const name = fold(countryNameFromIso(token));
+        const c = COUNTRY_NAMES.find(c => c.name === name);
+        if (c) found.add(c.code);
+      }
     }
   }
   return found;
