@@ -152,3 +152,33 @@ test("an edit to a template file that is itself a symlink to outside is refused"
 
   assert.ok(err instanceof TemplateRefusal, String(err));
 });
+
+// The save is an atomic replace (write a temp file, rename it over the path). That
+// swaps a symlink for a regular file even when the link points inside the user's
+// own directory: the target never receives the edit and the alias stops following
+// it. Refuse, as for a link that points outside, rather than write through it.
+test("an edit to a template file that is a symlink to another file in the user's directory is refused and leaves link and target alone", async () => {
+  const userDir = await withCopy("modern", "realone");
+  const real = path.join(userDir, "cv-template.realone.html");
+  const link = path.join(userDir, "cv-template.alias.html");
+  fs.symlinkSync(real, link);
+  const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "alias", userDir });
+  const before = fs.readFileSync(real, "utf8");
+
+  const err = await checkTemplateEdit(CORE, { kind: "cv", name: "alias", text: `${text}\n<!-- edit -->\n`, version, userDir }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.ok(!err.message.includes(userDir), "the message names no path");
+  assert.ok(fs.lstatSync(link).isSymbolicLink(), "the link is still a link");
+  assert.equal(fs.readFileSync(real, "utf8"), before, "the target is unchanged");
+});
+
+test("the real file a link points at can still be edited directly", async () => {
+  const userDir = await withCopy("modern", "realone");
+  fs.symlinkSync(path.join(userDir, "cv-template.realone.html"), path.join(userDir, "cv-template.alias.html"));
+  const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "realone", userDir });
+
+  const out = await checkTemplateEdit(CORE, { kind: "cv", name: "realone", text: `${text}\n<!-- edit -->\n`, version, userDir });
+
+  assert.equal(out.path, path.join(userDir, "cv-template.realone.html"));
+});
