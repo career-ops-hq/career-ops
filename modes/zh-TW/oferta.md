@@ -215,7 +215,7 @@
 
 **只做彙整，不產生新判斷。** 每一列都引用來源訊號已經得出的結論。摘要絕不重新評分、重新加權或推翻原判斷 —— 如果某一列看起來有問題，應當修正來源訊號，而不是改這裡。
 
-每列三種狀態：`✅ {明確結論}` / `⚠️ {發現的問題}` / `— not evaluated`。**`— not evaluated` 是一等狀態：** 某個訊號無法執行時必須明確寫出該列，而不是省略，這樣全 ✅ 的摘要才可信。**特例：** 面試紅旗一列的未評估情況渲染為 `— no interview sessions yet`（同一「未評估」概念針對該列的更具體表述 —— 交叉參照檢查確實執行了，只是沒有找到紅旗檔案），並非第四種狀態。
+每列三種狀態：`✅ {明確結論}` / `⚠️ {發現的問題}` / `— not evaluated`。**`— not evaluated` 是一等狀態：** 某個訊號無法執行時必須明確寫出該列，而不是省略，這樣全 ✅ 的摘要才可信。**特例：** 面試紅旗一列的未評估情況渲染為 `— no interview sessions yet`（同一「未評估」概念針對該列的更具體表述 —— 交叉參照檢查確實執行了，只是沒有找到紅旗檔案），並非第四種狀態。帶有未核實標記的紅旗檔案屬於一般的 `— not evaluated` 狀態，不適用此特例：檔案存在，所以該列不能說沒有面試 session。
 
 列標籤、`| Signal | Status |` 表頭與狀態詞皆為固定字面量，請勿翻譯：Machine Summary 的 `risk_summary` 欄位依賴它們。
 
@@ -224,7 +224,7 @@
 | Posting legitimacy | Block G 的評級 | `✅ High Confidence`；Proceed with Caution / Suspicious 渲染為 `⚠️ {tier} — {一句話原因}` |
 | Employment classification | Block G 內的僱用性質訊號 | 檢查已執行且無異常時 `✅ clear`；標記觸發時 `⚠️ contractor-style language: "{引用原文}"`；無法執行時 `— not evaluated` |
 | Culture screen | Block A 的文化篩查欄位 | `✅ pass`，或 `⚠️ caution — {證據}` / `⚠️ fail — {證據}`；未做篩查時 `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md`（來自 `interview-redflag` 模式） | **交叉參照，不是複製：** 檔案存在時寫出其目前警告等級並附相對連結 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相對於 `reports/`）；否則 `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（來自 `interview-redflag` 模式） | **交叉參照，不是複製：** 檔案存在時寫出其目前警告等級並附相對連結 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相對於 `reports/`）；否則 `— no interview sessions yet`。**未經核實的檔案：** 若檔案包含標記 `<!-- career-ops:redflags-unverified -->`（`interview-redflag` 在沒有任何真實面試 session 支撐的情況下保留了該檔案），絕不寫出其警告等級：渲染為 `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)`，`risk_summary.interview_redflags` 為 `not_evaluated`。只認標記，不認註記文字：註記以使用者的輸出語言書寫。 |
 | AI claims vs. infrastructure | Block G 中的 AI／基礎設施一致性檢查（若存在） | 本報告包含該檢查時鏡射其結論（`✅ consistent` / `⚠️ {發現}`）；否則 `— not evaluated`。該檢查一旦存在此列自動啟用，無順序相依 |
 
 區塊格式：

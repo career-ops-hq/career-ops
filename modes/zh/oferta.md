@@ -574,7 +574,7 @@ CV Top 5 修改 + LinkedIn Top 5 修改，用来最大化匹配。
 
 **只做聚合，不产生新判断。** 每一行都引用来源信号已经得出的结论。摘要绝不重新评分、重新加权或推翻原判断 —— 如果某行看起来不对，去改来源信号，而不是改这里。
 
-每行三种状态：`✅ {明确结论}` / `⚠️ {发现}` / `— not evaluated`。**`— not evaluated` 是一等状态：** 某个信号无法运行时必须显式写出该行、而不是省略，这样全 ✅ 的摘要才可信。**特例：** 面试红旗一行的未评估情况渲染为 `— no interview sessions yet` —— 同一个“未评估”概念针对该行的更具体表述（交叉引用检查确实运行了，只是没有找到红旗文件），并非第四种状态。
+每行三种状态：`✅ {明确结论}` / `⚠️ {发现}` / `— not evaluated`。**`— not evaluated` 是一等状态：** 某个信号无法运行时必须显式写出该行、而不是省略，这样全 ✅ 的摘要才可信。**特例：** 面试红旗一行的未评估情况渲染为 `— no interview sessions yet` —— 同一个“未评估”概念针对该行的更具体表述（交叉引用检查确实运行了，只是没有找到红旗文件），并非第四种状态。带有未核实标记的红旗文件属于普通的 `— not evaluated` 状态，不适用此特例：文件存在，所以该行不能说没有面试 session。
 
 行标签、`| Signal | Status |` 表头与状态词均为固定字面量，不要翻译：Machine Summary 的 `risk_summary` 依赖它们。
 
@@ -583,7 +583,7 @@ CV Top 5 修改 + LinkedIn Top 5 修改，用来最大化匹配。
 | Posting legitimacy | Block G 评级 | `✅ High Confidence`；Proceed with Caution / Suspicious 渲染为 `⚠️ {tier} — {一句话原因}` |
 | Employment classification | Block G 中的用工性质信号 | 检查已运行且无异常时 `✅ clear`；标记触发时 `⚠️ contractor-style language: “{引用原文}”`；无法运行时 `— not evaluated` |
 | Culture screen | Block A 的 Culture screen 字段 | `✅ pass`，或 `⚠️ caution — {证据}` / `⚠️ fail — {证据}`；未筛查时 `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md`（来自 `interview-redflag` 模式） | **交叉引用，不是复制：** 文件存在时写出其当前警告级别并附相对链接 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相对于 `reports/`）；否则 `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（来自 `interview-redflag` 模式） | **交叉引用，不是复制：** 文件存在时写出其当前警告级别并附相对链接 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相对于 `reports/`）；否则 `— no interview sessions yet`。**未经核实的文件：** 若文件包含标记 `<!-- career-ops:redflags-unverified -->`（`interview-redflag` 在没有任何真实面试 session 支撑的情况下保留了该文件），绝不写出其警告级别：渲染为 `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)`，`risk_summary.interview_redflags` 为 `not_evaluated`。只认标记，不认注释文字：注释按用户的输出语言书写。 |
 | AI claims vs. infrastructure | Block G 中的 AI/基础设施一致性检查（若存在） | 本报告包含该检查时镜像其结论（`✅ consistent` / `⚠️ {发现}`）；否则 `— not evaluated`。该检查一旦存在此行自动启用，无顺序依赖 |
 | AI-screening disclosure | Block G 中的 AI-screening disclosure 信号（Signal 15，若存在） | 本报告包含该检查时：(a) 触发写 `✅ discloses AI use`；仅 (b) 触发写 `ℹ️ {jurisdiction_name} requires disclosure; posting is silent`（仅为印证，不是合规判定）；两者都未触发且候选人法域无条目写 `— no jurisdiction match`；其他写 `— not evaluated`。无顺序依赖 |
 | Fixed-term contract | Block G 中的 Fixed-term disclosure 信号（Signal 16） | 存在明确固定期限表述时 `ℹ️ fixed term — “{引用原文}”`；否则 `✅ no fixed term disclosed`；只有在没有 JD 文本可读时 `— not evaluated` |

@@ -45,6 +45,7 @@ if (!bash || !rescue) {
       "appendFileSync(process.env.STUB_TRACE, JSON.stringify(process.argv.slice(2)) + '\\n');",
       "const mode = process.env.STUB_MODE;",
       "if (mode === 'crash') process.exitCode = 2;",
+      "else if (mode === 'closed') { process.stdout.write('0\\tclosed:Ashby isListed: false\\n'); process.exitCode = 3; }",
       "else if (mode === 'miss') { process.stdout.write('0\\tnone\\n'); process.exitCode = 1; }",
       "else if (mode === 'thin') { process.stdout.write('12\\tld+json:thin\\n'); process.exitCode = 1; }",
       "else { writeFileSync(process.argv[4], process.env.STUB_JD); process.stdout.write('120\\tld+json\\n'); }",
@@ -66,9 +67,11 @@ if (!bash || !rescue) {
         `BATCH_DIR=${JSON.stringify(withStub ? batchDir : join(work, 'none'))}`,
         'url="https://jobs.example.com/acme/1"',
         'prefetch_min_words=80',
+        'jd_rescue_closed_note=""',
         `jd_prefetch_words=${words}`,
         rescue,
         'echo "words=$jd_prefetch_words"',
+        'echo "closed=$jd_rescue_closed_note"',
       ].join('\n'));
       const out = execFileSync(bash, [script], { encoding: 'utf-8', timeout: 30000, cwd: work, env: { ...process.env, STUB_MODE: mode, STUB_TRACE: trace, STUB_JD: long } });
       return { out, jd: readFileSync(jd, 'utf-8'), trace: readFileSync(trace, 'utf-8'), rawLeft: existsSync(`${jd}.raw`) };
@@ -86,6 +89,11 @@ if (!bash || !rescue) {
       if (r.jd === 'JS shell' && /words=3/.test(r.out) && !r.rawLeft) pass(`rescue "${mode}" fails open: stripped text and word count untouched`);
       else fail(`rescue "${mode}" changed state: jd=${JSON.stringify(r.jd)} ${r.out.trim().split('\n').pop()}`);
     }
+    // Control flow: exit 3 from the rescue is terminal. The JD file is emptied (the page text is
+    // not handed to a worker) and the closure note is set for the runner's skip decision.
+    const closed = run({ mode: 'closed', stripped: Array.from({ length: 150 }, (_, i) => `w${i}`).join(' '), words: 150 });
+    if (closed.jd === '' && /words=0/.test(closed.out) && /closed=posting closed \(jd-rescue\): Ashby isListed: false/.test(closed.out)) pass('rescue exit 3: JD file emptied and the closure note is recorded for the skip');
+    else fail(`rescue exit 3 not terminal: jd=${JSON.stringify(closed.jd.slice(0, 20))} ${closed.out.trim().split('\n').slice(-2).join(' | ')}`);
     const none = run({ mode: 'hit', withStub: false });
     if (none.jd === 'JS shell' && none.trace === '') pass('jd-rescue.mjs absent: no rescue, no error');
     else fail('absent rescue script changed behaviour');
@@ -95,4 +103,35 @@ if (!bash || !rescue) {
   } finally {
     try { rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ }
   }
+}
+
+// ── end to end: rescue says closed → fetch-jd is not called, the offer is skipped, no worker ──
+if (bash && rescue) {
+  const work = mkdtempSync(join(tmpdir(), 'co-jd-rescue-e2e-'));
+  try {
+    const batchDir = join(work, 'batch'); const projectDir = join(work, 'project');
+    mkdirSync(batchDir); mkdirSync(projectDir);
+    writeFileSync(join(batchDir, 'jd-rescue.mjs'), "process.stdout.write('0\\tclosed:Ashby isListed: false\\n'); process.exitCode = 3;\n");
+    const trace = join(work, 'fetch-trace.txt'); writeFileSync(trace, '');
+    writeFileSync(join(projectDir, 'fetch-jd.mjs'), "import { appendFileSync } from 'node:fs'; appendFileSync(process.env.STUB_TRACE, 'called\\n');\n");
+    const apiBlk = SRC.match(/  local jd_api_words=0\n  if \[\[ ! -s "\$jd_file"[\s\S]*?\n  fi\n/)?.[0];
+    const decide = SRC.match(/  local jd_thin_skip=0 jd_thin_note="" jd_thin_retryable=0\n  if \[\[ -n "\$jd_closed_note" \]\]; then[\s\S]*?jd_thin_note="\$jd_closed_note"\n/)?.[0];
+    const skipBlk = SRC.match(/  if \[\[ "\$jd_thin_skip" == "1" \]\]; then[\s\S]*?\n    return 0\n  fi\n/)?.[0];
+    if (!apiBlk || !decide || !skipBlk) fail('could not extract the runner blocks for the end-to-end closure test');
+    else {
+      const jd = join(work, 'jd.txt'); writeFileSync(jd, 'full visible text of the closed page'); writeFileSync(`${jd}.raw`, '<html></html>');
+      const script = join(work, 'e2e.sh');
+      writeFileSync(script, [
+        '#!/usr/bin/env bash', 'set -euo pipefail',
+        `jd_file=${JSON.stringify(jd)}; jd_raw_file=${JSON.stringify(`${jd}.raw`)}; BATCH_DIR=${JSON.stringify(batchDir)}; PROJECT_DIR=${JSON.stringify(projectDir)}`,
+        'url="https://jobs.ashbyhq.com/acme/1"; prefetch_min_words=80; THIN_ACTION=webfetch; retries=0; MAX_RETRIES=2; id=7; started_at=t; report_num=042',
+        'update_state_retrying() { echo "STATE:$3"; }', 'release_report_num() { echo "RELEASED:$1"; }',
+        'f() {', '  local jd_prefetch_words=150 jd_rescue_closed_note=""', rescue, '  local jd_closed_note="$jd_rescue_closed_note"', apiBlk, decide + '  fi\n', skipBlk, '  echo "WORKER-REACHED"', '}', 'f',
+      ].join('\n'));
+      const out = execFileSync(bash, [script], { encoding: 'utf-8', timeout: 30000, cwd: work, env: { ...process.env, STUB_TRACE: trace, TMPDIR: work } });
+      const calls = readFileSync(trace, 'utf-8').trim();
+      if (/STATE:skipped/.test(out) && /RELEASED:042/.test(out) && !/WORKER-REACHED/.test(out) && calls === '' && !existsSync(jd)) pass('closed rescue: fetch-jd is not called, the offer is recorded skipped, no worker is reached');
+      else fail(`closed rescue end-to-end wrong: fetchCalls=${JSON.stringify(calls)} out=${out.trim()}`);
+    }
+  } finally { try { rmSync(work, { recursive: true, force: true }); } catch { /* best effort */ } }
 }

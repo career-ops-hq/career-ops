@@ -11,17 +11,25 @@ import { parseWpJobFeedItems, wpJobFeedItems } from './_wp-job-feed.mjs';
 //
 // Wire in via a `job_boards:` entry with `provider: jobspresso`.
 //
-// robots.txt (Source Indexing Policy rule 6): jobspresso.co disallows `/*?`
-// under `User-agent: *`, which covers the plugin's default `/?feed=job_feed`
-// URL. WordPress serves the same feed at the pretty-permalink path below,
-// which carries no query string and is the URL the feed's own
-// `<atom:link rel="self">` names, so that is the one fetched (#5774). Keep
-// it query-free: adding `paged` or `posts_per_page` would put the request
-// back under the Disallow. One request per scan is well within the site's
-// `Crawl-delay: 3`.
+// robots.txt (Source Indexing Policy rule 6): rule 6 changed in #6691 so
+// robots.txt is no longer a gate for providers (#6694). The feed returns 10
+// items by default; `posts_per_page` raises that to 100 per request.
 
-const FEED_URL = 'https://jobspresso.co/feed/job_feed/';
+const BASE_FEED_URL = 'https://jobspresso.co/feed/job_feed/';
+const DEFAULT_POSTS_PER_PAGE = 100;
+const MAX_POSTS_PER_PAGE = 100;
 const TRUSTED_HOST = 'jobspresso.co';
+
+/** @param {any} [entry] */
+export function buildFeedUrl(entry) {
+  const custom = entry?.posts_per_page;
+  const count = Number.isInteger(custom) && custom > 0
+    ? Math.min(custom, MAX_POSTS_PER_PAGE)
+    : DEFAULT_POSTS_PER_PAGE;
+  return `${BASE_FEED_URL}?posts_per_page=${count}`;
+}
+
+const DEFAULT_FEED_URL = buildFeedUrl();
 
 /** @param {string} url */
 function assertJobspressoUrl(url) {
@@ -46,11 +54,11 @@ export default {
   id: "jobspresso",
 
   detect(entry) {
-    return entry?.provider === "jobspresso" ? { url: FEED_URL } : null;
+    return entry?.provider === "jobspresso" ? { url: buildFeedUrl(entry) } : null;
   },
 
-  async fetch(_entry, ctx) {
-    const feedUrl = assertJobspressoUrl(FEED_URL);
+  async fetch(entry, ctx) {
+    const feedUrl = assertJobspressoUrl(buildFeedUrl(entry));
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertJobspressoUrl above it keeps the request pinned to jobspresso.co.
     const text = await ctx.fetchText(feedUrl, { redirect: "error" });

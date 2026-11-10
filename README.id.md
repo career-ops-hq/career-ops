@@ -594,7 +594,7 @@ Lihat [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) untuk detail selengkapnya. Pera
 ## Kontributor
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Setiap orang yang telah berkontribusi lewat kode, dokumentasi, terjemahan, maupun pengujian tercantum di dalam

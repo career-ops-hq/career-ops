@@ -589,7 +589,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 ## 기여자
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 코드, 문서, 번역, 테스트를 기여한 모든 분은

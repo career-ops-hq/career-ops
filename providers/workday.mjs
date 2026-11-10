@@ -940,6 +940,9 @@ export default {
       // cleanly with whatever pages were already gathered instead of
       // discarding them (Promise.all would fail the whole batch on one error).
       let page = 1;
+      // Raw row count of the last page read (before parsing drops rows): a
+      // short page is the board's natural end, so it can never be a cap stop.
+      let lastRawCount = firstPostings.length;
       if (stopReason === STOP_REASON.COMPLETE) {
         for (; page < pagesToFetch; page++) {
           if (pagesSpent >= pageBudget) { budgetExhausted = true; break; }
@@ -960,13 +963,14 @@ export default {
           }
           const pageJobs = parseWorkdayResponse(json, entry);
           jobs.push(...pageJobs);
-          if (total === null) {
-            const postings = Array.isArray(json?.jobPostings) ? json.jobPostings : [];
-            if (postings.length < PAGE_SIZE) break; // short page → last page reached
-          }
+          lastRawCount = Array.isArray(json?.jobPostings) ? json.jobPostings.length : 0;
+          if (total === null && lastRawCount < PAGE_SIZE) break; // short page → last page reached
           if (pageIsPastWindow(pageJobs, sinceMs)) { stopReason = STOP_REASON.EARLY_STOP; break; }
         }
-        if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages) {
+        // A cap stop needs a full last page and the entry's own cap, not a
+        // probe's ctx.maxPages (verify-portals/discover-ats probe with 1).
+        if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages
+          && lastRawCount >= PAGE_SIZE && ctxCap === Infinity) {
           stopReason = STOP_REASON.CAP;
         }
       }
@@ -1275,6 +1279,16 @@ export default {
         // clamp takes the facet-split path above instead of this warning.
         const suspectTag = total !== null && total === maxPages * PAGE_SIZE ? ' (total may be Workday-capped, not real)' : '';
         console.error(`⚠️  workday: ${entry.name} truncated at ${maxPages} pages (${jobsSummary})${suspectTag}`);
+      }
+      // Canonical partial-read signal for scan.mjs (lib/board-truncation.mjs).
+      // workdayTruncated is left alone: scan-ats-full.mjs reads its values to
+      // decide retries, and a page cap is neither of them. CAP already excludes
+      // probes and short last pages (runQuery). A reported total of exactly
+      // max_pages x PAGE_SIZE is NOT proof of completion: it is the value
+      // Workday's server clamp reports (suspectTag above), so it stays marked,
+      // matching the warning.
+      if (ctxCap === Infinity) {
+        /** @type {any} */ (jobs).truncated = { reason: 'page-cap', fetched: jobs.length, ...(total !== null ? { total } : {}) };
       }
     }
     // 'no-date-skip' hits many tenants in a full-directory scan (a company

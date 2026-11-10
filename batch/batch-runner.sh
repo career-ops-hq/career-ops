@@ -138,6 +138,7 @@ RATE_LIMIT_SLEEP=300
 WORKER_TIMEOUT=1800
 THIN_ACTION=webfetch   # webfetch | skip | browser-extract: what to do when the JD is still empty after the prefetch and the ATS API fallback
 BATCH_PAUSED=false
+EVIDENCE_FRESHNESS_JSON=""   # set once per run by check_evidence_freshness
 STATUS_ONLY=false
 STATUS_FULL=true
 WATCH_MODE=false
@@ -1232,6 +1233,7 @@ process_offer() {
   # requirements, which together exceed 80 stripped words.
   local prefetch_min_words=80
   local jd_prefetch_words=0
+  local jd_rescue_closed_note=""
   local jd_raw_file=""
   local curl_status=0
   if command -v curl >/dev/null 2>&1; then
@@ -1338,7 +1340,18 @@ process_offer() {
       # is thin or the rescued JD is longer, and it fails open (any failure leaves
       # the stripped text as is, and the checks below decide as before).
       if [[ -f "$BATCH_DIR/jd-rescue.mjs" && -s "$jd_raw_file" ]]; then
-        if _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" 2>/dev/null); then
+        _rs_rc=0
+        _rs_line=$(node "$BATCH_DIR/jd-rescue.mjs" "$url" "$jd_raw_file" "$jd_file" "$jd_prefetch_words" "${current_url:-$url}" 2>/dev/null) || _rs_rc=$?
+        if [[ "$_rs_rc" -eq 3 ]]; then
+          # The ATS says the posting is closed: terminal, even though the page text may look like a JD.
+          jd_rescue_closed_note="posting closed (jd-rescue): $(printf '%s' "${_rs_line#*$'\t'}" | tr -c '[:print:]' ' ' | sed 's/^closed://; s/  */ /g')"
+          : > "$jd_file"
+          jd_prefetch_words=0
+        elif [[ "$_rs_rc" -eq 4 ]]; then
+          # The download landed on a different page than the offer URL: its text is not this posting's.
+          : > "$jd_file"
+          jd_prefetch_words=0
+        elif [[ "$_rs_rc" -eq 0 ]]; then
           IFS=$'\t' read -r _rs_words _rs_method <<< "$_rs_line"
           _rs_words="${_rs_words//[^0-9]/}"
           _rs_words="${_rs_words:-0}"
@@ -1366,15 +1379,28 @@ process_offer() {
   # text inside a shell command the worker composes. fetch-jd.mjs only talks to
   # the known ATS API hosts it resolves from the URL, so a private or unknown
   # host is a miss (exit 1), not a request.
+  local jd_closed_note="$jd_rescue_closed_note"
   local jd_api_words=0
-  if [[ ! -s "$jd_file" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
-    local jd_api_tmp
+  if [[ ! -s "$jd_file" && -z "$jd_closed_note" && -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
+    local jd_api_tmp jd_api_rc=0
     jd_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-api.XXXXXX")"
-    if node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null; then
+    node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_api_tmp" 2>/dev/null || jd_api_rc=$?
+    if [[ "$jd_api_rc" -eq 3 ]]; then
+      # Exit 3: the posting's own data says it is closed (validThrough in the past,
+      # closure text on the page, an ATS delisting flag). Do not fall back to
+      # WebFetch, which could read the JD from the page and score a closed role.
+      # The evidence is page text, so keep it to one short printable line.
+      jd_closed_note="posting closed (fetch-jd): $(head -c 160 "$jd_api_tmp" | tr -c '[:print:]' ' ' | sed 's/^CLOSED_POSTING //; s/  */ /g')"
+    elif [[ "$jd_api_rc" -eq 0 ]]; then
       jd_api_words=$(wc -w < "$jd_api_tmp" 2>/dev/null) || jd_api_words=0
       jd_api_words="${jd_api_words//[^0-9]/}"
       jd_api_words="${jd_api_words:-0}"
-      if [[ "$jd_api_words" -ge "$prefetch_min_words" ]]; then
+      if grep -q 'Job description truncated here: the posting is longer than' "$jd_api_tmp" 2>/dev/null; then
+        # fetch-jd.mjs marked this text as cut short. Scoring and archiving it
+        # would treat a partial JD as the whole posting, so leave the JD file
+        # empty and let the existing thin-JD handling decide what happens next.
+        echo "    ℹ️  JD prefetch: fetch-jd.mjs returned a truncated JD — not used as the full posting"
+      elif [[ "$jd_api_words" -ge "$prefetch_min_words" ]]; then
         cat "$jd_api_tmp" > "$jd_file"
         echo "    ℹ️  JD prefetch: ${jd_api_words} words from the ATS API (fetch-jd.mjs)"
       fi
@@ -1387,7 +1413,11 @@ process_offer() {
   # 'webfetch', changes nothing: the worker is told to WebFetch. Detection only
   # here; the skip is recorded after the "Processing offer" line below.
   local jd_thin_skip=0 jd_thin_note="" jd_thin_retryable=0
-  if [[ ! -s "$jd_file" && "$THIN_ACTION" != "webfetch" ]]; then
+  if [[ -n "$jd_closed_note" ]]; then
+    # A closed posting is terminal ('skipped', not retryable) whatever --thin-action says.
+    jd_thin_skip=1
+    jd_thin_note="$jd_closed_note"
+  elif [[ ! -s "$jd_file" && "$THIN_ACTION" != "webfetch" ]]; then
     if [[ "$THIN_ACTION" == "browser-extract" && -f "$PROJECT_DIR/browser-extract.mjs" ]]; then
       # Real-browser read: zero model tokens, ~5-15s of Chromium. Success is
       # compact JSON on stdout, a failure is exit 1 with a JSON error on stderr.
@@ -1569,6 +1599,17 @@ process_offer() {
     done
   fi
 
+
+  # The run-wide evidence freshness result (Step 1.7). The same text for every
+  # offer, so it keeps the resolved prompt byte-identical across the run.
+  if [[ -n "$EVIDENCE_FRESHNESS_JSON" ]]; then
+    {
+      printf '\n\n---\n\n'
+      printf '## Runtime: GitHub evidence freshness\n\n'
+      printf 'The runner ran `node evidence-freshness.mjs` once for this batch run. Its JSON output:\n\n'
+      printf '%s\n' "$EVIDENCE_FRESHNESS_JSON" | sed 's/^/    /'
+    } >> "$resolved_prompt"
+  fi
 
   # Build the launch command for the configured CLI.
   # For claude the model is resolved once per run from spend_tier unless --model
@@ -2016,6 +2057,26 @@ process_offer() {
   fi
 }
 
+# GitHub evidence freshness (#5674): one check for the whole run, not one per
+# worker. The check makes a `gh search prs` call and its answer is the same for
+# every offer, so the runner makes it once and every worker reads the result
+# from its prompt. It is opt-in: with evidence_freshness.enabled not true it
+# reports status "disabled" without any network call, and workers get nothing.
+check_evidence_freshness() {
+  [[ -f "$PROJECT_DIR/evidence-freshness.mjs" ]] || return 0
+  local out status
+  out=$(node "$PROJECT_DIR/evidence-freshness.mjs" 2>/dev/null) || return 0
+  status=$(printf '%s\n' "$out" | sed -n 's/^  "status": "\(.*\)",$/\1/p')
+  [[ -z "$status" || "$status" == "disabled" ]] && return 0
+  EVIDENCE_FRESHNESS_JSON="$out"
+  if printf '%s\n' "$out" | grep -q '^  "stale": true,$'; then
+    echo "GitHub evidence: stale (checked once for this run; see each report header)"
+  else
+    echo "GitHub evidence: $status (checked once for this run)"
+  fi
+  echo ""
+}
+
 # Merge tracker additions into applications.md
 merge_tracker() {
   echo ""
@@ -2391,6 +2452,7 @@ main() {
     exit 0
   fi
 
+  check_evidence_freshness
   # --skip-pdf must not start a painter, even when the parent shell already opted in.
   if [[ "$SKIP_PDF" == "true" ]]; then
     unset CAREER_OPS_PDF_SHARED

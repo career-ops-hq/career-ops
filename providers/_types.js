@@ -30,6 +30,31 @@
  *                               `descriptionPlain`; most providers omit it.
  *                               Consumed by scan.mjs's content_filter; an
  *                               empty/absent value always passes the filter.
+ * @property {string} [eligibilityText] The source's own statement of where the
+ *                               job can be done or who may apply, when the
+ *                               source gives it outside the job description:
+ *                               `cryptocurrencyjobs.mjs` takes it from the
+ *                               feed teaser ("can be done remotely anywhere in
+ *                               the United States, or Canada"). Set it only to
+ *                               that statement, never to a teaser or excerpt
+ *                               as a whole. Read ONLY by scan.mjs's
+ *                               country_eligibility_filter, which matches it
+ *                               together with `description`; content_filter
+ *                               and visa_filter never read it, so setting it
+ *                               cannot make a posting look like it has a JD.
+ *                               Omitted when the source has no such statement.
+ * @property {string} [visaText] Text the source gives outside the job
+ *                               description that may state visa sponsorship:
+ *                               `startup-jobs.mjs` passes its feed teaser
+ *                               ("... we offer visa sponsorship."). Unlike
+ *                               `eligibilityText`, a whole teaser is fine here:
+ *                               visa_filter only looks for its sponsorship
+ *                               keywords, and a text without them gets the same
+ *                               decision as no text. Read ONLY by scan.mjs's
+ *                               visa_filter, which matches it together with
+ *                               `description`; content_filter and
+ *                               country_eligibility_filter never read it.
+ *                               Omitted when the source has no such text.
  * @property {number} [postedAt] Epoch ms when the posting was published.
  *                               Omitted when the source doesn't expose a
  *                               usable date. scan.mjs ignores it; consumers

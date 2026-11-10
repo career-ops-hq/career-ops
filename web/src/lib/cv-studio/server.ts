@@ -5,15 +5,21 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
-import { htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
+import { escapeHtml, htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
 
 const EDITED_SUFFIX = "-edited";
+
+export function missingDataFolderMessage(): string | null {
+  const root = careerOpsRoot();
+  return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
+}
 
 export type StudioLoad =
   | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean }
@@ -167,7 +173,11 @@ export async function unsupportedRewriteClaims(text: string, bulletText: string)
   const { verifyFacts, auditClaims } = await coreModule<VerifyCvFacts>("verify-cv-facts");
   const voice = await coreModule<CvVoice>("cv-voice");
   const cvPath = path.join(root, "cv.md");
-  const cv = verifyFacts(text, { sourcePaths: [cvPath, path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
+  // Checked as the list item it will render as: the PDF gate anchors each
+  // <li> to its source bullet (bullet drift, #1411), and a bare string is not
+  // a list item, so a rewrite that changed the verb would pass here and then
+  // block the render on save.
+  const cv = verifyFacts(`<ul><li>${escapeHtml(text)}</li></ul>`, { sourcePaths: [cvPath, path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
   // Wording evidence is cv.md, same as the PDF gate. The tailored bullet is
   // not the candidate's own words. The fact audit below stays on this bullet.
   let cvText = "";
@@ -201,7 +211,7 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
   const previousHtml = fs.existsSync(editedHtml) ? fs.readFileSync(editedHtml, "utf8") : null;
   atomicWrite(editedHtml, html);
   const format = /size:\s*a4/i.test(html) ? "a4" : "letter";
-  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
+  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), dataRoot: root, html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
   // A render over a warn-only page budget exits 0 but leaves nothing at
   // editedPdf (the PDF went to a sibling .overflow.pdf draft, #6377), so the
   // exit code alone would keep an HTML and mark the tracker ready for a PDF
@@ -212,7 +222,7 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
     return { ok: false, error: undeliveredRenderError(render, editedPdf) };
   }
   const warnings = render.stderr.split("\n").map((l: string) => l.trim()).filter(Boolean);
-  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: load.reportNum });
+  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), dataRoot: root, reportNum: load.reportNum });
   if (!mark.ok) warnings.push(`PDF rendered, but the tracker's PDF column was not updated${mark.data?.error ? `: ${mark.data.error}` : "."}`);
   const index = await pdfPathStatusForReport(load.reportNum);
   return { ok: true, pdf: path.basename(editedPdf), indexed: index.status === "found" && index.path === path.resolve(editedPdf), warnings };
