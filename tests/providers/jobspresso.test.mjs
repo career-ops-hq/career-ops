@@ -19,11 +19,20 @@ try {
 
   if (
     jobspresso.detect({ provider: 'jobspresso' })?.url ===
-      'https://jobspresso.co/feed/job_feed/'
+      'https://jobspresso.co/feed/job_feed/?posts_per_page=100'
   ) {
     pass('jobspresso.detect() claims explicit provider config');
   } else {
     fail('jobspresso.detect() failed');
+  }
+
+  if (
+    jobspresso.detect({ provider: 'jobspresso', posts_per_page: 50 })?.url ===
+      'https://jobspresso.co/feed/job_feed/?posts_per_page=50'
+  ) {
+    pass('jobspresso.detect() honours custom posts_per_page');
+  } else {
+    fail('jobspresso.detect() should honour custom posts_per_page');
   }
 
   if (jobspresso.detect({ provider: 'other' }) === null) {
@@ -85,7 +94,7 @@ try {
       fetchCalled = true;
 
       if (
-        url !== 'https://jobspresso.co/feed/job_feed/' ||
+        url !== 'https://jobspresso.co/feed/job_feed/?posts_per_page=100' ||
         opts?.redirect !== 'error'
       ) {
         throw new Error('unexpected fetch arguments');
@@ -101,11 +110,37 @@ try {
     fail('jobspresso.fetch() did not fetch correctly');
   }
 
-  const detectedUrl = jobspresso.detect({ provider: 'jobspresso' })?.url;
-  if (detectedUrl && new URL(detectedUrl).search === '') {
-    pass('jobspresso feed URL carries no query string (robots.txt disallows /*?, #5774)');
+  let customFetchUrl = null;
+  await jobspresso.fetch({ posts_per_page: 50 }, {
+    async fetchText(url) {
+      customFetchUrl = url;
+      return xml;
+    },
+  });
+  if (customFetchUrl === 'https://jobspresso.co/feed/job_feed/?posts_per_page=50') {
+    pass('jobspresso.fetch() honors posts_per_page: 50 in request');
   } else {
-    fail('jobspresso feed URL must not carry a query string');
+    fail(`jobspresso.fetch() unexpected url: ${customFetchUrl}`);
+  }
+
+  let cappedFetchUrl = null;
+  await jobspresso.fetch({ posts_per_page: 250 }, {
+    async fetchText(url) {
+      cappedFetchUrl = url;
+      return xml;
+    },
+  });
+  if (cappedFetchUrl === 'https://jobspresso.co/feed/job_feed/?posts_per_page=100') {
+    pass('jobspresso.fetch() caps posts_per_page at 100 in request');
+  } else {
+    fail(`jobspresso.fetch() did not cap posts_per_page at 100: ${cappedFetchUrl}`);
+  }
+
+  const detectedUrl = jobspresso.detect({ provider: 'jobspresso' })?.url;
+  if (detectedUrl && new URL(detectedUrl).searchParams.get('posts_per_page') === '100') {
+    pass('jobspresso feed URL carries posts_per_page=100 (#6694)');
+  } else {
+    fail('jobspresso feed URL must carry posts_per_page=100');
   }
 
   if (fetchCalled) {

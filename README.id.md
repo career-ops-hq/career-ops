@@ -64,7 +64,7 @@ CV disesuaikan dan draf jawaban disiapkan. <strong>Anda&nbsp;yang&nbsp;menekan&n
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Diterima kerja berkat career-ops: cerita publik yang tercatat"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Diterima kerja berkat career-ops: cerita publik yang tercatat"></a></p>
 
 <p align="center">Orang-orang setelah saya menuliskan bagaimana mereka berhasil diterima kerja.</p>
 
@@ -131,7 +131,7 @@ Proses rekrutmen tidak akan membaik dengan sendirinya. Orang-orang yang menjalan
 
 [Di sinilah perbaikan itu ditulis](CONTRIBUTING.md). Sebuah ruang bersama, bukan klub eksklusif. **Mari kita bangun bersama.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: jumlah anggota langsung di server career-ops"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: jumlah anggota langsung di server career-ops"></a></p>
 
 ## Sponsor
 
@@ -513,7 +513,7 @@ Dashboard TUI Go, skrip Node.js, dan semua mode agen AI secara otomatis mematuhi
 - **Data**: Tabel Markdown + konfigurasi YAML + file *batch* TSV
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Rilis terbaru"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Rilis terbaru"></a>
 </p>
 
 <p align="center">
@@ -594,7 +594,7 @@ Lihat [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) untuk detail selengkapnya. Pera
 ## Kontributor
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Setiap orang yang telah berkontribusi lewat kode, dokumentasi, terjemahan, maupun pengujian tercantum di dalam

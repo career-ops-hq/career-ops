@@ -42,7 +42,8 @@ if (process.platform === 'win32') {
  * `modelName` below and the `--model` examples accordingly.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { createHash } from 'crypto';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
@@ -139,6 +140,32 @@ function resolveModesDirCandidate(customModesDir) {
   return customModesDir;
 }
 
+// Same recognition as resolveEvalModeFile in web/src/lib/career-ops.ts: the
+// evaluation mode is the markdown file whose title states the block range it
+// produces (A-F, A-G, or A-H; the dash may be ASCII or typographic). A
+// filename allow-list goes stale whenever a market ships under a new name
+// (#6398: annuncio, vacature, gonggo, lowongan, offer, tuyen-dung).
+const EVAL_MODE_TITLE_RE = /A[-\u2010-\u2015][F-H]/;
+
+function findEvaluationModeFile(dir) {
+  let names;
+  try {
+    names = readdirSync(join(CODE_ROOT, dir));
+  } catch {
+    return null;
+  }
+  for (const name of names.sort()) {
+    if (!name.endsWith('.md') || name.startsWith('_') || name === 'README.md') continue;
+    try {
+      const first = readFileSync(join(CODE_ROOT, dir, name), 'utf8').split('\n', 1)[0] ?? '';
+      if (EVAL_MODE_TITLE_RE.test(first)) return name;
+    } catch {
+      // Unreadable file — keep looking.
+    }
+  }
+  return null;
+}
+
 if (existsSync(PATHS.profileYml)) {
   try {
     const yamlContent = stripBom(readFileSync(PATHS.profileYml, 'utf-8'));
@@ -154,8 +181,7 @@ if (existsSync(PATHS.profileYml)) {
       // anyone asking for it).
       const primaryRaw = candidates[0];
       const primaryDir = resolveModesDirCandidate(primaryRaw);
-      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'fursah.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
-      const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+      const primaryEvalFile = primaryDir && findEvaluationModeFile(primaryDir);
       const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
       if (primaryDir && primaryEvalFile) {
         // Primary resolved. Any further declared markets only need to exist —
@@ -348,16 +374,6 @@ function validateEvaluationShape(text) {
   }
 }
 
-// Lazy import — only used when saving
-let readdirSync;
-try {
-  ({ readdirSync } = await import('fs'));
-} catch { /* already imported above via named exports */ }
-// Use named import fallback
-if (!readdirSync) {
-  readdirSync = (await import('fs')).readdirSync;
-}
-
 // ---------------------------------------------------------------------------
 // Load context files
 // ---------------------------------------------------------------------------
@@ -367,6 +383,18 @@ const sharedLabel = join(modesDir, '_shared.md').replace(/\\/g, '/');
 const ofertaLabel = join(modesDir, evalFilename).replace(/\\/g, '/');
 let sharedContext    = readFile(PATHS.shared,      sharedLabel);
 const ofertaLogic    = readFile(PATHS.oferta,      ofertaLabel);
+// Market evaluation files are a layer over the canonical procedure: they cite
+// its gates, provenance rule and scoring bands, then add local vocabulary.
+// The web focused-evaluation path keeps those canonical rules and appends
+// market text as context that does not replace them (evaluation-options.mjs,
+// "MARKET CONTEXT (canonical scoring rules still apply)"). Gemini inlines
+// both, in that order. modes/oferta.md itself is not included twice.
+const CANONICAL_OFERTA_REL = 'modes/oferta.md';
+const MARKET_CONTEXT_MARK = '\n\n--- MARKET CONTEXT (canonical scoring rules still apply) ---\n';
+const resolvedOfertaRel = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
+const ofertaPrompt = resolvedOfertaRel === CANONICAL_OFERTA_REL
+  ? ofertaLogic
+  : `${readFile(join(CODE_ROOT, CANONICAL_OFERTA_REL), CANONICAL_OFERTA_REL)}${MARKET_CONTEXT_MARK}${ofertaLogic}`;
 
 // Multi-market (#3793): fold in every OTHER declared market's _shared.md so the
 // agent has all declared candidates' vocabulary/legal-concept context, not just
@@ -393,7 +421,7 @@ const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profil
 // ---------------------------------------------------------------------------
 const { contextBody, budgetReport } = buildBudgetedPrompt({
   sharedContent: sharedContext,
-  ofertaContent: ofertaLogic,
+  ofertaContent: ofertaPrompt,
   cvContent,
   profileYml,
   profileContent,
@@ -406,6 +434,18 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
 if (contextOnly) {
   const resolvedEvalMode = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
   console.log(`🧭  Evaluation mode: ${resolvedEvalMode}`);
+  // Fingerprints of the strings actually concatenated into the prompt, so a
+  // test can check order without printing the mode files (they name _custom.md,
+  // and an absent _custom.md must stay silent on stdout).
+  const evaluationFingerprint = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (resolvedEvalMode === CANONICAL_OFERTA_REL) {
+    console.log(`🧭  Evaluation stack: ${CANONICAL_OFERTA_REL} ${evaluationFingerprint(ofertaPrompt)}`);
+  } else {
+    const splitAt = ofertaPrompt.indexOf(MARKET_CONTEXT_MARK);
+    const prefix = splitAt === -1 ? '' : ofertaPrompt.slice(0, splitAt);
+    const suffix = splitAt === -1 ? '' : ofertaPrompt.slice(splitAt + MARKET_CONTEXT_MARK.length);
+    console.log(`🧭  Evaluation stack: ${CANONICAL_OFERTA_REL} ${evaluationFingerprint(prefix)} -> ${resolvedEvalMode} ${evaluationFingerprint(suffix)}`);
+  }
 }
 
 // Log token budget info
