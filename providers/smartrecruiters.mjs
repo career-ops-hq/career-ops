@@ -28,6 +28,7 @@
 import { intInRange } from './_config-utils.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const ALLOWED_SMARTRECRUITERS_HOSTS = new Set(['api.smartrecruiters.com']);
@@ -39,6 +40,12 @@ const SR_MAX_PAGES = 50;  // default cap (5000 postings @ 100/page) when the ent
 // a typo can't walk a board forever.
 export const SR_HARD_MAX_PAGES = 100;
 const SR_DETAIL_BATCH = 5;
+// A raised max_pages can mean 100 list requests to one public API host, so the
+// walk spaces its pages and retries a transient failure (429, 5xx, a dropped
+// connection) a bounded number of times, as oraclecloud.mjs does. A page that
+// still fails ends the board with that error, never as a page-cap truncation.
+const SR_INTER_PAGE_DELAY_MS = 250;
+const SR_RETRY_POLICY = { retries: 3 };
 
 /**
  * Page cap for an entry: a positive integer `max_pages` up to
@@ -167,9 +174,10 @@ export default {
     let total = null; // the API's totalFound, when it reports one
     let ended = false; // a short or empty page ended the walk before the cap
     for (let page = 0; page < pageLimit; page++) {
+      if (page > 0) await sleep(SR_INTER_PAGE_DELAY_MS, ctx);
       const apiUrl = buildPostingsUrl(slug, page * SR_PAGE_SIZE);
       assertSmartRecruitersUrl(apiUrl);
-      const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
+      const json = await fetchJsonWithRetry(ctx, apiUrl, { redirect: 'error' }, SR_RETRY_POLICY);
       if (total === null && Number.isSafeInteger(json?.totalFound) && json.totalFound >= 0) total = json.totalFound;
       const parsed = parseSmartRecruitersResponse(json, entry.name, slug);
       all.push(...parsed);

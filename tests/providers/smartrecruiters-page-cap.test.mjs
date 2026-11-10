@@ -23,6 +23,8 @@ try {
     const offsets = [];
     const ctx = {
       ...(maxPages ? { maxPages } : {}),
+      // The walk pauses between pages; a board of 100 pages must not take 25 s here.
+      sleep: async () => {},
       fetchJson: async (url) => {
         const offset = Number(new URL(url).searchParams.get('offset'));
         offsets.push(offset);
@@ -113,6 +115,71 @@ try {
       pass('a one-page health probe (ctx.maxPages) is not reported as a truncation');
     } else {
       fail(`probe: ${offsets.length} requests, truncation ${JSON.stringify(boardTruncation(jobs))}, errors ${JSON.stringify(errors)}`);
+    }
+  }
+
+  // Pages are spaced and a transient failure is retried (#6799 review): a
+  // raised cap must not send 100 back-to-back requests to the public API.
+  {
+    const sleeps = [];
+    const { ctx, offsets } = board(250);
+    const { jobs } = await walk(bosch, { ...ctx, sleep: async (ms) => { sleeps.push(ms); } });
+    if (jobs.length === 250 && offsets.length === 3 && sleeps.length === 2 && sleeps.every((ms) => ms === 250)) {
+      pass('the walk pauses 250 ms between pages, and not before the first');
+    } else {
+      fail(`pacing: ${jobs.length} jobs, ${offsets.length} requests, sleeps ${JSON.stringify(sleeps)}`);
+    }
+  }
+
+  {
+    const { ctx, offsets } = board(250);
+    let failed = false;
+    const flaky = {
+      ...ctx,
+      fetchJson: async (url) => {
+        if (!failed && new URL(url).searchParams.get('offset') === '100') {
+          failed = true;
+          throw Object.assign(new Error('HTTP 503'), { status: 503 });
+        }
+        return ctx.fetchJson(url);
+      },
+    };
+    const { jobs, errors } = await walk(bosch, flaky);
+    if (jobs.length === 250 && offsets.length === 3 && errors.length === 0 && boardTruncation(jobs) === null) {
+      pass('a page that fails once with a 503 is retried, and the walk reads the whole board');
+    } else {
+      fail(`retry: ${jobs.length} jobs, ${offsets.length} answered requests, errors ${JSON.stringify(errors)}`);
+    }
+  }
+
+  {
+    const { ctx } = board(5104);
+    let attempts = 0;
+    const down = {
+      ...ctx,
+      fetchJson: async (url) => {
+        if (new URL(url).searchParams.get('offset') === '100') {
+          attempts++;
+          throw Object.assign(new Error('HTTP 503'), { status: 503 });
+        }
+        return ctx.fetchJson(url);
+      },
+    };
+    let thrown = null;
+    const errors = [];
+    const original = console.error;
+    console.error = (...args) => errors.push(args.join(' '));
+    try {
+      await sr.fetch(bosch, down);
+    } catch (e) {
+      thrown = e;
+    } finally {
+      console.error = original;
+    }
+    if (thrown?.status === 503 && attempts === 4 && !errors.some((e) => e.includes('truncated'))) {
+      pass('a page that keeps failing ends the board with its error after 3 retries, not as a page-cap truncation');
+    } else {
+      fail(`exhaustion: thrown ${JSON.stringify(thrown && { message: thrown.message, status: thrown.status })}, attempts ${attempts}, errors ${JSON.stringify(errors)}`);
     }
   }
 
