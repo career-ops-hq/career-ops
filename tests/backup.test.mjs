@@ -319,13 +319,14 @@ try {
   put(tplRoot, 'templates/cover-jane-acme.html', 'generated');
   put(tplRoot, 'templates/cv-template.html', 'shipped');
   put(tplRoot, 'templates/cv-template.mine.html', 'configured variant');
+  put(tplRoot, 'templates/my-pack/cv-template.mine.html', 'packed variant');
   put(tplRoot, 'templates/cv-template.other.html', 'unconfigured variant');
   put(tplRoot, 'templates/cover-letter-template.html', 'shipped');
   const tplRun = b.runBackup({ dataRoot: tplRoot, dest: join(tmp, 'backup', 'tpl') });
   const has = (f) => existsSync(join(tmp, 'backup', 'tpl', 'templates', f));
   assert.deepEqual(
-    ['cv-jane-acme.html', 'cover-jane-acme.html', 'cv-template.mine.html'].map(has),
-    [true, true, true],
+    ['cv-jane-acme.html', 'cover-jane-acme.html', 'cv-template.mine.html', 'my-pack/cv-template.mine.html'].map(has),
+    [true, true, true, true],
   );
   assert.deepEqual(
     ['cv-template.html', 'cv-template.other.html', 'cover-letter-template.html'].map(has),
@@ -370,6 +371,25 @@ try {
   assert.equal(existsSync(join(tmp, 'backup', 'no-ov', 'templates', 'cv-template.mine.html')), false);
   const ovHas = (f) => existsSync(join(tmp, 'backup', 'ov', 'templates', f));
   assert.deepEqual(['cv-template.mine.html', 'cv-template.other.html'].map(ovHas), [true, false]);
+
+  // An inline-mapping profile selects a variant too (same reader as the resolver).
+  const inlRoot = join(tmp, 'inl-root');
+  put(inlRoot, 'cv.md', 'cv');
+  put(inlRoot, 'config/profile.yml', 'cv: { template: mine }\n');
+  put(inlRoot, 'templates/cv-template.mine.html', 'inline selected');
+  const inlRun = b.runBackup({ dataRoot: inlRoot, dest: join(tmp, 'backup', 'inl') });
+  assert.equal(existsSync(join(tmp, 'backup', 'inl', 'templates', 'cv-template.mine.html')), true);
+  assert.equal(inlRun.failed.length, 0);
+
+  // A profile that cannot be parsed is a reported failure, not a warning.
+  const badProf = join(tmp, 'badprof-root');
+  put(badProf, 'cv.md', 'cv');
+  put(badProf, 'config/profile.yml', 'cv: [unclosed\n');
+  const badRun = b.runBackup({ dataRoot: badProf, dest: join(tmp, 'backup', 'badprof') });
+  assert.equal(badRun.failed.some((f) => f.path.endsWith('profile.yml')), true);
+
+  // A destination that holds the checkout is refused when the data root is elsewhere.
+  assert.throws(() => b.assertSafeDestination(join(tmp, 'co-parent'), join(tmp, 'dr'), join(tmp, 'co-parent', 'checkout')), /contains/);
 
   // A declaration file that cannot be parsed falls back to the built-in list.
   const decl = join(tmp, 'decl-root');

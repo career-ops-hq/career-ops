@@ -39,11 +39,11 @@ import { fileURLToPath } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
+import { kebab, loadProfileDefault } from './cv-templates.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import {
   LOCAL_PATHS_FILE,
   USER_PATHS,
-  configuredTemplateVariantsFromProfileSource,
   effectiveUserPaths,
   isGeneratedTemplateArtifact,
   isUserConfiguredTemplateVariant,
@@ -91,14 +91,17 @@ function templateUserFiles(dataRoot, warnings, failed) {
   const variants = {};
   const profiles = new Set([getProfilePath(dataRoot), ...(hasProfileOverride() ? [getProfilePath()] : [])]);
   for (const profile of profiles) {
-    if (!existsSync(profile)) continue;
-    try {
-      const configured = configuredTemplateVariantsFromProfileSource(readFileSync(profile, 'utf8'));
-      for (const [kind, name] of Object.entries(configured)) {
-        variants[kind] = [...new Set([variants[kind], name].flat().filter(Boolean))];
+    // The same reader the template resolver uses (inline mappings included). A
+    // missing profile is "none"; any other read or parse error is a failure.
+    for (const kind of ['cv', 'cover']) {
+      try {
+        const configured = loadProfileDefault(kind, { profilePath: profile, strict: true });
+        const name = configured ? kebab(configured) : '';
+        if (name && name !== 'standard') variants[kind] = [...new Set([...(variants[kind] || []), name])];
+      } catch (error) {
+        failed.push({ path: profile, error: `could not discover configured template variants: ${error.message}` });
+        break;
       }
-    } catch (error) {
-      warnings.push(`${profile} could not be read for its configured template variants (${error.message}); they are not backed up.`);
     }
   }
   const found = [];
@@ -289,8 +292,10 @@ export function assertSafeDestination(dest, dataRoot, codeRoot = CODE_ROOT) {
   }
   // A destination that holds the data root would map a backed-up file onto the
   // live one (dest/config/profile.yml is the live config/profile.yml).
-  if (within(canonical(dataRoot), d)) {
-    throw new Error(`Backup folder ${dest} contains ${dataRoot}. Choose a separate folder.`);
+  for (const base of [dataRoot, codeRoot]) {
+    if (within(canonical(base), d)) {
+      throw new Error(`Backup folder ${dest} contains ${base}. Choose a separate folder.`);
+    }
   }
 }
 
