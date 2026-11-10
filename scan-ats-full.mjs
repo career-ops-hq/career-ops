@@ -688,16 +688,20 @@ export async function loadSourceList(name, source, datasetOpts, { loadCompanyLis
 const WORKABLE_FEED_CACHE_FILE = 'workable.xml.gz';
 const WORKABLE_FEED_META_FILE = 'workable.meta.json';
 
-/** Wait until a full stream can take more, or fails; both listeners are removed after. */
-function drainOrError(stream) {
+/**
+ * Wait until a full gzip stream can take more. Also ends when the gzip stream
+ * or the file it feeds fails or closes: a broken file never drains the gzip
+ * stream. Every listener is removed when the wait ends.
+ */
+export function drainOrFailure(gzip, out) {
+  if (gzip.destroyed || out.destroyed) return Promise.resolve();
   return new Promise((resolve) => {
+    const events = [[gzip, 'drain'], [gzip, 'error'], [gzip, 'close'], [out, 'error'], [out, 'close']];
     const done = () => {
-      stream.off('drain', done);
-      stream.off('error', done);
+      for (const [emitter, name] of events) emitter.off(name, done);
       resolve();
     };
-    stream.on('drain', done);
-    stream.on('error', done);
+    for (const [emitter, name] of events) emitter.on(name, done);
   });
 }
 
@@ -782,7 +786,7 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTex
         delivered = true;
         if (!writeFailed) {
           const g = sink();
-          if (!g.write(text)) await drainOrError(g);
+          if (!g.write(text) && !writeFailed) await drainOrFailure(g, out);
         }
         return onText(text);
       });
@@ -804,8 +808,10 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTex
         return readCopy(onText);
       }
       if (err?.status === 429) {
-        const retryS = Number(err.retryAfter);
-        const when = Number.isFinite(retryS) ? new Date(now() + retryS * 1000).toISOString() : 'later';
+        // A missing header is unknown, not 0 seconds.
+        const raw = typeof err.retryAfter === 'string' ? err.retryAfter.trim() : '';
+        const retryS = raw === '' ? NaN : Number(raw);
+        const when = Number.isFinite(retryS) && retryS >= 0 ? new Date(now() + retryS * 1000).toISOString() : 'later';
         throw new Error(`Workable serves its job feed about once an hour and refused this request (HTTP 429); try again after ${when}`);
       }
       throw err;
@@ -815,12 +821,21 @@ export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTex
   return {
     fetchStream: stream,
     get from() { return from; },
-    /** Keep a fresh download as the copy, with the date the next run asks about. */
+    /**
+     * Keep a fresh download as the copy, with the date the next run asks
+     * about. A failure here costs the copy, not the feed already read.
+     */
     commit() {
       if (from !== 'network' || !existsSync(tmp)) return;
-      renameSyncWithRetry(tmp, file);
-      if (downloadedLastModified) writeFileSync(metaFile, JSON.stringify({ lastModified: downloadedLastModified }), 'utf-8');
-      else removeQuietly(metaFile);
+      try {
+        renameSyncWithRetry(tmp, file);
+        if (downloadedLastModified) writeFileSync(metaFile, JSON.stringify({ lastModified: downloadedLastModified }), 'utf-8');
+        else removeQuietly(metaFile);
+      } catch (err) {
+        console.error(`⚠️  workable: could not keep the feed copy (${err.message}); the next run downloads the feed again`);
+        removeQuietly(tmp);
+        removeQuietly(metaFile);
+      }
     },
     /** Drop a download the caller refused. */
     discard() {

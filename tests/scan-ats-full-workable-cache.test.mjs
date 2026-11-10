@@ -1,7 +1,8 @@
 // tests/scan-ats-full-workable-cache.test.mjs — the copy of Workable's job
 // feed: kept only after a complete read, revalidated with If-Modified-Since
 // on every run, read as stale when a request is refused before it started.
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -9,7 +10,9 @@ import { pass, fail, ROOT } from './helpers.mjs';
 
 console.log('\nscan-ats-full — Workable feed copy');
 
-const { workableFeedCache } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
+const { workableFeedCache, drainOrFailure } = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
+const { createGzip } = await import('node:zlib');
+const { Writable } = await import('node:stream');
 const { loadWorkableFeed } = await import(pathToFileURL(join(ROOT, 'providers/workable.mjs')).href);
 
 const check = (ok, label, detail) => (ok ? pass(label) : fail(detail ? `${label} — ${detail}` : label));
@@ -113,8 +116,62 @@ try {
     try { await load(workableFeedCache({ cacheDir: empty, now: () => at, fetchStream: network({ failWith: http429('3600') }) })); } catch (e) { err8 = e; }
     check(/about once an hour/.test(err8?.message ?? '') && err8.message.includes('2026-11-10T04:00:00.000Z') && readdirSync(empty).length === 0,
       'with no copy, a 429 says when to try again and writes nothing', err8?.message);
+    let err8b = null;
+    try { await load(workableFeedCache({ cacheDir: empty, now: () => at, fetchStream: network({ failWith: http429(null) }) })); } catch (e) { err8b = e; }
+    check(/try again after later/.test(err8b?.message ?? ''), 'a 429 without Retry-After does not name the current time as the retry time', err8b?.message);
   } finally {
     rmSync(empty, { recursive: true, force: true });
+  }
+
+  const quiet = async (fn) => {
+    const real = console.error;
+    const warnings = [];
+    console.error = (m) => warnings.push(String(m));
+    try { return { result: await fn(), warnings }; } finally { console.error = real; }
+  };
+
+  // 9. The copy cannot be kept (a directory sits where the copy goes): the feed read still counts.
+  const blocked = mkdtempSync(join(tmpdir(), 'career-ops-workable-cache-blocked-'));
+  try {
+    mkdirSync(join(blocked, 'workable.xml.gz'));
+    const { result, warnings } = await quiet(() => load(workableFeedCache({ cacheDir: blocked, fetchStream: network({ text: feed(job('QA Engineer', 'K1')) }) })));
+    check(result.join() === 'QA Engineer' && warnings.some((w) => w.includes('could not keep the feed copy')) && !readdirSync(blocked).some((f) => f.includes('.tmp-')),
+      'a copy that cannot be kept warns and leaves no temporary file, and the feed already read is still returned');
+  } finally {
+    rmSync(blocked, { recursive: true, force: true });
+  }
+
+  // 10. The copy file fails while gzip waits for room: the read goes on and does not stall.
+  const badFile = mkdtempSync(join(tmpdir(), 'career-ops-workable-cache-badfile-'));
+  try {
+    mkdirSync(join(badFile, `workable.xml.gz.tmp-${process.pid}`));
+    const big = feed(...Array.from({ length: 300 }, (_, i) => job(`QA Engineer ${i}`, `L${i}`).replace('</title>', `</title><description>${cdata(randomBytes(4096).toString('hex'))}</description>`)));
+    const run = load(workableFeedCache({ cacheDir: badFile, fetchStream: network({ text: big }) }));
+    const timeout = new Promise((r) => setTimeout(() => r('timeout'), 15_000).unref());
+    const outcome = await Promise.race([run, timeout]);
+    check(Array.isArray(outcome) && outcome.length === 300, 'a copy file that fails during backpressure does not stall the read of the feed', String(outcome).slice(0, 80));
+  } finally {
+    rmSync(badFile, { recursive: true, force: true });
+  }
+
+  // 11. The file breaks while gzip already waits for room: the wait ends, and its listeners go.
+  {
+    // gzip is not read, so its buffer fills; `out` stands for the file and is
+    // not piped, so only the listeners of the wait itself are on both streams.
+    const gzip = createGzip({ level: 1 });
+    const out = new Writable({ write(_chunk, _enc, cb) { cb(); } });
+    out.on('error', () => {});
+    gzip.on('error', () => {});
+    const count = () => ['drain', 'error', 'close'].map((e) => gzip.listenerCount(e)).concat(['error', 'close'].map((e) => out.listenerCount(e))).join();
+    const before = count();
+    let full = false;
+    for (let i = 0; i < 200 && !full; i++) full = !gzip.write(randomBytes(64 * 1024));
+    const waiting = drainOrFailure(gzip, out);
+    setTimeout(() => out.destroy(new Error('ENOSPC')), 20);
+    const outcome = await Promise.race([waiting.then(() => 'ended'), new Promise((r) => setTimeout(() => r('stalled'), 3000).unref())]);
+    check(full && outcome === 'ended', 'a file that fails while gzip waits for room ends the wait instead of stalling', `full=${full} ${outcome}`);
+    check(count() === before, 'the wait removes every listener it added', `${before} → ${count()}`);
+    gzip.destroy();
   }
 } finally {
   rmSync(dir, { recursive: true, force: true });
