@@ -591,7 +591,7 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 ## 貢獻者
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 每一位貢獻過程式碼、文件、翻譯或測試的人都列在
