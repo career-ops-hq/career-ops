@@ -26,7 +26,7 @@
  *                        [--dry-run] [--json] [--quiet]
  *
  * Exit status: 0 success, 1 a file failed to copy or there was nothing to
- * copy, 2 no usable destination, invalid option or unreadable data root.
+ * copy, 2 no usable destination, invalid option or an unsafe data root.
  */
 
 import {
@@ -92,8 +92,7 @@ function templateUserFiles(dataRoot, warnings, failed) {
   const variants = {};
   const profiles = new Set([getProfilePath(dataRoot), ...(hasProfileOverride() ? [getProfilePath()] : [])]);
   if (hasProfileOverride()) {
-    const rel = relative(resolve(dataRoot), resolve(getProfilePath()));
-    if (rel.startsWith('..') || isAbsolute(rel)) {
+    if (!within(resolve(getProfilePath()), resolve(dataRoot))) {
       warnings.push(`CAREER_OPS_PROFILE points at ${getProfilePath()}, outside the data root; it is not copied. Back that profile up separately.`);
     }
   }
@@ -287,7 +286,7 @@ export function canonical(path) {
     probe = dirname(probe);
   }
   let real = probe;
-  try { real = realpathSync(probe); } catch { /* keep lexical */ }
+  try { real = realpathSync.native(probe); } catch { /* keep lexical */ }
   return join(real, ...tail);
 }
 

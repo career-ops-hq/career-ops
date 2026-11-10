@@ -108,6 +108,10 @@ try {
   assert.throws(() => b.assertSafeDestination(root, root, join(tmp, 'code')), /inside/);
   b.assertSafeDestination(join(tmp, 'elsewhere'), root, join(tmp, 'code'));
   assert.throws(() => b.assertSafeDestination(tmp, root, join(tmp, 'code')), /contains/);
+  // A case-different spelling of the data root is the same folder on a case-insensitive volume.
+  if (existsSync(root.toUpperCase()) && root.toUpperCase() !== root) {
+    assert.throws(() => b.assertSafeDestination(join(root.toUpperCase(), 'out', 'bk'), root, join(tmp, 'code')), /inside/);
+  }
   pass('refuses a destination inside the data root');
 
   // Copy: whole files, exclusions honoured, unchanged skipped, nothing deleted.
