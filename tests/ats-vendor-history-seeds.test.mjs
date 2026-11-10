@@ -121,6 +121,14 @@ try {
     atsBoardUrlOf('https://acme.recruitmentplatform.com/details.html?jobId=4001', 'talentlink'),
     'https://acme.recruitmentplatform.com',
   );
+  for (const refused of [
+    'http://acme.recruitmentplatform.com/details.html?jobId=4001',
+    'https://recruitmentplatform.com/details.html?jobId=4001',
+    'https://a.b.recruitmentplatform.com/details.html?jobId=4001',
+    'https://emea3.recruitmentplatform.com/syndicated/lay/jsoutputinitrapido.cfm?component=lay9999_lst',
+  ]) {
+    assert.equal(atsBoardUrlOf(refused, 'talentlink'), null, refused);
+  }
   pass('posting URLs collapse to provider-compatible board URLs without query or fragment data');
 
   const trackerWithUrl = [
