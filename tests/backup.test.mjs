@@ -9,6 +9,9 @@ import assert from 'node:assert/strict';
 
 console.log('\nbackup.mjs — back up the User Layer to a drive or folder');
 const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'co-backup-')));
+// An ambient override would change which template variants count as yours.
+const ambientProfile = process.env.CAREER_OPS_PROFILE;
+delete process.env.CAREER_OPS_PROFILE;
 try {
   const b = await import(pathToFileURL(join(ROOT, 'backup.mjs')).href);
   const put = (base, rel, text = 'x') => {
@@ -242,6 +245,19 @@ try {
     assert.equal(dirRun.failed[0].path, join('output', 'private'));
     assert.equal(existsSync(join(tmp, 'backup', 'locked-dir', 'output', 'ok.md')), true);
 
+    // An entry under an unreadable parent folder is reported, not dropped.
+    const lockedParent = join(tmp, 'locked-parent-root');
+    put(lockedParent, 'cv.md', 'cv');
+    put(lockedParent, 'config/profile.yml', 'x: 1\n');
+    chmodSync(join(lockedParent, 'config'), 0o000);
+    let parentRun;
+    try {
+      parentRun = b.runBackup({ dataRoot: lockedParent, dest: join(tmp, 'backup', 'locked-parent') });
+    } finally {
+      chmodSync(join(lockedParent, 'config'), 0o700);
+    }
+    assert.equal(parentRun.failed.some((f) => f.path.startsWith('config')), true);
+
     // An unreadable templates/ folder is a failure, not a silent omission.
     const lockedTpl = join(tmp, 'locked-tpl-root');
     put(lockedTpl, 'cv.md', 'cv');
@@ -457,5 +473,7 @@ try {
 } catch (e) {
   fail(`backup.mjs: ${e.message}`);
 } finally {
+  if (ambientProfile === undefined) delete process.env.CAREER_OPS_PROFILE;
+  else process.env.CAREER_OPS_PROFILE = ambientProfile;
   rmSync(tmp, { recursive: true, force: true });
 }

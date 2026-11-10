@@ -324,7 +324,13 @@ function hasSymlinkedParent(dataRoot, entry) {
 function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
   const abs = join(dataRoot, entry);
   let st;
-  try { st = lstatSync(abs); } catch { return []; }
+  try {
+    st = lstatSync(abs);
+  } catch (error) {
+    // Only an absent path stays silent; an unreadable parent would otherwise drop the entry unreported.
+    if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') onError(entry, error);
+    return [];
+  }
   if (st.isSymbolicLink() || hasSymlinkedParent(dataRoot, entry)) {
     onSkip(entry);
     return [];
