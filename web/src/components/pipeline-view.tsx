@@ -155,11 +155,20 @@ export function PipelineView({
   }, [isPending]);
 
   useLayoutEffect(() => {
-    const button = activeTab.current;
-    const strip = button?.parentElement;
-    if (!button || !strip) return;
-    const left = tabStripScrollLeft(strip.getBoundingClientRect(), button.getBoundingClientRect(), strip.scrollLeft);
-    if (left !== strip.scrollLeft) strip.scrollLeft = left;
+    const strip = activeTab.current?.parentElement;
+    if (!strip) return;
+    // The tab value does not change when the window narrows, so the strip
+    // measures itself again when its width changes.
+    const place = () => {
+      const button = activeTab.current;
+      if (!button || button.parentElement !== strip) return;
+      const left = tabStripScrollLeft(strip.getBoundingClientRect(), button.getBoundingClientRect(), strip.scrollLeft);
+      if (left !== strip.scrollLeft) strip.scrollLeft = left;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(strip);
+    return () => observer.disconnect();
   }, [tab]);
 
   useEffect(() => {
