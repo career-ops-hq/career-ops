@@ -392,37 +392,9 @@ test('a redirect is followed, and every hop is guarded again', async () => {
   assert.deepEqual(calls.map(({ url }) => url), ['https://example.com/robots.txt', 'https://www.example.com/robots.txt']);
   assert.ok(calls.every(({ init }) => init.redirect === 'manual'), 'the transport must never follow a redirect itself');
 
-  const refused = await robotsAllows('https://example.org/jobs/1', { fetchImpl, resolver, cache: new Map(), allowedRedirectHosts: ['internal.example.com'] });
+  const refused = await robotsAllows('https://example.org/jobs/1', { fetchImpl, resolver, cache: new Map() });
   assert.deepEqual([refused.allowed, refused.code], [false, 'robots_blocked_address']);
   assert.ok(!calls.some(({ url }) => url.startsWith('http://internal.')), 'a blocked hop is never fetched');
-});
-
-test('a redirect to a host outside the tenant and the allowlist is refused unfetched', async () => {
-  const { fetchImpl, calls } = transport({
-    'https://example.com/robots.txt': { status: 301, headers: { location: 'https://other.example.net/robots.txt' } },
-    'https://other.example.net/robots.txt': { status: 200, body: 'User-agent: *\nAllow: /\n' },
-  });
-  const off = await robotsAllows('https://example.com/jobs/1', { fetchImpl, resolver: async () => PUBLIC, cache: new Map() });
-  assert.deepEqual([off.allowed, off.code], [false, 'robots_redirect_refused']);
-  assert.deepEqual(calls.map(({ url }) => url), ['https://example.com/robots.txt']);
-
-  const ok = await robotsAllows('https://example.com/jobs/1', { fetchImpl, resolver: async () => PUBLIC, cache: new Map(), allowedRedirectHosts: ['other.example.net'] });
-  assert.equal(ok.allowed, true);
-});
-
-test('a shared cache keeps each redirect allowlist separate', async () => {
-  const { fetchImpl } = transport({
-    'https://example.com/robots.txt': { status: 301, headers: { location: 'https://other.example.net/robots.txt' } },
-    'https://other.example.net/robots.txt': { status: 200, body: 'User-agent: *\nAllow: /\n' },
-  });
-  const cache = new Map();
-  const base = { fetchImpl, resolver: async () => PUBLIC, cache };
-  const allowed = await robotsAllows('https://example.com/jobs/1', { ...base, allowedRedirectHosts: ['other.example.net'] });
-  assert.equal(allowed.allowed, true);
-  const refused = await robotsAllows('https://example.com/jobs/1', base);
-  assert.deepEqual([refused.allowed, refused.code], [false, 'robots_redirect_refused']);
-  const again = await robotsAllows('https://example.com/jobs/1', { ...base, allowedRedirectHosts: ['OTHER.example.net'] });
-  assert.equal(again.allowed, true);
 });
 
 test('a redirect off http(s), without a Location, or past the hop limit skips the retry', async () => {

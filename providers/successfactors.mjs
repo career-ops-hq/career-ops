@@ -1,7 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
-import { robotsAllows } from '../robots-check.mjs';
 
 // SAP SuccessFactors provider — Recruiting Marketing (RMK, ex-jobs2web) career
 // sites (Career Site Builder's branded job boards). These are the portals big
@@ -58,12 +57,8 @@ const MAX_PAGES = 40; // default cap on request count (RMK tile pagination)
 const MAX_JOBS = 1000; // default cap on total postings pulled per site (both strategies)
 // Opt-in ceilings. An entry may raise the defaults with `max_pages` / `max_jobs`
 // up to these bounds; without either key the defaults above apply unchanged.
-// Raising is also gated on the host's robots.txt (see allowRaise).
 const RMK_MAX_PAGES_CEILING = 400;
 const MAX_JOBS_CEILING = 10000;
-// RMK pages are fetched as ?startrow=N, so the robots gate checks a paged URL (a
-// rule on the query string would not show on the bare path).
-const RMK_GATE_STARTROW = 25;
 
 // CSB knobs.
 const CSB_PAGE_SIZE = 10; // fixed by the /services/recruiting/v1/jobs API
@@ -329,8 +324,7 @@ function posInt(v) {
 
 /**
  * Resolve the caps for one strategy. `raised` is true when the entry asks for
- * more than the defaults — the only case that adds request volume, and so the
- * only case gated on robots.txt. A `max_pages` below the CSB default still
+ * more than the defaults — the only case that adds request volume. A `max_pages` below the CSB default still
  * lowers the per-locale cap as before; on RMK it is only honored upward.
  * @param {any} entry @param {'rmk'|'csb'} kind
  */
@@ -345,29 +339,6 @@ export function resolveLimits(entry, kind) {
   return { maxPages, maxJobs, raised: maxPages > defPages || maxJobs > MAX_JOBS };
 }
 
-// Raising a cap is extra crawling, so it needs the host's robots.txt to permit
-// the endpoint being paged. A Disallow (or an unreadable robots.txt: the gate
-// fails closed) keeps the defaults and says so.
-/** @param {any} entry @param {'rmk'|'csb'} kind @param {string} url @param {any} ctx */
-async function limitsFor(entry, kind, url, ctx) {
-  const limits = resolveLimits(entry, kind);
-  if (!limits.raised) return limits;
-  const gate = ctx?.robotsGate || robotsAllows;
-  let verdict;
-  try {
-    verdict = await gate(url);
-  } catch (err) {
-    verdict = { allowed: false, reason: `check failed (${err?.message || err})` };
-  }
-  if (verdict?.allowed) return limits;
-  console.error(`⚠️  successfactors: ${entry.name} asks for a higher max_pages/max_jobs but robots.txt does not allow ${new URL(url).pathname} (${verdict?.reason || 'disallowed'}) — keeping the defaults`);
-  // Drop only what exceeds the defaults; a lower CSB max_pages still applies.
-  const defPages = kind === 'csb' ? CSB_MAX_PAGES_PER_LOCALE : MAX_PAGES;
-  const keepPages = posInt(entry?.max_pages) !== null && entry.max_pages <= defPages;
-  const keepJobs = posInt(entry?.max_jobs) !== null && entry.max_jobs <= MAX_JOBS;
-  return resolveLimits({ ...entry, max_pages: keepPages ? entry.max_pages : undefined, max_jobs: keepJobs ? entry.max_jobs : undefined }, kind);
-}
-
 // CSB strategy: discover locales, paginate the JSON jobs API per locale, dedup
 // by id across locales+pages. `total` from the first page bounds pagination;
 // an empty/short page also stops the loop.
@@ -377,11 +348,9 @@ async function limitsFor(entry, kind, url, ctx) {
 // NOT read as a dead board — return [] instead of throwing.
 /** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx @param {{probe?: boolean}} [opts] */
 async function fetchCsb(entry, cfg, ctx, { probe = false, quiet = false } = {}) {
-  // The post-RMK probe only looks for the empty-shell signature: defaults, no
-  // robots check, so an RMK entry's raised max_pages is never read as a CSB raise.
-  const limits = probe
-    ? resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, 'csb')
-    : await limitsFor(entry, 'csb', cfg.jobsApi, ctx);
+  // The post-RMK probe only looks for the empty-shell signature: defaults, so an
+  // RMK entry's raised max_pages is never read as a CSB raise.
+  const limits = resolveLimits(probe ? { ...entry, max_pages: undefined, max_jobs: undefined } : entry, 'csb');
   const { maxPages } = limits;
   // A quiet probe (the entry will be re-read in full at its own limits) only needs
   // to learn whether the board has any posting, so it stops at the first one and
@@ -498,11 +467,10 @@ function warnTruncated(entry, what, kind, maxPages, maxJobs) {
 /** @param {import('./_types.js').PortalEntry} entry @param {any} cfg @param {import('./_types.js').Context} ctx */
 async function fetchRmk(entry, cfg, ctx) {
   // A bounded probe (ctx.maxPages, e.g. verify-portals) never raises the cap, so
-  // it skips the robots check and stops at ctx.maxPages without warning.
+  // it stops at ctx.maxPages without warning.
   const probeLimit = posInt(ctx.maxPages);
-  const { maxPages: cappedPages, maxJobs } = probeLimit
-    ? resolveLimits({ ...entry, max_pages: undefined, max_jobs: undefined }, 'rmk')
-    : await limitsFor(entry, 'rmk', `${cfg.tileApi}?startrow=${RMK_GATE_STARTROW}`, ctx);
+  const { maxPages: cappedPages, maxJobs } = resolveLimits(
+    probeLimit ? { ...entry, max_pages: undefined, max_jobs: undefined } : entry, 'rmk');
   const maxPages = probeLimit ? Math.min(cappedPages, probeLimit) : cappedPages;
   const jobs = [];
   const seen = new Set();
@@ -513,20 +481,7 @@ async function fetchRmk(entry, cfg, ctx) {
   // no total, so the warning can only say "at least".
   let capped = false;
   let pageSize = 0;
-  const gate = ctx?.robotsGate || robotsAllows;
   for (let page = 0; page < maxPages; page++) {
-    // Pages past the default cap are extra crawling: check each actual startrow
-    // URL (a rule can allow one offset and disallow a later one). On a denial,
-    // stop here at what the defaults would have read and say so.
-    if ((page >= MAX_PAGES || jobs.length >= MAX_JOBS) && !probeLimit) {
-      let ok = false;
-      try { ok = !!(await gate(`${cfg.tileApi}?startrow=${startrow}`))?.allowed; } catch { ok = false; }
-      if (!ok) {
-        console.error(`⚠️  successfactors: ${entry.name} stopped raising max_pages at page ${page + 1} because robots.txt does not allow ${new URL(cfg.tileApi).pathname}?startrow=${startrow} — keeping what the defaults read`);
-        capped = false;
-        break;
-      }
-    }
     const htmlText = await ctx.fetchText(`${cfg.tileApi}?startrow=${startrow}`, {
       redirect: 'error',
       headers: { accept: 'text/html' },
@@ -594,7 +549,7 @@ export default {
     // is only a probe for the empty-shell signature, so it must not turn a
     // failing/absent CSB endpoint into a dead-board throw.
     // An opted-in entry (raised max_pages/max_jobs) that turns out to be CSB gets
-    // a second, robots-gated read at its own limits; the bounded probe stays quiet.
+    // a second read at its own limits; the bounded probe stays quiet.
     const raised = resolveLimits(entry, 'csb').raised;
     const probed = await fetchCsb(entry, cfg, ctx, { probe: true, quiet: raised });
     if (raised && probed.length > 0) return fetchCsb(entry, cfg, ctx);
