@@ -122,8 +122,8 @@ function resume(dir) {
     if (json === null) {
       fail(`resumed run did not complete${formatRunFailure()}`);
     } else {
-      const urls = (json?.offers ?? []).map((o) => o.url);
-      if (urls.includes('https://apply.workable.com/j/RESUME1')) {
+      const expectedUrl = 'https://apply.workable.com/j/RESUME1';
+      if ((json?.offers ?? []).some((o) => o.url === expectedUrl)) {
         pass('an interrupted Workable source runs again from the first employer, not from the saved offset');
       } else {
         fail(`the match below the saved offset was not processed: ${JSON.stringify(json?.offers ?? json)}`);
