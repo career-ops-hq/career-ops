@@ -39,7 +39,7 @@ import { fileURLToPath } from 'url';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import {
   LOCAL_PATHS_FILE,
   USER_PATHS,
@@ -87,7 +87,7 @@ export function backupPaths(dataRoot, warnings = []) {
  */
 function templateUserFiles(dataRoot, warnings) {
   let variants = {};
-  const profile = join(dataRoot, 'config', 'profile.yml');
+  const profile = getProfilePath(dataRoot);
   if (existsSync(profile)) {
     try {
       variants = configuredTemplateVariantsFromProfileSource(readFileSync(profile, 'utf8'));
