@@ -147,8 +147,9 @@ test('CLI: --max-pages and --strict-pages reach the renderer', () => {
 test('CLI: an overflow reports its draft path instead of a nonexistent final PDF', () => {
   const res = runCover([], { COVER_PDF_SIMULATE_OVERFLOW: '1' });
   assert.equal(res.status, 0, res.stdout + res.stderr);
-  assert.match(res.stdout, /Cover letter PDF: .*letter\\.pdf\\.overflow\\.pdf/);
-  assert.doesNotMatch(res.stdout, /Cover letter PDF: .*letter\\.pdf\\s*$/m);
+  assert.match(res.stdout, /Cover letter over its page budget:/);
+  assert.match(res.stdout, /draft is .*letter\\.pdf\\.overflow\\.pdf/);
+  assert.doesNotMatch(res.stdout, /Cover letter PDF:/);
 });
 
 test('strict cover-letter budget error never recommends CV-only settings', () => {

@@ -222,3 +222,5 @@ public commit with a stated reason.
 - @LucasAzLima | Lucas de Azevedo Lima | 2026-11-07 | id:28840603 | src:https://github.com/career-ops-hq/career-ops/discussions/6666 | n:174
 - @Bossku888 | 2026-11-08 | id:290774118 | src:https://github.com/career-ops-hq/career-ops/discussions/6689 | n:175
 - @marichikajoshi | Marichika Joshi | 2026-11-09 | "Front end developer" | id:86568342 | src:https://github.com/career-ops-hq/career-ops/discussions/6723 | n:176
+- @amolkadutech-afk | 2026-11-09 | id:234717522 | src:https://github.com/career-ops-hq/career-ops/discussions/6781 | n:177
+- @jf-xia | Jack | 2026-11-10 | "Great AI assistant career operation, thanks." | id:18513205 | src:https://github.com/career-ops-hq/career-ops/discussions/6797 | n:178

@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -40,6 +40,13 @@ function fakeStream() {
 // real async timing for these tests. `writes` is a file the fake "renderer"
 // creates before closing, the way generate-pdf.mjs leaves a PDF at the final
 // path; a route without it stands in for a render that wrote nothing there.
+//
+// Each write also moves the file's mtime to a time of its own. The fake writes
+// the same bytes in place, so inode and size never change between two renders,
+// and on Windows two writes inside one filesystem clock tick would share an
+// mtime too: `pdfFingerprint` would see no change and a replaced PDF would read
+// as kept (#6668). A real render takes seconds, so its mtime always moves.
+let fakeRenderMtime = 1_700_000_000;
 function fakeChild({ stdout = "", stderr = "", stderrChunks = null, exitCode = 0, spawnError = null, writes = null } = {}) {
   const child = new EventEmitter();
   child.stdout = fakeStream();
@@ -52,7 +59,11 @@ function fakeChild({ stdout = "", stderr = "", stderrChunks = null, exitCode = 0
     if (stdout) child.stdout.push(Buffer.from(stdout));
     if (stderrChunks) for (const chunk of stderrChunks) child.stderr.push(chunk);
     else if (stderr) child.stderr.push(Buffer.from(stderr));
-    if (writes) writeFileSync(writes, "%PDF-fake");
+    if (writes) {
+      writeFileSync(writes, "%PDF-fake");
+      fakeRenderMtime += 10;
+      utimesSync(writes, fakeRenderMtime, fakeRenderMtime);
+    }
     child.emit("close", exitCode);
   });
   return child;

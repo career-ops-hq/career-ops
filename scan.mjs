@@ -118,6 +118,7 @@ import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-l
 import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
 import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 export { applyEntryResponseCap };
+import { boardTruncation, describeTruncation } from './lib/board-truncation.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -1759,12 +1760,19 @@ const PERMANENT_SCAN_HISTORY_STATUSES = new Set([
  * relisted: pinning the retirement for good would put the recheck the user
  * configured out of reach for exactly the URLs most likely to come back.
  *
+ * `skipped_dup` says a scanner met a seen URL again, so it can pin no longer than
+ * whatever made the URL seen. As a permanent pin, the first repeat sighting kept
+ * an aged posting out for good, and scan-dayforce.mjs and scan-interamt.mjs write
+ * one on every scan that lists it. Its `first_seen` is the day of that repeat,
+ * not of the posting, so the TTL reads it only for a row with no original in
+ * scan-history; otherwise collectSeenUrls lets the row go with its original.
+ *
  * Everything else keeps its permanent pin. The distinction is whether the status
  * describes a POSTING, which can change, or the URL itself — an invalid URL does
  * not become valid and a blocked host does not become reachable because a window
  * elapsed.
  */
-const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired']);
+const RECHECKABLE_SCAN_HISTORY_STATUSES = new Set(['added', 'skipped_expired', 'skipped_dup']);
 
 /**
  * The offers not yet recorded under `status`, one per URL.
@@ -1798,6 +1806,11 @@ function daysBetweenIsoDates(start, end) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
   const startDate = new Date(`${start}T00:00:00Z`);
   const endDate = new Date(`${end}T00:00:00Z`);
+  // A month or day out of range (`2026-13-01`) is an Invalid Date, and
+  // toISOString() throws on one: a single such scan-history row aborted
+  // loadSeenUrls, and with it the scan. Read it as no date, as the check below
+  // reads `2026-02-30`.
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
   if (startDate.toISOString().slice(0, 10) !== start || endDate.toISOString().slice(0, 10) !== end) return null;
   return Math.floor((endDate - startDate) / (1000 * 60 * 60 * 24));
 }
@@ -1823,9 +1836,18 @@ export function shouldDedupScanHistoryRow({ firstSeen, status = 'added' }, { rec
   return ageDays < recheckAfterDays;
 }
 
-
-function scanHistoryPolicy(config = {}) {
-  const raw = config.scan_history?.recheck_after_days;
+/**
+ * The `scan_history` recheck policy portals.yml sets, in the shape
+ * collectSeenUrls and loadSeenUrls take. Exported so every scanner that builds
+ * a seen set releases the rows scan.mjs releases: a policy left out reads as
+ * "dedup forever", so a scanner that skipped it kept a URL seen after
+ * scan.mjs had let it back in.
+ *
+ * @param {object|null} [config] - Parsed portals.yml.
+ * @returns {{recheckAfterDays: number|null}}
+ */
+export function scanHistoryPolicy(config = {}) {
+  const raw = config?.scan_history?.recheck_after_days;
   const parsed = Number.parseInt(raw, 10);
   return {
     recheckAfterDays: Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
@@ -2322,6 +2344,13 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     if (!identityPromotableUrls.has(urlToken)) identityPromotableUrls.set(urlToken, new Set());
     identityPromotableUrls.get(urlToken).add(listingKey || null);
   };
+  const pinHistoryRow = (urlToken, url, title, language) => {
+    seen.add(urlToken);
+    const recorded = languageFormsForDedup(language);
+    recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
+  };
+  const dupRows = [];
+  const agedOrphanDups = new Set();
 
   // scan-history.tsv
   // Line 0 only when it is the header; a headerless legacy file starts with a data row.
@@ -2335,11 +2364,16 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
     // and the URL was never queued, so counting it as "eligible again" would
     // overstate what the TTL released. See OBSERVATIONAL_SCAN_HISTORY_STATUSES.
     if (OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
+    // Under a recheck window a repeat sighting takes its verdict from the URL's
+    // other rows, which can sit anywhere in the file, so it waits for all of
+    // them (next loop). With no window it pins like any other row.
+    if (status === 'skipped_dup' && policy.recheckAfterDays != null) {
+      dupRows.push({ url, firstSeen, title, language });
+      continue;
+    }
     if (shouldDedupScanHistoryRow({ firstSeen, status }, policy)) {
       const urlToken = seenJobKey(url);
-      seen.add(urlToken);
-      const recorded = languageFormsForDedup(language);
-      recordUrlVariant(variants, urlToken, recorded.length ? recorded : languageFormsFromUrl(url), title);
+      pinHistoryRow(urlToken, url, title, language);
       // Only accepted or intentionally deferred posting rows can teach this
       // scan a strong identity. A verification rejection such as an expired
       // URL may pin that URL, but must not suppress a different live alias
@@ -2360,6 +2394,28 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
       if (status === 'added' && listingKey) {
         recheckListingTokens.set(urlToken, `listing:${listingKey}`);
       }
+    }
+  }
+
+  // A `skipped_dup` row is dated the day of the repeat, and a scanner writes one
+  // on every run that lists the URL, so reading that date would restart the
+  // clock each time. The URL's own rows decide instead, whatever the repeat's
+  // age: one still pinned keeps it seen, and once they are all released the
+  // repeat goes with them.
+  //
+  // Only a row with no original here falls back on its own `first_seen`: the
+  // agent workflow in modes/scan.md writes these for a URL whose original lives
+  // in the tracker or pipeline. An aged one stops pinning and nothing more. It
+  // stays out of recheckCandidates, which the pipeline pass below reads as
+  // "scan-history released this URL": a row repeating a `- [x]` entry would
+  // otherwise un-pin the very entry it repeats.
+  for (const { url, firstSeen, title, language } of dupRows) {
+    const urlToken = seenJobKey(url);
+    if (!seen.has(urlToken) && recheckCandidates.has(urlToken)) continue;
+    if (seen.has(urlToken) || shouldDedupScanHistoryRow({ firstSeen, status: 'skipped_dup' }, policy)) {
+      pinHistoryRow(urlToken, url, title, language);
+    } else {
+      agedOrphanDups.add(urlToken);
     }
   }
 
@@ -2425,7 +2481,7 @@ export function collectSeenUrls(sources = {}, policy = {}, { extraTokensFor } = 
   // actionable pipeline row pinned again is not eligible, and saying so keeps the
   // number the scanners print honest.
   let recheckEligible = 0;
-  for (const key of recheckCandidates) if (!seen.has(key)) recheckEligible++;
+  for (const key of [...recheckCandidates, ...agedOrphanDups]) if (!seen.has(key)) recheckEligible++;
 
   return { seen, recheckEligible, identityPromotableUrls, variants };
 }
@@ -3792,17 +3848,21 @@ export async function appendToPipeline(offers, {
 // so such a caller cannot simply wrap this call; it takes the lock itself and
 // passes true. Everything else must leave it alone: true with no lock actually
 // held reintroduces both races described above.
+// `historyPath` is for a caller that resolves its own data root at call time,
+// as the LinkedIn mail drop does. SCAN_HISTORY_PATH is fixed when this module
+// first loads. The dedup read, the append, and the lock share that path.
 export async function appendToScanHistory(offers, date, status = 'added', {
   alreadyLocked = false,
   historyPolicy = null,
+  historyPath = SCAN_HISTORY_PATH,
 } = {}) {
   const write = () => {
     // Ensure file + header exist. The header is SCAN_HISTORY_COLUMNS, the same
     // list the row writer (formatScanHistoryRow) emits in order. Written ONLY
     // on fresh-file creation; existing files are never rewritten.
-    if (!existsSync(SCAN_HISTORY_PATH)) {
-      mkdirSync(path.dirname(SCAN_HISTORY_PATH), { recursive: true });
-      atomicWriteFile(SCAN_HISTORY_PATH, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
+    if (!existsSync(historyPath)) {
+      mkdirSync(path.dirname(historyPath), { recursive: true });
+      atomicWriteFile(historyPath, `${SCAN_HISTORY_COLUMNS.join('\t')}\n`);
     }
 
     // Re-read under the lock (the caller holds it, or withPipelineLock does).
@@ -3810,17 +3870,17 @@ export async function appendToScanHistory(offers, date, status = 'added', {
     // `skipped_expired` stop blocking once the recheck window releases them,
     // so a later scan can record the posting coming back or closing again.
     const policy = historyPolicy ?? historyPolicyFromPortals();
-    const fresh = offersMissingFromHistory(offers, status, readIfExists(SCAN_HISTORY_PATH), policy);
+    const fresh = offersMissingFromHistory(offers, status, readIfExists(historyPath), policy);
     if (fresh.length === 0) return 0;
 
     const lines = fresh.map(o => formatScanHistoryRow(o, date, status)).join('\n') + '\n';
 
-    appendLedgerRows(SCAN_HISTORY_PATH, lines);
+    appendLedgerRows(historyPath, lines);
     return fresh.length;
   };
 
   if (alreadyLocked) return write();
-  else return await withPipelineLock(SCAN_HISTORY_PATH, write);
+  else return await withPipelineLock(historyPath, write);
 }
 
 /**
@@ -4151,11 +4211,23 @@ export function computeConsecutiveFailures(healthRecords) {
     // Inverted (vs. listing failure statuses) so the newer error kinds
     // (auth/server/unknown) can't silently fall outside the streak again.
     // 'empty' is deliberately healthy: a live board with 0 jobs is reachable.
-    if (r.status === 'reachable' || r.status === 'empty') {
+    // 'partial' is reachable too: the board answered, it was only cut short,
+    // often by a cap the user set on purpose. verify-portals and a new slug
+    // cannot fix that, so it has its own streak (computePartialStreaks).
+    if (r.status === 'reachable' || r.status === 'empty' || r.status === 'partial') {
       streaks.set(r.company, 0);
     } else {
       streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
     }
+  }
+  return streaks;
+}
+
+// Consecutive `partial` runs per company: any other status resets it.
+export function computePartialStreaks(healthRecords) {
+  const streaks = new Map();
+  for (const r of healthRecords) {
+    streaks.set(r.company, r.status === 'partial' ? (streaks.get(r.company) || 0) + 1 : 0);
   }
   return streaks;
 }
@@ -4919,6 +4991,10 @@ async function main() {
   let failedTargets = 0;
   const emptyTargets = [];
   const unverifiedZeroTargets = [];
+  // Boards a provider read only partly (page cap, 429, fetch error), keyed by
+  // company: see lib/board-truncation.mjs. Logged `partial`, never `reachable`.
+  /** @type {Map<string, import('./lib/board-truncation.mjs').BoardTruncation>} */
+  const partialTargets = new Map();
 
   // Arm the failure-path row (#2643) now that the sweep is about to start and
   // every counter it reads is in scope. new_added is hardcoded 0 on a failed
@@ -4954,6 +5030,13 @@ async function main() {
   const deferredBoards = [];
   const employerLocationRejected = new Set();
   const employerLocationAccepted = new Set();
+  // Boards whose fetch failed on a transient error, retried once after the
+  // sweep (see retryTransientFailures below).
+  const TRANSIENT_KINDS = new Set(['network', 'server']);
+  const TRANSIENT_RETRY_GAP_MS = 3_000;
+  /** @type {Array<{ company: any, entry: any }>} */
+  const transientFailures = [];
+  const retriedTargets = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
@@ -4998,14 +5081,18 @@ async function main() {
     applyEntryResponseCap(ctx, company);
     applyEntryTimeout(ctx, company);
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
-    const recordError = err => {
+    const recordError = (err, { retryable = false } = {}) => {
       failedTargets++;
-      errors.push({
+      const entry = {
         company: company.name,
         error: err.message,
         kind: classifyFetchError(err),
         status: err.status ?? observation.lastStatus,
-      });
+      };
+      errors.push(entry);
+      if (retryable && TRANSIENT_KINDS.has(entry.kind) && !retriedTargets.has(company)) {
+        transientFailures.push({ company, entry });
+      }
     };
     try {
       let jobs;
@@ -5028,6 +5115,10 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
+      const truncation = boardTruncation(jobs);
+      // Boards (job_boards: aggregators) too: unlike an empty result, which is
+      // routine for a keyword search, a capped or failed walk is a real gap.
+      if (truncation) partialTargets.set(company.name, truncation);
       if (!company._isBoard && jobs.length === 0) {
         if (emptyTargetStatus(observation) === 'empty') emptyTargets.push(company.name);
         else unverifiedZeroTargets.push(company.name);
@@ -5275,14 +5366,42 @@ async function main() {
         await processJobs();
       }
     } catch (err) {
-      recordError(err);
+      recordError(err, { retryable: true });
     }
   });
 
-  const companyFetches = () => parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
-    hostLimit: HOST_CONCURRENCY,
-    hostOf: (_task, index) => companyFetchHost(targets[index]),
-  });
+  // Second pass for boards that failed on a TRANSIENT error (timeout, reset,
+  // 5xx) during the concurrent sweep. A provider already retries each request
+  // with backoff, but those retries run inside the same burst that caused the
+  // failure: on 2026-11-07 Marvell's first page timed out four times while
+  // other Workday boards on the same data center were paging, then read in
+  // full in 26 s on its own. Re-running the failed boards one at a time after
+  // the sweep removes the contention instead of repeating into it: the same
+  // deferred sequential retry scan-ats-full.mjs runs, and the AWS Builders'
+  // Library advice to retry with the load reduced rather than amplify it
+  // ("Timeouts, retries, and backoff with jitter"). Bounded: one extra attempt
+  // per board, never for a 4xx (a 403 or 404 will not change in seconds).
+  const retryTransientFailures = async () => {
+    if (transientFailures.length === 0) return;
+    const pending = transientFailures.splice(0);
+    process.stderr.write(`scan: retrying ${pending.length} board(s) that failed on a transient error, one at a time: ${pending.map((p) => p.company.name).join(', ')}\n`);
+    for (const { company, entry } of pending) {
+      retriedTargets.add(company);
+      const at = errors.indexOf(entry);
+      if (at !== -1) errors.splice(at, 1);
+      failedTargets--;
+      await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_GAP_MS));
+      await tasks[targets.indexOf(company)]();
+    }
+  };
+
+  const companyFetches = async () => {
+    await parallelFetch(tasks, SCAN_CONCURRENCY, progressTicker(tasks.length), {
+      hostLimit: HOST_CONCURRENCY,
+      hostOf: (_task, index) => companyFetchHost(targets[index]),
+    });
+    await retryTransientFailures();
+  };
   if (process.env.CAREER_OPS_HTTP_CACHE === '0') {
     await companyFetches();
   } else {
@@ -5669,6 +5788,11 @@ async function main() {
     const isUnverifiedZero = unverifiedZeroTargets.includes(t.name);
 
     let status = errorKindByCompany.get(t.name) || 'reachable';
+    // A board read only partly is not healthy coverage: logged `partial`, never
+    // `reachable`, with its own repeat warning below (not the 🚨 dead-board
+    // streak). Checked before `empty`, so a tagged empty read cannot pass as
+    // healthy.
+    if (status === 'reachable' && partialTargets.has(t.name)) status = 'partial';
     if (status === 'reachable' && isEmpty) status = 'empty';
     if (status === 'reachable' && isUnverifiedZero) status = 'unverified_zero';
 
@@ -5677,6 +5801,7 @@ async function main() {
 
   const pastHealth = loadPortalHealth();
   const currentStreaks = computeConsecutiveFailures([...pastHealth, ...healthRecords]);
+  const partialStreaks = computePartialStreaks([...pastHealth, ...healthRecords]);
 
   const persistentlyDead = [];
   const newlyDeadSlug = [];
@@ -5709,6 +5834,18 @@ async function main() {
   }
   if (emptyTargets.length > 0) {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
+  }
+  if (partialTargets.size > 0) {
+    const parts = [...partialTargets].map(([company, t]) => describeTruncation(company, t));
+    console.log(`\n⚠️  ${partialTargets.size} board(s) only PARTLY read — postings beyond the cut were not scanned:`);
+    for (const p of parts) console.log(`   • ${p}`);
+    // A repeat is not a dead board: the board answers every run. The usual
+    // cause is a cap on the entry, which only the entry can change.
+    const repeated = [...partialTargets.keys()].filter((c) => (partialStreaks.get(c) || 0) >= STREAK_THRESHOLD);
+    if (repeated.length > 0) {
+      console.log(`   Partly read for ${STREAK_THRESHOLD}+ runs in a row: ${repeated.join(', ')}`);
+      console.log(`   For a page cap, raise max_pages on the entry or narrow its search; a fetch error or rate limit that repeats points at the board's host.`);
+    }
   }
   if (unverifiedZeroTargets.length > 0) {
     console.log(`⚠️  ${unverifiedZeroTargets.length} target(s) returned zero jobs without a successful HTTP response: ${unverifiedZeroTargets.join(', ')}`);
@@ -5790,6 +5927,9 @@ async function main() {
       added_urls: verifiedOffers.map(offer => offer.url),
       errors: errors.map(({ company, error }) => ({ company, error })),
       unverified_zero: unverifiedZeroTargets,
+      // Boards read only partly (lib/board-truncation.mjs), so automation can
+      // tell a short read from a complete one without parsing stdout.
+      partial: [...partialTargets].map(([company, { source: _source, ...t }]) => ({ company, ...t })),
       dry_run: dryRun,
     }, errors.length > 0 ? 2 : 0);
   }

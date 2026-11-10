@@ -70,6 +70,21 @@ A hit needs a hard rule and a JD sentence that states the fact breaking it. An i
 
 Before Block A or any tracker, report, or CV write, if the JD suggests an agency/recruiter intermediary ("our client", agency domain, no employer named), ask which agency this posting came through and wait for an explicit answer. Follow `modes/_shared.md` → **Agency confirmation handoff**: a delegated/headless worker returns `needs_confirmation` with the posting identity, evidence, and question, then stops without artifacts. The parent asks and resumes only with the user's explicit answer for this posting. Never write `Company: ?` / Via first and seek confirmation afterward. After confirmation, retain `?` for an unknown employer and the confirmed agency in Via.
 
+## GitHub evidence freshness
+
+GitHub work reaches `cv.md` and `article-digest.md` only when the user runs `expand`, whose optional GitHub evidence step writes `output/github-evidence-{date}.json`. After the gates above and before Block A, run this once:
+
+```bash
+node evidence-freshness.mjs
+```
+
+It is read-only, always exits 0, and prints JSON: the last scan date (`lastScan`, `null` when none), `daysSince`, `newMergedPrs` (PRs the user authored and merged since that scan in repos they do not own), `stale` and `reason`. Its one metadata-only `gh search prs` call runs through the user's existing `gh auth`; it is not a WebSearch query and does not count against the **Bounded Research Budget** below. The check is opt-in: unless `config/profile.yml` → `evidence_freshness.enabled` is `true`, it prints status `disabled` and makes no call. Thresholds live in the same block (stale at 5 merged PRs or after 30 days by default, or with no scan on record once there is a merged PR to find).
+
+- **`"stale": true`** → translate its `notice` (the script prints it in English) into `language.output` and make it the first line of the reply, followed by a localized equivalent of "Run `expand`, then re-evaluate?" in `language.output`, and continue the evaluation without waiting. In an unattended run, do not ask.
+- **Anything else** (`stale: false`, including the statuses `no-github`, `gh-unavailable`, `gh-query-failed` and `disabled`) → say nothing and continue.
+- Never run `expand` or `github-evidence.mjs` from here (they write files, and `expand` needs the user's confirmation), and never change a score, block or decision because of this check: it says what the evidence may be missing, not what that work shows.
+- Record it in the report: Machine Summary `evidence_freshness` (schema in `batch/batch-prompt.md`), and, only when stale, the header line `**GitHub evidence:** {notice}` with the notice translated into `language.output`. If the script cannot run (no shell, an older install), record `not_evaluated` and continue.
+
 ## Bounded Research Budget
 
 Company, compensation, and hiring-signal research must be a single-pass lookup, not an open-ended investigation. This mode is an evaluation workflow, not deep company research.
@@ -443,6 +458,7 @@ Every jurisdiction splits work into two buckets under different names: an "emplo
 | Canada | "T4A", "independent contractor", "self-employed", "invoice for services" |
 | US | "1099", "independent contractor", "W-2 not provided" |
 | UK | "self-employed", "umbrella company", "outside IR35" / "inside IR35" |
+| Norway | "oppdragstaker", "selvstendig næringsdrivende", "fakturere" / "faktura", "via eget ENK" / "via eget AS", "konsulentoppdrag", "oppdragsavtale" (vs. "arbeidsavtale"; arbeidsmiljøloven § 1-8) |
 | Other jurisdictions | "labour contract" vs "employment contract" phrasing, "service agreement", "consulting agreement" (e.g., 劳务合同 vs 劳动合同 in China) |
 
 Plus a jurisdiction-agnostic structural check — **"contract position" alone is not enough to trigger this**, since plenty of legitimate fixed-term *employee* roles use that phrase. Only flag when the JD has explicit contractor-status wording (asks the candidate to "invoice," or to operate as a "consultant"/"freelancer," rather than being "hired"/"employed") **and** at least one corroborating omission (no benefits language, no vacation/PTO mention, no defined end date, no standard employment-standards phrasing, no mention of statutory deductions/withholding).
@@ -723,6 +739,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 **Legitimacy:** {High Confidence | Proceed with Caution | Suspicious}
 **Work Auth:** {✅ Sponsors | ➖ Not needed | ⚠️ Unstated | ⛔ No sponsorship}
 **PDF:** {path or pending}
+**GitHub evidence:** {the freshness check's `notice`, translated into `language.output`; this line only when it reported stale}
 
 {the `## Verdict (lead)` sentence, copied verbatim}
 

@@ -79,17 +79,38 @@ export function parseCryptocurrencyJobsRss(xml) {
       const pubDateStr = extractTag(block, 'pubDate');
       const postedAt = pubDateStr ? new Date(pubDateStr).getTime() : undefined;
 
-      // The feed carries the job description for free in the same payload;
-      // populate it so scan.mjs's content_filter can run (it's a remote-only
-      // board, so location stays 'Remote').
-      const description = decodeFeedText(extractTag(block, 'description'));
-
+      // No `description`: the feed's <description> is not the job description.
+      // Every item carries the same one-sentence template ("{Company} is
+      // looking to hire a {Role} to join their team. This is a full-time
+      // position that ...", verified 2026-11-09: 54 of 54 live items, 96-253
+      // characters) and never names a stack. scan.mjs's content_filter passes
+      // a posting with no description but treats any text as the JD, so the
+      // teaser would drop every posting from this board for a user with
+      // `content_filter.positive` set. Same decision as _wp-job-feed.mjs,
+      // which refuses WordPress's excerpt.
+      //
+      // What the other description readers lose:
+      // - visa_filter with `require_mention: true` rejects these postings with
+      //   or without the teaser: the template never mentions sponsorship (0 of
+      //   54), and a missing description fails require_mention by design.
+      // - country_eligibility_filter no longer sees the teaser's location
+      //   clause ("can be done remotely anywhere in the United States, or
+      //   Canada"). That clause is the feed's only country signal; carrying it
+      //   needs an input other than `description`, since the content filter
+      //   would read it as the JD.
+      // - content_filter.rescue_title_misses can't rescue a title miss from
+      //   this board. The teaser only repeats the title the title filter
+      //   already rejected and adds the company name and location, so a
+      //   rescue it allowed would be an accident (a `protocol` keyword
+      //   matching the company "Acme Protocol").
+      //
+      // Location stays 'Remote' as before, although some teasers name an
+      // on-site city ("is based in New York NY").
       results.push({
         title,
         url: link,
         company,
         location: 'Remote',
-        ...(description ? { description } : {}),
         ...(postedAt && Number.isFinite(postedAt) ? { postedAt } : {}),
       });
     } catch {

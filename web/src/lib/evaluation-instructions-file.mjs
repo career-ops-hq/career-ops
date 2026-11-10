@@ -29,6 +29,7 @@ export function writeEvaluationInstructions(root, instructions) {
   }
 
   return {
+    file,
     reference: `Read the selected canonical evaluation instructions from ${JSON.stringify(file)} before evaluating. Follow only those selected instructions; do not load the full evaluation mode or omitted sections.`,
     cleanup,
   };
