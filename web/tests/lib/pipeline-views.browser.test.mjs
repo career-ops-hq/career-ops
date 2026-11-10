@@ -103,7 +103,16 @@ test("a narrow window keeps the selected pipeline tab in the strip", { skip: liv
   assert.ok(narrow.scrollLeft > wide.scrollLeft);
   assert.ok(Math.abs(narrow.scrollY - wide.scrollY) < 5);
 
-  await page.getByRole("button", { name: /^INBOX\b/ }).click();
+  // locator.click() scrolls the button into view first, so a broken tab
+  // effect would still look fine. A DOM click leaves the strip where it is.
+  await page.getByRole("button", { name: /^INBOX\b/ }).evaluate((button) => button.click());
+  await page.waitForFunction(() => {
+    const button = [...document.querySelectorAll("button")].find((el) => {
+      const text = (el.textContent || "").trim();
+      return text === "INBOX" || text.startsWith("INBOX ");
+    });
+    return button?.getAttribute("aria-pressed") === "true";
+  });
   const inbox = await untilInside("INBOX");
   assert.ok(Math.abs(inbox.scrollY - wide.scrollY) < 5);
   assert.deepEqual(errors, []);
