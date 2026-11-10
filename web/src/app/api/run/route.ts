@@ -633,6 +633,8 @@ export async function POST(req: Request) {
                   finalPdf: pdfPaths.finalPdf,
                   ats: body.ats === true,
                 });
+                // cancel() can flip closed during this await. Do not save or render after that.
+                if (closed) return;
                 if (!built.ok) {
                   send({ type: "error", msg: built.error.slice(0, 200) });
                   return;

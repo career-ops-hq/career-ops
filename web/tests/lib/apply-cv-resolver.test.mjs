@@ -60,6 +60,7 @@ const loaderSrc = [
 register('data:text/javascript,' + encodeURIComponent(loaderSrc), pathToFileURL(WEB_SRC + '/'));
 
 const { resolveTailoredCv } = await import('../../src/lib/apply/cv.ts');
+const { locateTailoredPdf } = await import('../../src/lib/cv-pdf-file.ts');
 const { sortNewestFirst } = await import('../../src/lib/apply/cv-match.mjs');
 const { findReportFile } = await import('../../src/lib/career-ops.ts');
 const { resolvePdfPaths } = await import('../../src/lib/pdf-paths.mjs');
@@ -174,6 +175,19 @@ test('resolveTailoredCv: a real cv-<slug>-*.pdf matches its company', async () =
     const result = await resolveTailoredCv('Acme');
     assert.equal(result, join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
   });
+});
+
+test('locateTailoredPdf: company fallback serves the styled PDF when a newer ATS sibling exists', async () => {
+  await withFixture(
+    [
+      ['cv-jane-doe-acme-engineer-2026-01-01.pdf', 0],
+      ['cv-jane-doe-acme-engineer-ats-2026-01-01.pdf', 10000],
+    ],
+    async (outputDir) => {
+      const result = await locateTailoredPdf({ n: '', company: 'Acme', application: '', kind: 'cv' });
+      assert.equal('file' in result ? result.file : '', join(outputDir, 'cv-jane-doe-acme-engineer-2026-01-01.pdf'));
+    },
+  );
 });
 
 test('resolveTailoredCv: Apply uploads the styled PDF when an ATS sibling exists, even if that sibling is newer', async () => {
