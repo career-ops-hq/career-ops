@@ -1008,7 +1008,9 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
   // makes an invite of text the phrase list missed, and receipt or process
   // wording with no such signal ("if there is a match, we will invite you")
   // stops a confirmation reading as one. A rejection stays a rejection.
-  const evidence = inviteEvidence({ text });
+  // A pasted email often keeps its headers: the Subject line is evidence too.
+  const subject = (String(text || '').match(/^[ \t]*(?:subject|betreff|тема)[ \t]*:[ \t]*(.+)$/im) || [])[1] || '';
+  const evidence = inviteEvidence({ subject: subject.trim(), text });
   let classification = phrases.classification;
   if (classification !== 'rejection') {
     if (evidence.invite) classification = 'invite';

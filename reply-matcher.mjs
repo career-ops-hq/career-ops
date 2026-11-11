@@ -720,7 +720,10 @@ export function classifyReply(cand) {
   // still reads as one. Dates are read relative to when the email arrived.
   const received = new Date(cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date ?? NaN);
   const invite = inviteEvidence({ subject, text: body, from: cand.from || '', ...(Number.isNaN(received.getTime()) ? {} : { date: received }) });
-  if (invite.invite && invite.strong > 0) {
+  // An interview that still has to be booked ("pick a time", a Calendly link) is
+  // a Need Action below, as before; the evidence only keeps it from reading as a receipt.
+  const isAction = check(actionKeywords);
+  if (invite.invite && invite.strong > 0 && !isAction) {
     return {
       type: 'Interview',
       evidence: Array.from(new Set([...evidence, ...invite.reasons])),
@@ -737,7 +740,6 @@ export function classifyReply(cand) {
     };
   }
 
-  const isAction = check(actionKeywords);
   if (isAction) {
     const hasSchedulingWording = textLower.includes('schedule') || textLower.includes('pick a time') || textLower.includes('book a time') || textLower.includes('book a slot') ||
                                  textLower.includes('choose a time') || textLower.includes('select a time') || textLower.includes('appointment') ||

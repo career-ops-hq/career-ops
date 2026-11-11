@@ -90,6 +90,19 @@ test('booking links are matched on the host, not on text in the URL', () => {
   assert.match(e.bookingLink, /^https:\/\/cal\.com\//);
 });
 
+test('a bookings.* host alone and a meeting provider in a query string are not evidence', () => {
+  const base = { from: 'Maria Lopez <maria.lopez@acme.example>', subject: 'Your application to Acme', date: REF,
+    text: 'Thank you for applying. We received your application. Our office reopens on 05.11.2026 at 09:00.' };
+  const b = inviteEvidence({ ...base, links: ['https://bookings.example.net/anything'] });
+  assert.equal(b.bookingLink, '');
+  assert.equal(b.invite, false, b.reasons.join('; '));
+  const m = inviteEvidence({ ...base, links: ['https://example.net/?next=teams.microsoft.com/l/meetup-join/abc'] });
+  assert.equal(m.invite, false, m.reasons.join('; '));
+  assert.equal(m.receipt, true);
+  const ok = inviteEvidence({ ...base, text: 'Join our interview on 05.11.2026 at 09:00.', links: ['https://outlook.office365.com/book/AcmeRecruiting@acme.example/'] });
+  assert.match(ok.bookingLink, /outlook\.office365\.com\/book\//);
+});
+
 test('an unrelated time does not cancel conditional wording', () => {
   const e = inviteEvidence({ from: 'careers@globex.example', subject: 'Thank you for applying to Globex', date: REF,
     text: 'Thank you for applying. If there is a match, we will invite you to an interview. Our office reopens on 05.11.2026 at 09:00.' });
@@ -129,6 +142,19 @@ test('classifyReply: an invite that opens with receipt wording is an Interview, 
   const direct = classifyReply({ from: 'Tom Weiss <tom.weiss@initech.example>', subject: 'Your application at Initech',
     body_snippet: 'Thank you for applying. We would like to invite you to an interview with our product team.' });
   assert.equal(direct.type, 'Interview', 'a direct invitation from a person, no strong signal');
+});
+
+test('classifyReply: an interview still to be booked stays Need Action', () => {
+  const r = classifyReply({ from: 'Tom Weiss <tom.weiss@initech.example>', subject: 'Next step: your interview',
+    body_snippet: 'Thank you for applying. Please pick a time for your interview: https://calendly.com/initech/interview' });
+  assert.equal(r.type, 'Need Action');
+  assert.equal(r.suggestedTrackerUpdate, 'Interview');
+});
+
+test('analyzeInvite reads the Subject header of a pasted email', () => {
+  const r = analyzeInvite('From: Lena Berg <lena.berg@globex.example>\nSubject: Invitation to a first interview at Globex\n\nThank you for your application. Lena will be in touch with the details.', [], { clarificationDraft: false });
+  assert.ok(r.inviteEvidence.reasons.some((x) => /invite in the subject/.test(x)), r.inviteEvidence.reasons.join('; '));
+  assert.equal(r.classification, 'invite');
 });
 
 test('classifyReply reads a proposed time relative to the received date', () => {
