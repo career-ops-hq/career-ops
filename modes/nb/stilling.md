@@ -462,7 +462,7 @@ Feltnavnene i headeren (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 ## Score Evidence
 (fem dimensjoner, evidensstatus, åpne spørsmål, Evidence confidence, prioriteter)
 
-## H) Utkast til svar i søknadsskjemaet
+## H) Utkast til svar i søknadsskjemaet (draft)
 (bare ved score >= 4.5 -- utkast til svar i søknadsskjemaet)
 
 ---

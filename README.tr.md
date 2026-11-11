@@ -605,6 +605,8 @@ markası [Ticari Marka Politikası](TRADEMARK.md) ile yönetilir: topluluk
 kullanımı için izin verici, ticari ürün adlandırması ve onayı için
 saklıdır.
 
+Kod MIT lisanslıdır; [`employers/`](employers/) içindeki veriler [CC BY 4.0](employers/LICENSE) lisanslıdır.
+
 ## Yıldız geçmişi
 
 <p align="center">

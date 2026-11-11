@@ -19,7 +19,7 @@
  * injected closer truncates instead of escaping), and more than one envelope is
  * refused outright rather than guessed at.
  */
-import { PAGE_FORMATS, DEFAULT_PAGE_FORMAT } from "./page-formats.mjs";
+import { PAGE_FORMATS, PAGE_WIDTHS } from "./page-formats.mjs";
 
 // Markers must own their line — otherwise an agent merely *mentioning* the
 // syntax in its prose (or a CLI echoing the prompt, as `codex exec` does) would
@@ -35,7 +35,7 @@ export const CLOSE_MARK = "<</cv-html>>";
 // `exec` on a global regex advances `lastIndex` between calls, so the single-shot
 // lookup and the scanning one must not share an object; the opener is only ever
 // scanned with `matchAll`, which clones and needs just the one.
-const OPENER_SRC = String.raw`^<<cv-html(?:[ \t]+format="([^"\n]*)")?>>[ \t]*$`;
+const OPENER_SRC = String.raw`^<<cv-html(?:[ \t]+format="([^"\n]*)")?(?:[ \t]+country="([^"\n]*)")?>>[ \t]*$`;
 const CLOSER_SRC = String.raw`^<<\/cv-html>>[ \t]*$`;
 const OPENER = new RegExp(OPENER_SRC, "gm");
 const CLOSER = new RegExp(CLOSER_SRC, "m");
@@ -43,30 +43,57 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
 
 /**
  * The envelope contract, as the agent is told it. Lives here beside the parser so
- * the two cannot drift; route.ts interpolates it into the pdf prompt.
+ * the two cannot drift; run-prompts.mjs interpolates it into the pdf prompt.
  *
  * The markers are deliberately described MID-LINE (inside backticks) rather than
  * shown on their own lines: `codex exec` echoes its prompt to stdout, and a
  * line-start marker in that echo parses as a second envelope, failing the run.
  *
- * The page formats are spelled out literally rather than interpolated from
- * DEFAULT_PAGE_FORMAT: that constant is the parser's fallback for an agent that
- * declares NOTHING, which is a different question from what the agent should
- * choose. Tying them together once produced "choose letter … otherwise letter".
+ * The page-format sentence depends on the user's `page_format`, read before the
+ * run by core/page-format.mjs (readPageFormatSetting). The agent fills the
+ * template's `{{PAGE_WIDTH}}`, so the prompt names the width that matches the
+ * sheet the backend will print, from the same stance:
+ * - `a4` / `letter`: that format, no choice left to the agent.
+ * - `auto`: the agent names the hiring entity's country and the backend maps it,
+ *   as modes/pdf.md step 6 does on the CLI. The Letter countries come from the
+ *   core, so this prompt carries no copy of the list.
+ * - nothing stated: the agent picks, as before.
+ * The fallback for an agent that declares nothing is a different question,
+ * answered in core/page-format.mjs; tying the two together once produced
+ * "choose letter … otherwise letter".
  *
  * It says "do not save" rather than "you have no write tools": that claim is only
  * true on Claude Code. The six CLIs invoked via clis.ts's bare args keep their own
  * default tool access, and telling an agent something false about its own
  * capabilities invites it to test the claim.
+ *
+ * @param {{setting?: "a4"|"letter"|"auto"|null, letterCountries?: string[]}} [pageFormat]
+ *   readPageFormatSetting()'s result; omitted means nothing stated.
+ * @returns {string}
  */
-export const CV_ENVELOPE_INSTRUCTION =
-  `Do NOT save or edit any file — the platform persists your output for you. Instead OUTPUT the finished HTML inline, between two marker lines. The first line contains only the opening marker carrying your chosen page format — \`${OPEN_MARK} format="a4">>\` or \`${OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4. Then the complete HTML document, then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE document from <!DOCTYPE html> to </html> — never abbreviate, summarize, or write "unchanged"; the platform renders exactly these bytes and nothing else.`;
+export function cvEnvelopeInstruction({ setting = null, letterCountries = [] } = {}) {
+  return `Do NOT save or edit any file — the platform persists your output for you. Instead OUTPUT the finished HTML inline, between two marker lines. ${pageFormatSentences(setting, letterCountries)} Then the complete HTML document, then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE document from <!DOCTYPE html> to </html> — never abbreviate, summarize, or write "unchanged"; the platform renders exactly these bytes and nothing else.`;
+}
+
+function pageFormatSentences(setting, letterCountries) {
+  if (setting === "a4" || setting === "letter") {
+    return `The first line contains only the opening marker \`${OPEN_MARK} format="${setting}">>\`, and nothing else on that line. The user's profile sets page_format to ${setting}, so do not choose a page size yourself, and fill the template's {{PAGE_WIDTH}} with ${PAGE_WIDTHS[setting]}.`;
+  }
+  if (setting === "auto" && letterCountries.length > 0) {
+    return `The user's profile sets page_format to auto: the page size follows the hiring entity's country, and the platform picks it from the code you give. Read that country from the evaluation report's market signals (jurisdiction, currency, benefits and legal vocabulary; for a remote role, the entity that receives the CV). The first line contains only the opening marker carrying its ISO 3166-1 alpha-2 code, for example \`${OPEN_MARK} country="DE">>\`, and nothing else on that line. If you cannot tell the country, use \`${OPEN_MARK}>>\` instead. Fill the template's {{PAGE_WIDTH}} with ${PAGE_WIDTHS.letter} when the code is one of ${letterCountries.join(", ")}, or when you named no country, and with ${PAGE_WIDTHS.a4} otherwise.`;
+  }
+  return `The first line contains only the opening marker carrying your chosen page format — \`${OPEN_MARK} format="a4">>\` or \`${OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4, and fill the template's {{PAGE_WIDTH}} to match: ${PAGE_WIDTHS.letter} for letter, ${PAGE_WIDTHS.a4} for a4.`;
+}
 
 /**
  * @typedef {Object} CvEnvelope
  * @property {true} ok
  * @property {string} html - The tailored CV HTML, byte-exact as emitted.
- * @property {"a4"|"letter"} format - Page format for generate-pdf.mjs.
+ * @property {"a4"|"letter"|null} format - The page format the agent declared, or
+ *   null when it declared none it may use. Not yet the sheet: the profile can
+ *   outrank it (core/page-format.mjs resolveRenderPageFormat).
+ * @property {string|null} country - The country code the agent declared under
+ *   `page_format: auto`, as written; core/page-format.mjs validates it.
  * @property {string[]} warnings - Non-fatal issues to surface in the run log.
  */
 
@@ -119,18 +146,20 @@ export function parseCvEnvelope(text) {
     return { ok: false, error: "The CV was cut off before its closing </html> tag — the output is incomplete." };
   }
 
+  // What to do about a missing format, or a country, depends on the profile,
+  // which this pure parser does not read: it reports what was declared and
+  // resolveRenderPageFormat ranks it.
   const warnings = [];
   const declared = opener[1];
-  let format = DEFAULT_PAGE_FORMAT;
-  if (declared === undefined) {
-    warnings.push(`The agent declared no page format; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
-  } else {
+  let format = null;
+  if (declared !== undefined) {
     const lower = declared.trim().toLowerCase();
     if (PAGE_FORMATS.has(lower)) format = lower;
-    else warnings.push(`Unrecognized page format "${declared}"; defaulting to ${DEFAULT_PAGE_FORMAT}.`);
+    else warnings.push(`Unrecognized page format "${declared}"; ignoring it.`);
   }
+  const country = opener[2] === undefined ? null : opener[2].trim() || null;
 
-  return { ok: true, html, format, warnings };
+  return { ok: true, html, format, country, warnings };
 }
 
 /**

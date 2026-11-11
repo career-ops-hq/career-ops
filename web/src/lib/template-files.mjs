@@ -119,10 +119,42 @@ export async function duplicateTemplate(codeRoot, { kind, from, name, userDir })
   return { name };
 }
 
-/** @param {any} resolver @param {string} kind @param {string} userDir @param {string} profilePath */
+/**
+ * The default the profile names. A profile that cannot be read or parsed does not
+ * say, so that is a refusal and not "no default": answering with the base
+ * template would let a delete remove the named default, or a rename skip the
+ * profile update. A missing profile is still "no default". The refusal carries the
+ * original error as its `cause`; only the cause holds a path.
+ * @param {any} resolver @param {string} kind @param {string} profilePath
+ */
 function defaultName(resolver, kind, profilePath) {
-  const configured = resolver.loadProfileDefault(kind, profilePath ? { profilePath } : {});
+  let configured;
+  try {
+    configured = resolver.loadProfileDefault(kind, { ...(profilePath ? { profilePath } : {}), strict: true });
+  } catch (cause) {
+    throw new TemplateRefusal("Your profile could not be read, so the default template is unknown. Fix the profile and try again.", 409, { cause });
+  }
   return configured ? resolver.kebab(configured) : BASE_NAME;
+}
+
+/**
+ * Move a user template to a new name. No profile check: the rollback in
+ * renameTemplateAndFollow must work whatever state a failed profile update left.
+ * @param {string} codeRoot
+ * @param {{kind: "cv"|"cover", name: string, to: string, userDir: string}} opts
+ */
+async function moveTemplate(codeRoot, { kind, name, to, userDir }) {
+  assertValidName(to);
+  const resolver = await loadResolver(codeRoot);
+  const entry = findEntry(resolver, kind, userDir, name, { user: true });
+  await assertInsideUserDir(entry, userDir);
+  assertNameFree(resolver, kind, userDir, to);
+
+  const prefix = resolver.KINDS[kind].prefix;
+  const next = path.join(path.dirname(entry.path), `${prefix}.${to}.html`);
+  const text = retitle(await fs.readFile(entry.path, "utf8"), name, to, resolver.prettify);
+  await fs.writeFile(next, text, { flag: "wx" });
+  await fs.rm(entry.path);
 }
 
 /**
@@ -135,16 +167,11 @@ function defaultName(resolver, kind, profilePath) {
 export async function renameTemplate(codeRoot, { kind, name, to, userDir, profilePath }) {
   assertValidName(to);
   const resolver = await loadResolver(codeRoot);
-  const entry = findEntry(resolver, kind, userDir, name, { user: true });
-  await assertInsideUserDir(entry, userDir);
-  assertNameFree(resolver, kind, userDir, to);
-
-  const prefix = resolver.KINDS[kind].prefix;
-  const next = path.join(path.dirname(entry.path), `${prefix}.${to}.html`);
-  const text = retitle(await fs.readFile(entry.path, "utf8"), name, to, resolver.prettify);
-  await fs.writeFile(next, text, { flag: "wx" });
-  await fs.rm(entry.path);
-  return { wasDefault: defaultName(resolver, kind, profilePath) === name };
+  // Read the default before anything moves: an unreadable profile refuses here,
+  // with the file still where it was.
+  const wasDefault = defaultName(resolver, kind, profilePath) === name;
+  await moveTemplate(codeRoot, { kind, name, to, userDir });
+  return { wasDefault };
 }
 
 /**
@@ -164,7 +191,7 @@ export async function renameTemplateAndFollow(codeRoot, opts, updateProfile) {
     await updateProfile();
   } catch (cause) {
     try {
-      await renameTemplate(codeRoot, { ...opts, name: opts.to, to: opts.name });
+      await moveTemplate(codeRoot, { ...opts, name: opts.to, to: opts.name });
     } catch {
       throw new TemplateRefusal(`Renamed to "${opts.to}", but the profile still names "${opts.name}" and the file could not be put back.`, 409, { cause });
     }

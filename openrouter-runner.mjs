@@ -48,6 +48,7 @@ import { fetchJdViaKnownApi } from './browser-extract.mjs';
 import { HYDRATING_CODES, extractApplyControls, postingIdentity } from './liveness-browser.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { APPLY_MIN } from './lib/score-action.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // Ambient privacy guard over global fetch. Installed explicitly here (rather
@@ -1267,8 +1268,8 @@ async function cmdApply(ref, ctx) {
   // Score-gate: warn and confirm before applying to low-fit roles (AGENTS.md Ethical Use)
   const scoreMatch = reportContent.match(/^\s*\*?\*?\s*(?:score|puntuaci[oó]n)\s*:\s*\*?\*?\s*(\d+(?:\.\d+)?)\s*\/\s*5/im);
   const scoreValue = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
-  if (isFinite(scoreValue) && scoreValue < 4.0) {
-    console.log(`\n⚠️  This report scored ${scoreValue.toFixed(1)}/5 — below the 4.0/5 threshold.`);
+  if (isFinite(scoreValue) && scoreValue < APPLY_MIN) {
+    console.log(`\n⚠️  This report scored ${scoreValue.toFixed(1)}/5 — below the ${APPLY_MIN.toFixed(1)}/5 threshold.`);
     console.log('Strongly discourage low-fit applications. Your time and the recruiter\'s time are both valuable.');
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise(resolve => {

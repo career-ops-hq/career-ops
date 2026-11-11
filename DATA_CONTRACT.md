@@ -171,6 +171,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
 | `plugins-registry/` | Curated community plugins, one `<id>.json` per plugin (the trust root) |
 | `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
+| `seeds/` | Scanner seed sources: the VC portfolio fetchers (`seeds/vc-portfolios.mjs`) and the employer registry's tools: validator, inbox rules, importer and fold (`seeds/employers-*.mjs`) |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
 | `opencode.example.json` | OpenCode project config template (seed for `opencode.json`; ships Playwright MCP registration) |
 | `batch/batch-prompt.md` | Batch worker prompt |
@@ -189,6 +190,14 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `writing-samples/README.md` | System-owned onboarding documentation for the writing-samples directory |
 | `seed-fixture.mjs` / `test-fixtures/*` | Upgrade-test fixtures and seeder (system layer; fictional data, never user data) |
 | `upgrade-tests.mjs` | Dynamic upgrade regression harness (PR gate: old install applies the commit under test hermetically) |
+
+## Repository only (not updated on installs)
+
+Tracked in the repository, but `update-system.mjs` never writes, updates or deletes them on an install: they are neither system layer nor user layer.
+
+| File | Purpose |
+|------|---------|
+| `employers/` | The employer registry: community-maintained pointers from an employer to its ATS board, CC BY 4.0 (see `employers/README.md`). A fresh clone has the copy of that day; the updater does not refresh it. |
 
 ## The Rule
 

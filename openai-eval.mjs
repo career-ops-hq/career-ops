@@ -47,6 +47,7 @@ import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+import { NO_INVENTED_PAY_RULE, normalizeEvaluationText } from './lib/eval-evidence.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer, this covers anything the script hands to fetch directly.
@@ -327,7 +328,7 @@ ${contextBody}
 IMPORTANT OPERATING RULES FOR THIS SESSION
 ═══════════════════════════════════════════════════════
 1. You do NOT have access to WebSearch, Playwright, or file writing tools.
-   - Block D (Comp research): use training-data salary estimates; note them as estimates.
+   - ${NO_INVENTED_PAY_RULE}
    - Block G (Legitimacy): analyze JD text only; skip URL/page freshness checks.
    - Post-evaluation file saving is handled by the script, not by you.
 2. ${languageInstruction}
@@ -526,6 +527,8 @@ try {
 // ---------------------------------------------------------------------------
 // Display evaluation
 // ---------------------------------------------------------------------------
+evaluationText = normalizeEvaluationText(evaluationText, jdText);
+
 console.log('\n' + '═'.repeat(66));
 console.log('  CAREER-OPS EVALUATION — powered by ' + modelName + ' (' + endpointHost + ')');
 console.log('═'.repeat(66) + '\n');

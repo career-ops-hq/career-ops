@@ -208,7 +208,7 @@ export function FollowupsView() {
     <div className="mx-auto max-w-none px-6 py-8">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="font-display text-2xl tracking-tight text-landing">Follow-up Tracker</h1>
+          <h1 className="font-display text-2xl tracking-tight text-landing">Follow-ups</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
           <p className="mt-2 max-w-3xl text-xs leading-relaxed text-faint">
             Use <span className="font-medium text-muted">Log</span> after you actually send an email, LinkedIn message, or call. The count and next date update automatically; status changes recalculate urgency, while <span className="font-medium text-muted">Next date</span> lets you pin a custom reminder.

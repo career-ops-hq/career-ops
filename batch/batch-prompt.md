@@ -278,7 +278,7 @@ Cover:
 
 #### Block D — Compensation and Demand
 
-Use WebSearch for salary bands, company compensation reputation, funding/hiring signals, and market demand. Cite sources when available. If data is missing, say so.
+Use WebSearch for salary bands, company compensation reputation, funding/hiring signals, and market demand. Cite sources when available. If the posting states no figure and search finds none, mark compensation unknown. Do not invent a salary. Unknown compensation does not move the score.
 
 Before interpreting any salary, classify the **company type / hiring entity**. A public salary figure is a signal, not a contractual promise.
 
@@ -752,7 +752,7 @@ Translate these human-facing headings according to `language.output` when it is 
 
 ### Step 4 — Generate PDF (configurable)
 
-Read `config/profile.yml` and resolve `auto_pdf_score_threshold`. If absent, default to `3.0`.
+Read `config/profile.yml` and resolve `auto_pdf_score_threshold`. If absent, default to `3.0` (`PDF_GATE_DEFAULT` in `lib/score-action.mjs`, the floor of the Maybe band).
 
 Only generate the PDF when the score from Step 2 is greater than or equal to the threshold. If the score is below the threshold:
 

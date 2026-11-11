@@ -181,12 +181,13 @@ const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 function parseUtcOffset(value) {
   const m = /^([+-])(\d{2})(\d{2})(\d{2})?$/.exec(String(value ?? '').trim());
   if (!m) return null;
-  // Hours stop at 23, minutes at 59, and seconds at 60. A minute of 60 would
+  // Hours stop at 23, minutes at 59, and seconds at 59 (RFC 5545 §3.3.14: a
+  // UTC offset's seconds must not be 60). A minute or second of 60 would
   // still convert and hide a broken zone.
   const hour = Number(m[2]);
   const minute = Number(m[3]);
   const second = Number(m[4] ?? 0);
-  if (hour > 23 || minute > 59 || second > 60) return null;
+  if (hour > 23 || minute > 59 || second > 59) return null;
   const sign = m[1] === '-' ? -1 : 1;
   return sign * (hour * 60 + minute + second / 60);
 }
