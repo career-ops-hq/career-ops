@@ -97,7 +97,7 @@ reviews:
     - path: "plugins-registry.json"
       instructions: "Registry entries must be pinned to a commit SHA and reviewed under docs/PLUGIN_REVIEW.md. Flag unpinned refs or entries that fetch from a mutable branch."
     - path: "README*.md"
-      instructions: "There are 17 localized READMEs. When README.md changes, note which localized copies now drift, but do not request translations in the same PR."
+      instructions: "Localized READMEs (README.<lang>.md) mirror README.md. When README.md changes, note which localized copies now drift, but do not request translations in the same PR."
     - path: "package.json"
       instructions: "New dependencies need a discussion first. Flag any new dependency, any postinstall change, and any version range widening."
 
@@ -114,7 +114,7 @@ reviews:
     eslint: { enabled: true }
     yamllint: { enabled: true }
     github-checks: { enabled: true, timeout_ms: 900000 }
-    markdownlint: { enabled: false }   # 17 READMEs and long prompts: style noise, not review
+    markdownlint: { enabled: false }   # localized READMEs and long prompts: style noise, not review
     languagetool: { enabled: false }
     vale: { enabled: false }
     ast-grep: { enabled: false }
