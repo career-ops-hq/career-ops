@@ -207,9 +207,14 @@ html {
 }
 
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
+/* ── Content width (Config → Appearance → Page width). "small" = each page's own default. */
+html[data-width="medium"] main .mx-auto:is(.max-w-2xl, .max-w-3xl, .max-w-4xl, .max-w-5xl, .max-w-6xl) { max-width: 72rem; }
+html[data-width="full"] main .mx-auto:is(.max-w-2xl, .max-w-3xl, .max-w-4xl, .max-w-5xl, .max-w-6xl) { max-width: none; }
+
 .report-prose {
   color: var(--fg);
-  font-size: 0.95rem;
+  font-family: var(--font-preview, var(--font-sans));
+  font-size: calc(0.95rem * var(--preview-scale, 1));
   line-height: 1.7;
 }
 .report-prose > p,
@@ -222,15 +227,15 @@ html {
   letter-spacing: -0.01em;
   line-height: 1.25;
 }
-.report-prose h1 { font-family: var(--font-display); font-size: 1.7rem; margin: 2rem 0 0.75rem; }
+.report-prose h1 { font-family: var(--font-preview-heading, var(--font-display)); font-size: 1.7rem; margin: 2rem 0 0.75rem; }
 .report-prose h2 {
-  font-family: var(--font-display);
+  font-family: var(--font-preview-heading, var(--font-display));
   font-size: 1.3rem;
   margin: 2.25rem 0 0.75rem;
   padding-bottom: 0.4rem;
   border-bottom: 1px solid var(--border);
 }
-.report-prose h3 { font-weight: 600; font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
+.report-prose h3 { font-family: var(--font-preview-heading, var(--font-sans)); font-weight: 600; font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
 .report-prose h4 { font-weight: 600; font-size: 0.95rem; color: var(--muted); margin: 1.25rem 0 0.4rem; }
 .report-prose p { margin: 0.9rem 0; }
 
