@@ -4,6 +4,9 @@
 |------|------------|
 | `vc-portfolios.mjs` | Fetchers that pull a public VC portfolio company list and probe each company's ATS, below. |
 | `employers-validate.mjs` | The static validator of the employer registry, which lives at the repository root in [`employers/`](../employers/README.md): a community-maintained list of employer job boards, one pointer per board (employer → ATS → board), with no postings and no personal data, licensed CC BY 4.0. CI runs the validator on every pull request that touches the registry (`.github/workflows/employers-validate.yml`). |
+| `employers-inbox.mjs` | The registry's contribution inbox (`employers/inbox/`): file names, the short line format, and the check that a pull request only adds inbox files. |
+| `employers-import.mjs` | Turns a CSV or a list of board URLs into inbox files, reading each URL back to its ATS and board. No network. |
+| `employers-fold.mjs` | For maintainers: folds the inbox into `boards/` and `contributions/`, skips boards already listed, regenerates `CHANGELOG.md` and empties the inbox. Dry run unless `--apply`; it does not commit. |
 
 The scanner does not read the employer registry yet.
 

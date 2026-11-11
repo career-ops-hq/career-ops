@@ -2,8 +2,11 @@
 
 A community-maintained list of employer job boards that the local scanner can
 read. Each row is a pointer: **employer → ATS → board**. The registry holds no
-job postings, no job titles and no personal data. Postings are always read
-from the employer's own board, on your machine.
+job postings and no job titles, and its rows hold no personal data. The
+contribution manifests do publish two things about people: the GitHub
+username of whoever contributes, and the name of whoever grants the license
+(`contributor` and `signed_by`, see [the manifest](#the-contribution-manifest)).
+Postings are always read from the employer's own board, on your machine.
 
 - [What a row looks like](#a-row)
 - [Files](#files)
@@ -56,7 +59,8 @@ employers/
 ├── CHANGELOG.md            one credit line per contribution, generated from the manifests by maintainers
 ├── schema.json             JSON Schema of a row and of a manifest, for editors
 ├── contributions/          one manifest per contribution
-└── boards/<ats>/<initial>.ndjson
+├── boards/<ats>/<initial>.ndjson
+└── inbox/                  contributions waiting to be folded in (only while there are some)
 ```
 
 The registry lives in this repository only: a fresh clone has it, but the
@@ -65,12 +69,85 @@ career-ops updater does not copy it to existing installs. CI warns when
 
 ## Contributing boards
 
-Contributions open in a few days through a simpler path: one line with the
-board's address and the employer's name, and a short form. You will not need
-to edit these files by hand.
+A contribution is one new file in `inbox/`, and nothing else. You do not edit
+`boards/`, `contributions/` or `CHANGELOG.md`: after merging, maintainers fold
+the inbox into them.
 
-Until then, [open an issue](https://github.com/career-ops-hq/career-ops/issues/new/choose)
-with the board's address and the employer's name, and a maintainer adds it.
+### The inbox file
+
+Name it `inbox/<YYYY-MM-DD>-<github-username>.ndjson`, with the date and your
+GitHub username in lowercase: `inbox/2026-11-20-octocat.ndjson`. A file holds
+up to 5,000 boards. For a longer list, number the files:
+`inbox/2026-11-20-octocat-001.ndjson`, `-002.ndjson`, and so on.
+
+One board per line, one JSON object per line:
+
+```json
+{"ats":"greenhouse","board":"vercel","name":"Vercel","website":"vercel.com"}
+{"ats":"ashby","board":"DeepL","name":"DeepL"}
+{"ats":"workday","board":"nvidia/wd5/NVIDIAExternalCareerSite","name":"NVIDIA"}
+```
+
+| Key | Required | Rule |
+|---|---|---|
+| `ats` | yes | One of the ATS in [the row table](#a-row). |
+| `board` | yes | The board id, as in [the row table](#a-row). Workday: `tenant/wdN/site`. |
+| `name` | yes | The employer's name, up to 80 characters. No URL, email address, phone number or @handle. |
+| `website` | no | The employer's registrable domain (`example.com`). |
+| `region` | no | Greenhouse and Lever only: `eu` for a board on `job-boards.eu.greenhouse.io` or `jobs.eu.lever.co`. Without it, the board is on the US host. |
+| `workday_host` | no | Workday only: `site` for a board on `<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>`. Without it, the board is on `<tenant>.<wdN>.myworkdayjobs.com/<site>`. |
+
+Any other key is an error. Each board appears once in the inbox. A board
+that is already in the registry is a warning, not an error: it is skipped
+when the inbox is folded in.
+
+### From the browser
+
+1. Open [`employers/`](https://github.com/career-ops-hq/career-ops/tree/main/employers)
+   on GitHub and choose **Add file**, then **Create new file**.
+2. Name the file `inbox/<YYYY-MM-DD>-<github-username>.ndjson` and paste your
+   lines.
+3. Commit it to a new branch and open the pull request.
+
+### From a list, with the importer
+
+If you have a list of board URLs, the importer writes the inbox files for you:
+
+```bash
+node seeds/employers-import.mjs boards.csv --login <github-username>
+node seeds/employers-validate.mjs
+```
+
+The list is a CSV with a `url` column (and optionally `name` and `website`),
+or plain text with one board URL per line. The importer reads each URL back
+to its ATS and board, writes the canonical form, and splits the result into
+files of 5,000. A URL it does not recognise, a duplicate, or a line with an
+invalid name or website goes to `boards.csv.rejected.csv` with the reason,
+and never into the inbox. Without a name column, it makes each name from the
+board id: check those names before you open the pull request. It makes no
+network request.
+
+Then commit only the new files in `employers/inbox/` and open the pull
+request.
+
+### For an organization
+
+An organization adds its manifest next to its boards files, under the same
+name without a part number: `inbox/<YYYY-MM-DD>-<github-username>.json`. It
+has the fields of [the contribution manifest](#the-contribution-manifest);
+`contributor` is the username in the file name, and `rows` counts the lines
+of all its files. Without a manifest, the contribution is credited to the
+username in the file name, with source `community`.
+
+### What happens next
+
+The `Employer registry validate` workflow checks the new files, and reports
+whether the pull request only adds files to `inbox/`. A maintainer reviews it
+and merges it, then folds the inbox in: each line becomes a row with its
+`source`, `contribution` and `added` date, boards already in the registry are
+skipped, the manifest moves to `contributions/`, and `CHANGELOG.md` gets the
+credit line. If the contribution id is already taken (the same username on
+the same date), the fold adds `-2`, `-3`, and so on.
 
 What does not get in:
 
@@ -81,9 +158,10 @@ What does not get in:
   as hints;
 - a bulk list without a written `origin`.
 
-A maintainer reviews every contribution before merging. Data contributed to
-`employers/` is licensed under CC BY 4.0, and you also allow the
-maintainer to distribute it under ODbL 1.0 or CC0 (see [License](#license)).
+By opening the pull request you license the data you add under CC BY 4.0,
+you also allow the maintainer to distribute it under ODbL 1.0 or CC0 (see
+[License](#license)), and you confirm that no contract stops the list from
+being redistributed and that it holds no personal data.
 
 ## The contribution manifest
 
@@ -93,6 +171,13 @@ it in `contribution`. The manifest is the row's provenance: who contributed
 it, where the list came from, and the license it was granted under. The pull
 request that adds it is opened from the account named in `contributor`, and
 opening it is how the manifest is signed.
+
+An organization writes its manifest in `inbox/` with its boards (see
+[For an organization](#for-an-organization)). For a contribution without
+one, maintainers write a short manifest when they fold the inbox in: the
+username in the file name is the `contributor`, `signed_by` is that
+account, and the source is `community`. Both are public: the username and
+`signed_by` appear in the manifest, and `attribution` in `CHANGELOG.md`.
 
 ```json
 {"id":"2026-11-20-acme","contributor":"github-handle","on_behalf_of":"Acme Inc.","signed_by":"Name of a founder or officer",
@@ -121,9 +206,11 @@ opening it is how the manifest is signed.
 ## Validation
 
 ```bash
-node seeds/employers-validate.mjs                    # check employers/
+node seeds/employers-validate.mjs                    # check employers/, inbox included
 node seeds/employers-validate.mjs --base <dir>       # also check the changes against another checkout
 node seeds/employers-validate.mjs --write-changelog  # maintainers, on main: regenerate CHANGELOG.md, then check
+node seeds/employers-validate.mjs --inbox-only --base <ref>  # does <ref>...HEAD only add inbox files? (JSON)
+node seeds/employers-fold.mjs [--apply]              # maintainers: fold the inbox in (dry run without --apply)
 ```
 
 Every error names the file, the line and the reason. In a pull request, each
@@ -146,13 +233,22 @@ the workflow run. The checks:
    manifest of its own.
 9. A contribution does not change `retired`, and no row is ever deleted.
 10. A warning, not an error, when `boards/` passes 25 MB.
+11. The inbox: file names, at most 5,000 lines a file, the line format above,
+    the same board rules, each board once across the inbox, and an
+    organization's manifest (same rules, `rows` equal to its lines,
+    `contributor` equal to the username in the file name). A board already in
+    the registry is a warning.
 
 `CHANGELOG.md` is not checked against the manifests: a contribution does not
 edit it, and maintainers regenerate it on main.
 
 In a pull request, the `Employer registry validate` workflow runs the
 validator from the base branch against the pull request's files, so a pull
-request cannot change the rules it is checked by.
+request cannot change the rules it is checked by. It then reports whether
+every change adds a new file directly in `inbox/`, with a valid name: no
+edited, deleted or renamed file, and nothing outside `inbox/`. The answer is
+in the job summary and in the job's `inbox_only` output; the workflow does
+not act on it.
 
 ## Removal at an employer's request
 
