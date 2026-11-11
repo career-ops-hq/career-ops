@@ -1,4 +1,4 @@
-// tests/employers-registry.test.mjs: the employer registry in seeds/employers/
+// tests/employers-registry.test.mjs: the employer registry in employers/
 // and its validator (seeds/employers-validate.mjs).
 //
 // Four groups:
@@ -9,7 +9,9 @@
 //   3. schema.json (for editors) and the validator (the gate) state the same
 //      format.
 //   4. --base: what a pull request may change relative to the base branch, the
-//      size limit, and the generated CHANGELOG.
+//      size warning, and the generated CHANGELOG.
+//   5. GitHub Actions output: ::error/::warning annotations and the step
+//      summary, only when GITHUB_ACTIONS is true.
 //
 // Run:  node --test tests/employers-registry.test.mjs
 
@@ -25,7 +27,8 @@ import { BOARD_ATS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, WORKDAY_HOSTS } from '
 import {
   ALSO_PERMITS, DOMAIN_RE, FIXED_SOURCES, GITHUB_LOGIN_RE, LICENSE_ID, MANIFEST_ID_RE, MANIFEST_KEYS,
   MANIFEST_REQUIRED, NAME_MAX, RETIRED_REASONS, ROW_KEYS, ROW_REQUIRED, SOURCE_PATTERNS,
-  BOARDS_MAX_BYTES, compareRows, renderChangelog, validateRegistry, writeChangelog,
+  BOARDS_WARN_BYTES, SUMMARY_MAX_FINDINGS, annotation, compareRows, escapeCommandData, escapeCommandProperty,
+  renderChangelog, renderStepSummary, validateRegistry, writeChangelog,
 } from '../seeds/employers-validate.mjs';
 
 import greenhouse from '../providers/greenhouse.mjs';
@@ -47,10 +50,13 @@ const PROVIDERS = {
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
-const REGISTRY = join(ROOT, 'seeds', 'employers');
+const REGISTRY = join(ROOT, 'employers');
 const GARBAGE = join(ROOT, 'tests', 'fixtures', 'employers-garbage');
 
-const run = (cwd, args = []) => spawnSync(process.execPath, [VALIDATOR, ...args], { cwd, encoding: 'utf8' });
+// The suite itself runs in GitHub Actions, so the validator's environment is
+// set explicitly: plain output unless a case asks for the Actions one.
+const { GITHUB_ACTIONS: _ga, GITHUB_STEP_SUMMARY: _gss, ...PLAIN_ENV } = process.env;
+const run = (cwd, args = [], env = {}) => spawnSync(process.execPath, [VALIDATOR, ...args], { cwd, encoding: 'utf8', env: { ...PLAIN_ENV, ...env } });
 
 /** Every row in a registry directory, parsed. */
 function rowsOf(dir) {
@@ -68,10 +74,10 @@ function rowsOf(dir) {
 /** A scratch checkout holding a copy of the real registry. */
 function checkout() {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-'));
-  cpSync(REGISTRY, join(dir, 'seeds', 'employers'), { recursive: true });
+  cpSync(REGISTRY, join(dir, 'employers'), { recursive: true });
   return dir;
 }
-const reg = (dir, ...p) => join(dir, 'seeds', 'employers', ...p);
+const reg = (dir, ...p) => join(dir, 'employers', ...p);
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 const writeJson = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
 
@@ -114,13 +120,12 @@ test('every committed row is read by its own provider', () => {
 
 // ── 2. The garbage fixture ─────────────────────────────────────────────────
 
-const B = 'seeds/employers/boards';
-const BAD = 'seeds/employers/contributions/2026-11-02-bad.json';
+const B = 'employers/boards';
+const BAD = 'employers/contributions/2026-11-02-bad.json';
 const EXPECTED = [
-  ['seeds/employers/notes.txt', 'unexpected entry'],
-  ['seeds/employers/THIRD_PARTY_NOTICES.md', 'missing'],
-  ['seeds/employers/CHANGELOG.md', 'out of date with contributions/'],
-  ['seeds/employers/contributions/notes.txt', 'manifests are named <YYYY-MM-DD>-<slug>.json'],
+  ['employers/notes.txt', 'unexpected entry'],
+  ['employers/THIRD_PARTY_NOTICES.md', 'missing'],
+  ['employers/contributions/notes.txt', 'manifests are named <YYYY-MM-DD>-<slug>.json'],
   [BAD, 'unknown key "notes"'],
   [BAD, 'id "2026-11-02-other" does not match the file name'],
   [BAD, 'contributor must be the GitHub username'],
@@ -132,7 +137,7 @@ const EXPECTED = [
   [BAD, 'date 2026-11-03 does not match the date in the id'],
   [`${B}/dayforce`, 'unknown ATS directory'],
   [`${B}/lever/readme.txt`, 'board files are named <initial>.ndjson'],
-  [`${B}/greenhouse/a.ndjson:2`, 'duplicate careers_url, already at seeds/employers/boards/greenhouse/a.ndjson:1'],
+  [`${B}/greenhouse/a.ndjson:2`, 'duplicate careers_url, already at employers/boards/greenhouse/a.ndjson:1'],
   [`${B}/greenhouse/a.ndjson:3`, 'region "ap" is not one of: us, eu'],
   [`${B}/greenhouse/a.ndjson:4`, 'region is required on greenhouse rows'],
   [`${B}/greenhouse/a.ndjson:5`, 'is not the canonical URL for this board; expected "https://job-boards.greenhouse.io/acme-wrongurl"'],
@@ -171,13 +176,14 @@ const EXPECTED = [
 test('the garbage fixture fails, naming each planted mistake by file, line and reason', () => {
   const r = run(GARBAGE);
   assert.equal(r.status, 1, r.stdout);
-  const errorLines = r.stderr.split('\n').filter((l) => l.startsWith('seeds/employers'));
+  const errorLines = r.stderr.split('\n').filter((l) => l.startsWith('employers'));
   for (const [where, reason] of EXPECTED) {
     assert.ok(errorLines.some((l) => l.startsWith(`${where}: `) && l.includes(reason)), `missing: ${where}: ${reason}\n${r.stderr}`);
   }
   // Nothing but the planted mistakes: the valid rows next to them stay quiet.
   assert.equal(errorLines.length, EXPECTED.length, r.stderr);
   assert.match(r.stderr, new RegExp(`employer registry: ${EXPECTED.length} error\\(s\\), 1 warning\\(s\\)`));
+  assert.ok(!r.stdout.includes('::') && !r.stderr.includes('::'), 'no workflow commands outside GitHub Actions');
 });
 
 test('a website on two rows is a warning, not an error', () => {
@@ -246,7 +252,7 @@ function addContribution(dir, row = NEW_ROW) {
   writeJson(reg(dir, 'contributions', `${NEW_MANIFEST.id}.json`), NEW_MANIFEST);
   mkdirSync(reg(dir, 'boards', 'breezy'), { recursive: true });
   writeFileSync(reg(dir, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify(row)}\n`);
-  writeChangelog(dir);
+  // No CHANGELOG.md edit: a contribution does not touch it.
 }
 const firstRow = () => rowsOf(REGISTRY)[0].row;
 
@@ -261,9 +267,13 @@ function pr(change) {
   }
 }
 
-test('--base: a contribution with its own manifest passes', () => {
-  const r = pr((head) => addContribution(head));
+test('--base: a contribution with its own manifest passes, without touching CHANGELOG.md', () => {
+  const r = pr((head) => {
+    addContribution(head);
+    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), readFileSync(join(REGISTRY, 'CHANGELOG.md'), 'utf8'));
+  });
   assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stderr, '', 'no warnings either');
 });
 
 test('--base: a base with no registry (the bootstrap PR) counts every row as new', () => {
@@ -281,7 +291,6 @@ test('--base: a deleted row fails; rows are retired, never deleted', () => {
     editRow(head, victim.careers_url, () => null);
     const m = readJson(reg(head, 'contributions', `${victim.contribution}.json`));
     writeJson(reg(head, 'contributions', `${victim.contribution}.json`), { ...m, rows: m.rows - 1 });
-    writeChangelog(head);
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /was removed; rows are retired \(retired: true, retired_reason\), never deleted/);
@@ -294,7 +303,6 @@ test('--base: a new row on an already merged manifest fails', () => {
     writeJson(reg(head, 'contributions', `${id}.json`), { ...m, rows: m.rows + 1 });
     mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
     writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, contribution: id, added: m.date })}\n`);
-    writeChangelog(head);
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /which is already merged; new rows come with their own manifest/);
@@ -348,7 +356,6 @@ function addWorkdayVariant(dir, board, workdayHost) {
   const rows = [...readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)), row];
   rows.sort(compareRows);
   writeFileSync(path, `${rows.map((r) => JSON.stringify(r)).join('\n')}\n`);
-  writeChangelog(dir);
   return rows.map((r) => r.careers_url);
 }
 
@@ -368,7 +375,7 @@ test('--base: a letter-case variant of a merged board fails on the new row, even
     assert.ok(newLine < keptLine, 'the variant sorts before the merged row');
     const r = run(head, ['--base', ROOT]);
     assert.equal(r.status, 1);
-    const file = 'seeds/employers/boards/workday/c.ndjson';
+    const file = 'employers/boards/workday/c.ndjson';
     assert.match(r.stderr, new RegExp(`${file}:${newLine}: careers_url differs only in letter case from ${file}:${keptLine}, which is already merged and keeps its spelling`));
     assert.ok(!r.stderr.includes(`${file}:${keptLine}: `), `the merged row must not be the one reported:\n${r.stderr}`);
   } finally { rmSync(head, { recursive: true, force: true }); }
@@ -382,50 +389,143 @@ test('--base: a merged Workday board added again under the other host form fails
     const keptLine = order.indexOf(GUIDEWIRE) + 1;
     const r = run(head, ['--base', ROOT]);
     assert.equal(r.status, 1);
-    const file = 'seeds/employers/boards/workday/g.ndjson';
+    const file = 'employers/boards/workday/g.ndjson';
     assert.match(r.stderr, new RegExp(`${file}:${newLine}: the same Workday board as ${file}:${keptLine}, which is already merged and keeps its spelling, under the other host form`));
     assert.ok(!r.stderr.includes(`${file}:${keptLine}: `), r.stderr);
   } finally { rmSync(head, { recursive: true, force: true }); }
 });
 
-test('boards/ above the hard limit fails', () => {
+test('boards/ has no hard size limit: above 25 MB it is a warning, never an error', () => {
+  assert.equal(BOARDS_WARN_BYTES, 25 * 1024 * 1024);
   const head = checkout();
   try {
-    const big = { ...NEW_ROW, name: 'x'.repeat(BOARDS_MAX_BYTES) };
+    // One oversized row: its name is an error of its own, but the size is only a warning.
     mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
-    writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify(big)}\n`);
-    const r = run(head);
-    assert.equal(r.status, 1);
-    assert.match(r.stderr, /seeds\/employers\/boards: boards\/ is 5\.\d\d MB; the limit is 5 MB/);
+    writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(BOARDS_WARN_BYTES) })}\n`);
+    const { errors, warnings } = validateRegistry({ root: head });
+    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is 25\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
+    assert.deepEqual(errors.filter((e) => e.file === 'employers/boards'), [], 'the size is never an error');
   } finally { rmSync(head, { recursive: true, force: true }); }
 });
 
-test('boards/ above 1 MB is a warning', () => {
-  const head = checkout();
-  try {
-    mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
-    writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(1100 * 1024) })}\n`);
-    const { warnings } = validateRegistry({ root: head });
-    assert.ok(warnings.some((w) => w.file === 'seeds/employers/boards' && /boards\/ is 1\.\d\d MB/.test(w.message)), JSON.stringify(warnings));
-  } finally { rmSync(head, { recursive: true, force: true }); }
+test('boards/ under the warning size is quiet, and the threshold is the only trigger', () => {
+  const quiet = validateRegistry({ root: ROOT });
+  assert.deepEqual(quiet.warnings, []);
+  const tight = validateRegistry({ root: ROOT, boardsWarnBytes: 1024 });
+  assert.deepEqual(tight.errors, []);
+  assert.deepEqual(tight.warnings.map((w) => w.file), ['employers/boards']);
 });
 
-test('CHANGELOG.md is generated from the manifests and kept in sync', () => {
+test('CHANGELOG.md is generated by --write-changelog and not compared with the manifests', () => {
   const manifests = readdirSync(join(REGISTRY, 'contributions')).map((f) => readJson(join(REGISTRY, 'contributions', f)));
-  assert.equal(readFileSync(join(REGISTRY, 'CHANGELOG.md'), 'utf8'), renderChangelog(manifests));
   for (const m of manifests) assert.ok(renderChangelog(manifests).includes(`\`${m.id}\` (${m.rows} boards, source \`${m.source}\`): ${m.attribution}`));
 
   const head = checkout();
   try {
     writeFileSync(reg(head, 'CHANGELOG.md'), '# edited by hand\n');
-    assert.equal(run(head).status, 1);
+    const stale = run(head);
+    assert.equal(stale.status, 0, stale.stderr);
+    assert.equal(stale.stderr, '', 'a stale CHANGELOG.md is neither an error nor a warning');
     const r = run(head, ['--write-changelog']);
     assert.equal(r.status, 0, r.stderr);
-    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), readFileSync(join(REGISTRY, 'CHANGELOG.md'), 'utf8'));
+    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), renderChangelog(manifests));
+    // writeChangelog() is what --write-changelog calls.
+    writeFileSync(reg(head, 'CHANGELOG.md'), '');
+    writeChangelog(head);
+    assert.equal(readFileSync(reg(head, 'CHANGELOG.md'), 'utf8'), renderChangelog(manifests));
   } finally { rmSync(head, { recursive: true, force: true }); }
 });
 
 test('the CLI rejects unknown arguments and a missing --base directory with exit 2', () => {
   assert.equal(run(ROOT, ['--nope']).status, 2);
   assert.equal(run(ROOT, ['--base', join(tmpdir(), 'co-employers-does-not-exist')]).status, 2);
+});
+
+// ── 5. GitHub Actions output ──────────────────────────────────────────────
+
+test('annotation(): one workflow command per finding, escaped as the runner expects', () => {
+  assert.equal(
+    annotation('error', { file: 'employers/boards/greenhouse/a.ndjson', line: 2, message: 'duplicate careers_url' }),
+    '::error file=employers/boards/greenhouse/a.ndjson,line=2::duplicate careers_url',
+  );
+  // A finding about a whole file or directory (line 0) carries no line.
+  assert.equal(annotation('warning', { file: 'employers/boards', line: 0, message: 'big' }), '::warning file=employers/boards::big');
+  // Message: %, CR and LF. Property: those plus ":" and ",".
+  assert.equal(escapeCommandData('100% done\r\nnext: a,b'), '100%25 done%0D%0Anext: a,b');
+  assert.equal(escapeCommandProperty('a%b:c,d\n'), 'a%25b%3Ac%2Cd%0A');
+  assert.equal(
+    annotation('error', { file: 'employers/x,y:z.ndjson', line: 1, message: 'line one\nline two 50%' }),
+    '::error file=employers/x%2Cy%3Az.ndjson,line=1::line one%0Aline two 50%25',
+  );
+});
+
+test('in GitHub Actions, the garbage fixture fails with one ::error per finding and a step summary', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-employers-summary-'));
+  const summary = join(tmp, 'summary.md');
+  try {
+    const r = run(GARBAGE, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });
+    assert.equal(r.status, 1, r.stderr);
+    const errorCommands = r.stdout.split('\n').filter((l) => l.startsWith('::error '));
+    const warningCommands = r.stdout.split('\n').filter((l) => l.startsWith('::warning '));
+    assert.equal(errorCommands.length, EXPECTED.length, r.stdout);
+    assert.equal(warningCommands.length, 1, r.stdout);
+    assert.ok(errorCommands.includes('::error file=employers/boards/greenhouse/a.ndjson,line=2::duplicate careers_url, already at employers/boards/greenhouse/a.ndjson:1'), r.stdout);
+    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards'), r.stdout);
+    assert.match(warningCommands[0], /^::warning file=employers\/boards\/lever\/e\.ndjson,line=2::website "euco\.example" is also on /);
+    // The plain per-finding lines are not repeated; the closing count stays.
+    assert.ok(!r.stderr.split('\n').some((l) => l.startsWith('employers/') || l.startsWith('warning: ')), r.stderr);
+    assert.match(r.stderr, new RegExp(`employer registry: ${EXPECTED.length} error\\(s\\), 1 warning\\(s\\)`));
+
+    const md = readFileSync(summary, 'utf8');
+    assert.match(md, /^## Employer registry\n/);
+    assert.ok(md.includes(`**Failed**: ${EXPECTED.length} errors, 1 warning.`), md);
+    const tableRows = md.split('\n').filter((l) => /^\| (error|warning) \|/.test(l));
+    assert.equal(tableRows.length, Math.min(EXPECTED.length + 1, SUMMARY_MAX_FINDINGS));
+    assert.ok(tableRows.some((l) => l.startsWith('| error | employers/boards/greenhouse/a.ndjson | 2 | duplicate careers\\_url')), md);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('in GitHub Actions, a valid registry passes with no ::error and a summary of what it checked', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'co-employers-summary-'));
+  const summary = join(tmp, 'summary.md');
+  try {
+    writeFileSync(summary, '# an earlier step\n');
+    const r = run(ROOT, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(!r.stdout.includes('::error') && !r.stdout.includes('::warning'), r.stdout);
+    const md = readFileSync(summary, 'utf8');
+    assert.ok(md.startsWith('# an earlier step\n## Employer registry\n'), 'the summary is appended, not overwritten');
+    assert.match(md, /\*\*Valid\*\*: \d+ rows in \d+ files, 1 contribution; 0 errors, 0 warnings\./);
+    assert.ok(!md.includes('| Level |'), 'no table without findings');
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('in GitHub Actions without GITHUB_STEP_SUMMARY, annotations still print and nothing breaks', () => {
+  const r = run(GARBAGE, [], { GITHUB_ACTIONS: 'true' });
+  assert.equal(r.status, 1);
+  assert.ok(r.stdout.split('\n').filter((l) => l.startsWith('::error ')).length === EXPECTED.length, r.stdout);
+  assert.ok(!r.stderr.includes('could not write the step summary'), r.stderr);
+});
+
+test('GITHUB_ACTIONS other than "true" keeps the plain output', () => {
+  const r = run(GARBAGE, [], { GITHUB_ACTIONS: 'false' });
+  assert.equal(r.status, 1);
+  assert.ok(!r.stdout.includes('::'), r.stdout);
+  assert.ok(r.stderr.split('\n').some((l) => l.startsWith('employers/boards/greenhouse/a.ndjson:2: duplicate careers_url')), r.stderr);
+});
+
+test('the step summary lists the first findings only, errors first, and makes registry text inert', () => {
+  const errors = Array.from({ length: SUMMARY_MAX_FINDINGS + 5 }, (_, i) => ({ file: 'employers/boards/ashby/a.ndjson', line: i + 1, message: `bad ${i}` }));
+  const warnings = [{ file: 'employers/boards/ashby/b.ndjson', line: 1, message: 'a | pipe, <b>html</b> and `code`\nsecond line' }];
+  const md = renderStepSummary({ errors, warnings, stats: { rows: 0, files: 0, contributions: 0 } });
+  const rows = md.split('\n').filter((l) => /^\| (error|warning) \|/.test(l));
+  assert.equal(rows.length, SUMMARY_MAX_FINDINGS);
+  assert.ok(rows.every((l) => l.startsWith('| error |')), 'errors come before warnings');
+  assert.ok(md.includes(`**Failed**: ${errors.length} errors, 1 warning.`));
+  assert.ok(md.includes('6 more in the job log.'), md);
+
+  const one = renderStepSummary({ errors: [], warnings, stats: { rows: 1, files: 1, contributions: 1 } });
+  const row = one.split('\n').find((l) => l.startsWith('| warning |'));
+  assert.equal(row, '| warning | employers/boards/ashby/b.ndjson | 1 | a \\| pipe, \\<b\\>html\\</b\\> and \\`code\\` second line |');
+  assert.ok(one.includes('**Valid**: 1 row in 1 file, 1 contribution; 0 errors, 1 warning.'), one);
 });

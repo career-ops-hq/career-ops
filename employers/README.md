@@ -49,28 +49,28 @@ it.
 ## Files
 
 ```
-seeds/employers/
+employers/
 ├── README.md               this file
 ├── LICENSE                 CC BY 4.0
 ├── THIRD_PARTY_NOTICES.md  notices for data under a third party's license (none yet)
-├── CHANGELOG.md            one credit line per contribution, generated from the manifests
+├── CHANGELOG.md            one credit line per contribution, generated from the manifests by maintainers
 ├── schema.json             JSON Schema of a row and of a manifest, for editors
 ├── contributions/          one manifest per contribution
 └── boards/<ats>/<initial>.ndjson
 ```
 
-The registry ships with every career-ops install, so `boards/` is kept small:
-CI warns above 1 MB and fails above 5 MB.
+The registry lives in this repository only: a fresh clone has it, but the
+career-ops updater does not copy it to existing installs. CI warns when
+`boards/` passes 25 MB, so a maintainer can look at how the data is stored.
 
 ## Contributing boards
 
-1. Add your rows to the right `boards/<ats>/<initial>.ndjson` files, sorted.
-2. Add one manifest, `contributions/<YYYY-MM-DD>-<your-github-username>.json`
-   (see below). Every new row names it in `contribution`.
-3. Run `node seeds/employers-validate.mjs --write-changelog` from the
-   repository root. It regenerates `CHANGELOG.md` and checks everything.
-4. Open the pull request from the account named in `contributor`. Opening it
-   is how you sign the manifest.
+Contributions open in a few days through a simpler path: one line with the
+board's address and the employer's name, and a short form. You will not need
+to edit these files by hand.
+
+Until then, [open an issue](https://github.com/career-ops-hq/career-ops/issues/new/choose)
+with the board's address and the employer's name, and a maintainer adds it.
 
 What does not get in:
 
@@ -81,11 +81,18 @@ What does not get in:
   as hints;
 - a bulk list without a written `origin`.
 
-A maintainer reviews every manifest before merging. Data contributed to
-`seeds/employers/` is licensed under CC BY 4.0, and you also allow the
+A maintainer reviews every contribution before merging. Data contributed to
+`employers/` is licensed under CC BY 4.0, and you also allow the
 maintainer to distribute it under ODbL 1.0 or CC0 (see [License](#license)).
 
 ## The contribution manifest
+
+Every contribution is recorded in one manifest,
+`contributions/<YYYY-MM-DD>-<github-username>.json`, and each row it adds names
+it in `contribution`. The manifest is the row's provenance: who contributed
+it, where the list came from, and the license it was granted under. The pull
+request that adds it is opened from the account named in `contributor`, and
+opening it is how the manifest is signed.
 
 ```json
 {"id":"2026-11-20-acme","contributor":"github-handle","on_behalf_of":"Acme Inc.","signed_by":"Name of a founder or officer",
@@ -108,18 +115,20 @@ maintainer to distribute it under ODbL 1.0 or CC0 (see [License](#license)).
 | `personal_data` | `false`: the list holds no personal data. |
 | `exclusive` | `false`: the contribution is not exclusive to anyone. |
 | `license`, `also_permits` | `"CC-BY-4.0"` and `["ODbL-1.0","CC0-1.0"]`. |
-| `attribution` | The credit line for `CHANGELOG.md`. Credit, not advertising. |
+| `attribution` | The credit line in `CHANGELOG.md`. Credit, not advertising. |
 | `date` | The contribution date, the same as in the id. |
 
 ## Validation
 
 ```bash
-node seeds/employers-validate.mjs                    # check seeds/employers/
-node seeds/employers-validate.mjs --write-changelog  # regenerate CHANGELOG.md, then check
+node seeds/employers-validate.mjs                    # check employers/
 node seeds/employers-validate.mjs --base <dir>       # also check the changes against another checkout
+node seeds/employers-validate.mjs --write-changelog  # maintainers, on main: regenerate CHANGELOG.md, then check
 ```
 
-Every error names the file, the line and the reason. The checks:
+Every error names the file, the line and the reason. In a pull request, each
+one also appears as an annotation on the line it is about, with a summary on
+the workflow run. The checks:
 
 1. Every row and manifest matches the format above; unknown keys are errors.
 2. `ats`, `region`, `workday_host` and `source` come from their closed lists,
@@ -136,7 +145,10 @@ Every error names the file, the line and the reason. The checks:
 8. Each row names a valid manifest; a pull request adds new rows only with a
    manifest of its own.
 9. A contribution does not change `retired`, and no row is ever deleted.
-10. `boards/` stays under the size limit.
+10. A warning, not an error, when `boards/` passes 25 MB.
+
+`CHANGELOG.md` is not checked against the manifests: a contribution does not
+edit it, and maintainers regenerate it on main.
 
 In a pull request, the `Employer registry validate` workflow runs the
 validator from the base branch against the pull request's files, so a pull

@@ -66,10 +66,11 @@
 /.github/workflows/            @santifer
 /docs/PLUGIN_REVIEW.md         @santifer
 
-# Employer registry: community data that ships with every install, plus the
-# gate that judges it. CI runs the base branch's copy of the validator (and of
-# the URL builder it imports), so a change to either needs an owner's review.
-/seeds/employers/              @santifer
+# Employer registry: community data kept in the repository (the updater does
+# not ship it to installs), plus the gate that judges it. CI runs the base
+# branch's copy of the validator (and of the URL builder it imports), so a
+# change to either needs an owner's review.
+/employers/                    @santifer
 /seeds/employers-validate.mjs  @santifer
 /lib/ats-board-url.mjs         @santifer
 

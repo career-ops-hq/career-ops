@@ -70,7 +70,7 @@ const BLACKLIST_PATH = process.env.CAREER_OPS_BLACKLIST || join(DATA_ROOT, 'data
 export { SLUG_RE };
 
 // The canonical board URL of a registry row ({ats, region, board, workday_host}),
-// built by the same functions VENDORS uses below. seeds/employers/ keys every
+// built by the same functions VENDORS uses below. employers/ keys every
 // row on it.
 export { buildBoardUrl } from './lib/ats-board-url.mjs';
 

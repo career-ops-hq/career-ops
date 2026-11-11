@@ -1,16 +1,16 @@
 name: "🏢 Employer removal"
-description: "Ask for your company's board to be removed from the employer registry (seeds/employers/)"
+description: "Ask for your company's board to be removed from the employer registry (employers/)"
 title: "[Employer removal] "
 labels: ["employer-removal"]
 body:
   - type: markdown
     attributes:
       value: |
-        The [employer registry](https://github.com/career-ops-hq/career-ops/tree/main/seeds/employers) is a community-maintained list of employer job boards that the local scanner can read: one pointer per board (company, ATS, board URL), with no job postings and no personal data.
+        The [employer registry](https://github.com/career-ops-hq/career-ops/tree/main/employers) is a community-maintained list of employer job boards that the local scanner can read: one pointer per board (company, ATS, board URL), with no job postings and no personal data.
 
         If your company's board is listed and you want it removed, fill in this form. Within 7 days a maintainer marks the row `retired: true` with `retired_reason: owner_request`. The row stays in the file, retired, so the same board is not added again by a later contribution, and tools that read the registry stop reading it.
 
-        This issue is public. If you would rather not ask in public, the [removal section of the registry README](https://github.com/career-ops-hq/career-ops/tree/main/seeds/employers#removal-at-an-employers-request) gives an email address.
+        This issue is public. If you would rather not ask in public, the [removal section of the registry README](https://github.com/career-ops-hq/career-ops/tree/main/employers#removal-at-an-employers-request) gives an email address.
   - type: input
     id: company
     attributes:
@@ -22,7 +22,7 @@ body:
     id: boards
     attributes:
       label: Board URL(s) to remove
-      description: The `careers_url` of each row, as it appears in `seeds/employers/boards/`. One per line.
+      description: The `careers_url` of each row, as it appears in `employers/boards/`. One per line.
       placeholder: "https://job-boards.greenhouse.io/acme"
     validations:
       required: true

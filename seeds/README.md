@@ -3,10 +3,9 @@
 | Path | What it is |
 |------|------------|
 | `vc-portfolios.mjs` | Fetchers that pull a public VC portfolio company list and probe each company's ATS, below. |
-| `employers/` | The employer registry: a community-maintained list of employer job boards the local scanner can read, one pointer per board (employer → ATS → board), with no postings and no personal data. Licensed CC BY 4.0. Format, contributing and removal: [employers/README.md](employers/README.md). |
-| `employers-validate.mjs` | The employer registry's static validator. CI runs it on every pull request that touches the registry (`.github/workflows/employers-validate.yml`). |
+| `employers-validate.mjs` | The static validator of the employer registry, which lives at the repository root in [`employers/`](../employers/README.md): a community-maintained list of employer job boards, one pointer per board (employer → ATS → board), with no postings and no personal data, licensed CC BY 4.0. CI runs the validator on every pull request that touches the registry (`.github/workflows/employers-validate.yml`). |
 
-The scanner does not read the employer registry yet: this folder holds the data and the checks that gate it.
+The scanner does not read the employer registry yet.
 
 ## VC portfolio seed fetchers
 

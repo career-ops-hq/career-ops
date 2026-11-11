@@ -2,16 +2,23 @@
 // @ts-check
 /**
  * seeds/employers-validate.mjs: the static gate for the employer registry in
- * seeds/employers/ (pointers from an employer to its ATS board; no postings,
- * no personal data). See seeds/employers/README.md for the format.
+ * employers/ at the repository root (pointers from an employer to its ATS
+ * board; no postings, no personal data). See employers/README.md for the
+ * format. The data is repo-only (not in SYSTEM_PATHS, so the updater does not
+ * ship it); this validator is system code and ships like the rest of seeds/.
  *
  * Run from the root of a checkout:
- *   node seeds/employers-validate.mjs                    validate ./seeds/employers
+ *   node seeds/employers-validate.mjs                    validate ./employers
  *   node seeds/employers-validate.mjs --base <dir>       also check what changed against
- *                                                        <dir>/seeds/employers (CI passes the
+ *                                                        <dir>/employers (CI passes the
  *                                                        base branch checkout)
- *   node seeds/employers-validate.mjs --write-changelog  regenerate seeds/employers/CHANGELOG.md
+ *   node seeds/employers-validate.mjs --write-changelog  regenerate employers/CHANGELOG.md
  *                                                        from the manifests, then validate
+ *                                                        (maintainers, on main)
+ *
+ * In GitHub Actions (GITHUB_ACTIONS=true) every finding is printed as a
+ * workflow command (::error / ::warning with its file and line), so it shows up
+ * on the pull request's diff, and a summary goes to GITHUB_STEP_SUMMARY.
  *
  * The registry is read from the current working directory. The rules come from
  * this file and the files it loads relative to itself (lib/ats-board-url.mjs,
@@ -22,7 +29,7 @@
  * Exit codes: 0 valid (warnings allowed), 1 at least one error, 2 usage error.
  */
 
-import { existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -41,7 +48,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const AGGREGATOR_DOMAINS_PATH = join(HERE, '..', 'data-static', 'aggregator-domains.txt');
 
 /** Where the registry lives, relative to the checkout root. */
-export const REGISTRY_DIR = 'seeds/employers';
+export const REGISTRY_DIR = 'employers';
 
 // ── The format (schema.json describes the same rules for editors; a test keeps them equal) ──
 
@@ -83,9 +90,12 @@ export const NAME_MAX = 80;
 const SLUG_MIN = 2;
 const SEGMENT_MAX = 64;
 
-/** boards/ size: a warning above the first, an error above the second (bytes). */
-export const BOARDS_WARN_BYTES = 1024 * 1024;
-export const BOARDS_MAX_BYTES = 5 * 1024 * 1024;
+/**
+ * boards/ size above which the validator warns (bytes). A warning, never an
+ * error: the registry is repo-only, so its size costs a clone, not an update.
+ * Past this mark a maintainer looks at how the data is stored.
+ */
+export const BOARDS_WARN_BYTES = 25 * 1024 * 1024;
 
 const TOP_LEVEL = Object.freeze(['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'schema.json', 'contributions', 'boards']);
 const TOP_LEVEL_DIRS = new Set(['contributions', 'boards']);
@@ -307,9 +317,9 @@ export function loadAggregatorDomains(path = AGGREGATOR_DOMAINS_PATH) {
 
 const CHANGELOG_HEADER = `# Employer registry changelog
 
-One line per contribution, generated from \`contributions/*.json\`. Do not edit
-this file by hand: run \`node seeds/employers-validate.mjs --write-changelog\`
-from the repository root.
+One line per contribution, generated from \`contributions/*.json\`. A
+contribution does not edit this file: maintainers regenerate it on main with
+\`node seeds/employers-validate.mjs --write-changelog\`.
 `;
 
 /**
@@ -334,7 +344,7 @@ export function renderChangelog(manifests) {
  * @typedef {{file: string, line: number, message: string}} Finding
  * @typedef {{file: string, line: number, row: any, dirAts: string, initial: string}} RowRecord
  * @typedef {{file: string, text: string, data: any}} ManifestRecord
- * @typedef {{exists: boolean, rows: RowRecord[], manifests: Map<string, ManifestRecord>, boardsBytes: number, boardFiles: number, changelog: string|null}} Registry
+ * @typedef {{exists: boolean, rows: RowRecord[], manifests: Map<string, ManifestRecord>, boardsBytes: number, boardFiles: number}} Registry
  */
 
 /** @param {string} p */
@@ -353,7 +363,7 @@ function lstatOrNull(p) {
 function readRegistry(rootDir, report) {
   const err = report || (() => {});
   /** @type {Registry} */
-  const reg = { exists: false, rows: [], manifests: new Map(), boardsBytes: 0, boardFiles: 0, changelog: null };
+  const reg = { exists: false, rows: [], manifests: new Map(), boardsBytes: 0, boardFiles: 0 };
   const dir = join(rootDir, REGISTRY_DIR);
   const st = lstatOrNull(dir);
   if (!st || !st.isDirectory()) {
@@ -373,8 +383,6 @@ function readRegistry(rootDir, report) {
     else if (s.isSymbolicLink()) err(rel, 0, 'must not be a symlink');
     else if (TOP_LEVEL_DIRS.has(name) !== s.isDirectory()) err(rel, 0, `must be a ${TOP_LEVEL_DIRS.has(name) ? 'directory' : 'file'}`);
   }
-  const changelogStat = lstatOrNull(join(dir, 'CHANGELOG.md'));
-  if (changelogStat?.isFile()) reg.changelog = readFileSync(join(dir, 'CHANGELOG.md'), 'utf8');
 
   const cdir = join(dir, 'contributions');
   if (lstatOrNull(cdir)?.isDirectory()) {
@@ -487,10 +495,12 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * Validate the registry under `root` (and, with `base`, what changed relative
  * to the registry under `base`).
  *
- * @param {{root?: string, base?: string|null, aggregatorDomains?: Set<string>, today?: Date}} [opts]
+ * @param {{root?: string, base?: string|null, aggregatorDomains?: Set<string>, today?: Date, boardsWarnBytes?: number}} [opts]
  * @returns {{errors: Finding[], warnings: Finding[], stats: {rows: number, files: number, contributions: number, boardsBytes: number, baseFound: boolean|null}}}
  */
-export function validateRegistry({ root = process.cwd(), base = null, aggregatorDomains = loadAggregatorDomains(), today = new Date() } = {}) {
+export function validateRegistry({
+  root = process.cwd(), base = null, aggregatorDomains = loadAggregatorDomains(), today = new Date(), boardsWarnBytes = BOARDS_WARN_BYTES,
+} = {}) {
   /** @type {Finding[]} */
   const errors = [];
   /** @type {Finding[]} */
@@ -683,18 +693,11 @@ export function validateRegistry({ root = process.cwd(), base = null, aggregator
     }
   }
 
-  if (head.exists) {
-    if (head.boardsBytes > BOARDS_MAX_BYTES) {
-      err(`${REGISTRY_DIR}/boards`, 0, `boards/ is ${(head.boardsBytes / 1048576).toFixed(2)} MB; the limit is ${BOARDS_MAX_BYTES / 1048576} MB while the registry ships with every install`);
-    } else if (head.boardsBytes > BOARDS_WARN_BYTES) {
-      warn(`${REGISTRY_DIR}/boards`, 0, `boards/ is ${(head.boardsBytes / 1048576).toFixed(2)} MB; it ships with every install, and the hard limit is ${BOARDS_MAX_BYTES / 1048576} MB`);
-    }
-    if (head.changelog !== null) {
-      const expected = renderChangelog([...head.manifests.values()].map((m) => m.data));
-      if (head.changelog !== expected) {
-        err(`${REGISTRY_DIR}/CHANGELOG.md`, 0, 'out of date with contributions/: run node seeds/employers-validate.mjs --write-changelog');
-      }
-    }
+  // CHANGELOG.md is not compared with the manifests: a contribution does not
+  // touch it, and maintainers regenerate it on main (--write-changelog).
+  if (head.exists && head.boardsBytes > boardsWarnBytes) {
+    const mb = (/** @type {number} */ n) => `${Number((n / 1048576).toFixed(2))} MB`;
+    warn(`${REGISTRY_DIR}/boards`, 0, `boards/ is ${mb(head.boardsBytes)}, above ${mb(boardsWarnBytes)}; a maintainer should check how the registry is stored`);
   }
 
   let baseFound = null;
@@ -772,13 +775,14 @@ export function writeChangelog(root) {
 
 const USAGE = `Usage: node seeds/employers-validate.mjs [--base <dir>] [--write-changelog]
 
-  Validates seeds/employers/ in the current directory (run it from the repository root).
+  Validates employers/ in the current directory (run it from the repository root).
 
-  --base <dir>        also check the changes against <dir>/seeds/employers: rows are never
+  --base <dir>        also check the changes against <dir>/employers: rows are never
                       deleted, provenance never changes, new rows come with a new manifest,
                       and a contribution does not retire rows. A <dir> without a registry
                       counts as an empty one.
-  --write-changelog   regenerate seeds/employers/CHANGELOG.md from contributions/, then validate.
+  --write-changelog   regenerate employers/CHANGELOG.md from contributions/, then validate.
+                      For maintainers on main: a contribution does not edit CHANGELOG.md.
   --help              show this text.`;
 
 /** @param {string[]} argv */
@@ -800,6 +804,63 @@ function parseArgs(argv) {
 
 /** @param {Finding} f */
 const where = (f) => (f.line ? `${f.file}:${f.line}` : f.file);
+
+// ── GitHub Actions output ───────────────────────────────────────────────
+// Workflow commands: https://docs.github.com/actions/reference/workflow-commands-for-github-actions
+// The escaping is the one @actions/core applies: the message escapes %, CR
+// and LF; a property value (file=) also escapes ":" and ",".
+
+/** @param {string} text */
+export const escapeCommandData = (text) => text.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+
+/** @param {string} text */
+export const escapeCommandProperty = (text) => escapeCommandData(text).replace(/:/g, '%3A').replace(/,/g, '%2C');
+
+/**
+ * One finding as a workflow command. A finding about a whole file (line 0)
+ * carries no line.
+ * @param {'error'|'warning'} level
+ * @param {Finding} f
+ */
+export function annotation(level, f) {
+  const props = [`file=${escapeCommandProperty(f.file)}`];
+  if (f.line) props.push(`line=${f.line}`);
+  return `::${level} ${props.join(',')}::${escapeCommandData(f.message)}`;
+}
+
+/** How many findings the step summary lists; the job log has every one. */
+export const SUMMARY_MAX_FINDINGS = 50;
+
+/** Text from the registry, made inert inside a markdown table cell. @param {string} text */
+const escapeMarkdown = (text) => text.replace(/[\r\n]+/g, ' ').replace(/[\\`*_[\]<>|#~!]/g, (c) => `\\${c}`);
+
+/**
+ * The markdown summary written to GITHUB_STEP_SUMMARY: the counts, then a table
+ * of the first SUMMARY_MAX_FINDINGS findings, errors first.
+ * @param {{errors: Finding[], warnings: Finding[], stats: {rows: number, files: number, contributions: number}}} result
+ */
+export function renderStepSummary({ errors, warnings, stats }) {
+  const plural = (/** @type {number} */ n, /** @type {string} */ word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const lines = ['## Employer registry', ''];
+  const counts = `${plural(errors.length, 'error')}, ${plural(warnings.length, 'warning')}`;
+  lines.push(errors.length
+    ? `**Failed**: ${counts}.`
+    : `**Valid**: ${plural(stats.rows, 'row')} in ${plural(stats.files, 'file')}, ${plural(stats.contributions, 'contribution')}; ${counts}.`);
+  const findings = [
+    ...errors.map((f) => ({ level: 'error', f })),
+    ...warnings.map((f) => ({ level: 'warning', f })),
+  ];
+  if (findings.length) {
+    lines.push('', '| Level | File | Line | Message |', '|---|---|---|---|');
+    for (const { level, f } of findings.slice(0, SUMMARY_MAX_FINDINGS)) {
+      lines.push(`| ${level} | ${escapeMarkdown(f.file)} | ${f.line || ''} | ${escapeMarkdown(f.message)} |`);
+    }
+    if (findings.length > SUMMARY_MAX_FINDINGS) {
+      lines.push('', `${findings.length - SUMMARY_MAX_FINDINGS} more in the job log.`);
+    }
+  }
+  return `${lines.join('\n')}\n`;
+}
 
 function main() {
   let opts;
@@ -827,8 +888,23 @@ function main() {
   if (base && stats.baseFound === false) {
     console.log(`base ${opts.base} has no ${REGISTRY_DIR}/ yet: every row and manifest counts as new`);
   }
-  for (const w of warnings) console.error(`warning: ${where(w)}: ${w.message}`);
-  for (const e of errors) console.error(`${where(e)}: ${e.message}`);
+  const inActions = process.env.GITHUB_ACTIONS === 'true';
+  if (inActions) {
+    // Workflow commands go to stdout, where the runner reads them.
+    for (const w of warnings) console.log(annotation('warning', w));
+    for (const e of errors) console.log(annotation('error', e));
+    const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+    if (summaryPath) {
+      try {
+        appendFileSync(summaryPath, renderStepSummary({ errors, warnings, stats }));
+      } catch (e) {
+        console.error(`employers-validate: could not write the step summary: ${/** @type {Error} */ (e).message}`);
+      }
+    }
+  } else {
+    for (const w of warnings) console.error(`warning: ${where(w)}: ${w.message}`);
+    for (const e of errors) console.error(`${where(e)}: ${e.message}`);
+  }
   if (errors.length) {
     console.error(`\nemployer registry: ${errors.length} error(s), ${warnings.length} warning(s)`);
     process.exit(1);

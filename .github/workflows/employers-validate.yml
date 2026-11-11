@@ -1,13 +1,13 @@
 name: 'Employer registry validate'
 
-# Runs on PRs that touch the employer registry (seeds/employers/) or its gate.
+# Runs on PRs that touch the employer registry (employers/) or its gate.
 # Uses `pull_request` (NOT pull_request_target), read-only permissions, and NO
 # secrets: the validator is static. It parses the registry files, makes no
 # network request and has no dependencies to install.
 on:
   pull_request:
     paths:
-      - 'seeds/employers/**'
+      - 'employers/**'
       - 'seeds/employers-validate.mjs'
       - 'lib/ats-board-url.mjs'
 

@@ -11,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -39,7 +39,7 @@ test('keeps its security posture: pull_request, contents: read, no secrets', () 
 
 test('runs when the registry, the validator or the URL builder changes', () => {
   const paths = (wf.on || wf[true]).pull_request.paths;
-  for (const p of ['seeds/employers/**', 'seeds/employers-validate.mjs', 'lib/ats-board-url.mjs']) {
+  for (const p of ['employers/**', 'seeds/employers-validate.mjs', 'lib/ats-board-url.mjs']) {
     assert.ok(paths.includes(p), `paths must include ${p}`);
   }
 });
@@ -81,16 +81,19 @@ test('pins every action to a full commit SHA', () => {
 // ── The validator behaves as the workflow assumes ─────────────────────────
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
-const run = (cwd, script = VALIDATOR, args = []) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8' });
+// Plain output whatever runs the suite: in GitHub Actions the validator prints
+// workflow commands instead (tests/employers-registry.test.mjs covers those).
+const { GITHUB_ACTIONS: _ga, GITHUB_STEP_SUMMARY: _gss, ...PLAIN_ENV } = process.env;
+const run = (cwd, script = VALIDATOR, args = []) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', env: PLAIN_ENV });
 
 /** A stand-in for the PR checkout: the real registry plus whatever the case adds. */
 function prCheckout(mutate) {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-pr-'));
-  cpSync(join(ROOT, 'seeds', 'employers'), join(dir, 'seeds', 'employers'), { recursive: true });
+  cpSync(join(ROOT, 'employers'), join(dir, 'employers'), { recursive: true });
   if (mutate) mutate(dir);
   return dir;
 }
-const plantBadRow = (dir) => writeFileSync(join(dir, 'seeds/employers/boards/greenhouse/z.ndjson'), '{"ats":"greenhouse","board":"oops"}\n');
+const plantBadRow = (dir) => writeFileSync(join(dir, 'employers/boards/greenhouse/z.ndjson'), '{"ats":"greenhouse","board":"oops"}\n');
 
 test('the base validator accepts the PR registry it is run in', () => {
   const pr = prCheckout();
@@ -112,6 +115,7 @@ test('the base validator judges the PR directory it is run in', () => {
 test('a validator rewritten inside the PR is not the one that runs', () => {
   const pr = prCheckout((dir) => {
     plantBadRow(dir);
+    mkdirSync(join(dir, 'seeds'), { recursive: true });
     writeFileSync(join(dir, 'seeds', 'employers-validate.mjs'), 'console.log("ok");\n');
   });
   try {
