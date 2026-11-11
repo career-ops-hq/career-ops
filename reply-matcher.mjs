@@ -714,8 +714,12 @@ export function classifyReply(cand) {
 
   // Evidence pass (#6167): a real invite often opens with "thank you for your
   // application". A calendar invite, booking link or proposed time outranks
-  // the receipt wording below; receipt wording alone still reads as one.
-  const invite = inviteEvidence({ subject, text: body, from: cand.from || '' });
+  // everything below; a direct invitation without one (a named sender, "we
+  // would like to invite you to an interview") skips the receipt check and is
+  // an Interview unless it asks for an action first. Receipt wording alone
+  // still reads as one. Dates are read relative to when the email arrived.
+  const received = new Date(cand?.received_at ?? cand?.receivedAt ?? cand?.email_date ?? cand?.date ?? NaN);
+  const invite = inviteEvidence({ subject, text: body, from: cand.from || '', ...(Number.isNaN(received.getTime()) ? {} : { date: received }) });
   if (invite.invite && invite.strong > 0) {
     return {
       type: 'Interview',
@@ -725,7 +729,7 @@ export function classifyReply(cand) {
   }
 
   const isAuto = check(autoKeywords);
-  if (isAuto) {
+  if (isAuto && !invite.invite) {
     return {
       type: 'Auto-confirmation',
       evidence: Array.from(new Set(evidence)),
@@ -746,12 +750,12 @@ export function classifyReply(cand) {
   }
 
   const hasInterviewKeywords = check(interviewKeywords);
-  const isInterview = signal === 'interview_invite' || hasInterviewKeywords;
+  const isInterview = signal === 'interview_invite' || hasInterviewKeywords || invite.invite;
   if (isInterview) {
     if (signal === 'interview_invite' && !evidence.includes('interview_invite')) evidence.push('interview_invite');
     return {
       type: 'Interview',
-      evidence: Array.from(new Set(evidence)),
+      evidence: Array.from(new Set(invite.invite ? [...evidence, ...invite.reasons] : evidence)),
       suggestedTrackerUpdate: 'Interview'
     };
   }

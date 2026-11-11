@@ -735,16 +735,19 @@ function extractPanel(text) {
  * an invite (so unrelated text does not gain a spurious constraint).
  *
  * @param {string} text
+ * @param {{classification?: string}} [options] - the caller's final classification
+ *   (analyzeInvite's evidence pass can promote an email to `invite`); defaults to classifyEmail's.
  * @returns {Array<{key: string, tag: string, detail?: string}>}
  */
-export function extractConstraints(text) {
+export function extractConstraints(text, options = {}) {
   if (!text || typeof text !== 'string') return [];
   const out = [];
   const add = (key, detail) => out.push({ key, tag: `[constraint:${key}]`, ...(detail ? { detail } : {}) });
   for (const { key, test } of CONSTRAINT_DETECTORS) if (test(text)) add(key);
   const panel = extractPanel(text);
   if (panel) add('panel', panel.join('; '));
-  if (classifyEmail(text).classification === 'invite' && !statesDuration(text)) add('length-not-stated');
+  const classification = options.classification ?? classifyEmail(text).classification;
+  if (classification === 'invite' && !statesDuration(text)) add('length-not-stated');
   return out;
 }
 
@@ -997,8 +1000,6 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
     // unaffected.
     isAIInterviewer: isAIInterviewerPlatform(text),
   };
-  // Additive (#5732): top-level so every existing key keeps its shape.
-  const constraints = extractConstraints(text);
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
   const phrases = classifyEmail(text);
@@ -1013,6 +1014,9 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
     if (evidence.invite) classification = 'invite';
     else if (classification === 'invite' && evidence.receipt) classification = 'unknown';
   }
+  // Additive (#5732): top-level so every existing key keeps its shape. Read after
+  // the evidence pass, so a promoted invite still gets length-not-stated.
+  const constraints = extractConstraints(text, { classification });
   const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
   // Additive (#6092): appended last so every existing key keeps its position.
   // null unless the text is an invite and the draft was not suppressed.

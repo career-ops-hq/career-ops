@@ -77,6 +77,24 @@ test('proposed times in EN, DE and RU formats', () => {
   assert.equal(when('your interview with Sam on Friday, 20th of November at 12 pm'), '2026-11-20T12:00');
   assert.equal(when('a 12 month contract'), '', 'a bare number is not a time');
   assert.equal(when('see you on 01.01.2020 at 10:00'), '', 'outside the window around the email date');
+  assert.equal(when('on 11/20/26 at 10:30 am'), '2026-11-20T10:30', 'a second part over 12 is the day: US month/day');
+  assert.equal(when('on 31.11.2026 at 10:00'), '', 'a day the month does not have is not a date');
+  assert.equal(when('20 Nov 2026 at 10:00; 21.11.2026 at 11:00'), '2026-11-20T10:00', 'the first date in text order, whatever its format');
+});
+
+test('booking links are matched on the host, not on text in the URL', () => {
+  const base = { from: 'Maria Lopez <maria.lopez@acme.example>', subject: 'Your application to Acme', text: 'Thank you for applying. We received your application.', date: REF };
+  assert.equal(inviteEvidence({ ...base, links: ['https://local.com/privacy'] }).bookingLink, '');
+  assert.equal(inviteEvidence({ ...base, links: ['https://local.com/privacy'] }).invite, false);
+  const e = inviteEvidence({ ...base, text: 'Please book a slot for your interview.', links: ['https://cal.com/maria/interview'] });
+  assert.match(e.bookingLink, /^https:\/\/cal\.com\//);
+});
+
+test('an unrelated time does not cancel conditional wording', () => {
+  const e = inviteEvidence({ from: 'careers@globex.example', subject: 'Thank you for applying to Globex', date: REF,
+    text: 'Thank you for applying. If there is a match, we will invite you to an interview. Our office reopens on 05.11.2026 at 09:00.' });
+  assert.equal(e.invite, false, e.reasons.join('; '));
+  assert.equal(e.receipt, true);
 });
 
 // ── Callers ───────────────────────────────────────────────────────────
@@ -108,4 +126,22 @@ test('classifyReply: an invite that opens with receipt wording is an Interview, 
   assert.equal(invite.suggestedTrackerUpdate, 'Interview');
   const receipt = classifyReply({ from: 'no-reply@globex.example', subject: 'Application received', body_snippet: 'Thank you for applying. We received your application.' });
   assert.equal(receipt.type, 'Auto-confirmation');
+  const direct = classifyReply({ from: 'Tom Weiss <tom.weiss@initech.example>', subject: 'Your application at Initech',
+    body_snippet: 'Thank you for applying. We would like to invite you to an interview with our product team.' });
+  assert.equal(direct.type, 'Interview', 'a direct invitation from a person, no strong signal');
+});
+
+test('classifyReply reads a proposed time relative to the received date', () => {
+  const r = classifyReply({ from: 'Tom Weiss <tom.weiss@initech.example>', subject: 'Interview', received_at: '2026-03-10T08:00:00Z',
+    body_snippet: 'Thank you for applying. See you on 12.03.2026 at 10:30 am: https://teams.microsoft.com/l/meetup-join/abc' });
+  assert.equal(r.type, 'Interview');
+  assert.ok(r.evidence.some((e) => /proposed time 2026-03-12 10:30/.test(e)), r.evidence.join('; '));
+});
+
+test('analyzeInvite: an invite promoted by the evidence pass still gets length-not-stated', () => {
+  const d = new Date(Date.now() + 5 * 864e5);
+  const date = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+  const r = analyzeInvite(`Hi Alex, here is the link for our call on ${date} at 10:30 am: https://teams.microsoft.com/l/meetup-join/abc`, [], { clarificationDraft: false });
+  assert.equal(r.classification, 'invite');
+  assert.ok(r.constraints.some((c) => c.key === 'length-not-stated'));
 });
