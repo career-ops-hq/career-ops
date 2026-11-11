@@ -146,7 +146,7 @@ const countries = (text, codes = false) => {
     for (const raw of text.split(/[;·|]/)) {
       const segment = raw.trim();
       if (!segment) continue;
-      const stateCodes = uspsStateCodesBeatingIso(segment.replace(/\s*\(hybrid\)\s*$/, ''));
+      const stateCodes = uspsStateCodesBeatingIso(withoutTrailingHybrid(segment));
       for (const token of segment.split(/[,;/|()\s-]+/)) {
         if (stateCodes.has(token)) continue;
         if (/^[a-z]{2,3}$/.test(token) && !PROSE_WORD_CODES.has(token)) {
@@ -158,6 +158,33 @@ const countries = (text, codes = false) => {
     }
   }
   return found;
+};
+const withoutTrailingHybrid = (segment) => segment.replace(/\s*\(hybrid\)\s*$/, '');
+const isoCountryCode = (token) => {
+  const name = fold(countryNameFromIso(token));
+  return COUNTRY_NAMES.find(country => country.name === name)?.code || '';
+};
+const recognizedStateCodes = (text) => {
+  const found = new Set();
+  for (const raw of text.split(/[;·|]/)) {
+    const segment = withoutTrailingHybrid(raw.trim());
+    if (!segment) continue;
+    for (const code of uspsStateCodesBeatingIso(segment)) found.add(code);
+  }
+  return found;
+};
+// A state code is a US place. A policy whose own country uses those letters
+// keeps the code: Germany still accepts "Bremen, DE", and India still accepts
+// "Pune, IN". Every other policy sees the United States, so France rejects
+// "Paris, ID".
+const stateOutsideAllowedCountries = (text, allowed) => {
+  if (allowed.has('US')) return false;
+  for (const code of recognizedStateCodes(text)) {
+    const iso = isoCountryCode(code);
+    if (iso && allowed.has(iso)) continue;
+    return true;
+  }
+  return false;
 };
 // Config country lists and structured applicant-country fields have an exact
 // country token, unlike prose where "in", "it" or "no" are ordinary words.
@@ -328,6 +355,7 @@ export function buildWorkplacePolicy(policy) {
       if (!has(loc, onsite)) return fail(loc ? 'onsite_outside_allowed_locations' : 'location_unknown');
       const found = countries(loc, true);
       if (found.size && ![...found].some(c => localCodes.has(c))) return fail('onsite_country_restricted');
+      if (stateOutsideAllowedCountries(loc, localCodes)) return fail('onsite_country_restricted');
       return { eligible: true, reason: 'onsite_location_allowed' };
     }
     // Explicit structured countries narrow a covering region. Europe + UK-only
@@ -336,6 +364,7 @@ export function buildWorkplacePolicy(policy) {
     const geoLoc = geographyText(loc);
     const locationCountries = countries(geoLoc, true);
     if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c))) return fail('remote_country_restricted');
+    if (stateOutsideAllowedCountries(geoLoc, homeCodes)) return fail('remote_country_restricted');
     const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHomeGeography(clause));
     const conditionalRegion = description.split(/[.!?;\n]+/).some(clause => REMOTE.test(clause) && has(clause, regions)
       && /\bwhere (?:we|the company|the employer) (?:have|has) (?:a |an |our )?hiring presence\b/.test(clause));
