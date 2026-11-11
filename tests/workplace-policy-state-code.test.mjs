@@ -199,4 +199,6 @@ test('a state code is US evidence unless the policy country uses those letters',
   assert.equal(us('Remote Europe, DE').reason, 'remote_country_restricted');
   assert.equal(germany('Remote Europe, DE').eligible, true);
   assert.equal(spain('Remote Europe, DE').reason, 'remote_country_restricted');
+  assert.equal(us('Remote Germany, DE').reason, 'remote_country_restricted');
+  assert.equal(germany('Remote Germany, DE').eligible, true);
 });

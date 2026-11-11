@@ -196,18 +196,18 @@ const stateMatchesAllowedCountry = (text, allowed) => {
     return Boolean(iso && allowed.has(iso));
   });
 };
-// A listed state can answer a remote country check. For a US policy any
-// recognized state does. Another policy can use the code's own country only
-// when that place did not name a different country. "Remote, SC, US" stays
+// A listed state can answer a remote country check only for its own place.
+// A US policy still counts a bare state, but not when that same place names
+// another country. "Remote Germany, DE" stays Germany. "Remote, SC, US" stays
 // the United States, not Seychelles.
 const stateAlternativeForRemote = (text, allowed) => {
   if (!recognizedStateCodes(text).size) return false;
-  if (allowed.has('US')) return true;
   return placeSegments(text).some(segment => {
     const codes = [...recognizedStateCodes(segment)];
     if (!codes.length) return false;
     const named = countries(segment, true);
     if (named.size && ![...named].some(code => allowed.has(code))) return false;
+    if (allowed.has('US')) return true;
     return codes.some(code => {
       const iso = isoCountryCode(code);
       return Boolean(iso && allowed.has(iso));
