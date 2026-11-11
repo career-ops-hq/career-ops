@@ -174,10 +174,13 @@ test('a state code is US evidence unless the policy country uses those letters',
   assert.equal(germany('Berlin, TX | Munich, Germany').reason, 'onsite_country_restricted');
   assert.equal(germany('Remote, Germany | Austin, TX').reason, 'remote_region_allowed');
   assert.equal(germany('Remote | Bremen, DE').reason, 'remote_region_allowed');
+  const presence = 'Remote work in Europe where we have a hiring presence.';
+  assert.equal(germany('Remote | Bremen, DE', '', { description: presence }).reason, 'remote_region_allowed');
   const spain = buildWorkplacePolicy({
     onsite_locations: ['Barcelona'],
     remote_countries: ['Spain'],
     remote_regions: ['Europe'],
   });
   assert.equal(spain('Remote | Bremen, DE').reason, 'remote_country_restricted');
+  assert.equal(spain('Remote | Bremen, DE', '', { description: presence }).reason, 'remote_country_restricted');
 });
