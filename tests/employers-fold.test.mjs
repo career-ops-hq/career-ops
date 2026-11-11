@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
 import { listTree } from '../lib/walk-tree.mjs';
@@ -34,7 +34,8 @@ const DATE = '2026-11-10';
 /** Every file under dir/employers, path → text. */
 function snapshot(dir) {
   const out = {};
-  for (const p of listTree(join(dir, 'employers'))) out[relative(dir, p)] = readFileSync(p, 'utf8');
+  // Keys use `/` on every OS, so a lookup like before['employers/boards/greenhouse/n.ndjson'] also works on Windows.
+  for (const p of listTree(join(dir, 'employers'))) out[relative(dir, p).split(sep).join('/')] = readFileSync(p, 'utf8');
   return out;
 }
 
