@@ -873,3 +873,56 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#22 expected [], got ${JSON.stringify(atRisk)}`);
   }
 }
+
+// ── 23. An update delivered the file, then the install took a NEWER upstream version ──
+//    An update installs v2. The install then takes upstream's v3 of that file
+//    ahead of the next release, in its own commit (a fix it needed early).
+//    Upstream ships v4. The worktree differs from what the update delivered,
+//    so the file is a candidate, and because an update commit changed it, the
+//    "did upstream publish this content" check of case 22 never runs for it.
+//    The file is reported, preserved, and the next update commit does not
+//    change it, so v2 stays the reference and the file is pinned on every
+//    later update: it stops receiving upstream changes. Its content is
+//    upstream's own, published after the version the update delivered.
+//
+//    The direction is what separates this from case 17: there the install
+//    went back to a version OLDER than the delivered one, which is a choice
+//    the user made and stays reported (#3129).
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'take upstream pdf.md ahead of the release');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 0) {
+    pass('a newer upstream version taken after an update is not reported');
+  } else {
+    fail(`#23 expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 24. ...and a local edit on top of that newer version is still the user's ──
+//    Case 23 drops a file only when its exact content is a newer upstream
+//    version. Editing it afterwards makes content upstream never shipped, which
+//    is the #2337 case and has to stay reported.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v3 plus a local fix\n');
+  repo.g('commit', '-qam', 'take upstream pdf.md and fix it');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('a local edit on top of a newer upstream version is still reported (#2337)');
+  } else {
+    fail(`#24 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}

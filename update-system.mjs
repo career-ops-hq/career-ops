@@ -2538,6 +2538,73 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
       }
     }
 
+    // Files an update delivered that still differ from what it delivered. The
+    // content is upstream's when upstream published it AFTER the delivered
+    // version: the install took a newer upstream file ahead of a release, in a
+    // commit of its own. Reporting it preserves it, the next update commit then
+    // does not change it, and the delivered version stays the reference on
+    // every later update, so the file never updates again. The direction
+    // matters: content upstream published BEFORE the delivered version is a
+    // revert the user chose, and stays reported (#3129).
+    const deliveredDiffers = [...changedLocally].filter((file) => deliveredBy.has(file));
+    if (deliveredDiffers.length > 0) {
+      try {
+        // Blob each update commit installed, per file.
+        const deliveredBlob = new Map();
+        for (const [commit, files] of byCommit) {
+          const pending = files.filter((file) => changedLocally.has(file));
+          for (const batch of argvBatches(pending)) {
+            for (const line of runGit('ls-tree', '-r', '--full-tree', commit, '--', ...batch).split('\n')) {
+              const tab = line.indexOf('\t');
+              if (tab < 0) continue;
+              deliveredBlob.set(line.slice(tab + 1), line.slice(0, tab).split(' ')[2]);
+            }
+          }
+        }
+        // Worktree blob per file (the new side of `git diff --raw`). A zero sha
+        // means git did not hash the worktree file; it stays reported.
+        const worktreeBlob = new Map();
+        for (const batch of argvBatches(deliveredDiffers)) {
+          for (const line of runGit('diff', '--raw', '--no-abbrev', '--no-renames', upstreamRef, '--', ...batch).split('\n')) {
+            if (!line.startsWith(':')) continue;
+            const tab = line.indexOf('\t');
+            const sha = line.slice(0, tab).split(' ')[3];
+            if (sha && !/^0+$/.test(sha)) worktreeBlob.set(line.slice(tab + 1), sha);
+          }
+        }
+        // Upstream history newest first: the blobs seen for a path before the
+        // most recent publication of its delivered blob are the newer ones.
+        const publishedRange = mergeBase ? `${mergeBase}..${upstreamRef}` : upstreamRef;
+        const newer = new Map();
+        const reachedDelivered = new Set();
+        for (const batch of argvBatches(deliveredDiffers)) {
+          const log = runGit('log', '--topo-order', '--raw', '--no-abbrev', '--no-renames', '--format=%x1e%H', publishedRange, '--', ...batch);
+          for (const line of log.split('\n')) {
+            if (!line.startsWith(':')) continue;
+            const tab = line.indexOf('\t');
+            const path = line.slice(tab + 1);
+            const sha = line.slice(0, tab).split(' ')[3];
+            if (!sha || /^0+$/.test(sha) || reachedDelivered.has(path)) continue;
+            if (sha === deliveredBlob.get(path)) {
+              reachedDelivered.add(path);
+              continue;
+            }
+            if (!newer.has(path)) newer.set(path, new Set());
+            newer.get(path).add(sha);
+          }
+        }
+        for (const file of deliveredDiffers) {
+          // Only when the delivered blob was found: without it, newer and older
+          // cannot be told apart, and over-reporting is the safe side.
+          if (!reachedDelivered.has(file)) continue;
+          const sha = worktreeBlob.get(file);
+          if (sha && newer.get(file)?.has(sha)) changedLocally.delete(file);
+        }
+      } catch {
+        // Unreadable history keeps the candidates: over-report.
+      }
+    }
+
     // Files no update commit ever changed. Upstream's own history decides
     // whether the current content is still attributable to the user: content
     // that upstream published for the path since the merge-base is upstream's
