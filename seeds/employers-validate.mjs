@@ -16,6 +16,12 @@
  *                                                        from the manifests, then validate
  *                                                        (maintainers, on main)
  *
+ * The contribution inbox, employers/inbox/ (seeds/employers-inbox.mjs), is
+ * checked too: file names, at most 5,000 lines a file, the short line format,
+ * a board URL that builds, no personal data, and each board once across the
+ * inbox. A board that is already in boards/ is a warning, not an error:
+ * maintainers drop it when they fold the inbox in (seeds/employers-fold.mjs).
+ *
  * In GitHub Actions (GITHUB_ACTIONS=true) every finding is printed as a
  * workflow command (::error / ::warning with its file and line), so it shows up
  * on the pull request's diff, and a summary goes to GITHUB_STEP_SUMMARY.
@@ -43,6 +49,15 @@ import {
   buildBoardUrl,
 } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
+import {
+  INBOX_DIR,
+  INBOX_LINE_KEYS,
+  INBOX_LINE_REQUIRED,
+  INBOX_MAX_LINES,
+  inboxCareersUrl,
+  inboxCoords,
+  parseInboxName,
+} from './employers-inbox.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const AGGREGATOR_DOMAINS_PATH = join(HERE, '..', 'data-static', 'aggregator-domains.txt');
@@ -98,7 +113,10 @@ const SEGMENT_MAX = 64;
 export const BOARDS_WARN_BYTES = 25 * 1024 * 1024;
 
 const TOP_LEVEL = Object.freeze(['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'CHANGELOG.md', 'schema.json', 'contributions', 'boards']);
-const TOP_LEVEL_DIRS = new Set(['contributions', 'boards']);
+// inbox/ exists only while contributions wait to be folded in: git keeps no
+// empty directory, so it is gone after each fold.
+const OPTIONAL_TOP_LEVEL = Object.freeze(['inbox']);
+const TOP_LEVEL_DIRS = new Set(['contributions', 'boards', 'inbox']);
 
 // ATS whose board id is a subdomain label: their providers only match
 // lowercase hosts, so the id is lowercase letters, digits and hyphens.
@@ -374,7 +392,15 @@ function readRegistry(rootDir, report) {
 
   for (const name of readdirSync(dir).sort()) {
     if (name === '.DS_Store') continue;
-    if (!TOP_LEVEL.includes(name)) err(`${REGISTRY_DIR}/${name}`, 0, `unexpected entry; the registry holds only ${TOP_LEVEL.join(', ')}`);
+    if (!TOP_LEVEL.includes(name) && !OPTIONAL_TOP_LEVEL.includes(name)) {
+      err(`${REGISTRY_DIR}/${name}`, 0, `unexpected entry; the registry holds only ${[...TOP_LEVEL, ...OPTIONAL_TOP_LEVEL].join(', ')}`);
+    }
+  }
+  for (const name of OPTIONAL_TOP_LEVEL) {
+    const s = lstatOrNull(join(dir, name));
+    const rel = `${REGISTRY_DIR}/${name}`;
+    if (s?.isSymbolicLink()) err(rel, 0, 'must not be a symlink');
+    else if (s && !s.isDirectory()) err(rel, 0, 'must be a directory');
   }
   for (const name of TOP_LEVEL) {
     const s = lstatOrNull(join(dir, name));
@@ -434,6 +460,178 @@ function readRegistry(rootDir, report) {
   return reg;
 }
 
+/**
+ * @typedef {{file: string, parsed: import('./employers-inbox.mjs').InboxName, lines: Array<{line: number, row: any}>}} InboxFile
+ * @typedef {{file: string, text: string, data: any, parsed: import('./employers-inbox.mjs').InboxName}} InboxSheet
+ * @typedef {{files: InboxFile[], sheets: Map<string, InboxSheet>, lines: number}} Inbox
+ */
+
+/**
+ * Read employers/inbox/ under `rootDir`: the boards files line by line, and
+ * the manifests. A registry with no inbox has an empty one.
+ * @param {string} rootDir
+ * @param {((file: string, line: number, message: string) => void) | null} report
+ * @returns {Inbox}
+ */
+export function readInbox(rootDir, report) {
+  const err = report || (() => {});
+  /** @type {Inbox} */
+  const inbox = { files: [], sheets: new Map(), lines: 0 };
+  const dir = join(rootDir, INBOX_DIR);
+  const st = lstatOrNull(dir);
+  if (!st || !st.isDirectory()) return inbox; // a symlink or a file is reported by readRegistry
+  for (const f of readdirSync(dir).sort()) {
+    if (f === '.DS_Store') continue;
+    const rel = `${INBOX_DIR}/${f}`;
+    const parsed = parseInboxName(f);
+    if ('error' in parsed) { err(rel, 0, parsed.error); continue; }
+    if (!lstatOrNull(join(dir, f))?.isFile()) { err(rel, 0, 'must be a regular file'); continue; }
+    const text = readFileSync(join(dir, f), 'utf8');
+    if (parsed.kind === 'sheet') {
+      let data = null;
+      try { data = JSON.parse(text); } catch (e) { err(rel, 0, `not valid JSON: ${/** @type {Error} */ (e).message}`); }
+      inbox.sheets.set(parsed.id, { file: rel, text, data, parsed });
+      continue;
+    }
+    if (text === '') { err(rel, 0, 'empty file; an inbox file holds at least one board'); continue; }
+    const lines = text.split('\n');
+    if (lines[lines.length - 1] === '') lines.pop();
+    else err(rel, lines.length, 'the file must end with a newline');
+    if (lines.length > INBOX_MAX_LINES) {
+      err(rel, INBOX_MAX_LINES + 1, `${lines.length} lines; an inbox file holds up to ${INBOX_MAX_LINES}: split the list into ${parsed.id}-001.ndjson, ${parsed.id}-002.ndjson, …`);
+    }
+    /** @type {InboxFile} */
+    const rec = { file: rel, parsed, lines: [] };
+    lines.forEach((raw, i) => {
+      const line = i + 1;
+      let content = raw;
+      if (content.endsWith('\r')) { err(rel, line, 'CRLF line ending; use LF'); content = content.slice(0, -1); }
+      if (!content.trim()) { err(rel, line, 'blank line'); return; }
+      let row;
+      try { row = JSON.parse(content); } catch (e) { err(rel, line, `not valid JSON: ${/** @type {Error} */ (e).message}`); return; }
+      if (!row || typeof row !== 'object' || Array.isArray(row)) { err(rel, line, 'each line is one JSON object'); return; }
+      rec.lines.push({ line, row });
+    });
+    inbox.lines += rec.lines.length;
+    inbox.files.push(rec);
+  }
+  return inbox;
+}
+
+/**
+ * Problems with one inbox line: {"ats","board","name"} and, optionally,
+ * "website", plus "region" (greenhouse, lever) or "workday_host" (workday) when
+ * the board is not on the default host. Empty when the line is valid.
+ * @param {any} line
+ * @param {Set<string>} [aggregatorDomains]
+ * @returns {string[]}
+ */
+export function inboxLineProblems(line, aggregatorDomains = loadAggregatorDomains()) {
+  if (!line || typeof line !== 'object' || Array.isArray(line)) return ['each line is one JSON object'];
+  const out = [];
+  for (const k of Object.keys(line)) if (!INBOX_LINE_KEYS.includes(k)) out.push(`unknown key ${show(k)}; an inbox line has only ${INBOX_LINE_KEYS.join(', ')}`);
+  for (const k of INBOX_LINE_REQUIRED) if (!hasOwn(line, k)) out.push(`missing required key ${show(k)}`);
+
+  const atsOk = typeof line.ats === 'string' && BOARD_ATS.includes(line.ats);
+  if (hasOwn(line, 'ats') && !atsOk) out.push(`ats ${show(line.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
+  if (atsOk && hasOwn(line, 'region')) {
+    if (!hasOwn(REGIONAL_BOARD_URL_BUILDERS, line.ats)) out.push(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} boards`);
+    else if (!REGIONS.includes(line.region)) out.push(`region ${show(line.region)} is not one of: ${REGIONS.join(', ')}`);
+  }
+  if (atsOk && hasOwn(line, 'workday_host')) {
+    if (line.ats !== 'workday') out.push('workday_host is only used on workday boards');
+    else if (!WORKDAY_HOSTS.includes(line.workday_host)) out.push(`workday_host ${show(line.workday_host)} is not one of: ${WORKDAY_HOSTS.join(', ')}`);
+  }
+
+  if (hasOwn(line, 'board')) {
+    const p = atsOk ? boardProblem(line.ats, line.board) : (typeof line.board === 'string' ? null : 'board must be a string');
+    if (p) out.push(p);
+  }
+  if (out.length === 0) {
+    const url = inboxCareersUrl(line);
+    if (!url) out.push(`ats ${show(line.ats)} and board ${show(line.board)} do not build a board URL`);
+    else {
+      const agg = aggregatorFor(new URL(url).hostname, aggregatorDomains);
+      if (agg) out.push(`the board URL is on ${agg}, an aggregator (data-static/aggregator-domains.txt)`);
+    }
+  }
+
+  if (hasOwn(line, 'name')) {
+    const p = nameProblem(line.name);
+    if (p) out.push(p);
+  }
+  if (hasOwn(line, 'website')) {
+    const p = websiteProblem(line.website);
+    if (p) out.push(p);
+    else {
+      const agg = aggregatorFor(line.website, aggregatorDomains);
+      if (agg) out.push(`website ${show(line.website)} is an aggregator (data-static/aggregator-domains.txt), not the employer's site`);
+    }
+  }
+  return out;
+}
+
+/** How many line numbers a warning lists before it says "…". */
+const KNOWN_LINES_SHOWN = 20;
+
+/**
+ * Validate the inbox against the registry it sits in. Errors: a bad name, a
+ * bad line, a file over the limit, a board listed twice in the inbox, a
+ * manifest that does not fit its boards files. Warning: boards already in
+ * boards/ (one warning per file, however many lines), which the fold skips.
+ * @param {Inbox} inbox
+ * @param {RowRecord[]} storeRows
+ * @param {{err: (file: string, line: number, message: string) => void, warn: (file: string, line: number, message: string) => void, aggregatorDomains: Set<string>, latestDate: string}} ctx
+ * @returns {number} how many inbox lines are already in the registry
+ */
+function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate }) {
+  /** @type {Map<string, RowRecord>} */
+  const store = new Map();
+  for (const r of storeRows) {
+    if (typeof r.row.careers_url === 'string' && !store.has(boardIdentity(r.row))) store.set(boardIdentity(r.row), r);
+  }
+  /** @type {Map<string, {file: string, line: number}>} */
+  const seen = new Map();
+  /** @type {Map<string, number>} */
+  const linesPerId = new Map();
+  let knownTotal = 0;
+
+  for (const f of inbox.files) {
+    if (f.parsed.date > latestDate) err(f.file, 0, `the date in the file name, ${f.parsed.date}, is in the future`);
+    linesPerId.set(f.parsed.id, (linesPerId.get(f.parsed.id) || 0) + f.lines.length);
+    /** @type {number[]} */
+    const known = [];
+    for (const { line, row } of f.lines) {
+      const problems = inboxLineProblems(row, aggregatorDomains);
+      for (const p of problems) err(f.file, line, p);
+      if (problems.length) continue;
+      const identity = boardIdentity({ ...inboxCoords(row), careers_url: inboxCareersUrl(row) });
+      const first = seen.get(identity);
+      if (first) { err(f.file, line, `the same board as ${first.file}:${first.line}; list a board once`); continue; }
+      seen.set(identity, { file: f.file, line });
+      if (store.has(identity)) known.push(line);
+    }
+    if (known.length) {
+      knownTotal += known.length;
+      const shown = known.slice(0, KNOWN_LINES_SHOWN).join(', ') + (known.length > KNOWN_LINES_SHOWN ? ', …' : '');
+      warn(f.file, known[0], `${known.length} board${known.length === 1 ? ' is' : 's are'} already in the registry and will be skipped when the inbox is folded in (line${known.length === 1 ? '' : 's'} ${shown})`);
+    }
+  }
+
+  for (const [id, s] of inbox.sheets) {
+    if (s.parsed.date > latestDate) err(s.file, 0, `the date in the file name, ${s.parsed.date}, is in the future`);
+    if (!linesPerId.has(id)) err(s.file, 0, `a manifest with no boards: add ${id}.ndjson (or ${id}-001.ndjson, …) next to it`);
+    if (s.data === null) continue; // already reported as invalid JSON
+    const lines = linesPerId.get(id) || 0;
+    for (const p of manifestProblems(id, s.data, lines, latestDate, 'line(s) are in its inbox files')) err(s.file, 0, p);
+    const c = s.data && typeof s.data === 'object' ? s.data.contributor : undefined;
+    if (typeof c === 'string' && GITHUB_LOGIN_RE.test(c) && c.toLowerCase() !== s.parsed.login) {
+      err(s.file, 0, `contributor ${show(c)} is not the login in the file name (${s.parsed.login})`);
+    }
+  }
+  return knownTotal;
+}
+
 // ── Validation ──────────────────────────────────────────────────────────
 
 /**
@@ -442,9 +640,10 @@ function readRegistry(rootDir, report) {
  * @param {any} m
  * @param {number} rowCount  rows that name this contribution
  * @param {string} latestDate  the latest acceptable date (YYYY-MM-DD)
+ * @param {string} [counted]  what rowCount counts, for the message
  * @returns {string[]}
  */
-function manifestProblems(id, m, rowCount, latestDate) {
+function manifestProblems(id, m, rowCount, latestDate, counted = 'row(s) name this contribution') {
   if (!m || typeof m !== 'object' || Array.isArray(m)) return ['a manifest is one JSON object'];
   const out = [];
   for (const k of Object.keys(m)) if (!MANIFEST_KEYS.includes(k)) out.push(`unknown key ${show(k)}`);
@@ -460,7 +659,7 @@ function manifestProblems(id, m, rowCount, latestDate) {
   }
   if (hasOwn(m, 'rows')) {
     if (!Number.isInteger(m.rows) || m.rows < 1) out.push('rows must be a positive integer');
-    else if (m.rows !== rowCount) out.push(`rows is ${m.rows}, but ${rowCount} row(s) name this contribution`);
+    else if (m.rows !== rowCount) out.push(`rows is ${m.rows}, but ${rowCount} ${counted}`);
   }
   if (hasOwn(m, 'source')) {
     const p = sourceProblem(m.source);
@@ -496,7 +695,7 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * to the registry under `base`).
  *
  * @param {{root?: string, base?: string|null, aggregatorDomains?: Set<string>, today?: Date, boardsWarnBytes?: number}} [opts]
- * @returns {{errors: Finding[], warnings: Finding[], stats: {rows: number, files: number, contributions: number, boardsBytes: number, baseFound: boolean|null}}}
+ * @returns {{errors: Finding[], warnings: Finding[], stats: {rows: number, files: number, contributions: number, boardsBytes: number, baseFound: boolean|null, inboxFiles: number, inboxLines: number, inboxKnown: number}}}
  */
 export function validateRegistry({
   root = process.cwd(), base = null, aggregatorDomains = loadAggregatorDomains(), today = new Date(), boardsWarnBytes = BOARDS_WARN_BYTES,
@@ -693,6 +892,9 @@ export function validateRegistry({
     }
   }
 
+  const inbox = readInbox(root, err);
+  const inboxKnown = checkInbox(inbox, head.rows, { err, warn, aggregatorDomains, latestDate });
+
   // CHANGELOG.md is not compared with the manifests: a contribution does not
   // touch it, and maintainers regenerate it on main (--write-changelog).
   if (head.exists && head.boardsBytes > boardsWarnBytes) {
@@ -755,7 +957,10 @@ export function validateRegistry({
   return {
     errors,
     warnings,
-    stats: { rows: head.rows.length, files: head.boardFiles, contributions: head.manifests.size, boardsBytes: head.boardsBytes, baseFound },
+    stats: {
+      rows: head.rows.length, files: head.boardFiles, contributions: head.manifests.size, boardsBytes: head.boardsBytes, baseFound,
+      inboxFiles: inbox.files.length + inbox.sheets.size, inboxLines: inbox.lines, inboxKnown,
+    },
   };
 }
 
@@ -837,7 +1042,7 @@ const escapeMarkdown = (text) => text.replace(/[\r\n]+/g, ' ').replace(/[\\`*_[\
 /**
  * The markdown summary written to GITHUB_STEP_SUMMARY: the counts, then a table
  * of the first SUMMARY_MAX_FINDINGS findings, errors first.
- * @param {{errors: Finding[], warnings: Finding[], stats: {rows: number, files: number, contributions: number}}} result
+ * @param {{errors: Finding[], warnings: Finding[], stats: {rows: number, files: number, contributions: number, inboxFiles?: number, inboxLines?: number, inboxKnown?: number}}} result
  */
 export function renderStepSummary({ errors, warnings, stats }) {
   const plural = (/** @type {number} */ n, /** @type {string} */ word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -846,6 +1051,9 @@ export function renderStepSummary({ errors, warnings, stats }) {
   lines.push(errors.length
     ? `**Failed**: ${counts}.`
     : `**Valid**: ${plural(stats.rows, 'row')} in ${plural(stats.files, 'file')}, ${plural(stats.contributions, 'contribution')}; ${counts}.`);
+  if (stats.inboxFiles) {
+    lines.push('', `Inbox: ${plural(stats.inboxLines || 0, 'board')} in ${plural(stats.inboxFiles, 'file')}, ${stats.inboxKnown || 0} already in the registry.`);
+  }
   const findings = [
     ...errors.map((f) => ({ level: 'error', f })),
     ...warnings.map((f) => ({ level: 'warning', f })),
@@ -910,6 +1118,7 @@ function main() {
     process.exit(1);
   }
   console.log(`employer registry is valid: ${stats.rows} rows in ${stats.files} files, ${stats.contributions} contribution(s)` +
+    (stats.inboxFiles ? `; inbox: ${stats.inboxLines} board(s) in ${stats.inboxFiles} file(s), ${stats.inboxKnown} already in the registry` : '') +
     (warnings.length ? `, ${warnings.length} warning(s)` : ''));
 }
 

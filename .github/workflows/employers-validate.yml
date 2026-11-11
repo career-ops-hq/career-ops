@@ -9,6 +9,7 @@ on:
     paths:
       - 'employers/**'
       - 'seeds/employers-validate.mjs'
+      - 'seeds/employers-inbox.mjs'
       - 'lib/ats-board-url.mjs'
 
 permissions:

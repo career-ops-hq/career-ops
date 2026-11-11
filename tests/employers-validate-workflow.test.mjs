@@ -37,9 +37,9 @@ test('keeps its security posture: pull_request, contents: read, no secrets', () 
   assert.ok(!/GITHUB_TOKEN/.test(text), 'the job must not hand the token to a step');
 });
 
-test('runs when the registry, the validator or the URL builder changes', () => {
+test('runs when the registry, the validator, its inbox rules or the URL builder changes', () => {
   const paths = (wf.on || wf[true]).pull_request.paths;
-  for (const p of ['employers/**', 'seeds/employers-validate.mjs', 'lib/ats-board-url.mjs']) {
+  for (const p of ['employers/**', 'seeds/employers-validate.mjs', 'seeds/employers-inbox.mjs', 'lib/ats-board-url.mjs']) {
     assert.ok(paths.includes(p), `paths must include ${p}`);
   }
 });
