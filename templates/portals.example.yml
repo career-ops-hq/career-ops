@@ -145,6 +145,9 @@
 # guessed into the URL; omit it for a nationwide search. `max_pages` is optional
 # (default 5, cap 50).
 #
+# There is no date filter: a posting older than the last run but never seen
+# before is still new to you, so dedup is decided by scan-history, not by age.
+#
 # Results are still filtered by title_filter/location_filter below, and
 # data/blacklist.md applies.
 #

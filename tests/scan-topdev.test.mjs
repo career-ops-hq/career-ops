@@ -25,6 +25,7 @@ import {
   parseRelativeAge,
   cardsToJobs,
   detectChallenge,
+  isScanFatal,
   TopDevChallengeError,
   TopDevRenderError,
 } from '../scan-topdev.mjs';
@@ -48,13 +49,22 @@ test('importing the scanner ignores the caller argv', () => {
 
 test('parseArgs reads CLI flags and takes no argv by default side effect', () => {
   assert.deepStrictEqual(parseArgs([]), {
-    dryRun: false, debug: false, noDateFilter: false, singleKeyword: null,
+    dryRun: false, debug: false, singleKeyword: null,
   });
-  assert.deepStrictEqual(parseArgs(['--dry-run', '--debug', '--all', '--keyword', 'backend']), {
-    dryRun: true, debug: true, noDateFilter: true, singleKeyword: 'backend',
+  assert.deepStrictEqual(parseArgs(['--dry-run', '--debug', '--keyword', 'backend']), {
+    dryRun: true, debug: true, singleKeyword: 'backend',
   });
   // --keyword=value form, which indexOf() cannot see
   assert.strictEqual(parseArgs(['--keyword=frontend']).singleKeyword, 'frontend');
+});
+
+test('there is no --all flag: recency never decides, the seen set does', () => {
+  // The date cutoff was removed on review: an unseen posting older than the
+  // last run is still new to the user. --all would now be a dead flag, so the
+  // scanner must reject it rather than silently accept a no-op.
+  assert.deepStrictEqual(parseArgs(['--all']), {
+    dryRun: false, debug: false, singleKeyword: null,
+  });
 });
 
 test('regionIdFor maps the three observed cities, plus abbreviations', () => {
@@ -282,4 +292,14 @@ test('the named errors say what to do next', () => {
   assert.strictEqual(render.name, 'TopDevRenderError');
   assert.match(render.message, /never rendered its listings \(page title: "TopDev"\)/);
   assert.match(render.message, /rerun with --debug/);
+});
+
+test('a challenge ends the whole scan; a render failure does not', () => {
+  // Board-wide vs keyword-local: the challenge stands in front of every
+  // remaining search, so continuing would re-request a board that said no.
+  assert.strictEqual(isScanFatal(new TopDevChallengeError('https://topdev.vn/x')), true);
+  assert.strictEqual(isScanFatal(new TopDevRenderError('https://topdev.vn/x', 'TopDev')), false);
+  assert.strictEqual(isScanFatal(new Error('net::ERR_CONNECTION_CLOSED')), false);
+  assert.strictEqual(isScanFatal(null), false);
+  assert.strictEqual(isScanFatal(undefined), false);
 });

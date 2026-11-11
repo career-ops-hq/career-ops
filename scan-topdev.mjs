@@ -21,8 +21,10 @@
  * source with no reachable API. `providers/` stays fetch-only.
  *
  * This scanner reads only what a visitor sees: no login, no account, no
- * cookies of a real person, and it never solves or relays a challenge — a
- * challenge page is reported as a named error and the board is skipped.
+ * cookies of a real person, and it never solves or relays a challenge. A
+ * challenge page throws a named error and the WHOLE scan stops: the same gate
+ * stands in front of every remaining search, so continuing would re-request a
+ * board that has already told us no.
  *
  * Reads `topdev_searches` from portals.yml:
  *   topdev_searches:
@@ -49,7 +51,6 @@ import {
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   PORTALS_PATH,
-  SCAN_HISTORY_PATH,
 } from './scan.mjs';
 import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -57,7 +58,6 @@ import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
-import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
 import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 
@@ -69,14 +69,14 @@ const SEARCH_BASE_URL = 'https://topdev.vn/jobs/search';
 const DEFAULT_MAX_PAGES = 5;
 const MAX_PAGES_CAP = 50;
 
-/** Pacing between page loads of the same keyword (see --all note in README). */
+/** Pacing between page loads of the same keyword — the board is a Next.js SSR app under a Cloudflare edge. */
 const INTER_PAGE_DELAY_MS = 1500;
 
 /**
  * TopDev's own region ids, read off the board's search links.
- * Only these three were ever observed; an unrecognized location is dropped
- * rather than guessed into the URL, so a typo broadens the search instead of
- * silently narrowing it to the wrong city.
+ * Only these three were ever observed; an unrecognized location is rejected by
+ * `normalizeSearchEntry` (it throws) rather than guessed into the URL, so a typo
+ * cannot silently narrow the search to the wrong city.
  */
 export const REGION_IDS = Object.freeze({
   'ho chi minh': '79',
@@ -117,17 +117,15 @@ export const CHALLENGE_MARKERS = Object.freeze([
 ]);
 
 const DATA_ROOT = getCareerOpsRoot();
-const SCAN_HISTORY = SCAN_HISTORY_PATH;
 
 // ── Args ─────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dry-run', '--debug', '--all', '--keyword', '--help', '-h'];
+const KNOWN_FLAGS = ['--dry-run', '--debug', '--keyword', '--help', '-h'];
 const VALUE_FLAGS = ['--keyword'];
 
 const USAGE = `Usage:
   node scan-topdev.mjs
   node scan-topdev.mjs --dry-run
-  node scan-topdev.mjs --all              # skip the date filter (first scan)
   node scan-topdev.mjs --keyword "backend"
   node scan-topdev.mjs --debug            # save screenshot + page HTML to output/
   node scan-topdev.mjs --help|-h          # print this usage block and exit`;
@@ -136,14 +134,17 @@ const USAGE = `Usage:
  * Parse CLI arguments. Kept pure and argv-injected so a test can drive it
  * without the module reading `process.argv` at import time.
  *
+ * There is no date filter and therefore no `--all`: recency is the source's
+ * own pagination order, and "new to the user" is decided by the admission
+ * gate's seen set, never by a posting's age (see the note in main()).
+ *
  * @param {string[]} argv
- * @returns {{dryRun: boolean, debug: boolean, noDateFilter: boolean, singleKeyword: (string|null)}}
+ * @returns {{dryRun: boolean, debug: boolean, singleKeyword: (string|null)}}
  */
 export function parseArgs(argv = []) {
   return {
     dryRun: hasFlag(argv, '--dry-run'),
     debug: hasFlag(argv, '--debug'),
-    noDateFilter: hasFlag(argv, '--all'),
     singleKeyword: flagValue(argv, '--keyword') ?? null,
   };
 }
@@ -394,23 +395,20 @@ export class TopDevRenderError extends Error {
   }
 }
 
-// ── Date helpers ─────────────────────────────────────────────────────
-
 /**
- * Most recent first_seen date recorded for the `topdev` source.
+ * Does this error end the whole scan, or just its keyword?
  *
- * @returns {Date|null}
+ * A challenge is board-wide: the same gate stands in front of every remaining
+ * search, so continuing would re-request a board that already said no, which is
+ * exactly the "not solved, not retried" rule inverted. A page that never
+ * rendered is scoped to its keyword — it can be a local markup change, and the
+ * next keyword may well work.
+ *
+ * @param {unknown} err
+ * @returns {boolean}
  */
-function loadLastScanDate() {
-  if (!existsSync(SCAN_HISTORY)) return null;
-  let latest = null;
-  scanHistoryDataLines(readFileSync(SCAN_HISTORY, 'utf-8')).forEach((line) => {
-    const parts = line.split('\t');
-    if (parts[2] !== 'topdev') return;
-    const d = new Date((parts[1] || '') + 'T00:00:00Z');
-    if (!isNaN(d.getTime()) && (!latest || d > latest)) latest = d;
-  });
-  return latest;
+export function isScanFatal(err) {
+  return err instanceof TopDevChallengeError;
 }
 
 // ── Browser extraction (not unit-tested — the live smoke test covers it) ──
@@ -510,7 +508,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {{argv?: string[]}} [options]
  */
 export async function main({ argv = [] } = {}) {
-  const { dryRun, debug, noDateFilter, singleKeyword } = parseArgs(argv);
+  const { dryRun, debug, singleKeyword } = parseArgs(argv);
 
   mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
 
@@ -536,14 +534,15 @@ export async function main({ argv = [] } = {}) {
 
   const gate = createAdmissionGate({ config });
   const date = localToday();
-  const lastScanDate = noDateFilter ? null : loadLastScanDate();
-  if (noDateFilter) console.log('  --all: date filter disabled — fetching every rendered page');
-  else if (lastScanDate) console.log(`  Last TopDev scan: ${lastScanDate.toISOString().slice(0, 10)} — skipping older postings`);
 
+  // No recency cutoff. An unseen posting older than the last run is still new
+  // to the user, so "new" is decided by the gate's seen set (scan-history,
+  // pipeline and tracker) and never by `postedAt`. A cutoff here would record
+  // such a posting as `skipped_date`, which counts as seen and would hide it
+  // from every later run (#6795 review).
   const newOffers = [];
   const titleSkipped = [];
   const locationSkipped = [];
-  const dateSkipped = [];
   const dupeSkipped = [];
   const errors = [];
   // Searches overlap, so one posting comes back under several keywords. Its
@@ -561,7 +560,7 @@ export async function main({ argv = [] } = {}) {
   const page = await context.newPage();
 
   try {
-    for (const search of searches) {
+    searches: for (const search of searches) {
       const keywords = singleKeyword ? [singleKeyword] : [search.keyword];
 
       for (const keyword of keywords) {
@@ -576,10 +575,16 @@ export async function main({ argv = [] } = {}) {
           try {
             pageJobs = await scanSearchPage(page, url, { debug: debug && pageNum === 1 });
           } catch (err) {
-            // A challenge or a never-rendered page is a board-level failure:
-            // report it and move on rather than reporting an empty market.
             process.stdout.write(`ERROR\n`);
             errors.push({ keyword, page: pageNum, error: /** @type {Error} */ (err).message });
+            // A challenge stands in front of every remaining search too, so
+            // continuing would re-request a board that already said no — the
+            // opposite of "not solved, not retried". A never-rendered page can
+            // be a local markup change, so it stays scoped to its keyword.
+            if (isScanFatal(err)) {
+              console.log('  challenge encountered — stopping the scan; the board is not retried');
+              break searches;
+            }
             break;
           }
 
@@ -609,10 +614,6 @@ export async function main({ argv = [] } = {}) {
             if (reason === 'blacklisted') continue;
             if (reason === 'title') { titleSkipped.push(canonical); continue; }
             if (reason === 'location') { locationSkipped.push(canonical); continue; }
-            if (lastScanDate && job.postedAt !== undefined && new Date(job.postedAt) < lastScanDate) {
-              dateSkipped.push(canonical);
-              continue;
-            }
             newOffers.push(canonical);
           }
 
@@ -631,7 +632,6 @@ export async function main({ argv = [] } = {}) {
     if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
     await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
     await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
-    await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
     await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
@@ -641,7 +641,6 @@ export async function main({ argv = [] } = {}) {
   console.log(`Filtered by title:  ${titleSkipped.length}`);
   console.log(`Filtered location:  ${locationSkipped.length}`);
   console.log(`Blacklisted:        ${gate.counts.blacklisted}`);
-  console.log(`Filtered by date:   ${dateSkipped.length}`);
   console.log(`Duplicates:         ${dupeSkipped.length}`);
   console.log(`New offers:         ${newOffers.length}`);
 
