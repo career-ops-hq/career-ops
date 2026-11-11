@@ -2683,6 +2683,12 @@ const allowedFiles = new Set([
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
   'dashboard/internal/ui/screens/stats.go',
+  // An employer registry manifest names who granted its license, by design
+  // (signed_by, employers/README.md). This one is the maintainer's own.
+  'employers/contributions/2026-11-08-santifer.json',
+  // The registry README names its licensor and the address an employer writes
+  // to for removal, by design (employers/README.md, License and Removal).
+  'employers/README.md',
 ]);
 
 // The English README and every localized translation at the repo root
@@ -5945,21 +5951,21 @@ try {
   }
 
   // ── 2. a16z HTML parsing ───────────────────────────────────────────
-  // Sample HTML fixture with data-company-name attributes (the most reliable strategy).
-  const a16zHtml = `
-    <div class="portfolio-grid">
-      <a href="https://github.com" data-company-name="GitHub" data-company-url="https://github.com" class="portfolio-card"></a>
-      <a href="https://lyft.com" data-company-name="Lyft" data-company-url="https://lyft.com" class="portfolio-card"></a>
-      <a href="https://slack.com" data-company-name="Slack" data-company-url="https://slack.com" class="portfolio-card"></a>
-    </div>
-  `;
+  // The live page embeds its list as HTML-escaped JSON in a data-companies
+  // attribute (tests/vc-portfolios-a16z.test.mjs covers the real markup).
+  const a16zList = [
+    { id: '1', name: 'GitHub', company_url: 'https://github.com', acquirer: '' },
+    { id: '2', name: 'Lyft', company_url: 'https://lyft.com', acquirer: '' },
+    { id: '3', name: 'Slack', company_url: 'https://slack.com', acquirer: '' },
+  ];
+  const a16zHtml = `<div x-data="wr25Portfolio()" data-companies="${JSON.stringify(a16zList).replace(/"/g, '&quot;')}"></div>`;
   const a16zEntries = parseA16zPayload(a16zHtml);
   const a16zOk =
     a16zEntries.length === 3 &&
     a16zEntries.some(e => e.name === 'GitHub' && e.source === 'a16z' && e.url === 'https://github.com') &&
     a16zEntries.some(e => e.name === 'Lyft' && e.source === 'a16z') &&
     a16zEntries.some(e => e.name === 'Slack' && e.source === 'a16z');
-  if (a16zOk) pass('parseA16zPayload: extracts companies from data-company-name HTML attributes');
+  if (a16zOk) pass('parseA16zPayload: extracts companies from the data-companies attribute');
   else fail(`parseA16zPayload: output wrong — got ${a16zEntries.length} entries: ${JSON.stringify(a16zEntries.map(e => e.name))}`);
 
   // parseSeedEntries() delegating to a16z.
@@ -6005,9 +6011,9 @@ try {
   // ── 5. toPortalEntry — no ATS hint, slug-based fallback ───────────
   const noHint = toPortalEntry({ name: 'NewCo', slug: 'newco', url: 'https://newco.io', source: 'yc' });
   const noHintOk =
-    noHint.careers_url === 'https://job-boards.greenhouse.io/newco' && // Greenhouse is the default probe
+    noHint.careers_url === 'https://jobs.ashbyhq.com/newco' && // first of the Ashby, Greenhouse, Lever slug probes
     noHint.name === 'NewCo';
-  if (noHintOk) pass('toPortalEntry: no ATS hint falls back to Greenhouse URL from slug (provider.detect() validates at scan time)');
+  if (noHintOk) pass('toPortalEntry: no ATS hint → first slug probe (Ashby); the scan also tries Greenhouse and Lever');
   else fail(`toPortalEntry fallback wrong — got: ${noHint.careers_url}`);
 
   // ── 5b. toPortalEntry — website fallback when slug is empty ───────

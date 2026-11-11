@@ -236,6 +236,7 @@ function namesAsStoredOnWindows(path) {
 /**
  * Returns the canonical path to the tracker applications.md file for reading.
  * Priority: process.env.CAREER_OPS_TRACKER > root/data/applications.md > root/applications.md.
+ * Relative overrides are anchored to this codebase, not cwd or rootDir.
  *
  * @param {string} rootDir The career-ops data root directory
  * @returns {string} Canonical absolute path to the tracker file
@@ -250,6 +251,8 @@ export function resolveTrackerPath(rootDir) {
  * lock key, but workspace derivation uses the raw form instead (see
  * resolveWorkspaceRootFor) so a symlinked `data/` does not realpath the
  * workspace out of the repo (#3169).
+ * A relative CAREER_OPS_TRACKER is anchored to this codebase before any
+ * consumer derives a workspace or link directory from it.
  *
  * @param {string} rootDir The career-ops data root directory
  * @returns {string} Uncanonicalized tracker path
@@ -257,7 +260,7 @@ export function resolveTrackerPath(rootDir) {
 export function rawTrackerPath(rootDir) {
   const env = process.env.CAREER_OPS_TRACKER?.trim();
   return env
-    ? env
+    ? resolve(__dirname, env)
     : existsSync(join(rootDir, 'data/applications.md'))
       ? join(rootDir, 'data/applications.md')
       : join(rootDir, 'applications.md');
@@ -277,7 +280,7 @@ export function resolveTrackerPathForWrite(root) {
     // Same canonicalization as the read path (see canonicalizeTrackerPath): an
     // un-canonicalized env override derives divergent lock paths on symlinked
     // tmpdirs and breaks shared writer exclusion.
-    return canonicalizeTrackerPath(env);
+    return canonicalizeTrackerPath(resolve(__dirname, env));
   }
   return join(root, 'data/applications.md');
 }

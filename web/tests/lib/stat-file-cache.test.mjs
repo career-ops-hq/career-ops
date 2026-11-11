@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import "../helpers/web-ts-alias-loader.mjs";
 
-const { readApplications, readScanDates, readInbox } = await import("../../src/lib/career-ops.ts");
+const { readApplications, readTrackerShape, readScanDates, readInbox } = await import("../../src/lib/career-ops.ts");
 const { assembleDedupContext } = await import("../../src/lib/core/discover.ts");
 const { cachedFileValue } = await import("../../src/lib/stat-file-cache.mjs");
 
@@ -349,3 +349,51 @@ test("a missing inbox or scan history is still empty", () => {
     assert.equal(readScanDates().size, 0);
   });
 });
+
+for (const trackerMode of ["default", "relative"]) {
+  for (const hasRows of [true, false]) {
+    test(`external code-root aliases parse ${trackerMode} tracker ${hasRows ? "rows" : "shape"}`, () => {
+      withRoot(() => {}, (root) => {
+        const engine = join(root, "engine");
+        const cwd = join(root, "launcher", "web");
+        mkdirSync(join(engine, "custom"), { recursive: true });
+        mkdirSync(cwd, { recursive: true });
+        writeFileSync(join(engine, "tracker-aliases.json"),
+          origRead(new URL("../../../tracker-aliases.json", import.meta.url)));
+        const file = trackerMode === "relative"
+          ? join(engine, "custom", "applications.md")
+          : join(root, "data", "applications.md");
+        writeFileSync(file, (hasRows ? [
+          "| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes |",
+          "|---|---|---|---|---|---|---|---|---|---|",
+          "| 1 | 2026-01-01 | Lumenfold | Referral | Platform Engineer | 4.2/5 | Applied | | | synthetic |",
+        ] : [
+          "| # | Company | Via | Role | Score | Status |",
+          "|---|---|---|---|---|---|",
+        ]).join("\n"));
+        const priorCwd = process.cwd();
+        const priorCodeRoot = process.env.CAREER_OPS_CODE_ROOT;
+        const priorTracker = process.env.CAREER_OPS_TRACKER;
+        try {
+          process.chdir(cwd);
+          process.env.CAREER_OPS_CODE_ROOT = trackerMode === "relative" ? relative(cwd, engine) : engine;
+          if (trackerMode === "relative") process.env.CAREER_OPS_TRACKER = "custom/applications.md";
+          else delete process.env.CAREER_OPS_TRACKER;
+          if (hasRows) {
+            const [row] = readApplications();
+            assert.deepEqual(row && [row.company, row.via, row.role, row.score, row.status],
+              ["Lumenfold", "Referral", "Platform Engineer", "4.2/5", "Applied"]);
+          } else {
+            assert.equal(readTrackerShape(), "empty");
+          }
+        } finally {
+          process.chdir(priorCwd);
+          if (priorCodeRoot === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+          else process.env.CAREER_OPS_CODE_ROOT = priorCodeRoot;
+          if (priorTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
+          else process.env.CAREER_OPS_TRACKER = priorTracker;
+        }
+      });
+    });
+  }
+}

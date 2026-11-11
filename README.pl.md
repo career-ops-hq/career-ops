@@ -630,6 +630,8 @@ Kod jest na licencji [MIT](LICENSE). Nazwa i marka
 dla użytku społeczności, zastrzeżonej dla nazewnictwa produktów komercyjnych
 i rekomendacji.
 
+Kod jest na licencji MIT; dane w [`employers/`](employers/) są na licencji [CC BY 4.0](employers/LICENSE).
+
 ## Historia gwiazdek
 
 <p align="center">

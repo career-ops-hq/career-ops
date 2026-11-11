@@ -235,7 +235,7 @@ De veldnamen in de kop (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`
 ## Score Evidence
 (vijf dimensies, bewijsstatus, open vragen, Evidence confidence, prioriteiten)
 
-## H) Conceptantwoorden voor de sollicitatie
+## H) Conceptantwoorden voor de sollicitatie (draft)
 (alleen bij score >= 4,5 -- conceptantwoorden voor het sollicitatieformulier)
 
 ---

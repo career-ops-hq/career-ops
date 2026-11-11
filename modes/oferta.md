@@ -317,10 +317,10 @@ If the brand differs from the legal employer or posting entity, classify the **a
 
 **Compensation reliability (required):**
 
-First check whether the JD itself states a salary figure. If no advertised number exists, collapse this section to exactly two concise lines after the demand trend:
+First check whether the JD itself states a salary figure. Do not invent a salary from training data, the title, or the company. Unknown compensation does not move the 1-5 score. If no advertised number exists, collapse this section to exactly two concise lines after the demand trend:
 
 - **Company type:** {category or `Unknown`} — {confidence + one evidence phrase}
-- **Compensation reliability:** {tier} — no advertised salary figure; skip component split, detailed market rows, and HR verification questions
+- **Compensation reliability:** Unknown — no advertised salary figure; skip component split, detailed market rows, and HR verification questions
 
 When an advertised salary figure exists, split compensation into:
 
@@ -580,6 +580,8 @@ This does **not** alter the 1-5 score, the Block G Assessment tier or the Verdic
 
 Write a `## Verdict (lead)` block directly after Block G and before `## Risk Summary`. It answers the only question the reader opened the report with: should I apply?
 
+**Set `final_decision` from the score band** in `modes/_shared.md` (`lib/score-action.mjs`). A hard stop forces Skip. A suspicious posting forces Research first. Those overrides do not change the 1-5 score.
+
 **Derived, never originating.** `final_decision` in `## Machine Summary` is the source of truth. This block restates that same call as one human sentence and never introduces a different one — if the sentence and the field disagree, the field is right and the sentence is the defect. Write the block from `final_decision` rather than alongside it, so the block a reader leads with cannot drift from the field a script reads. The bolded call is that field's value in the report's own language: Apply, Consider, Research first, or Skip.
 
 **The `(lead)` marker is load-bearing, and language-invariant on purpose.** The web report view promotes whichever block carries the marker into the page's lead callout, identifying it by the marker rather than by a heading word or a block letter. Translations therefore keep their own noun and the same parenthetical: `## Veredicto (lead)`, `## Verdict (lead)`. Never translate `(lead)`, and never letter this block — it sits outside the A–H sequence.
@@ -777,7 +779,7 @@ Save full evaluation in `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## Score Evidence
 (five scoring dimensions, evidence status and source, unresolved questions, evidence-confidence tier, and verification priorities)
 
-## H) Draft Application Answers
+## H) Draft Application Answers (draft)
 (only if score >= 4.5 — draft answers for the application form)
 
 ---
