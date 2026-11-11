@@ -44,7 +44,7 @@ const BOLD = `${BLOCKS}
 const BULLET = `${BLOCKS}
 ---SCORE_SUMMARY---
 • COMPANY: Marrowfield Grocers
-• OLE: Senior Data Analyst
+• ROLE: Senior Data Analyst
 • SCORE: 4.3
 • ARCHETYPE: Data Analyst
 • LEGITIMACY: High Confidence
