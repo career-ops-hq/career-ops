@@ -1,3 +1,5 @@
+import { parsePdfManifestRows } from "../apply/cv-selection.mjs";
+
 /**
  * Reset clears the on-screen overlay back to the full CV. Apply still reads
  * data/pdf-index.tsv, which Save for apply pointed at the shortened -edited
@@ -21,7 +23,7 @@ export function restoreFullPdfIndex(text, reportNum, exists) {
     if (!line.trim() || line.startsWith("#")) return line;
     const fields = line.split("\t");
     if (norm(fields[0]) !== target) return line;
-    if ((fields[5] || "").trim() === "cover") return line;
+    if (parsePdfManifestRows(line)[0]?.kind === "cover") return line;
     const pdf = fields[1] || "";
     if (!pdf.endsWith("-edited.pdf")) return line;
     const full = `${pdf.slice(0, -"-edited.pdf".length)}.pdf`;

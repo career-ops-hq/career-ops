@@ -251,6 +251,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
     recordEdit({ type: "reset" });
     setSave({ kind: "idle" });
     void send("POST", { op: "restore-full-pdf" }).then(async (r) => {
+      if (!r.ok) throw new Error("restore-full-pdf failed");
       const body = (await r.json().catch(() => ({}))) as { restored?: boolean; reason?: string };
       if (body.reason === "missing") {
         setSave({ kind: "failed", error: "Reset cleared the preview. Apply still has the shortened PDF, because the full PDF is not on disk." });

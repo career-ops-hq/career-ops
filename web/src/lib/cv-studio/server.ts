@@ -151,20 +151,35 @@ export function saveEdits(reportNum: string, edits: StudioEdits) {
   atomicWrite(file, JSON.stringify(edits, null, 2) + "\n");
 }
 
+type IndexLock = {
+  withPipelineLock?: (
+    target: string,
+    fn: () => { restored: boolean; reason?: "missing" },
+    options?: { timeoutMs?: number; retryMs?: number },
+  ) => Promise<{ restored: boolean; reason?: "missing" }>;
+};
+
 /** Point Apply back at the full PDF after Reset, when that file is still on disk. */
 export async function restoreIndexedFullPdf(reportNum: string): Promise<{ restored: boolean; reason?: "missing" }> {
   const indexPath = await resolvePdfIndexPath();
   if (!indexPath || !fs.existsSync(indexPath)) return { restored: false };
-  const text = fs.readFileSync(indexPath, "utf8");
-  const root = careerOpsRoot();
-  const outputDir = path.resolve(root, "output");
-  const result = restoreFullPdfIndex(text, reportNum, (rel) => {
-    const abs = path.resolve(root, rel);
-    return abs.startsWith(`${outputDir}${path.sep}`) && fs.existsSync(abs);
-  });
-  if (!result.restored) return { restored: false, reason: result.reason };
-  atomicWrite(indexPath, result.text.endsWith("\n") ? result.text : `${result.text}\n`);
-  return { restored: true };
+  // generate-pdf.mjs holds this same lock while it rewrites the index.
+  const lockFile = path.join(resolveCodeRoot(process.cwd(), process.env), "pipeline-lock.mjs");
+  const mod = (await import(/* webpackIgnore: true */ pathToFileURL(lockFile).href)) as IndexLock;
+  if (typeof mod.withPipelineLock !== "function") throw new Error("pipeline-lock.mjs has no withPipelineLock");
+  const timeoutMs = Number(process.env.CAREER_OPS_WEB_LOCK_TIMEOUT_MS) || 5_000;
+  return mod.withPipelineLock(indexPath, () => {
+    const text = fs.readFileSync(indexPath, "utf8");
+    const root = careerOpsRoot();
+    const outputDir = path.resolve(root, "output");
+    const result = restoreFullPdfIndex(text, reportNum, (rel) => {
+      const abs = path.resolve(root, rel);
+      return abs.startsWith(`${outputDir}${path.sep}`) && isRegularContainedFile(abs, outputDir);
+    });
+    if (!result.restored) return { restored: false, reason: result.reason };
+    atomicWrite(indexPath, result.text.endsWith("\n") ? result.text : `${result.text}\n`);
+    return { restored: true };
+  }, { timeoutMs, retryMs: 50 });
 }
 
 export async function keywordsInText(n: string, text: string): Promise<string[] | null> {

@@ -55,7 +55,18 @@ export async function POST(req: Request, { params }: RouteContext) {
   if (body.op === "restore-full-pdf") {
     const load = await loadStudio(n);
     if (!load.ok) return NextResponse.json({ error: load.reason }, { status: NOT_FOUND[load.reason] });
-    return NextResponse.json(await restoreIndexedFullPdf(load.reportNum));
+    // Save for apply holds this set for the whole render. Reset must not
+    // publish the full PDF and then lose the race to that render's index write.
+    if (saving.has(load.reportNum)) return NextResponse.json({ error: "busy" }, { status: 409 });
+    saving.add(load.reportNum);
+    try {
+      return NextResponse.json(await restoreIndexedFullPdf(load.reportNum));
+    } catch (err) {
+      if (err instanceof Error && err.name === "LockTimeoutError") return NextResponse.json({ error: "busy" }, { status: 409 });
+      throw err;
+    } finally {
+      saving.delete(load.reportNum);
+    }
   }
   if (body.op !== "save") return NextResponse.json({ error: "unknown op" }, { status: 400 });
   const load = await loadStudio(n);
