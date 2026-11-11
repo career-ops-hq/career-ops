@@ -97,6 +97,33 @@ try {
     fail(`jobstreet.fetch() SEEK AU gave ${JSON.stringify(auJobs)}`);
   }
 
+  // fetch() — SEEK AU's API now lives on au.seek.com; links stay on www.seek.com.au
+  let auNewHostUrl = '';
+  const auNewHostJobs = await jobstreet.fetch(
+    {
+      name: 'SEEK AU (au.seek.com)',
+      provider: 'jobstreet',
+      api: 'https://au.seek.com/api/jobsearch/v5/search',
+      siteKey: 'AU-Main',
+      searchKeywords: 'business analyst',
+    },
+    {
+      transport: 'http',
+      fetchJson: async (url) => {
+        auNewHostUrl = String(url);
+        return { data: [{ id: '95650205', title: 'Technical Business Analyst' }], totalCount: 1 };
+      },
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (new URL(auNewHostUrl).hostname === 'au.seek.com'
+      && auNewHostJobs.length === 1
+      && auNewHostJobs[0].url === 'https://www.seek.com.au/job/95650205') {
+    pass('jobstreet.fetch() accepts au.seek.com and keeps /job/ links on www.seek.com.au');
+  } else {
+    fail(`jobstreet.fetch() au.seek.com gave url=${auNewHostUrl} jobs=${JSON.stringify(auNewHostJobs)}`);
+  }
+
   // parseJobstreetItem — uses companyName fallback when advertiser.description is absent
   const noAdvertiserItem = {
     id: '2',
