@@ -172,13 +172,17 @@ export function loadCheckpoint(file = CHECKPOINT_PATH) {
   }
 }
 
+function validIndexList(value) {
+  return Array.isArray(value) && value.every((i) => Number.isInteger(i) && i >= 0);
+}
+
 function validCheckpointCurrent(cur) {
   return typeof cur === 'object'
     && typeof cur.name === 'string'
     && Number.isInteger(cur.resumeAt) && cur.resumeAt >= 0
     && Number.isInteger(cur.datasetLen) && cur.datasetLen >= 0
-    && (cur.deferred === undefined
-      || (Array.isArray(cur.deferred) && cur.deferred.every((i) => Number.isInteger(i) && i >= 0)));
+    && (cur.deferred === undefined || validIndexList(cur.deferred))
+    && (cur.retries === undefined || validIndexList(cur.retries));
 }
 
 // A checkpoint written under different scan settings must not be resumed —
@@ -309,6 +313,46 @@ export function checkpointComparesCompanyList(checkpoint, sources) {
   const source = name ? sources?.[name] : null;
   if (!source) return false;
   return source.restartOnResume !== true;
+}
+
+/**
+ * Checkpoint fields for boards still waiting on a truncation retry.
+ * `deferred` is the subset the domain gate has not admitted. `retries`
+ * also includes an admitted partial response, which sits below the resume
+ * offset and would otherwise never be fetched again.
+ * @param {Map<object, number>} pendingRetries
+ * @param {Map<object, { index: number }>} deferred
+ */
+export function retryCheckpointFields(pendingRetries, deferred) {
+  return {
+    deferred: [...deferred.values()].map((item) => item.index),
+    retries: [...pendingRetries.values()],
+  };
+}
+
+/**
+ * Boards below the resume offset that still need a retry. A checkpoint
+ * written before `retries` existed stored only deferred indices; those
+ * stay retries. A board is deferred only when that checkpoint said so.
+ * @param {object[]} entriesAll
+ * @param {number} startAt
+ * @param {{ deferred?: number[], retries?: number[] } | null | undefined} current
+ */
+export function restorePendingRetries(entriesAll, startAt, current) {
+  const deferredSet = new Set(current?.deferred ?? []);
+  const indices = current?.retries ?? [...deferredSet];
+  const truncated = [];
+  const pendingRetries = new Map();
+  const deferred = new Map();
+  for (const index of indices) {
+    if (!Number.isInteger(index) || index < 0 || index >= startAt || !entriesAll[index]) continue;
+    const entry = entriesAll[index];
+    if (pendingRetries.has(entry)) continue;
+    truncated.push(entry);
+    pendingRetries.set(entry, index);
+    if (deferredSet.has(index)) deferred.set(entry, { index, jobs: null });
+  }
+  return { truncated, pendingRetries, deferred };
 }
 
 /**
@@ -1807,7 +1851,15 @@ async function main() {
   if (checkpointComparesCompanyList(checkpoint, SOURCES)) {
     const sourceName = checkpoint.current.name;
     const source = SOURCES[sourceName];
-    const { list } = await loadCompanyList(sourceName, source.dataset, source.parseDataset);
+    const loaded = await loadCompanyList(sourceName, source.dataset, source.parseDataset);
+    // A failed download with no cache is an empty list. That is not a new
+    // dataset. Comparing it discards the checkpoint, and the empty sweep
+    // then deletes the file and its unsaved offers.
+    if (loaded.status === 'empty' && checkpoint.current.datasetLen > 0) {
+      console.error(`⚠️  ${sourceName}: company list unavailable, so the checkpoint at ${CHECKPOINT_PATH} is unchanged.`);
+      process.exit(1);
+    }
+    const { list } = loaded;
     const hashMismatch = checkpoint.current.datasetHash != null
       && checkpoint.current.datasetHash !== datasetFingerprint(list);
     if (checkpoint.current.datasetLen !== list.length || hashMismatch) {
@@ -2114,21 +2166,22 @@ async function main() {
     // call returns to checkpoint where it actually stopped (#2283).
     let lastDone = 0;
     let lastResumeAt = 0;
-    const truncated = [];
     // The subset of `truncated` the gate deferred rather than admitted; the
     // retry needs to know which, see retryGateDecision. Each keeps its index in
     // entriesAll, so a checkpoint can carry it past the resume offset, and its
     // partial page, so a failed retry still has something to process.
-    const deferred = new Map();
-    // A board the interrupted run deferred sits below the resume offset, so
-    // the sweep never revisits it: it goes straight to the retry. Its partial
-    // page died with that run, so a failed retry has nothing to fall back to.
-    for (const index of checkpoint?.current?.name === name ? checkpoint.current.deferred ?? [] : []) {
-      if (index >= startAt || !entriesAll[index]) continue;
-      truncated.push(entriesAll[index]);
-      deferred.set(entriesAll[index], { index, jobs: null });
-    }
-    const deferredIndices = () => [...deferred.values()].map((d) => d.index);
+    // A board the interrupted run left for retry sits below the resume offset,
+    // so the sweep never revisits it. Gate-deferred boards are only part of
+    // that set: an admitted partial response is queued too, or the rest of
+    // the board is lost. Its partial page died with that run.
+    const restored = restorePendingRetries(
+      entriesAll,
+      startAt,
+      checkpoint?.current?.name === name ? checkpoint.current : null,
+    );
+    const truncated = restored.truncated;
+    const deferred = restored.deferred;
+    const pendingRetries = restored.pendingRetries;
     let checkpointPhase = 'sweep';
     liveCounters = () => stoppedScanCounts({
       phase: checkpointPhase,
@@ -2153,7 +2206,7 @@ async function main() {
       return writeCheckpoint({
         ...checkpointBase(),
         ...(partialSave ? { partialSave } : {}),
-        current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
+        current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, ...retryCheckpointFields(pendingRetries, deferred) },
         counters,
       });
     };
@@ -2189,7 +2242,10 @@ async function main() {
           // sequential retry — 'structural' means the board hit a fixed bound
           // (facet-split slice/depth/page budget) that a repeat run reaches
           // again, paying the same expensive split for the same result.
-          if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) truncated.push(entry);
+          if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) {
+            truncated.push(entry);
+            pendingRetries.set(entry, startAt + idx);
+          }
           // Ahead of processJobs, deliberately: a gated board is not merely
           // quieter but CHEAPER, since provider.enrichDate() issues a per-job
           // detail request for undated providers (icims) and a board dropped
@@ -2310,6 +2366,8 @@ async function main() {
           const partial = deferred.get(entry)?.jobs;
           if (partial && !retrySignal?.aborted) await processJobs(partial, name, source.provider, entry.name);
         }
+        pendingRetries.delete(entry);
+        deferred.delete(entry);
       }
     }
     totalErrors += errors;
@@ -2341,7 +2399,7 @@ async function main() {
       if (!opts.dryRun) {
         checkpointWritten = writeCheckpoint({
           ...checkpointBase(),
-          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
+          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, ...retryCheckpointFields(pendingRetries, deferred) },
           counters: snapshotCounters(),
         });
         outageCheckpointWritten = checkpointWritten;

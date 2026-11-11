@@ -1310,7 +1310,7 @@ CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pac
 
 The cost is real: a full Workday + iCIMS + BambooHR sweep becomes DNS-bound at roughly 63 minutes (25,205 hostnames ÷ 400/min default pacing). Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
 
-**Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
+**Exit codes:** `0` scan completed, or a `--json` stop whose result has `stoppedEarly: true` (read that flag before treating 0 as finished). `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
 
 ---
 

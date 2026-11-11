@@ -3,7 +3,7 @@
 // and exits 1, which would repeat on every later run. The scheduled flag warns
 // and starts a fresh sweep instead.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -189,3 +189,36 @@ try {
 } finally {
   rmSync(cutoffDir, { recursive: true, force: true });
 }
+
+// A failed download with no cache is an empty list. That must not read as a
+// changed dataset: the fresh sweep would finish nothing and delete the
+// checkpoint, including offers the interrupted run had not saved yet.
+function unavailableList(flag) {
+  const dir = mkdtempSync(join(tmpdir(), 'ats-full-list-missing-'));
+  try {
+    const { preload, fetched } = prepare(dir);
+    unlinkSync(join(dir, 'data', 'cache', 'ats-companies', 'greenhouse.json'));
+    const offer = 'https://example.test/role';
+    writeCheckpoint(dir, {
+      ...baseCheckpoint,
+      ats: ['greenhouse'],
+      offers: [{ url: offer, title: 'Director', company: 'Acme', source: 'greenhouse-full' }],
+      current: { name: 'greenhouse', resumeAt: 0, datasetLen: 1, datasetHash: '0123456789abcdef' },
+    });
+    const result = run(dir, preload, [flag]);
+    const kept = readFileSync(join(dir, 'data', 'cache', 'ats-full-checkpoint.json'), 'utf-8');
+    const names = readFileSync(fetched, 'utf-8').split('\n').filter(Boolean);
+    const unavailable = /company list unavailable/.test(result.stderr || '');
+    const discarded = /Starting a fresh sweep|company dataset changed/.test(result.stderr || '');
+    if (result.status === 1 && unavailable && !discarded && kept.includes(offer) && names.length === 0) {
+      pass(`${flag} keeps the checkpoint when the company list cannot be read`);
+    } else {
+      fail(`${flag} did not keep an unreadable company list: status=${result.status} unavailable=${unavailable} discarded=${discarded} fetched=${names.join(',')}\n${(result.stderr || '').slice(-700)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+unavailableList('--resume-if-compatible');
+unavailableList('--resume');
