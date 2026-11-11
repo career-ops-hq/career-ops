@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  confirmAtEmployer, titleSimilarity, titleContains, boardOfPosting, knownBoards, companySlugs, VERDICTS,
+  confirmAtEmployer, makeBoardLister, titleSimilarity, titleContains, boardOfPosting, knownBoards, companySlugs, VERDICTS,
 } from '../confirm-at-employer.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
@@ -111,6 +111,13 @@ test('step 4c: an answered empty board is a board, and a probed board never esta
   assert.equal(r.verdict, 'board_without_role');
   assert.equal(r.board, 'https://jobs.ashbyhq.com/acme');
   assert.equal(r.complete, false);
+});
+
+test('a Greenhouse body without a jobs array is no answer, not an empty board', async () => {
+  const malformed = makeBoardLister({ fetchJson: async () => ({ message: 'not a board' }) });
+  assert.equal(await malformed('https://job-boards.greenhouse.io/acme', 'Acme'), null, 'a malformed board never becomes a probed board');
+  const empty = makeBoardLister({ fetchJson: async () => ({ jobs: [] }) });
+  assert.deepEqual(await empty('https://job-boards.greenhouse.io/acme', 'Acme'), [], 'a real empty board stays an answer');
 });
 
 test('step 5: a board read only in part does not establish absence', async () => {

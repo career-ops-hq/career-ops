@@ -166,8 +166,22 @@ export function probeCandidates(company) {
  * board the provider read only in part keeps its lib/board-truncation.mjs mark.
  * null means the board did not answer; [] is an answered, empty board.
  */
-export function makeBoardLister(ctx = makeHttpCtx()) {
+// The Greenhouse provider reads a body without a jobs array as an empty board,
+// which suits a scan. Here an empty board is evidence (board_without_role), so a
+// malformed board response is refused before the provider sees it.
+const GREENHOUSE_JOBS = /^https:\/\/boards-api(?:\.eu)?\.greenhouse\.io\/v1\/boards\/[^/]+\/jobs(?:[/?]|$)/;
+function strictCtx(ctx) {
+  if (typeof ctx?.fetchJson !== 'function') return ctx;
+  return { ...ctx, fetchJson: async (url, opts) => {
+    const json = await ctx.fetchJson(url, opts);
+    if (GREENHOUSE_JOBS.test(String(url)) && !Array.isArray(json?.jobs)) throw new Error('greenhouse: the board returned no jobs array');
+    return json;
+  } };
+}
+
+export function makeBoardLister(httpCtx = makeHttpCtx()) {
   let providers = null;
+  const ctx = strictCtx(httpCtx);
   return async (careersUrl, company) => {
     providers ||= await loadProviders(fileURLToPath(new URL('./providers', import.meta.url)));
     const entry = { name: company, careers_url: careersUrl };
