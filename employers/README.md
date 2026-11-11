@@ -146,7 +146,8 @@ whether the pull request only adds files to `inbox/`. A maintainer reviews it
 and merges it, then folds the inbox in: each line becomes a row with its
 `source`, `contribution` and `added` date, boards already in the registry are
 skipped, the manifest moves to `contributions/`, and `CHANGELOG.md` gets the
-credit line.
+credit line. If the contribution id is already taken (the same username on
+the same date), the fold adds `-2`, `-3`, and so on.
 
 What does not get in:
 
@@ -209,6 +210,7 @@ node seeds/employers-validate.mjs                    # check employers/, inbox i
 node seeds/employers-validate.mjs --base <dir>       # also check the changes against another checkout
 node seeds/employers-validate.mjs --write-changelog  # maintainers, on main: regenerate CHANGELOG.md, then check
 node seeds/employers-validate.mjs --inbox-only --base <ref>  # does <ref>...HEAD only add inbox files? (JSON)
+node seeds/employers-fold.mjs [--apply]              # maintainers: fold the inbox in (dry run without --apply)
 ```
 
 Every error names the file, the line and the reason. In a pull request, each
