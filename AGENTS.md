@@ -391,6 +391,7 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 | Market | Dir | Evaluation / Apply | Local vocabulary (examples) |
 |--------|-----|--------------------|------------------------------|
 | German (DACH) | `modes/de/` | `angebot` / `bewerben` | 13. Monatsgehalt, Probezeit, Kündigungsfrist, AGG, Tarifvertrag |
+| Austria (English) | `modes/at/` | `offer` / `apply` | KV-Mindestgehalt, 14 Gehälter, Sonderzahlungen, Probemonat, All-in, Abfertigung Neu |
 | French (FR/BE/CH/LU) | `modes/fr/` | `offre` / `postuler` | CDI/CDD, SYNTEC, RTT, 13e mois, titres-restaurant, CSE |
 | Arabic (Middle East) | `modes/ar/` | `fursah` / `takdeem` | مكافأة نهاية الخدمة, التأمينات الاجتماعية, فترة التجربة |
 | Japanese (Japan) | `modes/ja/` | `kyujin` / `oubo` | 正社員, 賞与, みなし残業, 年俸制, 36協定 |
