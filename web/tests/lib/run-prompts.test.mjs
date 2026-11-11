@@ -70,6 +70,45 @@ test("buildPrompt: the pdf prompt offers both page formats", () => {
   assert.match(prompt, /format="a4"/);
   assert.match(prompt, /format="letter"/);
   assert.match(prompt, /letter for a US\/Canada company, otherwise a4/i);
+  // and the body width the agent fills is named for each, so body and sheet agree
+  assert.match(prompt, /\{\{PAGE_WIDTH\}\} to match: 8\.5in for letter, 210mm for a4/);
+});
+
+for (const setting of ["a4", "letter"]) {
+  test(`buildPrompt: page_format ${setting} in the profile leaves the agent no choice`, () => {
+    // Given a profile that states the sheet. The prompt used to tell the agent to
+    // pick letter for a US/Canada company regardless, and the backend passed that
+    // pick as --format, which outranks the profile.
+    const prompt = buildPrompt({ kind: "pdf", ...ARGS, pageFormat: { setting, letterCountries: [] } });
+
+    // Then only the profile's marker is offered, with its width, and no rule to choose by
+    const other = setting === "a4" ? "letter" : "a4";
+    assert.ok(prompt.includes(`${OPEN_MARK} format="${setting}">>`));
+    assert.ok(!prompt.includes(`format="${other}"`), `the prompt still offers ${other}`);
+    assert.ok(!/US\/Canada/.test(prompt), "the prompt still asks the agent to choose by country");
+    assert.ok(prompt.includes(`{{PAGE_WIDTH}} with ${setting === "a4" ? "210mm" : "8.5in"}`));
+  });
+}
+
+test("buildPrompt: page_format auto asks for the country, not a size", () => {
+  // Given a profile that defers the sheet to the employer's country
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS, pageFormat: { setting: "auto", letterCountries: ["CA", "US"] } });
+
+  // Then the agent declares a country code and no format, as modes/pdf.md step 6
+  // has the CLI agent do, and the Letter countries it is given decide the width
+  assert.ok(prompt.includes(`${OPEN_MARK} country="DE">>`));
+  assert.ok(!/format="(a4|letter)"/.test(prompt), "auto must not ask the agent for a format");
+  assert.ok(prompt.includes(`${OPEN_MARK}>>`), "no fallback marker for an unknown country");
+  assert.match(prompt, /8\.5in when the code is one of CA, US/);
+  assert.ok(!/US\/Canada/.test(prompt));
+});
+
+test("buildPrompt: auto with no Letter countries to name keeps the agent's own pick", () => {
+  // Given a stance the access layer would never return, as a guard: a prompt
+  // that asks for a country without saying which ones mean Letter leaves the
+  // width a guess, so it falls back to the format-choosing wording.
+  const prompt = buildPrompt({ kind: "pdf", ...ARGS, pageFormat: { setting: "auto", letterCountries: [] } });
+  assert.match(prompt, /letter for a US\/Canada company, otherwise a4/i);
 });
 
 test("buildPrompt: the pdf prompt still pins tailoring to the real mode", () => {

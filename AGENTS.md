@@ -195,6 +195,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `weekly-digest.mjs` | Rolls up `interview-prep/sessions/*.md` (default: current ISO week) into a per-company round summary, recurring competency-tag counts, and best-effort recurring 🔴 gaps from `question-bank.md` (JSON or `--summary`) |
 | `reports/` | Evaluation reports `{###}-{company-slug}-{YYYY-MM-DD}.md` — Blocks A-F + G (Posting Legitimacy) + Verdict (lead) + Risk Summary + `## Machine Summary` YAML; header includes `**Legitimacy:** {tier}`; **REQUIRED:** a `## Job Description (archived verbatim)` section with the JD's verbatim text, or an equivalent `jds/` capture (#2789) |
 | `check-jd-archive.mjs` | Validates every `reports/*.md` has an archived JD — an embedded `## Job Description` section with substantive content, or a matching `jds/` capture resolved by report number via `jd-capture.mjs`; flags `missing-jd-archive`; read-only (JSON or `--summary` table output) |
+| `clean-markers.mjs` | Audits or strips invisible Unicode (zero-width, bidi, tag characters, variation selectors) from generated text files; `audit` never modifies and exits 1 on any failing file, so it works as a pre-send gate; `--ascii` also normalizes smart quotes and dashes. See `docs/CLEAN_MARKERS.md` |
 
 ### Plugins (optional)
 

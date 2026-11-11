@@ -190,7 +190,12 @@ test("a changed header alias table reparses the tracker without the tracker file
     assert.equal(counted("applications.md"), afterFirst);
 
     const swapped = { ...aliases, employer: "role", title: "company" };
-    writeFileSync(join(process.env.CAREER_OPS_ROOT, "tracker-aliases.json"), JSON.stringify(swapped));
+    const file = join(process.env.CAREER_OPS_ROOT, "tracker-aliases.json");
+    const before = statSync(file);
+    writeFileSync(file, JSON.stringify(swapped));
+    // Immediate same-size writes can share even the nanosecond stat stamp.
+    // Advance the dependency's mtime explicitly; the tracker stays unchanged.
+    utimesSync(file, before.atime, new Date(before.mtimeMs + 1000));
     const again = readApplications()[0];
     assert.equal(again.company, "Platform Engineer");
     assert.equal(again.role, "Lumenfold");

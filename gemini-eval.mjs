@@ -49,7 +49,7 @@ import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
 import { redactIfEnabled } from './utils/privacy-filter.mjs';
 import {
-  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+  isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
 import { NO_INVENTED_PAY_RULE, normalizeEvaluationText } from './lib/eval-evidence.mjs';
 
@@ -353,20 +353,22 @@ function validateEvaluationShape(text) {
     if (!pattern.test(text)) issues.push(`missing Block ${label}`);
   }
 
-  const summary = text.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
+  // Read the way the other evaluators read it (#6332): parseScoreSummary()
+  // drops the bold and bullet marks a model puts on the keys
+  // (`**COMPANY:** Acme`, `- **SCORE**: 4.2/5`). Matched with `^KEY:`, a
+  // bolded summary failed this check, and the evaluation was thrown away.
+  const summary = parseScoreSummary(text);
   if (!summary) {
     issues.push('missing SCORE_SUMMARY block');
   } else {
-    const summaryBlock = summary[1];
-    for (const key of ['COMPANY', 'ROLE', 'ARCHETYPE', 'LEGITIMACY']) {
-      const field = summaryBlock.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, 'mi'));
-      const value = field?.[1]?.trim() ?? '';
-      if (!value || (key !== 'COMPANY' && value.toLowerCase() === 'unknown')) {
-        issues.push(`SCORE_SUMMARY ${key} is required`);
+    for (const key of ['company', 'role', 'archetype', 'legitimacy']) {
+      const value = summary[key].trim();
+      if (!value || (key !== 'company' && value.toLowerCase() === 'unknown')) {
+        issues.push(`SCORE_SUMMARY ${key.toUpperCase()} is required`);
       }
     }
 
-    const score = summaryBlock.match(/^\s*SCORE:\s*([0-9]+(?:\.[0-9]+)?)/mi);
+    const score = summary.score.match(/^([0-9]+(?:\.[0-9]+)?)/);
     const scoreValue = score ? Number(score[1]) : NaN;
     if (!Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > 5) {
       issues.push('SCORE_SUMMARY score must be a number between 0 and 5');
@@ -431,6 +433,10 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileContent,
   customContent,
   jdText,
+  // The user turn below carries the JD. Left in the context too, it went to
+  // Gemini twice, inside systemInstruction and again as the user turn; it is
+  // still counted toward the budget once (#3950, as in openai-eval.mjs).
+  jdInContext: false,
   noCompress,
   maxTokens: 1_048_576, // gemini-2.5-flash context window
 });
@@ -571,35 +577,13 @@ console.log(evaluationText);
 // ---------------------------------------------------------------------------
 // Parse score summary
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(
-  /---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/
-);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const block = summaryMatch[1];
-  const extract = (key) => {
-    const prefix = `${key}:`;
-    const lines = block.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trimStart();
-      if (trimmed.startsWith(prefix)) {
-        return trimmed.slice(prefix.length).trim();
-      }
-    }
-    return 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+// The same reading the validator above passed (parseScoreSummary, #6332).
+const summary    = parseScoreSummary(evaluationText);
+const company    = summary?.company    || 'unknown';
+const role       = summary?.role       || 'unknown';
+const score      = summary?.score      || '?';
+const archetype  = summary?.archetype  || 'unknown';
+const legitimacy = summary?.legitimacy || 'unknown';
 
 // ---------------------------------------------------------------------------
 // Save report

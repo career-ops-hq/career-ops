@@ -210,7 +210,12 @@ function today() {
  */
 function captureFilename(company, role, url) {
   const identity = createHash('sha256').update(url).digest('hex').slice(0, 16);
-  const base = `${today()}_${captureSlug(company)}_${captureSlug(role)}_${identity}.pdf`;
+  // A company with no letter or digit, such as the `?` placeholder for an
+  // unknown employer, has no slug. It is filed as `unknown`, the name a posting
+  // gets when no company was detected at all: an empty field (`015-…__role_…`)
+  // matched no lookup, so outcome.mjs reported the posting missing after
+  // archiving it, and archived it again on every run.
+  const base = `${today()}_${captureSlug(company) || 'unknown'}_${captureSlug(role)}_${identity}.pdf`;
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 

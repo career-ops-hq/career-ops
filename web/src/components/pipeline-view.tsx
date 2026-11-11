@@ -17,7 +17,7 @@ import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
 import { startRouteProgress } from "@/components/route-progress";
 import { sortRows } from "@/lib/core/pipeline-sort.mjs";
 import { PageFrame } from "@/components/page-frame";
-import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
 import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
 import { useListSearch } from "@/lib/use-list-search";
 import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
@@ -153,6 +153,23 @@ export function PipelineView({
   useEffect(() => {
     if (!isPending) setPendingTab(null);
   }, [isPending]);
+
+  useLayoutEffect(() => {
+    const strip = activeTab.current?.parentElement;
+    if (!strip) return;
+    // The tab value does not change when the window narrows, so the strip
+    // measures itself again when its width changes.
+    const place = () => {
+      const button = activeTab.current;
+      if (!button || button.parentElement !== strip) return;
+      const left = tabStripScrollLeft(strip.getBoundingClientRect(), button.getBoundingClientRect(), strip.scrollLeft);
+      if (left !== strip.scrollLeft) strip.scrollLeft = left;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [tab]);
 
   useEffect(() => {
     try {
@@ -745,7 +762,7 @@ export function PipelineView({
       </div>
 
       {/* tabs */}
-      <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
+      <div className="mt-6 flex min-w-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden border-b border-border">
         {PIPELINE_TABS.map((t) => {
           const count =
             t === "INBOX"
@@ -764,7 +781,7 @@ export function PipelineView({
               className={cn(
                 // gap-1, not a whitespace text node: flex containers drop
                 // whitespace-only anonymous items, which rendered "INBOX0".
-                "-mb-px inline-flex items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                "-mb-px inline-flex shrink-0 items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
                 visibleTab === t
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
