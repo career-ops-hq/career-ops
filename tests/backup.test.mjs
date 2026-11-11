@@ -562,6 +562,13 @@ try {
   const missingChosen = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir: join(tmp, 'no-such', 'memory'), memoryDirChosen: true, includeClaudeMemory: true });
   assert.equal(missingChosen.failed.length, 1);
   assert.match(missingChosen.failed[0].error, /does not exist/);
+  // A memory path that is a file, not a folder, is a failure and copies nothing.
+  const fileAsMemory = join(tmp, 'memory-is-a-file');
+  writeFileSync(fileAsMemory, 'not a folder');
+  const notFolder = b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'backup', 'mem-file'), memoryDir: fileAsMemory, includeClaudeMemory: true });
+  assert.equal(notFolder.claudeMemory, 0);
+  assert.equal(notFolder.failed.length, 1);
+  assert.match(notFolder.failed[0].error, /not a folder/);
   // Same size and same mtime is not proof of "unchanged" for memory files: the content is compared too.
   const sameDir = join(tmp, 'claude-same', 'memory');
   put(sameDir, 'MEMORY.md', 'AAAA');
