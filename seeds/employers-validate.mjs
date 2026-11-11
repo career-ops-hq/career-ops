@@ -15,6 +15,10 @@
  *   node seeds/employers-validate.mjs --write-changelog  regenerate employers/CHANGELOG.md
  *                                                        from the manifests, then validate
  *                                                        (maintainers, on main)
+ *   node seeds/employers-validate.mjs --inbox-only --base <ref> [--head <ref>]
+ *                                                        print, as JSON, whether the diff
+ *                                                        <ref>...HEAD only adds files to
+ *                                                        employers/inbox/ (no validation)
  *
  * The contribution inbox, employers/inbox/ (seeds/employers-inbox.mjs), is
  * checked too: file names, at most 5,000 lines a file, the short line format,
@@ -57,6 +61,8 @@ import {
   inboxCareersUrl,
   inboxCoords,
   parseInboxName,
+  recognizeInboxOnly,
+  renderInboxOnlySummary,
 } from './employers-inbox.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -979,6 +985,7 @@ export function writeChangelog(root) {
 // ── CLI ─────────────────────────────────────────────────────────────────
 
 const USAGE = `Usage: node seeds/employers-validate.mjs [--base <dir>] [--write-changelog]
+       node seeds/employers-validate.mjs --inbox-only --base <ref> [--head <ref>]
 
   Validates employers/ in the current directory (run it from the repository root).
 
@@ -988,15 +995,26 @@ const USAGE = `Usage: node seeds/employers-validate.mjs [--base <dir>] [--write-
                       counts as an empty one.
   --write-changelog   regenerate employers/CHANGELOG.md from contributions/, then validate.
                       For maintainers on main: a contribution does not edit CHANGELOG.md.
+  --inbox-only        do not validate: print, as one JSON object, whether every change in
+                      git diff <base>...<head> adds a new, validly named file directly
+                      under employers/inbox/ (status A only: no modify, delete or rename),
+                      and which files. Here --base is a git ref, and --head defaults to
+                      HEAD. Exit 0 whatever the answer; 2 when git cannot diff.
   --help              show this text.`;
 
 /** @param {string[]} argv */
 function parseArgs(argv) {
-  const opts = { base: /** @type {string|null} */ (null), writeChangelog: false, help: false };
+  const opts = { base: /** @type {string|null} */ (null), head: /** @type {string|null} */ (null), writeChangelog: false, inboxOnly: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') opts.help = true;
     else if (a === '--write-changelog') opts.writeChangelog = true;
+    else if (a === '--inbox-only') opts.inboxOnly = true;
+    else if (a === '--head') {
+      const v = argv[++i];
+      if (!v || v.startsWith('--')) throw new Error('--head needs a git ref');
+      opts.head = v;
+    } else if (a.startsWith('--head=')) opts.head = a.slice('--head='.length);
     else if (a === '--base') {
       const v = argv[++i];
       if (!v || v.startsWith('--')) throw new Error('--base needs a directory');
@@ -1004,6 +1022,9 @@ function parseArgs(argv) {
     } else if (a.startsWith('--base=')) opts.base = a.slice('--base='.length);
     else throw new Error(`unknown argument: ${a}`);
   }
+  if (opts.inboxOnly && !opts.base) throw new Error('--inbox-only needs --base <ref>');
+  if (opts.inboxOnly && opts.writeChangelog) throw new Error('--inbox-only does not validate or write anything; drop --write-changelog');
+  if (opts.head && !opts.inboxOnly) throw new Error('--head is only used with --inbox-only');
   return opts;
 }
 
@@ -1070,6 +1091,34 @@ export function renderStepSummary({ errors, warnings, stats }) {
   return `${lines.join('\n')}\n`;
 }
 
+/**
+ * --inbox-only: print the recognition as JSON; in GitHub Actions also write it
+ * to the step's outputs (inbox_only, inbox_files, inbox_logins) and summary.
+ * @param {string} base
+ * @param {string} head
+ */
+function mainInboxOnly(base, head) {
+  let result;
+  try {
+    result = recognizeInboxOnly({ base, head });
+  } catch (e) {
+    console.error(`employers-validate: ${/** @type {Error} */ (e).message}`);
+    process.exit(2);
+  }
+  console.log(JSON.stringify(result, null, 2));
+  if (process.env.GITHUB_ACTIONS !== 'true') return;
+  const write = (/** @type {string|undefined} */ path, /** @type {string} */ text, /** @type {string} */ what) => {
+    if (!path) return;
+    try { appendFileSync(path, text); } catch (e) { console.error(`employers-validate: could not write the ${what}: ${/** @type {Error} */ (e).message}`); }
+  };
+  write(process.env.GITHUB_OUTPUT, [
+    `inbox_only=${result.inboxOnly}`,
+    `inbox_files=${JSON.stringify(result.files)}`,
+    `inbox_logins=${JSON.stringify(result.logins)}`,
+  ].join('\n') + '\n', 'step outputs');
+  write(process.env.GITHUB_STEP_SUMMARY, renderInboxOnlySummary(result), 'step summary');
+}
+
 function main() {
   let opts;
   try {
@@ -1080,6 +1129,10 @@ function main() {
   }
   if (opts.help) {
     console.log(USAGE);
+    return;
+  }
+  if (opts.inboxOnly) {
+    mainInboxOnly(/** @type {string} */ (opts.base), opts.head || 'HEAD');
     return;
   }
   const root = process.cwd();

@@ -16,11 +16,13 @@
  * (seeds/employers-fold.mjs); the validator checks it in every pull request.
  *
  * This module holds what does not need the validator: the file names, the
- * line format and its defaults. It depends on lib/ats-board-url.mjs only, so
- * CI can run the base branch's copy of it.
+ * line format and its defaults, and the recognition of a pull request that
+ * only adds inbox files (classifyInboxDiff, recognizeInboxOnly). It depends on
+ * lib/ats-board-url.mjs only, so CI can run the base branch's copy of it.
  * No network, no npm dependencies.
  */
 
+import { spawnSync } from 'node:child_process';
 import { BOARD_ATS, REGIONAL_BOARD_URL_BUILDERS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 
 /** The inbox, relative to the checkout root. */
@@ -132,3 +134,140 @@ export function inboxLineToRow(line, { source, contribution, added }) {
   return row;
 }
 
+// ── A pull request that only adds inbox files ───────────────────────────
+
+/**
+ * @typedef {{status: string, path: string, oldPath?: string, mode?: string}} DiffEntry
+ * @typedef {{inboxOnly: boolean, files: string[], rejected: Array<{path: string, status: string, reason: string}>, logins: string[]}} InboxOnlyResult
+ */
+
+/** A regular, non-executable file in git. */
+const REGULAR_FILE_MODE = '100644';
+
+/**
+ * Whether every change in a diff adds a new, validly named file directly under
+ * employers/inbox/. Status A only: a modified (M), deleted (D), renamed (R),
+ * copied (C) or retyped (T) file, or one added anywhere else, makes the answer
+ * false and is listed in `rejected` with the reason. An empty diff is not an
+ * inbox-only change.
+ *
+ * It looks at names and statuses, not at what the files hold: the validator
+ * judges the content.
+ *
+ * @param {DiffEntry[]} entries
+ * @returns {InboxOnlyResult}
+ */
+export function classifyInboxDiff(entries) {
+  /** @type {string[]} */
+  const files = [];
+  /** @type {InboxOnlyResult['rejected']} */
+  const rejected = [];
+  const logins = new Set();
+  const prefix = `${INBOX_DIR}/`;
+  for (const e of entries) {
+    const status = String(e.status || '').charAt(0);
+    const path = String(e.path || '');
+    const reject = (/** @type {string} */ reason) => rejected.push({ path, status: String(e.status || ''), reason });
+    if (status !== 'A') {
+      const what = { M: 'modifies', D: 'deletes', R: 'renames', C: 'copies', T: 'changes the type of' }[status] || 'changes';
+      reject(`${what} a file; an inbox contribution only adds new files`);
+      continue;
+    }
+    if (!path.startsWith(prefix) || path.slice(prefix.length).includes('/')) {
+      reject(`adds a file outside ${INBOX_DIR}/`);
+      continue;
+    }
+    if (e.mode !== undefined && e.mode !== REGULAR_FILE_MODE) {
+      reject(`file mode ${e.mode}; inbox files are regular files (${REGULAR_FILE_MODE})`);
+      continue;
+    }
+    const parsed = parseInboxName(path.slice(prefix.length));
+    if ('error' in parsed) {
+      reject(parsed.error);
+      continue;
+    }
+    files.push(path);
+    logins.add(parsed.login);
+  }
+  return {
+    inboxOnly: entries.length > 0 && rejected.length === 0,
+    files: files.sort(),
+    rejected,
+    logins: [...logins].sort(),
+  };
+}
+
+/**
+ * Parse `git diff --raw -z` output into diff entries.
+ * Each record is ":<old mode> <new mode> <old sha> <new sha> <status>\0<path>\0",
+ * with a second path for renames and copies (old, then new).
+ * @param {string} text
+ * @returns {DiffEntry[]}
+ */
+export function parseRawDiff(text) {
+  const parts = text.split('\0');
+  /** @type {DiffEntry[]} */
+  const out = [];
+  for (let i = 0; i < parts.length; i++) {
+    const head = parts[i];
+    if (!head) continue;
+    if (!head.startsWith(':')) throw new Error(`unexpected git diff output: ${JSON.stringify(head.slice(0, 80))}`);
+    const fields = head.slice(1).split(' ');
+    const mode = fields[1];
+    const status = fields[4] || '';
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const oldPath = parts[++i];
+      const path = parts[++i];
+      out.push({ status, path, oldPath, mode });
+    } else {
+      out.push({ status, path: parts[++i], mode });
+    }
+  }
+  return out;
+}
+
+/**
+ * The changes from `base` to `head`, as `git diff base...head` sees them
+ * (what head adds since it branched off base), renames detected.
+ * @param {{base: string, head?: string, cwd?: string}} opts
+ * @returns {DiffEntry[]}
+ */
+export function gitDiffEntries({ base, head = 'HEAD', cwd = process.cwd() }) {
+  for (const ref of [base, head]) {
+    if (typeof ref !== 'string' || !ref || ref.startsWith('-')) throw new Error(`not a git ref: ${JSON.stringify(ref)}`);
+  }
+  const r = spawnSync('git', ['diff', '--raw', '-z', '--find-renames', '--no-color', '--no-ext-diff', `${base}...${head}`, '--'], {
+    cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
+  });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error(`git diff ${base}...${head} failed: ${(r.stderr || '').trim()}`);
+  return parseRawDiff(r.stdout);
+}
+
+/**
+ * Whether the diff base...head only adds inbox files.
+ * @param {{base: string, head?: string, cwd?: string}} opts
+ * @returns {InboxOnlyResult & {base: string, head: string}}
+ */
+export function recognizeInboxOnly({ base, head = 'HEAD', cwd = process.cwd() }) {
+  return { base, head, ...classifyInboxDiff(gitDiffEntries({ base, head, cwd })) };
+}
+
+/**
+ * The markdown block for GITHUB_STEP_SUMMARY.
+ * @param {InboxOnlyResult} r
+ */
+export function renderInboxOnlySummary(r) {
+  const lines = ['## Inbox-only check', ''];
+  if (r.inboxOnly) {
+    lines.push(`**Yes**: this pull request only adds ${r.files.length} file${r.files.length === 1 ? '' : 's'} to \`${INBOX_DIR}/\`.`, '');
+    for (const f of r.files) lines.push(`- \`${f}\``);
+  } else if (r.rejected.length === 0) {
+    lines.push('**No**: the pull request changes no file.');
+  } else {
+    lines.push(`**No**: ${r.rejected.length} change${r.rejected.length === 1 ? '' : 's'} outside the inbox-only path.`, '');
+    for (const x of r.rejected.slice(0, 50)) lines.push(`- \`${x.path.replace(/[`\r\n]/g, '?')}\` (${x.status}): ${x.reason}`);
+    if (r.rejected.length > 50) lines.push(`- ${r.rejected.length - 50} more in the job log.`);
+  }
+  return `${lines.join('\n')}\n`;
+}
