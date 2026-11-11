@@ -36,6 +36,27 @@ test("scrub: Windows account names with spaces are removed whole", () => {
   assert.equal(scrub("/Users/jdoe failed"), "~ failed");
 });
 
+test("scrub: the text after a bare home directory survives", () => {
+  assert.equal(
+    scrub("/home/jdoe failed to contact https://example.com"),
+    "~ failed to contact https://example.com",
+  );
+  assert.equal(
+    scrub("C:/Users/jdoe failed to contact https://example.com"),
+    "~ failed to contact https://example.com",
+  );
+  assert.equal(scrub("C:\\Users\\jdoe failed to read C:\\tmp"), "~ failed to read C:\\tmp");
+});
+
+test("scrub: an apostrophe inside a Windows account name is part of it", () => {
+  assert.equal(scrub("C:\\Users\\O'Brien\\cv.md"), "~\\cv.md");
+  assert.equal(scrub("open 'C:\\Users\\jdoe' failed"), "open '~' failed");
+});
+
+test("scrub: a POSIX account name keeps its backslashes", () => {
+  assert.equal(scrub("/home/jane\\doe/cv.md"), "~/cv.md");
+});
+
 test("scrub: prefixed tokens are redacted with nothing in front of them", () => {
   for (const tok of [
     "ghp_abcdefghijklmnopqrstuvwx0123",

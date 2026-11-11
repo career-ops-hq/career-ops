@@ -6,16 +6,23 @@
 // guard. Plain .mjs so it can be tested without a build (report.ts imports
 // ./logbuf with no extension, which Node cannot resolve).
 
-// An account name: one or more space-separated words, taken whole only when a
-// path separator or quote follows it ("C:\Users\Jane Doe\cv.md",
-// "'C:/Users/Jane Doe'"); otherwise just the first word, so the rest of a
-// sentence after a bare home directory ("/Users/jdoe failed") survives.
-const NAME = String.raw`(?:[^\\/\s"']+(?: [^\\/\s"']+)*(?=[\\/"'])|[^\\/\s"']+)`;
+// One word of a Windows account name. An apostrophe followed by a name
+// character stays in the word (O'Brien); one before a separator, a space or the
+// end is a closing quote. `:` cannot appear in a Windows account name, which
+// keeps a URL scheme ("https:") out of the match.
+const WIN_WORD = String.raw`(?:[^\\/\s"':]|'(?=[^\\/\s"':]))+`;
 
 // Windows home directory, either slash style, any number of slashes (a path
-// inside a JSON-encoded error message has its backslashes doubled).
-const WINDOWS_HOME = new RegExp(String.raw`\b[A-Za-z]:(?:\\+|\/+)Users(?:\\+|\/+)` + NAME, "gi");
-const POSIX_HOME = new RegExp(String.raw`\/(?:Users|home)\/` + NAME, "g");
+// inside a JSON-encoded error message has its backslashes doubled). A name of
+// up to three space-separated words ("Jane Doe") is taken whole only when the
+// same separator or a closing quote follows it; otherwise just the first word,
+// so the rest of a sentence after a bare home directory survives.
+const WINDOWS_HOME = new RegExp(
+  String.raw`\b[A-Za-z]:(?:\\+|\/+)Users(\\+|\/+)(?:${WIN_WORD}(?: ${WIN_WORD}){1,2}(?=\1|["'])|${WIN_WORD})`,
+  "gi",
+);
+// POSIX account names cannot contain spaces, and `\` is an ordinary character.
+const POSIX_HOME = /\/(?:Users|home)\/[^/\s"']+/g;
 
 // Tokens recognisable by their prefix alone, with no `key=` in front of them.
 const PREFIXED_TOKEN = new RegExp(
