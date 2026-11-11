@@ -8,8 +8,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import "../helpers/web-ts-alias-loader.mjs";
 import { restoreFullPdfIndex } from "../../src/lib/cv-studio/restore-pdf.mjs";
+
+// test-all runs from the checkout root. A `cwd/..` code root then points at
+// the parent of the repo, tracker-utils.mjs does not load, and the index
+// rewrite looks like a miss. Pin the checkout from this file.
+const REPO_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 const header = "# report\tpdf\thtml\tformat\tdate\tkind\n";
 const edited = "011\toutput/cv-fixture-011-fixture-co-edited.pdf\toutput/cv-fixture-011-fixture-co-edited.html\tletter\t2026-11-10\tcv";
@@ -45,7 +51,7 @@ test("restoreIndexedFullPdf rewrites the index only when the full file exists", 
   fs.writeFileSync(path.join(root, "output", "cv-fixture-011-fixture-co.pdf"), "%PDF");
   fs.writeFileSync(indexPath, `${header}${edited}\n${cover}\n`);
   process.env.CAREER_OPS_ROOT = root;
-  process.env.CAREER_OPS_CODE_ROOT = path.resolve(process.cwd(), "..");
+  process.env.CAREER_OPS_CODE_ROOT = REPO_ROOT;
   process.env.CAREER_OPS_PDF_INDEX = indexPath;
   try {
     const restored = await restoreIndexedFullPdf("011");
