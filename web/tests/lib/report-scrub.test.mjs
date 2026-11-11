@@ -29,6 +29,13 @@ test("scrub: a Windows path inside JSON-escaped text is caught", () => {
   leaks(out, "jdoe");
 });
 
+test("scrub: Windows account names with spaces are removed whole", () => {
+  assert.equal(scrub("C:\\Users\\Jane Doe\\cv.md"), "~\\cv.md");
+  assert.equal(scrub("open 'C:/Users/Jane Doe' failed"), "open '~' failed");
+  leaks(scrub('{"path":"C:\\\\Users\\\\Jane Doe\\\\cv.md"}'), "Doe");
+  assert.equal(scrub("/Users/jdoe failed"), "~ failed");
+});
+
 test("scrub: prefixed tokens are redacted with nothing in front of them", () => {
   for (const tok of [
     "ghp_abcdefghijklmnopqrstuvwx0123",
@@ -49,6 +56,9 @@ test("scrub: keyed secrets are still redacted", () => {
   assert.equal(scrub("GITHUB_TOKEN=abcdefghij12"), "GITHUB_TOKEN=[redacted]");
   assert.equal(scrub("secret_key=abcdefghij12"), "secret_key=[redacted]");
   assert.equal(scrub("x-api-key: abcdefghij12"), "x-api-key: [redacted]");
+  assert.equal(scrub("accessToken=AbCdEfGhIjKlMnOp1234"), "accessToken=[redacted]");
+  assert.equal(scrub("clientSecret=AbCdEfGhIjKlMnOp1234"), "clientSecret=[redacted]");
+  assert.equal(scrub('{"refresh_token":"AbCdEfGhIjKl"}'), '{"refresh_token":"[redacted]"}');
 });
 
 test("scrub: ordinary text is left alone", () => {

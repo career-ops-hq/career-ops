@@ -6,10 +6,16 @@
 // guard. Plain .mjs so it can be tested without a build (report.ts imports
 // ./logbuf with no extension, which Node cannot resolve).
 
+// An account name: one or more space-separated words, taken whole only when a
+// path separator or quote follows it ("C:\Users\Jane Doe\cv.md",
+// "'C:/Users/Jane Doe'"); otherwise just the first word, so the rest of a
+// sentence after a bare home directory ("/Users/jdoe failed") survives.
+const NAME = String.raw`(?:[^\\/\s"']+(?: [^\\/\s"']+)*(?=[\\/"'])|[^\\/\s"']+)`;
+
 // Windows home directory, either slash style, any number of slashes (a path
 // inside a JSON-encoded error message has its backslashes doubled).
-const WINDOWS_HOME = /\b[A-Za-z]:(?:\\+|\/+)Users(?:\\+|\/+)[^\\/\s"']+/gi;
-const POSIX_HOME = /\/(?:Users|home)\/[^/\s"']+/g;
+const WINDOWS_HOME = new RegExp(String.raw`\b[A-Za-z]:(?:\\+|\/+)Users(?:\\+|\/+)` + NAME, "gi");
+const POSIX_HOME = new RegExp(String.raw`\/(?:Users|home)\/` + NAME, "g");
 
 // Tokens recognisable by their prefix alone, with no `key=` in front of them.
 const PREFIXED_TOKEN = new RegExp(
@@ -25,9 +31,12 @@ const PREFIXED_TOKEN = new RegExp(
 );
 
 // `key=value` / `token: value` shapes. The lookbehind keeps the keyword from
-// matching inside a word ("task-12345678"), while still allowing a `_` before
-// it so `GITHUB_TOKEN=` and `secret_key=` are caught.
-const KEYED_SECRET = /(?<![A-Za-z0-9])(sk|key|token|secret|bearer|api[-_]?key)([-_=:\s"']+)[A-Za-z0-9._-]{8,}/gi;
+// matching inside a word ("task-12345678", "monkey: …"), while still allowing a
+// `_` before it so `GITHUB_TOKEN=` and `secret_key=` are caught. Compound names
+// written in camelCase (`accessToken`, `clientSecret`) are listed explicitly,
+// because the lookbehind would otherwise reject them.
+const KEYWORD = "(?:(?:access|refresh|auth|client|id|session|private|app|api)[-_]?)?(?:token|secret|key)|sk|bearer";
+const KEYED_SECRET = new RegExp(String.raw`(?<![A-Za-z0-9])(${KEYWORD})([-_=:\s"']+)[A-Za-z0-9._-]{8,}`, "gi");
 
 /** @param {string} s */
 export function scrub(s) {
