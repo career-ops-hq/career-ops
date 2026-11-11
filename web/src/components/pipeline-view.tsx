@@ -649,7 +649,7 @@ export function PipelineView({
   }, [span.start, span.end]);
 
   return (
-    <PageFrame>
+    <PageFrame width="wide">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
@@ -921,7 +921,11 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table aria-label="Tracked applications" aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
+          <table
+            aria-label="Tracked applications"
+            aria-rowcount={filtered.length + 1}
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[9.5rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+          >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
@@ -1083,14 +1087,14 @@ const TrackerRow = memo(function TrackerRow({
         </Link>
       </td>
       <td className="px-4 py-3 font-medium">
-        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 min-w-0 transition-colors group-hover:text-brand-text min-[1440px]:w-full">
           <CompanyLogo name={company.logoName} size={20} />
-          <span className="block max-w-64 truncate" title={company.label}>{company.label}</span>
+          <span className="block max-w-64 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={company.label}>{company.label}</span>
         </Link>
       </td>
       <td className="px-4 py-3 text-muted">
-        <div className="flex items-center gap-2">
-          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
+        <div className="flex min-w-0 items-center gap-2">
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
           {r.closesAt ? (
             <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
           ) : null}

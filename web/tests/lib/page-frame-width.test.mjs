@@ -37,6 +37,6 @@ test("pipeline company and role use the wide row and the date cell stays put", (
   assert.match(pipeline, /min-\[1440px\]:table-fixed/);
   assert.match(pipeline, /min-w-\[44rem\]/);
   assert.match(pipeline, /max-w-64 truncate min-\[1440px\]:min-w-0 min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{company\.label\}/);
-  assert.match(pipeline, /max-w-60 truncate min-\[1440px\]:min-w-0 min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{r\.role\}/);
-  assert.match(pipeline, /<td className="hidden whitespace-nowrap px-3 py-3 text-faint tabular-nums lg:table-cell">\{r\.date\}<\/td>/);
+  assert.match(pipeline, /max-w-72 truncate min-\[1440px\]:min-w-0 min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{r\.role\}/);
+  assert.match(pipeline, /<td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">\{r\.date\}<\/td>/);
 });
