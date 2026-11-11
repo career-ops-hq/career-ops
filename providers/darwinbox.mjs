@@ -6,6 +6,7 @@ import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 
 const DARWINBOX_HOST_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.darwinbox\.in$/;
@@ -218,6 +219,11 @@ export default {
     if (stopReason === 'cap' && !probing) {
       const summary = `${jobs.length}${total !== undefined ? ` of ${total}` : ''} jobs`;
       console.error(`⚠️  darwinbox: ${entry.name} truncated at max_pages=${maxPages} (${summary}) — raise max_pages on this entry for more`);
+    }
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs).
+    if (!probing && stopReason !== 'complete') {
+      markTruncated(jobs, stopReason === 'cap' ? 'page-cap' : 'fetch-error', { fetched: jobs.length, ...(total !== undefined ? { total } : {}) });
     }
 
     return jobs;
