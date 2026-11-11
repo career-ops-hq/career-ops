@@ -1,6 +1,8 @@
 import { fillSession, handoffSession, getSession } from "@/lib/apply/session";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
+import { handoffDecision } from "@/lib/apply/handoff-gate.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
+import type { ApplyIssue } from "@/lib/apply/issue";
 import { readJsonObject } from "@/lib/json-body";
 
 export const runtime = "nodejs";
@@ -30,8 +32,23 @@ export async function POST(req: Request) {
   try {
     const cvUploadName = cvPath ? uploadNameForCv({ application, title: session?.title }) : undefined;
     const result = await fillSession(sessionId, answers, fields, cvPath, cvUploadName);
-    if (handoff) await handoffSession(sessionId).catch(() => {});
-    return Response.json({ ...result, handedOff: !!handoff, cvAttached: !!cvPath });
+    const unmetLabels = (result.issues ?? []).flatMap((issue) =>
+      issue.code === "required-empty" && Array.isArray(issue.labels) ? issue.labels : [],
+    );
+    const decision = handoffDecision({
+      fields,
+      answers,
+      cvAttached: !!cvPath,
+      steps: result.steps,
+      unmetLabels,
+    });
+    const issues = [...(result.issues ?? [])];
+    for (const gap of decision.gaps) {
+      if (!issues.some((issue) => issue.message === gap.message)) issues.push(gap as ApplyIssue);
+    }
+    const handedOff = !!handoff && decision.handoff;
+    if (handedOff) await handoffSession(sessionId).catch(() => {});
+    return Response.json({ ...result, issues, handedOff, cvAttached: !!cvPath });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message.slice(0, 200) : "fill failed" }, { status: 500 });
   }
