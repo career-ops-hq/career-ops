@@ -23,7 +23,7 @@ import { pass, fail, NODE, ROOT, rmSync, sealProcessGitEnv } from './helpers.mjs
 import { execFileSync } from 'child_process';
 import { mkdtempSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, relative } from 'path';
 
 // Fixture git inherits process.env, so keep the contributor's git config out of it.
 sealProcessGitEnv();
@@ -110,6 +110,15 @@ try {
       pass("--target reports the diagnosed checkout as project_root (#6498)");
     } else {
       fail(`--target did not report target as project_root: got ${targetState.project_root}, want ${dataRoot}`);
+    }
+
+    // 4. relative --target resolves to an absolute path before reporting
+    const relRun = runDoctor(dataRoot, ['--target', relative(ROOT, dataRoot), '--json']);
+    const relState = JSON.parse(relRun.out);
+    if (relState.project_root === dataRoot) {
+      pass("relative --target resolves to an absolute path before reporting (#6498)");
+    } else {
+      fail(`relative --target was not resolved to absolute path: got ${relState.project_root}, want ${dataRoot}`);
     }
   } catch {
     fail(`doctor --json did not produce parseable JSON under a split CAREER_OPS_ROOT: ${jsonRun.out}\n${jsonRun.stderr || ''}`);

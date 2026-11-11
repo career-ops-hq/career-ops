@@ -368,6 +368,7 @@ test('doctor reports a data root inside the plugin copy and creates nothing ther
   const state = JSON.parse(onboarding.stdout);
   assert.deepEqual(state.autoCopied, []);
   assert.equal(state.dataRootError.code, 'CAREER_OPS_UNSAFE_DATA_ROOT');
+  assert.equal(state.data_root, null);
   assert.ok(state.warnings.some((w) => w.includes('inside a Claude Code plugin install')), state.warnings.join('\n'));
   assert.equal(existsSync(inside), false, '--init-templates seeded files inside the plugin copy');
 });

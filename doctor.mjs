@@ -25,7 +25,7 @@ import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES }
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const explicitTarget = flagValue(argv, '--target') || null;
-const codeRoot = explicitTarget || __dirname;
+const codeRoot = explicitTarget ? resolve(explicitTarget) : __dirname;
 
 // path-resolver.mjs refuses an explicit data root inside a plugin install copy,
 // and some modules loaded below resolve the root as they load. Ask once, first,
@@ -39,7 +39,7 @@ try {
     // onboardingNeeded stays true so nothing proceeds on this root.
     console.log(JSON.stringify({
       onboardingNeeded: true,
-      data_root: err.root || null,
+      data_root: null,
       project_root: codeRoot,
       missing: [],
       unpersonalized: [],
@@ -118,7 +118,7 @@ CLIs: ${AGENT_CLIS.join(', ')}`;
 // shared message.
 validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-const projectRoot = explicitTarget || getCareerOpsRoot();
+const projectRoot = explicitTarget ? resolve(explicitTarget) : getCareerOpsRoot();
 // --target diagnoses a whole other checkout, so that checkout's profile is the
 // one that counts; otherwise CAREER_OPS_PROFILE applies as it does everywhere.
 // With no override the path is the root the doctor started from: the human run
