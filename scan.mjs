@@ -3746,13 +3746,27 @@ function sameJobWriteKey(url) {
 function releasedHistoryKeys(historyText, policy) {
   const pinned = new Set();
   const released = new Set();
+  const dupRows = [];
   for (const row of scanHistoryRows(historyText)) {
     const status = row.status || 'added';
     if (!row.url || OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     const key = sameJobWriteKey(row.url);
     if (!key) continue;
+    // A repeat sighting takes its verdict from the URL's other rows, as in
+    // collectSeenUrls, so the gate and this write agree on what was released.
+    if (status === 'skipped_dup' && policy?.recheckAfterDays != null) {
+      dupRows.push({ key, firstSeen: row.first_seen });
+      continue;
+    }
     if (shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) pinned.add(key);
     else released.add(key);
+  }
+  for (const { key, firstSeen } of dupRows) {
+    // Its original was released: the repeat goes with it.
+    if (released.has(key) && !pinned.has(key)) continue;
+    // No original here: it pins while young, and an aged one releases nothing,
+    // so it never un-pins the checked-off entry it repeats.
+    if (shouldDedupScanHistoryRow({ firstSeen, status: 'skipped_dup' }, policy)) pinned.add(key);
   }
   for (const key of pinned) released.delete(key);
   return released;
