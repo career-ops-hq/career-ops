@@ -61,6 +61,16 @@ test("scrub: a POSIX account name keeps its backslashes", () => {
   assert.equal(scrub("/home/jane\\doe/cv.md"), "~/cv.md");
 });
 
+test("scrub: a JSON escape ends a POSIX account name", () => {
+  assert.equal(scrub('{"message":"/home/jdoe\\nEACCES"}'), '{"message":"~\\nEACCES"}');
+  assert.equal(scrub('{"path":"/home/jdoe\\"}'), '{"path":"~\\"}');
+});
+
+test("scrub: a Windows name with spaces is removed whole across mixed separators", () => {
+  assert.equal(scrub("C:\\Users\\Jane Doe/cv.md"), "~/cv.md");
+  assert.equal(scrub(`C:/${U}/Jane Doe\\cv.md`), "~\\cv.md");
+});
+
 test("scrub: prefixed tokens are redacted with nothing in front of them", () => {
   for (const tok of [
     "ghp_abcdefghijklmnopqrstuvwx0123",

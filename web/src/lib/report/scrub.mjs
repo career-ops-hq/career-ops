@@ -14,15 +14,17 @@ const WIN_WORD = String.raw`(?:[^\\/\s"':]|'(?=[^\\/\s"':]))+`;
 
 // Windows home directory, either slash style, any number of slashes (a path
 // inside a JSON-encoded error message has its backslashes doubled). A name of
-// up to three space-separated words ("Jane Doe") is taken whole only when the
-// same separator or a closing quote follows it; otherwise just the first word,
-// so the rest of a sentence after a bare home directory survives.
+// up to three space-separated words ("Jane Doe") is taken whole only when a
+// separator of either style or a closing quote follows it; otherwise just the
+// first word, so the rest of a sentence after a bare home directory survives.
 const WINDOWS_HOME = new RegExp(
-  String.raw`\b[A-Za-z]:(?:\\+|\/+)Users(\\+|\/+)(?:${WIN_WORD}(?: ${WIN_WORD}){1,2}(?=\1|["'])|${WIN_WORD})`,
+  String.raw`\b[A-Za-z]:(?:\\+|\/+)Users(?:\\+|\/+)(?:${WIN_WORD}(?: ${WIN_WORD}){1,2}(?=[\\/"'])|${WIN_WORD})`,
   "gi",
 );
-// POSIX account names cannot contain spaces, and `\` is an ordinary character.
-const POSIX_HOME = /\/(?:Users|home)\/[^/\s"']+/g;
+// POSIX account names cannot contain spaces, and `\` is an ordinary character,
+// except where it starts a JSON escape: in a serialized log line
+// ("/home/jdoe\nEACCES") the name ends at the `\n`.
+const POSIX_HOME = /\/(?:Users|home)\/(?:[^/\s"'\\]|\\(?![nrtbfu"\\/]))+/g;
 
 // Tokens recognisable by their prefix alone, with no `key=` in front of them.
 const PREFIXED_TOKEN = new RegExp(
