@@ -169,4 +169,7 @@ test('a state code is US evidence unless the policy country uses those letters',
   });
   assert.equal(germany('Bremen, DE').eligible, true);
   assert.equal(germany('Bremen, DE (Hybrid)').eligible, true);
+  assert.equal(germany('Berlin, TX').reason, 'onsite_country_restricted');
+  assert.deepEqual(germany('Berlin, Germany | Austin, TX'), { eligible: true, reason: 'onsite_location_allowed' });
+  assert.equal(germany('Remote, Germany | Austin, TX').reason, 'remote_region_allowed');
 });

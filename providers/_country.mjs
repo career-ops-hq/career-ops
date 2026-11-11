@@ -173,12 +173,13 @@ const recognizedStateCodes = (text) => {
   }
   return found;
 };
-// A state code is a US place. A policy whose own country uses those letters
-// keeps the code: Germany still accepts "Bremen, DE", and India still accepts
-// "Pune, IN". Every other policy sees the United States, so France rejects
-// "Paris, ID".
-const stateOutsideAllowedCountries = (text, allowed) => {
+// A state code is a US place when the policy's country does not use those
+// letters. It restricts the posting only when no other place already names
+// an allowed country. France rejects "Paris, ID". Germany still accepts
+// "Bremen, DE" and "Berlin, Germany | Austin, TX".
+const stateOutsideAllowedCountries = (text, allowed, found) => {
   if (allowed.has('US')) return false;
+  if ([...found].some(code => allowed.has(code))) return false;
   for (const code of recognizedStateCodes(text)) {
     const iso = isoCountryCode(code);
     if (iso && allowed.has(iso)) continue;
@@ -355,7 +356,7 @@ export function buildWorkplacePolicy(policy) {
       if (!has(loc, onsite)) return fail(loc ? 'onsite_outside_allowed_locations' : 'location_unknown');
       const found = countries(loc, true);
       if (found.size && ![...found].some(c => localCodes.has(c))) return fail('onsite_country_restricted');
-      if (stateOutsideAllowedCountries(loc, localCodes)) return fail('onsite_country_restricted');
+      if (stateOutsideAllowedCountries(loc, localCodes, found)) return fail('onsite_country_restricted');
       return { eligible: true, reason: 'onsite_location_allowed' };
     }
     // Explicit structured countries narrow a covering region. Europe + UK-only
@@ -364,7 +365,7 @@ export function buildWorkplacePolicy(policy) {
     const geoLoc = geographyText(loc);
     const locationCountries = countries(geoLoc, true);
     if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c))) return fail('remote_country_restricted');
-    if (stateOutsideAllowedCountries(geoLoc, homeCodes)) return fail('remote_country_restricted');
+    if (stateOutsideAllowedCountries(geoLoc, homeCodes, locationCountries)) return fail('remote_country_restricted');
     const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHomeGeography(clause));
     const conditionalRegion = description.split(/[.!?;\n]+/).some(clause => REMOTE.test(clause) && has(clause, regions)
       && /\bwhere (?:we|the company|the employer) (?:have|has) (?:a |an |our )?hiring presence\b/.test(clause));
