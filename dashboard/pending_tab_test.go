@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
+	"github.com/santifer/career-ops/dashboard/internal/i18n"
 	"github.com/santifer/career-ops/dashboard/internal/theme"
 	"github.com/santifer/career-ops/dashboard/internal/ui/screens"
 )
@@ -155,6 +156,8 @@ func treeOf(t *testing.T, root string) string {
 }
 
 func TestInboxKeysChangeNoFile(t *testing.T) {
+	// The key list presses the global `t` language toggle; put English back for later tests.
+	t.Cleanup(func() { i18n.SetLang("en") })
 	root, paths := writeInboxRoot(t)
 	m := newInboxApp(t, root)
 	if v := ansi.Strip(m.pipeline.View()); !strings.Contains(v, "ALL (1)") || !strings.Contains(v, "INBOX (3)") {

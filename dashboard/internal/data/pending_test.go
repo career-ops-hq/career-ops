@@ -410,8 +410,14 @@ func TestPendingRowsMatchTheSharedParityFixture(t *testing.T) {
 			rank := row.Rank
 			got.Rank = &rank
 		}
-		g, _ := json.Marshal(got)
-		w, _ := json.Marshal(want[i])
+		g, err := json.Marshal(got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w, err := json.Marshal(want[i])
+		if err != nil {
+			t.Fatal(err)
+		}
 		if string(g) != string(w) {
 			t.Errorf("row %d:\n got  %s\n want %s", i, g, w)
 		}
