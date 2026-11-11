@@ -307,17 +307,30 @@ try {
     pass('ashby.fetch() tolerates a sparse job (empty strings, null salary, undefined postedAt for a bad date)');
   else fail(`ashby.fetch() row 1 = ${JSON.stringify(fetched[1])}`);
 
-  // Malformed response bodies → [], no crash.
-  const emptyCases = [null, {}, { jobs: null }, { jobs: 'nope' }];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await ashby.fetch(
-      { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`ashby.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // The documented envelope present and empty → [] (an empty board); any
+  // other 200 body is an API change or an error page and must throw, naming
+  // what came back, instead of reading as "no open roles" (#6906).
+  const emptyOut = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    { fetchJson: async () => ({ jobs: [] }) },
+  );
+  if (Array.isArray(emptyOut) && emptyOut.length === 0) pass('ashby.fetch() returns [] for { jobs: [] }');
+  else fail(`ashby.fetch() { jobs: [] } → ${JSON.stringify(emptyOut)}`);
+
+  const malformedCases = [[null, 'got null'], [{}, 'got keys []'], [{ error: 'rate limited' }, 'got keys [error]'], [{ jobs: null }, 'got jobs: null'], [{ jobs: {} }, 'got jobs: object'], [{ jobs: 'nope' }, 'got jobs: string'], [[], 'got an array'], ['oops', 'got string']];
+  let malformedOk = true;
+  for (const [body, got] of malformedCases) {
+    try {
+      const out = await ashby.fetch(
+        { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+        { fetchJson: async () => body },
+      );
+      malformedOk = false; fail(`ashby.fetch() body=${JSON.stringify(body)} returned ${JSON.stringify(out)} instead of throwing`); break;
+    } catch (e) {
+      if (!/^ashby: Acme returned an unexpected response/.test(e.message) || !e.message.includes(got)) { malformedOk = false; fail(`ashby.fetch() body=${JSON.stringify(body)} threw ${JSON.stringify(e.message)}`); break; }
+    }
   }
-  if (emptyOk) pass('ashby.fetch() returns [] for null / {} / non-array jobs response bodies');
+  if (malformedOk) pass('ashby.fetch() throws, naming what it got, for null / {} / {error} / non-array jobs / bare array or string bodies');
 
   // Retry loop — a transient failure on the first attempt recovers
   // transparently on the second (ASHBY_RETRIES=2 allows up to 3 attempts).

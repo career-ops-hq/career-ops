@@ -310,17 +310,46 @@ try {
     pass('greenhouse.fetch() preserves a valid epoch-0 first_published as postedAt 0');
   else fail(`greenhouse.fetch() epoch-0 postedAt = ${JSON.stringify(epochZero[0]?.postedAt)}`);
 
-  // Malformed response bodies → empty result, no crash.
-  const emptyCases = [null, {}, { jobs: null }, { jobs: 'nope' }];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await greenhouse.fetch(
-      { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`greenhouse.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // The documented envelope present and empty → [] (an empty board); any
+  // other 200 body is an API change or an error page and must throw, naming
+  // what came back, instead of reading as "no open roles" (#6906).
+  const emptyOut = await greenhouse.fetch(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    { fetchJson: async () => ({ jobs: [] }) },
+  );
+  if (Array.isArray(emptyOut) && emptyOut.length === 0) pass('greenhouse.fetch() returns [] for { jobs: [] }');
+  else fail(`greenhouse.fetch() { jobs: [] } → ${JSON.stringify(emptyOut)}`);
+
+  const malformedCases = [[null, 'got null'], [{}, 'got keys []'], [{ error: 'rate limited' }, 'got keys [error]'], [{ jobs: null }, 'got jobs: null'], [{ jobs: {} }, 'got jobs: object'], [{ jobs: 'nope' }, 'got jobs: string'], [[], 'got an array'], ['oops', 'got string']];
+  let malformedOk = true;
+  for (const [body, got] of malformedCases) {
+    try {
+      const out = await greenhouse.fetch(
+        { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+        { fetchJson: async () => body },
+      );
+      malformedOk = false; fail(`greenhouse.fetch() body=${JSON.stringify(body)} returned ${JSON.stringify(out)} instead of throwing`); break;
+    } catch (e) {
+      if (!/^greenhouse: Acme returned an unexpected response/.test(e.message) || !e.message.includes(got)) { malformedOk = false; fail(`greenhouse.fetch() body=${JSON.stringify(body)} threw ${JSON.stringify(e.message)}`); break; }
+    }
   }
-  if (emptyOk) pass('greenhouse.fetch() returns [] for null / {} / non-array jobs response bodies');
+  if (malformedOk) pass('greenhouse.fetch() throws, naming what it got, for null / {} / {error} / non-array jobs / bare array or string bodies');
+
+  // fetchListing() (scan-ats-full's cheap pre-check) reads the same envelope.
+  const listingEmpty = await greenhouse.fetchListing(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    { fetchJson: async () => ({ jobs: [] }) },
+  );
+  let listingThrew = '';
+  try {
+    await greenhouse.fetchListing(
+      { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+      { fetchJson: async () => ({ error: 'rate limited' }) },
+    );
+  } catch (e) { listingThrew = e.message; }
+  if (Array.isArray(listingEmpty) && listingEmpty.length === 0 && /^greenhouse: Acme returned an unexpected response .*got keys \[error\]$/.test(listingThrew))
+    pass('greenhouse.fetchListing() returns [] for { jobs: [] } and throws for a body without jobs[]');
+  else fail(`greenhouse.fetchListing() empty=${JSON.stringify(listingEmpty)} threw=${JSON.stringify(listingThrew)}`);
 
   // Guard chain runs BEFORE any request: an untrusted api: must throw without
   // ever calling fetchJson.

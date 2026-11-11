@@ -533,7 +533,17 @@ export default {
       // changes; the timing is preserved.
       { retries: ASHBY_RETRIES, baseDelayMs: ASHBY_BACKOFF_BASE_MS },
     ));
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    // `{jobs: []}` is an empty board; any other 200 body is an API change or an
+    // error page, not "no open roles" (ADDING_A_PROVIDER.md, "Defensive parsing").
+    if (!json || !Array.isArray(json.jobs)) {
+      const got = json === null ? 'null'
+        : typeof json !== 'object' ? typeof json
+        : Array.isArray(json) ? 'an array'
+        : 'jobs' in json ? `jobs: ${json.jobs === null ? 'null' : typeof json.jobs}`
+        : `keys [${Object.keys(json).join(', ')}]`;
+      throw new Error(`ashby: ${entry.name} returned an unexpected response — expected { jobs: [...] }, got ${got}`);
+    }
+    const jobs = json.jobs;
     const boardSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1] || '';
     return jobs.map(/** @param {any} j */ (j) => ({
       title: j.title || '',

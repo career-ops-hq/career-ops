@@ -198,6 +198,22 @@ export function contentToText(content) {
   return htmlToText(content);
 }
 
+// The board answered 200, so the documented envelope must be there: `{jobs: []}`
+// is an empty board, anything else (`{}`, `{error: …}`, `{jobs: null}`, a bare
+// string) is an API change or an error page, and has to surface as one instead
+// of reading as "no open roles" on every scan (ADDING_A_PROVIDER.md, "Defensive
+// parsing").
+/** @param {any} json @param {{ name?: string }} entry @returns {any[]} */
+function boardJobs(json, entry) {
+  if (json && Array.isArray(json.jobs)) return json.jobs;
+  const got = json === null ? 'null'
+    : typeof json !== 'object' ? typeof json
+    : Array.isArray(json) ? 'an array'
+    : 'jobs' in json ? `jobs: ${json.jobs === null ? 'null' : typeof json.jobs}`
+    : `keys [${Object.keys(json).join(', ')}]`;
+  throw new Error(`greenhouse: ${entry.name} returned an unexpected response — expected { jobs: [...] }, got ${got}`);
+}
+
 /** @type {Provider} */
 export default {
   id: 'greenhouse',
@@ -224,7 +240,7 @@ export default {
     const listUrl = new URL(apiUrl);
     listUrl.searchParams.delete('content');
     const json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(listUrl.href), { redirect: 'error' }));
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const jobs = boardJobs(json, entry);
     return jobs
       .filter(/** @param {any} j */ j => j.absolute_url)
       .map(/** @param {any} j */ j => ({ title: j.title || '', url: j.absolute_url, postedAt: toEpochMs(j.first_published) }));
@@ -260,7 +276,7 @@ export default {
       json = await ctx.fetchJson(assertGreenhouseUrl(bare.href), { redirect: 'error' });
       bodiesInline = false;
     }
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const jobs = boardJobs(json, entry);
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';
 

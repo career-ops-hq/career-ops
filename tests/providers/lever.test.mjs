@@ -262,17 +262,30 @@ try {
     pass('lever.fetch() ignores a non-array allLocations and preserves the primary location');
   else fail(`lever.fetch() row 6 location = ${JSON.stringify(fetched[6]?.location)}`);
 
-  // Non-array response bodies → [], no crash.
-  const emptyCases = [null, {}, { postings: [] }, 'nope'];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await lever.fetch(
-      { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`lever.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // The documented envelope present and empty → [] (an empty board); any
+  // other 200 body is an API change or an error page and must throw, naming
+  // what came back, instead of reading as "no open roles" (#6906).
+  const emptyOut = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    { fetchJson: async () => ([]) },
+  );
+  if (Array.isArray(emptyOut) && emptyOut.length === 0) pass('lever.fetch() returns [] for an empty array');
+  else fail(`lever.fetch() an empty array → ${JSON.stringify(emptyOut)}`);
+
+  const malformedCases = [[null, '(null)'], [{}, '(keys [])'], [{ error: 'rate limited' }, '(keys [error])'], [{ postings: [] }, '(keys [postings])'], ['nope', '(string)']];
+  let malformedOk = true;
+  for (const [body, got] of malformedCases) {
+    try {
+      const out = await lever.fetch(
+        { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+        { fetchJson: async () => body },
+      );
+      malformedOk = false; fail(`lever.fetch() body=${JSON.stringify(body)} returned ${JSON.stringify(out)} instead of throwing`); break;
+    } catch (e) {
+      if (!/^lever: Acme returned a non-array response/.test(e.message) || !e.message.includes(got)) { malformedOk = false; fail(`lever.fetch() body=${JSON.stringify(body)} threw ${JSON.stringify(e.message)}`); break; }
+    }
   }
-  if (emptyOk) pass('lever.fetch() returns [] for non-array response bodies (null / {} / string)');
+  if (malformedOk) pass('lever.fetch() throws, naming what it got, for null / {} / {error} / {postings} / string bodies');
 
   // fetch() — a pinned api: is used verbatim, bypassing careers_url parsing entirely.
   let pinnedUrl = null;

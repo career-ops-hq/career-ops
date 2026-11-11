@@ -243,7 +243,12 @@ export default {
         json = await readPaged();
       }
     }
-    if (!Array.isArray(json)) return [];
+    // Same guard as the paged path: `[]` is an empty board, any other 200 body
+    // is an API change or an error page, not "no open roles".
+    if (!Array.isArray(json)) {
+      const got = json === null ? 'null' : typeof json === 'object' ? `keys [${Object.keys(json).join(', ')}]` : typeof json;
+      throw new Error(`lever: ${entry.name} returned a non-array response (${got})`);
+    }
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v0\/postings\/([^/]+)\/?$/)?.[1] || '';
     const mapped = json.map(j => ({
       title: j.text || '',
