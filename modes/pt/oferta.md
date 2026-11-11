@@ -706,7 +706,7 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## Score Evidence
 (cinco dimensões de pontuação, status de evidência e fonte, questões não resolvidas, tier de confiança da evidência e prioridades de verificação)
 
-## H) Rascunhos de Respostas para Candidatura
+## H) Rascunhos de Respostas para Candidatura (draft)
 (apenas se score >= 4.5 — rascunhos de respostas para o formulário de candidatura)
 
 ---
