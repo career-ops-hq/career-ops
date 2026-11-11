@@ -226,7 +226,7 @@ Trước khi gán `confidence`, phân loại bằng chứng cho từng chiều (
 3. Hầu hết tiêu chí có bằng chứng tích cực → 4-5.
 4. Một số có bằng chứng tích cực và không có tiêu chí nào bị mâu thuẫn → 3.
 5. Bằng chứng mâu thuẫn với tiêu chí `require` → **giới hạn chiều này ở 2/5** và thêm một dòng vào trường Culture screen ở Block A nêu rõ điều gì thiếu hoặc mâu thuẫn.
-6. Không có bằng chứng cho tiêu chí nào → 3 theo mặc định, trừ khi `culture_screen.deprioritize_if_absent: true`, khi đó **giới hạn ở 2/5**.
+6. Không có bằng chứng cho tiêu chí nào → chiều này là unknown và không làm thay đổi điểm toàn cục. Không chấm 3. Nếu `culture_screen.deprioritize_if_absent: true`, người dùng muốn coi việc thiếu bằng chứng là tiêu cực, nên **giới hạn chiều này ở 2/5**.
 7. Vai trò 4.5+ tổng thể nhưng chiều văn hóa từ 2 trở xuống phải kèm cảnh báo: "Khớp kỹ thuật cao, văn hóa chưa xác nhận/kém -- xác minh trước khi ứng tuyển."
 
 ---
