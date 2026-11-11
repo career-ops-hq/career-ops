@@ -2,6 +2,7 @@
  * reply-matcher.mjs — deterministic matcher that maps email reply candidates to application tracker entries.
  */
 
+import { inviteEvidence } from './lib/invite-evidence.mjs';
 import { isPlaceholderCompany } from './lib/placeholder-cell.mjs';
 
 export function extractDomain(emailStr) {
@@ -708,6 +709,18 @@ export function classifyReply(cand) {
       type: 'Offer',
       evidence: Array.from(new Set(evidence)),
       suggestedTrackerUpdate: 'Offer'
+    };
+  }
+
+  // Evidence pass (#6167): a real invite often opens with "thank you for your
+  // application". A calendar invite, booking link or proposed time outranks
+  // the receipt wording below; receipt wording alone still reads as one.
+  const invite = inviteEvidence({ subject, text: body, from: cand.from || '' });
+  if (invite.invite && invite.strong > 0) {
+    return {
+      type: 'Interview',
+      evidence: Array.from(new Set([...evidence, ...invite.reasons])),
+      suggestedTrackerUpdate: 'Interview'
     };
   }
 

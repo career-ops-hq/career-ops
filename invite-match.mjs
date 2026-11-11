@@ -46,6 +46,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './tracker-utils.mjs';
+import { inviteEvidence } from './lib/invite-evidence.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Sibling scripts live next to this file in the *code* checkout, which is a
@@ -1000,7 +1001,18 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
   const constraints = extractConstraints(text);
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
-  const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
+  const phrases = classifyEmail(text);
+  const { matchedPhrases, phraseStrength } = phrases;
+  // Evidence pass (#6167): a calendar invite, a booking link or a proposed time
+  // makes an invite of text the phrase list missed, and receipt or process
+  // wording with no such signal ("if there is a match, we will invite you")
+  // stops a confirmation reading as one. A rejection stays a rejection.
+  const evidence = inviteEvidence({ text });
+  let classification = phrases.classification;
+  if (classification !== 'rejection') {
+    if (evidence.invite) classification = 'invite';
+    else if (classification === 'invite' && evidence.receipt) classification = 'unknown';
+  }
   const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
   // Additive (#6092): appended last so every existing key keeps its position.
   // null unless the text is an invite and the draft was not suppressed.
@@ -1012,7 +1024,8 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
       readReport: options.readReport ?? (r => readReportHeader(r.report, [dirname(APPS_FILE), CAREER_OPS])),
     });
   }
-  return { ...result, clarificationDraft };
+  // Additive (#6167): appended last, after clarificationDraft.
+  return { ...result, clarificationDraft, inviteEvidence: evidence };
 }
 
 /**
