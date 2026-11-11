@@ -28,6 +28,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run career-profile` | `career-profile.mjs` | Import CV facts into `data/career-profile.yml` (preview by default; `--review` to save) |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
+| `node clean-markers.mjs` | `clean-markers.mjs` | Audit or strip invisible Unicode from generated text files (see [CLEAN_MARKERS.md](CLEAN_MARKERS.md)) |
 | `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, never with `--provider` or a `--dest` inside a provider folder at its default location; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
@@ -860,6 +861,20 @@ node check-jd-archive.mjs --help
 ```
 
 **Exit codes:** `1` if any `missing-jd-archive` finding, `0` otherwise: with only `jd-archive-review-due` findings, and in the empty-repo case (`reports/*.md` is gitignored, so a fresh checkout has nothing to scan). Wired into `test-all.mjs`'s `--self-test` invocation; backfilling JD text for pre-existing reports that predate this validator is explicitly out of scope (#2789) — this only prevents the gap going forward.
+
+---
+
+## clean-markers
+
+Audits or cleans generated text files (CVs, cover letters, application answers) for invisible Unicode that untrusted job text can smuggle in: zero-width marks, bidi controls, tag characters, variation selectors, soft hyphens. Dependency-free; full usage and the `--keep-script-joiners` rules are in [CLEAN_MARKERS.md](CLEAN_MARKERS.md).
+
+```bash
+node clean-markers.mjs audit output/acme-cv.html              # report only, never modifies
+node clean-markers.mjs clean output/acme-cover-letter.md
+node clean-markers.mjs clean --ascii output/cover-letter.txt  # also normalize smart quotes / dashes
+```
+
+**Exit codes:** `audit` exits `1` if any file fails, so it works as a pre-send gate.
 
 ---
 
