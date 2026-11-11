@@ -363,13 +363,25 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
   if (ctx.calls.length === 2) pass('darwinbox.fetch() honours max_pages on the entry');
   else fail(`darwinbox.fetch() max_pages: ${ctx.calls.length} calls`);
 }
-// A cap landing exactly on the board's end, and a short page at the cap, are not truncations.
+// Only a short page proves the board ended: a full page at the cap is a page-cap stop,
+// whatever total the source reports.
 {
   const ctx = pagedCtx([fullPage('a', 100), fullPage('b', 100)]);
   let jobs;
   const logged = await captureErrors(async () => { jobs = await darwinbox.fetch({ name: 'Acme', careers_url: CAREERS, max_pages: 2 }, ctx); });
-  if (logged.length === 0 && jobs?.truncated === undefined) pass('no truncation warning or marker when the source count says the full last page was the end');
-  else fail(`darwinbox.fetch() false cap: ${JSON.stringify(logged)} ${JSON.stringify(jobs?.truncated)}`);
+  if (jobs?.truncated?.reason === 'page-cap' && logged.some((l) => /truncated at max_pages=2 \(100 jobs\) — raise max_pages/.test(l))) pass('a full page at the cap stays a page-cap stop even when the reported total matches what was read');
+  else fail(`darwinbox.fetch() matching total: ${JSON.stringify(logged)} ${JSON.stringify(jobs?.truncated)}`);
+}
+{
+  // The source reports 72 postings but serves 102: an under-reported total must not hide the cap.
+  const ctx = pagedCtx([fullPage('a', 72), fullPage('b', 72), envelope([row('c1'), row('c2')], 72)]);
+  let jobs;
+  const logged = await captureErrors(async () => { jobs = await darwinbox.fetch({ name: 'Acme', careers_url: CAREERS, max_pages: 2 }, ctx); });
+  const t = jobs?.truncated;
+  if (ctx.calls.length === 2 && jobs?.length === 2 * PAGE_SIZE && t?.reason === 'page-cap' && t.fetched === 2 * PAGE_SIZE && !('total' in t)) pass('an under-reported total does not hide a page-cap stop, and is left out of the marker');
+  else fail(`darwinbox.fetch() under-reported total: ${ctx.calls.length} calls, ${jobs?.length} jobs, ${JSON.stringify(t)}`);
+  if (logged.some((l) => /truncated at max_pages=2 \(100 jobs\) — raise max_pages/.test(l))) pass('the cap warning does not quote a total below what was read');
+  else fail(`darwinbox.fetch() under-reported total warning: ${JSON.stringify(logged)}`);
 }
 {
   const ctx = pagedCtx([fullPage('a', 60), envelope([row('b1')], 60)]);
