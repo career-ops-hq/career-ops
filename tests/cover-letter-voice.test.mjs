@@ -107,3 +107,10 @@ test('a plain letter gets no wording note, so the template itself is not flagged
   assert.ok(html);
   assert.doesNotMatch(run.stderr, /Voice check/);
 });
+
+test('a sentence with a long dash that the candidate gave as an answer is theirs and is not named', () => {
+  const sentence = 'I built it \u2014 then measured it.';
+  const { run } = letter({ opening: sentence }, { inputs: [sentence] });
+  assert.equal(run.status, 0, describeSpawn(run));
+  assert.doesNotMatch(run.stderr, /Voice check/);
+});
