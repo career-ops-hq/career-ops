@@ -233,6 +233,29 @@ Rules for the transcript:
 
 ---
 
+## Step 10 — Record the call on the tracker
+
+Setelah debrief disimpan, catat fakta yang sudah dikonfirmasi pada lamaran. Cocokkan setiap fakta baru dengan dealbreaker yang sudah ditulis pengguna di `modes/_profile.md` atau `config/profile.yml`. Tanyakan setiap kecocokan secara terpisah dan tunjukkan fakta tersebut serta kalimat dari profil. `debrief-sync.mjs` menolak nilai `--dealbreaker` yang berisi titik koma (`;`), tab, atau baris baru, dan itu menghentikan seluruh panggilan. Jika kalimatnya berisi salah satunya, beri tahu pengguna karakter mana itu dan minta versi satu baris tanpa karakter tersebut yang maknanya sama. Jangan menghapus karakter itu atau menulis ulang kalimatnya sendiri. Periksa versi pengguna untuk ketiga karakter itu, dan minta lagi sampai tidak ada satu pun. Lalu tanyakan `Record this dealbreaker on the report and the tracker? [y/N]`. Simpan setiap kalimat yang dikonfirmasi pengguna, atau versi satu barisnya. Buang setiap kalimat yang ditolak pengguna.
+
+Untuk setiap orang yang disebut namanya, tanyakan `Save this contact to data/contacts.tsv? [y/N]`. Jika ya, berikan nama, email jika ada, dan type jika pengguna menyebutkannya. `--contact-type` hanya menerima `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` atau `other`, dalam huruf kecil. Petakan kata yang dipakai pengguna ke nilai yang dimaksud, dalam bahasa apa pun ("talent partner" adalah `recruiter`, "calon atasan saya" adalah `hiring-manager`). Jika kata itu tidak jelas cocok dengan satu nilai, hilangkan `--contact-type` dan tetap simpan kontaknya. `debrief-sync.mjs` menolak nilai lain, dan itu menghentikan seluruh panggilan, termasuk dealbreaker dan `--next`.
+
+Jika langkah berikutnya menyebut satu hari kalender yang jelas, berikan `--next YYYY-MM-DD` tanpa pertanyaan kedua. Tentukan nama hari dari hari kalender lokal, dan hari ini ikut dihitung. Jika frasanya tidak menyebut hari, hilangkan `--next`. Jika ambigu (`next week`, dua hari), minta satu tanggal lalu berikan tanggal itu.
+
+Jalankan `node debrief-sync.mjs --app <tracker#>` dengan flag tersebut, di mana `<tracker#>` adalah `#` lamaran di tracker (bukan nomor report-nya). `--dealbreaker` menerima satu kalimat dan hanya boleh muncul sekali per panggilan, jadi jalankan satu perintah untuk setiap kalimat yang dikonfirmasi. Jangan pernah menggabungkan dua kalimat menjadi satu nilai: script menolak titik koma. Letakkan flag kontak dan `--next` hanya di perintah pertama. Setiap perintah berikutnya hanya memberikan `--app <tracker#>` dan satu `--dealbreaker`, tidak ada yang lain. Apit setiap nilai dengan tanda kutip tunggal agar shell meneruskan `$` dan backtick apa adanya. Tulis tanda kutip tunggal di dalam nilai sebagai `'\''` di Git Bash atau shell POSIX lain. Di PowerShell, tulis sebagai `''`, dan gandakan tanda kutip lengkung (`‘`, `’`, `‚` atau `‛`) dengan cara yang sama, karena PowerShell juga membacanya sebagai tanda kutip:
+
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
+
+Jalankan perintah satu per satu dan periksa exit status masing-masing. Jika sebuah perintah gagal, berhenti, perbaiki, lalu jalankan ulang daftar dari perintah pertama. Jika tidak ada dealbreaker, kontak, atau hari `--next` untuk diberikan, lewati perintahnya: script menolak panggilan yang tidak punya apa pun untuk dicatat. Setelah perintah terakhir, jika kontak disimpan, jalankan `node contacts.mjs --summary`. Jika hari sudah ditetapkan, jalankan `node followup-cadence.mjs --summary`.
+
+Jangan ubah status kecuali pengguna menyebut status baru. Itu panggilan `set-status.mjs` terpisah, sebelum perintah-perintah ini.
+
+Menjalankan ulang perintah yang sama aman: kalimat, kontak, atau tanggal yang sudah dicatat tidak ditulis lagi.
+
+---
+
 ## Rules
 
 * **Debrief immediately.** Ingatan mengenai detail wawancara cepat menurun — dalam hitungan jam, pertanyaan dan reaksi spesifik mulai terlupakan. Jalankan skill ini pada hari yang sama.

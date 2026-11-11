@@ -250,7 +250,7 @@ I am happy to discuss further at your convenience.
 
 **集約のみで、新たな judgment は行いません。** 各行は、元のシグナルがすでに出した判定を引用またはリンクします。サマリーが再採点・再重み付け・上書きを行うことは決してありません。ある行が誤って見える場合、修正すべきは元のシグナル側であり、ここではありません。
 
-各行の状態は3種類：`✅ {明確な判定}` / `⚠️ {検出事項}` / `— not evaluated`。**`— not evaluated` は一級の状態です。** シグナルを実行できなかった場合は、行を省略せず明示してください。そうして初めて、すべて ✅ のサマリーを信頼できます。**個別の例外：** 面接レッドフラグ行の未評価は `— no interview sessions yet` と表記します。これは同じ「未評価」概念をこの行に限ってより具体的に言い換えたもので（相互参照チェック自体は実行され、redflags ファイルが無かっただけ）、4つ目の状態ではありません。
+各行の状態は3種類：`✅ {明確な判定}` / `⚠️ {検出事項}` / `— not evaluated`。**`— not evaluated` は一級の状態です。** シグナルを実行できなかった場合は、行を省略せず明示してください。そうして初めて、すべて ✅ のサマリーを信頼できます。**個別の例外：** 面接レッドフラグ行の未評価は `— no interview sessions yet` と表記します。これは同じ「未評価」概念をこの行に限ってより具体的に言い換えたもので（相互参照チェック自体は実行され、redflags ファイルが無かっただけ）、4つ目の状態ではありません。未検証マーカー付きの redflags ファイルはこの例外ではなく、通常の `— not evaluated` 状態です。ファイルは存在するので、セッションが無いとは書きません。
 
 行ラベル、`| Signal | Status |` のヘッダー、状態の語彙はいずれも固定リテラルであり、翻訳しません。Machine Summary の `risk_summary` がこれらに依存します。
 
@@ -259,7 +259,7 @@ I am happy to discuss further at your convenience.
 | Posting legitimacy | ブロック G の評価ティア | `✅ High Confidence`。Proceed with Caution / Suspicious は `⚠️ {tier} — {一文の理由}` |
 | Employment classification | ブロック G 内の雇用形態シグナル | チェックが実行され問題がなければ `✅ clear`。フラグが立った場合は `⚠️ contractor-style language: "{引用した表現}"`。実行できなかった場合は `— not evaluated` |
 | Culture screen | ブロック A のカルチャースクリーン項目 | `✅ pass`、または `⚠️ caution — {根拠}` / `⚠️ fail — {根拠}`。スクリーンを実施していない場合は `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md`（`interview-redflag` モード） | **コピーではなく相互参照：** ファイルが存在する場合は現在の警告レベルと相対リンクを記載 — `[{level}](../interview-prep/{company-slug}-redflags.md)`（`reports/` からの相対）。無ければ `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（`interview-redflag` モード） | **コピーではなく相互参照：** ファイルが存在する場合は現在の警告レベルと相対リンクを記載 — `[{level}](../interview-prep/{company-slug}-redflags.md)`（`reports/` からの相対）。無ければ `— no interview sessions yet`。**未検証ファイル：** ファイルにマーカー `<!-- career-ops:redflags-unverified -->` が含まれる場合（実際の面接セッションの裏付けがないまま `interview-redflag` が残したファイル）、その警告レベルは決して記載しません。`— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)` と表記し、`risk_summary.interview_redflags` は `not_evaluated` とします。注記の文言ではなくマーカーで判定してください。注記はユーザーの出力言語で書かれています。 |
 | AI claims vs. infrastructure | ブロック G の AI／インフラ整合性チェック（存在する場合） | 本レポートにそのチェックが含まれる場合は判定をミラーする（`✅ consistent` / `⚠️ {検出事項}`）。無ければ `— not evaluated`。チェックが存在すれば自動的に有効化され、順序依存はありません |
 
 ブロック形式：

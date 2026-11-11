@@ -25,10 +25,12 @@ These files contain your personal data, customizations, and work product. Update
 | `interview-prep/sessions/*.md` | Interview sessions — real transcripts + mock sessions (sensitive: real names/companies; gitignored except scaffold). Drives `patterns` Step 1b targeting signal and `interview-redflag` analysis. Scaffold files (`README.md`, `.gitkeep`) are system-owned. |
 | `documents/*` | Your profile intake sources — master CV, LinkedIn export, diplomas, reference letters (PII — gitignored except scaffold; read locally by `intake.mjs`, see `modes/intake.md`). Scaffold files (`README.md`, `.gitkeep`) are system-owned. |
 | `data/.hired-share-state.json` | Hired Wall ask-state (asked/shared/later/never per hire) — the anti-nag memory; never committed, never read by anything but `hired-share.mjs` |
+| `data/.community-asks/` | Community-ask markers (`star`, `manifesto`, `off`): one file per ask, created the moment it is shown — the anti-nag memory of `community-asks.mjs`; never committed, never read by anything else. Updates keep it, so an ask never comes back after an update or a reinstall that keeps the data |
 | `data/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/` |
 | `data/offers/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/offers/` |
 | `data/parser-output/.gitkeep` | System-owned empty directory scaffold; the updater writes only this exact file and preserves all user files in `data/parser-output/` |
 | `data/intake-state.json` | Fingerprints of already-ingested intake sources (written by `node intake.mjs --commit`; makes re-runs propose only new material — safe to delete, next intake re-proposes everything) |
+| `data/intake-snapshots/` | Extracted text of each committed intake source, one `{sha256 of the documents/ path}.txt` per source (written by `node intake.mjs --commit`, read by `node intake.mjs --diff <path>` to show what changed since the last commit). A second copy of the source text, so it is as personal as `documents/*`. Safe to delete: `--diff` then prints the full text once, and the next `--commit` writes it again |
 | `portals.yml` | Your customized company list |
 | `config/plugins.yml` | Your plugin activation toggles (opt-in; seeded from `config/plugins.example.yml`) |
 | `opencode.json` | Your OpenCode project config (MCP servers, model, formatter, LSP) — gitignored, copy `opencode.example.json` to start |
@@ -41,7 +43,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/scan-history.tsv` | Your scan history: one tab-separated row per posting the scanners have seen. Columns are append-only — a new column goes at the end and existing ones never move — so older rows may have fewer columns, and a missing cell reads as empty. The column order is declared in `lib/scan-history-columns.mjs`; what each column holds is in the Scan History table of `modes/scan.md`. A cell that would run as a spreadsheet formula is stored with one extra leading `'`; `parseScanHistoryLine` removes it. |
 | `data/scan-runs.tsv` | Your per-run scan counters (appended by `scan.mjs`, read by `stats.mjs`) |
 | `data/scheduled-jobs.json` | Your local scheduled-scan definitions, queue, and bounded run history (written by the web UI and `web/scripts/scheduled-jobs-runner.mjs`) |
-| `data/portal-health.tsv` | Consecutive reachability status for scanned portals (appended by `scan.mjs`; statuses: `reachable`, `empty`, `slug_gone`, `network`, `auth`, `server`, `unknown`, `unverified_zero` — the last four joined the vocabulary later, so older files carry only the first four; `unverified_zero` means a provider returned no jobs without any observed successful HTTP response and counts toward the failure streak) |
+| `data/portal-health.tsv` | Consecutive reachability status for scanned portals (appended by `scan.mjs`; statuses: `reachable`, `empty`, `slug_gone`, `network`, `auth`, `server`, `unknown`, `unverified_zero`, `partial` — the later ones joined the vocabulary over time, so older files carry only the first four; `unverified_zero` means a provider returned no jobs without any observed successful HTTP response, and `partial` means the provider said it read the board only partly (page cap, rate limit, fetch error; see `lib/board-truncation.mjs`); `unverified_zero` counts toward the failure streak, while `partial` resets it, since the board answered, and repeats are reported on their own line) |
 | `data/dead-boards.tsv` | Boards that returned three consecutive 404s during mass reverse ATS sweeps (written by `scan-ats-full.mjs`; unlike `data/portal-health.tsv`, this does not track the user's configured portals; re-probed after 30 days — safe to delete, the next sweep rebuilds it) |
 | `data/cache/provider-ids/<provider>.json` | Values a provider resolved on one scan and reuses on the next, one JSON object per provider (written by `scan.mjs` and `scan-ats-full.mjs` through `provider-id-cache.mjs`; join.com keeps company ids here) — safe to delete, the next scan looks them up again |
 | `data/cache/http/` | Board responses saved for a few minutes so a repeat `scan` can reuse them (written by `scan.mjs` through `providers/_http-cache.mjs`). Each file name is a hash. The URL is not stored, because a query string can carry a token. Safe to delete. The next scan downloads the boards again. |
@@ -147,6 +149,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/it/*` | Italian language modes |
 | `modes/ja/*` | Japanese language modes |
 | `modes/ko/*` | Korean language modes |
+| `modes/nb/*` | Norwegian (Bokmål) language modes |
 | `modes/nl/*` | Dutch language modes |
 | `modes/pl/*` | Polish language modes |
 | `modes/pt/*` | Portuguese language modes |

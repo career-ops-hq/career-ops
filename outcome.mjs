@@ -42,7 +42,7 @@ import { localToday } from './lib/local-today.mjs';
 import { resolveOutcomeDir } from './lib/outcome-dir.mjs';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import { parsePdfIndex } from './find.mjs';
-import { findCaptureForReport } from './jd-capture.mjs';
+import { captureSlug, findCaptureForReport } from './jd-capture.mjs';
 
 // Two roots. CODE_ROOT locates the sibling scripts this file shells out to and
 // is the cwd it runs them from; DATA_ROOT is where the user's tracker and
@@ -505,6 +505,15 @@ const targetUrl = flags.url || cellUrl || (matchedRow.notes && matchedRow.notes.
 // self-consistent report link keeps the tracker # it was keyed by before.
 const linkedReports = linkedReportNumbers(matchedRow.report, matchedRow.notes);
 const captureKey = linkedReports.length === 1 ? linkedReports[0] : matchedRow.num;
+// A capture carries the company slug archive-posting.mjs wrote, captureSlug(),
+// so the lookup uses that slug and not this file's slugify(). The two agree on
+// a Latin name, but slugify() turns one written only in another script
+// (株式会社アクメ, Яндекс) into 'unknown', which no capture carries: the posting
+// was never found, and each run asked archive-posting for it again. A name with
+// no letter or digit at all, such as the `?` placeholder employer, has no slug,
+// so it still looks for 'unknown': the name archive-posting gives a posting
+// whose company it could not detect.
+const captureCompanySlug = captureSlug(matchedRow.company) || 'unknown';
 
 // Case 1: Check if there's already an archived posting link in the notes column
 const notesLink = matchedRow.notes && matchedRow.notes.match(/local:(jds\/[^\s|)]+)/)?.[1];
@@ -521,7 +530,7 @@ if (notesLink) {
 // the archive exists for, and the one a same-day filename rebuild cannot serve.
 if (!resolvedPostingPath) {
   const found = findCaptureForReport(resolve(repoRoot, 'jds'), captureKey, {
-    companySlug: slugify(matchedRow.company),
+    companySlug: captureCompanySlug,
   });
   if (found) {
     resolvedPostingPath = found.path;
@@ -539,7 +548,7 @@ if (!resolvedPostingPath && targetUrl) {
       timeout: 45000,
     });
     const found = findCaptureForReport(resolve(repoRoot, 'jds'), captureKey, {
-      companySlug: slugify(matchedRow.company),
+      companySlug: captureCompanySlug,
     });
     if (found) {
       resolvedPostingPath = found.path;

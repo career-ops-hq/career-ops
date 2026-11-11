@@ -179,8 +179,8 @@ providerFixture: {
     } else {
       fail(`audit-portals.mjs did not resolve the apify plugin: ${JSON.stringify(auditApify) ?? auditRun.out.slice(0, 300)}`);
     }
-    if (auditBogus && auditBogus.verdict !== 'ok' && auditBogus.provider !== 'definitely-not-a-provider') {
-      pass('audit-portals.mjs still does not resolve a genuinely unknown provider id');
+    if (auditBogus && auditBogus.verdict === 'error' && /unknown provider:\s*definitely-not-a-provider/i.test(auditBogus.detail || '')) {
+      pass('audit-portals.mjs reports a genuinely unknown provider id as an error');
     } else {
       fail(`audit-portals.mjs resolved an unknown provider id: ${JSON.stringify(auditBogus)}`);
     }
@@ -210,8 +210,11 @@ providerFixture: {
     // Before the fix the apify entry was skipped as unclaimed and doctor said
     // every entry resolves; now it reaches the stub, whose probe fails.
     const doctorRun = runVerifier('doctor.mjs', ['--strict']);
-    if (/1 portals\.yml entry do not resolve/i.test(doctorRun.out)) {
-      pass('doctor.mjs --strict reports the apify portal entry as unresolved instead of skipping it');
+    // The bogus id is unresolved too, so the count is the apify stub plus that typo.
+    if (/2 portals\.yml entries do not resolve/i.test(doctorRun.out)
+      && /apify entry/i.test(doctorRun.out)
+      && /definitely-not-a-provider/i.test(doctorRun.out)) {
+      pass('doctor.mjs --strict reports the apify portal entry and the unknown provider id');
     } else {
       fail(`doctor.mjs --strict did not report the apify portal entry (exit ${doctorRun.code}): ${doctorRun.out.slice(0, 600)}`);
     }

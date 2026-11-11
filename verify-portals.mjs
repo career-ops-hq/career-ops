@@ -45,6 +45,8 @@ import { isIP } from 'net';
 import { dirname, join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
+import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
+import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 
 import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
 import { ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
@@ -287,13 +289,36 @@ export function deriveSlugCandidates(name, { firstWordSuffixes = true } = {}) {
 // one, hence the wording in the output.
 
 /** Hosts that aggregate many employers. `site:jobs.ashbyhq.com` is a
- *  cross-company search — its host names no company worth promoting. */
+ *  cross-company search — its host names no company worth promoting.
+ *
+ *  One host per line, in alphabetical order: PRs that add different hosts then
+ *  touch different lines, which reduces merge conflicts. */
 const AGGREGATOR_HOSTS = [
-  'greenhouse.io', 'ashbyhq.com', 'lever.co', 'myworkdayjobs.com', 'workday.com',
-  'smartrecruiters.com', 'jobvite.com', 'icims.com', 'bamboohr.com', 'gem.com',
-  'recruitee.com', 'teamtailor.com', 'personio.com', 'workable.com', 'breezy.hr',
-  'paylocity.com', 'join.com', 'linkedin.com', 'indeed.com', 'glassdoor.com',
-  'ycombinator.com', 'wellfound.com',
+  'ashbyhq.com',
+  'bamboohr.com',
+  'breezy.hr',
+  'careers.hibob.com',
+  'gem.com',
+  'glassdoor.com',
+  'greenhouse.io',
+  'hirehive.com',
+  'icims.com',
+  'indeed.com',
+  'jobvite.com',
+  'join.com',
+  'lever.co',
+  'linkedin.com',
+  'myworkdayjobs.com',
+  'paylocity.com',
+  'personio.com',
+  'recruitee.com',
+  'recruitmentplatform.com',
+  'smartrecruiters.com',
+  'teamtailor.com',
+  'wellfound.com',
+  'workable.com',
+  'workday.com',
+  'ycombinator.com',
 ];
 
 /** Subdomain labels that describe a careers site rather than the company. */
@@ -833,7 +858,8 @@ export async function probeProvider(entry, provider, baseCtx) {
 /**
  * Verify each enabled portals.yml entry's board is reachable.
  *
- * Two tiers, cheapest first:
+ * Two tiers, cheapest first. An explicit provider id the scanner does not
+ * load is reported before either tier, so a recognizable URL cannot hide the typo.
  *   1. Greenhouse/Ashby/Lever slugs are probed directly (one JSON request each),
  *      with cross-probe suggestions when a slug 404s.
  *   2. Everything else is routed through the SAME provider plugins the scanner
@@ -872,6 +898,20 @@ export async function verifyCompanies(
 }
 
 /**
+ * Apply an entry's `timeout_ms` and `max_response_mb` to a ctx, as scan.mjs
+ * and audit-portals.mjs do, so the check reads a board with the same limits
+ * the scan does. The ctx's fetchers are replaced in place; pass a copy when
+ * it is shared.
+ *
+ * @param {object} ctx
+ * @param {object} entry
+ * @returns {any}
+ */
+function withEntryLimits(ctx, entry) {
+  return applyEntryTimeout(applyEntryResponseCap(ctx, entry), entry);
+}
+
+/**
  * One health row for one enabled entry; the body of verifyCompanies' pool.
  *
  * @param {object} company
@@ -880,6 +920,21 @@ export async function verifyCompanies(
  */
 async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) {
   const name = typeof company.name === 'string' ? company.name : '(unnamed)';
+  // scan.mjs rejects an unknown provider before it looks at the URL. Probing
+  // a Greenhouse URL first used to return live, and --strict never saw the typo.
+  let resolved = null;
+  if (providers && providers.size > 0) {
+    resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
+    if (resolved?.error) {
+      return {
+        name,
+        status: 'missing',
+        errorKind: 'unknown',
+        provider: typeof company.provider === 'string' ? company.provider : 'unknown',
+        reason: resolved.error,
+      };
+    }
+  }
   const match =
     parseAtsSlug(company.api) || parseAtsSlug(company.careers_url);
   // An Ashby entry that opts into the embed source (`ashby: { embed: true }`)
@@ -888,7 +943,11 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   // reads the embed page instead.
   const embedOnly = match?.ats === 'ashby' && /** @type {any} */ (company).ashby?.embed === true;
   if (match && !embedOnly) {
-    const probe = await probeSlug(match.ats, match.slug, { fetchJson, eu: match.eu });
+    // The entry's own board is read with its timeout_ms and max_response_mb,
+    // as scan.mjs reads it. Alternates below are other boards and keep the
+    // defaults.
+    const entryFetchJson = withEntryLimits({ fetchJson }, company).fetchJson;
+    const probe = await probeSlug(match.ats, match.slug, { fetchJson: entryFetchJson, eu: match.eu });
     if (probe.status === 'live' || probe.status === 'empty') return { name, ...probe };
     // Wrong slug or ATS migration — cross-probe only for slug/unknown failures.
     if (probe.errorKind === 'slug_gone' || probe.errorKind === 'unknown') {
@@ -899,20 +958,29 @@ async function verifyOne(company, { fetchJson, fetchText, providers, httpCtx }) 
   }
 
   // Tier 2: hand the entry to the scanner's provider layer. Skip the
-  // local-parser provider — a health check must stay network-only and never
-  // execute a configured local command.
+  // local-parser provider. A health check must stay network-only and never
+  // execute a configured local command. The unknown-provider error was
+  // already returned above, before a recognizable URL could hide it.
   if (providers && providers.size > 0) {
-    const resolved = resolveProvider(company, providers, { skipIds: ['local-parser'] });
     if (resolved && resolved.provider) {
-      const probe = await probeProvider(company, resolved.provider, httpCtx || makeHttpCtx());
+      const probe = await probeProvider(company, resolved.provider, withEntryLimits({ ...(httpCtx || makeHttpCtx()) }, company));
       return { name, ...probe };
+    }
+    const full = resolveProvider(company, providers);
+    if (full?.provider?.id === 'local-parser') {
+      return {
+        name,
+        status: 'skipped',
+        provider: 'local-parser',
+        reason: 'local parser; verify-portals does not run it. Use scan.mjs to read this board.',
+      };
     }
   }
 
   return {
     name,
     status: 'skipped',
-    reason: 'no provider matched careers_url or api',
+    reason: 'no provider matched. Name a provider this scanner loads, set a careers_url a provider detects, or set scan_method: websearch for the scan.mjs agent handoff. verify-portals does not verify that board.',
   };
 }
 

@@ -1,25 +1,46 @@
-// The morning scan used to run 10 companies at a time, no matter how many
-// ATS hosts were in the list. One host still stays at 10. Other hosts can
-// use the spare slots, up to 32 in flight.
+// The company scan runs under two limits: one for the whole scan and one per
+// hostname. Both come from env values and default to 10.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const SCAN_URL = pathToFileURL(join(ROOT, 'scan.mjs')).href;
 const {
   parallelFetch,
   companyFetchHost,
-  SCAN_CONCURRENCY,
-  HOST_CONCURRENCY,
+  resolveConcurrency,
+  DEFAULT_CONCURRENCY,
   VERIFY_CONCURRENCY,
-} = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+} = await import(SCAN_URL);
 
-test('scan fetches up to 32 companies and 10 per host', () => {
-  assert.equal(SCAN_CONCURRENCY, 32);
-  assert.equal(HOST_CONCURRENCY, 10);
+test('both scan limits default to 10 and verify has its own limit of 10', () => {
+  assert.equal(DEFAULT_CONCURRENCY, 10);
+  assert.equal(resolveConcurrency(undefined), 10);
   assert.equal(VERIFY_CONCURRENCY, 10);
-  assert.ok(SCAN_CONCURRENCY > HOST_CONCURRENCY);
+});
+
+test('resolveConcurrency accepts only a positive integer', () => {
+  assert.equal(resolveConcurrency('7'), 7);
+  assert.equal(resolveConcurrency(' 32 '), 32);
+  for (const bad of [undefined, null, '', '  ', '0', '-1', '2.5', 'abc', 'Infinity']) {
+    assert.equal(resolveConcurrency(bad), DEFAULT_CONCURRENCY, `value: ${JSON.stringify(bad)}`);
+  }
+});
+
+test('the env values reach the limits the scan uses', () => {
+  const child = spawnSync(process.execPath, [
+    '--input-type=module',
+    '-e',
+    `const m = await import(${JSON.stringify(SCAN_URL)}); console.log(m.SCAN_CONCURRENCY, m.HOST_CONCURRENCY, m.VERIFY_CONCURRENCY);`,
+  ], {
+    encoding: 'utf8',
+    env: { ...process.env, CAREER_OPS_SCAN_CONCURRENCY: '32', CAREER_OPS_SCAN_HOST_CONCURRENCY: '4' },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout.trim(), '32 4 10');
 });
 
 test('a full host does not block the other host', async () => {

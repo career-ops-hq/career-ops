@@ -73,10 +73,12 @@ import {
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   loadSeenUrls,
-  normalizeUrlForDedup,
+  scanHistoryPolicy,
+  seenJobKey,
   buildTitleFilter,
   buildLocationFilter,
-  buildContentFilter,
+  buildContentFilterOrExit,
+  buildTitleGate,
   buildCountryEligibilityFilter,
   buildVisaFilter,
   loadCandidateCountry,
@@ -381,10 +383,15 @@ export function loadConfig(portalsPath = PORTALS_PATH, singleTenant = null) {
   const validBoards = normalizedBoards.filter(Boolean)
     .filter(board => !blacklist.has(normalizeCompany(board.name)));
   const boards = validBoards.filter(b => !singleTenant || b.tenant === singleTenant);
+  const titleFilter = buildTitleFilter(config.title_filter);
+  const contentFilter = buildContentFilterOrExit(config.content_filter);
   const filters = {
-    titleFilter: buildTitleFilter(config.title_filter),
+    titleFilter,
+    // #6020. Same title decision as scan.mjs, so rescue_title_misses means
+    // the same thing here.
+    titleGate: buildTitleGate(config.title_filter, contentFilter, titleFilter),
     locationFilter: buildLocationFilter(config.location_filter),
-    contentFilter: buildContentFilter(config.content_filter),
+    contentFilter,
     countryEligibilityFilter: buildCountryEligibilityFilter(
       config.country_eligibility_filter,
       loadCandidateCountry(),
@@ -393,7 +400,8 @@ export function loadConfig(portalsPath = PORTALS_PATH, singleTenant = null) {
     matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
   };
 
-  return { boards, invalidCount, filters };
+  // The recheck window scan.mjs applies to the same seen set.
+  return { boards, invalidCount, filters, historyPolicy: scanHistoryPolicy(config) };
 }
 
 // ── Fetch helpers (all run through page.request — same context, same cookies) ──
@@ -462,7 +470,7 @@ async function fetchDetail(page, boardCfg, jobPostingId) {
 /**
  * @param {import('playwright').Page} page
  * @param {{ name: string, tenant: string, board: string, culture: string, jobBoardId: string }} boardCfg
- * @param {{ titleFilter: Function, locationFilter: Function, contentFilter: Function, countryEligibilityFilter: Function, visaFilter: Function, matchedTitleKeywords: Function }} [filters]
+ * @param {{ titleFilter: Function, titleGate?: Function, locationFilter: Function, contentFilter: Function, countryEligibilityFilter: Function, visaFilter: Function, matchedTitleKeywords: Function }} [filters]
  * @param {{ debug?: boolean }} [options]
  */
 export async function scanBoard(page, boardCfg, filters = {}, { debug = false } = {}) {
@@ -475,6 +483,10 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
     matchedTitleKeywords: () => [],
     ...filters,
   };
+  // Without a titleGate (callers that predate #6020), the title decision is
+  // titleFilter alone: no posting is rescued.
+  const titleGate = filters.titleGate
+    ?? ((t) => (filters.titleFilter(t) ? 'match' : 'reject'));
   const found = [];
   const boardUrl = buildBoardUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board);
 
@@ -540,9 +552,15 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
     const url = buildJobUrl(boardCfg.culture, boardCfg.tenant, boardCfg.board, jobPostingId);
 
     const skipped = { title, url, location: listLocation };
-    if (!filters.titleFilter(title)) { titleSkipped.push(skipped); continue; }
-    if (!filters.locationFilter(listLocation, url, title)) { locationSkipped.push(skipped); continue; }
-    if (!filters.contentFilter(listDescription, filters.matchedTitleKeywords(title))) { contentSkipped.push(skipped); continue; }
+    // #6020. A rescued title miss passes only on its list description, and a
+    // failure there is booked as a title skip, as scan.mjs books it. A filter
+    // in between that drops it first books it as its own.
+    const verdict = titleGate(title);
+    if (verdict === 'reject') { titleSkipped.push(skipped); continue; }
+    if (!filters.locationFilter(listLocation, url, title, { description: listDescription })) { locationSkipped.push(skipped); continue; }
+    if (verdict === 'rescue') {
+      if (!filters.contentFilter(listDescription, [], { titleMissed: true })) { titleSkipped.push(skipped); continue; }
+    } else if (!filters.contentFilter(listDescription, filters.matchedTitleKeywords(title))) { contentSkipped.push(skipped); continue; }
     if (!filters.countryEligibilityFilter(listDescription)) { countryEligibilitySkipped.push(skipped); continue; }
     if (!filters.visaFilter(listDescription)) { visaSkipped.push(skipped); continue; }
 
@@ -556,12 +574,18 @@ export async function scanBoard(page, boardCfg, filters = {}, { debug = false } 
 
     const description = buildJobDescriptionText(detail.jobPostingContent) || item.listDescription;
     const location = joinLocations(detail.postingLocations) || item.listLocation;
+    const title = decodeEntities(String(detail.jobTitle || item.title));
+    const detailPolicy = filters.locationFilter.workplacePolicyOnly;
+    if (typeof detailPolicy === 'function' && !detailPolicy(location, item.url, title, { description })) {
+      locationSkipped.push({ title, url: item.url, location });
+      continue;
+    }
     const postedAt = detail.postingStartTimestampUTC ? Date.parse(detail.postingStartTimestampUTC) : undefined;
 
     found.push({
       url: item.url,
       company: boardCfg.name,
-      title: decodeEntities(String(detail.jobTitle || item.title)),
+      title,
       location,
       source: 'dayforce',
       description,
@@ -633,7 +657,7 @@ export async function scanBoardWithRetry(boardCfg, filters, {
 async function main() {
   const { dryRun, debug, singleTenant } = parseArgs();
   mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
-  const { boards, invalidCount, filters } = loadConfig(PORTALS_PATH, singleTenant);
+  const { boards, invalidCount, filters, historyPolicy } = loadConfig(PORTALS_PATH, singleTenant);
 
   if (invalidCount > 0) {
     console.log(`  Skipping ${invalidCount} malformed dayforce_boards entr${invalidCount === 1 ? 'y' : 'ies'} (bad tenant/board/culture/jobBoardId)`);
@@ -644,7 +668,7 @@ async function main() {
     return;
   }
 
-  const { seen } = loadSeenUrls();
+  const { seen } = loadSeenUrls(historyPolicy);
   const date = localToday();
 
   let totalFound = 0;
@@ -671,14 +695,14 @@ async function main() {
     totalFound += result.totalFound;
     process.stdout.write(`${result.totalFound} found, ${result.found.length} passed filters\n`);
 
-    for (const skip of result.titleSkipped) { seen.add(normalizeUrlForDedup(skip.url)); titleSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.locationSkipped) { seen.add(normalizeUrlForDedup(skip.url)); locationSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.contentSkipped) { seen.add(normalizeUrlForDedup(skip.url)); contentSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.countryEligibilitySkipped) { seen.add(normalizeUrlForDedup(skip.url)); countryEligibilitySkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
-    for (const skip of result.visaSkipped) { seen.add(normalizeUrlForDedup(skip.url)); visaSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.titleSkipped) { seen.add(seenJobKey(skip.url)); titleSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.locationSkipped) { seen.add(seenJobKey(skip.url)); locationSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.contentSkipped) { seen.add(seenJobKey(skip.url)); contentSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.countryEligibilitySkipped) { seen.add(seenJobKey(skip.url)); countryEligibilitySkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
+    for (const skip of result.visaSkipped) { seen.add(seenJobKey(skip.url)); visaSkipped.push({ ...skip, source: 'dayforce', company: boardCfg.name }); }
 
     for (const offer of result.found) {
-      const key = normalizeUrlForDedup(offer.url);
+      const key = seenJobKey(offer.url);
       if (seen.has(key)) { dupeSkipped.push(offer); continue; }
       seen.add(key);
       newOffers.push(offer);

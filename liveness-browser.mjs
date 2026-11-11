@@ -23,7 +23,7 @@ const NAVIGATE_TIMEOUT_MS = 15_000;
 // changing is NOT: a spinner holds the text constant on live pages.
 const HYDRATION_POLL_MS = 250;
 const HYDRATION_MAX_POLLS = 16;
-const HYDRATING_CODES = new Set(['insufficient_content', 'no_apply_control']);
+export const HYDRATING_CODES = new Set(['insufficient_content', 'no_apply_control']);
 // Upper bound on the extra wait for same-origin child frames to populate, and
 // the poll interval inside it. Only spent when the page poll ends undecided
 // while such a frame is present.
@@ -467,6 +467,116 @@ export async function gotoWithTimeoutRetry(page, url, {
   }
 }
 
+export const extractApplyControls = ({ postingId, postingSegment, pageUrl, idPattern }) => {
+  // Page chrome (nav, header, footer) is skipped because its links are the
+  // site's own: Jobs, Careers, Sign in. A link to this posting's own page,
+  // on the page's own origin, is not chrome, wherever it sits; a link to
+  // another site says nothing about this page's posting, even with its id
+  // in the path. Tech in Asia puts its only Apply control,
+  // "APPLY FOR JOB" -> /jobs/<id>/apply, in the page header: measured
+  // 2026-10-22, 20 of 20 live postings read no_apply_control without this,
+  // and 40 of 40 closed ones answer "Job not found" with no such link. Only
+  // the path counts, so a sign-in link that carries the posting in its
+  // return address (?returnUrl=/jobs/<id>) is still chrome, and so is a
+  // link back into this page under another query, fragment or trailing
+  // slash, such as a skip link to #main-content. A sign-in or sign-up page
+  // is chrome even under the posting's own path (/jobs/<id>/login): it is
+  // the site's sign-in, not the posting. In a frame, the page the
+  // frame sits in is this page too; its address is passed in, because a
+  // frame sandboxed without allow-same-origin cannot read window.top. The
+  // id has to be the link's own: its last path segment that carries an id,
+  // whole, so posting 12345 claims neither /jobs/123456/apply nor
+  // /jobs/job-12345/apply, nor /jobs/12345/related/67890/apply, whose own
+  // posting is 67890. A posting whose own segment carries the id with more
+  // around it claims that whole segment too: posting job-12345 claims
+  // /jobs/job-12345/apply.
+  const idBearing = new RegExp(idPattern, 'i');
+  const signIn = /^(?:log-?in|sign[-_]?(?:in|up)|register)(?:\.\w+)?$/;
+  const linksToPosting = (element) => {
+    const href = postingId && element.getAttribute('href');
+    if (!href) return false;
+    try {
+      const target = new URL(href, document.baseURI);
+      const pageKey = (u) => u.origin + u.pathname.replace(/\/+$/, '');
+      const thisPage = [location.href, pageUrl].map((u) => pageKey(new URL(u)));
+      if (thisPage.includes(pageKey(target))) return false;
+      if (target.origin !== new URL(pageUrl).origin) return false;
+      const segments = target.pathname.toLowerCase().split('/');
+      if (segments.some((s) => signIn.test(s))) return false;
+      const own = segments.filter((s) => idBearing.test(s)).pop();
+      return own === postingId || own === postingSegment;
+    } catch {
+      return false;
+    }
+  };
+
+  // A design-system button is a custom element: UKG Pro (UltiPro) renders
+  // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
+  // native <button> inside its shadow root has no text of its own (the
+  // label is slotted in), so the element itself is the control to read.
+  // No selector matches a tag-name suffix, hence the filter.
+  const customButtons = Array.from(document.querySelectorAll('*'))
+    .filter((element) => element.localName.endsWith('-button'));
+  const candidates = Array.from(
+    document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
+  ).concat(customButtons);
+
+  return candidates
+    .filter((element) => {
+      if (element.closest('nav, header, footer') && !linksToPosting(element)) return false;
+      if (element.closest('[aria-hidden="true"]')) return false;
+
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      if (!element.getClientRects().length) return false;
+
+      return Array.from(element.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0);
+    })
+    .map((element) => {
+      const label = [
+        element.innerText,
+        element.value,
+        element.getAttribute('aria-label'),
+        element.getAttribute('title'),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return label;
+    })
+    .filter(Boolean);
+};
+
+// The posting's id, from the address of the page being read, so a posting
+// reached through a redirect (/jobs/senior-engineer to /jobs/12345) is
+// matched by the address it landed on. A page whose address lost the
+// requested URL's id reads as off the posting whatever its controls (the
+// redirect guard), and one whose own id is another posting's claims
+// nothing in the chrome: /jobs/12345 that lands on
+// /jobs/67890?returnUrl=/jobs/12345 passes the guard, but the page is
+// posting 67890. The id in the last path segment, so a number in the
+// query (?campaign=123456) is not taken for it. When that segment has
+// none, the id in a query parameter that names the posting, and only then
+// the last id in the path: on UltiPro,
+// /JobBoard/{board}/OpportunityDetail?opportunityId={posting}, the path's
+// only id is the board's, and every link under the board's path has it.
+// The segment itself is kept only when the id came from it, so a generic
+// last segment (/jobs/12345/details) claims nothing.
+export const postingIdentity = (address) => {
+  const postingUrl = new URL(address);
+  const lastSegment = postingUrl.pathname.split('/').filter(Boolean).pop() ?? '';
+  const queryId = [...postingUrl.searchParams]
+    .filter(([name]) => POSTING_ID_PARAMS.has(name.toLowerCase()))
+    .map(([, value]) => jobIdToken(value))
+    .find(Boolean);
+  return {
+    postingId: jobIdToken(lastSegment) ?? queryId ?? jobIdToken(postingUrl.pathname),
+    postingSegment: jobIdToken(lastSegment) ? lastSegment.toLowerCase() : null,
+  };
+};
+
 export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRetry = true } = {}) {
   const guardError = rejectPrivateOrInvalid(url);
   if (guardError) {
@@ -483,88 +593,6 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
     // extraSettleMs is slack for the headed retry, where a JS anti-bot
     // interstitial needs a moment to clear before the first read.
     if (extraSettleMs > 0) await page.waitForTimeout(extraSettleMs);
-
-    const extractApplyControls = ({ postingId, postingSegment, pageUrl, idPattern }) => {
-      // Page chrome (nav, header, footer) is skipped because its links are the
-      // site's own: Jobs, Careers, Sign in. A link to this posting's own page,
-      // on the page's own origin, is not chrome, wherever it sits; a link to
-      // another site says nothing about this page's posting, even with its id
-      // in the path. Tech in Asia puts its only Apply control,
-      // "APPLY FOR JOB" -> /jobs/<id>/apply, in the page header: measured
-      // 2026-10-22, 20 of 20 live postings read no_apply_control without this,
-      // and 40 of 40 closed ones answer "Job not found" with no such link. Only
-      // the path counts, so a sign-in link that carries the posting in its
-      // return address (?returnUrl=/jobs/<id>) is still chrome, and so is a
-      // link back into this page under another query, fragment or trailing
-      // slash, such as a skip link to #main-content. A sign-in or sign-up page
-      // is chrome even under the posting's own path (/jobs/<id>/login): it is
-      // the site's sign-in, not the posting. In a frame, the page the
-      // frame sits in is this page too; its address is passed in, because a
-      // frame sandboxed without allow-same-origin cannot read window.top. The
-      // id has to be the link's own: its last path segment that carries an id,
-      // whole, so posting 12345 claims neither /jobs/123456/apply nor
-      // /jobs/job-12345/apply, nor /jobs/12345/related/67890/apply, whose own
-      // posting is 67890. A posting whose own segment carries the id with more
-      // around it claims that whole segment too: posting job-12345 claims
-      // /jobs/job-12345/apply.
-      const idBearing = new RegExp(idPattern, 'i');
-      const signIn = /^(?:log-?in|sign[-_]?(?:in|up)|register)(?:\.\w+)?$/;
-      const linksToPosting = (element) => {
-        const href = postingId && element.getAttribute('href');
-        if (!href) return false;
-        try {
-          const target = new URL(href, document.baseURI);
-          const pageKey = (u) => u.origin + u.pathname.replace(/\/+$/, '');
-          const thisPage = [location.href, pageUrl].map((u) => pageKey(new URL(u)));
-          if (thisPage.includes(pageKey(target))) return false;
-          if (target.origin !== new URL(pageUrl).origin) return false;
-          const segments = target.pathname.toLowerCase().split('/');
-          if (segments.some((s) => signIn.test(s))) return false;
-          const own = segments.filter((s) => idBearing.test(s)).pop();
-          return own === postingId || own === postingSegment;
-        } catch {
-          return false;
-        }
-      };
-
-      // A design-system button is a custom element: UKG Pro (UltiPro) renders
-      // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
-      // native <button> inside its shadow root has no text of its own (the
-      // label is slotted in), so the element itself is the control to read.
-      // No selector matches a tag-name suffix, hence the filter.
-      const customButtons = Array.from(document.querySelectorAll('*'))
-        .filter((element) => element.localName.endsWith('-button'));
-      const candidates = Array.from(
-        document.querySelectorAll('a, button, input[type="submit"], input[type="button"], [role="button"]')
-      ).concat(customButtons);
-
-      return candidates
-        .filter((element) => {
-          if (element.closest('nav, header, footer') && !linksToPosting(element)) return false;
-          if (element.closest('[aria-hidden="true"]')) return false;
-
-          const style = window.getComputedStyle(element);
-          if (style.display === 'none' || style.visibility === 'hidden') return false;
-          if (!element.getClientRects().length) return false;
-
-          return Array.from(element.getClientRects()).some((rect) => rect.width > 0 && rect.height > 0);
-        })
-        .map((element) => {
-          const label = [
-            element.innerText,
-            element.value,
-            element.getAttribute('aria-label'),
-            element.getAttribute('title'),
-          ]
-            .filter(Boolean)
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-
-          return label;
-        })
-        .filter(Boolean);
-    };
 
     // Frame aggregation is an enhancement, never a requirement. Callers may pass
     // a lightweight page object that only implements goto/url/evaluate — the
@@ -584,33 +612,6 @@ export async function checkUrlLiveness(page, url, { extraSettleMs = 0, timeoutRe
             }
           });
 
-    // The posting's id, from the address of the page being read, so a posting
-    // reached through a redirect (/jobs/senior-engineer to /jobs/12345) is
-    // matched by the address it landed on. A page whose address lost the
-    // requested URL's id reads as off the posting whatever its controls (the
-    // redirect guard), and one whose own id is another posting's claims
-    // nothing in the chrome: /jobs/12345 that lands on
-    // /jobs/67890?returnUrl=/jobs/12345 passes the guard, but the page is
-    // posting 67890. The id in the last path segment, so a number in the
-    // query (?campaign=123456) is not taken for it. When that segment has
-    // none, the id in a query parameter that names the posting, and only then
-    // the last id in the path: on UltiPro,
-    // /JobBoard/{board}/OpportunityDetail?opportunityId={posting}, the path's
-    // only id is the board's, and every link under the board's path has it.
-    // The segment itself is kept only when the id came from it, so a generic
-    // last segment (/jobs/12345/details) claims nothing.
-    const postingIdentity = (address) => {
-      const postingUrl = new URL(address);
-      const lastSegment = postingUrl.pathname.split('/').filter(Boolean).pop() ?? '';
-      const queryId = [...postingUrl.searchParams]
-        .filter(([name]) => POSTING_ID_PARAMS.has(name.toLowerCase()))
-        .map(([, value]) => jobIdToken(value))
-        .find(Boolean);
-      return {
-        postingId: jobIdToken(lastSegment) ?? queryId ?? jobIdToken(postingUrl.pathname),
-        postingSegment: jobIdToken(lastSegment) ? lastSegment.toLowerCase() : null,
-      };
-    };
     const requested = postingIdentity(url);
 
     // One reading of the page: the top-level document plus every same-origin
@@ -870,10 +871,30 @@ export function createHeadedPageProvider(chromium, browserContext = {}) {
 // blocked by an anti-bot wall. The headed result wins when it actually sees the
 // page; if the retry is still blocked (or no headed page is available) the
 // original uncertain result is kept — we never upgrade a block to expired.
-export async function checkUrlLivenessWithFallback(page, url, { getHeadedPage } = {}) {
+//
+// `robotsGate(url) -> { allowed, reason }` (robots-check.mjs robotsAllows in
+// both real callers) is consulted only once the headless result is a
+// challenge, and before a headed page is asked for, so a site whose robots.txt
+// does not permit the path never gets the headed retry, which exists only to
+// get past its bot wall (#5776). A skip keeps the headless verdict, result and
+// code unchanged, with the reason extended: it can drop an escalation, never a
+// posting, because `uncertain` is never recorded as expired. A gate that throws
+// counts as a skip. With no gate passed, the retry runs as it always did.
+export async function checkUrlLivenessWithFallback(page, url, { getHeadedPage, robotsGate } = {}) {
   const first = await checkUrlLiveness(page, url);
   if (!getHeadedPage || !isChallengeResult(first)) {
     return first;
+  }
+  if (robotsGate) {
+    let gate;
+    try {
+      gate = await robotsGate(url);
+    } catch (err) {
+      gate = { allowed: false, reason: `check failed (${String(err?.message ?? err).split('\n')[0]})` };
+    }
+    if (gate?.allowed !== true) {
+      return { ...first, reason: `${first.reason} (headed retry skipped: robots.txt ${gate?.reason ?? 'gave no verdict'})` };
+    }
   }
   const headedPage = await getHeadedPage();
   if (!headedPage) {

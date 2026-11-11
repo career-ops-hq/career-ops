@@ -70,6 +70,8 @@ copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'brow
 // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
 copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
 copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
+// generate-pdf.mjs dates its PDF index row with lib/local-today.mjs.
+copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -250,24 +252,53 @@ try {
     fail('an accepted page budget changed the rendered PDF instead of acting only as a post-render decision');
   }
 
+  // #6377: a warn-only overflow still exits 0, but the output path only ever
+  // holds a PDF inside the budget. The render goes to a sibling draft, is not
+  // logged as generated and is not indexed, so the dashboard never opens it.
   const defaultOverflowPdf = join(sandbox, 'default-overflow.pdf');
+  const defaultOverflowDraft = join(sandbox, 'default-overflow.overflow.pdf');
+  const manifestBeforeDefaultOverflow = readFileSync(manifest, 'utf-8');
   const defaultOverflow = runPdf([defaultOverflowInput, defaultOverflowPdf]);
   if (
     defaultOverflow.status === 0 &&
-    existsSync(defaultOverflowPdf) &&
-    countPages(defaultOverflowPdf) === 3 &&
+    !existsSync(defaultOverflowPdf) &&
+    existsSync(defaultOverflowDraft) &&
+    countPages(defaultOverflowDraft) === 3 &&
     defaultOverflow.output.includes('📐 Page budget: 2 (warning only)') &&
     defaultOverflow.output.includes('⚠️') &&
     defaultOverflow.output.includes('CV is 3 pages') &&
     defaultOverflow.output.includes('allowed maximum is 2 pages') &&
     defaultOverflow.output.includes('--strict-pages') &&
-    defaultOverflow.output.includes('✅ PDF generated') &&
-    defaultOverflow.output.includes('Manifest:') &&
-    manifestHasPdf(defaultOverflowPdf)
+    defaultOverflow.output.includes(`⚠️  Overflow draft: ${defaultOverflowDraft} (nothing was written to the output path)`) &&
+    !defaultOverflow.output.includes('✅ PDF generated') &&
+    !defaultOverflow.output.includes('Manifest:') &&
+    !manifestHasPdf(defaultOverflowPdf) &&
+    !manifestHasPdf(defaultOverflowDraft) &&
+    readFileSync(manifest, 'utf-8') === manifestBeforeDefaultOverflow
   ) {
-    pass('generate-pdf warns loudly and publishes overflow by default');
+    pass('generate-pdf warns on a default overflow, keeps it as a draft and never writes or indexes the output path');
   } else {
     fail(`generate-pdf default page budget regressed: ${defaultOverflow.output.trim()}`);
+  }
+
+  // The same over an existing PDF: a warn-only re-render that runs over keeps
+  // the previous good PDF byte for byte, and says so.
+  const keptWarnPdf = join(sandbox, 'kept-previous-warn.pdf');
+  const keptWarnDraft = join(sandbox, 'kept-previous-warn.overflow.pdf');
+  writeFileSync(keptWarnPdf, 'PREVIOUS GOOD PDF', 'latin1');
+  const keptWarnRun = runPdf([input, keptWarnPdf, '--max-pages=1']);
+  if (
+    keptWarnRun.status === 0 &&
+    readFileSync(keptWarnPdf, 'latin1') === 'PREVIOUS GOOD PDF' &&
+    existsSync(keptWarnDraft) &&
+    countPages(keptWarnDraft) === 2 &&
+    keptWarnRun.output.includes(`⚠️  Overflow draft: ${keptWarnDraft} (the existing PDF at the output path was left unchanged)`) &&
+    !keptWarnRun.output.includes('✅ PDF generated') &&
+    !manifestHasPdf(keptWarnPdf)
+  ) {
+    pass('a warn-only overflow leaves the existing PDF at the output path unchanged');
+  } else {
+    fail(`a warn-only overflow replaced the existing PDF or lost its draft: ${keptWarnRun.output.trim()}`);
   }
 
   const strictOverflowPdf = join(sandbox, 'strict-overflow.pdf');
@@ -375,14 +406,19 @@ try {
   }
 
   const profileWarnPdf = join(sandbox, 'profile-warn.pdf');
+  const profileWarnDraft = join(sandbox, 'profile-warn.overflow.pdf');
   const profileWarn = runPdf([input, profileWarnPdf], withProfile('warn-one-page', '  max_pages: "1"\n'));
   if (
     profileWarn.status === 0 &&
     profileWarn.output.includes('📐 Page budget: 1 (warning only) — cv.max_pages from config/profile.yml') &&
     profileWarn.output.includes('CV is 2 pages') &&
-    manifestHasPdf(profileWarnPdf)
+    // #6377: a warn-only overflow from the profile lands in the draft too,
+    // never at the output path, and is never indexed.
+    !existsSync(profileWarnPdf) &&
+    existsSync(profileWarnDraft) &&
+    !manifestHasPdf(profileWarnPdf)
   ) {
-    pass('a profile max_pages without strict_pages warns on overflow and still indexes the PDF (quoted "1" accepted)');
+    pass('a profile max_pages without strict_pages warns on overflow and keeps it as a draft (quoted "1" accepted)');
   } else {
     fail(`a warn-only profile budget regressed: ${profileWarn.output.trim()}`);
   }
@@ -637,6 +673,66 @@ try {
     pass('renderHtmlToPdf rejects maxPages NaN before asking the shared painter, leaving the existing PDF in place');
   } else {
     fail(`renderHtmlToPdf sent maxPages NaN to the shared painter: ${sharedRejection?.message ?? 'no error'}; painted=${painted}`);
+  }
+
+  // #6377: the painter's own console output goes nowhere, so a warn-only
+  // overflow it kept as a draft must come back through the socket as
+  // draftPath, and the client must repeat the warning and the draft line
+  // instead of logging a PDF generated at the output path.
+  const draftSocketDir = mkdtempSync(join(tmpdir(), 'co-pb-draft-'));
+  const draftSocketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\career-ops-page-budget-draft-${process.pid}`
+    : join(draftSocketDir, 'pdf.sock');
+  const sharedDraftPdf = join(sandbox, 'shared-overflow.pdf');
+  const sharedDraft = join(sandbox, 'shared-overflow.overflow.pdf');
+  const draftServer = await startPdfServer({
+    socketPath: draftSocketPath,
+    launchBrowser: async () => ({ async close() {} }),
+    render: async (_browser, _html, outputPath) => {
+      const draftPath = outputPath.replace(/\.pdf$/, '.overflow.pdf');
+      writeFileSync(draftPath, 'OVERFLOW DRAFT', 'latin1');
+      return { outputPath, draftPath, pageCount: 2, size: 14 };
+    },
+  });
+  const clientLines = [];
+  const savedLog = console.log;
+  const savedWarn = console.warn;
+  let sharedDraftResult = null;
+  let sharedDraftError = null;
+  try {
+    process.env.CAREER_OPS_PDF_SHARED = '1';
+    process.env.CAREER_OPS_PDF_SOCKET = draftSocketPath;
+    console.log = (...args) => clientLines.push(args.join(' '));
+    console.warn = (...args) => clientLines.push(args.join(' '));
+    sharedDraftResult = await renderHtmlToPdf('<!doctype html><html><body>shared</body></html>', sharedDraftPdf, {
+      workspaceRoot: sandbox,
+      maxPages: 1,
+    });
+  } catch (err) {
+    sharedDraftError = err;
+  } finally {
+    console.log = savedLog;
+    console.warn = savedWarn;
+    if (savedShared === undefined) delete process.env.CAREER_OPS_PDF_SHARED;
+    else process.env.CAREER_OPS_PDF_SHARED = savedShared;
+    if (savedSocket === undefined) delete process.env.CAREER_OPS_PDF_SOCKET;
+    else process.env.CAREER_OPS_PDF_SOCKET = savedSocket;
+    await draftServer.close();
+    rmSync(draftSocketDir, { recursive: true, force: true });
+  }
+  const clientOutput = clientLines.join('\n');
+  if (
+    !sharedDraftError &&
+    sharedDraftResult?.draftPath === sharedDraft &&
+    sharedDraftResult?.pageCount === 2 &&
+    !existsSync(sharedDraftPdf) &&
+    clientOutput.includes('CV is 2 pages') &&
+    clientOutput.includes(`⚠️  Overflow draft: ${sharedDraft}`) &&
+    !clientOutput.includes('✅ PDF generated')
+  ) {
+    pass('a warn-only overflow kept as a draft by the shared painter comes back as draftPath and is not logged as generated');
+  } else {
+    fail(`the shared painter's overflow draft was lost on the way back: ${sharedDraftError?.message ?? JSON.stringify(sharedDraftResult)}\n${clientOutput}`);
   }
   // --- Optional sections that arrived as a bare header (#3986) -------------
   // The builders strip these from the payload before filling a template, but

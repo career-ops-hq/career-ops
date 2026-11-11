@@ -25,6 +25,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parseFollowups } from './followup-cadence.mjs';
+import { performance } from 'node:perf_hooks';
 
 // Every file here is user layer, so it resolves against the data root
 // (CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data marker), never the
@@ -35,6 +36,10 @@ export const DEFAULT_CANDIDATES_PATH = process.env.CAREER_OPS_REPLY_CANDIDATES
 export const APPS_FILE = resolveTrackerPath(DATA_ROOT);
 export const FOLLOWUPS_FILE = path.join(DATA_ROOT, 'data', 'follow-ups.md');
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+// CAREER_OPS_DEBUG=1 turns on the timing output (it always reports the sync
+// time and forwards tracker.mjs's parse/ledger/write timing), and a sync slower
+// than 5s is reported on stderr even without it.
+const DEBUG = process.env.CAREER_OPS_DEBUG === '1';
 
 // Helper to ask a question in the CLI
 function askQuestion(query) {
@@ -412,15 +417,27 @@ async function main() {
       }
       console.log('\n✅ Tracker review complete');
 
-      // Sync tracker DB if tracker.mjs exists
+      // Sync tracker DB if tracker.mjs exists. Time the call so a stall shows
+      // where the time goes; written to stderr so it cannot alter stdout output.
+      const syncStartedAt = performance.now();
       try {
+        const stdio = DEBUG ? ['ignore', 'ignore', 'inherit'] : 'ignore';
         execFileSync(process.execPath, [path.join(CODE_ROOT, 'tracker.mjs'), 'sync'], {
-          stdio: 'ignore',
+          stdio,
           env: { ...process.env, CAREER_OPS_ROOT: DATA_ROOT, CAREER_OPS_TRACKER: APPS_FILE },
         });
         console.log('Synced database index (applications.db).');
       } catch (e) {
         // ignore
+      } finally {
+        const syncDurationMs = Math.round(performance.now() - syncStartedAt);
+        // Surface a slow sync even when debug is off, but keep stdout untouched
+        // and the normal fast path silent. Debug builds forward tracker.mjs's
+        // own stderr timing line through as well. Runs in finally so it also
+        // fires when execFileSync throws.
+        if (DEBUG || syncDurationMs > 5000) {
+          console.error(`tracker.mjs sync took ${syncDurationMs}ms`);
+        }
       }
     } else {
       console.log('Updates skipped.');

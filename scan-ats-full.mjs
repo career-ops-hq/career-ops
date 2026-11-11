@@ -5,9 +5,9 @@
  *
  * Where scan.mjs scans the companies you track in portals.yml, this script
  * inverts the direction: it walks public directories of companies per ATS
- * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com) and
- * surfaces fresh postings that match your portals.yml `title_filter` /
- * `location_filter` — no manual company curation needed.
+ * (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com,
+ * Workable) and surfaces fresh postings that match your portals.yml
+ * `title_filter` / `location_filter` — no manual company curation needed.
  *
  * Optional `title_filter_full` in portals.yml overrides `title_filter` for
  * THIS scanner only, so the keywords tuned for scan.mjs's curated company
@@ -29,7 +29,11 @@
  * Company directories come from the public job-board-aggregator dataset
  * (github.com/Feashliaa/job-board-aggregator), except join.com's, which is
  * read from join.com's own company sitemap. Each is cached in data/cache/ for
- * 24h.
+ * 24h. Workable has no directory: its public XML job feed carries every
+ * tenant's postings, so that source reads the feed once per run (about 140 MB
+ * compressed), keeps a copy, and on later runs downloads it again only when
+ * Workable says it changed (see workableFeedCache below and loadWorkableFeed
+ * in providers/workable.mjs).
  *
  * Zero LLM tokens — pure HTTP + JSON, same providers/ modules as scan.mjs.
  * Postings without a usable publish date are skipped: a reverse scan is only
@@ -50,14 +54,17 @@
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
+import { captureWorkplaceEvidence } from './providers/_country.mjs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync, unlinkSync, createReadStream, createWriteStream } from 'fs';
+import { finished } from 'node:stream/promises';
+import { createGunzip, createGzip } from 'node:zlib';
 import { createHash } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
 
-import { makeHttpCtx, fetchJson, fetchText, fetchTextHead } from './providers/_http.mjs';
+import { makeHttpCtx, fetchJson, fetchText, fetchTextHead, fetchTextStream } from './providers/_http.mjs';
 import { withConnectionScope, withAbortScope } from './providers/_connection-scope.mjs';
 import { isResolverFailure, dnsPacingStats } from './providers/_dns-cache.mjs';
 import greenhouse from './providers/greenhouse.mjs';
@@ -68,9 +75,10 @@ import icims from './providers/icims.mjs';
 import bamboohr from './providers/bamboohr.mjs';
 import paylocity, { boardUrl as paylocityBoardUrl } from './providers/paylocity.mjs';
 import join, { parseCompanySitemap } from './providers/join.mjs';
+import { loadWorkableFeed, WORKABLE_FEED_URL } from './providers/workable.mjs';
 import { openProviderIdCache, PROVIDER_ID_CACHE_DIR } from './provider-id-cache.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilter, matchedTitleKeywords, loadSeenUrls, normalizeUrlForDedup, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilterOrExit, matchedTitleKeywords, loadSeenUrls, scanHistoryPolicy, seenJobKey, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
@@ -331,8 +339,18 @@ export function paylocityEntry(row) {
   return entryOnHost(name, careersUrl, h => h === 'recruiting.paylocity.com');
 }
 
+// The Workable source's boards arrive with their postings from the feed, so
+// its "provider" only hands them back. It is not registered in providers/:
+// nothing in portals.yml can name it, and scan.mjs never downloads the feed.
+const WORKABLE_FEED_PROVIDER = Object.freeze({
+  id: 'workable-feed',
+  fetch: async (entry) => (Array.isArray(entry?.jobs) ? entry.jobs : []),
+});
+
 // Each source: the provider module that does the fetching, plus how to turn a
 // dataset entry into a synthetic PortalEntry the provider can detect/fetch.
+// A source with `loadDataset` builds its list itself instead of downloading a
+// company directory (see loadSourceList).
 export const SOURCES = {
   greenhouse: {
     provider: greenhouse,
@@ -432,6 +450,37 @@ export const SOURCES = {
     toEntry: (slug) => SLUG_RE.test(String(slug))
       ? entryOnHost(String(slug), `https://join.com/companies/${slug}`, h => h === 'join.com')
       : null,
+  },
+  workable: {
+    // Workable publishes every tenant's postings in one hourly XML feed, so
+    // there is no company directory to walk and nothing to fetch per board:
+    // loadDataset reads the feed once (loadWorkableFeed in
+    // providers/workable.mjs, through workableFeedCache) and hands back
+    // one board per employer with its postings attached, already narrowed to
+    // the --since window and the title filter. The rest of the sweep (domain
+    // gate, location and content filters, blacklist, dedup) runs per employer
+    // as for any other source. Title-filter overrides match the employer name.
+    provider: WORKABLE_FEED_PROVIDER,
+    singleHost: true,
+    // The feed changes every hour, so an interrupted pass cannot resume at an
+    // offset into it; it starts again, and seenUrls keeps the matches already
+    // saved from being added twice.
+    restartOnResume: true,
+    dataset: WORKABLE_FEED_URL,
+    loadDataset: async ({ cutoff, includeUndated, titleFilter, cacheDir }) => {
+      const cache = workableFeedCache(cacheDir ? { cacheDir } : {});
+      try {
+        const { companies } = await loadWorkableFeed({ cutoffMs: cutoff, includeUndated, titleFilter, fetchStream: cache.fetchStream });
+        cache.commit();
+        return { list: companies, status: cache.from === 'stale-cache' ? 'stale' : 'ok' };
+      } catch (err) {
+        cache.discard();
+        throw err;
+      }
+    },
+    toEntry: (row) => (row && typeof row.company === 'string' && row.company
+      ? { name: row.company, ...(row.website ? { website: row.website } : {}), jobs: Array.isArray(row.jobs) ? row.jobs : [] }
+      : null),
   },
 };
 
@@ -607,6 +656,194 @@ export async function loadCompanyList(name, url, parseDataset, { cacheDir = CACH
   return { list: [], status: 'empty' };
 }
 
+// A source with `loadDataset` (workable) builds its own list from the sweep's
+// window and title filter; every other source downloads its company directory
+// through loadCompanyList. Both answer { list, status }, and a failed
+// loadDataset reads as 'empty', reported once, like a directory that could not
+// be downloaded and has no cache.
+export async function loadSourceList(name, source, datasetOpts, { loadCompanyListFn = loadCompanyList } = {}) {
+  if (typeof source?.loadDataset !== 'function') return loadCompanyListFn(name, source.dataset, source.parseDataset);
+  try {
+    const loaded = await source.loadDataset(datasetOpts);
+    // A loader answers its list, or { list, status } when it can say more
+    // (a list read from an expired cache is 'stale').
+    const list = Array.isArray(loaded) ? loaded : loaded?.list;
+    const status = !Array.isArray(loaded) && ['ok', 'stale'].includes(loaded?.status) ? loaded.status : 'ok';
+    return { list: Array.isArray(list) ? list : [], status };
+  } catch (err) {
+    console.error(`⚠️  ${name}: could not read ${source.dataset} — ${err.message}`);
+    return { list: [], status: 'empty' };
+  }
+}
+
+// Workable rebuilds its job feed about once an hour and refuses a second
+// download inside the hour (HTTP 429, Retry-After up to 3600). It answers a
+// conditional request, though: the feed carries Last-Modified, and a GET with
+// that date in If-Modified-Since gets 304 with no body and no refusal. So the
+// last download is kept, gzipped, beside its Last-Modified, and every run asks
+// whether the feed changed: on 304 it reads the copy, on 200 it keeps the new
+// download. When the request is refused before any of the feed arrived, the
+// copy is read and the source reports 'stale', as an expired directory cache
+// does.
+const WORKABLE_FEED_CACHE_FILE = 'workable.xml.gz';
+const WORKABLE_FEED_META_FILE = 'workable.meta.json';
+
+/**
+ * Wait until a full gzip stream can take more. Also ends when the gzip stream
+ * or the file it feeds fails or closes: a broken file never drains the gzip
+ * stream. Every listener is removed when the wait ends.
+ */
+export function drainOrFailure(gzip, out) {
+  if (gzip.destroyed || out.destroyed) return Promise.resolve();
+  return new Promise((resolve) => {
+    const events = [[gzip, 'drain'], [gzip, 'error'], [gzip, 'close'], [out, 'error'], [out, 'close']];
+    const done = () => {
+      for (const [emitter, name] of events) emitter.off(name, done);
+      resolve();
+    };
+    for (const [emitter, name] of events) emitter.on(name, done);
+  });
+}
+
+/**
+ * A fetchTextStream stand-in for loadWorkableFeed that serves and keeps the
+ * feed copy. A fresh download is written to a temporary file and becomes the
+ * copy only on commit(), after the caller accepted the whole document, so a
+ * copy is always a complete feed; discard() drops a download the caller
+ * refused.
+ *
+ * @param {{ cacheDir?: string, fetchStream?: typeof fetchTextStream, now?: () => number }} [opts]
+ */
+export function workableFeedCache({ cacheDir = CACHE_DIR, fetchStream = fetchTextStream, now = Date.now } = {}) {
+  const file = path.join(cacheDir, WORKABLE_FEED_CACHE_FILE);
+  const metaFile = path.join(cacheDir, WORKABLE_FEED_META_FILE);
+  const tmp = `${file}.tmp-${process.pid}`;
+  /** @type {'network' | 'cache' | 'stale-cache'} */
+  let from = 'network';
+  /** Last-Modified of the download in `tmp`, written beside the copy on commit(). */
+  let downloadedLastModified = null;
+  const removeQuietly = (p) => { try { unlinkSync(p); } catch { /* not there */ } };
+  const copyLastModified = () => {
+    if (!existsSync(file)) return null;
+    try {
+      const value = JSON.parse(readFileSync(metaFile, 'utf-8'))?.lastModified;
+      return typeof value === 'string' && value.trim() ? value.trim() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  async function readCopy(onText) {
+    const decoder = new TextDecoder('utf-8');
+    let bytes = 0;
+    for await (const chunk of createReadStream(file).pipe(createGunzip())) {
+      bytes += chunk.length;
+      if (await onText(decoder.decode(chunk, { stream: true })) === false) return { bytes, complete: false };
+    }
+    const tail = decoder.decode();
+    if (tail) await onText(tail);
+    return { bytes, complete: true };
+  }
+
+  async function stream(url, opts, onText) {
+    const validator = copyLastModified();
+    const requestOpts = validator
+      ? { ...opts, headers: { ...(opts?.headers ?? {}), 'if-modified-since': validator }, acceptNotModified: true }
+      : opts;
+    // The copy is written only once text arrives, so a refused request never
+    // touches the disk. A failure to write it costs the copy, not the read.
+    /** @type {import('node:zlib').Gzip | null} */
+    let gzip = null;
+    /** @type {import('node:fs').WriteStream | null} */
+    let out = null;
+    let writeFailed = false;
+    const sink = () => {
+      if (!gzip) {
+        mkdirSync(cacheDir, { recursive: true });
+        gzip = createGzip({ level: 1 });
+        out = createWriteStream(tmp);
+        gzip.on('error', () => { writeFailed = true; });
+        out.on('error', () => { writeFailed = true; });
+        gzip.pipe(out);
+      }
+      return gzip;
+    };
+    const closeSink = async (keep) => {
+      if (!gzip) return;
+      if (keep && !writeFailed) {
+        gzip.end();
+        await finished(out).catch(() => { writeFailed = true; });
+      } else {
+        gzip.destroy();
+        out.destroy();
+        await finished(out).catch(() => {});
+      }
+      if (!keep || writeFailed) removeQuietly(tmp);
+    };
+    let delivered = false;
+    try {
+      const result = await fetchStream(url, requestOpts, async (text) => {
+        delivered = true;
+        if (!writeFailed) {
+          const g = sink();
+          if (!g.write(text) && !writeFailed) await drainOrFailure(g, out);
+        }
+        return onText(text);
+      });
+      if (result?.notModified) {
+        await closeSink(false);
+        from = 'cache';
+        return readCopy(onText);
+      }
+      await closeSink(true);
+      from = 'network';
+      downloadedLastModified = typeof result?.lastModified === 'string' ? result.lastModified : null;
+      return result;
+    } catch (err) {
+      await closeSink(false);
+      // Only a refusal that delivered nothing can fall back: once part of the
+      // feed reached the caller, the copy would be read on top of it.
+      if (!delivered && existsSync(file)) {
+        from = 'stale-cache';
+        return readCopy(onText);
+      }
+      if (err?.status === 429) {
+        // A missing header is unknown, not 0 seconds.
+        const raw = typeof err.retryAfter === 'string' ? err.retryAfter.trim() : '';
+        const retryS = raw === '' ? NaN : Number(raw);
+        const when = Number.isFinite(retryS) && retryS >= 0 ? `after ${new Date(now() + retryS * 1000).toISOString()}` : 'later';
+        throw new Error(`Workable serves its job feed about once an hour and refused this request (HTTP 429); try again ${when}`);
+      }
+      throw err;
+    }
+  }
+
+  return {
+    fetchStream: stream,
+    get from() { return from; },
+    /**
+     * Keep a fresh download as the copy, with the date the next run asks
+     * about. A failure here costs the copy, not the feed already read.
+     */
+    commit() {
+      if (from !== 'network' || !existsSync(tmp)) return;
+      try {
+        renameSyncWithRetry(tmp, file);
+        if (downloadedLastModified) writeFileSync(metaFile, JSON.stringify({ lastModified: downloadedLastModified }), 'utf-8');
+        else removeQuietly(metaFile);
+      } catch (err) {
+        console.error(`⚠️  workable: could not keep the feed copy (${err.message}); the next run downloads the feed again`);
+        removeQuietly(tmp);
+        removeQuietly(metaFile);
+      }
+    },
+    /** Drop a download the caller refused. */
+    discard() {
+      removeQuietly(tmp);
+    },
+  };
+}
+
 // Date gate for one posting in a reverse (fresh-first) scan:
 //   'stale'   — dated, but older than the cutoff → always dropped
 //   'undated' — no usable publish date → dropped by default, kept with --include-undated
@@ -615,6 +852,16 @@ export function classifyPostingDate(job, cutoff) {
   if (job.postedAt && job.postedAt < cutoff) return 'stale';
   if (!job.postedAt) return 'undated';
   return 'keep';
+}
+
+// #6020. content_filter.rescue_title_misses is not applied here.
+// listingMayMatch() below skips a whole board when no title on it matches,
+// before any posting body is downloaded; that precheck is what makes a sweep of
+// a full public directory affordable, and rescuing title misses would mean
+// downloading every board. Say so instead of ignoring the key silently.
+export const RESCUE_TITLE_MISSES_IGNORED_WARNING = '⚠️  content_filter.rescue_title_misses is ignored by scan-ats-full.mjs: it skips boards by title before downloading descriptions. Title misses are dropped here as without the key; scan.mjs and scan-dayforce.mjs apply it.';
+export function warnRescueTitleMissesIgnored(contentFilter, warn = console.error) {
+  if (contentFilter?.rescueTitleMisses === true) warn(RESCUE_TITLE_MISSES_IGNORED_WARNING);
 }
 
 // Can this board hold a match? Asked of a provider's cheap listing (titles and
@@ -818,7 +1065,7 @@ export function passesFilters(job, { titleFilter, locationFilter, contentFilter,
   // job.url is passed so the location filter can fall back to the URL's own
   // location segment when the provider reports a rolled-up "N Locations" string;
   // job.title so a title-stated remote role survives a city-only location.
-  if (!locationFilter(job.location, job.url, job.title)) return false;
+  if (!locationFilter(job.location, job.url, job.title, job)) return false;
   if (contentFilter && !contentFilter(job.description, matchedTitleKeywords(job.title, titleFilterConfig))) return false;
   return true;
 }
@@ -826,12 +1073,12 @@ export function passesFilters(job, { titleFilter, locationFilter, contentFilter,
 // Prefer a provider's own scoped dedup key over URL normalization when the
 // provider can derive one — e.g. workday.mjs's requisition ID, which
 // collapses the same posting served under several sites of one tenant
-// (different paths, sometimes different hosts) that normalizeUrlForDedup
+// (different paths, sometimes different hosts) that seenJobKey
 // can't recognize as duplicates (#3439). `provider` is optional so this stays
 // safe to call for seed-pass offers, which carry no SOURCES entry to look one
 // up from. Falls back to the pre-#3439 behavior whenever no key is derived.
 export function dedupTokenFor(job, provider) {
-  return provider?.dedupKey?.(job) || normalizeUrlForDedup(job.url);
+  return provider?.dedupKey?.(job) || seenJobKey(job.url);
 }
 
 // Resolve an offer's provider from its recorded `source` string — shared by
@@ -872,6 +1119,7 @@ export function formatLiveOfferLine(job, source) {
     title: job.title,
     url: job.url,
     location: job.location || null,
+    ...(job.geographyEvidence ? { geographyEvidence: job.geographyEvidence } : {}),
     postedAt,
     source: source || job.source || '',
   });
@@ -899,7 +1147,7 @@ export function emitLiveOffer(job, source, { json } = {}) {
 }
 
 export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
-  const kept = { ...job, source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
+  const kept = { ...job, ...(opts.workplacePolicy ? { geographyEvidence: captureWorkplaceEvidence(job) } : {}), source, dateStatus: job.postedAt ? 'dated' : 'unknown' };
   sink.push(kept);
   const live = filterBlacklistedOffers([kept], blacklist, { includeBlacklisted: opts.includeBlacklisted });
   if (live.offers.length) emitLiveOffer(live.offers[0], source, { json: opts.json });
@@ -986,7 +1234,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) 
         titleFilterConfig: opts.titleFilterConfig,
       })) continue;
       // provider is always one of SEED_PROVIDERS (greenhouse/lever/ashby) here —
-      // none currently define dedupKey, so this is the same normalizeUrlForDedup
+      // none currently define dedupKey, so this is the same seenJobKey
       // behavior as before; kept via the shared helper so the two dedup sites
       // in this file can't quietly drift apart (#3439).
       const dedupToken = dedupTokenFor(job, provider);
@@ -1278,9 +1526,11 @@ async function main() {
   const titleFilterOverrides = buildTitleFilterOverrides(config?.title_filter_overrides);
   const titleFilter = buildTitleFilterWithOverrides(fullTitleFilterConfig, titleFilterOverrides);
   const locationFilter = buildLocationFilter(config?.location_filter);
+  opts.workplacePolicy = config?.location_filter?.workplace_policy;
   // Same content_filter (incl. by_title_keyword scoping) scan.mjs applies —
   // see #1846. Built once here from the same portals.yml config.
-  const contentFilter = buildContentFilter(config?.content_filter);
+  const contentFilter = buildContentFilterOrExit(config?.content_filter);
+  warnRescueTitleMissesIgnored(contentFilter);
   // Opt-in, and the opt-in IS the key: `domain_filter` does not exist in any
   // portals.yml written before this feature, so every existing install keeps
   // its exact behaviour and nobody loses a board without having asked for the
@@ -1336,12 +1586,13 @@ async function main() {
   // extraTokensFor: a historical scan-history.tsv row records the URL it was
   // FIRST seen on, so without this a Workday requisition seen last run under
   // site A's URL wouldn't be recognized when this run only sees it under
-  // site B — the plain normalizeUrlForDedup comparison never matches across
+  // site B — the plain seenJobKey comparison never matches across
   // sites, and only fresh-run offers were reseeded with the provider key
   // (#3439). `portal` here is scan-history.tsv's recorded `offer.source`, so
   // providerForSource resolves it the same way the checkpoint reseed above
   // does.
-  const { seen: seenUrls } = loadSeenUrls({}, {
+  // scanHistoryPolicy: the recheck window scan.mjs applies to the same history.
+  const { seen: seenUrls } = loadSeenUrls(scanHistoryPolicy(config), {
     extraTokensFor: (url, portal) => providerForSource(portal)?.dedupKey?.({ url }),
   });
   const blacklist = loadBlacklist();
@@ -1427,6 +1678,10 @@ async function main() {
   let domainGatedBoards = cc.domainGatedBoards || 0;
   let domainGatedPostings = cc.domainGatedPostings || 0;
   const datasetStatus = {};
+  // Companies each source's list held, kept in the checkpoint beside its
+  // status so a resumed run can report a finished source without reading its
+  // list again (see restartOnResume).
+  const datasetSizes = {};
 
   // Graceful stop for the web layer: it SIGTERMs us when its scan budget elapses
   // (see web/src/lib/core/scan-timeout.mjs). A full sweep only prints its result
@@ -1455,6 +1710,7 @@ async function main() {
           title: o.title,
           url: o.url,
           location: o.location || null,
+          ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
           postedAt: isoDay(o.postedAt),
           dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
           source: o.source,
@@ -1496,6 +1752,7 @@ async function main() {
     includeUndated: opts.includeUndated,
     filters,
     completedSources: [...completedSources],
+    datasets: Object.fromEntries(Object.keys(datasetStatus).map((n) => [n, { status: datasetStatus[n], available: datasetSizes[n] ?? 0 }])),
     offers: newOffers,
     savedAt: new Date().toISOString(),
   });
@@ -1525,7 +1782,7 @@ async function main() {
       // posting stale, --since was silently ignored for the entire source.
       // Enrich first, then let the undated policy decide.
       if (dateClass === 'undated' && provider.enrichDate
-          && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title)) {
+          && titleFilter(job.title, companySlug) && locationFilter(job.location, job.url, job.title, job)) {
         try { await provider.enrichDate(job, ctx); } catch { /* stays undated */ }
         if (!shouldContinue()) return;
         dateClass = classifyPostingDate(job, cutoff);
@@ -1536,7 +1793,7 @@ async function main() {
       // job.url is passed so the location filter can fall back to the URL's own
       // location segment when the provider reports a rolled-up "N Locations" string;
       // job.title so a title-stated remote role survives a city-only location.
-      if (!locationFilter(job.location, job.url, job.title)) continue;
+      if (!locationFilter(job.location, job.url, job.title, job)) continue;
       if (!contentFilter(job.description, matchedTitleKeywords(job.title, fullTitleFilterConfig))) { droppedContent++; continue; }
       const dedupToken = dedupTokenFor(job, provider);
       if (seenUrls.has(dedupToken)) continue;
@@ -1551,23 +1808,44 @@ async function main() {
 
   for (const name of opts.ats.filter((ats) => SOURCES[ats])) {
     const source = SOURCES[name];
-    // Stats are accumulated BEFORE the completed-source skip: on --resume a
-    // source finished before the checkpoint was written still contributed its
-    // companies to the sweep, so it must still count toward the availability /
-    // cap figures the final report and --json output show.
-    const { list, status } = await loadCompanyList(name, source.dataset, source.parseDataset);
+    // A finished source whose list is rebuilt rather than cached (the Workable
+    // feed, about 140 MB a read) is not read again on --resume: its status and
+    // size come from the checkpoint. A checkpoint that predates those fields
+    // reports it as read ('ok', since it finished) with no companies counted.
+    if (completedSources.has(name) && source.restartOnResume) {
+      const saved = checkpoint?.datasets?.[name];
+      datasetStatus[name] = ['ok', 'stale', 'empty'].includes(saved?.status) ? saved.status : 'ok';
+      const available = Number.isInteger(saved?.available) && saved.available >= 0 ? saved.available : 0;
+      datasetSizes[name] = available;
+      totalCompaniesAvailable += available;
+      if (opts.limit < available) capHit = true;
+      log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping (its list is not read again)`);
+      continue;
+    }
+    // For every other source, stats are accumulated BEFORE the completed-source
+    // skip: on --resume a source finished before the checkpoint was written
+    // still contributed its companies to the sweep, so it must still count
+    // toward the availability / cap figures the final report and --json output
+    // show. Reading its list again is cheap, since the list comes from the 24h
+    // directory cache.
+    const { list, status } = await loadSourceList(name, source, { cutoff, includeUndated: opts.includeUndated, titleFilter });
     datasetStatus[name] = status;
+    datasetSizes[name] = list.length;
     totalCompaniesAvailable += list.length;
     if (opts.limit < list.length) capHit = true;
     if (completedSources.has(name)) {
       log(`\n⚙  ${name} — already complete in resumed checkpoint, skipping`);
       continue;
     }
-    const datasetHash = datasetFingerprint(list);
+    // A source that restarts on resume never compares fingerprints, and its
+    // list carries every kept posting, so it is not hashed.
+    const datasetHash = source.restartOnResume ? null : datasetFingerprint(list);
     const entriesAll = sampleCompanies(list, opts.limit, opts.shuffle).map(source.toEntry).filter(Boolean);
 
     let startAt = 0;
-    if (checkpoint && checkpoint.current?.name === name) {
+    if (checkpoint && checkpoint.current?.name === name && source.restartOnResume) {
+      log(`  ${name} — interrupted in the checkpoint; its list is rebuilt, so the pass starts again`);
+    } else if (checkpoint && checkpoint.current?.name === name) {
       // datasetHash is absent in checkpoints written before this guard existed;
       // fall back to the length-only check for those rather than hard-failing.
       const hashMismatch = checkpoint.current.datasetHash != null
@@ -1913,11 +2191,6 @@ async function main() {
   // Persist (unless dry-run, or nothing to save).
   let saved = false;
   if (offers.length && !opts.dryRun) {
-    // appendToPipeline assumes the file exists (onboarding creates it) — cover fresh setups.
-    if (!existsSync(PIPELINE_PATH)) {
-      mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
-      writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
-    }
     await appendToPipeline(offers);
     await appendToScanHistory(offers, date);
     saved = true;
@@ -1988,6 +2261,7 @@ async function main() {
         title: o.title,
         url: o.url,
         location: o.location || null,
+        ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
         postedAt: o.postedAt ? new Date(o.postedAt).toISOString().slice(0, 10) : null,
         dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
         blacklisted: Boolean(o.blacklisted),

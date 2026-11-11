@@ -56,13 +56,14 @@ const workdayOtherTenant = { url: 'https://other.wd5.myworkdayjobs.com/External/
 // unchanged from before #3439.
 {
   const greenhouseModule = await import(pathToFileURL(join(ROOT, 'providers/greenhouse.mjs')).href);
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const job = { url: 'https://boards.greenhouse.io/acme/jobs/12345?gh_src=abc' };
   const token = dedupTokenFor(job, greenhouseModule.default);
-  if (token === normalizeUrlForDedup(job.url)) {
-    pass('dedupTokenFor() falls back to normalizeUrlForDedup for a provider with no dedupKey');
+  const urlKey = normalizeUrlForDedup(job.url);
+  if (token === 'greenhouse:12345' && token === seenJobKey(job.url) && urlKey.includes('boards.greenhouse.io') && urlKey.includes('gh_jid') === false) {
+    pass('dedupTokenFor() falls back to the same-job key; normalizeUrlForDedup stays a URL');
   } else {
-    fail(`dedupTokenFor() fallback mismatch: ${JSON.stringify({ token, expected: normalizeUrlForDedup(job.url) })}`);
+    fail(`dedupTokenFor() fallback mismatch: ${JSON.stringify({ token, urlKey })}`);
   }
 }
 

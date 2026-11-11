@@ -38,7 +38,8 @@
  * to the MCP path silently). An empty/near-empty jd-mode extraction is one of
  * those hard errors (`code: "empty_text"`) rather than a successful-looking
  * empty JD — the documented silent fallback only fires if the tool actually
- * reports failure. Reuses liveness-browser.mjs's SSRF host guard and
+ * reports failure. So is a Cloudflare challenge or block page served in place
+ * of the posting (`code: "bot_challenge"`). Reuses liveness-browser.mjs's SSRF host guard and
  * realistic-UA context so it isn't instantly bot-walled.
  */
 
@@ -49,9 +50,11 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { LIVENESS_CONTEXT_OPTIONS, rejectPrivateOrInvalid } from './liveness-browser.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
-import { classifyLiveness } from './liveness-core.mjs';
+import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { HTML_TAG_RE } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
+import { buildLocation } from './providers/hirehive.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
 import { extractCandidateOpportunityDetail, extractLocations } from './providers/ultipro.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
@@ -181,8 +184,8 @@ const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/
  * payloads and hard-caps at 4000 chars while collapsing ALL whitespace
  * (newlines included) into single spaces. A JD read for evaluation wants the
  * full body up to `--max-chars`, with its paragraph and bullet breaks intact.
- * The entity decoder itself IS shared, so the two cannot drift on the thing
- * that has actually drifted historically (#1555/#1639/#2623).
+ * The entity decoder and the tag matcher ARE shared, so the two cannot drift on
+ * the thing that has actually drifted historically (#1555/#1639/#2623).
  *
  * Double-decode for the same reason htmlToText does: payloads often carry
  * entity-escaped markup (`&lt;p&gt;`), and text-level entities only become
@@ -198,7 +201,7 @@ export function jdHtmlToText(html) {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '\n- ')
     .replace(BLOCK_END_RE, '\n')
-    .replace(/<[^>]+>/g, ' ');
+    .replace(HTML_TAG_RE, ' ');
   return decodeEntities(stripped)
     .replace(/[ \t\u00a0]+/g, ' ')
     .replace(/ *\n */g, '\n')
@@ -256,6 +259,27 @@ export function normalizeWorkdayJob(json, postingUrl, textCap = JD_TEXT_CAP) {
 }
 
 /**
+ * Read the body of a response no fetcher will use, dropping each chunk as it
+ * arrives, and return null. Left unread, a body still arriving keeps its
+ * socket open, and with it the process: fetch-jd.mjs exits once nothing is
+ * left to run. Fetchers await this inside their try, so the read stays under
+ * their abort timer and a body that never ends stops at the same timeout as
+ * the rest of the request. Reading, not cancelling: these error bodies are
+ * small, while a cancel aborts the request mid-body and undici then opens a
+ * new connection that the process waits for (0.1 to 2.5 s on real Greenhouse
+ * and Workday misses, Node 24).
+ *
+ * @param {Response} res
+ */
+async function discard(res) {
+  try {
+    const reader = res.body?.getReader();
+    while (reader && !(await reader.read()).done) { /* drop the chunk */ }
+  } catch { /* cut off by the abort timer, or unreadable */ }
+  return null;
+}
+
+/**
  * Fetch + shape one Workday posting from its CXS endpoint. Returns null for
  * ANY inconclusive outcome (blocked host, redirect, non-200, unparseable or
  * unexpected body, timeout) so the caller falls through to the browser path —
@@ -280,7 +304,7 @@ async function fetchWorkdayJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error', // a redirect off the derived host is not one to follow
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeWorkdayJob(await res.json(), postingUrl, textCap);
   } catch {
     return null;
@@ -339,6 +363,9 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
     url: postingUrl,
     title: compactText(str(job.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    // isListed:false is NOT closure: Ashby serves an unlisted posting by direct
+    // link and it can still take applications. The note in the text is the only
+    // carrier; closure needs independent evidence.
   };
 }
 
@@ -369,7 +396,7 @@ async function fetchAshbyJd(apiUrl, jobId, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeAshbyJob(json, jobId, postingUrl, textCap);
   } catch {
@@ -454,7 +481,7 @@ async function fetchGreenhouseJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeGreenhouseJob(json, postingUrl, textCap);
   } catch {
@@ -545,7 +572,7 @@ async function fetchLeverJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeLeverJob(json, postingUrl, textCap);
   } catch {
@@ -573,6 +600,7 @@ async function fetchGreenhouseEmbeddedJd(resolved, postingUrl, textCap, timeoutM
       signal: controller.signal,
     });
     jobApiUrl = await resolved.followEmbed(res, resolved.parts);
+    await discard(res); // only its status and Location header are read
   } catch {
     return null;
   } finally {
@@ -611,6 +639,10 @@ export function normalizeSmartRecruitersJob(json, postingUrl, textCap = JD_TEXT_
   if (where) meta.push(`Location: ${where}`);
   if (loc.remote === true) meta.push('Work model: Remote');
   else if (loc.hybrid === true) meta.push('Work model: Hybrid');
+  // A closed posting can still ship its ad. The marker carries `active: false`
+  // with the text the way Workday carries `canApply: false`, so the caller
+  // reads the closure instead of falling back to a page that hides it.
+  if (json?.active === false) meta.push('Applications closed (active: false)');
 
   return {
     url: postingUrl,
@@ -629,7 +661,7 @@ async function fetchSmartRecruitersJd(apiUrl, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     const json = await res.json();
     return normalizeSmartRecruitersJob(json, postingUrl, textCap);
   } catch {
@@ -684,8 +716,55 @@ async function fetchZohoJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeZohoJob(await res.text(), id, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Shape one HireHive per-posting API answer into a jd-mode result. Pure, same
+ * contract as the other normalizers. The body must be THIS posting's: another
+ * id returns null so the caller falls through.
+ *
+ * @param {any} json - parsed `/api/v1|v2/jobs/<id>` response body
+ * @param {string} id - `job_<shortid>` (v2) or the posting number (v1)
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeHireHiveJob(json, id, postingUrl, textCap = JD_TEXT_CAP) {
+  if (!json || String(json.id) !== String(id)) return null;
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const body = jdHtmlToText(json.description?.html) || str(json.description?.text);
+  if (!body) return null;
+  const meta = [];
+  const location = buildLocation(json);
+  if (location) meta.push(`Location: ${location}`);
+  if (str(json.type?.name)) meta.push(`Job type: ${str(json.type.name)}`);
+  const posted = str(json.published_date) || (Number.isFinite(json.publishedDate) ? new Date(json.publishedDate * 1000).toISOString() : '');
+  if (posted) meta.push(`Posted: ${posted.slice(0, 10)}`);
+  return {
+    url: postingUrl,
+    title: compactText(str(json.title), 300),
+    text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchHireHiveJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return await discard(res);
+    return normalizeHireHiveJob(await res.json(), id, postingUrl, textCap);
   } catch {
     return null;
   } finally {
@@ -815,8 +894,73 @@ async function fetchUltiproJd(apiUrl, id, postingUrl, textCap, timeoutMs) {
       redirect: 'error',
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeUltiproJob(await res.text(), id, postingUrl, textCap);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Shape one HiBob `/api/job-ad/{uuid}/application-form` answer into a jd-mode
+ * result. Pure, same contract as the other normalizers. `data.jobAd` carries
+ * the title, the site as the page shows it ("Berlin, Germany"), the work model
+ * and the employment type; `jobDescription` keys each field by a path ending
+ * in `/jobDescription/{field}` and wraps the value as `{ value }`. The four
+ * text sections are HTML and keep the tenant's own section labels when it set
+ * them.
+ *
+ * @param {any} json - parsed application-form response body
+ * @param {string} postingUrl
+ * @param {number} [textCap]
+ */
+export function normalizeHibobJob(json, postingUrl, textCap = JD_TEXT_CAP) {
+  const ad = json?.data?.jobAd;
+  if (!ad || typeof ad !== 'object') return null;
+  const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : '');
+  const fields = ad.jobDescription && typeof ad.jobDescription === 'object' ? ad.jobDescription : {};
+  const field = (name) => {
+    const key = Object.keys(fields).find((k) => k.endsWith(`/jobDescription/${name}`));
+    return key ? fields[key]?.value : undefined;
+  };
+  const labels = field('sectionLabels') && typeof field('sectionLabels') === 'object' ? field('sectionLabels') : {};
+  const blocks = [];
+  for (const [key, label] of [['description', 'Description'], ['responsibilities', 'Responsibilities'], ['requirements', 'Requirements'], ['benefits', 'Benefits']]) {
+    const body = jdHtmlToText(typeof field(key) === 'string' ? field(key) : '');
+    if (body) blocks.push(`${str(labels[key]) || label}:\n${body}`);
+  }
+  if (!blocks.length) return null;
+
+  const meta = [];
+  if (str(ad.site)) meta.push(`Location: ${str(ad.site)}`);
+  if (str(ad.workspaceType)) meta.push(`Work model: ${str(ad.workspaceType)}`);
+  if (str(ad.employmentType)) meta.push(`Type: ${str(ad.employmentType)}`);
+  const min = field('payTransparencyMinSalary');
+  const max = field('payTransparencyMaxSalary');
+  const range = [min, max].filter((v) => typeof v === 'number' && v > 0).map((v) => v.toLocaleString('en-US')).join(' – ');
+  if (range) meta.push(`Salary: ${[range, str(field('payTransparencySalaryCurrency')), str(field('payTransparencySalaryPayPeriod'))].filter(Boolean).join(' ')}`);
+
+  return {
+    url: postingUrl,
+    title: compactText(str(ad.title), 300),
+    text: compactText([meta.join('\n'), ...blocks].filter(Boolean).join('\n\n'), textCap),
+  };
+}
+
+async function fetchHibobJd(resolved, postingUrl, textCap, timeoutMs) {
+  if (rejectPrivateOrInvalid(resolved.apiUrl)) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(resolved.apiUrl, {
+      headers: { accept: 'application/json', 'user-agent': DEFAULT_USER_AGENT, ...resolved.headers },
+      redirect: 'error',
+      signal: controller.signal,
+    });
+    if (!res.ok) return await discard(res);
+    return normalizeHibobJob(await res.json(), postingUrl, textCap);
   } catch {
     return null;
   } finally {
@@ -855,19 +999,24 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
     redirect: 'error',
     signal: controller.signal,
   };
+  // The share link's redirect, of which only the status and Location header
+  // are read. Its body is drained last: both requests share one timer, so a
+  // slow body read first would spend the posting request's budget.
+  let redirect;
   try {
     let apiUrl = resolved.apiUrl;
     if (resolved.followEmbed) {
-      const redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
+      redirect = await fetch(apiUrl, { ...options, redirect: 'manual' });
       apiUrl = await resolved.followEmbed(redirect, resolved.parts);
       if (!apiUrl || rejectPrivateOrInvalid(apiUrl)) return null;
     }
     const res = await fetch(apiUrl, options);
-    if (!res.ok) return null;
+    if (!res.ok) return await discard(res);
     return normalizeWorkableJob(await res.json(), resolved.parts.shortcode, postingUrl, textCap);
   } catch {
     return null;
   } finally {
+    if (redirect) await discard(redirect);
     clearTimeout(timer);
   }
 }
@@ -883,8 +1032,8 @@ async function fetchWorkableJd(resolved, postingUrl, textCap, timeoutMs) {
  *
  * Every entry takes the same `(resolved, url, textCap, timeoutMs)` shape so
  * dispatch stays a lookup; the extra `parts` arguments (Ashby's `jobId`, Zoho
- * Recruit's and UltiPro's `id`) are unpacked inside their own entries rather
- * than widening the shared signature.
+ * Recruit's, UltiPro's and HireHive's `id`) are unpacked inside their own
+ * entries rather than widening the shared signature.
  */
 export const JD_FETCHERS = {
   workable: fetchWorkableJd,
@@ -905,6 +1054,9 @@ export const JD_FETCHERS = {
     fetchZohoJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
   ultipro: (resolved, url, textCap, timeoutMs) =>
     fetchUltiproJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
+  hirehive: (resolved, url, textCap, timeoutMs) =>
+    fetchHireHiveJd(resolved.apiUrl, resolved.parts.id, url, textCap, timeoutMs),
+  hibob: fetchHibobJd,
 };
 
 /**
@@ -936,6 +1088,25 @@ export async function fetchJdViaKnownApi(url, textCap = JD_TEXT_CAP, timeoutMs =
   const budgetMs = resolved.timeoutMs || timeoutMs;
   const result = await fetcher(resolved, url, textCap, budgetMs);
   return result ? { ...result, ats: resolved.ats } : null;
+}
+
+/**
+ * A Cloudflare challenge or block page served in place of the posting, as a
+ * jd-mode failure, or null. Pure — exported for tests.
+ *
+ * jdFailure() never rejects a result above the length floor, and a
+ * site-branded challenge body clears it (#6713: 838 characters, "Humans
+ * only"), so the interstitial was emitted as the JD. Cloudflare titles the page
+ * itself, and archive-posting.mjs refuses the same pages by that title on an
+ * HTTP error (#6724). `bot_challenge` is the code liveness gives the same wall.
+ *
+ * @param {{ status?: number, pageTitle?: string, url?: string }} page
+ */
+export function challengeFailure({ status = 0, pageTitle = '', url = '' } = {}) {
+  if (!(status >= 400)) return null;
+  const kind = cloudflareInterstitial(pageTitle);
+  if (!kind) return null;
+  return { error: `HTTP ${status} Cloudflare ${kind} ("${String(pageTitle).trim()}"), not the posting`, code: 'bot_challenge', url };
 }
 
 /**
@@ -988,7 +1159,7 @@ function emitJd(result, maxChars) {
   }
   // bodyText exists only for jdFailure(); drop it so the documented success
   // shape `{ url, title, text }` is unchanged.
-  const { bodyText: _bodyText, ...emitted } = result;
+  const { bodyText: _bodyText, closed: _closed, evidence: _evidence, ...emitted } = result;
   process.stdout.write(JSON.stringify(emitted));
 }
 
@@ -1185,7 +1356,9 @@ export async function readDom(page) {
     const fullBody = document.body?.innerText || '';
     const bodyText = fullBody.length > 4000 ? `${fullBody.slice(0, 2000)}\n…\n${fullBody.slice(-2000)}` : fullBody;
 
-    return { title, text, anchors, jsonLdDescription, jsonLdTitle, bodyText };
+    // The document's own title, which `title` above passes over for an <h1>:
+    // challengeFailure() reads it.
+    return { title, text, anchors, jsonLdDescription, jsonLdTitle, bodyText, pageTitle: document.title || '' };
   });
 }
 
@@ -1258,7 +1431,7 @@ async function main() {
       return route.continue();
     });
     const page = await context.newPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
+    const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout });
     await page.waitForTimeout(HYDRATION_WAIT_MS); // let SPAs hydrate
 
     // Belt-and-suspenders: never emit content read from a private final URL.
@@ -1274,7 +1447,13 @@ async function main() {
     if (mode === 'listing') {
       process.stdout.write(JSON.stringify(normalizeListing(raw.anchors, finalUrl, max)));
     } else {
-      emitJd(normalizeJd(raw, finalUrl, maxChars), maxChars);
+      const challenge = challengeFailure({ status: response?.status() ?? 0, pageTitle: raw.pageTitle, url: finalUrl });
+      if (challenge) {
+        console.error(JSON.stringify(challenge));
+        process.exitCode = 1;
+      } else {
+        emitJd(normalizeJd(raw, finalUrl, maxChars), maxChars);
+      }
     }
   } catch (err) {
     console.error(JSON.stringify({ error: `navigation error: ${String(err.message).split('\n')[0]}`, code: 'navigation_error' }));

@@ -133,7 +133,8 @@ export function assertParsedSomething(html, url) {
 // Tenants vary the result class: Synopsys uses `article--result`, Siemens
 // appends a position index (`article--result 1`). Accept any suffix.
 // careers.avature.net renders `article--jobs` cards instead (seen 2026-09-28).
-const ARTICLE_PATTERN = /<article class="article article--(?:result|jobs)\b[^"]*"[\s\S]*?<\/article>/;
+// Deloitte USI drops the leading `article` class: `<article class="article--result ">`.
+const ARTICLE_PATTERN = /<article class="(?:article )?article--(?:result|jobs)\b[^"]*"[\s\S]*?<\/article>/;
 
 /**
  * Number of result cards on a page, before `parseArticles` drops any (no

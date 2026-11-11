@@ -60,7 +60,8 @@ function runScan(portalsYml) {
     writeFileSync(preload, PRELOAD);
     const log = join(dir, 'requests.log');
     const env = { ...process.env };
-    for (const name of ['CAREER_OPS_PORTALS', 'CAREER_OPS_PROFILE', 'CAREER_OPS_PIPELINE', 'CAREER_OPS_SCAN_HISTORY', 'CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR']) delete env[name];
+    // Every inherited CAREER_OPS_* setting points at the developer's own data.
+    for (const name of Object.keys(env)) if (name.startsWith('CAREER_OPS_')) delete env[name];
     const run = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(ROOT, 'scan.mjs'), '--dry-run'], {
       cwd: dir,
       encoding: 'utf-8',
@@ -98,4 +99,13 @@ test('a company whose filter_on leaves out the title still resolves every placeh
   const { out, details } = runScan(`title_filter:\n  positive:\n    - "Engineer"\nfield_filters:\n  location:\n    positive: ["Austin"]\n${company}    filter_on: [location]\n`);
   assert.equal(details.length, 3, out);
   assert.match(out, /resolved 3 of 3 multi-location placeholder\(s\)/);
+});
+
+test('with rescue_title_misses, a title miss spends no detail request (#6020)', () => {
+  const { out, status, details } = runScan(`title_filter:\n  positive:\n    - "Engineer"\n  negative:\n    - "Payroll"\ncontent_filter:\n  positive: ["ledger"]\n  rescue_title_misses: true\n${company}`);
+  // Workday postings carry no description, so the content check can never keep
+  // a title miss here. Resolving its locations would only spend the shared
+  // detail budget, so only the matching title gets a request.
+  assert.equal(status, 0, out);
+  assert.deepEqual(details, [`GET ${CXS}/job/USA---Austin-TX/Platform-Engineer_R1`], out);
 });

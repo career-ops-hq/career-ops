@@ -245,24 +245,31 @@ Regeln für das Transkript:
 - **Tagge jede Antwort.** In der Zeile direkt über jeder `**Candidate:**`-Zeile gib `<!-- competency: tag[, tag...] -->` aus — lowercase-kebab-case, kommagetrennt bei Antworten mit mehreren Kompetenzen (z. B. `system-design`, `people-leadership`, `incident-response`). Du hast jede Antwort in Step 2 bereits bewertet, also tagge aus dieser Bewertung, statt neu zu lesen. Tags sind frei wählbar; wähle die Kompetenz, die die Frage tatsächlich geprüft hat.
 - **Rekonstruiere den Turn des Kandidaten getreu.** Verwende, was der Kandidat in Step 1 als seine Aussage berichtet hat, nicht eine idealisierte Antwort. Die "correct/complete answer" aus Step 2 gehört in die Debrief-Datei, nie ins Transkript — das Transkript hält fest, was passiert ist.
 - **`source: debrief`.**
-- **`stated_priorities` gehört ins Front Matter** (Step 1c), als YAML-Liste aus `speaker`- + `quote`-Elementen, damit Skripte und `interview/plan` es lesen können, ohne den Body zu parsen. Setze jedes `quote` in doppelte Anführungszeichen und escape innere doppelte Anführungszeichen, damit das Front Matter gültiges YAML bleibt. Runde und Datum des Elements sind `round` und `date` der Datei selbst. Lass das Feld weg, wenn nichts genannt wurde, und immer bei `input_source: recall`. Schreibe Prioritäten niemals in eine Datei einer Übungs-Session, denn diese haben keinen echten Interviewer.
+- **`stated_priorities` gehört ins Front Matter** (Step 1c), als YAML-Liste aus `speaker`- + `quote`-Elementen, damit Skripte und `interview/plan` es lesen können, ohne den Body zu parsen. Setze jedes `quote` in doppelte Anführungszeichen, damit das Front Matter gültiges YAML bleibt und exakt das Gesprochene wieder ergibt: beim manuellen Escapen Backslashes zuerst escapen, dann innere doppelte Anführungszeichen, damit ein wörtliches `\n` im Zitat zwei Zeichen bleibt statt zu einem Zeilenumbruch zu werden. Runde und Datum des Elements sind `round` und `date` der Datei selbst. Lass das Feld weg, wenn nichts genannt wurde, und immer bei `input_source: recall`. Schreibe Prioritäten niemals in eine Datei einer Übungs-Session, denn diese haben keinen echten Interviewer.
 - Die Session-Datei landet in einem gitignorierten Verzeichnis (echte Namen/Unternehmen gelangen nie in die Versionskontrolle); schreibe sie ohne Schwärzung.
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-Wenn der Debrief gespeichert ist, halte bestätigte Fakten bei der Bewerbung fest. Ordne einen neuen Fakt einem Dealbreaker zu, den der Nutzer bereits in `modes/_profile.md` oder `config/profile.yml` geschrieben hat. Zeige den Fakt und den Satz aus dem Profil. Frag `Record this dealbreaker on the report and the tracker? [y/N]`. Bei Ja übergib diesen Satz als `--dealbreaker`. Bei Nein lass ihn weg.
+Wenn der Debrief gespeichert ist, halte bestätigte Fakten bei der Bewerbung fest. Ordne jeden neuen Fakt einem Dealbreaker zu, den der Nutzer bereits in `modes/_profile.md` oder `config/profile.yml` geschrieben hat. Frag zu jeder Übereinstimmung einzeln und zeige den Fakt und den Satz aus dem Profil. `debrief-sync.mjs` lehnt einen `--dealbreaker`-Wert mit Semikolon (`;`), Tabulator oder Zeilenumbruch ab, und das stoppt den ganzen Aufruf. Enthält der Satz eines dieser Zeichen, sag dem Nutzer, welches, und bitte um eine einzeilige Fassung ohne dieses Zeichen, die dasselbe meint. Entferne das Zeichen nicht selbst und formuliere den Satz nicht selbst um. Prüfe die Fassung des Nutzers auf alle drei Zeichen und frag erneut, bis sie keines mehr enthält. Frag dann `Record this dealbreaker on the report and the tracker? [y/N]`. Behalte jeden Satz, den der Nutzer bestätigt, oder seine einzeilige Fassung. Lass jeden Satz weg, den der Nutzer ablehnt.
 
-Frag für jede genannte Person `Save this contact to data/contacts.tsv? [y/N]`. Bei Ja übergib den Namen, die E-Mail-Adresse, falls eine genannt wurde, und den Typ, falls der Nutzer einen genannt hat.
+Frag für jede genannte Person `Save this contact to data/contacts.tsv? [y/N]`. Bei Ja übergib den Namen, die E-Mail-Adresse, falls eine genannt wurde, und den Typ, falls der Nutzer einen genannt hat. `--contact-type` nimmt nur `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` oder `other` an, in Kleinbuchstaben. Ordne das Wort des Nutzers dem Wert zu, den es meint, in jeder Sprache (ein „Talent Partner“ ist `recruiter`, „meine künftige Chefin“ ist `hiring-manager`). Passt das Wort nicht eindeutig zu einem Wert, lass `--contact-type` weg und speichere den Kontakt trotzdem. `debrief-sync.mjs` lehnt jeden anderen Wert ab, und das stoppt den ganzen Aufruf, Dealbreaker und `--next` eingeschlossen.
 
 Nennt der nächste Schritt einen eindeutigen Kalendertag, übergib `--next YYYY-MM-DD` ohne zweite Frage. Löse einen Wochentag ausgehend vom lokalen Kalendertag auf, wobei heute mitzählt. Enthält die Formulierung keinen Tag, lass `--next` weg. Ist sie mehrdeutig (`next week`, zwei Tage), frag nach einem Datum und übergib es dann.
 
-Führe `node debrief-sync.mjs` mit diesen Flags aus. Wurde ein Kontakt gespeichert, führe danach `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.
+Führe `node debrief-sync.mjs --app <tracker#>` mit diesen Flags aus. `<tracker#>` ist die `#` der Bewerbung im Tracker (nicht die Berichtsnummer). `--dealbreaker` nimmt genau einen Satz und darf pro Aufruf nur einmal vorkommen, also führe für jeden bestätigten Satz einen eigenen Befehl aus. Füge nie zwei Sätze zu einem Wert zusammen: Das Skript lehnt ein Semikolon ab. Setze die Kontakt-Flags und `--next` nur in den ersten Befehl. Jeder weitere Befehl übergibt `--app <tracker#>` und ein `--dealbreaker`, sonst nichts. Setze jeden Wert in einfache Anführungszeichen, damit die Shell `$` und Backticks unverändert durchreicht. Schreibe ein einfaches Anführungszeichen innerhalb eines Werts als `'\''` in Git Bash oder einer anderen POSIX-Shell. In PowerShell schreibe es als `''`, und verdopple ein typografisches Anführungszeichen (`‘`, `’`, `‚` oder `‛`) genauso, denn PowerShell liest auch diese als Anführungszeichen:
 
-Ändere den Status nicht, es sei denn, der Nutzer nennt einen neuen Status. Das ist ein separater `set-status.mjs`-Aufruf vor diesem Befehl.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-Ein zweiter Lauf desselben Befehls ist unbedenklich.
+Führe die Befehle einzeln aus und prüfe nach jedem den Exit-Status. Schlägt ein Befehl fehl, halte an, behebe den Fehler und führe die Liste ab dem ersten Befehl erneut aus. Gibt es keinen Dealbreaker, keinen Kontakt und keinen `--next`-Tag zu übergeben, lass den Befehl weg: Das Skript lehnt einen Aufruf ab, der nichts festzuhalten hat. Wurde ein Kontakt gespeichert, führe nach dem letzten Befehl `node contacts.mjs --summary` aus. Wurde ein Tag festgelegt, führe `node followup-cadence.mjs --summary` aus.
+
+Ändere den Status nicht, es sei denn, der Nutzer nennt einen neuen Status. Das ist ein separater `set-status.mjs`-Aufruf vor diesen Befehlen.
+
+Ein zweiter Lauf derselben Befehle ist unbedenklich: Ein bereits festgehaltener Satz, Kontakt oder Termin wird nicht erneut geschrieben.
 
 ---
 

@@ -268,8 +268,36 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
       && written.requisition_id === 'JREQ 12757' && written.language === 'en-GB',
     'formatScanHistoryRow: writes every declared column, requisition_id and language included',
     `got ${JSON.stringify(written)}`);
+  const closeLine = formatScanHistoryRow({
+    url: EN_URL, source: 'platsbanken', title: 'Senior QA Manager', company: 'Acme',
+    closesAt: '2026-11-11T23:59:59', endDate: '2026-01-01',
+  }, '2026-09-28');
+  const closeRow = parseScanHistoryLine(closeLine);
+  check(closeRow.closes_at === '2026-11-11' && closeRow.listing_key === '',
+    'formatScanHistoryRow: writes the close day from closesAt, not from another date field',
+    `got ${JSON.stringify(closeRow.closes_at)}`);
+  const badClose = parseScanHistoryLine(formatScanHistoryRow({
+    url: EN_URL, source: 'platsbanken', title: 'Senior QA Manager', company: 'Acme',
+    closesAt: '2026-02-31',
+  }, '2026-09-28'));
+  check(badClose.closes_at === '',
+    'formatScanHistoryRow: an impossible close day is an empty cell');
+  const sharedClose = parseScanHistoryLine(formatScanHistoryRow({
+    url: EN_URL, source: 'platsbanken', title: 'Senior QA Manager', company: 'Acme',
+    closesAt: '', validThrough: '2026-08-08',
+  }, '2026-09-28'));
+  check(sharedClose.closes_at === '2026-08-08',
+    'formatScanHistoryRow: an empty closesAt uses a valid shared close field',
+    `got ${JSON.stringify(sharedClose.closes_at)}`);
+  const invalidShared = parseScanHistoryLine(formatScanHistoryRow({
+    url: EN_URL, source: 'platsbanken', title: 'Senior QA Manager', company: 'Acme',
+    closesAt: 'nope', validThrough: '2026-08-09',
+  }, '2026-09-28'));
+  check(invalidShared.closes_at === '2026-08-09',
+    'formatScanHistoryRow: an invalid closesAt uses a valid shared close field',
+    `got ${JSON.stringify(invalidShared.closes_at)}`);
   const bare = parseScanHistoryLine(formatScanHistoryRow({ url: EN_URL, source: 's', title: 't', company: 'c' }, '2026-09-28'));
-  check(bare.requisition_id === '' && bare.language === '',
+  check(bare.requisition_id === '' && bare.language === '' && bare.closes_at === '',
     'formatScanHistoryRow: a provider without the fields writes empty cells');
   // Append-only: every column that has ever shipped keeps its position, so a
   // later column can only extend this prefix, never shift it.

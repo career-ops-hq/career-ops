@@ -34,6 +34,9 @@ function run(root, args = [], envExtra = { CAREER_OPS_ROOT: root }) {
   const env = { ...process.env, ...envExtra };
   for (const k of ['CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_ADDITIONS', 'CAREER_OPS_BATCH_STATE']) delete env[k];
   if (!('CAREER_OPS_ROOT' in envExtra)) delete env.CAREER_OPS_ROOT;
+  // The default batch-state.tsv is the checkout's, so a developer's own batch
+  // history could decide whether a fixture row merges. Name the fixture's.
+  env.CAREER_OPS_BATCH_STATE = join(root, 'batch', 'batch-state.tsv');
   const r = spawnSync(process.execPath, [join(CODE_ROOT, 'merge-tracker.mjs'), ...args], { cwd: CODE_ROOT, env, encoding: 'utf-8', timeout: 30_000 });
   assert.equal(r.error, undefined);
   return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };

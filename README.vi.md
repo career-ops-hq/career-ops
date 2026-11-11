@@ -64,7 +64,7 @@ Nó điều chỉnh CV và soạn nháp&nbsp;câu&nbsp;trả&nbsp;lời. <strong
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Được tuyển nhờ career-ops: những câu chuyện công khai"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Được tuyển nhờ career-ops: những câu chuyện công khai"></a></p>
 
 <p align="center">Những người đến sau tôi đã viết lại cách họ được tuyển.</p>
 
@@ -131,7 +131,7 @@ Việc tuyển dụng sẽ không tự sửa. Những người đang trải qua 
 
 [Đây là nơi bản sửa được viết ra](CONTRIBUTING.md). Một căn phòng, không phải một câu lạc bộ. **Hãy cùng xây dựng.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: số thành viên của máy chủ career-ops theo thời gian thực"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: số thành viên của máy chủ career-ops theo thời gian thực"></a></p>
 
 ## Nhà tài trợ
 
@@ -512,7 +512,7 @@ TUI dashboard viết bằng Go, các script Node.js và các mode của AI agent
 - **Dữ liệu**: bảng Markdown + cấu hình YAML + file batch TSV
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -593,7 +593,7 @@ Xem [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) để biết chi tiết. Phần m
 ## Người đóng góp
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Mọi người đã đóng góp mã, tài liệu, bản dịch hoặc test đều được liệt kê trong

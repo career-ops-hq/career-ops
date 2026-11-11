@@ -22,10 +22,11 @@ const doc = yaml.load(raw);
 const rows = doc?.jurisdictions || {};
 const on = rows['CA-ON'];
 const uk = rows['UK'];
+const no = rows['NO'];
 
 // --- table shape ---
-check('table has exactly two live rows (Ontario and UK); other candidates stay comments',
-  Object.keys(rows).length === 2 && Boolean(on) && Boolean(uk),
+check('table has exactly three live rows (Ontario, UK and Norway); other candidates stay comments',
+  Object.keys(rows).length === 3 && Boolean(on) && Boolean(uk) && Boolean(no),
   `rows: ${Object.keys(rows).join(', ')}`);
 check('Ontario row carries the verified dates',
   on?.effective === '2023-10-26' && /^\d{4}-\d{2}-\d{2}$/.test(String(on?.as_of)) && String(on?.as_of) >= '2026-10-18', `${on?.effective} / ${on?.as_of}`);
@@ -82,12 +83,12 @@ check('UK official_source is the s. 6 page and what_it_shows names the reg. 26 U
 
 // --- freshness validator discovers it ---
 const found = extractRows(doc);
-check('check-table-freshness discovers the Ontario and UK rows with as_of',
-  found.length === 2 && ['CA-ON', 'UK'].every((k) => found.some((f) => f.row.jurisdiction === k && !f.missingAsOf)),
+check('check-table-freshness discovers the Ontario, UK and Norway rows with as_of',
+  found.length === 3 && ['CA-ON', 'UK', 'NO'].every((k) => found.some((f) => f.row.jurisdiction === k && !f.missingAsOf)),
   `found ${found.length}`);
 const verdict = checkFreshness([{ file: 'jurisdiction-candidate-fees.yml', doc }], new Date(Date.UTC(2026, 9, 19)));
 check('freshly verified rows produce no findings',
-  verdict.rowsChecked === 2 && verdict.findings.length === 0 && verdict.warnings.length === 0,
+  verdict.rowsChecked === 3 && verdict.findings.length === 0 && verdict.warnings.length === 0,
   JSON.stringify(verdict));
 
 // --- synthetic fixtures for the four cases in the issue ---

@@ -282,3 +282,22 @@ export function resolveTrackerPathForWrite(root) {
   return join(root, 'data/applications.md');
 }
 
+
+/**
+ * Every batch/batch-state.tsv to take report numbers from. batch-runner.sh keeps
+ * the file beside itself, in the checkout, wherever the data root is. batch/ is
+ * System Layer, and batch-tailor.mjs, reconcile-pipeline.mjs, sync-batch-input.mjs
+ * and the dashboard (#5254) all read the file there. A data root can hold a copy
+ * of its own, and the failed rows in it still name reports that must not be
+ * merged or handed out again. The runner never copies them into the checkout's
+ * file, so both are read: preferring the checkout's once it existed dropped
+ * them. In the default layout the two are one file.
+ *
+ * @param {string} rootDir The career-ops data root directory
+ * @returns {string[]} Absolute paths, the checkout's first; a reader skips one that does not exist
+ */
+export function resolveBatchStatePaths(rootDir) {
+  const checkout = join(__dirname, 'batch', 'batch-state.tsv');
+  const dataRoot = resolve(rootDir, 'batch', 'batch-state.tsv');
+  return dataRoot === checkout ? [checkout] : [checkout, dataRoot];
+}

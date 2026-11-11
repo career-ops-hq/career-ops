@@ -1,5 +1,5 @@
-// tests/local-time-stamps.test.mjs — the two remaining writers that stamp a
-// record with the UTC clock now use the local one.
+// tests/local-time-stamps.test.mjs — writers that stamp a record with the
+// UTC clock now use the local one.
 //
 //   agent-inbox.mjs        `- [ ] <stamp> — <request>`: the stamp was
 //                          toISOString().slice(0, 16), i.e. UTC date AND time
@@ -8,9 +8,18 @@
 //   plugins/apify          the `scraped:` date in a saved JD's frontmatter was
 //                          the UTC day, one day behind for the first hours of a
 //                          local morning east of Greenwich.
+//   generate-pdf.mjs       the date column of data/pdf-index.tsv.
+//   fix-slugs.mjs          the `(slug migrated … <date>, verify-portals)` note
+//                          it writes into portals.yml.
+//   company-funded.mjs     generated_at, which also names the report files, and
+//                          the date of an item with none of its own. It read
+//                          the current year from the UTC clock as well, so an
+//                          item naming the local year was dated in the future
+//                          and dropped for the first hours of a new year.
+//   discover-new-companies.mjs  the date in the banner of its YAML.
 //
 // Every other "today" in the repo already goes through lib/local-today.mjs
-// (#2765, #2932, #3070, #3301, #3990). These two were missed because they stamp
+// (#2765, #2932, #3070, #3301, #3990). These were missed because they stamp
 // rather than gate.
 //
 // PINNED INSTANT in a zone far from UTC: Pacific/Kiritimati is UTC+14, so
@@ -19,7 +28,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -105,6 +114,117 @@ test('apify JD frontmatter dates the capture with the local day, not UTC', async
     globalThis.Date = RealDate;
     globalThis.fetch = realFetch;
     if (realTz === undefined) delete process.env.TZ; else process.env.TZ = realTz;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/** Runs a module in a child pinned to TZ and to `instant`; `source` is written next to it. */
+function runPinned(dir, { source, script, args = [], env = {}, instant = INSTANT }) {
+  const preload = join(dir, 'freeze.mjs');
+  writeFileSync(preload, FREEZE.replace(INSTANT, instant));
+  if (source) writeFileSync(script = join(dir, 'run.mjs'), source);
+  return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, script, ...args], {
+    cwd: dir, encoding: 'utf-8', timeout: 60000,
+    env: { ...process.env, TZ, ...env },
+  });
+}
+const href = (file) => JSON.stringify(pathToFileURL(join(ROOT, file)).href);
+
+test('generate-pdf dates its PDF index row with the local day, not UTC', () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'pdf-index-stamp-')));
+  try {
+    mkdirSync(join(dir, 'output'));
+    const manifest = join(dir, 'pdf-index.tsv');
+    // The browser is a test double, as in generate-pdf-manifest-concurrency.test.mjs.
+    const r = runPinned(dir, {
+      source: `
+const { renderHtmlToPdf } = await import(${href('generate-pdf.mjs')});
+const pdf = Buffer.from('%PDF-1.7\\n1 0 obj\\n<< /Type /Catalog /Pages 2 0 R >>\\nendobj\\n'
+  + '2 0 obj\\n<< /Type /Pages /Count 1 >>\\nendobj\\n%%EOF');
+const launchBrowser = async () => ({
+  async newPage() { return { async goto() {}, async evaluate() {}, async pdf() { return pdf; } }; },
+  async close() {},
+});
+await renderHtmlToPdf('<!doctype html><html><body>cv</body></html>', ${JSON.stringify(join(dir, 'output', 'cv.pdf'))}, {
+  reportNum: '7', workspaceRoot: ${JSON.stringify(dir)}, styleTokens: {}, launchBrowser, kind: 'cv',
+});
+`,
+      env: { CAREER_OPS_ROOT: dir, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: '', CAREER_OPS_PDF_INDEX: manifest },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const row = readFileSync(manifest, 'utf-8').split('\n').find((l) => l.startsWith('7\t'));
+    assert.ok(row, 'no manifest row was written');
+    assert.equal(row.split('\t')[4], LOCAL_DAY, `the row was not dated with the local day: ${row}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fix-slugs dates the note it writes into portals.yml with the local day, not UTC', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fix-slugs-stamp-'));
+  try {
+    const r = runPinned(dir, {
+      source: `
+const { computeFixes } = await import(${href('fix-slugs.mjs')});
+const text = ['tracked_companies:', '  - name: Foo Bar', '    careers_url: https://job-boards.greenhouse.io/foobar', ''].join('\\n');
+const results = [{ name: 'Foo Bar', status: 'missing', ats: 'greenhouse', suggested: { ats: 'lever', slug: 'foobar' } }];
+process.stdout.write(computeFixes(text, results).text);
+`,
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.includes(`(slug migrated greenhouse->lever ${LOCAL_DAY}, verify-portals)`), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const FUNDED = (title) => `
+const { discoverFundedCompanies } = await import(${href('company-funded.mjs')});
+const item = { source: 'hacker_news', title: ${JSON.stringify(title)}, url: 'https://news.ycombinator.com/item?id=77',
+  observedDate: null, text: 'Acme raises funding.', categories: [] };
+const result = await discoverFundedCompanies({ discoveryItems: [item], months: 3 });
+process.stdout.write(JSON.stringify({ generated_at: result.generated_at, company: result.companies[0]?.company ?? null,
+  observed: result.companies[0]?.funding.sources[0]?.observed_date ?? null }));
+`;
+
+test('company-funded dates its run, and an item with no date, with the local day', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'funded-stamp-'));
+  try {
+    const r = runPinned(dir, { source: FUNDED('Acme raises $25M Series A') });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { generated_at: LOCAL_DAY, company: 'Acme', observed: LOCAL_DAY });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('company-funded keeps an item naming the local year once the UTC year is behind it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'funded-year-'));
+  try {
+    // 20:30Z on 31 December is 10:30 on 1 January in Kiritimati.
+    const r = runPinned(dir, { source: FUNDED('Acme raises $25M Series A in 2027'), instant: '2026-12-31T20:30:00Z' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { generated_at: '2027-01-01', company: 'Acme', observed: '2027' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('discover-new-companies dates its YAML banner with the local day, not UTC', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'discover-stamp-'));
+  try {
+    const hist = join(dir, 'scan-history.tsv');
+    const rows = [1, 2].map((n) => [`https://boards.greenhouse.io/acme/jobs/${n}`, UTC_DAY, 'greenhouse', 'Engineer', 'Acme', 'skipped', 'Remote'].join('\t'));
+    writeFileSync(hist, `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${rows.join('\n')}\n`);
+    writeFileSync(join(dir, 'portals.yml'), '{}\n');
+    const r = runPinned(dir, {
+      script: join(ROOT, 'discover-new-companies.mjs'),
+      env: { CAREER_OPS_SCAN_HISTORY: hist, CAREER_OPS_PORTALS: join(dir, 'portals.yml'), CAREER_OPS_BLACKLIST: join(dir, 'blacklist.md') },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(r.stdout.startsWith(`# Generated by discover-new-companies.mjs — ${LOCAL_DAY}\n`), r.stdout);
+    assert.match(r.stdout, /name: Acme/, 'the run must emit the company, or the banner proves nothing');
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

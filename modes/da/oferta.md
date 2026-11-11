@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Tracker-format:**
 
 ```markdown
-| # | Dato | Virksomhed | Rolle | Score | Status | PDF | Report |
+| # | Dato | Virksomhed | Rolle | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Lønobservationer (kun ønsket beløb)

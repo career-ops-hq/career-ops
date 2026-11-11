@@ -1,6 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { htmlToText } from './_html-to-text.mjs';
+
 // Working Nomads provider — board-wide aggregator feed
 // (https://www.workingnomads.com/api/exposed_jobs/). Returns a JSON array of
 // postings; scan.mjs applies the configured title_filter / location_filter.
@@ -24,7 +26,7 @@ export default {
    * Fetches and normalizes postings from the Working Nomads public feed.
    * @param {{ name?: string }} entry - The job_boards entry being processed.
    * @param {{ fetchJson: (url: string, opts?: { redirect?: 'error'|'follow'|'manual' }) => Promise<any> }} ctx - HTTP context.
-   * @returns {Promise<Array<{title: string, url: string, company: string, location: string, postedAt?: number}>>}
+   * @returns {Promise<Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>>}
    */
   async fetch(entry, ctx) {
     // redirect:'error' prevents SSRF via server-side redirects
@@ -47,6 +49,14 @@ export default {
         // `pub_date` is ISO 8601 with an offset (2026-10-29T09:50:51-04:00).
         const postedAt = toEpochMs(j.pub_date);
         if (postedAt !== undefined) job.postedAt = postedAt;
+        // Every posting carries its HTML in `description`, so it costs no
+        // request. content_filter, country_eligibility_filter and visa_filter
+        // read it, and formatScanHistoryRow() fingerprints it. Omitted when the
+        // text is empty, the "no signal" path each of those filters handles.
+        if (typeof j.description === 'string') {
+          const description = htmlToText(j.description);
+          if (description) job.description = description;
+        }
         return job;
       });
   },

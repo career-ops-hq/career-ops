@@ -1,6 +1,6 @@
 {
   "name": "career-ops",
-  "version": "1.39.0",
+  "version": "1.40.0",
   "description": "Open-source AI job search that runs locally in your AI coding CLI: scan job portals, evaluate listings into a structured A-H report with a 1-5 score, tailor your CV, track applications",
   "private": true,
   "engines": {
@@ -43,6 +43,7 @@
     "scan:yc": "node scan-ats-full.mjs --seeds yc",
     "scan:interamt": "node scan-interamt.mjs",
     "scan:dayforce": "node scan-dayforce.mjs",
+    "scan:seek": "node scan-seek.mjs",
     "company:funded": "node company-funded.mjs",
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
@@ -63,6 +64,7 @@
     "role-clarity": "node role-clarity.mjs",
     "closing-soon": "node closing-soon.mjs",
     "close-stale": "node close-stale.mjs",
+    "import-tracker": "node import-tracker.mjs",
     "reeval-candidates": "node reeval-candidates.mjs",
     "invite-match": "node invite-match.mjs",
     "ics-interview": "node ics-interview.mjs",
