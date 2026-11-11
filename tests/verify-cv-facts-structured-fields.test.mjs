@@ -106,7 +106,50 @@ test('a swapped or fabricated job-period in built HTML blocks (#6255)', () => {
   }, 'html');
   const result = verifyFacts(html, options());
   assert.equal(result.verdict, 'block');
-  assert.deepEqual(kinds(result.unsupportedFacts), ['dates=2015 – 2018']);
+  assert.deepEqual(kinds(result.unsupportedFacts), ['dates=2015 – 2018', 'employment-dates=acme corp: 2015 – 2018']);
+});
+
+test('dates swapped between two valid employers in built HTML block (#6255)', () => {
+  const multiCv = `# Jane Doe
+
+## Experience
+
+### Acme Corp — Remote
+**Senior Software Engineer**
+2019 – 2024
+
+- Led a team of 4 engineers.
+
+### Beta LLC — Boston, MA
+**Software Engineer**
+2015 – 2018
+
+- Built microservices in Go.
+
+## Education
+BS Computer Science, State University
+
+## Certifications
+AWS Certified Developer – Associate
+`;
+  const multiSource = join(tmp, 'cv-multi.md');
+  writeFileSync(multiSource, multiCv);
+
+  const swappedHtml = build('build-cv-html.mjs', {
+    ...htmlPayload(TRUE),
+    experience: [
+      { company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2015 – 2018', bullets: ['Led team.'] },
+      { company: 'Beta LLC', role: 'Software Engineer', dates: '2019 – 2024', bullets: ['Built services.'] },
+    ],
+  }, 'html');
+  const result = verifyFacts(swappedHtml, options({ sourcePaths: [multiSource] }));
+  assert.equal(result.verdict, 'block');
+  assert.deepEqual(kinds(result.unsupportedFacts), [
+    'dates=2015 – 2018',
+    'dates=2019 – 2024',
+    'employment-dates=acme corp: 2015 – 2018',
+    'employment-dates=beta llc: 2019 – 2024',
+  ]);
 });
 
 test('job-period matches regardless of dash style (hyphen, en-dash, em-dash, double-hyphen) (#6255)', () => {
