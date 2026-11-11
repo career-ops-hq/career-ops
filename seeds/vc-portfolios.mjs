@@ -25,6 +25,7 @@
  */
 
 import { DEFAULT_USER_AGENT } from '../user-agent.mjs';
+import { decodeEntities } from '../providers/_html-entities.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -37,9 +38,10 @@ export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
 const DEFAULT_TIMEOUT_MS = 20_000;
 
 // Runaway guard for the YC pagination walk, NOT the stop condition: the walk
-// normally ends at the API's own `totalPages` (246 as of Aug 2026, 25 per page).
-// It exists only for the case where the API stops reporting pagination metadata
-// at all. Sized well clear of the real total on purpose - a ceiling that sits
+// normally ends at the API's own `totalPages`, which grows with every batch
+// (read it from the API rather than from here). This guard exists only for the
+// case where the API stops reporting pagination metadata at all. Sized well
+// clear of the real total on purpose - a ceiling that sits
 // close to today's page count stops being a guard and becomes a silent truncation
 // the day the catalogue grows past it, which is the exact failure this file was
 // fixed for. Exported so the walk is clamped to it as a hard ceiling and tests
@@ -47,11 +49,10 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 export const YC_MAX_PAGES = 500;
 
 /**
- * YC public company API.
- * Returns paginated JSON with company objects including name, slug, website.
- * Documentation: https://www.ycombinator.com/companies (public, no auth needed).
+ * YC public company API (no auth). Paginated JSON: `{ companies, page,
+ * totalPages, nextPage }`, each company with name, slug, website, batch.
  */
-const YC_API_URL = 'https://api.ycombinator.com/v0.1/companies?page=1&per_page=1000';
+const YC_API_BASE = 'https://api.ycombinator.com/v0.1/companies';
 
 /**
  * a16z public portfolio page.
@@ -169,74 +170,144 @@ export function parseYCPayload(payload) {
 // ── Pure parser: a16z ────────────────────────────────────────────────
 
 /**
+ * Where a16z.com/portfolio/ keeps its company list. The page carries the whole
+ * portfolio twice, with the same ids:
+ *
+ *  1. A `data-companies="[...]"` attribute on the portfolio grid: HTML-escaped
+ *     JSON with `name` / `display_name`, `status`, `acquirer`, `company_url`.
+ *  2. An inline `<script>window.a16z_portfolio_companies = [...];</script>`:
+ *     plain JSON with `title`, `web` and `acquirer`, but no status, and some
+ *     titles are legal names ("Groupon, Inc.").
+ *
+ * The attribute is read first because its names are the display names a slug
+ * is derived from; the script is the fallback for when the attribute goes.
+ * The page also has a logo ticker of about 20 single `data-company='{...}'`
+ * objects. That is a showcase, not the list, and neither reader matches it.
+ */
+const A16Z_DATA_ATTR_RE = /\sdata-companies="([^"]*)"/;
+const A16Z_SCRIPT_MARKER_RE = /window\.a16z_portfolio_companies\s*=\s*/;
+
+/**
+ * @param {string} text
+ * @returns {any[] | null}  The parsed array, or null when it is not one.
+ */
+function parseJsonArray(text) {
+  try {
+    const data = JSON.parse(text);
+    return Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the company array from the `data-companies` attribute. The value is
+ * decoded once, then parsed: a quote inside a JSON string arrives as `\&quot;`
+ * and decodes to `\"`, which is still valid JSON.
+ *
+ * @param {string} html
+ * @returns {any[] | null}
+ */
+function readA16zDataAttribute(html) {
+  const m = html.match(A16Z_DATA_ATTR_RE);
+  return m ? parseJsonArray(decodeEntities(m[1])) : null;
+}
+
+/**
+ * Read the company array from the inline `window.a16z_portfolio_companies`
+ * script. The array ends at the script's `;</script>`, so the slice runs to the
+ * closing tag and drops the statement's trailing semicolon before parsing.
+ * WordPress escapes `/` inside JSON strings, so a `</script>` cannot appear
+ * inside the array itself.
+ *
+ * @param {string} html
+ * @returns {any[] | null}
+ */
+function readA16zInlineScript(html) {
+  const m = A16Z_SCRIPT_MARKER_RE.exec(html);
+  if (!m) return null;
+  const start = m.index + m[0].length;
+  const end = html.indexOf('</script>', start);
+  if (end === -1) return null;
+  return parseJsonArray(html.slice(start, end).trim().replace(/;$/, ''));
+}
+
+/** @param {unknown} v */
+const str = (v) => (typeof v === 'string' ? v.trim() : '');
+
+/**
+ * The company's own website. `url` on the attribute list is the a16z profile
+ * page for companies with no site of their own, so it only counts when it is
+ * off a16z.com.
+ *
+ * @param {any} item
+ * @returns {string}
+ */
+function a16zCompanyUrl(item) {
+  for (const candidate of [str(item.company_url), str(item.external_url), str(item.web), str(item.url)]) {
+    if (!/^https?:\/\//i.test(candidate)) continue;
+    try {
+      const host = new URL(candidate).hostname.toLowerCase();
+      if (host === 'a16z.com' || host.endsWith('.a16z.com')) continue;
+    } catch {
+      continue;
+    }
+    return candidate;
+  }
+  return '';
+}
+
+/**
+ * Slug for an a16z company name. About 15 names in the list are legal names
+ * ("Groupon, Inc.", "Yuga Labs (BAYC)"), and a board slug never carries the
+ * suffix, so a trailing parenthetical and a trailing Inc/LLC/Ltd/Corp are
+ * dropped before slugging. The display name keeps them.
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+function a16zSlug(name) {
+  const base = name
+    .replace(/\s*\([^)]*\)\s*$/, '')
+    .replace(/,?\s+(?:inc|incorporated|llc|ltd|corp)\.?$/i, '');
+  return (base || name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+/**
  * Parse raw a16z portfolio HTML into SeedCompany entries.
  *
  * This is the testable unit — pure, no network, no side effects.
- * The a16z portfolio page lists companies in anchor tags with data attributes.
- * We extract company names and URLs from the HTML without a full DOM parser —
- * matching patterns like:
- *   <a ... href="https://company.com" ... data-company-name="Stripe" ...>
- *   or <h3 class="...">Stripe</h3> adjacent to a link
  *
- * Strategy: look for JSON-LD structured data first (most reliable), then
- * fall back to pattern-matching anchor/heading text.
+ * Acquired companies (a non-empty `acquirer`) are left out by default: their
+ * old job boards are mostly gone, and the hiring now happens at the acquirer.
+ * IPO'd companies have no acquirer and stay in.
  *
  * @param {string} html    Raw HTML from the a16z portfolio page (or a fixture in tests).
+ * @param {{ includeAcquired?: boolean }} [opts]
  * @returns {SeedCompany[]}
  */
-export function parseA16zPayload(html) {
+export function parseA16zPayload(html, { includeAcquired = false } = {}) {
   if (typeof html !== 'string' || !html.trim()) return [];
+
+  const list = readA16zDataAttribute(html) ?? readA16zInlineScript(html) ?? [];
 
   /** @type {Map<string, SeedCompany>} */
   const seen = new Map();
 
-  // Strategy 1: JSON-LD embedded in the page (structured data block).
-  // a16z sometimes embeds schema.org/Organization blocks — extract if present.
-  const jsonLdMatches = html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
-  for (const match of jsonLdMatches) {
-    try {
-      const data = JSON.parse(match[1]);
-      const items = Array.isArray(data) ? data : [data];
-      for (const item of items) {
-        if (item?.['@type'] === 'Organization' || item?.['@type'] === 'Corporation') {
-          const name = typeof item.name === 'string' ? item.name.trim() : '';
-          const url = typeof item.url === 'string' ? item.url.trim() : '';
-          if (!name) continue;
-          const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-          if (!slug || !SLUG_RE.test(slug) || seen.has(slug)) continue;
-          seen.set(slug, { name, slug, url, source: 'a16z' });
-        }
-      }
-    } catch {
-      // Malformed JSON-LD — skip silently.
-    }
-  }
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    if (!includeAcquired && str(item.acquirer)) continue;
 
-  // Strategy 2: data-company-name attributes (a16z uses React-rendered data attrs).
-  // Pattern: data-company-name="Stripe" (optionally with data-company-url)
-  const dataAttrRe = /data-company-name=["']([^"']+)["'](?:[^>]*data-company-url=["']([^"']+)["'])?/gi;
-  for (const match of html.matchAll(dataAttrRe)) {
-    const name = match[1]?.trim();
-    const url = match[2]?.trim() || '';
+    // `title` comes last: on the script list it is the company name, but on
+    // the attribute list it is a tag such as "IPO: FIG", and every attribute
+    // entry has a `name` ahead of it.
+    const name = str(item.display_name) || str(item.name) || str(item.post_title) || str(item.title);
     if (!name) continue;
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-    if (!slug || !SLUG_RE.test(slug) || seen.has(slug)) continue;
-    seen.set(slug, { name, slug, url, source: 'a16z' });
-  }
 
-  // Strategy 3: Portfolio card anchors / heading text fallback.
-  // Matches patterns like: <a href="https://stripe.com" class="...portfolio...">Stripe</a>
-  // or company names in h3/h4 elements within portfolio sections.
-  const portfolioAnchorRe = /<a\s+[^>]*href=["'](https?:\/\/[^"'?\s]+)["'][^>]*class=["'][^"']*(?:portfolio|company|card)[^"']*["'][^>]*>\s*([A-Z][^<]{1,60}?)\s*<\/a>/gi;
-  for (const match of html.matchAll(portfolioAnchorRe)) {
-    const url = match[1]?.trim();
-    const name = match[2]?.trim().replace(/\s+/g, ' ');
-    if (!name || !url) continue;
-    // Filter out nav/generic link text.
-    if (/^(read more|learn more|visit|see all|view|more|news|blog|press|contact)/i.test(name)) continue;
-    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const slug = a16zSlug(name);
     if (!slug || !SLUG_RE.test(slug) || seen.has(slug)) continue;
-    seen.set(slug, { name, slug, url, source: 'a16z' });
+
+    seen.set(slug, { name, slug, url: a16zCompanyUrl(item), source: 'a16z' });
   }
 
   return [...seen.values()];
@@ -264,52 +335,64 @@ export function parseSeedEntries(payload, source) {
 // ── toPortalEntry converter ──────────────────────────────────────────
 
 /**
- * Convert a SeedCompany into a PortalEntry-shaped object that ATS provider
- * detect() can consume directly.
+ * Board URL builders for the ATSs a seed company is probed on when its source
+ * names no ATS. Neither the YC API nor the a16z page carries one, so this is
+ * every seed company.
  *
- * Resolution order for careers_url:
- *  1. If `company.ats === 'greenhouse'` and `company.ats_id` is set → Greenhouse board URL.
- *  2. If `company.ats === 'lever'` and `company.ats_id` is set → Lever URL.
- *  3. If `company.ats === 'ashby'` and `company.ats_id` is set → Ashby URL.
- *  4. Derive from slug: try Greenhouse, Lever, Ashby URLs (provider.detect() will
- *     validate at scan time; if none match, the entry is skipped with a warning).
- *  5. Fallback: company website URL (the ATS may be on a custom subdomain).
+ * Order is by measured hit rate. Of 300 YC companies sampled across the
+ * W21-W27 batches (2026-11-09), the company's own slug was an Ashby board for
+ * 25, a Greenhouse board for 4 and a Lever board for 4; none matched two. The
+ * probe stops at the first board that exists, so the likeliest goes first.
+ *
+ * @type {ReadonlyArray<readonly ['ashby' | 'greenhouse' | 'lever', (slug: string) => string]>}
+ */
+const SLUG_PROBE_ORDER = [
+  ['ashby', (slug) => `https://jobs.ashbyhq.com/${slug}`],
+  ['greenhouse', (slug) => `https://job-boards.greenhouse.io/${slug}`],
+  ['lever', (slug) => `https://jobs.lever.co/${slug}`],
+];
+
+/**
+ * Convert a SeedCompany into the PortalEntry-shaped candidates to probe, in
+ * order. ATS provider detect() consumes each one directly.
+ *
+ *  1. `company.ats` + `company.ats_id` set → that one board URL.
+ *  2. Otherwise, a valid slug → one candidate per ATS in SLUG_PROBE_ORDER
+ *     (Ashby, Greenhouse, Lever). The scan tries them in turn and moves on when
+ *     a board answers 404.
+ *  3. No slug → the company website (detect() rarely matches it, and the
+ *     company is then skipped).
+ *
+ * @param {SeedCompany} company
+ * @returns {SeedPortalEntry[]}
+ */
+export function toPortalEntries(company) {
+  const make = (/** @type {string} */ careers_url) => ({ name: company.name, careers_url, source: company.source });
+
+  const atsId = company.ats_id && SLUG_RE.test(company.ats_id) ? company.ats_id : null;
+  if (atsId) {
+    const hinted = SLUG_PROBE_ORDER.find(([ats]) => ats === company.ats);
+    if (hinted) return [make(hinted[1](atsId))];
+  }
+
+  if (company.slug && SLUG_RE.test(company.slug)) {
+    const slug = company.slug;
+    return SLUG_PROBE_ORDER.map(([, url]) => make(url(slug)));
+  }
+
+  return [make(company.url || '')];
+}
+
+/**
+ * The first candidate from toPortalEntries(): the hinted board, else the
+ * Ashby URL for the slug, else the website. Kept for callers that want one
+ * entry; the seed scan itself probes every candidate.
  *
  * @param {SeedCompany} company
  * @returns {SeedPortalEntry}
  */
 export function toPortalEntry(company) {
-  let careers_url = '';
-
-  // Explicit ATS hint from the YC dataset.
-  const atsId = company.ats_id && SLUG_RE.test(company.ats_id) ? company.ats_id : null;
-  if (atsId) {
-    if (company.ats === 'greenhouse') {
-      careers_url = `https://job-boards.greenhouse.io/${atsId}`;
-    } else if (company.ats === 'lever') {
-      careers_url = `https://jobs.lever.co/${atsId}`;
-    } else if (company.ats === 'ashby') {
-      careers_url = `https://jobs.ashbyhq.com/${atsId}`;
-    }
-  }
-
-  // No explicit ATS: try Greenhouse by slug (most common for YC companies), then
-  // Lever, then Ashby — provider.detect() will confirm or skip at scan time.
-  if (!careers_url && company.slug && SLUG_RE.test(company.slug)) {
-    // Use a format that greenhouse.mjs detect() can match.
-    careers_url = `https://job-boards.greenhouse.io/${company.slug}`;
-  }
-
-  // Last resort: company website (ATS may auto-detect from the domain).
-  if (!careers_url) {
-    careers_url = company.url || '';
-  }
-
-  return {
-    name: company.name,
-    careers_url,
-    source: company.source,
-  };
+  return toPortalEntries(company)[0];
 }
 
 // ── Network fetchers ─────────────────────────────────────────────────
@@ -319,8 +402,9 @@ export function toPortalEntry(company) {
  *
  * Uses the public YC API (no auth, no API key). The response is a JSON object
  * with a `companies` array plus `page`/`totalPages` pagination fields. The API
- * caps page size server-side (~30/page; `per_page` is ignored), so the whole
- * portfolio is walked page by page, newest batches first.
+ * sets the page size server-side and ignores `per_page`, so the whole
+ * portfolio is walked page by page, newest batches first. The API carries no
+ * ATS field, so every company is probed by slug (see toPortalEntries).
  *
  * @param {{ timeoutMs?: number, maxPages?: number }} [opts] - `maxPages` is
  *   clamped to YC_MAX_PAGES, which is a hard ceiling; pagination normally stops
@@ -338,7 +422,7 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
 
   let page = 1;
   for (let fetched = 0; fetched < limit; fetched++) {
-    const url = `https://api.ycombinator.com/v0.1/companies?page=${page}&per_page=1000`;
+    const url = `${YC_API_BASE}?page=${page}`;
     let payload;
     try {
       const res = await fetchWithTimeout(url, { timeoutMs });
@@ -349,7 +433,12 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
     }
 
     const entries = parseYCPayload(payload);
-    if (entries.length === 0) break; // No more companies.
+    if (entries.length === 0) {
+      // An empty first page means the response shape changed, not that YC has
+      // no companies; fail the same way a network error on page 1 does.
+      if (page === 1) throw new Error('vc-portfolios: YC API page 1 parsed to 0 companies — the response shape has probably changed');
+      break; // No more companies.
+    }
 
     for (const e of entries) {
       if (!seen.has(e.slug)) {
@@ -358,8 +447,8 @@ export async function fetchYCCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, maxPage
       }
     }
 
-    // The API caps page size server-side (~30/page; per_page is ignored) and
-    // reports totalPages — follow its signal instead of guessing from batch size.
+    // The API sets the page size server-side (per_page is ignored) and reports
+    // totalPages — follow its signal instead of guessing from batch size.
     const raw = /** @type {any} */ (payload);
     if (Number.isInteger(raw?.totalPages) && raw.totalPages > 0) {
       if (page >= raw.totalPages) break;
@@ -407,10 +496,14 @@ export function parseYCNextPage(nextPage) {
  * a16z does not expose a public JSON API, so we fetch the HTML portfolio page
  * and parse it with `parseA16zPayload()`.
  *
- * @param {{ timeoutMs?: number }} [opts]
+ * A page that loads but yields no companies throws. The portfolio has hundreds
+ * of entries, so zero means the markup moved, and returning [] would make
+ * `--seeds a16z` report "0 companies probed" as if the run had worked.
+ *
+ * @param {{ timeoutMs?: number, includeAcquired?: boolean }} [opts]
  * @returns {Promise<SeedCompany[]>}
  */
-export async function fetchA16zCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+export async function fetchA16zCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS, includeAcquired = false } = {}) {
   let html;
   try {
     const res = await fetchWithTimeout(A16Z_PORTFOLIO_URL, { timeoutMs });
@@ -418,7 +511,11 @@ export async function fetchA16zCompanies({ timeoutMs = DEFAULT_TIMEOUT_MS } = {}
   } catch (err) {
     throw new Error(`vc-portfolios: a16z portfolio fetch failed — ${err.message}`);
   }
-  return parseA16zPayload(html);
+  const companies = parseA16zPayload(html, { includeAcquired });
+  if (companies.length === 0) {
+    throw new Error(`vc-portfolios: a16z portfolio page (${html.length} bytes) parsed to 0 companies — the page markup has probably changed`);
+  }
+  return companies;
 }
 
 // ── SEED_SOURCES registry ────────────────────────────────────────────
