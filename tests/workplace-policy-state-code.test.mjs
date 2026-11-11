@@ -100,6 +100,9 @@ test('country slots, hyphen codes, names, and a bare code stay countries', () =>
     remote_regions: ['Europe'],
   });
   assert.equal(spain('Remote Europe - DE').eligible, false);
+  assert.equal(spain('Remote Europe - DE | Wilmington, DE').reason, 'remote_country_restricted');
+  assert.equal(spain('Remote Europe - DE; Wilmington, DE').reason, 'remote_country_restricted');
+  assert.deepEqual(us('Office City, SC | Wilmington, DE'), { eligible: true, reason: 'onsite_location_allowed' });
   assert.equal(spain('Remote (ES)').eligible, true);
 
   const canada = buildWorkplacePolicy({
