@@ -100,11 +100,13 @@ const PROSE_WORD_CODES = new Set(['in', 'as', 'at', 'be', 'is', 'it', 'no', 'so'
 // A USPS code in "City, ST", before a US country token, or before a
 // trailing "(Hybrid)", is a state. The skip stays inside that place.
 // "Remote Europe - DE | Wilmington, DE" still sees Germany.
+// "Remote Europe, DE" is that same region label, not a US city.
 // "City, Region, CC", "Remote - DE", and a bare code stay ISO countries.
 const USPS_STATE_CODES = new Set(['al', 'ak', 'az', 'ar', 'ca', 'co', 'ct', 'de', 'fl', 'ga', 'hi', 'id', 'il', 'in', 'ia', 'ks', 'ky', 'la', 'me', 'md', 'ma', 'mi', 'mn', 'ms', 'mo', 'mt', 'ne', 'nv', 'nh', 'nj', 'nm', 'ny', 'nc', 'nd', 'oh', 'ok', 'or', 'pa', 'ri', 'sc', 'sd', 'tn', 'tx', 'ut', 'vt', 'va', 'wa', 'wv', 'wi', 'wy']);
 const US_COUNTRY_PLACE_TOKENS = new Set(['us', 'usa', 'u.s.', 'u.s.a.', 'united states', 'united states of america']);
 const WORKPLACE_PLACE_WORDS = new Set(['remote', 'hybrid', 'onsite', 'on', 'site', 'in', 'office', 'based', 'work', 'from', 'home', 'anywhere', 'global', 'worldwide']);
 const cityWords = (head) => head.replace(/[-–—:|/]+/g, ' ').split(/\s+/).filter(word => word && !WORKPLACE_PLACE_WORDS.has(word));
+const regionLabel = (head) => /^(?:eu|europe|asia|africa|emea|apac|latam|(?:north|south|latin) america)$/.test(cityWords(head).join(' '));
 const trailingUspsCode = (head) => {
   const match = /(?:^|[^\p{L}\p{M}\p{N}])([a-z]{2})$/u.exec(head);
   return match && USPS_STATE_CODES.has(match[1]) ? match[1] : '';
@@ -130,12 +132,13 @@ const uspsStateCodesBeatingIso = (text) => {
       if (headCode && headCode === parts[0]) {
         ignore.add(headCode);
         ignore.add(last);
-      } else if (cityWords(parts[0]).length) ignore.add(last);
+      } else if (cityWords(parts[0]).length && !regionLabel(parts[0])) ignore.add(last);
       continue;
     }
     if (parts.length === 1 && !/-\s*[a-z]{2,3}$/.test(place)) {
       const code = trailingUspsCode(place);
-      if (code && code !== place && cityWords(place.slice(0, place.length - code.length)).length) ignore.add(code);
+      const head = place.slice(0, place.length - code.length);
+      if (code && code !== place && cityWords(head).length && !regionLabel(head)) ignore.add(code);
     }
   }
   return ignore;
@@ -191,6 +194,24 @@ const stateMatchesAllowedCountry = (text, allowed) => {
   return codes.some(code => {
     const iso = isoCountryCode(code);
     return Boolean(iso && allowed.has(iso));
+  });
+};
+// A listed state can answer a remote country check. For a US policy any
+// recognized state does. Another policy can use the code's own country only
+// when that place did not name a different country. "Remote, SC, US" stays
+// the United States, not Seychelles.
+const stateAlternativeForRemote = (text, allowed) => {
+  if (!recognizedStateCodes(text).size) return false;
+  if (allowed.has('US')) return true;
+  return placeSegments(text).some(segment => {
+    const codes = [...recognizedStateCodes(segment)];
+    if (!codes.length) return false;
+    const named = countries(segment, true);
+    if (named.size && ![...named].some(code => allowed.has(code))) return false;
+    return codes.some(code => {
+      const iso = isoCountryCode(code);
+      return Boolean(iso && allowed.has(iso));
+    });
   });
 };
 const segmentOnsiteAllowed = (segment, onsite, allowed) => {
@@ -379,9 +400,10 @@ export function buildWorkplacePolicy(policy) {
     // are allowed. No timezone token is an eligibility signal.
     const geoLoc = geographyText(loc);
     const locationCountries = countries(geoLoc, true);
-    if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c))) return fail('remote_country_restricted');
-    if (stateOutsideAllowedCountries(geoLoc, homeCodes, locationCountries)) return fail('remote_country_restricted');
     const stateHome = stateMatchesAllowedCountry(geoLoc, homeCodes);
+    // Berlin, Germany does not erase a separate Austin, TX for a US policy.
+    if (locationCountries.size && ![...locationCountries].some(c => homeCodes.has(c)) && !stateAlternativeForRemote(geoLoc, homeCodes)) return fail('remote_country_restricted');
+    if (stateOutsideAllowedCountries(geoLoc, homeCodes, locationCountries)) return fail('remote_country_restricted');
     const remoteDescription = description.split(/[.!?;\n]+/).some(clause => /\b(?:work remotely|work remote|remote work|remote role|work from home|work from)\b/.test(clause) && supportsHomeGeography(clause));
     const conditionalRegion = description.split(/[.!?;\n]+/).some(clause => REMOTE.test(clause) && has(clause, regions)
       && /\bwhere (?:we|the company|the employer) (?:have|has) (?:a |an |our )?hiring presence\b/.test(clause));

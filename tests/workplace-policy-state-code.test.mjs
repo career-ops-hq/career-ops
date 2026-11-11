@@ -193,4 +193,10 @@ test('a state code is US evidence unless the policy country uses those letters',
   const northAmerica = 'Remote work in North America where we have a hiring presence.';
   assert.equal(usRemote('Remote | Office City, SC', '', { description: northAmerica }).reason, 'remote_region_allowed');
   assert.equal(usRemote('Remote | Berlin, Germany', '', { description: northAmerica }).reason, 'remote_country_restricted');
+  assert.equal(usRemote('Remote | Austin, TX | Berlin, Germany').reason, 'remote_region_allowed');
+  assert.equal(usRemote('Remote | Berlin, Germany').reason, 'remote_country_restricted');
+  assert.equal(germany('Remote | Bremen, DE | Paris, France').reason, 'remote_region_allowed');
+  assert.equal(us('Remote Europe, DE').reason, 'remote_country_restricted');
+  assert.equal(germany('Remote Europe, DE').eligible, true);
+  assert.equal(spain('Remote Europe, DE').reason, 'remote_country_restricted');
 });
