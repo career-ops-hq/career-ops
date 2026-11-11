@@ -42,6 +42,7 @@ test("pipeline company and role use the wide row and the date cell stays put", (
   assert.match(pipeline, /min-\[1440px\]:min-w-0 min-\[1440px\]:truncate/);
   assert.match(pipeline, /\[&_th:nth-child\(6\)\]:w-\[14rem\]/);
   assert.match(pipeline, /\[data-status-confirm\]/);
+  assert.match(read("components/status-select.tsx"), /flex min-w-0 max-w-full flex-nowrap items-center gap-2/);
   assert.match(read("components/status-select.tsx"), /min-w-0 truncate/);
   assert.match(read("components/status-select.tsx"), /min-w-0 max-w-\[calc\(100%-2\.5rem\)\]/);
   assert.match(pipeline, /<td className="whitespace-nowrap px-4 py-3 text-muted">/);

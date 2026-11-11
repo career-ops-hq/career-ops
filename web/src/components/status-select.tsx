@@ -192,29 +192,40 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
   );
   return (
     <span className={cn("flex-wrap items-center gap-2", inline ? "flex w-full min-w-0" : "inline-flex")} aria-busy={savingNow} data-status-editor="">
-      {inline ? (editing || heldPending !== "") ? (
-        <>
-          {control}
-          <button type="button" aria-label={`Cancel editing status for ${label}`} title="Cancel" onClick={cancel} disabled={savingNow} className={buttonClass}>
-            <X aria-hidden="true" className="size-3.5" />
-          </button>
-        </>
-      ) : (
-        <>
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", statusDot(shown))} />
-            <span className="min-w-0 truncate" title={shown}>{shown}</span>
+      {/* Flex wraps a line before it shrinks items, so min-w-0 on the label
+          cannot keep the edit button beside a long status. This group does
+          not wrap. The confirmation stays outside it and takes the next line. */}
+      <span className={inline ? "flex min-w-0 max-w-full flex-nowrap items-center gap-2" : "contents"}>
+        {inline ? (editing || heldPending !== "") ? (
+          <>
+            {control}
+            <button type="button" aria-label={`Cancel editing status for ${label}`} title="Cancel" onClick={cancel} disabled={savingNow} className={buttonClass}>
+              <X aria-hidden="true" className="size-3.5" />
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span aria-hidden="true" className={cn("size-1.5 shrink-0 rounded-full", statusDot(shown))} />
+              <span className="min-w-0 truncate" title={shown}>{shown}</span>
+            </span>
+            <button ref={pencil} type="button" aria-label={`Edit status for ${label}`} title="Edit status" onClick={() => { setError(""); onHeldSave?.({ type: "clear" }); setEditing(true); }} className={buttonClass}>
+              <Pencil aria-hidden="true" className="size-4" />
+            </button>
+          </>
+        ) : (
+          <>
+            <label htmlFor={id} className="text-xs text-faint">status</label>
+            {control}
+          </>
+        )}
+        {inline && savingNow && <span role="status" className="shrink-0 text-xs text-faint">saving…</span>}
+        {inline && saved && (
+          <span role="status" className="inline-flex shrink-0 animate-terminal-popup items-center gap-1 text-xs font-medium text-brand-text">
+            <Check aria-hidden="true" className="size-3" /> saved
           </span>
-          <button ref={pencil} type="button" aria-label={`Edit status for ${label}`} title="Edit status" onClick={() => { setError(""); onHeldSave?.({ type: "clear" }); setEditing(true); }} className={buttonClass}>
-            <Pencil aria-hidden="true" className="size-4" />
-          </button>
-        </>
-      ) : (
-        <>
-          <label htmlFor={id} className="text-xs text-faint">status</label>
-          {control}
-        </>
-      )}
+        )}
+      </span>
       {pendingApplied && (
         <span data-status-confirm="" className={cn("items-center gap-2", inline ? "flex basis-full whitespace-normal" : "inline-flex")}>
           <span className="text-xs text-foreground">{appliedAsk.prompt}</span>
@@ -226,8 +237,8 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
           </button>
         </span>
       )}
-      {savingNow && <span role="status" className="text-xs text-faint">saving…</span>}
-      {saved && (
+      {!inline && savingNow && <span role="status" className="text-xs text-faint">saving…</span>}
+      {!inline && saved && (
         <span role="status" className="animate-terminal-popup inline-flex items-center gap-1 text-xs font-medium text-brand-text">
           <Check aria-hidden="true" className="size-3" /> saved
         </span>
