@@ -141,3 +141,12 @@ test('country slots, hyphen codes, names, and a bare code stay countries', () =>
   assert.equal(us('SC').reason, 'onsite_outside_allowed_locations');
   assert.equal(us('Remote - SC').reason, 'remote_country_restricted');
 });
+
+test('a trailing Hybrid tag does not turn a state code into a country', () => {
+  assert.deepEqual(us('Office City, SC (Hybrid)'), { eligible: true, reason: 'onsite_location_allowed' });
+  assert.deepEqual(us('Berlin, DE (Hybrid)'), { eligible: true, reason: 'onsite_location_allowed' });
+  assert.deepEqual(us('Office City, SC (Hybrid) | River Bend, SC'), { eligible: true, reason: 'onsite_location_allowed' });
+  assert.deepEqual(us('Office City, SC (Hybrid) · River Bend, SC'), { eligible: true, reason: 'onsite_location_allowed' });
+  assert.equal(us('Office City, SC (Hybrid) | Berlin, Germany').reason, 'onsite_country_restricted');
+  assert.equal(us('Berlin, Germany (Hybrid)').reason, 'onsite_country_restricted');
+});
