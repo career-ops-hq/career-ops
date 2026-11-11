@@ -40,7 +40,10 @@ test("pipeline company and role use the wide row and the date cell stays put", (
   assert.match(pipeline, /max-w-72 truncate min-\[1440px\]:min-w-\[8rem\] min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{r\.role\}/);
   assert.match(pipeline, /max-\[1439px\]:shrink-0 items-center gap-1 text-xs text-brand-text hover:underline min-\[1440px\]:max-w-\[40%\] min-\[1440px\]:min-w-0 min-\[1440px\]:overflow-hidden/);
   assert.match(pipeline, /min-\[1440px\]:min-w-0 min-\[1440px\]:truncate/);
+  assert.match(pipeline, /\[&_th:nth-child\(6\)\]:w-\[14rem\]/);
   assert.match(pipeline, /\[data-status-confirm\]/);
+  assert.match(read("components/status-select.tsx"), /min-w-0 truncate/);
+  assert.match(read("components/status-select.tsx"), /min-w-0 max-w-\[calc\(100%-2\.5rem\)\]/);
   assert.match(pipeline, /<td className="whitespace-nowrap px-4 py-3 text-muted">/);
   assert.match(read("components/status-select.tsx"), /inline \? "flex basis-full whitespace-normal" : "inline-flex"/);
   assert.match(pipeline, /<td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">\{r\.date\}<\/td>/);

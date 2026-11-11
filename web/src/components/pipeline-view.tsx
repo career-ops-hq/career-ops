@@ -393,8 +393,9 @@ export function PipelineView({
       ? windowState.span
       : clampTrackerWindow(windowState.span, filtered.length);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
-  // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
-  // lines at some widths, so the spacers use the height a mounted row has.
+  // TRACKER_ROW_PX is the first-paint guess. Spacers copy one mounted row
+  // so the window stays aligned with the scroll position. A confirmation,
+  // an error, or a save in flight is taller and does not set that height.
   const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
   const mountedRows = filtered.slice(span.start, span.end);
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
@@ -924,7 +925,7 @@ export function PipelineView({
           <table
             aria-label="Tracked applications"
             aria-rowcount={filtered.length + 1}
-            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[9.5rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
           >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
