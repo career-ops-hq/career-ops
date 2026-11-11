@@ -21,6 +21,16 @@ export const SERVICE = Object.freeze({
 // the scheduled-scan agent and a hand-written KeepAlive agent use.
 export const RESTART_SECONDS = 30;
 
+// Task Scheduler's RestartOnFailure interval cannot be shorter than one minute, so on
+// Windows the runner does the 30-second throttling itself: it restarts a crashed
+// dashboard after RESTART_SECONDS and only exits (leaving the task's own one-minute
+// restart as the backstop) for a stop request. Other platforms throttle in the
+// definition (ThrottleInterval, RestartSec).
+export function crashRestartDelayMs({ platform, code, signal, stopping }) {
+  if (platform !== "win32" || stopping || signal || code === 0) return null;
+  return RESTART_SECONDS * 1000;
+}
+
 // The only environment a service carries. A service starts with a near-empty
 // environment, so an override the user exported when installing (a data root kept
 // outside the checkout, a port) would otherwise be lost and the dashboard would

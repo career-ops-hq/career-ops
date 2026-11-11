@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   CARRIED_ENV,
   RESTART_SECONDS,
+  crashRestartDelayMs,
   SERVICE,
   carriedEnv,
   definitionPath,
@@ -201,4 +202,16 @@ test("the restart count stays within the Task Scheduler schema's unsigned byte",
 test("a spaced argument that ends in a backslash does not escape its closing quote", () => {
   const xml = renderTaskXml({ node: "n", args: ["C:\\my logs\\"], workDir: "w", user: "u" });
   assert.ok(xml.includes("&quot;C:\\my logs\\\\&quot;"));
+});
+
+test("Windows crash restarts are throttled to RESTART_SECONDS by the runner", () => {
+  const crash = { code: 1, signal: null, stopping: false };
+  assert.equal(RESTART_SECONDS, 30);
+  assert.equal(crashRestartDelayMs({ platform: "win32", ...crash }), 30000);
+  assert.equal(crashRestartDelayMs({ platform: "win32", ...crash, code: 0 }), null);
+  assert.equal(crashRestartDelayMs({ platform: "win32", ...crash, signal: "SIGTERM" }), null);
+  assert.equal(crashRestartDelayMs({ platform: "win32", ...crash, stopping: true }), null);
+  // launchd and systemd throttle in their own definitions
+  assert.equal(crashRestartDelayMs({ platform: "linux", ...crash }), null);
+  assert.equal(crashRestartDelayMs({ platform: "darwin", ...crash }), null);
 });

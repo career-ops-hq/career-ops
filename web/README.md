@@ -129,7 +129,7 @@ It uses what each system already has, and runs as you, never as root:
 |---|---|---|---|
 | Mechanism | launchd LaunchAgent `io.career-ops.web` | `systemd --user` unit `career-ops-web.service` | Task Scheduler task `career-ops web` |
 | Starts | at login | at login (at boot after `loginctl enable-linger "$USER"`) | at logon |
-| Restarts | 30 s after it exits | 30 s after it exits | after a failure, at Task Scheduler's one-minute minimum |
+| Restarts | 30 s after it exits | 30 s after it exits | 30 s after a crash (the runner waits; Task Scheduler's own minimum is one minute and stays as the backstop) |
 | Log | `data/web-service.log` | `journalctl --user -u career-ops-web` | `data/web-service.log` |
 
 ```sh

@@ -33,7 +33,7 @@ import {
   untrackedSignature,
   walkSignature,
 } from "../src/lib/web-service-prepare.mjs";
-import { parseRunArgs } from "../src/lib/web-service.mjs";
+import { crashRestartDelayMs, parseRunArgs } from "../src/lib/web-service.mjs";
 
 const webDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(webDir, "..");
@@ -143,22 +143,38 @@ async function runService(argv) {
     process.exit(1);
   }
 
-  log("starting the dashboard");
-  const child = spawn(process.execPath, [path.join(webDir, "server.mjs"), "start"], {
-    cwd: webDir,
-    env,
-    stdio,
-    windowsHide: true,
-  });
-  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => child.kill(signal));
-  child.on("error", (err) => {
-    log(`could not start the dashboard: ${err.message}`);
-    process.exit(1);
-  });
-  // A signalled child reports a null code; 128+signal keeps a stop distinguishable from a crash.
-  child.on("exit", (code, signal) => {
-    process.exit(signal ? 128 + (os.constants.signals[signal] ?? 0) : (code ?? 1));
-  });
+  let stopping = false;
+  let current = null;
+  for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+    process.on(signal, () => {
+      stopping = true;
+      current?.kill(signal);
+    });
+  }
+  const start = () => {
+    log("starting the dashboard");
+    current = spawn(process.execPath, [path.join(webDir, "server.mjs"), "start"], {
+      cwd: webDir,
+      env,
+      stdio,
+      windowsHide: true,
+    });
+    current.on("error", (err) => {
+      log(`could not start the dashboard: ${err.message}`);
+      process.exit(1);
+    });
+    // A signalled child reports a null code; 128+signal keeps a stop distinguishable from a crash.
+    current.on("exit", (code, signal) => {
+      const delay = crashRestartDelayMs({ platform: process.platform, code, signal, stopping });
+      if (delay !== null) {
+        log(`the dashboard exited with code ${code}; restarting in ${delay / 1000} seconds`);
+        setTimeout(start, delay);
+        return;
+      }
+      process.exit(signal ? 128 + (os.constants.signals[signal] ?? 0) : (code ?? 1));
+    });
+  };
+  start();
 }
 
 const [command, ...rest] = process.argv.slice(2);
