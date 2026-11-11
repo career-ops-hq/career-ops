@@ -605,6 +605,8 @@ Koden er licenseret under [MIT](LICENSE). Navnet og brandet
 for community-brug, forbeholdt kommerciel produktnavngivning og
 anbefalinger.
 
+Koden er MIT; dataene i [`employers/`](employers/) er under [CC BY 4.0](employers/LICENSE).
+
 ## Stjernehistorik
 
 <p align="center">

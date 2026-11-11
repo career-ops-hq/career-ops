@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "@/lib/templates-state.mjs";
+import { TemplateEditor } from "@/components/templates/template-editor";
+import { editLocks, editingAfterReload, latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "@/lib/templates-state.mjs";
 
 // The CV templates the core resolves, each shown filled with a fictional resume
 // so the design is visible before it is chosen. Choosing one writes cv.template
@@ -34,6 +35,9 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  // Bumped after a save so the card previews fetch the edited template.
+  const [rev, setRev] = useState(0);
 
   // One guard per mounted section: a response applies only if its load is the
   // newest, and none applies after unmount.
@@ -41,6 +45,8 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
   // Whether a list has ever loaded, read by a failing reload. Set from the load
   // handler, not during render.
   const hasListRef = useRef(false);
+  // The Edit button that opened the editor, so closing it puts focus back there.
+  const returnFocus = useRef<HTMLElement | null>(null);
 
   const load = useCallback((listIsCurrent = false) => {
     setLoadError(false);
@@ -56,6 +62,7 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         setTemplates(list);
         hasListRef.current = true;
         setPending((p) => pendingAfterReload(p, list));
+        setEditing((e) => editingAfterReload(e, list));
       })
       .catch(() => {
         if (current()) setLoadError(loadFailureView(listIsCurrent, hasListRef.current));
@@ -148,7 +155,7 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
           {templates.map((t) => (
             <li key={t.name} className="rounded-xl border border-border bg-surface/40 p-3">
-              <Thumb kind={kind} name={t.name} title={`${t.displayName} preview`} />
+              <Thumb key={`${t.name}-${rev}`} kind={kind} name={t.name} title={`${t.displayName} preview`} />
               <div className="mt-2 flex items-center justify-between gap-2">
                 <span className="truncate text-sm font-medium">{t.displayName}</span>
                 {t.isDefault ? (
@@ -215,10 +222,16 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
                   </button>
                   {t.layer === "user" && (
                     <>
-                      <button type="button" disabled={busy !== null} onClick={() => ask(t.name, "rename")} className="underline">
+                      <button type="button" disabled={busy !== null || editLocks(editing, t.name).edit} title={editLocks(editing, t.name).edit ? "Close the open editor first" : undefined} onClick={(e) => {
+                          returnFocus.current = e.currentTarget;
+                          setEditing(t.name);
+                        }} className="underline">
+                        Edit
+                      </button>
+                      <button type="button" disabled={busy !== null || editLocks(editing, t.name).rename} title={editLocks(editing, t.name).rename ? "Close the editor first" : undefined} onClick={() => ask(t.name, "rename")} className="underline">
                         Rename
                       </button>
-                      <button type="button" disabled={busy !== null || t.isDefault} title={t.isDefault ? "Make another template the default first" : undefined} onClick={() => ask(t.name, "delete")} className="underline">
+                      <button type="button" disabled={busy !== null || t.isDefault || editLocks(editing, t.name).remove} title={t.isDefault ? "Make another template the default first" : editLocks(editing, t.name).remove ? "Close the editor first" : undefined} onClick={() => ask(t.name, "delete")} className="underline">
                         Delete
                       </button>
                     </>
@@ -241,6 +254,20 @@ export function TemplatesSection({ kind = "cv" }: { kind?: "cv" | "cover" }) {
         <p role="alert" className="mt-3 text-sm text-red-500">
           {error}
         </p>
+      )}
+      {editing && templates?.some((t) => t.name === editing) && (
+        <TemplateEditor
+          key={editing}
+          kind={kind}
+          name={editing}
+          title={templates.find((t) => t.name === editing)?.displayName ?? editing}
+          onClose={() => {
+            setEditing(null);
+            returnFocus.current?.focus();
+            returnFocus.current = null;
+          }}
+          onSaved={() => setRev((n) => n + 1)}
+        />
       )}
     </section>
   );

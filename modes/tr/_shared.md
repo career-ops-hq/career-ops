@@ -65,7 +65,7 @@ Değerlendirme 6 blok (A-F) üzerinden yapılır ve 1-5 arası global bir puan v
 3. **Eğer çoğu `require` kriteri için olumlu kanıt varsa** → 4-5 puan verin.
 4. **Eğer bazı kriterler için olumlu kanıt varsa ve hiçbiri çelişmiyorsa** → 3 puan verin.
 5. **Eğer kanıtlar `require` kriterleriyle çelişiyorsa** → **bu boyutu 2/5 ile sınırlayın** ve eksik olanı veya çelişeni belirten Blok A Kültürel Sinyaller alanına açık bir satır ekleyin. Yüksek bir CV eşleşme puanının bunu sessizce telafi etmesine izin vermeyin — bunu ön plana çıkarın, saklamayın.
-6. **Eğer hiçbir `require` kriteri için kanıt yoksa** → varsayılan olarak 3 puan verin, ancak `culture_screen.deprioritize_if_absent: true` ayarlanmışsa, bu durumda **bu boyutu 2/5 ile sınırlayın**.
+6. **Eğer hiçbir `require` kriteri için kanıt yoksa** → bu boyut unknown sayılır ve genel skoru hareket ettirmez. 3 puan vermeyin. `culture_screen.deprioritize_if_absent: true` ise, kullanıcı yokluğu olumsuz saydığı için **bu boyutu 2/5 ile sınırlayın**.
 7. Genel olarak 4,5+ puan alan ancak Kültürel Sinyallerden 2 veya daha düşük alan bir rol, raporda açık bir uyarı taşımalıdır: "Yüksek teknik uyum, doğrulanmamış/zayıf kültür uyumu — başvurmadan önce doğrulayın."
 
 ## İlan Meşruiyeti (Blok G)

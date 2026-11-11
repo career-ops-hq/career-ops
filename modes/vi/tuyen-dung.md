@@ -718,7 +718,7 @@ Lưu bản đánh giá đầy đủ vào `reports/{###}-{company-slug}-{YYYY-MM-
 ## Score Evidence
 (năm chiều chấm điểm, trạng thái bằng chứng và nguồn, câu hỏi chưa giải quyết, tầng evidence-confidence và ưu tiên xác minh)
 
-## H) Draft Application Answers
+## H) Draft Application Answers (draft)
 (chỉ khi điểm >= 4.5 -- bản nháp trả lời cho form ứng tuyển)
 
 ---

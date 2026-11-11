@@ -70,12 +70,15 @@ check(
 );
 check(
   /no evidence exists for any `require` criterion/.test(rules.get(6) ?? '')
-    && /deprioritize_if_absent: true/.test(rules.get(6) ?? ''),
-  'rule 6: absent interview detail defaults to 3, or caps at 2/5 under deprioritize_if_absent',
+    && /unknown and does not move the global score/.test(rules.get(6) ?? '')
+    && /Do not score 3/.test(rules.get(6) ?? '')
+    && /deprioritize_if_absent: true/.test(rules.get(6) ?? '')
+    && /cap this dimension at 2\/5/.test(rules.get(6) ?? ''),
+  'rule 6: no evidence is unknown and does not move the score, unless deprioritize_if_absent caps it at 2/5',
 );
 check(
-  /3 by default/.test(rules.get(6) ?? '') && /4-5/.test(rules.get(3) ?? ''),
-  'rule 3 scores positive evidence (e.g. pairing / system design) 4-5 and rule 6 defaults to 3',
+  !/3 by default/.test(rules.get(6) ?? '') && /4-5/.test(rules.get(3) ?? ''),
+  'rule 3 scores positive evidence 4-5, and rule 6 does not default the dimension to 3',
 );
 check(
   /4\.5\+ overall but 2 or below on Cultural signals must carry an explicit warning/.test(rules.get(7) ?? ''),

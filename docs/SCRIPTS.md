@@ -28,6 +28,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run career-profile` | `career-profile.mjs` | Import CV facts into `data/career-profile.yml` (preview by default; `--review` to save) |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
+| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, never with `--provider` or a `--dest` inside a provider folder at its default location; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
@@ -43,6 +44,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan:hn` | `scan-hn.mjs` | Hacker News "Who is hiring?" scanner, filtered by `hn_hiring.keywords` |
 | `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing |
 | `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing; `--tenant NAME` scans one board |
+| `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing; `--keyword TEXT` scans one keyword |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
@@ -1624,8 +1626,11 @@ it, and proposes the one `portals.yml` change that would have caught it. The
 verdict is one of: already surfaced, seen and dropped by a filter, tracked
 but disabled, tracked with no provider, tracked but dropped by the title or
 location filter, tracked but not seen yet, company not tracked, or company not
-tracked and its job site read by no provider. Zero-network: it reads `portals.yml`,
-`data/scan-history.tsv`, `data/pipeline.md` and the cached reverse-sweep
+tracked and its job site read by no provider. When no provider reads the
+posting's site, it also counts the other postings on that host, and when they
+name other companies, the fix leads with a provider for the site, keeping the
+per-company change as the fallback. Zero-network: it reads `portals.yml`,
+`data/scan-history.tsv`, `data/pipeline.md`, the tracker and the cached reverse-sweep
 company lists. It never edits `portals.yml`.
 
 ```bash
@@ -2088,6 +2093,32 @@ node sync-pdf-flags.mjs --prune --write --json   # JSON output of prune results
 ```
 
 Exit status: `0` success, `1` invalid option or write error, `2` missing tracker file or unreadable manifest, `4` tracker lock timeout.
+
+---
+
+## backup.mjs
+
+Copies the User Layer to a backup folder. The file list is `USER_PATHS` in `update-system.mjs` (the updater's own list of what is yours: CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, the web app's `.career-ops-web/` stores and more), plus any paths a fork declares in `config/local-paths.txt`, plus the files under `templates/` that are yours (generated per-application CVs and cover letters, and the template variant `config/profile.yml` selects; the shipped templates are not copied). It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
+
+Never copied: `.env` files, `data/cache/`, lock and temp files (except `plugins.lock`, which is yours), editor swap and autosave files of any file (vim `.name.swp`/`.swo`/`.swn`, emacs `#name#` and `.#name`, and `name~`), `.git/` and `node_modules/` folders inside nested checkouts, symlinks and anything under a symlinked folder, and anything outside the User Layer. `data/Connections.csv` (a LinkedIn export), `data/contacts.tsv` and `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) and their `.bak`/`.orig`/`.old`/`.save` copies such as `contacts.tsv.bak` (other people's contact details), are copied only with `--include-contacts` (their editor swap, autosave and lock files stay excluded even then), which cannot be combined with `--provider` or with a `--dest` inside a provider folder at its default location. A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder.
+
+Nothing is chosen for you: pass `--dest` or `--provider`, or set `CAREER_OPS_BACKUP_DIR`.
+
+```bash
+node backup.mjs --dest ~/Backups/career-ops
+node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; also dropbox | onedrive | icloud
+node backup.mjs --provider google-drive --account work@example.com   # when several accounts are signed in
+node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
+node backup.mjs --dest ~/Backups/career-ops --include-contacts # also copy the four contact files
+node backup.mjs --dest ~/Backups/career-ops --dry-run             # print the counts and bytes that would be copied, copy nothing
+node backup.mjs --dest ~/Backups/career-ops --json                # machine-readable result
+```
+
+Where it goes, first match wins: `--dest`, then `CAREER_OPS_BACKUP_DIR`, then the drive folder `--provider` names. With more than one drive found it stops and asks for `--account` or `--dest` instead of guessing. The destination's parent folder must already exist (so an unmounted drive never gets a stray local folder; for `--provider` that is the drive folder itself, and `Backups/career-ops` is created under it). Agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`) are left out when the destination is in a recognized sync folder, and the run says so, and a destination inside your career-ops files is refused.
+
+A file that cannot be read or copied is listed and the run carries on with the rest. A run that finds no files at all (a mistyped `CAREER_OPS_ROOT`, say) says so and exits `1` instead of reporting success.
+
+Exit status: `0` success, `1` one or more files failed to copy or nothing was found to copy, `2` no usable destination, invalid option or an unsafe data root (an unreadable one is a failed file, exit `1`).
 
 ---
 
