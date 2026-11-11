@@ -1115,7 +1115,7 @@ const TrackerRow = memo(function TrackerRow({
       <td className="px-4 py-3">
         <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
       </td>
-      <td className="relative whitespace-nowrap px-4 py-3 text-muted">
+      <td className="whitespace-nowrap px-4 py-3 text-muted">
         <StatusSelect
           n={r.n}
           current={r.status}

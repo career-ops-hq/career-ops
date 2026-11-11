@@ -188,7 +188,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     </select>
   );
   return (
-    <span className="inline-flex flex-wrap items-center gap-2" aria-busy={savingNow} data-status-editor="">
+    <span className={cn("flex-wrap items-center gap-2", inline ? "flex w-full min-w-0" : "inline-flex")} aria-busy={savingNow} data-status-editor="">
       {inline ? (editing || heldPending !== "") ? (
         <>
           {control}
@@ -213,7 +213,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
         </>
       )}
       {pendingApplied && (
-        <span data-status-confirm="" className="absolute right-0 top-full z-20 mt-1 flex w-56 flex-wrap items-center gap-x-2 gap-y-1 whitespace-normal rounded-md border border-border bg-surface px-2 py-1.5 text-left">
+        <span data-status-confirm="" className={cn("items-center gap-2", inline ? "flex basis-full whitespace-normal" : "inline-flex")}>
           <span className="text-xs text-foreground">{appliedAsk.prompt}</span>
           <button type="button" onClick={() => void confirmApplied()} disabled={savingNow} className="text-xs font-medium text-brand-text disabled:opacity-60">
             {appliedAsk.yesLabel}
