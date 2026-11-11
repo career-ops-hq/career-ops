@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, FileText, File, Calendar, Loader2 } from "lucide-react";
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { documentDisplayTitle } from "@/lib/document-title.mjs";
 
 type DocumentItem = {
@@ -81,7 +82,7 @@ export default function DocumentsPage() {
 
   if (documents.length === 0) {
     return (
-      <div className="mx-auto max-w-5xl space-y-6 px-6 py-8">
+      <div className={`mx-auto space-y-6 px-6 py-8 ${pageFrameWidthClass.wide}`}>
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">
             Documents
@@ -104,7 +105,7 @@ export default function DocumentsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-6 py-8">
+    <div className={`mx-auto space-y-6 px-6 py-8 ${pageFrameWidthClass.wide}`}>
       <div>
         <h1 className="font-display text-2xl tracking-tight text-landing">
           Documents
