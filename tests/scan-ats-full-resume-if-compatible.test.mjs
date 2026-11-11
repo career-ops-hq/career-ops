@@ -206,11 +206,11 @@ function unavailableList(flag) {
       current: { name: 'greenhouse', resumeAt: 0, datasetLen: 1, datasetHash: '0123456789abcdef' },
     });
     const result = run(dir, preload, [flag]);
-    const kept = readFileSync(join(dir, 'data', 'cache', 'ats-full-checkpoint.json'), 'utf-8');
+    const kept = JSON.parse(readFileSync(join(dir, 'data', 'cache', 'ats-full-checkpoint.json'), 'utf-8'));
     const names = readFileSync(fetched, 'utf-8').split('\n').filter(Boolean);
     const unavailable = /company list unavailable/.test(result.stderr || '');
     const discarded = /Starting a fresh sweep|company dataset changed/.test(result.stderr || '');
-    if (result.status === 1 && unavailable && !discarded && kept.includes(offer) && names.length === 0) {
+    if (result.status === 1 && unavailable && !discarded && kept?.offers?.[0]?.url === offer && names.length === 0) {
       pass(`${flag} keeps the checkpoint when the company list cannot be read`);
     } else {
       fail(`${flag} did not keep an unreadable company list: status=${result.status} unavailable=${unavailable} discarded=${discarded} fetched=${names.join(',')}\n${(result.stderr || '').slice(-700)}`);
