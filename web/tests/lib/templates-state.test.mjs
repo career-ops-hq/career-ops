@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "../../src/lib/templates-state.mjs";
+import { editLocks, editingAfterReload, latestOnly, loadFailureView, pendingAfterReload, settleChoice } from "../../src/lib/templates-state.mjs";
 
 // The Templates section reloads its list after every change. These two pieces
 // decide what a reload may do to the screen, so they are tested without React.
@@ -43,6 +43,18 @@ test("a form is closed when the reload no longer lists its template", () => {
 
 test("no open form stays no open form", () => {
   assert.equal(pendingAfterReload(null, [{ name: "mine" }]), null);
+});
+
+test("the open editor stays while its template is still in the reloaded list", () => {
+  assert.equal(editingAfterReload("mine", [{ name: "mine" }, { name: "other" }]), "mine");
+});
+
+test("the editor is closed when the reload no longer lists its template", () => {
+  assert.equal(editingAfterReload("gone", [{ name: "other" }]), null);
+});
+
+test("no open editor stays no open editor", () => {
+  assert.equal(editingAfterReload(null, [{ name: "mine" }]), null);
 });
 
 // Choosing a default: the order of apply -> reload, and when neither happens.
@@ -99,4 +111,19 @@ test("a failed reload replaces a list that a management change may have made sta
 test("a failed first load has no list to keep", () => {
   assert.equal(loadFailureView(true, false), "replace");
   assert.equal(loadFailureView(false, false), "replace");
+});
+
+// An open editor holds text the section cannot see. Anything that would unmount
+// it (removing its template, or switching the editor to another one) must wait
+// for Close, which already asks about unsaved changes.
+test("with no editor open nothing is locked", () => {
+  assert.deepEqual(editLocks(null, "mine"), { edit: false, rename: false, remove: false });
+});
+
+test("the open editor's own card cannot be renamed or deleted, but Edit there is harmless", () => {
+  assert.deepEqual(editLocks("mine", "mine"), { edit: false, rename: true, remove: true });
+});
+
+test("other cards cannot switch the editor to themselves, but can still be renamed or deleted", () => {
+  assert.deepEqual(editLocks("mine", "other"), { edit: true, rename: false, remove: false });
 });

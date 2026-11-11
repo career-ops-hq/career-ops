@@ -267,6 +267,76 @@ test("a successful rename of the default runs the profile update once", async ()
   assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.fav2.html")));
 });
 
+// A profile that cannot be read or parsed does not say which template is the
+// default. Treating it as "no default" would let a delete remove the template the
+// profile names, or let a rename skip the profile update and leave it pointing at
+// a name that no longer exists.
+const BROKEN_PROFILE = "cv:\n  template: favorite\n  : [unclosed\n";
+
+test("delete refuses, and removes nothing, when the profile cannot be parsed", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "modern", name: "favorite", userDir: s.userDir });
+  fs.writeFileSync(s.profilePath, BROKEN_PROFILE);
+
+  const err = await deleteTemplate(CORE, { kind: "cv", name: "favorite", userDir: s.userDir, profilePath: s.profilePath }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.equal(err.status, 409);
+  assert.ok(!err.message.includes(s.root), "the message names no path");
+  assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.favorite.html")));
+});
+
+test("delete refuses when the profile exists but cannot be read", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "modern", name: "favorite", userDir: s.userDir });
+  fs.mkdirSync(s.profilePath); // reading a directory fails with EISDIR, not ENOENT
+
+  const err = await deleteTemplate(CORE, { kind: "cv", name: "favorite", userDir: s.userDir, profilePath: s.profilePath }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.equal(err.status, 409);
+  assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.favorite.html")));
+});
+
+test("rename refuses before moving anything when the profile cannot be parsed", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "modern", name: "favorite", userDir: s.userDir });
+  fs.writeFileSync(s.profilePath, BROKEN_PROFILE);
+
+  const err = await renameTemplate(CORE, { kind: "cv", name: "favorite", to: "renamed", userDir: s.userDir, profilePath: s.profilePath }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.equal(err.status, 409);
+  assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.favorite.html")));
+  assert.ok(!fs.existsSync(path.join(s.userDir, "cv-template.renamed.html")));
+});
+
+test("a profile that does not exist yet is still just 'no default'", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "modern", name: "plain", userDir: s.userDir });
+
+  const out = await renameTemplate(CORE, { kind: "cv", name: "plain", to: "plainer", userDir: s.userDir, profilePath: s.profilePath });
+
+  assert.deepEqual(out, { wasDefault: false });
+});
+
+test("the rollback restores the file even when the failed profile update left the profile unreadable", async () => {
+  const s = scratch();
+  await duplicateTemplate(CORE, { kind: "cv", from: "modern", name: "favorite", userDir: s.userDir });
+  fs.writeFileSync(s.profilePath, "cv:\n  template: favorite\n");
+
+  const err = await renameTemplateAndFollow(CORE, { kind: "cv", name: "favorite", to: "renamed", userDir: s.userDir, profilePath: s.profilePath }, () => {
+    fs.writeFileSync(s.profilePath, BROKEN_PROFILE);
+    throw new Error("disk full");
+  }).then(() => null, (e) => e);
+
+  assert.ok(err instanceof TemplateRefusal, String(err));
+  assert.match(err.message, /Nothing was renamed/);
+  assert.ok(fs.existsSync(path.join(s.userDir, "cv-template.favorite.html")));
+  assert.ok(!fs.existsSync(path.join(s.userDir, "cv-template.renamed.html")));
+});
+
+
 // Real layouts, not mocks. Flat templates read their partials from
 // <userDir>/sections/, shared by all of them. A pack is any folder under userDir
 // that holds a template file, so a template filed inside that very folder makes a
