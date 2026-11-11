@@ -606,6 +606,8 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 品牌受[商標政策](TRADEMARK.md)約束：對社群使用寬鬆，
 對商業產品命名和背書保留權利。
 
+程式碼採用 MIT 授權；[`employers/`](employers/) 中的資料採用 [CC BY 4.0](employers/LICENSE) 授權。
+
 ## Star 歷史
 
 <p align="center">

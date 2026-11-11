@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { ChevronDown } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -110,13 +111,13 @@ export function ReportMarkdown({ children }: { children: string }) {
           }
           const fitCol = parsed ? fitColumnIndex(parsed.header) : -1;
           return (
-            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={markdownComponents(fitCol)}>
+            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} components={markdownComponents(fitCol)} {...noMarkdownImages}>
               {c.text}
             </ReactMarkdown>
           );
         }
         return (
-          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+          <ReactMarkdown key={i} remarkPlugins={[remarkGfm]} {...noMarkdownImages}>
             {c.text}
           </ReactMarkdown>
         );

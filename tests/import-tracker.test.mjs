@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, relative, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
@@ -37,8 +37,8 @@ const TEAL_CSV = [
   'Marrowfield Foods,Analytics Engineer,Hold for later review,8/6/2026,,,3',
 ].join('\r\n');
 
-function makeRoot({ tracker = trackerText(EXISTING), csv = TEAL_CSV } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'import-tracker-test-'));
+function makeRoot({ tracker = trackerText(EXISTING), csv = TEAL_CSV, baseDir = tmpdir() } = {}) {
+  const root = mkdtempSync(join(baseDir, 'import-tracker-test-'));
   mkdirSync(join(root, 'data'), { recursive: true });
   mkdirSync(join(root, 'reports'), { recursive: true });
   const trackerPath = join(root, 'data', 'applications.md');
@@ -314,15 +314,27 @@ test('a row merge refuses keeps its file and number and fails the import', () =>
 });
 
 test('the printed re-run makes relative tracker and batch-state overrides absolute', () => {
-  withRoot({ csv: QUILLFEATHER_REFUSED }, (fx) => {
+  // Keep this disposable fixture on the codebase drive so the override is
+  // relative on Windows too. Its cwd decoy stays inside the same fixture.
+  withRoot({ csv: QUILLFEATHER_REFUSED, baseDir: ROOT }, (fx) => {
     mkdirSync(join(fx.root, 'batch'), { recursive: true });
     writeFileSync(join(fx.root, 'batch', 'batch-state.tsv'),
       BATCH_HEADER + '1\thttps://jobs.example.com/quillfeather/2\tfailed\t-\t-\t7\t-\tno JD\t0\n');
+    const elsewhere = join(fx.root, 'elsewhere');
+    mkdirSync(elsewhere, { recursive: true });
+    const trackerOverride = relative(ROOT, fx.trackerPath);
+    const decoy = resolve(elsewhere, trackerOverride);
+    assert.notEqual(decoy, fx.trackerPath);
+    mkdirSync(dirname(decoy), { recursive: true });
+    const decoyText = trackerText(EXISTING);
+    writeFileSync(decoy, decoyText);
     const result = run(fx, ['--confirm'], {
-      cwd: fx.root,
-      env: { CAREER_OPS_TRACKER: join('data', 'applications.md'), CAREER_OPS_BATCH_STATE: join('batch', 'batch-state.tsv') },
+      cwd: elsewhere,
+      // Tracker overrides are codebase-relative; batch-state remains cwd-relative.
+      env: { CAREER_OPS_TRACKER: trackerOverride, CAREER_OPS_BATCH_STATE: relative(elsewhere, join(fx.root, 'batch', 'batch-state.tsv')) },
     });
     assert.equal(result.status, 1, describeSpawn(result));
+    assert.equal(readFileSync(decoy, 'utf-8'), decoyText, 'initial import leaves cwd-relative decoy untouched');
     assert.equal(rowFor(readFileSync(fx.trackerPath, 'utf-8'), 'Quillfeather Health'), undefined);
     const dir = /stay in (\S+) with their numbers reserved/.exec(result.stderr)?.[1];
     assert.ok(dir, describeSpawn(result));
@@ -330,7 +342,11 @@ test('the printed re-run makes relative tracker and batch-state overrides absolu
       const retry = /then run:\n {2}(.+)\n/.exec(result.stderr)?.[1];
       assert.ok(retry, describeSpawn(result));
       assert.doesNotMatch(retry, /CAREER_OPS_(TRACKER|BATCH_STATE)='?(data|batch)\b/);
+      const trackerArgument = new RegExp(`CAREER_OPS_TRACKER=(${ARG}) `).exec(retry)?.[1];
+      assert.ok([fx.trackerPath, `'${fx.trackerPath}'`].includes(trackerArgument), 'retry pins the codebase-relative tracker to its absolute path');
+      assert.ok(retry.includes(join(fx.root, 'batch', 'batch-state.tsv')), 'retry pins the cwd-relative batch state');
       rerunFromElsewhere(fx, retry);
+      assert.equal(readFileSync(decoy, 'utf-8'), decoyText, 'retry leaves cwd-relative decoy untouched');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

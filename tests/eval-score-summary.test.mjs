@@ -36,12 +36,12 @@ const BOLD = `${BLOCKS}
 ---SCORE_SUMMARY---
 **COMPANY:** Marrowfield Grocers
 **ROLE:** Senior Data Analyst
-- **SCORE**: 4.3/5
+**SCORE**: 4.3/5
 **ARCHETYPE:** Data Analyst
 **LEGITIMACY:** High Confidence
 ---END_SUMMARY---
 `;
-const BULLETED = `${BLOCKS}
+const BULLET = `${BLOCKS}
 ---SCORE_SUMMARY---
 • COMPANY: Marrowfield Grocers
 • ROLE: Senior Data Analyst
@@ -50,6 +50,16 @@ const BULLETED = `${BLOCKS}
 • LEGITIMACY: High Confidence
 ---END_SUMMARY---
 `;
+const BOLD_AND_BULLET = `${BLOCKS}
+---SCORE_SUMMARY---
+• **COMPANY:** Marrowfield Grocers
+• **ROLE:** Senior Data Analyst
+• **SCORE**: 4.3/5
+• **ARCHETYPE:** Data Analyst
+• **LEGITIMACY:** High Confidence
+---END_SUMMARY---
+`;
+
 const NO_BLOCK = `${BLOCKS}\n**Overall score: 4.3/5.** Worth applying.\n`;
 
 test('parseScoreSummary reads plain keys', () => {
@@ -61,6 +71,8 @@ test('parseScoreSummary reads plain keys', () => {
 
 test('parseScoreSummary drops bold and bullet marks and a trailing /5', () => {
   assert.deepEqual(parseScoreSummary(BOLD), parseScoreSummary(PLAIN));
+  assert.deepEqual(parseScoreSummary(BULLET), parseScoreSummary(PLAIN));
+  assert.deepEqual(parseScoreSummary(BOLD_AND_BULLET), parseScoreSummary(PLAIN));
 });
 
 test('parseScoreSummary drops a /5 that ends the sentence, and keeps any other scale', () => {

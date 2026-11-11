@@ -3,6 +3,7 @@
 import { use } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { ArrowLeft, Loader2, Wrench, CircleDot, Check, X, CirclePause } from "lucide-react";
 import { evaluationGateForJob, isLegacyMissingReportMessage, jobOutputForDisplay } from "@/lib/job-gate.mjs";
 import { notFound, useSearchParams } from "next/navigation";
@@ -103,7 +104,7 @@ export default function JobPage({ params }: { params: Promise<{ id: string }> })
         <div className="mt-8">
           <h2 className="text-xs font-semibold uppercase tracking-[0.2em] text-muted">Output</h2>
           <div className="report-prose mt-3 rounded-2xl border border-border bg-surface/40 p-5">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayOutput}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} {...noMarkdownImages}>{displayOutput}</ReactMarkdown>
           </div>
           {displayOutput !== job.text && (
             <details className="mt-3 text-sm text-muted">

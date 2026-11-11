@@ -132,6 +132,32 @@
 #     daterange: 7
 #     max_pages: 5
 
+# -- TopDev keyword searches (optional, Vietnam) --
+# Read by scan-topdev.mjs (`npm run scan:topdev`), a separate Playwright scanner
+# for TopDev (topdev.vn), a Vietnam-wide job board with no reachable listing
+# API: a bare fetch answers HTTP 200, but the search results are hydrated in the
+# browser, so the postings are not in the HTML. Same architectural pattern as
+# scan-interamt.mjs and scan-dayforce.mjs.
+#
+# `keyword` is required and is submitted to TopDev's own search. `location` is
+# optional and narrows by the board's region id — only Ho Chi Minh, Hanoi and Da
+# Nang have ever been observed, so any other value is rejected rather than
+# guessed into the URL; omit it for a nationwide search. `max_pages` is optional
+# (default 5, cap 50).
+#
+# There is no date filter: a posting older than the last run but never seen
+# before is still new to you, so dedup is decided by scan-history, not by age.
+#
+# Results are still filtered by title_filter/location_filter below, and
+# data/blacklist.md applies.
+#
+# topdev_searches:
+#   - keyword: "backend"
+#     location: "Ho Chi Minh"
+#     max_pages: 5
+#   - keyword: "data engineer"
+#     location: "Hanoi"
+
 # -- Dayforce (Ceridian) Recruiting boards (optional) --
 # Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
 # scanner for Dayforce career sites (jobs.dayforcehcm.com). Dayforce's job
@@ -246,7 +272,11 @@
 # restriction ("US-based candidates only" vs. "US or Canada eligible")
 # often lives only in the job description BODY TEXT. This filter reads that
 # text (same field content_filter reads) and cross-references it against
-# your own country from `location.country` above.
+# your own country from `location.country` above. It also reads a board's
+# eligibility line when the board states one outside the description:
+# CryptocurrencyJobs says "can be done remotely anywhere in the United
+# States", which a phrase like "remotely anywhere in the united states"
+# matches and none of the example phrases below do.
 #
 # Semantics (case-insensitive substring), same "don't penalize missing
 # data" discipline as location_filter:
@@ -1362,6 +1392,8 @@ search_queries:
 #   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
 #   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
 #                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
+#   talentlink      <tenant>.recruitmentplatform.com/[<site path>/][<page>.html]  (Lumesse TalentLink career page; a
+#                   posting's details.html?jobId=<id> link is claimed too and read as its site's board)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1446,6 +1478,16 @@ search_queries:
 # - name: Example HireHive Co
 #   careers_url: https://exampleco.hirehive.com/   # any <tenant>.hirehive.com host
 #   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Example TalentLink Co
+#   careers_url: https://exampleco.recruitmentplatform.com/   # keep the site path your link has, e.g. /internal/ or /FO/<code>/components/
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 200)
+#   enabled: true
+#
+# - name: Example TalentLink Branded Co
+#   careers_url: https://careers.exampleco.example/jobsearch.html   # the employer's page that embeds the TalentLink job list
+#   provider: talentlink   # branded domains are never auto-detected
 #   enabled: true
 #
 # - name: Example Collage HR Co
@@ -2931,6 +2973,11 @@ tracked_companies:
     careers_url: https://jobs.ashbyhq.com/forto
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
     enabled: true
+
+  - name: Mubea
+    careers_url: https://mubeacareers.recruitmentplatform.com/
+    notes: "Attendorn DE. Automotive and aerospace components, engineering and plant roles across DE, CZ, PL, MX, US."
+    enabled: false
 
   # -- DACH IT services / digital transformation consulting --
 

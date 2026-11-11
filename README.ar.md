@@ -605,6 +605,8 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 للاستخدام المجتمعي، ومحفوظة لتسمية المنتجات التجارية
 والتزكية.
 
+الكود مرخّص بموجب MIT؛ أما البيانات في [`employers/`](employers/) فمرخّصة بموجب [CC BY 4.0](employers/LICENSE).
+
 ## سجلّ النجوم
 
 <p align="center">

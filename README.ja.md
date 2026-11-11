@@ -604,6 +604,8 @@ career-ops で採用された？ [あなたのストーリーを共有してく�
 ブランドは[商標ポリシー](TRADEMARK.md)に従います。コミュニティでの利用には
 寛容で、商用製品の命名と推奨には制限があります。
 
+コードは MIT ライセンス、[`employers/`](employers/) のデータは [CC BY 4.0](employers/LICENSE) です。
+
 ## スター履歴
 
 <p align="center">
