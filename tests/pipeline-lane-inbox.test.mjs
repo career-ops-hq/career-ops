@@ -37,7 +37,12 @@ test('the scan hint is unchanged without a lane', () => {
   assert.equal(pipelineRunHint('   '), '→ Run /career-ops pipeline to evaluate new offers.');
 });
 
-test('the pipeline mode takes a named file first, then the path scan.mjs writes to', () => {
+/**
+ * Verifies that a named inbox takes precedence over the Data Root default.
+ * @param {object} _testContext Node.js test context.
+ * @returns {void}
+ */
+function pipelineModeKeepsTheDataRootDefault(_testContext) {
   const which = section(mode, '## Which inbox', '## Liveness sweep');
   const named = which.indexOf('names in the request');
   const scanner = which.indexOf('import { PIPELINE_PATH } from "./scan.mjs"');
@@ -46,8 +51,10 @@ test('the pipeline mode takes a named file first, then the path scan.mjs writes 
   // `./scan.mjs` resolves against the working directory, which is not the
   // checkout when a plugin session starts elsewhere.
   assert.match(which, /Run it from `PROJECT_ROOT`/);
-  assert.match(which, /Do not fall back to `data\/pipeline\.md`/);
-});
+  assert.match(which, /Do not fall back to `\{DATA_ROOT\}\/data\/pipeline\.md`/);
+}
+
+test('the pipeline mode takes a named file first, then the path scan.mjs writes to', pipelineModeKeepsTheDataRootDefault);
 
 // scan.mjs loads the data root's .env before it reads CAREER_OPS_PIPELINE, so a
 // lane set only there must still reach the mode (a shell-only read misses it).
@@ -71,7 +78,14 @@ test('the command the mode runs resolves a lane set only in the data root .env',
   }
 });
 
-test('the pipeline mode searches the resolved inbox, not a hardcoded file', () => {
+/**
+ * Verifies that the pipeline search uses its resolved inbox variable.
+ * @param {object} _testContext Node.js test context.
+ * @returns {void}
+ */
+function pipelineModeSearchesTheResolvedInbox(_testContext) {
   const workflow = section(mode, '## Workflow', '## Format of pipeline.md');
-  assert.match(workflow, /searching `\{INBOX\}`/);
-});
+  assert.match(workflow, /searching the resolved `\{INBOX\}`/);
+}
+
+test('the pipeline mode searches the resolved inbox, not a hardcoded file', pipelineModeSearchesTheResolvedInbox);

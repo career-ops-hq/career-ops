@@ -27,13 +27,21 @@ See "Untrusted External Content" in `AGENTS.md` / `CLAUDE.md` / `CODEX.md` for t
 
 **RULE: NEVER hardcode metrics from proof points.** Read them from cv.md + article-digest.md at evaluation time.
 **RULE: For article/project metrics, article-digest.md takes precedence over cv.md.**
-**RULE: Read _profile.md AFTER this file. User customizations in _profile.md override defaults here.**
-**RULE: Read _custom.md (if it exists) AFTER _profile.md and honor its house rules in every mode.** It is where the user's persistent instructions live ("use this date format", "never reorder section X", "always include Y in summaries") — an instruction recorded there is NOT optional and does not expire between sessions or between items in a batch. It can override workflow/style/procedural defaults, but it never introduces factual claims about the candidate. In an interactive session, a lasting preference or correction the user states in conversation goes through the `retro` mode (`modes/retro.md`), which writes to `modes/_custom.md` only the rules the user accepts. A delegated or headless worker (`CAREER_OPS_HEADLESS=1`, `-p`, `exec`, or a subagent) never writes `modes/_custom.md`, `modes/_profile.md`, or `config/profile.yml`. It reports the preference to its parent instead.
+**RULE: Read `{DATA_ROOT}/modes/_profile.md` AFTER this file. User customizations in that file override defaults here.**
+**RULE: Read `{DATA_ROOT}/modes/_custom.md` (if it exists) AFTER `_profile.md` and honor its house rules in every mode.** It is where the user's persistent instructions live ("use this date format", "never reorder section X", "always include Y in summaries") — an instruction recorded there is NOT optional and does not expire between sessions or between items in a batch. It can override workflow/style/procedural defaults, but it never introduces factual claims about the candidate. In an interactive session, a lasting preference or correction the user states in conversation goes through the `retro` mode (`modes/retro.md`), which writes to `{DATA_ROOT}/modes/_custom.md` only the rules the user accepts. A delegated or headless worker (`CAREER_OPS_HEADLESS=1`, `-p`, `exec`, or a subagent) never writes `{DATA_ROOT}/modes/_custom.md`, `{DATA_ROOT}/modes/_profile.md`, or `{DATA_ROOT}/config/profile.yml`. It reports the preference to its parent instead.
 **RULE: NEVER claim the user authored a project, repo, library, tool, framework, or open-source artefact unless explicitly attributed to them in cv.md or article-digest.md.** Tool-of-trade conflation (user uses X → user built X) is the most common fabrication pattern and is forbidden.
 **RULE: Keywords get reformulated, never fabricated.** Reorder, reframe, emphasise — but never invent. If a claim isn't backed by an in-scope file, ask the user. If no answer, omit. Silence on a topic beats manufactured detail.
 **RULE: Before an interactive session ends, if the user corrected or rejected your work, offer `/career-ops retro` once.** The `retro` mode (`modes/retro.md`) turns those corrections into proposed rules and writes only the ones the user accepts. A delegated or headless worker never offers or runs it.
 
 ## Data Root & Path Resolution (CRITICAL)
+
+**Step 0 (before any User Layer file I/O):** From `PROJECT_ROOT`, resolve `DATA_ROOT` once by running:
+
+```bash
+node --input-type=module -e 'import { getCareerOpsRoot } from "./path-resolver.mjs"; console.log(getCareerOpsRoot())'
+```
+
+Use the exact absolute path printed for every User Layer read and write. If resolution fails, stop before accessing User Layer files and report the error; never fall back to `PROJECT_ROOT` or the process working directory. Pass the resolved absolute `DATA_ROOT` to every subagent or worker and require it to follow the same rule.
 
 All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`, `data/applications.md` or `applications.md`, `reports/`, `output/`, `interview-prep/`, `portals.yml`, `batch/tracker-additions/`, etc.) must be resolved relative to the dynamically resolved **Data Root** (`{DATA_ROOT}`).
 
@@ -51,9 +59,9 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 
 ## Spend Tier (Model Routing)
 
-`config/profile.yml` may set `spend_tier` to control which model evaluates offers. Read it once per session.
+`{DATA_ROOT}/config/profile.yml` may set `spend_tier` to control which model evaluates offers. Read it once per session.
 
-**Resolution:** Read `spend_tier` from `config/profile.yml`. If the key is absent, default to `standard` (back-compat for existing profiles). Any value other than the three below is treated as invalid -- fall back to `standard` and note the issue to the user once.
+**Resolution:** Read `spend_tier` from `{DATA_ROOT}/config/profile.yml`. If the key is absent, default to `standard` (back-compat for existing profiles). Any value other than the three below is treated as invalid -- fall back to `standard` and note the issue to the user once.
 
 **Tier -> model mapping (the only place model/provider names appear in this logic, one row per CLI -- see the Headless / Batch Mode table in `AGENTS.md` for the canonical CLI list):**
 
@@ -86,7 +94,7 @@ The evaluation scores five dimensions, integrated into one global score of 1-5. 
 | Red flags | Blockers, warnings (negative adjustments) |
 | **Global** | Holistic judgment integrating the five dimensions above (no arithmetic formula) |
 
-Decide the Global Score once from these dimensions, applying the user's own scoring rules from `modes/_profile.md` and `modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
+Decide the Global Score once from these dimensions, applying the user's own scoring rules from `{DATA_ROOT}/modes/_profile.md` and `{DATA_ROOT}/modes/_custom.md`. The report header, Machine Summary `score`, and application tracker must record that same value. A–H are report sections, not numeric inputs to average; Block B requirement importance and Block G posting legitimacy remain separate from the 1–5 score.
 
 **Score interpretation:**
 - 4.5+ → Strong match, recommend applying immediately
@@ -115,7 +123,7 @@ Show a short evidence table in the report with each dimension's status, its sour
 Name up to three concrete checks that could change the decision; use an empty list only when none remain. Never convert this tier into a numeric probability or silently treat missing evidence as a neutral score. In the Machine Summary, mirror the five statuses under `score_evidence` and the checks under `confidence_gaps`; the human-readable explanation and `confidence` tier must agree.
 
 **How to score the "Cultural signals" dimension:**
-1. Read `culture_screen.require` from `config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
+1. Read `culture_screen.require` from `{DATA_ROOT}/config/profile.yml`. If `culture_screen` is missing or empty, skip the structural capping and score the dimension qualitatively based on company size, remote policy, and stability.
 2. Actively look for evidence in the JD + Block G company research corresponding to those requirements (e.g., team size mentions, org-chart depth/manager layers, meeting-culture language, company stage, named interview stages).
 3. **If most `require` criteria have positive evidence** → score 4-5.
 4. **If some criteria have positive evidence, and none are contradicted** → score 3.
@@ -188,7 +196,7 @@ When a JD publishes a salary figure, distinguish advertised range, likely guaran
 
 ## Archetype Detection
 
-Classify the offer by archetype. `modes/_profile.md` → *Your Target Roles* is
+Classify the offer by archetype. `{DATA_ROOT}/modes/_profile.md` → *Your Target Roles* is
 authoritative: where it defines archetypes, detect against **that** table and
 use the one below only as a fallback for what it does not cover. This mirrors
 the precedence already stated above — user customizations in `_profile.md`
@@ -231,7 +239,7 @@ scale beside it.
 | AI Forward Deployed | "client-facing", "deploy", "prototype", "fast delivery", "field" |
 | AI Transformation | "change management", "adoption", "enablement", "transformation" |
 
-After detecting archetype, read `modes/_profile.md` for the user's specific framing and proof points for that archetype.
+After detecting archetype, read `{DATA_ROOT}/modes/_profile.md` for the user's specific framing and proof points for that archetype.
 
 ## Global Rules
 
@@ -256,7 +264,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 3. Cite exact lines from CV when matching
 4. Use WebSearch for comp and company data
 5. Register in tracker after evaluating
-6. Write human-facing content in `{language.output}` from `config/profile.yml` (EN when unset), whatever the language of the JD. Keep this market's terms and explain them in that language when needed
+6. Write human-facing content in `{language.output}` from `{DATA_ROOT}/config/profile.yml` (EN when unset), whatever the language of the JD. Keep this market's terms and explain them in that language when needed
 7. Be direct and actionable -- no fluff
 8. Native tech English for generated text. Short sentences, action verbs, no passive voice.
 8b. Case study URLs in PDF Professional Summary (recruiter may only read this).
