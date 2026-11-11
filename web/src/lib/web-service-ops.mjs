@@ -164,6 +164,12 @@ function stoppedOrAbsent(result, absentCodes, absentText) {
   return result.status === 0 || absentCodes.includes(result.status) || absentText.test(`${result.stderr}\n${result.stdout}`);
 }
 
+// With /HRESULT, schtasks exits with the HRESULT of what went wrong; a task that does not
+// exist is ERROR_FILE_NOT_FOUND (0x80070002), reported unsigned or signed by the platform.
+// Anything else (access denied, the Task Scheduler service down) is a real failure.
+const TASK_NOT_FOUND = [0x80070002, -2147024894];
+const taskAbsent = (result) => TASK_NOT_FOUND.includes(result.status);
+
 /** Stop and remove the service. Keeps the log. */
 export function uninstallService(ctx) {
   const { platform, fs, run, out } = ctx;
@@ -189,7 +195,9 @@ export function uninstallService(ctx) {
     out(existed ? `Removed ${SERVICE.systemdUnit}.` : `${SERVICE.systemdUnit} is not installed.`);
   } else {
     const name = SERVICE.taskName;
-    if (run("schtasks", ["/Query", "/TN", name]).status !== 0) {
+    const queried = run("schtasks", ["/Query", "/TN", name, "/HRESULT"]);
+    if (queried.status !== 0) {
+      if (!taskAbsent(queried)) throw new Error(`could not query the task: ${describe(queried)}`);
       out(`Task "${name}" is not installed.`);
       return;
     }
@@ -237,8 +245,8 @@ export function serviceStatus(ctx) {
     if (result.status === 3) result = { ...result, status: 0 };
     absent = result.status === 4 || /could not be found|not-found/i.test(result.stderr);
   } else {
-    result = run("schtasks", ["/Query", "/TN", SERVICE.taskName, "/FO", "LIST", "/V"]);
-    absent = true; // schtasks reports a missing task and a failure alike, with localized text
+    result = run("schtasks", ["/Query", "/TN", SERVICE.taskName, "/FO", "LIST", "/V", "/HRESULT"]);
+    absent = taskAbsent(result);
   }
   if (result.status !== 0) {
     if (!absent) throw new Error(`could not query the service: ${describe(result)}`);

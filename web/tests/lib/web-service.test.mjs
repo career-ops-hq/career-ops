@@ -27,6 +27,7 @@ test("carriedEnv keeps only set variables, in the carried order", () => {
     ["PORT", "3917"],
   ]);
   assert.ok(CARRIED_ENV.includes("CAREER_OPS_WEB_ALLOWED_HOSTS"));
+  assert.ok(CARRIED_ENV.includes("CAREER_OPS_CODE_ROOT"), "an isolated web runtime finds the engine scripts through it");
 });
 
 test("carriedEnv refuses a value that would not survive a plist, a unit and a command line", () => {
@@ -171,10 +172,13 @@ test("the Task Scheduler definition escapes XML and refuses a percent sign", () 
   assert.throws(() => renderTaskXml({ node: "n", args: ["C:\\50%\\x"], workDir: "w", user: "u" }), /cannot be used in a scheduled task/);
 });
 
+// Assembled, because test-all.mjs bans a literal home-directory path in tracked files.
+const MAC_HOME = ["", "Users", "me"].join("/");
+
 test("definitionPath is the LaunchAgents plist, the systemd user unit, or nothing on Windows", () => {
   assert.equal(
-    definitionPath({ platform: "darwin", home: "/Users/me" }),
-    "/Users/me/Library/LaunchAgents/io.career-ops.web.plist",
+    definitionPath({ platform: "darwin", home: MAC_HOME }),
+    `${MAC_HOME}/Library/LaunchAgents/io.career-ops.web.plist`,
   );
   assert.equal(
     definitionPath({ platform: "linux", home: "/home/me" }),

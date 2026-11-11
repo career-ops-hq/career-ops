@@ -252,10 +252,10 @@ test("uninstall says so when nothing is installed", async () => {
       assert.deepEqual(sb.lines, [expected]);
     });
   }
-  await withSandbox("win32", { results: { "schtasks /Query": [fail()] } }, async (sb) => {
+  await withSandbox("win32", { results: { "schtasks /Query": [{ status: 0x80070002, stdout: "", stderr: "" }] } }, async (sb) => {
     uninstallService(sb.ctx);
     assert.deepEqual(sb.lines, ['Task "career-ops web" is not installed.']);
-    assert.deepEqual(sb.calls, ["schtasks /Query /TN career-ops web"]);
+    assert.deepEqual(sb.calls, ["schtasks /Query /TN career-ops web /HRESULT"]);
   });
 });
 
@@ -274,7 +274,7 @@ test("uninstall disables the Linux unit, removes the file and reloads", () => wi
 test("uninstall ends and deletes the Windows task", () => withSandbox("win32", {}, async (sb) => {
   uninstallService(sb.ctx);
   assert.deepEqual(sb.calls, [
-    "schtasks /Query /TN career-ops web",
+    "schtasks /Query /TN career-ops web /HRESULT",
     "schtasks /End /TN career-ops web",
     "schtasks /Delete /TN career-ops web /F",
   ]);
@@ -360,4 +360,20 @@ test("uninstall keeps the definition when the service could not be stopped", asy
     assert.throws(() => uninstallService(sb.ctx), /disable failed/);
     assert.ok(fs.existsSync(unit));
   });
+});
+
+test("Windows uninstall and status tell a missing task from a failed query", async () => {
+  const denied = { status: 0x80070005, stdout: "", stderr: "Access is denied" };
+  await withSandbox("win32", { results: { "schtasks /Query": [denied] } }, async (sb) => {
+    assert.throws(() => uninstallService(sb.ctx), /could not query the task.*Access is denied/s);
+    assert.ok(!sb.calls.some((c) => c.startsWith("schtasks /Delete")));
+  });
+  await withSandbox("win32", { results: { "schtasks /Query": [denied] } }, async (sb) => {
+    assert.throws(() => serviceStatus(sb.ctx), /could not query the service/);
+  });
+  for (const status of [0x80070002, -2147024894]) {
+    await withSandbox("win32", { results: { "schtasks /Query": [{ status, stdout: "", stderr: "" }] } }, async (sb) => {
+      assert.equal(serviceStatus(sb.ctx), false);
+    });
+  }
 });

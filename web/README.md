@@ -151,7 +151,7 @@ node web/scripts/web-service.mjs install --dry-run   # print the definition, cha
 - **After `git pull` or an update, run `restart`.** The running dashboard keeps serving
   the old build until then; the restart rebuilds first, then serves the new one.
 - **Overrides are baked in when you install.** `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR`,
-  `CAREER_OPS_SCHEDULED_JOBS_PATH`, `CAREER_OPS_TRACKER`, `CAREER_OPS_PROFILE`,
+  `CAREER_OPS_SCHEDULED_JOBS_PATH`, `CAREER_OPS_TRACKER`, `CAREER_OPS_PROFILE`, `CAREER_OPS_CODE_ROOT`,
   `CAREER_OPS_WEB_ALLOWED_HOSTS` and `PORT` are carried into the service if they are set
   in the shell that runs `install`. A service starts with an almost empty environment,
   and without them the dashboard would read a different store than the CLI. Nothing else
