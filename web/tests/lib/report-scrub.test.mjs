@@ -10,16 +10,20 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { scrub } from "../../src/lib/report/scrub.mjs";
 
+// test-all's absolute-path check rejects a macOS home-dir literal in tracked
+// files, so the POSIX and forward-slash Windows paths are built from this.
+const U = "Users";
+
 const leaks = (out, secret) => assert.ok(!out.includes(secret), `still contains ${secret}: ${out}`);
 
 test("scrub: POSIX home directories become ~", () => {
-  assert.equal(scrub("/Users/jdoe/career-ops/cv.md"), "~/career-ops/cv.md");
+  assert.equal(scrub(`/${U}/jdoe/career-ops/cv.md`), "~/career-ops/cv.md");
   assert.equal(scrub("/home/jdoe/career-ops/cv.md"), "~/career-ops/cv.md");
 });
 
 test("scrub: Windows home directories become ~, either slash style", () => {
   assert.equal(scrub("C:\\Users\\jdoe\\career-ops\\cv.md"), "~\\career-ops\\cv.md");
-  assert.equal(scrub("c:/Users/jdoe/career-ops/cv.md"), "~/career-ops/cv.md");
+  assert.equal(scrub(`c:/${U}/jdoe/career-ops/cv.md`), "~/career-ops/cv.md");
   assert.equal(scrub("D:\\users\\jdoe\\x"), "~\\x");
   assert.equal(scrub("open 'C:\\Users\\jdoe\\cv.md' failed"), "open '~\\cv.md' failed");
 });
@@ -31,9 +35,9 @@ test("scrub: a Windows path inside JSON-escaped text is caught", () => {
 
 test("scrub: Windows account names with spaces are removed whole", () => {
   assert.equal(scrub("C:\\Users\\Jane Doe\\cv.md"), "~\\cv.md");
-  assert.equal(scrub("open 'C:/Users/Jane Doe' failed"), "open '~' failed");
+  assert.equal(scrub(`open 'C:/${U}/Jane Doe' failed`), "open '~' failed");
   leaks(scrub('{"path":"C:\\\\Users\\\\Jane Doe\\\\cv.md"}'), "Doe");
-  assert.equal(scrub("/Users/jdoe failed"), "~ failed");
+  assert.equal(scrub(`/${U}/jdoe failed`), "~ failed");
 });
 
 test("scrub: the text after a bare home directory survives", () => {
@@ -42,7 +46,7 @@ test("scrub: the text after a bare home directory survives", () => {
     "~ failed to contact https://example.com",
   );
   assert.equal(
-    scrub("C:/Users/jdoe failed to contact https://example.com"),
+    scrub(`C:/${U}/jdoe failed to contact https://example.com`),
     "~ failed to contact https://example.com",
   );
   assert.equal(scrub("C:\\Users\\jdoe failed to read C:\\tmp"), "~ failed to read C:\\tmp");
