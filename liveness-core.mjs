@@ -64,6 +64,12 @@ const HARD_EXPIRED_PATTERNS = [
   // renders. Spelled in the normalized alphabet like every pattern here.
   /can't view this job because it's not available/i,
   /the page you are looking for doesn.t exist/i,
+  // Eightfold career sites (e.g. netapp.eightfold.ai) render a closed req as a
+  // near-empty page whose only body is "The job you are looking for may have
+  // closed." Without this it read as insufficient_content (uncertain). Anchored
+  // on the subject "the job you are looking for" plus a closed verb, so prose
+  // that merely contains the word "closed" never matches.
+  /\bthe job you(?:'re| are) (?:looking|searching) for (?:may |might |could )?(?:have |has )?closed\b/i,
   /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
   // "Was closed on 15 December" is a closure. "Will be closed on", "is to be
   // closed on" and "may be closed on" give a date still ahead, on a posting
@@ -97,6 +103,14 @@ const HARD_EXPIRED_PATTERNS = [
   /oferta (jest )?nieaktualna/i,
   /oferta archiwalna/i,
   /kandydaci nie sa juz akceptowani/i,
+  // Norwegian closure banners. arbeidsplassen.no, Jobbnorge and employer
+  // career sites can keep a closed posting's "Søk her" link, so this has to be
+  // a hard pattern (#6620). normalizeForMatch() folds å to a but not ø, hence
+  // [øo] and "gatt". Only the past tense and statements that the post is gone
+  // match: a deadline still ahead ("Søknadsfrist: 20.11.2026", "Søknadsfristen
+  // utløper 20. november") and "Stillingen vil bli besatt" never do.
+  /s[øo]knadsfristen (?:er utl[øo]pt|har gatt ut)/i,
+  /\b(?:stillingen|annonsen) er (?:ikke lenger (?:ledig|aktiv|tilgjengelig)|besatt|utl[øo]pt)\b/i,
 ];
 
 const LISTING_PAGE_PATTERNS = [
@@ -149,8 +163,30 @@ export const BOT_CHALLENGE_PATTERNS = [
   /please complete the security check/i,
 ];
 
+// Cloudflare titles its own interstitials, whatever the site's branding in the
+// body: "Just a moment..." for a managed challenge, "Attention Required! |
+// Cloudflare" for a block. A site-branded challenge body can be long, and a
+// reader that keeps a long page does not judge it by phrases a real posting may
+// quote, so it matches the title of the page that settled instead (#6713).
+// Callers check it only on an HTTP error: a challenge the browser passes
+// reloads the real posting under its own title.
+const CLOUDFLARE_INTERSTITIAL_TITLES = [
+  { re: /^just a moment\.{0,3}(?:…)?$/i, kind: 'challenge page' },
+  { re: /^attention required!?\s*\|\s*cloudflare$/i, kind: 'block page' },
+];
+
+/**
+ * @param {string} title - the rendered page title
+ * @returns {string|null} the interstitial kind, or null
+ */
+export function cloudflareInterstitial(title) {
+  const text = String(title ?? '').trim();
+  return CLOUDFLARE_INTERSTITIAL_TITLES.find(({ re }) => re.test(text))?.kind ?? null;
+}
+
 const EXPIRED_URL_PATTERNS = [
   /[?&]error=true/i,
+  /recruiting\.paylocity\.com\/recruiting\/jobs\/jobnotfound(?:\/|\?|#|$)/i,
 ];
 
 const APPLY_PATTERNS = [
@@ -198,6 +234,14 @@ const APPLY_PATTERNS = [
   // "Външно кандидатстване". Only at the start of the label: the noun also ends
   // advice-article links ("…писмо за кандидатстване"), which are not Apply.
   /^(?:външно )?кандидатстване(?![\p{L}\p{M}])/iu,
+  // Norwegian (arbeidsplassen.no, Jobbnorge, employer career sites): "Gå til
+  // søknad", "Send søknad", "Søk på stillingen", "Søk nå". normalizeForMatch
+  // turns "å" into "a" but leaves "ø" alone, so both are spelled here as they
+  // arrive. Bare "Søk" is not Apply: it is also every Norwegian site's search
+  // button ("Søk", "Søk etter stillinger"), so only the qualified labels count,
+  // and only at the start of the label.
+  /^(?:ga til|send) s[øo]knad(?:en)?(?![\p{L}\p{M}])/iu,
+  /^s[øo]k (?:pa (?:denne |den )?(?:stillingen|jobben)|stillingen|her|na)(?![\p{L}\p{M}])/iu,
 ];
 
 // CareerViet prints the application deadline in the posting's info block as
@@ -266,8 +310,30 @@ function firstMatch(patterns, text = '') {
 //
 // Words are separated by a single space because normalizeForMatch() leaves one
 // character per run of whitespace; "\n" is not a space, so the clause stops there.
+// The Norwegian openers are spelled as normalizeForMatch() leaves them (når →
+// "nar", så → "sa"; ø is kept): public-sector postings routinely say "Når
+// søknadsfristen er utløpt, blir søkerlisten offentliggjort", which describes
+// what happens after the deadline, not a closed posting (#6620). "for" and "til"
+// are left out because they are also prepositions in both languages. So is
+// "etter" ("Søk etter stillinger"); see ETTER_BEFORE_MATCH for the one place a
+// bare "etter" opens the clause.
 const TIME_OR_CONDITION_CLAUSE =
-  /\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/i;
+  /(?:\b(?:until|till|once|when|whenever|after|before|unless|if|whether|as soon as|nar|etter at|inntil|hvis|dersom|sa snart)|(?<![\p{L}\p{N}])før) (?:[^\s.,;:!?…|•·]+ ){0,9}[^\s.,;:!?…|•·]+$/iu;
+
+// A bare "etter" opens the clause only when the match itself starts at the
+// deadline noun right after it: "Søknader behandles etter søknadsfristen er
+// utløpt". A lookahead for the noun anywhere after "etter" also caught a sort
+// control: "Sorter etter søknadsfrist Stillingen er besatt", with the control
+// and the banner joined on one line, read the banner as part of a time clause
+// and the filled position as active (#6788).
+const ETTER_BEFORE_MATCH = /(?<![\p{L}\p{N}])etter $/iu;
+const DEADLINE_NOUN_START = /^s[øo]knadsfrist/iu;
+
+function opensTimeOrConditionClause(lines, match) {
+  const end = match.index + match[0].length;
+  if (TIME_OR_CONDITION_CLAUSE.test(lines.slice(0, end))) return true;
+  return DEADLINE_NOUN_START.test(match[0]) && ETTER_BEFORE_MATCH.test(lines.slice(0, match.index));
+}
 
 // `lines` keeps its line breaks (normalizeForMatch with keepLineBreaks). The
 // patterns match on the joined text, as every other check here does, so a
@@ -277,7 +343,7 @@ function firstStatedMatch(patterns, lines = '') {
   const text = lines.replace(/\n/g, ' ');
   return patterns.find((pattern) => {
     for (const match of text.matchAll(new RegExp(pattern, `${pattern.flags}g`))) {
-      if (!TIME_OR_CONDITION_CLAUSE.test(lines.slice(0, match.index + match[0].length))) return true;
+      if (!opensTimeOrConditionClause(lines, match)) return true;
     }
     return false;
   });

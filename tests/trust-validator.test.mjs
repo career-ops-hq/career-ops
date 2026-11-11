@@ -341,6 +341,25 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
 }
 
 {
+  // The tenant label need not match the company name, so the host alone must clear it.
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://exampleco.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001', company: 'BigCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'careers.hibob.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'hirehive.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://acme.recruitmentplatform.com/details.html?jobId=4001', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'recruitmentplatform.com → ATS allowlist, no mismatch');
+}
+
+{
   const v = buildTrustValidator({ enabled: true });
   const r = v({ url: 'https://join.com/companies/acme/15402839', company: 'Acme' });
   assert(!r.flags.includes('company_domain_mismatch'), 'join.com → ATS allowlist, no mismatch');

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
-import { keywordsInText, loadStudio, unsupportedRewriteClaims } from "@/lib/cv-studio/server";
+import { keywordsInText, loadStudio, missingDataFolderMessage, unsupportedRewriteClaims } from "@/lib/cv-studio/server";
 import { runRewrite } from "@/lib/cv-studio/rewrite-run";
 import { buildRewritePrompt, MAX_INSTRUCTION, parseRewrite } from "@/lib/cv-studio/rewrite.mjs";
 
@@ -16,7 +16,7 @@ const MESSAGES = {
   refused: "The AI CLI could not be started with read-only access, so nothing ran.",
   failed: "The AI CLI did not finish. Check that it is signed in, then try again.",
   "no-answer": "The AI CLI replied without a usable bullet. Try a different instruction.",
-  unsupported: "The rewrite was discarded because it adds claims this bullet does not support:",
+  unsupported: "The rewrite was discarded because it adds wording this bullet does not support:",
 } as const;
 
 export async function POST(req: Request, { params }: RouteContext) {
@@ -27,6 +27,8 @@ export async function POST(req: Request, { params }: RouteContext) {
   }
   const instruction = body.instruction.trim().slice(0, MAX_INSTRUCTION);
   if (!instruction) return NextResponse.json({ error: "Say how the bullet should change." }, { status: 400 });
+  const missing = missingDataFolderMessage();
+  if (missing) return NextResponse.json({ error: missing }, { status: 400 });
 
   const load = await loadStudio(n);
   if (!load.ok) return NextResponse.json({ error: load.reason }, { status: 404 });
@@ -40,7 +42,8 @@ export async function POST(req: Request, { params }: RouteContext) {
   }
   const text = parseRewrite(run.reply);
   if (!text) return NextResponse.json({ error: MESSAGES["no-answer"] }, { status: 422 });
-  const claims = await unsupportedRewriteClaims(text, [bullet.base, bullet.tailored].filter((t) => t !== null).join("\n"));
-  if (claims.length) return NextResponse.json({ error: `${MESSAGES.unsupported} ${claims.join(", ")}.`, claims }, { status: 422 });
-  return NextResponse.json({ text, keywords: (await keywordsInText(n, text)) ?? [], warning: run.warning });
+  const check = await unsupportedRewriteClaims(text, [bullet.base, bullet.tailored].filter((t) => t !== null).join("\n"));
+  if (check.claims.length) return NextResponse.json({ error: `${MESSAGES.unsupported} ${check.claims.join(", ")}.`, claims: check.claims }, { status: 422 });
+  const warning = [run.warning, check.warning].filter((item) => item).join(" ") || null;
+  return NextResponse.json({ text, keywords: (await keywordsInText(n, text)) ?? [], warning });
 }

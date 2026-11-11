@@ -3,16 +3,33 @@ import { parseWpJobFeedItems, wpJobFeedItems } from './_wp-job-feed.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Jobspresso provider - public WordPress jobs feed
-// (https://jobspresso.co/?feed=job_feed). The feed is public, no-auth,
+// (https://jobspresso.co/feed/job_feed/). The feed is public, no-auth,
 // and XML, so it is parsed in-process with the same tiny tag extractor
 // approach as providers/personio.mjs rather than adding an XML dependency.
 // The item parsing is shared with providers/wp-job-manager.mjs, the generic
 // provider for any board on the same plugin (providers/_wp-job-feed.mjs).
 //
 // Wire in via a `job_boards:` entry with `provider: jobspresso`.
+//
+// robots.txt (Source Indexing Policy rule 6): rule 6 changed in #6691 so
+// robots.txt is no longer a gate for providers (#6694). The feed returns 10
+// items by default; `posts_per_page` raises that to 100 per request.
 
-const FEED_URL = 'https://jobspresso.co/?feed=job_feed';
+const BASE_FEED_URL = 'https://jobspresso.co/feed/job_feed/';
+const DEFAULT_POSTS_PER_PAGE = 100;
+const MAX_POSTS_PER_PAGE = 100;
 const TRUSTED_HOST = 'jobspresso.co';
+
+/** @param {any} [entry] */
+export function buildFeedUrl(entry) {
+  const custom = entry?.posts_per_page;
+  const count = Number.isInteger(custom) && custom > 0
+    ? Math.min(custom, MAX_POSTS_PER_PAGE)
+    : DEFAULT_POSTS_PER_PAGE;
+  return `${BASE_FEED_URL}?posts_per_page=${count}`;
+}
+
+const DEFAULT_FEED_URL = buildFeedUrl();
 
 /** @param {string} url */
 function assertJobspressoUrl(url) {
@@ -37,11 +54,11 @@ export default {
   id: "jobspresso",
 
   detect(entry) {
-    return entry?.provider === "jobspresso" ? { url: FEED_URL } : null;
+    return entry?.provider === "jobspresso" ? { url: buildFeedUrl(entry) } : null;
   },
 
-  async fetch(_entry, ctx) {
-    const feedUrl = assertJobspressoUrl(FEED_URL);
+  async fetch(entry, ctx) {
+    const feedUrl = assertJobspressoUrl(buildFeedUrl(entry));
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertJobspressoUrl above it keeps the request pinned to jobspresso.co.
     const text = await ctx.fetchText(feedUrl, { redirect: "error" });
@@ -75,10 +92,11 @@ function cleanUrl(value) {
  * - pubDate
  * - job_listing:company
  * - job_listing:location
+ * - content:encoded (the full post, which becomes `description`)
  *
  * The RSS link is used as the dedup key.
  * @param {string} xml - raw RSS feed body
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number, description?: string}>}
  */
 export function parseJobspressoFeed(xml) {
   if (typeof xml !== "string") return [];

@@ -7,25 +7,30 @@ import fs from "node:fs";
 import path from "node:path";
 import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from "@/lib/clis";
 import { localISODate } from "@/lib/followups";
-import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, timeoutMessage } from "@/lib/run-cli-support.mjs";
+import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
-import { persistEvaluation, evaluateRunOutcome } from "@/lib/report-persist.mjs";
+import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
-import { resolveCvTemplate } from "@/lib/core/cv-template.mjs";
+import { resolveCvTemplate, resolveUserTemplatesDir } from "@/lib/core/cv-template.mjs";
 import { profileRef } from "@/lib/core/profile-path.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
+import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 
 export const runtime = "nodejs";
@@ -40,6 +45,13 @@ export async function POST(req: Request) {
   if (evaluation && !evaluation.ok) return Response.json({ error: evaluation.error }, { status: 400 });
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+  }
+  const userData = careerOpsRoot();
+  if (!fs.existsSync(userData)) {
+    return new Response(JSON.stringify({ error: dataFolderMissingMessage(userData) }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
   const resolved = resolveCliOrFallback(requestedCliId);
   if (!resolved) {
@@ -168,62 +180,103 @@ export async function POST(req: Request) {
   // (#4034). Only pdf fills a template, so nothing else pays for the lookup.
   // The root is passed, not re-derived: a relative CAREER_OPS_PROFILE resolves
   // against it, and `process.cwd()` here is `<core>/web` (see cv-template.mjs).
-  const cvTemplate = kind === "pdf" ? await resolveCvTemplate(codeRoot) : undefined;
-  const prompt = buildPrompt({
-    kind,
-    input,
-    memory: readMemory(),
-    today,
-    postedAt,
-    lang,
-    cvTemplate,
-    // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
-    codeRoot,
-    reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
-    coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
-    profile: profileRef(careerOpsRoot()),
-    evaluationInstructions,
-  });
+  // The data root goes in too: a template from the core's user layer (#5777) lives
+  // there, so it is named relative to the worker's cwd, not the checkout.
+  const dataRoot = kind === "pdf" ? careerOpsRoot() : undefined;
 
-  const isClaude = cliId === "claude";
-  // Which tools each kind gets, and the whole claude argv, live in
-  // claude-invocation.mjs — see its header for the policy and for why it is asserted on
-  // built values rather than on this file's source. NEVER auto-submits; that
-  // remains a prompt-level guarantee.
-  // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
-  // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
-  // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
-  // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
-  // verified mechanism. Those report level "none" and the run says so
-  // below, rather than looking identical to a fenced one (#2507).
-  // A CLI with its own structured stream gets the argv that turns it on, so its
-  // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
-  // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
+  const cvTemplate = dataRoot
+    ? await resolveCvTemplate(codeRoot, dataRoot)
+    : undefined;
 
-  // Tracker-mutating runs hold a write token so a row delete can't race their
-  // merge (tracker.mjs delete doesn't yet share a lock with merge-tracker,
-  // see run-registry). evaluate's agent no longer writes; the backend persist
-  // path below still merges the tracker, so the token stays.
+  const userTemplatesDir = dataRoot
+    ? await resolveUserTemplatesDir(codeRoot, dataRoot)
+    : undefined;
+  // Hold the tracker guard through evaluation persistence / PDF marking. Build
+  // the prompt inside the same try so preparation failures release it too. It is
+  // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
-
-  // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
-  // `exec` blocks reading stdin for additional context, hangs until the kill timer,
-  // and then reports a generic "installed and authenticated?" error that reads as an
-  // auth failure even though the CLI is fully signed in. #1973 fixed that here with
-  // an inline `stdio: ["ignore", …]`; spawnHeadlessCli generalizes the same fix to
-  // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
-  // which had the identical bug, and puts it behind one tested helper so it cannot
-  // drift back in on any single call site.
   let child;
+  let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
+  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // Read the JD here, not in the worker: WebFetch drops script content, so a
+    // board that renders its JD from script data looks like an empty shell to the
+    // worker and the run ends as "Needs review" on a live posting. null (plain
+    // boards, any miss) leaves the worker on its WebFetch path.
+    const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
+    // The caller went away while the JD was being read: do not start a worker for nobody.
+    if (req.signal.aborted) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return new Response(null, { status: 499 });
+    }
+    // A partial JD must not reach a worker that could score and save it as the
+    // whole posting, so refuse here instead of trusting the prompt to stop it.
+    if (isTruncatedJd(prefetch?.text)) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
+    }
+    const prefetchedJd = prefetch?.text ?? null;
+    const closedEvidence = prefetch?.closedEvidence ?? null;
+    if (evaluationInstructions) {
+      instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
+    }
+    const prompt = buildPrompt({
+      kind,
+      input,
+      memory: readMemory(),
+      today,
+      postedAt,
+      lang,
+      cvTemplate,
+      userTemplatesDir,
+      // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
+      codeRoot,
+      reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
+      coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
+      profile: profileRef(careerOpsRoot()),
+      evaluationInstructions: instructionFile?.reference,
+      prefetchedJd,
+      closedEvidence,
+    });
+
+    const isClaude = cliId === "claude";
+    // Which tools each kind gets, and the whole claude argv, live in
+    // claude-invocation.mjs — see its header for the policy and for why it is asserted on
+    // built values rather than on this file's source. NEVER auto-submits; that
+    // remains a prompt-level guarantee.
+    // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
+    // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
+    // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
+    // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
+    // verified mechanism. Those report level "none" and the run says so
+    // below, rather than looking identical to a fenced one (#2507).
+    // A CLI with its own structured stream gets the argv that turns it on, so its
+    // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
+    // envelope-parsing routes rely on.
+    const buildArgs = (p: string) =>
+      isClaude ? claudeCliArgs({ kind, prompt: p }) : (spec.streamArgs ?? spec.args)(p);
+    // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
+    // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
+    // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the
+    // data root and argv carries a pointer to it. Prompts that fit are untouched.
+    spill = spillOversizedPrompt({
+      prompt,
+      buildArgs,
+      binPath,
+      fencing: { cliId, capabilities },
+      root: careerOpsRoot(),
+    });
     child = spawnHeadlessCli(
       binPath,
-      args,
+      spill.args,
       { cwd: careerOpsRoot(), env: process.env },
       { cliId, capabilities },
     );
+    if (instructionFile) child.once("close", instructionFile.cleanup);
+    if (spill.cleanup) child.once("close", spill.cleanup);
   } catch (e) {
+    instructionFile?.cleanup();
+    spill?.cleanup?.();
     // Fencing refuses an argv that contradicts the capability record, so nothing
     // spawned and the stream below — which owns finishRun — is never
     // constructed. Release the tracker guard HERE or it is held for the lifetime
@@ -366,6 +419,10 @@ export async function POST(req: Request) {
       // for the backend while holding the body out of the run log.
       const cvFilter = kind === "pdf" ? createCvEnvelopeFilter() : null;
       const reportFilter = kind === "evaluate" ? createReportEnvelopeFilter() : null;
+      // Assistant-authored text only, before report-body filtering. Tools/JDs
+      // cannot directly declare a gated outcome. Process integrity is checked
+      // first at close, before this text can be treated as a terminal stop.
+      let evaluationText = "";
       // While the agent emits the 15-25 KB <<cv-html>> envelope, cvFilter swallows
       // every byte, so the response stream goes completely silent for as long as
       // the model takes to write the CV — a minute or more. Nothing downstream can
@@ -375,6 +432,7 @@ export async function POST(req: Request) {
       // the stream never idles during the filtered phase. Unknown event types are
       // ignored by the client's switch, so this is safe for older tabs too.
       const sendAgentText = (text: string) => {
+        if (kind === "evaluate") evaluationText += text;
         const filter = cvFilter ?? reportFilter;
         const visible = filter ? filter.push(text) : text;
         if (visible) send({ type: "text", text: visible });
@@ -474,7 +532,7 @@ export async function POST(req: Request) {
             evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
           });
           if (!result.ok) {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           sendWarnings(result.warnings);
@@ -502,12 +560,13 @@ export async function POST(req: Request) {
             spawnFn: spawn,
             execPath: process.execPath,
             coreRoot: resolveCodeRoot(process.cwd(), process.env),
+            dataRoot: careerOpsRoot(),
             pdfPaths: paths,
             format,
             reportNum: paths.reportNum,
           });
           if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
@@ -556,14 +615,8 @@ export async function POST(req: Request) {
         // pdfRunOutcome's noOutputMessage — because a CLI that produced no output at
         // all is the same failure mode whether it was evaluating or tailoring
         // a PDF — one place for the condition/message pair instead of two.
-        const noOutputError = (): string | null => {
-          if (!emittedText && !sawError && !cleanExit) {
-            const detail = stderrErrorSnippet ? ` (${stderrErrorSnippet})` : "";
-            return `The CLI exited with an error — is it installed and authenticated?${detail}`;
-          }
-          if (!emittedText && !sawError) return "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)";
-          return null;
-        };
+        const noOutputMessage = (): string | null =>
+          noOutputError({ emittedText, sawError, cleanExit, stderrSnippet: stderrErrorSnippet });
 
         if (kind === "pdf") {
           // Release any text the filter was still holding, so the log keeps the
@@ -576,7 +629,7 @@ export async function POST(req: Request) {
           const envelope = cvFilter?.result();
           const outcome = pdfRunOutcome({
             envelope,
-            noOutputMessage: noOutputError(),
+            noOutputMessage: noOutputMessage(),
             sawError,
             cleanExit,
             hasPaths: pdfPaths !== undefined,
@@ -608,12 +661,14 @@ export async function POST(req: Request) {
           const envelope = reportFilter?.result();
           const outcome = evaluateRunOutcome({
             envelope,
-            noOutputMessage: noOutputError(),
+            noOutputMessage: noOutputMessage(),
             sawError,
             cleanExit,
+            text: evaluationText,
           });
           if (!outcome.ok) {
-            send({ type: "error", msg: outcome.message });
+            const event = evaluationOutcomeEvent(outcome, { tokens: lastTokens, costUsd: lastCostUsd });
+            if (event) send(event);
           } else if (envelope?.ok !== true) {
             send({ type: "error", msg: "Internal error: the evaluate run passed its gate with no report to save — please report this." });
           } else {
@@ -626,7 +681,7 @@ export async function POST(req: Request) {
         // Honesty gate (#9): a green "done" with a parsed score requires a CLEAN exit
         // and real output. Anything else is surfaced. An errored run must never be
         // banked as a confident score.
-        const baseErr = noOutputError();
+        const baseErr = noOutputMessage();
         if (baseErr) {
           send({ type: "error", msg: baseErr });
         } else if (!cleanExit || sawError) {

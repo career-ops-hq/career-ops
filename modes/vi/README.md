@@ -40,7 +40,7 @@ language:
 | Tệp | Dịch từ | Vai trò |
 |-----|---------|---------|
 | `_shared.md` | `modes/_shared.md` | Ngữ cảnh chung, archetype, hệ thống chấm điểm, quy tắc toàn cục, đặc thù thị trường Việt Nam |
-| `tuyen-dung.md` | `modes/oferta.md` | Đánh giá đầy đủ một tin tuyển dụng (Block A-G, Risk Summary, Block H) |
+| `tuyen-dung.md` | `modes/oferta.md` | Đánh giá đầy đủ một tin tuyển dụng (Block A-H, Risk Summary) |
 | `ung-tuyen.md` | `modes/apply.md` | Trợ lý điền form ứng tuyển trực tiếp (bản rút gọn) |
 | `pipeline.md` | `modes/pipeline.md` | Hộp thư URL / Second Brain cho các tin đã thu thập |
 

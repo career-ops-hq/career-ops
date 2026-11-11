@@ -8,7 +8,7 @@
 import { accessSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
 import { execFileSync } from 'child_process';
 import { homedir } from 'os';
-import { delimiter, join, dirname, resolve } from 'path';
+import { delimiter, join, dirname, isAbsolute, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
@@ -21,6 +21,7 @@ import { SKILL_ENTRYPOINTS } from './scaffolder/bin/skill-entrypoints.mjs';
 import { nodeFloor } from './lib/node-floor.mjs';
 import { classifyChromiumLaunchError } from './lib/chromium-launch-error.mjs';
 import { findExperienceSections, parseCompanyHeading, EXPERIENCE_HEADING_NAMES } from './lib/cv-markdown.mjs';
+import { LINKEDIN_DOCTOR_LABEL, linkedInPluginFix } from './lib/linkedin-import.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -56,7 +57,8 @@ try {
 // copy made without `npm install`) died with a raw ERR_MODULE_NOT_FOUND stack
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
-let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH, resolveExtractorMode, auditUserTemplates;
+let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
+let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -65,6 +67,7 @@ try {
     { validateProfile, EXAMPLE_PATH },
     { resolveExtractorMode },
     { auditUserTemplates },
+    { browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
@@ -72,10 +75,13 @@ try {
     import('./validate-profile.mjs'),
     import('./browser-extract.mjs'),
     import('./cv-templates.mjs'),
+    import('./lib/browser-launch.mjs'),
   ]);
 } catch (err) {
   let missing = [];
-  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: rethrow below */ }
+  try { missing = findMissingDependencies(__dirname); } catch { /* no readable package.json: the error still names the package */ }
+  const name = /Cannot find package '((?:@[^/'\\:]+\/)?[^/'\\:]+)'/.exec(err?.message)?.[1];
+  if (name && !missing.includes(name)) missing.unshift(name);
   if (err?.code !== 'ERR_MODULE_NOT_FOUND' || missing.length === 0) throw err;
   console.error(`career-ops dependencies are not installed in ${__dirname} (missing: ${missing.join(', ')}), so doctor cannot run its checks.\nFix: run \`npm install\` in ${__dirname}, then run doctor again.`);
   process.exit(1);
@@ -484,7 +490,7 @@ function playwrightDepsFix() {
   return `Run: ${sudo}npx playwright install-deps chromium`;
 }
 
-async function checkPlaywright() {
+async function checkPlaywright(browserProcessEnv) {
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -507,19 +513,39 @@ async function checkPlaywright() {
   // tests the exact binary the runtime uses and catches stub-installs (directory
   // present but no binary — just ABOUT + LICENSE files).
   let browser;
+  // The configured browser, so the check tests what the rest of the repo will
+  // actually launch rather than always probing the bundled Chromium.
+  const override = resolveBrowserExecutable({ projectRoot, processEnv: browserProcessEnv });
   try {
-    browser = await chromium.launch({ headless: true });
-    return { pass: true, label: 'Playwright chromium installed' };
+    browser = await chromium.launch(browserLaunchOptions(
+      { headless: true },
+      { projectRoot, processEnv: browserProcessEnv },
+    ));
+    return {
+      pass: true,
+      label: override
+        ? `Playwright chromium installed (using the ${override.source === 'env' ? 'configured' : 'auto-detected'} browser at ${override.path})`
+        : 'Playwright chromium installed',
+    };
   } catch (err) {
     // Only a missing binary is fixed by installing it. Everything else means
     // the binary is present and failed to start, so the advice follows the
     // error Playwright reported instead of repeating a no-op install.
     const cause = classifyChromiumLaunchError(err);
+    // Either cause can be sidestepped by pointing career-ops at a
+    // Chromium-family browser the machine already has.
+    const overrideHint = override
+      ? ` The browser it tried is the one configured for career-ops (${override.path}); clear that setting to fall back to the bundled Chromium.`
+      : ' Or, to use a browser this machine already has instead of the bundled'
+        + ' Chromium (e.g. on an OS too old for it), set'
+        + ' PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/browser, or'
+        + ' CAREER_OPS_BROWSER_AUTODETECT=true to detect an installed'
+        + ' Brave/Chrome/Edge, in your shell or the data-root .env.';
     if (cause.kind === 'missing-executable') {
       return {
         pass: false,
         label: 'Playwright chromium not installed',
-        fix: playwrightInstallFix(),
+        fix: playwrightInstallFix() + overrideHint,
       };
     }
     if (cause.kind === 'missing-libraries') {
@@ -533,7 +559,7 @@ async function checkPlaywright() {
     return {
       pass: false,
       label: `Playwright chromium is installed but failed to launch: ${cause.detail}`,
-      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.',
+      fix: 'Reinstalling will not fix this, because the browser is already installed. If doctor runs inside a sandbox or container, check that it allows a browser process to start.' + overrideHint,
     };
   } finally {
     try { await browser?.close(); } catch { /* ignore */ }
@@ -551,14 +577,16 @@ const MCP_CONFIGS = [
   // there, and JSON.parse throwing on them used to read as "no MCP server
   // configured" (#2252).
   { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'], userFiles: () => opencodeUserConfigFiles() },
+  { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json', 'mcp.json', '.mcp.json'] },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package,
 // or the `mcp-server-playwright` binary that package installs. nixpkgs ships
 // the binary on its own (pkgs.playwright-mcp, in the flake dev shell), so a
 // NixOS config names the command and never mentions the npm package.
-function isPlaywrightServer(server) {
+function isPlaywrightServer(server, { allowDisabled = false } = {}) {
   if (!server || typeof server !== 'object') return false;
+  if (!allowDisabled && (server.enabled === false || server.enabled === 'false')) return false;
   const blob = JSON.stringify(server).toLowerCase();
   return blob.includes('@playwright/mcp') || blob.includes('mcp-server-playwright');
 }
@@ -647,6 +675,247 @@ function hasPlaywrightInMergedOpenCode(configs) {
     .some((def) => def && def.enabled !== false && isPlaywrightServer(def));
 }
 
+// Resolve OMP's active agent directory using supported selectors:
+// named profile ($OMP_PROFILE / $PI_PROFILE), explicit $PI_CODING_AGENT_DIR
+// override, or the default ~/.omp/agent directory (docs/settings.md).
+// Honors $PI_CONFIG_DIR when set, and treats 'default' as the default profile.
+function ompAgentDir() {
+  const profile = (process.env.OMP_PROFILE || process.env.PI_PROFILE || '').trim();
+  const configDirName = process.env.PI_CONFIG_DIR || '.omp';
+  if (profile && profile !== 'default') {
+    return join(homedir(), configDirName, 'profiles', profile, 'agent');
+  }
+  if (process.env.PI_CODING_AGENT_DIR) {
+    return process.env.PI_CODING_AGENT_DIR;
+  }
+  return join(homedir(), configDirName, 'agent');
+}
+
+// OMP's USER-level config sources for settings (docs/settings.md):
+// active agent directory (config.yml > config.yaml > settings.json).
+function ompUserConfigFiles() {
+  const dir = ompAgentDir();
+  const configYml = join(dir, 'config.yml');
+  const configYaml = join(dir, 'config.yaml');
+  if (existsSync(configYml)) return [configYml];
+  if (existsSync(configYaml)) return [configYaml];
+  return [join(dir, 'settings.json')];
+}
+
+function ompConfigEnableProjectState(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  if (isExplicitlyDisabled(cfg['mcp.enableProjectConfig'])) return false;
+  if (isExplicitlyEnabled(cfg['mcp.enableProjectConfig'])) return true;
+  if (cfg.mcp && typeof cfg.mcp === 'object') {
+    if (isExplicitlyDisabled(cfg.mcp.enableProjectConfig)) return false;
+    if (isExplicitlyEnabled(cfg.mcp.enableProjectConfig)) return true;
+  }
+  return undefined;
+}
+
+// OMP allows disabling project MCP configuration via mcp.enableProjectConfig: false
+// in project settings (.omp/config.yml, .omp/settings.json) or user settings
+// (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
+// Active project-level settings files for OMP (docs/settings.md).
+// Excludes inactive variants like .omp/config.yaml that OMP does not load.
+function ompProjectConfigFiles(root) {
+  if (!root) return [];
+  return [
+    join(root, '.omp', 'config.yml'),
+    join(root, '.omp', 'settings.json'),
+  ];
+}
+
+// OMP honors mcp.enableProjectConfig (boolean)
+// in project settings (.omp/config.yml, .omp/settings.json) or user settings
+// (~/.omp/agent/config.yml, ~/.omp/settings.json). When false, project-level MCP
+// sources are excluded from discovery (docs/mcp-config.md). Defaults to true.
+function isOmpProjectMcpEnabled(root) {
+  for (const file of ompProjectConfigFiles(root)) {
+    const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state;
+  }
+  for (const file of ompUserConfigFiles()) {
+    const state = ompConfigEnableProjectState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state;
+  }
+  return true;
+}
+
+// OMP gates user-level Claude Code MCP discovery behind enabledProviders ('claude'),
+// but setting CLAUDE_CONFIG_DIR implicitly enables it unless disabledProviders lists it.
+function isOmpClaudeUserProviderEnabled(root) {
+  const configs = [
+    ...ompProjectConfigFiles(root),
+    ...ompUserConfigFiles(),
+  ].map(readOmpConfigIfPresent).filter(Boolean);
+
+  const listFor = (key) => {
+    const cfg = configs.find((entry) => Array.isArray(entry[key]));
+    return cfg ? cfg[key].map((p) => String(p).toLowerCase()) : [];
+  };
+  if (listFor('disabledProviders').includes('claude')) return false;
+  if (listFor('enabledProviders').includes('claude')) return true;
+
+  return Boolean(process.env.CLAUDE_CONFIG_DIR);
+}
+
+// OMP merges MCP definitions across user agent directory and project files.
+// Project definitions override/shadow user definitions with the same name.
+// User-level disabledServers acts as an explicit denylist across all sources (docs/mcp-config.md).
+// User-level enabledServers force-enables a server definition unless disabledServers also lists it.
+function getOmpEffectivePlaywright(root) {
+  const projectEnabled = isOmpProjectMcpEnabled(root);
+  const claudeUserEnabled = isOmpClaudeUserProviderEnabled(root);
+
+  const claudeHome = process.env.CLAUDE_CONFIG_DIR ? process.env.CLAUDE_CONFIG_DIR : homedir();
+
+  const sources = [
+    // 1. Imported Claude user configs (gated on effective Claude user provider)
+    ...(claudeUserEnabled ? [
+      { file: join(claudeConfigDir(), 'mcp.json'), source: 'the Claude user mcp.json' },
+      { file: join(claudeHome, '.claude.json'), source: 'the Claude user .claude.json' },
+    ] : []),
+    // 2. Project root fallback files (ascending precedence: .mcp.json, then mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.mcp.json'), source: '.mcp.json' },
+      { file: join(root, 'mcp.json'), source: 'mcp.json' },
+    ] : (projectEnabled ? [
+      { file: '.mcp.json', source: '.mcp.json' },
+      { file: 'mcp.json', source: 'mcp.json' },
+    ] : [])),
+    // 3. Imported Claude project configs (.claude/.mcp.json, then .claude/mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.claude', '.mcp.json'), source: '.claude/.mcp.json' },
+      { file: join(root, '.claude', 'mcp.json'), source: '.claude/mcp.json' },
+    ] : []),
+    // 4. Native OMP user files (ascending precedence: .mcp.json, then mcp.json)
+    { file: join(ompAgentDir(), '.mcp.json'), source: 'the OMP user mcp.json' },
+    { file: join(ompAgentDir(), 'mcp.json'), source: 'the OMP user mcp.json', userOverrides: true },
+    // 5. Native OMP project files (ascending precedence: .omp/.mcp.json, then .omp/mcp.json)
+    ...(projectEnabled && root ? [
+      { file: join(root, '.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: join(root, '.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : (projectEnabled ? [
+      { file: join('.omp', '.mcp.json'), source: '.omp/.mcp.json' },
+      { file: join('.omp', 'mcp.json'), source: '.omp/mcp.json' },
+    ] : [])),
+  ];
+
+  const disabledServers = new Set();
+  const forcedEnabled = new Set();
+  const effectiveServers = new Map();
+
+  for (const { file, cfg: directCfg, source, userOverrides } of sources) {
+    const cfg = directCfg ?? (file ? readConfigIfPresent(file) : null);
+    if (!cfg || typeof cfg !== 'object') continue;
+
+    if (userOverrides && Array.isArray(cfg.disabledServers)) {
+      for (const s of cfg.disabledServers) {
+        if (typeof s === 'string' && s.trim()) {
+          disabledServers.add(s.trim().toLowerCase());
+        }
+      }
+    }
+    if (userOverrides && Array.isArray(cfg.enabledServers)) {
+      for (const s of cfg.enabledServers) {
+        if (typeof s === 'string' && s.trim()) {
+          forcedEnabled.add(s.trim().toLowerCase());
+        }
+      }
+    }
+
+    const buckets = [cfg.mcpServers, cfg.mcp].filter((b) => b && typeof b === 'object');
+    for (const bucket of buckets) {
+      for (const [name, def] of Object.entries(bucket)) {
+        if (def && typeof def === 'object') {
+          effectiveServers.set(name.toLowerCase(), { name, def, source });
+        }
+      }
+    }
+  }
+
+  for (const [name, entry] of effectiveServers.entries()) {
+    if (disabledServers.has(name)) continue;
+    const forced = forcedEnabled.has(name);
+    if (!forced && (entry.def.enabled === false || entry.def.enabled === 'false')) continue;
+    if (isPlaywrightServer(entry.def, { allowDisabled: forced })) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
+
+function readOmpConfigIfPresent(file) {
+  if (!existsSync(file)) return null;
+  try {
+    const content = readFileSync(file, 'utf8');
+    if (file.endsWith('.json') || file.endsWith('.jsonc')) {
+      try {
+        return parseConfigByExtension(file, content);
+      } catch {
+        return loadYaml(content);
+      }
+    }
+    return loadYaml(content) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function isExplicitlyDisabled(val) {
+  if (val === false) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'false' || s === 'off' || s === 'disabled' || s === 'no';
+  }
+  return false;
+}
+
+function isExplicitlyEnabled(val) {
+  if (val === true) return true;
+  if (typeof val === 'string') {
+    const s = val.trim().toLowerCase();
+    return s === 'true' || s === 'on' || s === 'enabled' || s === 'yes';
+  }
+  return false;
+}
+
+// Inspect a parsed OMP config object for its native browser setting.
+// Returns false if browser is explicitly disabled, true if explicitly enabled,
+// or undefined if unspecified.
+function ompConfigBrowserState(cfg) {
+  if (!cfg || typeof cfg !== 'object') return undefined;
+  if (isExplicitlyDisabled(cfg.browser)) return false;
+  if (isExplicitlyEnabled(cfg.browser)) return true;
+  if (isExplicitlyDisabled(cfg['browser.enabled'])) return false;
+  if (isExplicitlyEnabled(cfg['browser.enabled'])) return true;
+  if (cfg.browser && typeof cfg.browser === 'object') {
+    if (isExplicitlyDisabled(cfg.browser.enabled)) return false;
+    if (isExplicitlyEnabled(cfg.browser.enabled)) return true;
+  }
+  return undefined;
+}
+
+// OMP drops recognized browser MCP servers (playwright, puppeteer, etc.) by
+// default when its native browser prelude is active (browser.enabled defaults
+// to true). A Playwright MCP definition is only usable if the native browser
+// is explicitly disabled in project settings (.omp/config.yml, .omp/settings.json)
+// or user settings (~/.omp/agent/config.yml, ~/.omp/settings.json).
+function isOmpBrowserDisabled(root) {
+  for (const file of ompProjectConfigFiles(root)) {
+    const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state === false;
+  }
+  for (const file of ompUserConfigFiles()) {
+    const state = ompConfigBrowserState(readOmpConfigIfPresent(file));
+    if (state !== undefined) return state === false;
+  }
+  return false;
+}
+
 // A Claude Code plugin declares its MCP servers in its own .mcp.json, which
 // lives under the user's config dir - never in the project root. The
 // project-root scan below therefore reports "not detected" on a machine where
@@ -727,6 +996,10 @@ function isPlaywrightMcpConfigured(root, activeCli) {
       ...entry.files.map((rel) => join(root, ...rel.split('/'))),
     ].map(readConfigIfPresent).filter(Boolean);
     return hasPlaywrightInMergedOpenCode(configs);
+  }
+  if (activeCli === 'omp') {
+    const effective = getOmpEffectivePlaywright(root);
+    return effective !== null && isOmpBrowserDisabled(root);
   }
   const inProject = entry.files.some((rel) => {
     const file = join(root, ...rel.split('/'));
@@ -872,7 +1145,20 @@ function checkPlaywrightMcp(root, activeCli) {
   if (isPlaywrightMcpConfigured(root, activeCli)) {
     return { pass: true, label: `Playwright MCP server configured (${activeCli})` };
   }
-  // Active CLI is known (flag/env/.env) but its MCP isn't configured.
+  // Active CLI is known (flag/env/.env) but its MCP isn't configured or is filtered.
+  if (activeCli === 'omp') {
+    const effective = getOmpEffectivePlaywright(root);
+    if (effective) {
+      return {
+        warn: true,
+        label: `Playwright MCP server defined in ${effective.source}, but filtered by OMP native browser`,
+        fix: [
+          'OMP drops browser MCP servers by default when its native browser is active.',
+          'To use Playwright MCP in OMP, disable the built-in browser by setting "browser": { "enabled": false } in .omp/settings.json or .omp/config.yml (or run "omp config set browser.enabled false").',
+        ],
+      };
+    }
+  }
   return {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
@@ -882,7 +1168,9 @@ function checkPlaywrightMcp(root, activeCli) {
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (project; see opencode.example.json) or to the global ~/.config/opencode/opencode.json[c] (or $OPENCODE_CONFIG), or pass --cli <name> if you actually run a different CLI.'
-        : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
+        : activeCli === 'omp'
+          ? 'Add the Playwright MCP server to .omp/mcp.json, or pass --cli <name> if you actually run a different CLI.'
+          : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
     ],
   };
 }
@@ -913,15 +1201,18 @@ function checkScanExtractor(root) {
 const USER_LAYER_PREREQS = [
   {
     path: 'cv.md',
+    blocksExit: true,
     fix: [
       'Create cv.md in the project root with your CV in markdown',
-      'See examples/ for reference CVs',
+      'See examples/cv-example.md for the format',
     ],
   },
   {
     path: 'config/profile.yml',
+    blocksExit: true,
     emptyImpact: 'evaluations and scans have none of your targeting',
     fix: [
+      'Run: node onboard-write.mjs --answers <answers.json> [--target <data-root>]',
       'Run: cp config/profile.example.yml config/profile.yml',
       'Then edit it with your details',
     ],
@@ -1000,7 +1291,7 @@ function checkPrereq(prereq) {
   if (path === 'config/profile.yml' && !explicitTarget && hasProfileOverride()) {
     const named = profilePathFor(projectRoot);
     return {
-      warn: true,
+      pass: false,
       label: `${path} not found (CAREER_OPS_PROFILE names ${named})`,
       fix: [`Create ${named}, or unset CAREER_OPS_PROFILE to use the profile in the data root`],
     };
@@ -1008,10 +1299,15 @@ function checkPrereq(prereq) {
   const fromEnvFile = path === 'config/profile.yml' && !explicitTarget ? profileFromEnvFile(projectRoot) : null;
   if (fromEnvFile) {
     return {
-      warn: true,
+      pass: false,
       label: `${path} not found (.env sets CAREER_OPS_PROFILE=${fromEnvFile}, but most commands never load .env)`,
       fix: [`Export CAREER_OPS_PROFILE=${fromEnvFile} in your shell so every command sees it, or remove it from .env and put the profile at ${profilePathFor(projectRoot)}`],
     };
+  }
+  // cv.md and config/profile.yml are the files a run cannot score without.
+  // The other two stay warnings: a checkout can be healthy and still unfinished.
+  if (prereq.blocksExit) {
+    return { pass: false, label: `${path} not found (user setup required)`, fix };
   }
   return { warn: true, label: `${path} not found (user setup required)`, fix };
 }
@@ -1205,7 +1501,11 @@ function checkPlugins(root) {
   for (const m of manifests) {
     const s = pluginState(m, cfg);
     lines.push(`${m.id} (${s.enabled ? 'enabled' : s.configured ? `missing ${s.missingEnv.join(', ')}` : 'off'})`);
-    if (s.configured && s.missingEnv.length) fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    if (s.configured && s.missingEnv.length) {
+      const paste = linkedInPluginFix(m.id);
+      if (paste) fixes.push(paste);
+      fixes.push(`${m.id}: add ${s.missingEnv.join(', ')} to .env`);
+    }
   }
   const label = `Plugins: ${lines.join(', ')}`;
   return fixes.length ? { warn: true, label, fix: fixes } : { pass: true, label };
@@ -1288,18 +1588,33 @@ function checkUserTemplates(root) {
 function checkProfileShape(root) {
   const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
+  // Name the file actually read. With --target that is the target's
+  // profile, not the CAREER_OPS_PROFILE path the default label comes from.
+  // A CAREER_OPS_PROFILE outside the root keeps its absolute path, since a
+  // ../../ path says less than the one the user exported.
+  const rel = relative(root, profilePath);
+  const label = rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) ? rel.split(sep).join('/') : profilePath;
   let findings;
   try {
     const example = existsSync(EXAMPLE_PATH) ? readFileSync(EXAMPLE_PATH, 'utf-8') : '';
-    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example).findings;
+    findings = validateProfile(readFileSync(profilePath, 'utf-8'), example, label).findings;
   } catch (err) {
-    return { warn: true, label: `config/profile.yml could not be read (${err.message})` };
+    return { warn: true, label: `${label} could not be read (${err.message})` };
   }
   const actionable = findings.filter((f) => f.level !== 'info');
-  if (actionable.length === 0) return { pass: true, label: 'config/profile.yml: shape OK' };
+  if (actionable.length === 0) return { pass: true, label: `${label}: shape OK` };
+  // A bad value sits under a key the readers know. Calling it an unrecognized
+  // key would send the user to delete a setting they only need to correct.
+  const badValues = actionable.some((f) => f.code === 'bad-value');
+  const otherIssues = actionable.some((f) => f.code !== 'bad-value');
+  const why = badValues && otherIssues
+    ? 'unrecognized keys and invalid values have no effect'
+    : badValues
+      ? 'known settings hold values the readers ignore'
+      : 'settings under an unrecognized key have no effect';
   return {
     warn: true,
-    label: `config/profile.yml: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — settings under an unrecognized key have no effect`,
+    label: `${label}: ${actionable.length} issue${actionable.length === 1 ? '' : 's'} — ${why}`,
     fix: actionable.map((f) => f.message),
   };
 }
@@ -1308,6 +1623,7 @@ async function main() {
   console.log('\ncareer-ops doctor');
   console.log('================\n');
 
+  const browserProcessEnv = snapshotBrowserProcessEnv();
   const { cli: activeCli, source: cliSource, warning: cliWarning } = resolveActiveCli();
   // A data root inside the plugin copy is deleted on the next plugin update,
   // so the checks that create User Layer folders and files skip it.
@@ -1325,7 +1641,7 @@ async function main() {
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
-    await checkPlaywright(),
+    await checkPlaywright(browserProcessEnv),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
@@ -1339,6 +1655,7 @@ async function main() {
       ? [checkAutoDir('data'), checkPipelineFile(), checkAutoDir('output'), checkAutoDir('reports')]
       : []),
     checkPlugins(projectRoot),
+    { pass: true, label: LINKEDIN_DOCTOR_LABEL },
     // checkPrereq already explains the .env case when the profile is missing.
     prereqPresent(projectRoot, { path: 'config/profile.yml' }) ? checkEnvFileProfile(projectRoot) : null,
   ].filter(Boolean);
@@ -1380,7 +1697,23 @@ async function main() {
   const setupNote = setupMissing.length > 0
     ? `Setup is not finished (${setupMissing.length} file${setupMissing.length === 1 ? '' : 's'} missing: ${setupMissing.map(({ path }) => path).join(', ')})`
     : null;
-  const setupHint = `Open your AI CLI in this folder (${CLI_NAMES}) and it walks you through setup by chatting.`;
+  // --target forces codeRoot and projectRoot to the same path, so equality
+  // alone would drop --target and let onboard-write follow getCareerOpsRoot().
+  const quoteOnboard = process.platform === 'win32' ? quotePowerShell : quoteSh;
+  const onboardCmd = !explicitTarget && projectRoot === codeRoot
+    ? 'node onboard-write.mjs --answers <answers.json>'
+    : `node ${quoteOnboard(join(codeRoot, 'onboard-write.mjs'))} --answers <answers.json> --target ${quoteOnboard(projectRoot)}`;
+  // onboard-write only writes config/profile.yml and portals.yml, so cv.md
+  // gets its own step instead of a command that would not create it.
+  const setupSteps = [];
+  if (setupMissing.some(({ path }) => path === 'config/profile.yml' || path === 'portals.yml')) {
+    setupSteps.push(`Run \`${onboardCmd}\` from the career-ops checkout.`);
+  }
+  if (setupMissing.some(({ path }) => path === 'cv.md')) {
+    setupSteps.push(`Add your CV as cv.md in ${projectRoot} (examples/cv-example.md shows the format).`);
+  }
+  setupSteps.push(`Open your AI CLI in the checkout (${CLI_NAMES}) and it walks you through setup by chatting.`);
+  const setupHint = setupSteps.join(' ');
   if (failures > 0) {
     console.log(`Result: ${failures} issue${failures === 1 ? '' : 's'} found. Fix them and run \`npm run doctor\` again.`);
     if (setupNote) {
@@ -1398,7 +1731,6 @@ async function main() {
     }
     console.log('');
     console.log('Join the community: https://discord.gg/8pRpHETxa4');
-    console.log('Read the manifesto: `npm run manifesto` — a new way of job searching is taking shape, and you are now part of it.');
     process.exit(0);
   }
 }

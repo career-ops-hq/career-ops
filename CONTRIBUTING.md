@@ -145,7 +145,7 @@ career-ops reads job listings from public sources: ATSes, job boards, company ca
 
 5. **The aggregation layer belongs to the project.** A provider reads its own source. Cross-source aggregation, ranking, matching and the registry are the project's own and are never delegated to a source. They are first-party wherever they run: on your machine in the local core, or in the opt-in shared layer the project governs (see "First-party and official surfaces").
 
-6. **The source's own `robots.txt`.** Checked before a provider is written, and read the way a crawler reads it: per path, under the group that binds career-ops's own client (`User-agent: *`, or a token the scanner actually sends). A `Disallow` counts only when it covers a path the provider would fetch — a rule on `/api`, `/data`, a subscribe form or any route the parser never requests is not an obstacle (precedent: ITviec, CareerViet, both carrying disallows they route around). A `Disallow` that does cover the listing paths the provider needs is a stop: the source is not indexed, and the finding goes in the [Evaluated, not supported](docs/SUPPORTED_JOB_BOARDS.md#evaluated-not-supported) table (precedent: Lagou — `Disallow: /*?*` under `User-agent: *`, and every usable request carries a query string). A `robots.txt` rule scoped to a named AI or agent crawler (`ClaudeBot`, `anthropic-ai`, `Claude-Web`, a generic managed AI-bot block) does **not** name this client — the scanner is a distinct, bounded, `career-ops`-identified fetcher, not that crawler — but a scan can still be the first step toward a model reading the posting in a later `pipeline` / `triage` run. Whether the operator's intent reaches it is therefore a maintainer decision on a [source proposal](https://github.com/career-ops-hq/career-ops/issues/new?template=source-proposal.yml), not something the rule settles by itself. Anything ambiguous takes the same route.
+6. **Read like a visitor, for one person.** A provider reads a posting on the job seeker's own machine so that person can understand it and, if it fits, apply on the employer's own page (rule 2). It builds no index and republishes nothing: what it reads is kept only in the user's own files. `robots.txt` is written for crawlers that index or copy a site, and a provider does neither, so a source's `robots.txt` is not a gate. A provider may read what any visitor reads without signing in, with a bounded number of requests per host, honouring a `Crawl-delay` the source states. Three things stay a stop: content behind a login or a user account (LinkedIn and the like); anything that needs a CAPTCHA solved; and a source whose operator asks career-ops not to read it, which is removed ([open an issue](https://github.com/career-ops-hq/career-ops/issues/new) to ask). Until 2026-11-08 a `Disallow` covering the listing paths was a stop; the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md#rule-6-changed-2026-11-08) records why that changed.
 
 To see how the rules have actually been applied, read the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md): one entry per listed source, with what was checked and how.
 
@@ -161,7 +161,7 @@ To propose a source (yours or anyone's): [open a source proposal](https://github
 
 ## What we do NOT accept
 
-- **PRs that scrape platforms prohibiting automated access** (LinkedIn, etc.). We actively reject these to respect third-party ToS.
+- **PRs that read behind a login or solve CAPTCHAs** (LinkedIn and other signed-in platforms). A provider reads what any visitor sees without signing in, so one person can decide whether to apply there (Source Indexing Policy, rule 6).
 - **PRs that enable auto-submitting applications** without human review. career-ops is a decision-support tool, not a spam bot.
 - **PRs that add external API dependencies** without prior discussion in an issue.
 - **Feature PRs against bundled plugins** (`plugins/apify`, `plugins/gmail`, `plugins/notion`). Bundled plugins are stable *reference seeds* — to extend one, publish your own `career-ops-plugin-<id>` and we'll register it as the maintained successor that takes precedence once installed (see [docs/PLUGINS.md](docs/PLUGINS.md)). Bundled plugins only take security/compat fixes.
@@ -247,7 +247,8 @@ without declaring it.
 Run `node i18n-drift.mjs --lang tr` (repeat `--lang` for several languages),
 or omit `--lang` to check every locale. `--json` emits machine-readable results;
 `--summary` prints language totals. The checker runs offline with Node alone and
-reports drift without failing.
+reports drift without failing; `--fail-under N` is the opt-in exception, exiting
+1 when any selected locale's coverage is below N%, for a CI gate you configure.
 It checks existing mode files, including nested interview modes, and files
 promised in each locale's README. Languages shipping only the core subset are
 not penalized for modes they have not translated.

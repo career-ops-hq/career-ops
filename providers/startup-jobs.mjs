@@ -50,6 +50,30 @@ import { htmlToText } from './_html-to-text.mjs';
 //     " · " (a trailing comp range) stripped. Observed shapes: "{body}\n\n{Location}",
 //     "{body}\n\n{Location} · {Comp}", or just "{Location}" with no body at all.
 //
+// No `description` is set. The feed's <description> is a one-sentence
+// teaser plus the location line, not the JD: on 2026-11-09 all 50 items in
+// the live feed ran 18-340 characters. content_filter drops a posting whose
+// text lacks a required keyword but passes one with no text, so the teaser
+// would drop every posting whose single sentence doesn't happen to name the
+// stack. providers/_wp-job-feed.mjs refuses WordPress's <description>
+// excerpt for the same reason, and providers/paylocity.mjs leaves out its
+// ~110-char snippet.
+//
+// The teaser goes to `visaText` instead, which only visa_filter reads, so a
+// teaser that says "we offer visa sponsorship" (or "no sponsorship") still
+// counts as visa evidence. None of the 50 said either, but nothing stops a
+// teaser from saying it. visa_filter matches only its sponsorship keywords,
+// so a teaser without them gets the same decision as no text.
+//
+// What the other description readers lose (same 50 items):
+// - country_eligibility_filter: none of the 50 carries eligibility wording,
+//   and the teaser's location line still reaches location_filter as
+//   `location`.
+// - content_filter.rescue_title_misses can no longer rescue a title miss
+//   from this board, since an empty description fails a rescue. A teaser
+//   that named a positive keyword used to be enough; that is the one signal
+//   given up here.
+//
 // Wire in via a `job_boards:` entry with `provider: startup-jobs`.
 
 const FEED_HOST = 'startup.jobs';
@@ -193,12 +217,12 @@ function maskCdataAndComments(str) {
  * `<description>` whose last line is the location (optionally followed by
  * " · {comp range}"). No structured company/location fields are offered.
  *
- * The `<description>` text is also carried as plain-text `description` (it
- * ships in the same payload, so it is free), giving the scanner's
- * content_filter and visa_filter something to read.
+ * The `<description>` is not carried as `description`: it is a short teaser,
+ * not the JD (see the header comment). It supplies the location and, as
+ * plain text, `visaText`.
  *
  * @param {string} xml - raw RSS feed body
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, visaText?: string, postedAt?: number}>}
  */
 export function parseStartupJobsFeed(xml) {
   if (typeof xml !== 'string') {
@@ -257,10 +281,10 @@ export function parseStartupJobsFeed(xml) {
       url,
     };
     if (postedAt !== undefined) job.postedAt = postedAt;
-    // Location above reads the raw lines; the description is flattened to
-    // plain text (and capped) by the shared helper, like pythonorg.mjs does.
-    const descriptionText = htmlToText(description);
-    if (descriptionText) job.description = descriptionText;
+    // Location above reads the raw lines; visaText is the teaser flattened to
+    // plain text by the shared helper.
+    const visaText = htmlToText(description);
+    if (visaText) job.visaText = visaText;
     jobs.push(job);
   }
 

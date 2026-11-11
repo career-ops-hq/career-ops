@@ -47,7 +47,7 @@ function runMerge(opts = {}) {
     }
     let output = '';
     try {
-      output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), ...(opts.args ?? [])], {
+      output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless', ...(opts.args ?? [])], {
         encoding: 'utf-8',
         timeout: 30000,
         stdio: ['ignore', 'pipe', 'pipe'],

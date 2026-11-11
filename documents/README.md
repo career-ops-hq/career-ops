@@ -23,3 +23,6 @@ are out of scope — convert them first.
 
 Re-runs are idempotent: already-merged sources are fingerprinted in
 `data/intake-state.json` and only genuinely new material is proposed again.
+When a merged source changes, its last merged text, kept in
+`data/intake-snapshots/` (also user layer and gitignored), lets intake propose
+from the lines that changed instead of the whole document.

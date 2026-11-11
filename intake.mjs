@@ -22,10 +22,19 @@
 // PDFs and .docx are out of scope for v1 (the summary tells the user to
 // convert them).
 //
+// Snapshots (#5779): `--commit` also keeps the extracted text of each recorded
+// source in data/intake-snapshots/, so `--diff` can show a `changed` source as
+// the lines that moved instead of the whole document again. A snapshot is
+// trusted only while its text still hashes to the ledger entry; anything else
+// (an install from before snapshots, a deleted ledger, a crash between the two
+// writes) falls back to the full text, labelled as such.
+//
 // Usage:
 //   node intake.mjs                 # scan + extract, JSON to stdout
 //   node intake.mjs --summary       # human-readable table instead of JSON
 //   node intake.mjs --text <path>   # full extracted text of one source
+//   node intake.mjs --diff <path>   # what changed in one source since it was
+//                                   # last committed (unified line diff)
 //   node intake.mjs --commit <path …>
 //                                   # record the confirmed sources as ingested
 //                                   # (run only after the user confirmed)
@@ -42,7 +51,7 @@ import {
 import { dirname, extname, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { writeFileAtomic, acquireTrackerLock } from './tracker-utils.mjs';
 import { isNestedCheckout } from './lib/mjs-files.mjs';
@@ -51,6 +60,10 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
 const DOCS_DIR = process.env.CAREER_OPS_DOCUMENTS_DIR || join(DATA_ROOT, 'documents');
 const STATE_FILE = process.env.CAREER_OPS_INTAKE_STATE || join(DATA_ROOT, 'data', 'intake-state.json');
+// Beside the ledger rather than under DATA_ROOT, so an overridden state file
+// (CAREER_OPS_INTAKE_STATE, which the tests use) takes its snapshots with it.
+// With no override this is {DATA_ROOT}/data/intake-snapshots/.
+const SNAPSHOT_DIR = join(dirname(STATE_FILE), 'intake-snapshots');
 
 // The four intake folders from the issue spec. Files directly under
 // documents/ are picked up too — the folders are guidance, not a gate.
@@ -295,7 +308,130 @@ function toRelPath(abs) {
   return relative(DOCS_DIR, abs).split(sep).join('/');
 }
 
-function extractAll() {
+/**
+ * Snapshot filename for a documents/-relative source path. Pure.
+ *
+ * A hash, not a slug: slugs collide (`cv/a-b.md` and `cv/a/b.md`; `cv/CV.md`
+ * and `cv/cv.md` on a case-insensitive disk), and a source filename can carry
+ * the user's name, which then stays out of data/intake-snapshots/ listings.
+ */
+export function snapshotFileName(relPath) {
+  return `${sha256(relPath)}.txt`;
+}
+
+/** Split text into lines for diffing: CRLF folded, no phantom last line. Pure. */
+function toLines(text) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  if (lines.length && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+// Above this many DP cells (lines changed in the old text × in the new) the
+// LCS table would cost hundreds of MB; the middle is reported as removed then
+// added instead. Still a correct diff, just not a minimal one. A CV never gets
+// near it; a several-hundred-page export might.
+const LCS_CELL_LIMIT = 25_000_000;
+
+/**
+ * Line diff of two texts as a list of `{ op, line, a, b }`, where op is ' '
+ * (kept), '-' (only in the old text) or '+' (only in the new), and a / b are
+ * 1-based line numbers in the old / new text. Pure; longest-common-subsequence
+ * over the lines left after trimming the shared prefix and suffix. No package
+ * dependency: package.json carries no diff library and this is ~40 lines.
+ */
+export function diffLines(oldText, newText) {
+  const a = toLines(oldText);
+  const b = toLines(newText);
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start += 1;
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA -= 1; endB -= 1; }
+
+  const ops = [];
+  for (let i = 0; i < start; i += 1) ops.push({ op: ' ', line: a[i], a: i + 1, b: i + 1 });
+  const n = endA - start;
+  const m = endB - start;
+  if (n > 0 && m > 0 && (n + 1) * (m + 1) <= LCS_CELL_LIMIT) {
+    // lcs[i * (m + 1) + j] = LCS length of a[start+i..endA) and b[start+j..endB).
+    const w = m + 1;
+    const lcs = new Uint32Array((n + 1) * w);
+    for (let i = n - 1; i >= 0; i -= 1) {
+      for (let j = m - 1; j >= 0; j -= 1) {
+        lcs[i * w + j] = a[start + i] === b[start + j]
+          ? lcs[(i + 1) * w + j + 1] + 1
+          : Math.max(lcs[(i + 1) * w + j], lcs[i * w + j + 1]);
+      }
+    }
+    let i = 0;
+    let j = 0;
+    while (i < n && j < m) {
+      if (a[start + i] === b[start + j]) {
+        ops.push({ op: ' ', line: a[start + i], a: start + i + 1, b: start + j + 1 });
+        i += 1; j += 1;
+      } else if (lcs[(i + 1) * w + j] >= lcs[i * w + j + 1]) {
+        ops.push({ op: '-', line: a[start + i], a: start + i + 1, b: start + j });
+        i += 1;
+      } else {
+        ops.push({ op: '+', line: b[start + j], a: start + i, b: start + j + 1 });
+        j += 1;
+      }
+    }
+    for (; i < n; i += 1) ops.push({ op: '-', line: a[start + i], a: start + i + 1, b: start + m });
+    for (; j < m; j += 1) ops.push({ op: '+', line: b[start + j], a: start + n, b: start + j + 1 });
+  } else {
+    for (let i = start; i < endA; i += 1) ops.push({ op: '-', line: a[i], a: i + 1, b: start });
+    for (let j = start; j < endB; j += 1) ops.push({ op: '+', line: b[j], a: endA, b: j + 1 });
+  }
+  for (let k = 0; k < a.length - endA; k += 1) {
+    ops.push({ op: ' ', line: a[endA + k], a: endA + k + 1, b: endB + k + 1 });
+  }
+  return ops;
+}
+
+const HEADING_RE = /^#{1,6}\s+\S/;
+
+/**
+ * Format diffLines() output as unified-diff hunks (`@@ -a,b +c,d @@`), with
+ * `context` unchanged lines around each change. Pure; returns '' when nothing
+ * changed.
+ *
+ * Each hunk header carries the nearest Markdown heading above the hunk, the
+ * way `git diff` names the enclosing function, so a changed bullet arrives
+ * labelled with the `### Company` block it sits in. That is the cheap answer
+ * to "line-based or section-aware" (#5779): line-based, with the section shown.
+ */
+export function formatHunks(ops, context = 2) {
+  const changed = ops.map((o, idx) => (o.op === ' ' ? -1 : idx)).filter((idx) => idx !== -1);
+  if (!changed.length) return '';
+  // Group change indices whose context windows touch into one hunk.
+  const groups = [];
+  for (const idx of changed) {
+    const last = groups[groups.length - 1];
+    if (last && idx - last[1] <= context * 2 + 1) last[1] = idx;
+    else groups.push([idx, idx]);
+  }
+  const out = [];
+  for (const [first, lastIdx] of groups) {
+    const from = Math.max(0, first - context);
+    const to = Math.min(ops.length - 1, lastIdx + context);
+    const slice = ops.slice(from, to + 1);
+    const oldCount = slice.filter((o) => o.op !== '+').length;
+    const newCount = slice.filter((o) => o.op !== '-').length;
+    // Unified-diff convention: a zero-length side names the line before it.
+    const oldStart = oldCount ? slice.find((o) => o.op !== '+').a : slice[0].a;
+    const newStart = newCount ? slice.find((o) => o.op !== '-').b : slice[0].b;
+    let heading = '';
+    for (let k = from - 1; k >= 0; k -= 1) {
+      if (ops[k].op !== '-' && HEADING_RE.test(ops[k].line)) { heading = ops[k].line.trim(); break; }
+    }
+    out.push(`@@ -${oldStart},${oldCount} +${newStart},${newCount} @@${heading ? ` ${heading}` : ''}`);
+    for (const o of slice) out.push(`${o.op}${o.line}`);
+  }
+  return out.join('\n') + '\n';
+}
+
+function extractAll({ withText = false } = {}) {
   const extractor = detectPdfExtractor();
   const { files, unreadable } = listSourceFiles();
   const sources = files.map((abs) => {
@@ -326,7 +462,12 @@ function extractAll() {
           reason: 'no text extracted — likely a scanned/image-only PDF; convert or re-export with a text layer',
         };
       }
-      return { ...base, chars: text.length, hash: sha256(text), preview: text.slice(0, 400) };
+      // `text` only on the --commit path, which writes it as the snapshot:
+      // the scan JSON must keep printing a preview, not every whole CV.
+      return {
+        ...base, chars: text.length, hash: sha256(text), preview: text.slice(0, 400),
+        ...(withText ? { text } : {}),
+      };
     } catch (err) {
       return { ...base, status: 'error', reason: String(err.message || err).split('\n')[0] };
     }
@@ -375,6 +516,15 @@ async function commitState(result, only = []) {
     for (const s of computeDelta(state, result.sources.filter(source => source.status !== 'ingested'))) {
       if (!s.hash || s.status === 'ingested') continue;
       if (!all && !only.includes(s.path)) continue;
+      // Snapshot first, in the same branch that records the source, so a
+      // committer that records nothing (a stale scan, see
+      // tests/intake-concurrent-commit.test.mjs) writes no snapshot either. If
+      // the ledger write below then fails, the snapshot no longer hashes to
+      // the ledger entry and --diff falls back to the full text.
+      if (typeof s.text === 'string') {
+        mkdirSync(SNAPSHOT_DIR, { recursive: true });
+        writeFileAtomic(join(SNAPSHOT_DIR, snapshotFileName(s.path)), s.text);
+      }
       state.ingested[s.path] = { hash: s.hash, ingestedAt: now };
       count += 1;
     }
@@ -451,8 +601,108 @@ function runSelfTest() {
   const delta2 = computeDelta(state, [{ path: 'cv/master.md', hash: sha256('edited') }]);
   eq('re-extracted source with different text is changed', delta2[0].status, 'changed');
 
+  // Line diff + hunks (#5779).
+  const ops = diffLines('a\nb\nc\n', 'a\nB\nc\nd\n');
+  eq('diffLines marks a replaced line as - then +',
+    ops.map((o) => `${o.op}${o.line}`), [' a', '-b', '+B', ' c', '+d']);
+  eq('diffLines of equal texts has no changes',
+    diffLines('x\r\ny\n', 'x\ny').every((o) => o.op === ' '), true);
+  eq('formatHunks is empty when nothing changed', formatHunks(diffLines('x\n', 'x\n')), '');
+  eq('formatHunks names the heading above the hunk',
+    formatHunks(diffLines('### Acme\n\n- one\n- two\n- three\n- four\n', '### Acme\n\n- one\n- two\n- three\n- 4\n'), 1),
+    '@@ -5,2 +5,2 @@ ### Acme\n - three\n-- four\n+- 4\n');
+  eq('formatHunks counts a pure insertion from the line before it',
+    formatHunks(diffLines('a\n', 'a\nb\n'), 0), '@@ -1,0 +2,1 @@\n+b\n');
+  eq('snapshot names are a hash of the path', /^[0-9a-f]{64}\.txt$/.test(snapshotFileName('cv/Jane Doe.md')), true);
+  eq('snapshot names keep case-variant paths apart',
+    snapshotFileName('cv/CV.md') !== snapshotFileName('cv/cv.md'), true);
+
   console.log(`\nself-test: ${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);
+}
+
+/**
+ * Resolve, contain and extract one source named on the command line. Shared by
+ * --text and --diff so both refuse the same paths the same way. Exits 1 with a
+ * one-line message on any expected failure.
+ */
+function readSourceText(target, flag) {
+  if (!target) { console.error(`Usage: node intake.mjs ${flag} <path relative to documents/>`); process.exit(1); }
+  const abs = resolve(DOCS_DIR, target);
+  // Scan output only ever emits paths inside documents/ — refuse anything
+  // that resolves outside it.
+  if (!abs.startsWith(resolve(DOCS_DIR) + sep)) {
+    console.error(`Path escapes documents/: ${target}`);
+    process.exit(1);
+  }
+  if (!existsSync(abs)) { console.error(`Not found: ${target}`); process.exit(1); }
+  const cls = classifySource(target);
+  let text;
+  // existsSync() only proves the name resolves — a directory called `cv.md`,
+  // a file the user can't read, or a malformed PDF all throw from here. Fail
+  // the way extractAll() does (first line of the message, nonzero) instead of
+  // dumping a stack trace at someone who mistyped a path.
+  try {
+    if (cls.kind === 'direct') text = readFileSync(abs, 'utf-8');
+    else if (cls.kind === 'pdf') {
+      const extractor = detectPdfExtractor();
+      if (!extractor) { console.error(PDF_INSTALL_HINT); process.exit(1); }
+      text = extractor.extract(abs);
+    } else { console.error(`Unsupported source: ${cls.reason}`); process.exit(1); }
+  } catch (err) {
+    console.error(`Could not read ${target}: ${String(err.message || err).split('\n')[0]}`);
+    process.exit(1);
+  }
+  if (!text.trim()) {
+    console.error('No text extracted — likely a scanned/image-only PDF; convert or re-export with a text layer.');
+    process.exit(1);
+  }
+  // The ledger key: documents/-relative with forward slashes, whatever
+  // spelling (`./cv/master.md`, `cv\\master.md`) the caller used.
+  return { path: toRelPath(abs), text };
+}
+
+/**
+ * The --diff output for one extracted source. Every outcome is an answer, not
+ * an error, so all of them exit 0; the first line says which one it is.
+ *
+ *   - unchanged since the last commit → one line saying so;
+ *   - a snapshot whose text still hashes to the ledger entry → a unified diff;
+ *   - anything else (never committed, committed before snapshots existed,
+ *     snapshot missing or out of step with the ledger) → a one-line notice,
+ *     then the full text, so the agent reads it exactly as it would --text.
+ *     The next --commit writes the snapshot, so this happens once per source.
+ */
+function diffSource({ path, text }) {
+  const entry = loadState().ingested[path];
+  if (entry && entry.hash === sha256(text)) {
+    return `intake: ${path} is unchanged since it was last committed (${entry.ingestedAt || 'date unknown'}).\n`;
+  }
+  let snapshot = null;
+  let reason;
+  if (!entry) reason = 'it has never been committed';
+  else {
+    try {
+      snapshot = readFileSync(join(SNAPSHOT_DIR, snapshotFileName(path)), 'utf-8');
+    } catch {
+      reason = 'it was committed before intake kept snapshots';
+    }
+    if (snapshot !== null && sha256(snapshot) !== entry.hash) {
+      snapshot = null;
+      reason = 'the snapshot does not match the recorded fingerprint';
+    }
+  }
+  if (snapshot === null) {
+    const body = text.endsWith('\n') ? text : `${text}\n`;
+    return `intake: no snapshot to diff ${path} against (${reason}); full text follows.\n${body}`;
+  }
+  // The ledger hashes raw text, but toLines() folds CRLF and the final newline,
+  // so a source that changed only in those has a new hash and no hunks.
+  const hunks = formatHunks(diffLines(snapshot, text));
+  if (!hunks) {
+    return `intake: ${path} differs from its snapshot only in line endings or the final newline; nothing to propose.\n`;
+  }
+  return `--- ${path} (committed ${entry.ingestedAt || 'date unknown'})\n+++ ${path} (current)\n` + hunks;
 }
 
 const isMain = isMainModule(import.meta.url);
@@ -464,63 +714,37 @@ const isMain = isMainModule(import.meta.url);
 const INTAKE_USAGE = [
   'Usage: node intake.mjs [--summary]',
   '       node intake.mjs --text <path>',
+  '       node intake.mjs --diff <path>',
   '       node intake.mjs --commit <path> [<path> ...]',
   '       node intake.mjs --commit --all',
   '       node intake.mjs --self-test',
 ].join('\n');
 
-const INTAKE_KNOWN_FLAGS = ['--summary', '--text', '--commit', '--all', '--self-test', '--help', '-h'];
+const INTAKE_KNOWN_FLAGS = ['--summary', '--text', '--diff', '--commit', '--all', '--self-test', '--help', '-h'];
 
 async function main() {
   const args = process.argv.slice(2);
   // Unknown flags used to be ignored, so `intake --txt path` scanned the
   // whole folder and exited 0. --commit is not a value flag: `--commit --all`
   // and `--commit --summary` are real. --text=path has to be read below or
-  // declaring --text as a value flag would scan again.
-  validateFlags(args, INTAKE_KNOWN_FLAGS, INTAKE_USAGE, { valueFlags: ['--text'], requireOperand: true });
+  // declaring --text as a value flag would scan again. --diff is the same.
+  validateFlags(args, INTAKE_KNOWN_FLAGS, INTAKE_USAGE, { valueFlags: ['--text', '--diff'], requireOperand: true });
   if (args.includes('--self-test')) runSelfTest();
 
   ensureScaffold();
-  const textEq = args.find((arg) => typeof arg === 'string' && arg.startsWith('--text='));
-  const textIdx = args.indexOf('--text');
-  if (textEq !== undefined || textIdx !== -1) {
-    const target = textEq !== undefined ? textEq.slice('--text='.length) : args[textIdx + 1];
-    if (!target) { console.error('Usage: node intake.mjs --text <path relative to documents/>'); process.exit(1); }
-    const abs = resolve(DOCS_DIR, target);
-    // Scan output only ever emits paths inside documents/ — refuse anything
-    // that resolves outside it.
-    if (!abs.startsWith(resolve(DOCS_DIR) + sep)) {
-      console.error(`Path escapes documents/: ${target}`);
-      process.exit(1);
-    }
-    if (!existsSync(abs)) { console.error(`Not found: ${target}`); process.exit(1); }
-    const cls = classifySource(target);
-    let text;
-    // existsSync() only proves the name resolves — a directory called `cv.md`,
-    // a file the user can't read, or a malformed PDF all throw from here. Fail
-    // the way extractAll() does (first line of the message, nonzero) instead of
-    // dumping a stack trace at someone who mistyped a path.
-    try {
-      if (cls.kind === 'direct') text = readFileSync(abs, 'utf-8');
-      else if (cls.kind === 'pdf') {
-        const extractor = detectPdfExtractor();
-        if (!extractor) { console.error(PDF_INSTALL_HINT); process.exit(1); }
-        text = extractor.extract(abs);
-      } else { console.error(`Unsupported source: ${cls.reason}`); process.exit(1); }
-    } catch (err) {
-      console.error(`Could not read ${target}: ${String(err.message || err).split('\n')[0]}`);
-      process.exit(1);
-    }
-    if (!text.trim()) {
-      console.error('No text extracted — likely a scanned/image-only PDF; convert or re-export with a text layer.');
-      process.exit(1);
-    }
-    process.stdout.write(text);
+  const textTarget = flagValue(args, '--text');
+  if (hasFlag(args, '--text')) {
+    process.stdout.write(readSourceText(textTarget, '--text').text);
+    return;
+  }
+  if (hasFlag(args, '--diff')) {
+    process.stdout.write(diffSource(readSourceText(flagValue(args, '--diff'), '--diff')));
     return;
   }
 
-  const result = extractAll();
   const commitIdx = args.indexOf('--commit');
+  // Full text only when committing: that is where it becomes the snapshot.
+  const result = extractAll({ withText: commitIdx !== -1 });
   if (commitIdx !== -1) {
     const only = args.slice(commitIdx + 1).filter((a) => !a.startsWith('--'));
     const all = args.includes('--all');

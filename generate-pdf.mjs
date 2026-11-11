@@ -4,8 +4,8 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
- *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
  *
  * --batch renders every document in a JSON manifest (an array of
  * {input, output, format?, reportNum?}) through ONE shared Chromium instead of
@@ -39,9 +39,22 @@
  * recent senior title and reads as concealment to ATS parsers and recruiters.
  *
  * --max-pages=N sets the preferred rendered CV length (default: 2 pages).
- * The actual page count is checked after Chromium writes the PDF; overflow
- * warns with trimming guidance by default. --strict-pages turns that warning
- * into a hard rejection without publishing the render as successful.
+ * The actual page count is read from the PDF Chromium produced, before anything
+ * is written to the output path. An overflow never lands there: the render goes
+ * to a sibling {output}.overflow.pdf draft for inspection, and the output path
+ * keeps whatever it held. By default that is a warning and the process still
+ * exits 0; --strict-pages turns it into a hard rejection. Either way the draft
+ * is never logged as a successful render or indexed in data/pdf-index.tsv.
+ *
+ * --strict-fact-check makes a `warn` verdict from the fact gate fatal, the same
+ * way --strict-pages makes a page-budget overflow fatal. The gate's `warn`
+ * covers findings that are advisory by nature — claims it could not read
+ * (`#5348`), a missing config/cv-facts.json — so a careful caller may still
+ * want them to stop a render instead of scrolling past them. The warnings are
+ * printed exactly as they are without the flag; only the exit changes. It does
+ * not make the gate RUN: --skip-fact-check, or a workspace with no cv.md, still
+ * means no gate, and combining the two is rejected rather than silently
+ * honouring one over the other. A `block` verdict already fails without it.
  *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
@@ -53,13 +66,15 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFile
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
-import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections } from './theme-style.mjs';
+import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections, readCvPageBudget } from './theme-style.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
 import { PAGE_CSS_SIZE, PAGE_FORMATS, normalizePageFormat, pageFormatForCountry, resolvePageFormat } from './lib/page-format.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const trackerPath = resolveTrackerPath(getCareerOpsRoot());
@@ -214,6 +229,21 @@ function resolvePdfCliPath(p) {
 mkdirSync(resolve(workspaceRoot, 'output'), { recursive: true });
 
 /**
+ * Say what normalizeTextForATS() rewrote, so a changed character in a document
+ * going to an employer is never a silent one.
+ *
+ * @param {Record<string, number>} replacements - Count per kind of rewrite.
+ * @param {(line: string) => void} [print] - Where the line goes.
+ * @returns {void}
+ */
+function reportAtsReplacements(replacements, print = console.log) {
+  const total = Object.values(replacements).reduce((a, b) => a + b, 0);
+  if (total === 0) return;
+  const breakdown = Object.entries(replacements).map(([k, v]) => `${k}=${v}`).join(', ');
+  print(`🧹 ATS normalization: ${total} replacements (${breakdown})`);
+}
+
+/**
  * Normalize text for ATS compatibility by converting problematic Unicode.
  *
  * ATS parsers and legacy systems often fail on em-dashes, smart quotes,
@@ -333,7 +363,11 @@ function normalizeTextForATS(html) {
     // snake_case, a_b and docs/_draft_/cv.md stay literal. Text-only elements
     // (<title>, <textarea>, ...) would show <em> as literal text, so skip them.
     if (!plainUntil) {
-      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (_, inner) => {
+      t = t.replace(/(?<![\p{L}\p{N}_/\\])_(?=[^_\s])([^_\n]*?[^_\s])_(?![\p{L}\p{N}_/\\])/gu, (match, inner, at, whole) => {
+        // Underscores inside an email address are the address. Underscores
+        // around the whole address enclose its @, and are italics.
+        const word = /\S*$/.exec(whole.slice(0, at))[0] + /^\S*/.exec(whole.slice(at))[0];
+        if (word.includes('@') && !inner.includes('@')) return match;
         bump('markdown-italic', 1);
         return `<em>${inner}</em>`;
       });
@@ -687,6 +721,29 @@ function normalizeForComparison(text) {
 }
 
 /**
+ * Excerpts of two normalized section bodies around the first place they differ,
+ * so a locked-section failure shows what changed rather than an entire section.
+ * A whole Experience section runs to thousands of characters, which the web UI
+ * would cut off before the changed text. Equal-length windows of `context`
+ * characters either side of the divergence; an ellipsis marks each cut end.
+ * @param {string} expected
+ * @param {string} found
+ * @param {number} [context]
+ * @returns {[string, string]}
+ */
+export function lockedSectionExcerpts(expected, found, context = 80) {
+  let i = 0;
+  const max = Math.min(expected.length, found.length);
+  while (i < max && expected[i] === found[i]) i++;
+  const start = Math.max(0, i - context);
+  const cut = (text) => {
+    const end = Math.min(text.length, i + context);
+    return `${start > 0 ? '…' : ''}${text.slice(start, end)}${end < text.length ? '…' : ''}`;
+  };
+  return [cut(expected), cut(found)];
+}
+
+/**
  * Validate that sections marked as locked in config/profile.yml are identical
  * (ignoring formatting) between the source cv.md and the rendered HTML.
  * @param {string} html 
@@ -742,7 +799,8 @@ export function validateLockedSections(html, cvMarkdown, lockedKeys) {
     const renderedNorm = normalizeForComparison(renderedRaw);
 
     if (sourceNorm !== renderedNorm) {
-      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${sourceNorm}\nFound (normalized): ${renderedNorm}`);
+      const [expectedExcerpt, foundExcerpt] = lockedSectionExcerpts(sourceNorm, renderedNorm);
+      throw new Error(`Locked section '${key}' was modified during tailoring.\nExpected (normalized): ${expectedExcerpt}\nFound (normalized): ${foundExcerpt}`);
     }
   }
 }
@@ -1337,29 +1395,70 @@ export function reorderCvSections(html, order) {
  * force content under the limit.
  *
  * @param {number} pageCount - Actual pages in the rendered PDF.
- * @param {{ maxPages?: number, strictPages?: boolean }} [options]
+ * @param {{ maxPages?: number, strictPages?: boolean, kind?: string }} [options]
  * @returns {void}
  */
-export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false } = {}) {
+export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false, kind = 'cv' } = {}) {
   if (!Number.isInteger(pageCount) || pageCount < 1) {
     throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
   }
-  if (!Number.isInteger(maxPages) || maxPages < 1) {
-    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
-  }
+  assertValidMaxPages(maxPages);
   if (pageCount <= maxPages) return;
 
   const actualLabel = 'pages';
   const allowedLabel = maxPages === 1 ? 'page' : 'pages';
+  const isCover = kind === 'cover';
   const message =
-    `CV is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
-    'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
+    `${isCover ? 'Cover letter' : 'CV'} is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
+    (isCover
+      ? 'Shorten the opening, the profile intro, or the achievements, then regenerate.'
+      : 'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.');
 
   if (strictPages) {
-    throw new Error(`${message} (--strict-pages requested)`);
+    throw new Error(`${message} (strict page budget: ${isCover ? '--strict-pages' : '--strict-pages or cv.strict_pages'})`);
   }
 
-  console.warn(`⚠️  ${message} Continuing because overflow is warning-only by default; use --strict-pages to reject it.`);
+  console.warn(`⚠️  ${message} Overflow is warning-only by default; use --strict-pages to reject it.`);
+}
+
+/**
+ * Write an over-budget render to a sibling draft next to the output path, so
+ * the output path only ever holds a PDF inside its page budget (#6325, #6377).
+ *
+ * The first free name is taken, so the draft never replaces a file already
+ * there: a CV can legitimately be named cv.overflow.pdf, or another render may
+ * be writing it. 'wx' creates the file or fails with EEXIST in one step, so
+ * two concurrent renders cannot both claim the same name.
+ *
+ * @param {string} outputPath - The PDF path the caller asked for.
+ * @param {Buffer} pdfBuffer - The rendered PDF.
+ * @returns {string} The draft path that was written.
+ */
+function writeOverflowDraft(outputPath, pdfBuffer) {
+  const draftBase = outputPath.replace(/\.pdf$/i, '');
+  for (let n = 1; ; n++) {
+    const candidate = n === 1 ? `${draftBase}.overflow.pdf` : `${draftBase}.overflow-${n}.pdf`;
+    try {
+      writeFileSync(candidate, pdfBuffer, { flag: 'wx' });
+      return candidate;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+  }
+}
+
+/**
+ * Throw unless a page budget is a positive integer. enforcePageBudget() checks
+ * it after a render; renderInPage() checks it before one, so a bad value never
+ * reaches the output path.
+ *
+ * @param {unknown} maxPages
+ * @returns {void}
+ */
+function assertValidMaxPages(maxPages) {
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    throw new Error(`Invalid page budget "${maxPages}". Use a positive integer.`);
+  }
 }
 
 /**
@@ -1619,7 +1718,7 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
   const toRel = (p) => relative(workspaceRoot, p).split(sep).join('/');
   const relPDF = toRel(pdfPath);
   const relHTML = workspaceRelativeManifestPath(htmlPath, workspaceRoot);
-  const date = new Date().toISOString().slice(0, 10);
+  const date = localToday();
 
   mkdirSync(dirname(manifestPath), { recursive: true });
   // Read, supersede and write under one lock, and publish atomically. Every
@@ -1661,15 +1760,17 @@ async function updatePDFManifest(reportNum, pdfPath, htmlPath, format, kind) {
  * both paths, because the batch run is exactly that caller and for a while it
  * was the path with no gate at all.
  *
- * Callers pass the normalized HTML and skip the call when --skip-fact-check is
- * set or the workspace has no cv.md to check against.
+ * Callers pass the normalized HTML and the HTML from before ATS normalization.
+ * They skip the call when --skip-fact-check is set or the workspace has no cv.md.
  *
  * @param {string} html - Normalized HTML, as it will be printed.
  * @param {string} label - Document name for the error and warning lines.
- * @returns {Promise<void>} Resolves when the document passes or only warns.
- * @throws {Error} When a metric, fact or forbidden phrase blocks the document.
+ * @param {string} [rawHtml] - HTML before ATS normalization, so an em dash is still visible.
+ * @param {{strictFactCheck?: boolean}} [options] - `strictFactCheck` makes a `warn` verdict fatal.
+ * @returns {Promise<void>} Resolves when the document passes, or only warns without strict mode.
+ * @throws {Error} When the voice check or the fact gate rejects the document, or a warning is fatal under strict mode.
  */
-async function runFactGate(html, label) {
+async function runFactGate(html, label, rawHtml = html, { strictFactCheck = false } = {}) {
   // Imported lazily, by the callers' guard. A static import is resolved at module
   // load whether or not the gate runs, and the page-budget/batch suites copy
   // generate-pdf.mjs alone into a temp workspace — a static import of a sibling
@@ -1679,7 +1780,18 @@ async function runFactGate(html, label) {
   // module is genuinely missing in a real workspace this throws and the render
   // fails, which is the correct direction to fail for a fact gate.
   const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
-  const factCheck = assertFacts(html, { label, ...factGateInputs() });
+  const { voiceIssues, voiceTellMessage, voiceDashWarning, candidateOwnWords } = await import('./cv-voice.mjs');
+  const inputs = factGateInputs();
+  // The voice check allows wording the CV, voice-dna.md, and the cv-facts
+  // allow lists already have. article-digest.md backs facts, not phrasing.
+  const cvPath = resolve(workspaceRoot, 'cv.md');
+  const source = existsSync(cvPath) ? readFileSync(cvPath, 'utf-8') : '';
+  const found = voiceIssues(rawHtml, `${source}\n${candidateOwnWords(workspaceRoot)}`);
+  const voiceError = voiceTellMessage(found, label);
+  if (voiceError) throw new Error(voiceError);
+  const dashWarning = voiceDashWarning(found, label);
+  if (dashWarning) console.warn(`⚠️  ${dashWarning}`);
+  const factCheck = assertFacts(html, { label, ...inputs });
   // Ahead of the verdict, because it qualifies it: with no config the phrase
   // lists are empty, so a "passed" below covers metrics and facts only.
   if (factCheck.configMissing) {
@@ -1688,6 +1800,11 @@ async function runFactGate(html, label) {
   if (factCheck.verdict === 'warn') {
     console.warn(`⚠️  CV fact check warning: ${label}`);
     printFactWarnings(factCheck, console.warn);
+    // Same output either way; only the exit differs. Thrown AFTER the warnings
+    // print, so a CI log carries the reason the render stopped.
+    if (strictFactCheck) {
+      throw new Error(`Fact check failed for ${label} (--strict-fact-check: a warning is fatal)`);
+    }
   } else {
     console.log(`✅ Fact check passed: ${label}`);
   }
@@ -1733,6 +1850,7 @@ function warnFactGateNotRun() {
 async function generatePDF() {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
+  let strictFactCheck = false;
 
   // Parse arguments
   // Empty, not 'cv': an omitted --kind must fall through to inference from the
@@ -1743,7 +1861,7 @@ async function generatePDF() {
   // No flag seen yet: null, not a paper size. The default belongs to
   // lib/page-format.mjs, which ranks it below the user's config/profile.yml.
   let inputPath, outputPath, format = null, country = null, reportNum = '', allowReorder = false, allowNonChronological = false;
-  let maxPages = 2, maxPagesInput = '2', strictPages = false, batchManifestPath = null;
+  let maxPages = 2, maxPagesInput = '2', maxPagesSupplied = false, strictPages = false, batchManifestPath = null;
 
   for (const arg of args) {
     if (arg.startsWith('--format=')) {
@@ -1777,7 +1895,16 @@ async function generatePDF() {
       kindFlag = arg.slice('--kind='.length).trim();
     } else if (arg.startsWith('--batch=')) {
       batchManifestPath = arg.slice('--batch='.length);
+    } else if (arg === '--max-pages') {
+      // A flag missing its operand, not an absent flag. Left alone it falls
+      // through to the positional arms, and cv.max_pages from the profile would
+      // then set the budget the caller meant to set here (#6325). Marked
+      // supplied and made invalid, so the check below rejects it by name.
+      maxPagesSupplied = true;
+      maxPagesInput = '';
+      maxPages = NaN;
     } else if (arg.startsWith('--max-pages=')) {
+      maxPagesSupplied = true;
       maxPagesInput = arg.slice('--max-pages='.length);
       maxPages = Number(maxPagesInput);
     } else if (arg === '--allow-reorder') {
@@ -1786,6 +1913,8 @@ async function generatePDF() {
       allowNonChronological = true;
     } else if (arg === '--strict-pages') {
       strictPages = true;
+    } else if (arg === '--strict-fact-check') {
+      strictFactCheck = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
     } else if (!inputPath) {
@@ -1818,6 +1947,20 @@ async function generatePDF() {
     process.exit(1);
   }
 
+  // Contradictory pair, rejected for the same reason --kind is rejected with
+  // --batch: one flag asks for the gate to run and be fatal, the other asks for
+  // it not to run at all. Letting either win silently turns a CI gate into a
+  // no-op the day someone adds --skip-fact-check to a shared invocation.
+  if (strictFactCheck && skipFactCheck) {
+    console.error('--strict-fact-check cannot be combined with --skip-fact-check: one runs the fact gate, the other skips it.');
+    process.exit(1);
+  }
+
+  // #6325: cv.max_pages / cv.strict_pages in config/profile.yml, read once and
+  // applied per document by pageBudgetFor().
+  const flagBudget = { maxPages, maxPagesSupplied, strictPages };
+  const profileBudget = readCvPageBudget(workspaceProfilePath());
+
   // Resolve the format before the batch branch, so a batch and a single render
   // inherit the same configured size and a bad --format fails the same way in
   // both. An explicit flag is still rejected loudly: falling through to the
@@ -1848,7 +1991,8 @@ async function generatePDF() {
 
   // Batch mode (#2384): render every document in the manifest through one
   // Chromium. Applies the global --max-pages/--strict-pages/--allow-reorder/
-  // --allow-nonchronological to all entries; each entry supplies its own
+  // --allow-nonchronological to all entries (a CV entry with no page flag
+  // takes the profile's cv.max_pages/cv.strict_pages, #6325); each entry supplies its own
   // input/output and may override format/reportNum. Takes no positional
   // input/output.
   if (batchManifestPath) {
@@ -1869,12 +2013,12 @@ async function generatePDF() {
       console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
       process.exit(1);
     }
-    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, maxPages, strictPages, allowReorder, allowNonChronological, skipFactCheck });
+    return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck, strictFactCheck });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
-    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--skip-fact-check]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
+    console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
     console.error('{input, output, format?, country?, reportNum?, kind?}) through one shared Chromium and writes');
@@ -1929,7 +2073,15 @@ async function generatePDF() {
   console.log(`📄 Input:  ${inputPath}`);
   console.log(`📁 Output: ${outputPath}`);
   console.log(`📏 Format: ${format.toUpperCase()}`);
-  console.log(`📐 Page budget: ${maxPages}${strictPages ? ' (strict)' : ' (warning only)'}`);
+  let budget;
+  try {
+    budget = pageBudgetFor(resolveArtifactKind(kindFlag, outputPath).kind, flagBudget, profileBudget);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+  const budgetSource = budget.fromProfile.length > 0 ? ` — ${budget.fromProfile.join(' and ')} from config/profile.yml` : '';
+  console.log(`📐 Page budget: ${budget.maxPages}${budget.strictPages ? ' (strict)' : ' (warning only)'}${budgetSource}`);
 
   let html = await readFile(inputPath, 'utf-8');
   let cvMarkdown = '';
@@ -1960,20 +2112,17 @@ async function generatePDF() {
   validateCvExperienceOrder(html, { allowNonChronological });
   validateLockedSections(html, cvMarkdown, readLockedSections(workspaceProfilePath(), sectionKey));
 
+  const rawHtml = html;
   // Normalize text for ATS compatibility (issue #1)
   const normalized = normalizeTextForATS(html);
   html = normalized.html;
   // After normalization, so the length is that of the text that prints.
   warnLongPortalFields(html, outputPath);
-  const totalReplacements = Object.values(normalized.replacements).reduce((a, b) => a + b, 0);
-  if (totalReplacements > 0) {
-    const breakdown = Object.entries(normalized.replacements).map(([k, v]) => `${k}=${v}`).join(', ');
-    console.log(`🧹 ATS normalization: ${totalReplacements} replacements (${breakdown})`);
-  }
+  reportAtsReplacements(normalized.replacements);
 
   // Fact gate, on the normalized HTML: the document that actually prints.
   if (!skipFactCheck) {
-    if (cvMarkdown) await runFactGate(html, basename(inputPath));
+    if (cvMarkdown) await runFactGate(html, basename(inputPath), rawHtml, { strictFactCheck });
     else warnFactGateNotRun();
   }
 
@@ -1983,10 +2132,49 @@ async function generatePDF() {
     reportNum,
     kind: kindFlag,
     inputPath,
-    maxPages,
-    strictPages,
+    maxPages: budget.maxPages,
+    strictPages: budget.strictPages,
     styleTokens: readStyleTokens(workspaceProfilePath()),
   });
+}
+
+/**
+ * The page budget for one document (#6325). A flag always wins. With none, a
+ * CV takes cv.max_pages / cv.strict_pages from config/profile.yml, so a
+ * one-page preference holds on every render path: agents, batch workers and
+ * the web UI all spawn this CLI, and none of them could remember the flag. A
+ * cover letter keeps the flag-or-default budget, since a cv.* key says nothing
+ * about it. Exported for tests.
+ *
+ * Throws when a CV would read a key that is set but unusable: a typo in a
+ * stated budget must not quietly print a 2-page CV. A flag that covers the
+ * key, or a cover letter, never reads it, so neither is stopped.
+ *
+ * @param {string|null} kind - From resolveArtifactKind().
+ * @param {{maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}} flags
+ * @param {{maxPages?: number, strictPages?: boolean, invalid?: {key: string, message: string}[]}} profile - From readCvPageBudget().
+ * @returns {{maxPages: number, strictPages: boolean, fromProfile: string[]}}
+ */
+export function pageBudgetFor(kind, flags, profile = {}) {
+  const budget = { maxPages: flags.maxPages, strictPages: flags.strictPages, fromProfile: [] };
+  if (kind !== 'cv') return budget;
+  const read = (profile.invalid || []).filter((p) =>
+    (p.key === 'max_pages' && !flags.maxPagesSupplied) || (p.key === 'strict_pages' && !flags.strictPages));
+  if (read.length > 0) {
+    throw new Error(
+      `Invalid page budget in config/profile.yml: ${read.map((p) => p.message).join('; ')}. ` +
+      'Fix the value, or pass --max-pages / --strict-pages for this render.',
+    );
+  }
+  if (!flags.maxPagesSupplied && profile.maxPages !== undefined) {
+    budget.maxPages = profile.maxPages;
+    budget.fromProfile.push('cv.max_pages');
+  }
+  if (!flags.strictPages && profile.strictPages === true) {
+    budget.strictPages = true;
+    budget.fromProfile.push('cv.strict_pages');
+  }
+  return budget;
 }
 
 /**
@@ -2006,7 +2194,7 @@ async function generatePDF() {
  * for success; it exits zero only when every document rendered.
  *
  * @param {string} manifestPath - Path to the JSON manifest.
- * @param {{format: string, flagFormat?: string|null, country?: string|null, maxPages: number, strictPages: boolean, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean}} globals
+ * @param {{format: string, flagFormat?: string|null, country?: string|null, flagBudget: {maxPages: number, maxPagesSupplied: boolean, strictPages: boolean}, profileBudget: {maxPages?: number, strictPages?: boolean}, allowReorder: boolean, allowNonChronological: boolean, skipFactCheck: boolean, strictFactCheck?: boolean}} globals
  * @returns {Promise<{ok: number, failed: number, results: Array}>}
  */
 async function runBatchFromManifest(manifestPath, globals) {
@@ -2128,12 +2316,14 @@ async function runBatchFromManifest(manifestPath, globals) {
       validateCvSectionOrder(html, cvMarkdown, { allowReorder: globals.allowReorder });
       validateCvExperienceOrder(html, { allowNonChronological: globals.allowNonChronological });
       validateLockedSections(html, cvMarkdown, lockedKeys);
+      const rawHtml = html;
       html = normalizeTextForATS(html).html;
       warnLongPortalFields(html, entryOutput);
       // Same gate, same guard and same place as the single render. A blocked
       // entry throws into the catch below: it is recorded as failed and never
       // reaches Chromium, and the rest of the batch still renders.
-      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput));
+      if (!globals.skipFactCheck && cvMarkdown) await runFactGate(html, basename(entryInput), rawHtml, { strictFactCheck: globals.strictFactCheck === true });
+      const entryBudget = pageBudgetFor(resolveArtifactKind(entryKind, entryOutput).kind, globals.flagBudget, globals.profileBudget);
 
       entries.push({
         _idx: i,
@@ -2144,8 +2334,8 @@ async function runBatchFromManifest(manifestPath, globals) {
         reportNum: entryReport,
         kind: entryKind,
         inputPath: entryInput,
-        maxPages: globals.maxPages,
-        strictPages: globals.strictPages,
+        maxPages: entryBudget.maxPages,
+        strictPages: entryBudget.strictPages,
         styleTokens,
       });
     } catch (err) {
@@ -2254,14 +2444,12 @@ export async function inlineLocalFonts(html) {
   return html.replace(FONT_REF, (match, _quote, name) => dataUrls.get(name) || match);
 }
 
-export async function launchChromium(options) {
+// Keep the PDF module's existing launch API while delegating the executable
+// choice to the same resolver every other browser-backed feature uses.
+export async function launchChromium(options = {}) {
   const { chromium } = await import('playwright');
-  const launchOptions = { ...options };
-  const envPath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim();
-  if (!launchOptions.executablePath && envPath) {
-    launchOptions.executablePath = envPath;
-  }
-  return chromium.launch(launchOptions);
+  const { projectRoot, ...launchOptions } = options;
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
 }
 
 /**
@@ -2287,9 +2475,15 @@ export async function launchChromium(options) {
  *   strictPages?: boolean,
  *   launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>
  * }} [opts]
- * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
+ * @returns {Promise<{outputPath: string, pageCount: number, size: number, draftPath?: string}>}
+ *   `draftPath` is set when the render ran over a warn-only page budget: the
+ *   PDF is at that sibling draft and nothing was written to outputPath.
  */
 export async function renderHtmlToPdf(html, outputPath, opts = {}) {
+  // Checked before the shared painter as well as in renderInPage(): the request
+  // reaches the painter as JSON, which turns NaN into null, and the painter
+  // would read that as no budget, paint with the default 2 and replace the PDF.
+  assertValidMaxPages(opts.maxPages ?? 2);
   // A passed launchBrowser is a test double and always paints in this process.
   // The shared painter is only for the batch, which opts in with the env var,
   // and the painter process itself must not dial its own socket.
@@ -2303,12 +2497,21 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
         outputPath,
         { ...opts, workspaceRoot: opts.workspaceRoot || workspaceRoot },
         fileURLToPath(import.meta.url),
+        getCareerOpsRoot(),
       );
+      // The painter's own output goes nowhere, so repeat it here. A strict
+      // overflow already came back as an error. A warn-only one comes back
+      // with the draft it wrote instead of the output path (#6377); the
+      // warning is repeated on the page count alone, so a painter still
+      // running from before drafts existed is reported honestly too.
+      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false, kind: resolveArtifactKind(opts.kind, outputPath).kind ?? 'cv' });
+      if (result.draftPath) {
+        console.warn(`⚠️  Overflow draft: ${result.draftPath} (nothing was written to the output path). Trim and rerun to write ${result.outputPath}.`);
+        console.log(`📊 Pages: ${result.pageCount}`);
+        return result;
+      }
       console.log(`✅ PDF generated: ${result.outputPath}`);
       console.log(`📊 Pages: ${result.pageCount}`);
-      // The painter's own warning goes nowhere, so repeat it here. A strict
-      // overflow already came back as an error.
-      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
       console.log(`📦 Size: ${(result.size / 1024).toFixed(1)} KB`);
       return result;
     } catch (err) {
@@ -2316,7 +2519,10 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       console.warn(`⚠️  Shared PDF browser unavailable, painting locally: ${err.message}`);
     }
   }
-  const launchBrowser = opts.launchBrowser || launchChromium;
+  const launchBrowser = opts.launchBrowser || ((options) => launchChromium({
+    ...options,
+    projectRoot: opts.workspaceRoot || getCareerOpsRoot(),
+  }));
   let browser = null;
   try {
     browser = await launchBrowser({ headless: true });
@@ -2383,6 +2589,12 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   if (!artifactKind) {
     throw new Error(`Invalid artifact kind "${opts.kind}". Use: ${ARTIFACT_KINDS.join(', ')}`);
   }
+  // The page budget is checked here for the same reason. The CLI, the batch
+  // loop and the profile reader validate it, but a direct caller does not, and
+  // an unusable value would skip the strict-overflow branch below, replace the
+  // PDF at outputPath, and only then be rejected by enforcePageBudget().
+  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false, kind: artifactKind };
+  assertValidMaxPages(budget.maxPages);
 
   // Reject an escaping destination before creating directories, launching
   // Chromium, or writing any renderer temporary files (#2844).
@@ -2456,20 +2668,41 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       preferCSSPageSize: true,
     });
 
+    // Read the root page-tree count so page-like text in streams is ignored.
+    const pageCount = countRenderedPdfPages(pdfBuffer);
+
+    // An overflow never reaches outputPath, strict or not. A caller that
+    // restores its own inputs on failure (CV Studio restores the edited HTML)
+    // would otherwise hold an HTML and a PDF from two revisions, and
+    // cv.strict_pages makes strict renders reachable from the web UI (#6325).
+    // In warn-only mode the agent-driven pdf flow trims and re-renders after the
+    // warning, so a PDF at the final name was one the tool had already flagged,
+    // and the manifest pointed the dashboard at it (#6377). The render goes to a
+    // sibling draft for inspection either way; strict then fails, warn-only
+    // returns before success logs and manifest publication, exit code 0.
+    if (pageCount > budget.maxPages) {
+      const hadPrevious = existsSync(outputPath);
+      const draftPath = writeOverflowDraft(outputPath, pdfBuffer);
+      if (budget.strictPages) {
+        try {
+          enforcePageBudget(pageCount, budget);
+        } catch (err) {
+          err.message += ` Rejected draft: ${draftPath} (${hadPrevious ? 'the existing PDF was left unchanged' : 'nothing was written to the output path'}).`;
+          throw err;
+        }
+      }
+      enforcePageBudget(pageCount, budget);
+      // One line a caller can read back: the web layer treats this render as
+      // not delivered, since it only sees the exit code and stderr.
+      console.warn(`⚠️  Overflow draft: ${draftPath} (${hadPrevious ? 'the existing PDF at the output path was left unchanged' : 'nothing was written to the output path'}). Trim and rerun to write ${outputPath}.`);
+      console.log(`📊 Pages: ${pageCount}`);
+      return { outputPath, draftPath, pageCount, size: pdfBuffer.length };
+    }
+
     // Write PDF only after rendering has completed. Renderer cleanup still runs
     // if an injected browser fails before producing a buffer. The atomic write
     // keeps the previous PDF intact if this write fails partway.
     writeFileAtomic(outputPath, pdfBuffer);
-
-    // Read the root page-tree count so page-like text in streams is ignored.
-    const pageCount = countRenderedPdfPages(pdfBuffer);
-
-    // Strict overflow leaves the draft on disk but stops before success logs
-    // and manifest publication. Default overflow warns and continues.
-    enforcePageBudget(pageCount, {
-      maxPages: opts.maxPages ?? 2,
-      strictPages: opts.strictPages ?? false,
-    });
 
     console.log(`✅ PDF generated: ${outputPath}`);
     console.log(`📊 Pages: ${pageCount}`);
@@ -2529,7 +2762,9 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
  * @param {Array<{html: string, outputPath: string, format?: string, baseDir?: string,
  *   reportNum?: string, inputPath?: string, maxPages?: number, strictPages?: boolean}>} entries
  * @param {{launchBrowser?: (options: {headless: boolean}) => Promise<import('playwright').Browser>}} [opts]
- * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, error?: string}>>}
+ * @returns {Promise<Array<{outputPath: string, ok: boolean, pageCount?: number, size?: number, draftPath?: string, error?: string}>>}
+ *   `draftPath` is set on an entry that rendered over a warn-only page budget:
+ *   it is ok, but the PDF is at the draft, and nothing was written to outputPath.
  */
 export async function renderBatch(entries, opts = {}) {
   const launchBrowser = opts.launchBrowser || launchChromium;
@@ -2552,7 +2787,9 @@ export async function renderBatch(entries, opts = {}) {
     for (const entry of entries) {
       try {
         const r = await renderInPage(browser, entry.html, entry.outputPath, entry);
-        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size });
+        // A warn-only overflow is not a failure, but its PDF is the draft, not
+        // outputPath, and the results manifest says so (#6377).
+        results.push({ outputPath: entry.outputPath, ok: true, pageCount: r.pageCount, size: r.size, ...(r.draftPath ? { draftPath: r.draftPath } : {}) });
       } catch (err) {
         console.error(`❌ Batch entry failed (${entry.outputPath}): ${err.message}`);
         results.push({ outputPath: entry.outputPath, ok: false, error: err.message });
@@ -2572,7 +2809,10 @@ async function runPdfServer() {
   const { startPdfServer } = await import('./lib/pdf-server.mjs');
   const server = await startPdfServer({
     rootDir: __dirname,
-    launchBrowser: launchChromium,
+    launchBrowser: (options) => launchChromium({
+      ...options,
+      projectRoot: process.env.CAREER_OPS_PDF_BROWSER_ROOT || getCareerOpsRoot(),
+    }),
     render: (browser, html, outputPath, opts) => renderInPage(browser, html, outputPath, opts),
   });
   if (server.alreadyRunning) return;
@@ -2600,4 +2840,4 @@ if (isMain && process.argv[2] === '--pdf-server') {
   });
 }
 
-export { normalizeTextForATS, sectionKey };
+export { normalizeTextForATS, reportAtsReplacements, sectionKey };

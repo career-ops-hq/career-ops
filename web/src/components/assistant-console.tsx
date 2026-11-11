@@ -154,6 +154,9 @@ export function AssistantConsole() {
   messagesRef.current = messages;
   const savedSnapshot = useRef("");
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  // Identifies this page's saves, so the server can tell its own lost save from another tab's.
+  const writerId = useRef("");
+  const saveSeq = useRef(0);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [requestFeedback, setRequestFeedback] = useState<RequestFeedback | null>(null);
@@ -320,7 +323,7 @@ export function AssistantConsole() {
       try {
         const chat = await chatRequest("/api/assistant/chats", {
           method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...current, ...(title ? { title } : {}), messages: snapshot }),
+          body: JSON.stringify({ ...current, writer: writerId.current ||= crypto.randomUUID(), seq: ++saveSeq.current, ...(title ? { title } : {}), messages: snapshot }),
         });
         current.revision = chat.revision;
         current.title = chat.title;
@@ -825,7 +828,7 @@ export function AssistantConsole() {
           onClick={(e) => openAssistant(e.currentTarget)}
           onPointerEnter={loadMarkdown}
           onFocus={loadMarkdown}
-          className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px]"
+          className="fixed bottom-5 right-5 z-50 flex items-center justify-center gap-2 rounded-full border border-border bg-surface/90 py-1.5 pl-1.5 pr-4 shadow-lg backdrop-blur transition-colors hover:bg-surface-hover max-sm:min-h-[44px] md-tall:bottom-24 md-tall:left-3 md-tall:right-auto md-tall:max-w-[13.5rem]"
         >
           <CoMark size={26} />
           <span className="text-sm font-medium">Ask<span className="sr-only"> the assistant</span></span>

@@ -13,12 +13,17 @@ import { FollowUpCard, type FollowUp } from "@/components/home/follow-up-card";
 import { DecisionCard } from "@/components/home/decision-card";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 import { QuickEvaluate } from "@/components/quick-evaluate";
+import { LinkedInPaste } from "@/components/linkedin-paste";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
 import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
+import { orderTodayQueue } from "@/lib/home/today-queue.mjs";
+import { selectDueFollowups } from "@/lib/core/followup-view.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
+import { ApplyNext } from "@/components/apply-next";
 import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
+import { homeFollowupRemainder } from "@/lib/home/followups-shown.mjs";
 
 // The retention "Today": a dual-loop action queue (the maintainer's
 // "N new matches this week · M follow-ups due"). SUPPLY loop = fresh free-scan
@@ -30,7 +35,7 @@ export function TodayDashboard({
   reasons,
   legitimacy,
   inbox,
-  inBetween,
+  applyFacts = {},
 }: {
   applications: Application[];
   reasons: Record<string, CardReason>;
@@ -38,6 +43,7 @@ export function TodayDashboard({
   legitimacy: Record<string, string>;
   inbox: Pick<InboxJob, "url" | "done">[];
   inBetween: boolean;
+  applyFacts?: Record<string, { pdfOnDisk: boolean; postingUrl: string }>;
 }) {
   const [followups, setFollowups] = useState<FollowUp[]>([]);
   const [overdue, setOverdue] = useState(0);
@@ -162,7 +168,16 @@ export function TodayDashboard({
   // place when a source fails, so `overdue` can still hold a number from before
   // the outage. See displayCounts().
   const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
+  const followupRest = homeFollowupRemainder(followups.length, overdue);
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+  const dueFollowups = useMemo(
+    () => selectDueFollowups(followups, Math.max(followups.length, 1)),
+    [followups],
+  );
+  const queueLead = orderTodayQueue([
+    { kind: "follow-up", due: true, count: shown.overdue },
+    { kind: "match", due: false, count: shown.newThisWeek },
+  ]).filter((item) => item.count > 0);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -183,21 +198,24 @@ export function TodayDashboard({
               <>You&apos;re all caught up.</>
             ) : showsQueue(heroState) ? (
               <>
-                {shown.newThisWeek > 0 && (
-                  <>
-                    <span className="text-brand-text tabular-nums">{shown.newThisWeek}</span> new match{shown.newThisWeek === 1 ? "" : "es"} this week
-                  </>
-                )}
-                {shown.newThisWeek > 0 && shown.overdue > 0 && <span className="text-faint"> · </span>}
-                {shown.overdue > 0 && (
-                  <>
-                    <span className="text-brand-text tabular-nums">{shown.overdue}</span> follow-up{shown.overdue === 1 ? "" : "s"} due
-                  </>
-                )}
+                {queueLead.map((item, index) => (
+                  <span key={item.kind}>
+                    {index > 0 && <span className="text-faint"> · </span>}
+                    {item.kind === "follow-up" ? (
+                      <>
+                        <span className="text-brand-text tabular-nums">{item.count}</span> follow-up{item.count === 1 ? "" : "s"} due
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-brand-text tabular-nums">{item.count}</span> new match{item.count === 1 ? "" : "es"} this week
+                      </>
+                    )}
+                  </span>
+                ))}
                 {/* queue-partial with work known only from the server snapshot:
                     both loops are down but the pipeline still has decisions
                     waiting, so the queue is real while neither count is. */}
-                {shown.newThisWeek === 0 && shown.overdue === 0 && <>Your queue is waiting.</>}
+                {queueLead.length === 0 && <>Your queue is waiting.</>}
               </>
             ) : (
               <>Your queue is waiting.</>
@@ -222,7 +240,7 @@ export function TodayDashboard({
               Open pipeline
             </Link>
           </div>
-          {inBetween && <QuickEvaluate />}
+          <QuickEvaluate />
         </div>
       </section>
 
@@ -238,16 +256,21 @@ export function TodayDashboard({
         <FollowupsDueSectionSkeleton />
       ) : followupsError ? (
         null
-      ) : followups.length > 0 ? (
+      ) : dueFollowups.length > 0 ? (
         <Section icon={Bell} title="Follow-ups due" hint="Keep your applications alive — a nudge beats silence">
           <div className="grid gap-2.5">
-            {followups.map((f) => (
+            {dueFollowups.map((f) => (
               // Refetch (not a local decrement) so the parent's followups/upcoming
               // stay in sync with the server. Logging the LAST due item must flip this
               // section over to "Upcoming" instead of leaving it empty.
               <FollowUpCard key={`${f.num}-${f.company}`} followup={f} onLogged={refetch} />
             ))}
           </div>
+          {followupRest.hidden > 0 && (
+            <Link href="/followups" className="mt-3 inline-flex items-center text-sm text-muted transition hover:text-brand-text max-sm:min-h-[44px]">
+              See all {followupRest.total} {followupRest.total === 1 ? "follow-up" : "follow-ups"}
+            </Link>
+          )}
         </Section>
       ) : null}
 
@@ -274,12 +297,13 @@ export function TodayDashboard({
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first">
           {recommended.length > 0 && (
-            <Link
-              href={`/pipeline/${recommended[0].n}`}
-              className="mb-3 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition hover:bg-brand-200 max-sm:min-h-[44px]"
-            >
-              Apply next · {companyPresentation(recommended[0]).label} {recommended[0].score} <ArrowRight className="size-4" />
-            </Link>
+            <ApplyNext
+              n={recommended[0].n}
+              company={companyPresentation(recommended[0]).label}
+              score={recommended[0].score}
+              pdfOnDisk={applyFacts[recommended[0].n]?.pdfOnDisk ?? false}
+              postingUrl={applyFacts[recommended[0].n]?.postingUrl ?? ""}
+            />
           )}
           {awaitingGroups.map(([label, group]) => (
             <div key={label} className="mb-3">
@@ -326,6 +350,8 @@ export function TodayDashboard({
           </p>
         </div>
       )}
+
+      <LinkedInPaste />
 
       {decisionUndo && (
         <div className="fixed inset-x-0 bottom-32 z-40 flex justify-center px-4 sm:bottom-6">

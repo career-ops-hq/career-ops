@@ -148,6 +148,19 @@ try {
       fail(`unparseable date produced postedAt = ${JSON.stringify(undated.postedAt)}`);
     }
 
+    if (job.closesAt === '2026-11-11') {
+      pass('parsePlatsbankenResponse keeps application_deadline as the calendar day 2026-11-11');
+    } else {
+      fail(`closesAt = ${JSON.stringify(job.closesAt)}`);
+    }
+
+    const badDeadline = parsePlatsbankenResponse(response([ad({ application_deadline: '2026-02-31T00:00:00' })]))[0];
+    if (!('closesAt' in badDeadline)) {
+      pass('parsePlatsbankenResponse omits closesAt when application_deadline is not a calendar day');
+    } else {
+      fail(`bad deadline produced closesAt = ${JSON.stringify(badDeadline.closesAt)}`);
+    }
+
     // Location is "{city or municipality}, {region}, {country}" from the parts
     // the ad carries, so a location_filter entry for the country matches an
     // ad from any town; repeated parts appear once, and it is '' — never
@@ -464,6 +477,11 @@ try {
     );
     if (fetched.length === 100) pass('platsbanken.fetch() keeps the pages already collected when a later page fails');
     else fail(`platsbanken.fetch() returned ${fetched.length} rows after a later-page failure (expected 100)`);
+    if (fetched.truncated && fetched.truncated.reason === 'fetch-error' && fetched.truncated.fetched === 100) {
+      pass('platsbanken.fetch() marks the board truncated (fetch-error) when a later page fails');
+    } else {
+      fail(`a later-page failure should mark jobs.truncated = { reason: 'fetch-error', fetched: 100 }, got ${JSON.stringify(fetched.truncated)}`);
+    }
   }
 
   // ── fetch(): total outage throws ──
@@ -509,10 +527,20 @@ try {
 
     const fullPages = (url) => response(Array.from({ length: 100 }, (_, i) => ad({ id: `${new URL(url).searchParams.get('offset')}${i}` })));
 
-    const entryCapText = await captureStderr(() => platsbanken.fetch(
-      { provider: 'platsbanken', name: 'CapEntry', platsbanken: { keywords: ['x'] }, max_pages: 2 },
-      { sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
-    ));
+    let entryCapJobs;
+    const entryCapText = await captureStderr(async () => {
+      entryCapJobs = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'CapEntry', platsbanken: { keywords: ['x'] }, max_pages: 2 },
+        { sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
+      );
+    });
+    // The warning goes to a human; the marker goes to scan.mjs, which then logs
+    // the board `partial` in data/portal-health.tsv instead of `reachable`.
+    if (entryCapJobs?.truncated?.reason === 'page-cap' && entryCapJobs.truncated.fetched === 200) {
+      pass('platsbanken.fetch() marks the board truncated (page-cap) when the entry cap stops the walk');
+    } else {
+      fail(`entry-cap truncation should set jobs.truncated = { reason: 'page-cap', fetched: 200 }, got ${JSON.stringify(entryCapJobs?.truncated)}`);
+    }
     if (/raise max_pages on this entry/.test(entryCapText) && /CapEntry/.test(entryCapText)) {
       pass('platsbanken.fetch() warns to raise max_pages when the entry cap truncates the walk');
     } else {
@@ -529,10 +557,18 @@ try {
 
     // At the source's own ceiling the advice has to change: raising max_pages
     // cannot buy a page Platsbanken does not serve.
-    const sourceCapText = await captureStderr(() => platsbanken.fetch(
-      { provider: 'platsbanken', name: 'CapSource', platsbanken: { keywords: ['x'] }, max_pages: 21 },
-      { sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
-    ));
+    let sourceCapJobs;
+    const sourceCapText = await captureStderr(async () => {
+      sourceCapJobs = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'CapSource', platsbanken: { keywords: ['x'] }, max_pages: 21 },
+        { sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
+      );
+    });
+    if (sourceCapJobs?.truncated?.reason === 'source-cap') {
+      pass("platsbanken.fetch() marks the board truncated (source-cap) at the source's offset-2000 ceiling");
+    } else {
+      fail(`source-ceiling truncation should set jobs.truncated.reason = 'source-cap', got ${JSON.stringify(sourceCapJobs?.truncated)}`);
+    }
     if (/offset ceiling/.test(sourceCapText) && !/raise max_pages/.test(sourceCapText)) {
       pass('platsbanken.fetch() names the source ceiling instead of advising raise max_pages when the source is the limit');
     } else {
@@ -544,12 +580,33 @@ try {
       fail(`source-ceiling warning reported the wrong row count: ${JSON.stringify(sourceCapText)}`);
     }
 
-    const probeText = await captureStderr(() => platsbanken.fetch(
-      { provider: 'platsbanken', name: 'ProbeSilent', platsbanken: { keywords: ['x'] }, max_pages: 5 },
-      { maxPages: 1, sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
-    ));
+    let probeJobs;
+    const probeText = await captureStderr(async () => {
+      probeJobs = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'ProbeSilent', platsbanken: { keywords: ['x'] }, max_pages: 5 },
+        { maxPages: 1, sleep: async () => {}, fetchJson: async (url) => fullPages(url) },
+      );
+    });
     if (probeText === '') pass('platsbanken.fetch() stays silent during a health probe');
     else fail(`a probe produced output: ${JSON.stringify(probeText)}`);
+    if (probeJobs && probeJobs.truncated === undefined) pass('platsbanken.fetch() does not mark a health probe truncated');
+    else fail(`a probe should not set jobs.truncated, got ${JSON.stringify(probeJobs?.truncated)}`);
+
+    // A walk that reaches the keyword's own end (a short page) is complete.
+    const completeJobs = await platsbanken.fetch(
+      { provider: 'platsbanken', name: 'Complete', platsbanken: { keywords: ['x'] }, max_pages: 5 },
+      {
+        sleep: async () => {},
+        fetchJson: async (url) => (new URL(url).searchParams.get('offset') === '0'
+          ? fullPages(url)
+          : response([ad({ id: '99999999' })])),
+      },
+    );
+    if (completeJobs.length === 101 && completeJobs.truncated === undefined) {
+      pass('platsbanken.fetch() leaves a fully read board unmarked');
+    } else {
+      fail(`a complete walk should not set jobs.truncated (got ${completeJobs.length} rows, ${JSON.stringify(completeJobs.truncated)})`);
+    }
   }
 } catch (e) {
   fail(`platsbanken provider tests crashed: ${e.message}`);

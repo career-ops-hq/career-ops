@@ -2,18 +2,27 @@ name: Release Please
 on:
   push:
     branches: [main]
-  # Manual re-publish: when a release was tagged but the npm publish failed,
-  # dispatch this workflow to publish the scaffolder at its current version
-  # without cutting a new release.
+  # Releases are published by a maintainer, from their own account. With
+  # "skip-github-release": true in release-please-config.json, release-please
+  # keeps opening and updating the release PR, but no longer creates tags or
+  # releases: once the PR is merged, the maintainer creates each tag on its
+  # merge commit and publishes the release. Publishing a career-ops release is
+  # what publishes the npm scaffolder below. A release published with a
+  # person's token triggers this event; one created with GITHUB_TOKEN would not.
+  release:
+    types: [published]
+  # Manual re-publish: when a release was published but the npm publish failed,
+  # dispatch this workflow from the release tag to publish the scaffolder at
+  # that version without cutting a new release:
+  #   gh workflow run release.yml --ref career-ops-vX.Y.Z
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: read
 
 jobs:
   release-please:
+    if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest
     steps:
       # release-please opens and updates its release PR with a GitHub App token,
@@ -22,67 +31,79 @@ jobs:
       # approve them), so with GITHUB_TOKEN the run failed at "create pull
       # request" and no release could be cut. The App (secrets RELEASE_APP_ID,
       # its client ID, and RELEASE_APP_PRIVATE_KEY) has Contents, Pull requests
-      # and Issues read/write on this repository only. Side effects worth
-      # knowing: its release PR runs CI like any other PR, and the releases it
-      # creates trigger `on: release` workflows (sbom.yml), which releases
-      # created with GITHUB_TOKEN never did.
+      # and Issues read/write on this repository only. Its release PR runs CI
+      # like any other PR. Everything here uses the App token, so this job's
+      # GITHUB_TOKEN stays read-only.
       - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         id: app-token
-        if: ${{ github.event_name == 'push' }}
         with:
           client-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
-        if: ${{ github.event_name == 'push' }}
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # Publish the npm scaffolder when a career-ops release was just created,
-      # OR on a manual dispatch (to recover from a failed publish). Kept in this
-      # job so the publish stays tied to the run that cut the release. The
-      # checkout also runs when only the `web` component was released: the
-      # Latest step at the bottom reads the manifest from it.
-      - uses: actions/checkout@v7
-        if: ${{ steps.release.outputs.releases_created == 'true' || github.event_name == 'workflow_dispatch' }}
-      - uses: actions/setup-node@v7
-        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+  publish-npm:
+    # The npm scaffolder, once per career-ops release (a web-vX.Y.Z release
+    # publishes nothing), or on a manual dispatch. It stays in this file: the
+    # trusted publisher on npmjs.com is bound to the workflow filename
+    # (release.yml). For a release, the checkout is the tagged commit.
+    if: ${{ (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'career-ops-v')) || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # A tag on the wrong commit would publish whatever version that commit
+      # carries: stop unless the release and scaffolder/package.json agree.
+      - name: Check the release tag matches the scaffolder version
+        if: ${{ github.event_name == 'release' }}
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ver=$(jq -r .version scaffolder/package.json)
+          if [ "$TAG" != "career-ops-v${ver}" ]; then
+            echo "::error::release $TAG, but scaffolder/package.json is ${ver}: not publishing"
+            exit 1
+          fi
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           registry-url: "https://registry.npmjs.org"
       # Trusted Publishing (OIDC): npm >= 11.5.1 authenticates via the workflow's
       # id-token against the trusted publisher configured on npmjs.com — no token.
       # setup-node ships an older npm, so upgrade before publishing.
+      # The version is exact, not @latest: this step runs with id-token: write,
+      # so @latest would hand publish rights to whatever npm release came out
+      # that day. 12.2.2 is the npm that published career-ops v1.39.0. Dependabot
+      # does not update a version inside a `run:` line, so bump it by hand.
       - name: Upgrade npm for trusted publishing
-        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
-        run: npm install -g npm@latest
+        run: npm install -g npm@12.2.2
       - name: Publish scaffolder to npm
-        if: ${{ steps.release.outputs.release_created || github.event_name == 'workflow_dispatch' }}
         run: npm publish --provenance --access public
         working-directory: scaffolder
 
-      # GitHub marks whichever release was created LAST as "Latest", and in this
-      # manifest the `web` component is created after `career-ops`. Result: the
-      # repository's releases page has never once pointed at the main package —
-      # every career-ops release since the web component was added showed
-      # `web-vX.Y.Z` as the latest version to anyone landing there. Verified
-      # 28-jul: 0 of 20 career-ops releases carried the flag.
-      #
-      # Re-assert it explicitly so ordering stops deciding. Reads the version
-      # from the manifest rather than an action output, so it cannot drift from
-      # what was actually released.
-      #
-      # `releases_created` is the string 'true'/'false' (release_created is
-      # unset when false, so the bare form works for it and not for this one).
-      #
-      # Runs on ANY release, not only a career-ops one: a web-only release
-      # would otherwise become Latest, and update-system.mjs resolves what to
-      # install from /releases/latest — it refuses a web-* tag, so every
-      # install would stop getting updates until the next career-ops release.
+  keep-latest:
+    # GitHub marks a newly published release as Latest unless it is told
+    # otherwise. The web-vX.Y.Z release is published with make_latest=false,
+    # but one published any other way would become Latest, and
+    # update-system.mjs resolves what to install from /releases/latest: it
+    # refuses a web-* tag, so every install would stop getting updates until
+    # the next career-ops release. After any web release, re-assert the
+    # career-ops release. Reads the version from the manifest of the tagged
+    # commit rather than an event field, so it cannot drift from what was
+    # actually released.
+    if: ${{ github.event_name == 'release' && startsWith(github.event.release.tag_name, 'web-v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Keep the career-ops release marked as Latest
-        if: ${{ steps.release.outputs.releases_created == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

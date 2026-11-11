@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 // The written cell is a markdown link since #3516; the KEY is its href, so the
 // assertions below read the href and check the rendering separately.
-import { extractCellUrl } from '../tracker-parse.mjs';
+import { extractCellUrl, extractReqNumber } from '../tracker-parse.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
@@ -42,11 +42,12 @@ function addTsv(env, name, cols) {
   writeFileSync(join(env.addDir, name), cols.join('\t'));
 }
 function runMerge(env, args = []) {
-  // Pin the data root to the fixture and drop every other CAREER_OPS_* override,
-  // the way merge-tracker-cli-roots.test.mjs does. Spreading process.env alone
-  // let CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR, CAREER_OPS_BATCH_STATE and
-  // CAREER_OPS_CODE_ROOT through from whoever ran the suite, so a developer's
-  // real batch-state could decide whether a fixture row merged.
+  // Pin the data root and the batch state to the fixture and drop every other
+  // CAREER_OPS_* override, the way merge-tracker-cli-roots.test.mjs does.
+  // Spreading process.env alone let CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR,
+  // CAREER_OPS_BATCH_STATE and CAREER_OPS_CODE_ROOT through from whoever ran the
+  // suite, so a developer's real batch-state could decide whether a fixture row
+  // merged. Unset, the batch state is the checkout's, which has the same effect.
   const childEnv = {
     ...process.env,
     CAREER_OPS_ROOT: env.base,
@@ -55,9 +56,8 @@ function runMerge(env, args = []) {
     CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(env.addDir),
   };
   delete childEnv.CAREER_OPS_DATA_DIR;
-  delete childEnv.CAREER_OPS_BATCH_STATE;
   delete childEnv.CAREER_OPS_CODE_ROOT;
-  return execFileSync('node', [MERGE, ...args], { encoding: 'utf-8', env: childEnv });
+  return execFileSync('node', [MERGE, '--allow-headerless', ...args], { encoding: 'utf-8', env: childEnv });
 }
 function trackerRows(env) {
   // Exclude the markdown separator PRECISELY (not any `---`) so rows whose URL
@@ -428,6 +428,173 @@ ok('REGRESSION: two employer-board URLs are still proof of two distinct openings
 ok('UNCHANGED: an addition with no URL cannot claim a row whose posting is known', () => {
   const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', '');
   assert.equal(rows.length, 2, 'an absent key stays UNKNOWN, so the unkeyed addition inserts');
+});
+
+// ─────────────── which URL the merged row keys on ───────────────
+//
+// The cases above prove WHETHER an aggregator sighting merges. These pin which
+// URL the merged row is left keyed on. The employer URL is canonical, so an
+// aggregator sighting of an employer-keyed row must not take over the URL cell:
+// it goes to Notes, and the employer URL stays the dedup key.
+const notesCell = (row) => row.split('|').map(s => s.trim())[9];
+
+ok('THE BUG (#6621): an aggregator sighting keeps the employer URL as the key', () => {
+  const employer = 'https://boards.greenhouse.io/acme/jobs/7001';
+  const aggregator = 'https://www.linkedin.com/jobs/view/4001';
+  const rows = mergeTwoWithUrls(employer, aggregator, 'Applied');
+  assertMerged(rows, 'employer row, aggregator sighting');
+  assert.equal(urlHref(rows[0]), employer, 'the employer URL stays in the URL column');
+  assert.ok(notesCell(rows[0]).endsWith(`Also listed at ${aggregator}`),
+    `the aggregator URL is recorded in Notes, got: ${notesCell(rows[0])}`);
+  assert.ok(rows[0].includes('Applied'), 'status is untouched');
+});
+
+ok('WHY IT MATTERS: after a sighting, a different employer opening still gets its own row', () => {
+  // Re-keyed on LinkedIn, the Applied row reads as UNKNOWN against any employer
+  // URL, so a second opening with the same title fuzzy-matched it and rewrote
+  // its score, report and URL to the other job, still marked Applied.
+  const env = makeEnv();
+  try {
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Applied | ❌ | [1](reports/1-acme.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |',
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', 'n', 'https://www.linkedin.com/jobs/view/4001']);
+    runMerge(env);
+    addTsv(env, '3-acme.tsv', ['3', '2026-06-05', 'Acme', 'Director of Marketing', 'Evaluated', '3.1/5', '❌',
+      '[3](reports/3-acme.md)', 'second opening', 'https://boards.greenhouse.io/acme/jobs/7002']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, `the second opening must get its own row, got ${rows.length}`);
+    const applied = rows.find(r => r.split('|')[1].trim() === '1');
+    assert.equal(urlHref(applied), 'https://boards.greenhouse.io/acme/jobs/7001', 'the Applied row still names the job applied to');
+    assert.ok(applied.includes('4.1/5') && applied.includes('Applied'), 'the Applied row is not overwritten by the other opening');
+  } finally { cleanup(env); }
+});
+
+ok('UNCHANGED: an employer URL replaces an aggregator key', () => {
+  const employer = 'https://boards.greenhouse.io/acme/jobs/7001';
+  const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', employer);
+  assertMerged(rows, 'aggregator row, employer sighting');
+  assert.equal(urlHref(rows[0]), employer, 'the row moves to the employer key');
+  assert.ok(!notesCell(rows[0]).includes('Also listed at'), 'no sighting note in this direction');
+});
+
+ok('an empty URL cell keeps the employer URL from the row\'s report', () => {
+  const env = makeEnv();
+  try {
+    const employer = 'https://boards.greenhouse.io/acme/jobs/7001';
+    writeFileSync(join(env.reportsDir, '1-acme.md'), `# Eval\n**URL:** ${employer}\n`);
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Applied | ❌ | [1](reports/1-acme.md) | n |  |',
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'SKIP', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', 'n', 'https://www.linkedin.com/jobs/view/4001']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assertMerged(rows, 'report-keyed row, aggregator sighting');
+    // The update replaces the report link, so without this the employer URL
+    // the row keyed on through report 1 would be gone from the row entirely.
+    assert.equal(urlHref(rows[0]), employer, 'the report\'s employer URL is written into the cell');
+  } finally { cleanup(env); }
+});
+
+ok('a repeated aggregator sighting is recorded in Notes once', () => {
+  const env = makeEnv();
+  try {
+    const aggregator = 'https://www.linkedin.com/jobs/view/4001';
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |',
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', 'n', aggregator]);
+    runMerge(env);
+    addTsv(env, '3-acme.tsv', ['3', '2026-06-05', 'Acme', 'Director of Marketing', 'Evaluated', '4.2/5', '❌',
+      '[3](reports/3-acme.md)', 'n', aggregator]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected one row, got ${rows.length}`);
+    assert.ok(rows[0].includes('4.2/5'), 'the second sighting merged too');
+    assert.equal(notesCell(rows[0]).split(`Also listed at ${aggregator}`).length - 1, 1,
+      `the sighting is noted once, got: ${notesCell(rows[0])}`);
+  } finally { cleanup(env); }
+});
+
+ok('a sighting already in a Re-eval clause is not noted again', () => {
+  // mergeNotes() writes an addition's own Notes as `Re-eval {date} (…): {text}`.
+  // When that text is the sighting clause, it is already recorded: in the same
+  // update, and in every later one.
+  const env = makeEnv();
+  try {
+    const aggregator = 'https://www.linkedin.com/jobs/view/4001';
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |',
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', `Also listed at ${aggregator}`, aggregator]);
+    runMerge(env);
+    let rows = trackerRows(env);
+    assertMerged(rows, 'employer row, sighting stated in the addition\'s Notes');
+    const count = (row) => notesCell(row).split(`Also listed at ${aggregator}`).length - 1;
+    assert.equal(count(rows[0]), 1, `same update: noted once, got: ${notesCell(rows[0])}`);
+    addTsv(env, '3-acme.tsv', ['3', '2026-06-05', 'Acme', 'Director of Marketing', 'Evaluated', '4.2/5', '❌',
+      '[3](reports/3-acme.md)', 'n', aggregator]);
+    runMerge(env);
+    rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected one row, got ${rows.length}`);
+    assert.ok(rows[0].includes('4.2/5'), 'the later sighting merged too');
+    assert.equal(count(rows[0]), 1, `later update: still noted once, got: ${notesCell(rows[0])}`);
+    assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+  } finally { cleanup(env); }
+});
+
+ok('a sighting is recorded even when an earlier noted URL contains it', () => {
+  // Notes are compared by clause, not substring: `…/jobs/view/4001` is inside
+  // `…/jobs/view/40010`, and the two are different listings.
+  const env = makeEnv();
+  try {
+    const noted = 'https://www.linkedin.com/jobs/view/40010';
+    const aggregator = 'https://www.linkedin.com/jobs/view/4001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Evaluated | ❌ | [1](reports/1-acme.md) | n. Also listed at ${noted} | https://boards.greenhouse.io/acme/jobs/7001 |`,
+    ]);
+    addTsv(env, '2-acme.tsv', ['2', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[2](reports/2-acme.md)', 'n', aggregator]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assertMerged(rows, 'employer row, a second LinkedIn sighting');
+    assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+    const notes = notesCell(rows[0]);
+    assert.ok(notes.includes(`Also listed at ${noted}.`), `the earlier sighting stays, got: ${notes}`);
+    assert.ok(notes.endsWith(`Also listed at ${aggregator}`), `the new sighting is recorded, got: ${notes}`);
+  } finally { cleanup(env); }
+});
+
+ok('a sighting URL that reads as a req number is noted by host, not planted as a req', () => {
+  // LinkedIn builds its slug from the posting title, so a "Jr." title yields
+  // `/jobs/view/jr-…-4001`, which extractReqNumber() reads as the label `jr`
+  // followed by an id. Planted in Notes, it would become this row's req number
+  // and block every later fuzzy match against an addition carrying a real one.
+  // (The slug's title need not match the TSV role: matching reads the role cell.)
+  const aggregator = 'https://www.linkedin.com/jobs/view/jr-data-analyst-at-acme-4001';
+  assert.ok(extractReqNumber(`Also listed at ${aggregator}`), 'precondition: the full URL reads as a req number');
+  const rows = mergeTwoWithUrls('https://boards.greenhouse.io/acme/jobs/7001', aggregator);
+  assertMerged(rows, 'employer row, LinkedIn "Jr." slug sighting');
+  assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+  assert.ok(notesCell(rows[0]).endsWith('Also listed at www.linkedin.com'), `got: ${notesCell(rows[0])}`);
+  assert.equal(extractReqNumber(notesCell(rows[0])), null, 'Notes carry no req number');
+});
+
+ok('a sighting whose host also reads as a req number is noted without the host', () => {
+  // `jobg8.com` reads as the label `job` followed by the id `g8`, so naming the
+  // host would plant the same req number the host-only fallback above avoids.
+  const aggregator = 'https://www.jobg8.com/jobs/4001';
+  assert.ok(extractReqNumber('Also listed at www.jobg8.com'), 'precondition: the host reads as a req number');
+  const rows = mergeTwoWithUrls('https://boards.greenhouse.io/acme/jobs/7001', aggregator);
+  assertMerged(rows, 'employer row, JobG8 sighting');
+  assert.equal(urlHref(rows[0]), 'https://boards.greenhouse.io/acme/jobs/7001', 'the employer URL stays the key');
+  assert.ok(notesCell(rows[0]).endsWith('Also listed on an aggregator board'), `got: ${notesCell(rows[0])}`);
+  assert.equal(extractReqNumber(notesCell(rows[0])), null, 'Notes carry no req number');
 });
 
 // ─────────────── …but the POSTING ID on one aggregator still is ───────────────

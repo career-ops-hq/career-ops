@@ -29,7 +29,7 @@ Voeg in `config/profile.yml` toe:
 
 ```yaml
 language:
-  primary: nl
+  output: nl
   modes_dir: modes/nl
 ```
 

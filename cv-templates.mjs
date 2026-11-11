@@ -853,9 +853,10 @@ const isScopeBarrier = (e) => (e.ns === 'html' ? HTML_SCOPE.has(e.name) : isSpec
 // Where script data ends. The tokenizer's escape states change what a `</script` means: after
 // `<!--` it is still script data, and after `<script` inside that it ends only the inner script.
 function scriptEnd(html, from) {
-  // `--!>` is deliberately absent: it ends a comment (see scanHtml) but not the escaped
-  // states, where the tokenizer reads `--!` as text and stays escaped (probed).
-  const marks = /<!--|-->|<\/?script(?=[\t\n\f\r />])/gi;
+  // `--!>` is matched so the comment-end pattern is complete, but it changes no state: it ends
+  // a comment (see scanHtml) but not the escaped states, where the tokenizer reads `--!` as
+  // text and stays escaped (probed).
+  const marks = /<!--|--!?>|<\/?script(?=[\t\n\f\r />])/gi;
   marks.lastIndex = from;
   let state = 0; // 0 script data, 1 escaped, 2 double escaped
   for (let m; (m = marks.exec(html));) {
@@ -863,6 +864,8 @@ function scriptEnd(html, from) {
     if (mark === '<!--') {
       if (state === 0) state = 1;
       marks.lastIndex = m.index + 2; // its two dashes can open `-->`
+    } else if (mark === '--!>') {
+      // deliberately no state change: `--!` is text in the escaped states (probed)
     } else if (mark[0] === '-') {
       if (state !== 0) state = 0;
     } else if (mark === '<script') {
@@ -1408,10 +1411,26 @@ export function auditUserTemplates({ dir = DEFAULT_TEMPLATES_DIR, userDir = DEFA
 export function loadProfileDefault(kind, { profilePath = DEFAULT_PROFILE_PATH, strict = false } = {}) {
   const cfg = KINDS[kind];
   if (!cfg) throw new Error(`Unknown template kind: ${kind}`);
-  if (!existsSync(profilePath)) return null;
+  // Read first and treat only ENOENT as "no profile". existsSync() also
+  // answers false when the file exists but cannot be reached (e.g. its parent
+  // directory is not searchable), and a strict caller would then silently get
+  // the base template for a profile that names another one.
+  let source;
+  try {
+    source = readFileSync(profilePath, 'utf-8');
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    if (strict) {
+      throw new Error(
+        `Failed to read profile at ${profilePath} (${err?.code || 'unknown error'}). Check that the file is readable. ${err?.message || err}`,
+        { cause: err },
+      );
+    }
+    return null;
+  }
   let doc;
   try {
-    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+    doc = loadYaml(source) || {};
   } catch (err) {
     if (strict) {
       throw new Error(
@@ -1435,11 +1454,19 @@ export function resolveTemplate(kind, name, opts = {}) {
     format = 'html',
     profilePath = DEFAULT_PROFILE_PATH,
     fallback = false,
+    // strict: a profile that exists but is not valid YAML throws instead of
+    // reading as "no default configured". Off by default so existing callers
+    // keep their behaviour; the cover-letter renderer opts in (#6370).
+    strict = false,
   } = opts;
   assertFormat(format);
 
   const explicit = Boolean(name && String(name).trim());
-  let chosen = kebab(explicit ? name : loadProfileDefault(kind, { profilePath }) || 'standard');
+  // Strict callers parse the profile even when a name was passed, so a broken
+  // config/profile.yml is reported on every strict path rather than only when
+  // the profile happens to supply the name.
+  const profileDefault = (!explicit || strict) ? loadProfileDefault(kind, { profilePath, strict }) : null;
+  let chosen = kebab(explicit ? name : profileDefault || 'standard');
   const fileFor = (n) => (n === 'standard' ? `${cfg.prefix}.${format}` : `${cfg.prefix}.${n}.${format}`);
 
   // Resolution goes through the same discovery as listTemplates, so a name that

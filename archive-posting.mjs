@@ -23,7 +23,6 @@
  * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
-import { chromium } from 'playwright';
 import { open, unlink, readFile } from 'fs/promises';
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
@@ -32,10 +31,12 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { captureSlug, reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { cloudflareInterstitial } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { detectNonContentMarker } from './check-jd-archive.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -55,6 +56,13 @@ const VALUE_FLAGS = ['--company', '--role', '--report'];
 // page IS essentially the wall, not when a real posting merely mentions one
 // nearby.
 const NON_CONTENT_PAGE_MAX_CHARS = 600;
+
+// A Cloudflare interstitial is recognised by its title instead
+// (cloudflareInterstitial, liveness-core.mjs): a site-branded challenge body
+// can run past NON_CONTENT_PAGE_MAX_CHARS and use none of the phrases
+// detectNonContentMarker knows ("Humans only", "Ray ID:"), so the body check
+// never fires on it (#6713). A challenge the browser passes reloads the real
+// posting under its own title, and that capture is kept.
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
@@ -407,6 +415,10 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     if (httpStatus === 404) {
       throw new Error('refusing to archive: HTTP 404');
     }
+    const interstitial = httpStatus >= 400 ? cloudflareInterstitial(pageTitle) : null;
+    if (interstitial) {
+      throw new Error(`refusing to archive: HTTP ${httpStatus} Cloudflare ${interstitial} ("${pageTitle.trim()}"), not a posting`);
+    }
     if (httpStatus && httpStatus >= 400) {
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
@@ -497,8 +509,12 @@ async function main() {
       results.push({ url, filename, reference, skipped: true });
     }
   } else {
-    // Sequential — project convention: never Playwright in parallel
-    const browser = await chromium.launch({ headless: true });
+    // Sequential — project convention: never Playwright in parallel.
+    // Loaded here, after --help / --dry-run / a missing pipeline have already
+    // returned. A static import made those paths wait on the browser package
+    // and crash when it was not installed.
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {
         try {

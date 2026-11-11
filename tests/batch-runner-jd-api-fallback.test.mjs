@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, mkdtempSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { TRUNCATION_NOTICE, capJdText, markCappedAtsText } from '../lib/jd-page-fetch.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
@@ -34,6 +35,24 @@ const apiBlock = (() => {
 
 if (apiBlock) pass('batch-runner.sh has the ATS API fallback block');
 else fail('ATS API fallback block is missing from batch-runner.sh');
+
+// ── the runner's truncation marker is the real producer's ───────────────────
+// The functional stub below only proves the runner reacts to a marker it was
+// handed. This pins that the marker the runner greps for is the one the real
+// producer writes on both paths fetch-jd.mjs uses: a cut page JD (capJdText)
+// and a capped ATS result (markCappedAtsText turns compactText's bare ellipsis
+// into the notice before fetch-jd.mjs prints it).
+{
+  const marker = SRC.match(/grep -q '(Job description truncated here[^']*)' "\$jd_api_tmp"/)?.[1];
+  const cap = 100;
+  const page = capJdText('word '.repeat(200), cap);
+  const ats = markCappedAtsText('x'.repeat(cap) + '\u2026', cap);
+  if (marker && TRUNCATION_NOTICE(cap).includes(marker) && page.includes(marker) && ats.includes(marker)) {
+    pass('the runner marker appears in real capJdText and markCappedAtsText output');
+  } else {
+    fail(`the runner marker (${marker}) does not match the producer's notice`);
+  }
+}
 
 // ── static checks ───────────────────────────────────────────────────────────
 
@@ -80,6 +99,8 @@ if (!bash || !apiBlock) {
       "appendFileSync(process.env.STUB_TRACE, JSON.stringify(process.argv.slice(2)) + '\\n');",
       "const mode = process.env.STUB_MODE;",
       "if (mode === 'miss') process.exitCode = 1;",
+      "else if (mode === 'truncated') process.stdout.write(" + JSON.stringify(long + '\n\n[Job description truncated here: the posting is longer than 20000 characters. This text is NOT the complete job description.]') + ");",
+      "else if (mode === 'closed') { process.stdout.write('CLOSED_POSTING page text: this job is closed'); process.exitCode = 3; }",
       `else process.stdout.write(mode === 'short' ? ${JSON.stringify(short)} : ${JSON.stringify(long)});`,
       '',
     ].join('\n'));
@@ -97,11 +118,13 @@ if (!bash || !apiBlock) {
         `jd_file=${JSON.stringify(jd)}`,
         `PROJECT_DIR=${JSON.stringify(withStub ? projectDir : join(work, 'no-such-project'))}`,
         'prefetch_min_words=80',
+        'jd_closed_note=""',
         'url="$OFFER_URL"',
         'runFallback() {',
         apiBlock,
         '}',
         'runFallback',
+        'echo "closed=$jd_closed_note"',
       ].join('\n'));
       const out = execFileSync(bash, [script], {
         encoding: 'utf-8', timeout: 30000, cwd: work,
@@ -113,6 +136,33 @@ if (!bash || !apiBlock) {
     const hit = run({ mode: 'hit', url: 'https://jobs.ashbyhq.com/acme/123' });
     if (hit.jd === long && /words from the ATS API/.test(hit.out)) pass('empty JD file + API hit: the API text becomes the JD file');
     else fail(`empty JD file + API hit: JD file not filled (len=${hit.jd.length})`);
+
+    const closedRun = run({ mode: 'closed', url: 'https://careers.example.com/job/1' });
+    if (closedRun.jd === '' && /closed=posting closed \(fetch-jd\): page text: this job is closed/.test(closedRun.out)) pass('fetch-jd exit 3: JD file stays empty and a closure note is set for the terminal skip');
+    else fail(`fetch-jd exit 3 not recorded as closure: ${closedRun.out.trim().split('\n').pop()}`);
+
+    // The skip decision: a closure note beats --thin-action webfetch, is a terminal 'skipped'
+    // (never 'failed'/retryable), and returns before any worker is built.
+    const decide = SRC.match(/  local jd_thin_skip=0 jd_thin_note="" jd_thin_retryable=0\n  if \[\[ -n "\$jd_closed_note" \]\]; then[\s\S]*?jd_thin_note="\$jd_closed_note"\n/)?.[0];
+    const skipBlk = SRC.match(/  if \[\[ "\$jd_thin_skip" == "1" \]\]; then[\s\S]*?\n    return 0\n  fi\n/)?.[0];
+    if (decide && skipBlk) {
+      const sk = join(work, 'skip.sh');
+      writeFileSync(sk, [
+        '#!/usr/bin/env bash',
+        'THIN_ACTION=webfetch; jd_file=/dev/null; retries=0; MAX_RETRIES=2; id=7; url=u; started_at=t; report_num=042',
+        'jd_closed_note="posting closed (fetch-jd): page text: closed"',
+        'update_state_retrying() { echo "STATE:$3:$8"; }',
+        'release_report_num() { echo "RELEASED:$1"; }',
+        'f() {', '  local jd_closed_note="$jd_closed_note"', decide + '  fi\n', skipBlk, '  echo "WORKER-REACHED"', '}', 'f',
+      ].join('\n'));
+      const sout = execFileSync(bash, [sk], { encoding: 'utf-8', timeout: 30000 });
+      if (/STATE:skipped:posting closed/.test(sout) && /RELEASED:042/.test(sout) && !/WORKER-REACHED/.test(sout) && !/STATE:failed/.test(sout)) pass('closure note: the offer is recorded as skipped and no worker is reached');
+      else fail(`closure skip is not terminal: ${sout.trim()}`);
+    } else fail('could not extract the closure skip blocks from batch-runner.sh');
+
+    const truncated = run({ mode: 'truncated', url: 'https://careers.example.com/job/1' });
+    if (truncated.jd === '' && /truncated JD/.test(truncated.out)) pass('a fetch-jd result marked truncated is not written as the full JD');
+    else fail(`truncated fetch-jd result was accepted (len=${truncated.jd.length})`);
 
     const miss = run({ mode: 'miss', url: 'https://jobs.example.com/eng-42' });
     if (miss.jd === '' && miss.trace.trim() !== '') pass('API miss (exit 1): JD file stays empty, the worker falls back to WebFetch');

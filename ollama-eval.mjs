@@ -27,6 +27,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { outputLanguageInstruction, parseOutputLanguage } from './profile-language.mjs';
 import {
@@ -37,7 +38,7 @@ import { buildBudgetedPrompt } from './lib/context-budget.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
-  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+  isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
@@ -50,7 +51,10 @@ tracker.recordZeroToken('pdf payload');
 
 try {
   const { config } = await import('dotenv');
-  config();
+  // The data root's .env first: doctor.mjs, remember-cli.mjs, scan.mjs and the
+  // plugin engine all read it there. The working directory's .env, the only one
+  // read before, still supplies what the data root's leaves unset.
+  config({ path: [join(getCareerOpsRoot(), '.env'), join(process.cwd(), '.env')] });
 } catch { /* dotenv optional */ }
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -124,9 +128,21 @@ let baseUrl   = (process.env.OLLAMA_BASE_URL || 'http://localhost:11434').replac
 // Context window for the request AND the prompt budget. Defaults to the previous hardcoded
 // 32768, so behaviour is unchanged unless OLLAMA_NUM_CTX is set. Raise it for a model with a
 // bigger window; `ollama show` reports each model's ceiling (qwen2.5 caps at 32768).
-const numCtx = parseInt(process.env.OLLAMA_NUM_CTX || '32768', 10);
-if (Number.isNaN(numCtx) || numCtx <= 0) {
+// Digits only: parseInt read "32k" as 32, a 32-token context, and the prompt was
+// cut to fit it.
+const numCtxRaw = (process.env.OLLAMA_NUM_CTX || '32768').trim();
+const numCtx = /^\d+$/.test(numCtxRaw) ? Number(numCtxRaw) : NaN;
+if (!Number.isSafeInteger(numCtx) || numCtx <= 0) {
   console.error(`❌  Invalid OLLAMA_NUM_CTX: "${process.env.OLLAMA_NUM_CTX}" — must be a positive integer (tokens).`);
+  process.exit(1);
+}
+// Checked here, with the other settings, before the server is contacted. Digits
+// only (parseInt read "5m" as a 5 ms timeout) and at most 2^31-1 ms:
+// AbortSignal.timeout() fires a longer delay after 1 ms, and throws past 2^32-1.
+const timeoutRaw = (process.env.OLLAMA_TIMEOUT_MS || '300000').trim();
+const timeoutMs = /^\d+$/.test(timeoutRaw) ? Number(timeoutRaw) : NaN;
+if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+  console.error(`❌  Invalid OLLAMA_TIMEOUT_MS: "${process.env.OLLAMA_TIMEOUT_MS}" — must be a positive integer of at most 2147483647 (milliseconds).`);
   process.exit(1);
 }
 let saveReport = true;
@@ -262,6 +278,7 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileContent,
   customContent,
   jdText,
+  jdInContext: false, // The user message carries the JD; still budget it once.
   maxTokens: numCtx, // matches options.num_ctx below
 });
 
@@ -308,11 +325,6 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 // Call Ollama
 // ---------------------------------------------------------------------------
 const endpoint = `${baseUrl}/api/chat`;
-const timeoutMs = parseInt(process.env.OLLAMA_TIMEOUT_MS || '300000', 10);
-if (Number.isNaN(timeoutMs) || timeoutMs <= 0) {
-  console.error(`❌  Invalid OLLAMA_TIMEOUT_MS: "${process.env.OLLAMA_TIMEOUT_MS}" — must be a positive integer (milliseconds).`);
-  process.exit(1);
-}
 
 console.log(`🤖  Calling Ollama (${modelName})... this may take a minute.\n`);
 
@@ -430,37 +442,27 @@ console.log(evaluationText);
 // ---------------------------------------------------------------------------
 // Parse score summary
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const extract = (key) => {
-    const m = summaryMatch[1].match(new RegExp(`${key}:\\s*(.+)`));
-    return m ? m[1].trim() : 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+const summary    = parseScoreSummary(evaluationText);
+const company    = summary?.company    || 'unknown';
+const role       = summary?.role       || 'unknown';
+const score      = summary?.score      || '?';
+const archetype  = summary?.archetype  || 'unknown';
+const legitimacy = summary?.legitimacy || 'unknown';
+// An addition for company and role "unknown" would merge as a real application.
+const trackable  = Boolean(summary?.company && summary.role && summary.role.toLowerCase() !== 'unknown');
 
 // ---------------------------------------------------------------------------
 // Save report
 // ---------------------------------------------------------------------------
 if (saveReport) {
   let reservedNumbers = [];
+  let saveStage = 'report';
   try {
     if (!existsSync(PATHS.reports)) {
       mkdirSync(PATHS.reports, { recursive: true });
     }
 
-    reservedNumbers   = await reserveReportNumbers(1, { rootDir: ROOT, reportsDir: PATHS.reports });
+    reservedNumbers   = await reserveReportNumbers(1, { rootDir: DATA_ROOT, reportsDir: PATHS.reports });
     const num         = formatReportNumber(reservedNumbers[0]);
     // LOCAL calendar day (#3070). This one value becomes three things that have to
     // agree with each other and with the user's calendar: the report FILENAME
@@ -492,46 +494,53 @@ if (saveReport) {
 ${evaluationText.replace(/---SCORE_SUMMARY---[\s\S]*?---END_SUMMARY---/, '').trim()}
 `;
 
-    writeFileSync(reportPath, reportContent, 'utf-8');
+    writeFileSync(reportPath, withJdArchiveSection(reportContent, jdText), 'utf-8');
     console.log(`\n✅  Report saved: reports/${filename}`);
 
-    // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
-    // into data/applications.md. Evaluations persist as a tracker addition and
-    // merge-tracker.mjs applies dedup, status validation, report-link
-    // normalization and the tracker lock. A pasted literal skipped all of that,
-    // and at 8 cells it was also silently dropped by every reader's width guard.
-    // Field order is the TSV contract's -- status BEFORE score; merge-tracker
-    // swaps them into the tracker's own column order, resolved by name.
-    const additionName = `${num}-${companySlug}.tsv`;
-    const trackerFields = [
-      String(parseInt(num, 10)),
-      today,
-      tsvSafe(company),
-      tsvSafe(role),
-      'Evaluated',
-      normalizedTrackerScore(score),
-      '❌',
-      `[${num}](reports/${filename})`,
-      tsvSafe(`Ollama evaluation (${modelName})`),
-    ];
-    // Optional tenth field, labelled in the header below so it resolves by name.
-    // Pass 0 can then match on it instead of waiting for --backfill-urls.
-    if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
-    // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
-    // so this row cannot be ingested into the wrong columns. The optional URL
-    // needs its own label -- values are read BY label, so a tenth field the
-    // header does not name is not mis-mapped, it is dropped.
-    const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
-    mkdirSync(PATHS.trackerAdditions, { recursive: true });
-    writeFileSync(
-      join(PATHS.trackerAdditions, additionName),
-      `${additionHeader}\n${trackerFields.join('\t')}\n`,
-      'utf-8',
-    );
-    console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
-    console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    if (!trackable) {
+      console.warn(`\n⚠️   The reply has no ${summary ? 'company and role in its SCORE_SUMMARY' : 'SCORE_SUMMARY block'}, so no tracker row was written.`);
+      console.warn('    Re-run the evaluation, or use a model that follows the report format.');
+    } else {
+      // AGENTS.md Pipeline Integrity rule 1: never hand the user a row to paste
+      // into data/applications.md. Evaluations persist as a tracker addition and
+      // merge-tracker.mjs applies dedup, status validation, report-link
+      // normalization and the tracker lock. A pasted literal skipped all of that,
+      // and at 8 cells it was also silently dropped by every reader's width guard.
+      // Field order is the TSV contract's -- status BEFORE score; merge-tracker
+      // swaps them into the tracker's own column order, resolved by name.
+      const additionName = `${num}-${companySlug}.tsv`;
+      const trackerFields = [
+        String(parseInt(num, 10)),
+        today,
+        tsvSafe(company),
+        tsvSafe(role),
+        'Evaluated',
+        normalizedTrackerScore(score),
+        '❌',
+        `[${num}](reports/${filename})`,
+        tsvSafe(`Ollama evaluation (${modelName})`),
+      ];
+      // Optional tenth field, labelled in the header below so it resolves by name.
+      // Pass 0 can then match on it instead of waiting for --backfill-urls.
+      if (postingUrl) trackerFields.push(tsvSafe(postingUrl));
+      // Header row first (#3517/#3706): merge-tracker resolves the fields by name,
+      // so this row cannot be ingested into the wrong columns. The optional URL
+      // needs its own label -- values are read BY label, so a tenth field the
+      // header does not name is not mis-mapped, it is dropped.
+      const additionHeader = postingUrl ? `${TSV_ADDITION_HEADER}\turl` : TSV_ADDITION_HEADER;
+      saveStage = 'tracker addition';
+      mkdirSync(PATHS.trackerAdditions, { recursive: true });
+      writeFileSync(
+        join(PATHS.trackerAdditions, additionName),
+        `${additionHeader}\n${trackerFields.join('\t')}\n`,
+        'utf-8',
+      );
+      console.log(`\n📊  Tracker addition saved: batch/tracker-additions/${additionName}`);
+      console.log('    Run `node merge-tracker.mjs` to merge it into the tracker.');
+    }
   } catch (err) {
-    console.warn(`⚠️   Could not save report: ${err.message}`);
+    console.warn(`⚠️   Could not save evaluation (${saveStage}): ${err.message}`);
+    process.exitCode = 1;
   } finally {
     if (reservedNumbers.length > 0) {
       try {
