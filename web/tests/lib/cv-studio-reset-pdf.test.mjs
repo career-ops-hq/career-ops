@@ -53,6 +53,15 @@ test("reset leaves a COVER row and a blank-kind cover file on their own paths", 
   assert.match(cv.text, /cv-fixture-011-fixture-co\.pdf/);
 });
 
+test("reset leaves a custom kind on its edited path and still restores the CV row", () => {
+  const portfolio = "011\toutput/portfolio-fixture-011-edited.pdf\toutput/portfolio-fixture-011-edited.html\tletter\t2026-11-10\tportfolio";
+  const result = restoreFullPdfIndex(`${header}${portfolio}\n${edited}\n`, "11", () => true);
+  assert.equal(result.restored, true);
+  assert.match(result.text, /portfolio-fixture-011-edited\.pdf/);
+  assert.doesNotMatch(result.text, /portfolio-fixture-011\.pdf/);
+  assert.match(result.text, /cv-fixture-011-fixture-co\.pdf/);
+});
+
 test("restoreIndexedFullPdf rewrites the index only when the full file exists", async () => {
   const { restoreIndexedFullPdf } = await import("../../src/lib/cv-studio/server.ts");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cv-studio-reset-pdf-"));

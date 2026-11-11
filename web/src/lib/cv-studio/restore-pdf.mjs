@@ -23,7 +23,7 @@ export function restoreFullPdfIndex(text, reportNum, exists) {
     if (!line.trim() || line.startsWith("#")) return line;
     const fields = line.split("\t");
     if (norm(fields[0]) !== target) return line;
-    if (parsePdfManifestRows(line)[0]?.kind === "cover") return line;
+    if (parsePdfManifestRows(line)[0]?.kind !== "cv") return line;
     const pdf = fields[1] || "";
     if (!pdf.endsWith("-edited.pdf")) return line;
     const full = `${pdf.slice(0, -"-edited.pdf".length)}.pdf`;
