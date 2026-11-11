@@ -431,6 +431,10 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
   profileContent,
   customContent,
   jdText,
+  // The user turn below carries the JD. Left in the context too, it went to
+  // Gemini twice, inside systemInstruction and again as the user turn; it is
+  // still counted toward the budget once (#3950, as in openai-eval.mjs).
+  jdInContext: false,
   noCompress,
   maxTokens: 1_048_576, // gemini-2.5-flash context window
 });
