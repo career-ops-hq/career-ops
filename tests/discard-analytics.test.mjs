@@ -80,6 +80,12 @@ try {
   ].join('\n')));
   check('latest reason follows the timestamp, not the line order', outOfOrder.byUrl[0].lastReason === 'newer reason');
 
+  const fractional = aggregateDiscards(parseDiscardLog([
+    '2026-08-25T10:00:00.500Z\thttps://example.com/job1\tlater, with fractional seconds',
+    '2026-08-25T10:00:00Z\thttps://example.com/job1\tearlier',
+  ].join('\n')));
+  check('latest reason compares timestamps as instants, not text', fractional.byUrl[0].lastReason === 'later, with fractional seconds');
+
   const nonMonotonic = aggregateDiscards(parseDiscardLog([
     '2026-08-27T10:00:00Z\thttps://example.com/job3\tbelow-min-score',
     '2026-08-25T10:00:00Z\thttps://example.com/job1\tdealbreaker: "no on-site"',

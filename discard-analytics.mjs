@@ -60,6 +60,22 @@ export function parseDiscardLog(text) {
 }
 
 /**
+ * Order two log timestamps as instants. ISO8601 strings do not sort as text
+ * (`10:00:00.500Z` sorts before `10:00:00Z`, and offsets differ), so both are
+ * parsed; an unparseable one falls back to text order.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number} negative, zero or positive, like a sort comparator.
+ */
+function compareTimestamps(a, b) {
+  const ta = Date.parse(a);
+  const tb = Date.parse(b);
+  if (!Number.isNaN(ta) && !Number.isNaN(tb)) return ta - tb;
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/**
  * Aggregate parsed entries into sorted reason/domain/day counts.
  *
  * @param {Array<{timestamp:string, url:string, reason:string}>} entries
@@ -87,7 +103,7 @@ export function aggregateDiscards(entries) {
     dayCounts[day] = (dayCounts[day] || 0) + 1;
     const stat = urlStats.get(e.url) || { url: e.url, count: 0, lastReason: '', lastTimestamp: '' };
     stat.count += 1;
-    if (e.timestamp >= stat.lastTimestamp) {
+    if (stat.count === 1 || compareTimestamps(e.timestamp, stat.lastTimestamp) >= 0) {
       stat.lastTimestamp = e.timestamp;
       stat.lastReason = e.reason;
     }
