@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { resolveInside } from "@/lib/prep.mjs";
+import { realInside } from "@/lib/safe-path.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,39 +17,60 @@ const TYPES: Record<string, string> = {
 
 type Entry = { path: string; size: number; mtime: number };
 
-function walk(base: string, dir: string, out: Entry[]) {
-  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+// Two folders hold what the app generates for a role: output/ (CVs, evaluations,
+// per-company folders) and interview-prep/ (the prep guides the interview-prep
+// mode writes). Listed paths are prefixed with the folder they live in.
+const roots = () => ({
+  output: path.resolve(careerOpsRoot(), "output"),
+  "interview-prep": path.resolve(careerOpsRoot(), "interview-prep"),
+});
+
+function walk(prefix: string, base: string, dir: string, out: Entry[], recursive: boolean, skipped: { n: number }) {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") skipped.n++;
+    return;
+  }
+  for (const e of entries) {
     const full = path.join(dir, e.name);
-    if (e.isDirectory()) walk(base, full, out);
-    else if (TYPES[path.extname(e.name).toLowerCase()]) {
-      const st = fs.statSync(full);
-      out.push({ path: path.relative(base, full).split(path.sep).join("/"), size: st.size, mtime: st.mtimeMs });
+    if (e.isDirectory()) {
+      if (recursive) walk(prefix, base, full, out, recursive, skipped);
+    } else if (e.isFile() && TYPES[path.extname(e.name).toLowerCase()]) {
+      // isFile() is false for a symlink, so one pointing outside the folder is never listed.
+      try {
+        const st = fs.statSync(full);
+        out.push({ path: `${prefix}/${path.relative(base, full).split(path.sep).join("/")}`, size: st.size, mtime: st.mtimeMs });
+      } catch {
+        skipped.n++; // removed or unreadable between the listing and the stat
+      }
     }
   }
 }
 
-// GET /api/output            -> list of every viewable file under output/
-// GET /api/output?file=a/b.md -> that file (path-confined to output/)
+// GET /api/output                   -> every viewable file, plus how many entries could not be read
+// GET /api/output?file=output/a/b.md -> that file (confined to its folder)
 export async function GET(req: NextRequest) {
-  const base = path.resolve(careerOpsRoot(), "output");
+  const r = roots();
   const file = req.nextUrl.searchParams.get("file");
   if (!file) {
     const out: Entry[] = [];
-    try {
-      walk(base, base, out);
-    } catch {
-      /* no output dir yet */
-    }
-    return Response.json({ files: out });
+    const skipped = { n: 0 };
+    walk("output", r.output, r.output, out, true, skipped);
+    walk("interview-prep", r["interview-prep"], r["interview-prep"], out, false, skipped);
+    return Response.json({ files: out, unreadable: skipped.n });
   }
-  const full = resolveInside(base, file);
-  if (!full) return new Response("forbidden", { status: 403 });
-  const type = TYPES[path.extname(full).toLowerCase()];
+  const slash = file.indexOf("/");
+  const prefix = (slash < 0 ? "" : file.slice(0, slash)) as keyof ReturnType<typeof roots>;
+  const base = r[prefix];
+  if (!base) return new Response("forbidden", { status: 403 });
+  const type = TYPES[path.extname(file).toLowerCase()];
   if (!type) return new Response("unsupported", { status: 415 });
+  // Follows symlinks: only a file that really lives inside its folder is served.
+  const real = realInside(base, file.slice(slash + 1));
+  if (!real) return new Response("not found", { status: 404 });
   try {
-    // A symlink inside output/ must not lead outside it: re-check on real paths.
-    const real = fs.realpathSync(full);
-    if (!resolveInside(fs.realpathSync(base), real)) return new Response("forbidden", { status: 403 });
     const headers: Record<string, string> = { "content-type": type, "x-content-type-options": "nosniff" };
     // Generated HTML is untrusted: serve it sandboxed so scripts cannot reach the app's origin.
     if (type.startsWith("text/html")) headers["content-security-policy"] = "sandbox";

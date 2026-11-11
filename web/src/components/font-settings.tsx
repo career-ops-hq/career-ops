@@ -6,7 +6,7 @@ import {
   ROLES, DEFAULTS, applyAppearance, loadAppearance, loadAppearanceFromServer, saveAppearance,
   type Appearance, type FontChoice, type RoleId,
 } from "@/lib/appearance";
-import { normalizeAppearance } from "@/lib/ui-state.mjs";
+import { normalizeAppearance } from "@/lib/appearance-schema.mjs";
 
 const COMMON = ["Segoe UI", "Arial", "Verdana", "Tahoma", "Calibri", "Georgia", "Cambria", "Trebuchet MS", "Consolas", "Courier New"];
 const opt = { background: "var(--bg)", color: "var(--fg)" };

@@ -3,7 +3,7 @@
 import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { parseTaskItems, tickKey, countDone } from "@/lib/prep.mjs";
+import { parseTaskItems, tickKey, countDone, pickForCompany } from "@/lib/prep.mjs";
 import { ChevronRight, Folder, FolderOpen, FileText, FileCode, FileType, Download, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react";
 
 type Task = { id: string; text: string; done: boolean };
@@ -80,8 +80,13 @@ export function OutputViewer() {
   const [progError, setProgError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [missing, setMissing] = useState("");
+  const [unreadable, setUnreadable] = useState(0);
   const [newTask, setNewTask] = useState("");
-  const company = sel?.split("/")[0] ?? null;
+  // The company whose "My prep tasks" show: the folder of the open file (output/<company>/…),
+  // or the company the page was opened for (?company=) while viewing its interview-prep file.
+  const [linked, setLinked] = useState<string | null>(null);
+  const parts = sel?.split("/") ?? [];
+  const company = parts[0] === "output" && parts.length > 2 ? parts[1] : linked;
 
   // Progress: the server file is the truth. If it cannot be read (damaged file),
   // saving is switched off so ticking a box never overwrites it.
@@ -129,11 +134,13 @@ export function OutputViewer() {
         // ?company=slug opens that company's folder and its most useful file
         const slug = new URLSearchParams(window.location.search).get("company");
         if (slug) {
-          const mine = list.filter((f) => f.path.split("/")[0] === slug);
-          const pick = ["interview-prep.md", "evaluation.md"].map((n) => mine.find((f) => f.path.endsWith("/" + n))).find(Boolean) ?? mine[0];
-          if (pick) setSel(pick.path);
-          else setMissing(slug);
+          const pick = pickForCompany(list.map((f) => f.path), slug);
+          if (pick) {
+            setSel(pick);
+            setLinked(slug);
+          } else setMissing(slug);
         }
+        setUnreadable(d.unreadable ?? 0);
         setFiles(list);
       })
       .catch(() => setFiles([]));
@@ -156,7 +163,8 @@ export function OutputViewer() {
     <div className="flex h-[calc(100vh-4rem)] gap-4 p-4">
       {showTree && <div className="flex w-72 shrink-0 flex-col gap-3 overflow-y-auto"><div className="rounded border border-border bg-surface/30 p-2">
         {sorted(tree).map((n) => <Row key={n.path} n={n} depth={0} sel={sel} onSel={setSel} />)}
-        {!files.length && <p className="p-2 text-sm text-muted">No files in output/.</p>}
+        {!files.length && <p className="p-2 text-sm text-muted">No files in output/ or interview-prep/.</p>}
+        {unreadable > 0 && <p className="p-2 text-xs text-faint">{unreadable} entries could not be read and are not listed.</p>}
       </div>
       {company && (
         <div className="rounded border border-border bg-surface/30 p-2">

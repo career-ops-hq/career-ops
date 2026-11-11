@@ -1,7 +1,9 @@
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { atomicWrite } from "@/lib/core/safe-write";
 import { readJsonObject } from "@/lib/json-body";
-import { normalizeProgress, readJsonFile, writeJsonAtomic } from "@/lib/ui-state.mjs";
+import { normalizeProgress } from "@/lib/prep.mjs";
+import { readJsonFile } from "@/lib/json-file.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,7 +29,7 @@ export async function PUT(req: Request) {
   const body = await readJsonObject(req);
   if (!body) return Response.json({ error: "Expected a JSON object." }, { status: 400 });
   try {
-    writeJsonAtomic(file(), normalizeProgress(body));
+    atomicWrite(file(), JSON.stringify(normalizeProgress(body), null, 2));
     return Response.json({ ok: true });
   } catch {
     return Response.json({ error: "Could not write data/prep-progress.json." }, { status: 500 });

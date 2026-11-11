@@ -3,7 +3,7 @@
 // ("upload", kept as a data URL). Applied by overriding CSS variables on <html>.
 // The source of truth is config/ui-appearance.json (via /api/appearance);
 // localStorage is only a cache so the page does not flash before the server answers.
-import { normalizeAppearance } from "@/lib/ui-state.mjs";
+import { normalizeAppearance } from "@/lib/appearance-schema.mjs";
 
 const KEY = "career-ops:appearance";
 
@@ -12,7 +12,7 @@ export type FontChoice = { kind: "system"; family: string } | { kind: "upload"; 
 export const ROLES = [
   { id: "ui", label: "Menu & interface", hint: "Sidebar, buttons, forms and all general text", vars: ["--font-sans"] },
   { id: "heading", label: "Page titles", hint: "Big titles such as “Config” and “Today”", vars: ["--font-display"] },
-  { id: "preview", label: "Preview text", hint: "Body text of .md files in the Preparation page and reports", vars: ["--font-preview"] },
+  { id: "preview", label: "Preview text", hint: "Body text of previewed .md files and reports", vars: ["--font-preview"] },
   { id: "previewHeading", label: "Preview titles", hint: "Headings inside previewed documents", vars: ["--font-preview-heading"] },
   { id: "code", label: "Code", hint: "Code blocks, JSON and monospace text", vars: ["--font-mono"] },
 ] as const;

@@ -1,7 +1,9 @@
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
+import { atomicWrite } from "@/lib/core/safe-write";
 import { readJsonObject } from "@/lib/json-body";
-import { normalizeAppearance, readJsonFile, writeJsonAtomic } from "@/lib/ui-state.mjs";
+import { normalizeAppearance } from "@/lib/appearance-schema.mjs";
+import { readJsonFile } from "@/lib/json-file.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +30,7 @@ export async function PUT(req: Request) {
   const body = await readJsonObject(req);
   if (!body) return Response.json({ error: "Expected a JSON object." }, { status: 400 });
   try {
-    writeJsonAtomic(file(), normalizeAppearance(body));
+    atomicWrite(file(), JSON.stringify(normalizeAppearance(body), null, 2));
     return Response.json({ ok: true });
   } catch {
     return Response.json({ error: "Could not write config/ui-appearance.json." }, { status: 500 });
