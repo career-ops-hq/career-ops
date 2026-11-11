@@ -14,6 +14,8 @@ const ORIGIN = 'https://acme.darwinbox.in';
 const BOARD = { origin: ORIGIN, companyId: 'main' };
 const CAREERS = `${ORIGIN}/ms/candidatev2/main/careers/allJobs`;
 const ENDPOINT = `${ORIGIN}/ms/candidateapi/job/alljobs?companyId=main`;
+const COM_ORIGIN = 'https://acme.darwinbox.com';
+const COM_CAREERS = `${COM_ORIGIN}/ms/candidatev2/main/careers/allJobs`;
 const PAGE_SIZE = 50;
 
 /** Run `fn` with console.error captured; returns what it logged. */
@@ -42,6 +44,8 @@ const detectCases = [
   [{ careers_url: 'https://acme.darwinbox.in:8443/ms/candidatev2/main/careers/allJobs' }, 'a tenant host carrying a port', CAREERS],
   [{ api: CAREERS }, 'the api: field', CAREERS],
   [{ careers_url: `${ORIGIN}/ms/candidatev2/5ffc190a05f27/careers/allJobs` }, 'a tenant-specific company id', `${ORIGIN}/ms/candidatev2/5ffc190a05f27/careers/allJobs`],
+  [{ careers_url: `${COM_CAREERS}?x=1` }, 'a darwinbox.com tenant', COM_CAREERS],
+  [{ careers_url: 'https://ACME.darwinbox.com:8443/ms/candidatev2/main/careers/home' }, 'an upper-case darwinbox.com host carrying a port', COM_CAREERS],
 ];
 for (const [entry, label, want] of detectCases) {
   const got = darwinbox.detect(entry);
@@ -56,6 +60,13 @@ const rejectCases = [
   [{ careers_url: 'https://a.b.darwinbox.in/ms/candidatev2/main/careers/allJobs' }, 'two tenant labels'],
   [{ careers_url: 'https://-acme.darwinbox.in/ms/candidatev2/main/careers/allJobs' }, 'label starting with a hyphen'],
   [{ careers_url: 'https://darwinbox.in/ms/candidatev2/main/careers/allJobs' }, 'the apex host'],
+  [{ careers_url: 'http://acme.darwinbox.com/ms/candidatev2/main/careers/allJobs' }, 'non-HTTPS on darwinbox.com'],
+  [{ careers_url: 'https://acme.darwinbox.com.evil.example/ms/candidatev2/main/careers/allJobs' }, 'look-alike darwinbox.com host (trailing suffix)'],
+  [{ careers_url: 'https://evildarwinbox.com/ms/candidatev2/main/careers/allJobs' }, 'suffix look-alike darwinbox.com host'],
+  [{ careers_url: 'https://a.b.darwinbox.com/ms/candidatev2/main/careers/allJobs' }, 'two tenant labels on darwinbox.com'],
+  [{ careers_url: 'https://darwinbox.com/ms/candidatev2/main/careers/allJobs' }, 'the darwinbox.com apex host'],
+  [{ careers_url: 'https://www.darwinbox.com/careers' }, 'the vendor site without a company id'],
+  [{ careers_url: 'https://acme.darwinbox.net/ms/candidatev2/main/careers/allJobs' }, 'a darwinbox host on another TLD'],
   [{ careers_url: ORIGIN }, 'a bare tenant host (no company id to read)'],
   [{ careers_url: `${ORIGIN}/user/login` }, 'the employee login page'],
   [{ careers_url: `${ORIGIN}/ms/candidatev2/ma%2Fin/careers/allJobs` }, 'an encoded slash in the company id'],
@@ -87,6 +98,9 @@ for (const [entry, label] of rejectCases) {
   const routed = resolveProvider({ name: 'Acme', careers_url: CAREERS }, providers);
   if (routed?.provider?.id === 'darwinbox') pass('the registry routes a <tenant>.darwinbox.in URL to darwinbox');
   else fail(`registry routed a darwinbox URL to ${routed?.provider?.id}`);
+  const routedCom = resolveProvider({ name: 'Acme', careers_url: COM_CAREERS }, providers);
+  if (routedCom?.provider?.id === 'darwinbox') pass('the registry routes a <tenant>.darwinbox.com URL to darwinbox');
+  else fail(`registry routed a darwinbox.com URL to ${routedCom?.provider?.id}`);
 }
 
 // Normalization of the live response shape.
@@ -274,6 +288,19 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
     jobs[0].url === `${ORIGIN}/ms/candidatev2/5ffc190a05f27/careers/jobDetails/a1`
   ) pass('darwinbox.fetch() carries a tenant-specific company id through');
   else fail(`darwinbox.fetch() company id: ${ctx.calls[0].url} ${jobs[0]?.url}`);
+}
+
+// fetch() — a darwinbox.com tenant is read from its own host, not rewritten to darwinbox.in.
+{
+  const ctx = pagedCtx([envelope([row('a1')])]);
+  const jobs = await darwinbox.fetch({ name: 'Acme', careers_url: 'https://acme.darwinbox.com:9999/ms/candidatev2/main/careers/home' }, ctx);
+  if (
+    ctx.calls.length === 1 &&
+    ctx.calls[0].url === `${COM_ORIGIN}/ms/candidateapi/job/alljobs?companyId=main` &&
+    ctx.calls[0].opts.redirect === 'error' &&
+    jobs[0].url === `${COM_ORIGIN}/ms/candidatev2/main/careers/jobDetails/a1`
+  ) pass('darwinbox.fetch() reads a darwinbox.com tenant from its own host');
+  else fail(`darwinbox.fetch() darwinbox.com: ${JSON.stringify(ctx.calls.map((c) => c.url))} ${jobs[0]?.url}`);
 }
 
 // fetch() — walks until a short page, paced, refusing redirects on every request.
