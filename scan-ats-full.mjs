@@ -81,7 +81,7 @@ import { decodeEntities } from './providers/_html-entities.mjs';
 import { buildTitleFilter, buildTitleFilterOverrides, buildTitleFilterWithOverrides, buildLocationFilter, buildContentFilterOrExit, matchedTitleKeywords, loadSeenUrls, scanHistoryPolicy, seenJobKey, appendToPipeline, appendToScanHistory, findBlacklistEntry, loadBlacklist, parseSinceDays, BROWSER_PROCESS_ENV, DATA_ROOT as SCAN_DATA_ROOT, PORTALS_PATH, PIPELINE_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
-import { SEED_SOURCES, toPortalEntry } from './seeds/vc-portfolios.mjs';
+import { SEED_SOURCES, toPortalEntries } from './seeds/vc-portfolios.mjs';
 import { validateFlags, flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { boardKey, loadDeadBoards, recordBoardFailure, recordBoardResult, saveDeadBoards, shouldSkipDeadBoard } from './dead-boards.mjs';
@@ -456,8 +456,10 @@ export const SOURCES = {
     // there is no company directory to walk and nothing to fetch per board:
     // loadDataset reads the feed once (loadWorkableFeed in
     // providers/workable.mjs, through workableFeedCache) and hands back
-    // one board per employer with its postings attached, already narrowed to
-    // the --since window and the title filter. The rest of the sweep (domain
+    // one board per employer in the feed with its postings attached, already
+    // narrowed to the --since window and the title filter (so most boards are
+    // empty, and the source counts every employer as others count every
+    // tenant of their directory). The rest of the sweep (domain
     // gate, location and content filters, blacklist, dedup) runs per employer
     // as for any other source. Title-filter overrides match the employer name.
     provider: WORKABLE_FEED_PROVIDER,
@@ -1155,17 +1157,55 @@ export function keepAndMaybeEmit(job, source, sink, blacklist, opts) {
 
 // ── VC portfolio seed scan ──────────────────────────────────────────
 
-// ATS providers that can auto-detect from a careers_url, in probe order.
+// ATS providers that can auto-detect from a careers_url. Each seed candidate
+// URL names one ATS host, so at most one of these claims it; the probe ORDER
+// lives in toPortalEntries() (seeds/vc-portfolios.mjs).
 // Workday is excluded: its URL format requires a tenant|instance|site triple
 // that can't be derived from a portfolio slug alone.
 const SEED_PROVIDERS = [greenhouse, lever, ashby];
 
 /**
+ * Probe a seed company's candidate boards in order and return the first that
+ * exists. A 404 means "no board under this slug on this ATS" and moves on to
+ * the next candidate; when every candidate 404s the company has no board on
+ * any of them, which is a normal outcome for a portfolio company and is
+ * reported as `{ found: false }`, not as an error. Any other failure throws,
+ * so a timeout or a 5xx still counts as an unreachable board.
+ *
+ * A lone candidate (the source named the ATS) gets no such allowance: a 404
+ * there means the named board is gone, and that is an error.
+ *
+ * @param {Array<{ name: string, careers_url: string }>} candidates  From toPortalEntries().
+ * @param {Array<{ detect?: (entry: any) => unknown }>} providers
+ * @param {(provider: any, entry: any) => Promise<any[]>} fetchBoard
+ * @returns {Promise<{ found: true, provider: any, entry: any, jobs: any[] } | { found: false }>}
+ */
+export async function probeSeedBoards(candidates, providers, fetchBoard) {
+  const probes = [];
+  for (const entry of candidates) {
+    if (!entry.careers_url) continue;
+    const provider = providers.find((p) => {
+      try { return Boolean(p.detect?.(entry)); } catch { return false; }
+    });
+    if (provider) probes.push({ provider, entry });
+  }
+  for (const { provider, entry } of probes) {
+    try {
+      return { found: true, provider, entry, jobs: await fetchBoard(provider, entry) };
+    } catch (err) {
+      if (probes.length > 1 && /** @type {any} */ (err)?.status === 404) continue;
+      throw err;
+    }
+  }
+  return { found: false };
+}
+
+/**
  * Scan a VC portfolio seed source and return matching job offers.
- * Companies are converted to PortalEntry shape, then each ATS provider's
- * detect() is tried in order (greenhouse → lever → ashby). The first hit
- * wins and its fetch() is called — identical to how portals.yml tracked
- * companies flow through scan.mjs.
+ * Each company becomes one or more PortalEntry candidates
+ * (toPortalEntries: Ashby, Greenhouse, Lever by slug), probed in order by
+ * probeSeedBoards(). The first board that exists wins and its jobs go through
+ * the same filters as portals.yml tracked companies in scan.mjs.
  *
  * @param {string}   seedId      Key from SEED_SOURCES (e.g. 'yc').
  * @param {object}   opts        Parsed CLI options.
@@ -1197,28 +1237,34 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) 
   const cutoff = Date.now() - opts.sinceDays * 86_400_000;
   const offers = [];
   let errors = 0;
+  let noBoard = 0;
+  // Ashby, Greenhouse and Lever each answer every board from one API host, and
+  // each company may be probed on all three, so CONCURRENCY companies in flight
+  // can mean CONCURRENCY requests at one host. Cap each host the way the
+  // directory sweeps are capped (see SINGLE_HOST_CONCURRENCY). The key is the
+  // candidate's board host, which maps one-to-one to its ATS.
+  const withHostSlot = createKeyedLimiter(SINGLE_HOST_CONCURRENCY);
+  const fetchBoard = (p, entry) => {
+    let hostKey;
+    try { hostKey = new URL(entry.careers_url).hostname.toLowerCase(); } catch { hostKey = p.id || 'unknown'; }
+    return withHostSlot(hostKey, () => p.fetch(entry, withIdCache(ctx, idCaches, p)));
+  };
 
   await parallelEach(capped, CONCURRENCY, async (company) => {
-    const entry = toPortalEntry(company);
-    if (!entry.careers_url) return;
-
-    // Try each ATS provider's detect() — first hit wins.
-    let provider = null;
-    for (const p of SEED_PROVIDERS) {
-      try {
-        if (p.detect?.(entry)) { provider = p; break; }
-      } catch { /* no-op */ }
-    }
-    if (!provider) return; // No ATS detected — skip silently (or log in --verbose).
-
-    let jobs;
+    let probe;
     try {
-      jobs = await provider.fetch(entry, withIdCache(ctx, idCaches, provider));
+      probe = await probeSeedBoards(toPortalEntries(company), SEED_PROVIDERS, fetchBoard);
     } catch (err) {
       errors++;
-      if (opts.verbose) console.error(`  ✗ ${seedId}/${entry.name}: ${err.message}`);
+      if (opts.verbose) console.error(`  ✗ ${seedId}/${company.name}: ${err.message}`);
       return;
     }
+    if (!probe.found) {
+      noBoard++;
+      if (opts.verbose) console.error(`  · ${seedId}/${company.name}: no Ashby, Greenhouse or Lever board under its slug`);
+      return;
+    }
+    const { provider, entry, jobs } = probe;
 
     const sourceName = `${seedId}-seed`;
     for (const job of jobs) {
@@ -1244,7 +1290,7 @@ export async function runSeedScan(seedId, opts, ctx, seenUrls, label, idCaches) 
     }
   });
 
-  return { offers, errors, total: capped.length };
+  return { offers, errors, noBoard, total: capped.length };
 }
 
 /**
@@ -2131,7 +2177,7 @@ async function main() {
       totalCompaniesScanned += result.total || 0;
       totalErrors += result.errors || 0;
       newOffers.push(...result.offers);
-      log(`  done — ${result.total} companies probed, ${result.offers.length} matches (${result.errors} errors)`);
+      log(`  done — ${result.total} companies probed, ${result.offers.length} matches (${result.errors} errors, ${result.noBoard} with no board found)`);
     }
   }
   // The history and VC seed passes run after every directory source has

@@ -24,6 +24,10 @@ exception: `config/local-paths.txt`, if you have one, stays in the checkout beca
 `update-system.mjs` reads it from there. It is not in the data root, so keep a copy of it
 with your backup.
 
+The same applies to any agent-tool files that are still in the checkout rather than the data
+root (`.claude/settings.json`, `.claude/hooks/`, `opencode.json`, `plugins.local/`,
+`plugins.lock`): `backup.mjs` reads them only from the data root, so copy them separately.
+
 Once your data is in one folder, backing it up is one path, and none of the patterns
 below have to know which files under the checkout are yours.
 
@@ -73,6 +77,31 @@ You can use `export CAREER_OPS_ROOT=~/career-data` instead of the marker file
 (`CAREER_OPS_DATA_DIR` is an alias for it). Either variable takes precedence over the
 marker. The marker works without editing your shell profile, and every script and agent
 mode picks it up.
+
+---
+
+## The built-in script: `node backup.mjs`
+
+For a plain copy to a folder, career-ops ships a script. You choose where it goes: any
+folder with `--dest`, or a cloud drive with `--provider` (Google Drive, Dropbox, OneDrive or
+iCloud Drive; it copies into `Backups/career-ops` underneath the drive folder). It skips
+unchanged files and never deletes anything in the backup:
+
+```bash
+node backup.mjs --dest ~/Backups/career-ops --dry-run   # print counts and bytes that would be copied (no file list)
+node backup.mjs --dest ~/Backups/career-ops             # run it
+node backup.mjs --provider google-drive                 # or a signed-in cloud drive (creates Backups/career-ops in it)
+```
+
+It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The files that hold other people's contact details (`data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json`, `output/contacts.vcf` (and any other `.vcf` file)) are
+left out unless you add `--include-contacts`, which cannot be combined with `--provider` or with a `--dest` inside a provider folder at its default location (a sync client would upload them). A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder. The backup includes your agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`), which can
+hold API tokens, so back up to a place only you can read. When the destination is inside a recognized
+sync folder (including every `--provider` destination) these are left out and the run says so. Several signed-in accounts are
+handled with `--account`; see
+[SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it protects against a lost
+machine, not against a mistaken edit. Use Pattern 1 or 3 below when you want to go back to
+an earlier version. The script is on-demand; schedule it with
+[the same tools as scans](AUTOMATION.md) if you want it recurring.
 
 ---
 

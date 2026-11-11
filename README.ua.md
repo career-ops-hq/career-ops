@@ -605,6 +605,8 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 для використання спільнотою, зарезервованою для назв комерційних продуктів
 і схвалень.
 
+Код ліцензовано за MIT; дані в [`employers/`](employers/) ліцензовано за [CC BY 4.0](employers/LICENSE).
+
 ## Історія зірок
 
 <p align="center">

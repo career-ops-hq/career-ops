@@ -488,6 +488,15 @@ function normalizeKeywordList(value) {
 // end-of-string (#4478), so "𐐀" lost its trailing boundary and matched "𐐀x".
 const LOCATION_WORD_CP = /^[\p{L}\p{M}\p{N}]$/u;
 
+// Boards ship locations with no-break spaces and doubled spaces: joinup.ch
+// returns "St.\u00a0Gallen", and `&#160;` decodes to a raw U+00A0. A
+// multi-word keyword is a literal sequence, so "st. gallen" missed it, allow
+// rejected the posting, and block let "New\u00a0York" through. Keywords and
+// locations both collapse every whitespace run to one ASCII space, as
+// foldTitle does for the title filter. Case is left alone, because ISO codes
+// are matched against the original-case location (#6605).
+const foldLocationWhitespace = (s) => s.replace(/\s+/g, ' ');
+
 function compileLocationKeyword(keyword) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const codePoints = [...keyword];
@@ -512,7 +521,7 @@ function compileLocationKeywordList(value) {
   return raw
     .filter(k => typeof k === 'string' && k.trim())
     .map((entry) => {
-      const trimmed = entry.trim();
+      const trimmed = foldLocationWhitespace(entry).trim();
       if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
       const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
       return (lower, original) => typeof original === 'string' && re.test(original);
@@ -725,7 +734,7 @@ const WORLDWIDE_LOCATION_LABELS = new Set([
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
-  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
+  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow).map(foldLocationWhitespace);
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   // US-targeted configs list the country in always_allow and foreign cities
   // in block. "Dublin, OH" does not contain "United States", so without this
@@ -735,7 +744,7 @@ export function buildLocationFilter(locationFilter) {
   if (usExpansion) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
-  const allowKeywords = normalizeKeywordList(locationFilter.allow);
+  const allowKeywords = normalizeKeywordList(locationFilter.allow).map(foldLocationWhitespace);
   const allow = compileLocationKeywordList(locationFilter.allow);
   // Do not widen city-only or mixed city/country targeting. Reuse the shared
   // country vocabulary rather than introducing a second country-name list.
@@ -756,7 +765,7 @@ export function buildLocationFilter(locationFilter) {
 
   const filter = (location, url, title, offer) => {
     if (!workplacePolicy(location, title, offer).eligible) return false;
-    const original = typeof location === 'string' ? location.trim() : '';
+    const original = typeof location === 'string' ? foldLocationWhitespace(location).trim() : '';
     const lower = original.toLowerCase();
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data),
@@ -2310,7 +2319,7 @@ function extractPipelineUrl(line) {
  * @returns {{company: string, role: string, location: string}|null} The pair plus
  *   its location (`''` when unknown), or null when the line has none to contribute.
  */
-function extractPipelineCompanyRole(line) {
+export function extractPipelineCompanyRole(line) {
   const entry = pipelineEntry(line, PIPELINE_CHECKBOX_STRICT_RE);
   if (!entry || entry.expired) return null;
 

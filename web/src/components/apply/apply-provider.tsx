@@ -5,6 +5,7 @@ import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
+import { issuesAfterAgent, issuesAfterFill } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
 
 export type FillStep = { fieldId: string; label: string; ok: boolean; thumb?: string };
@@ -31,6 +32,8 @@ type ApplyCtx = {
   error: string;
   /** Set when the posting is Workday, iCIMS, or UKG. Drive and prefill do not run. */
   blockedAts: { message: string; postingUrl: string; checklistHref: string } | null;
+  /** True when a tailored CV file was resolved for this application. */
+  cvAttached: boolean;
   open: (url: string, opts?: { prefill?: boolean; company?: string; n?: string; from?: string }) => Promise<void>;
   prefill: () => Promise<void>;
   setAnswer: (idOrLabel: string, value: string) => void;
@@ -78,6 +81,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   const [driveSteps, setDriveSteps] = useState<DriveStep[]>([]);
   const [error, setError] = useState("");
   const [blockedAts, setBlockedAts] = useState<ApplyCtx["blockedAts"]>(null);
+  const [cvAttached, setCvAttached] = useState(false);
   const sessionId = useRef<string | null>(null);
   const companyRef = useRef<string>("");
   // Mirrors `n` for the async fetch below, same reason as companyRef: the
@@ -182,6 +186,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setIssues([]);
     setDriveSteps([]);
     setBlockedAts(null);
+    setCvAttached(false);
     setUrl(u);
     setCompany(opts?.company ?? "");
     companyRef.current = opts?.company ?? "";
@@ -193,7 +198,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const r = await fetch("/api/apply/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: u, cliId: cliId(), ...(opts?.n ? { n: opts.n } : {}) }),
+        body: JSON.stringify({ url: u, cliId: cliId(), ...(opts?.n ? { n: opts.n } : {}), ...(opts?.company ? { company: opts.company } : {}) }),
       });
       const d = await r.json();
       // The user can leave while this is in flight, and the request can't be
@@ -221,6 +226,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       sessionId.current = d.id;
       setTitle(d.title);
       setShots(d.shots ?? []);
+      setCvAttached(!!d.cvAttached);
       pendingPrefill.current = !!opts?.prefill;
       if (d.needsDrive) {
         // The form is behind navigation → the agent drives to reach it, streamed.
@@ -348,22 +354,22 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       setSteps(d.steps ?? []);
-      // merge the verify-after-fill warnings (required-empty / mismatch / validation)
-      if (Array.isArray(d.issues) && d.issues.length) {
-        setIssues((prev) => {
-          const seen = new Set(prev.map((i: ApplyIssue) => i.message));
-          return [...prev, ...(d.issues as ApplyIssue[]).filter((i) => !seen.has(i.message))];
-        });
-      }
+      if (typeof d.cvAttached === "boolean") setCvAttached(d.cvAttached);
+      // Gaps stay up while the request runs. This body is what replaces them.
+      setIssues((prev) => issuesAfterFill(prev, Array.isArray(d.issues) ? d.issues as ApplyIssue[] : []));
       if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
-      setStatus("done");
-      // ESCALATION ("si no va, full agente"): if deterministic fill clearly
-      // didn't land (most fields failed / mismatched), let the agent fill it.
-      const okCount = (d.steps ?? []).filter((s: FillStep) => s.ok).length;
-      const total = (d.steps ?? []).length;
-      const mismatch = (d.issues ?? []).some((i: ApplyIssue) => i.code === "fill-mismatch");
-      if (cliId() && total > 0 && (okCount === 0 || (mismatch && okCount < total / 2))) {
-        await agentFillRef.current();
+      if (d.handedOff) {
+        setStatus("done");
+        // ESCALATION ("si no va, full agente"): if deterministic fill clearly
+        // didn't land (most fields failed / mismatched), let the agent fill it.
+        const okCount = (d.steps ?? []).filter((s: FillStep) => s.ok).length;
+        const total = (d.steps ?? []).length;
+        const mismatch = (d.issues ?? []).some((i: ApplyIssue) => i.code === "fill-mismatch");
+        if (cliId() && total > 0 && (okCount === 0 || (mismatch && okCount < total / 2))) {
+          await agentFillRef.current();
+        }
+      } else {
+        setStatus("ready");
       }
     } catch {
       if (generation.current !== gen) return; // left mid-fill
@@ -380,7 +386,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const gen = generation.current;
     const fs = fieldsRef.current;
     const a = answersRef.current;
-    const ans = fs.filter((f) => f.type !== "file" && (a[f.id] || "").trim()).map((f) => ({ label: f.label || f.id, value: a[f.id] }));
+    const ans = fs.filter((f) => f.type !== "file").map((f) => ({ id: f.id, label: f.label || f.id, value: a[f.id] || "" }));
     setDriveSteps([]);
     setError("");
     setStatus("filling");
@@ -388,17 +394,26 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const controller = new AbortController();
     fillAbort.current = controller;
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans }), signal: controller.signal });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans, company: companyRef.current, application: nRef.current }), signal: controller.signal });
       if (controller.signal.aborted || generation.current !== gen) return; // left mid-fill
       const result = await readFillResult(r, (step) => setDriveSteps((p) => [...p, step]), () => generation.current === gen, controller.signal);
       if (!result || controller.signal.aborted || generation.current !== gen) return; // left mid-fill
       const outcome = screenForFill(result);
-      if (outcome.status === "done") {
-        setIssues((prev) => [...prev, { level: "info", code: "ai-filled", message: outcome.issue }]);
-      } else {
-        setError(outcome.error);
+      const gaps = "gaps" in outcome && outcome.gaps?.length ? outcome.gaps : [];
+      if (gaps.length || outcome.status === "done") {
+        setIssues((prev) => issuesAfterAgent(prev, {
+          gaps,
+          note: outcome.status === "done" ? outcome.issue : "",
+        }));
       }
-      setStatus(outcome.status);
+      if (outcome.status === "done") {
+        setStatus("done");
+      } else if (gaps.length) {
+        setStatus("ready");
+      } else {
+        setError(outcome.error || "The agent couldn't finish. Check the real form before trying again.");
+        setStatus(outcome.status);
+      }
     } catch (e) {
       if (controller.signal.aborted || generation.current !== gen) return; // left mid-fill
       setError(`The agent couldn't fill the form: ${e instanceof Error ? e.message : "stream error"}. Check the real form before trying again.`);
@@ -433,12 +448,13 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setIssues([]);
     setDriveSteps([]);
     setBlockedAts(null);
+    setCvAttached(false);
     setError("");
   }, []);
 
   const value = useMemo(
-    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, blockedAts, open, prefill, setAnswer, fill, agentFill, reset }),
-    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, blockedAts, open, prefill, setAnswer, fill, agentFill, reset],
+    () => ({ status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, blockedAts, cvAttached, open, prefill, setAnswer, fill, agentFill, reset }),
+    [status, url, title, company, n, from, fields, answers, meta, steps, shots, prefillLog, issues, driveSteps, error, blockedAts, cvAttached, open, prefill, setAnswer, fill, agentFill, reset],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

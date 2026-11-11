@@ -18,12 +18,15 @@ import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { resolveCvTemplate, resolveUserTemplatesDir } from "@/lib/core/cv-template.mjs";
-import { profileRef } from "@/lib/core/profile-path.mjs";
+import { getProfilePath, profileRef } from "@/lib/core/profile-path.mjs";
+import { readPageFormatSetting, resolveRenderPageFormat, type PageFormatSetting } from "@/lib/core/page-format.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -189,13 +192,40 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
+  // The profile's page_format, read once HERE for the same reason: the worker
+  // fills {{PAGE_WIDTH}}, so the prompt has to name the sheet before the run, and
+  // the render below reuses this stance instead of reading the profile again.
+  // The web used to let the agent pick, which overrode a4/letter and never
+  // reached auto.
+  const pageFormat: PageFormatSetting | undefined = dataRoot
+    ? await readPageFormatSetting(codeRoot, getProfilePath(dataRoot))
+    : undefined;
   // Hold the tracker guard through evaluation persistence / PDF marking. Build
-  // the prompt inside the same try so preparation failures release it too.
+  // the prompt inside the same try so preparation failures release it too. It is
+  // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
   let child;
   let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
   let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // Read the JD here, not in the worker: WebFetch drops script content, so a
+    // board that renders its JD from script data looks like an empty shell to the
+    // worker and the run ends as "Needs review" on a live posting. null (plain
+    // boards, any miss) leaves the worker on its WebFetch path.
+    const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
+    // The caller went away while the JD was being read: do not start a worker for nobody.
+    if (req.signal.aborted) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return new Response(null, { status: 499 });
+    }
+    // A partial JD must not reach a worker that could score and save it as the
+    // whole posting, so refuse here instead of trusting the prompt to stop it.
+    if (isTruncatedJd(prefetch?.text)) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
+    }
+    const prefetchedJd = prefetch?.text ?? null;
+    const closedEvidence = prefetch?.closedEvidence ?? null;
     if (evaluationInstructions) {
       instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
     }
@@ -208,12 +238,15 @@ export async function POST(req: Request) {
       lang,
       cvTemplate,
       userTemplatesDir,
+      pageFormat,
       // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
       codeRoot,
       reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
       coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
       profile: profileRef(careerOpsRoot()),
       evaluationInstructions: instructionFile?.reference,
+      prefetchedJd,
+      closedEvidence,
     });
 
     const isClaude = cliId === "claude";
@@ -525,7 +558,7 @@ export async function POST(req: Request) {
           close();
         }
       };
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
+      const renderPdf = async (paths: PdfPaths, envelope: CvEnvelope) => {
         send({ type: "status", label: "Rendering PDF…" });
         // renderAndMarkPdf is designed to resolve, never throw — but this is
         // the one place nothing else awaits or catches this promise (cancel()
@@ -533,6 +566,15 @@ export async function POST(req: Request) {
         // unexpected exception here must still close the stream instead of
         // leaving it — and the write-token — open until process shutdown.
         try {
+          // The profile outranks the agent's pick, and auto maps the country it
+          // named, both through the core (core/page-format.mjs).
+          const sheet = await resolveRenderPageFormat(codeRoot, {
+            setting: pageFormat?.setting ?? null,
+            declared: envelope.format,
+            country: envelope.country,
+          });
+          sendWarnings(sheet.warnings);
+          const format = sheet.format;
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
@@ -624,7 +666,7 @@ export async function POST(req: Request) {
             if (saveCv(pdfPaths, envelope)) {
               // Tracked so cancel() can defer releasing writeToken until this
               // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
+              pdfRenderPromise = renderPdf(pdfPaths, envelope);
               return;
             }
             // saveCv already streamed the specific reason.
