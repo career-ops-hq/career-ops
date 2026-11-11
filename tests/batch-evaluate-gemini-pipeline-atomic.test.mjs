@@ -35,7 +35,13 @@ function run({ failure, link = false }) {
     const linkDir = join(dir, 'link');
     mkdirSync(linkDir);
     pipeline = join(linkDir, 'pipeline.md');
-    symlinkSync(join('..', 'real', 'pipeline.md'), pipeline);
+    try {
+      symlinkSync(join('..', 'real', 'pipeline.md'), pipeline);
+    } catch (err) {
+      rmSync(dir, { recursive: true, force: true });
+      if (err && (err.code === 'EPERM' || err.code === 'EACCES')) return { skip: err.code };
+      throw err;
+    }
   }
   const preload = join(dir, 'preload.cjs');
   const worker = join(dir, 'worker.mjs');
@@ -53,6 +59,8 @@ function run({ failure, link = false }) {
       if (failure && isPipelineWrite(file)) {
         if (failure === 'kill') {
           write(file, '', options);
+          // A direct write, so the marker is in the pipe before SIGKILL.
+          fs.writeSync(2, 'batch-atomic-kill\\n');
           process.kill(process.pid, 'SIGKILL');
         }
         write(file, String(content).slice(0, 19), options);
@@ -103,6 +111,9 @@ test('a disk-full batch finish leaves the previous pipeline.md', () => {
 test('a killed batch finish leaves the previous pipeline.md', () => {
   const { result, body, mode } = run({ failure: 'kill' });
   // Windows reports a killed child as a non-zero status and no signal.
+  // The marker is written on the line before the kill, so an earlier throw
+  // cannot pass this test by leaving the old file in place.
+  assert.match(result.stderr ?? '', /batch-atomic-kill/);
   const killed = result.signal === 'SIGKILL' || (IS_WINDOWS && exitedNonZero(result));
   assert.ok(killed, describeSpawn(result, 'the finish must die on the injected kill'));
   assert.equal(body, ORIGINAL);
@@ -116,8 +127,9 @@ test('a finished batch still marks the offer done', () => {
   if (!IS_WINDOWS) assert.equal(mode, 0o600);
 });
 
-test('a finished batch writes through a symlinked pipeline.md', { skip: IS_WINDOWS && 'file symlink requires privileges' }, () => {
+test('a finished batch writes through a symlinked pipeline.md', (t) => {
   const got = run({ failure: '', link: true });
+  if (got.skip) return t.skip(`file symlink unavailable (${got.skip})`);
   assert.equal(got.result.status, 0, describeSpawn(got.result, 'a finish through a symlink'));
   assert.equal(got.link, true);
   assert.equal(got.target, join('..', 'real', 'pipeline.md'));
@@ -125,8 +137,10 @@ test('a finished batch writes through a symlinked pipeline.md', { skip: IS_WINDO
   if (!IS_WINDOWS) assert.equal(got.mode, 0o600);
 });
 
-test('a killed batch finish leaves a symlinked pipeline.md in place', { skip: IS_WINDOWS && 'file symlink requires privileges' }, () => {
+test('a killed batch finish leaves a symlinked pipeline.md in place', (t) => {
   const got = run({ failure: 'kill', link: true });
+  if (got.skip) return t.skip(`file symlink unavailable (${got.skip})`);
+  assert.match(got.result.stderr ?? '', /batch-atomic-kill/);
   const killed = got.result.signal === 'SIGKILL' || (IS_WINDOWS && exitedNonZero(got.result));
   assert.ok(killed, describeSpawn(got.result, 'a kill through a symlink'));
   assert.equal(got.link, true);
