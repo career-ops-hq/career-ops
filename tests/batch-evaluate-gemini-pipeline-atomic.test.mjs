@@ -8,10 +8,12 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const BATCH_URL = pathToFileURL(join(ROOT, 'batch-evaluate-gemini.mjs')).href;
+const IS_WINDOWS = process.platform === 'win32';
 const ORIGINAL = [
   '# Pipeline',
   '',
@@ -63,7 +65,7 @@ function run({ failure, link = false }) {
     require('node:module').syncBuiltinESMExports();
   `);
   writeFileSync(worker, `
-    import { finishPipelineBatch } from ${JSON.stringify(join(ROOT, 'batch-evaluate-gemini.mjs'))};
+    import { finishPipelineBatch } from ${JSON.stringify(BATCH_URL)};
     const pipeline = ${JSON.stringify(pipeline)};
     const original = ${JSON.stringify(ORIGINAL)};
     const snapshot = original.split('\\n');
@@ -83,7 +85,7 @@ function run({ failure, link = false }) {
       body: readFileSync(real, 'utf8'),
       link: link ? lstatSync(pipeline).isSymbolicLink() : null,
       target: link ? readlinkSync(pipeline) : null,
-      mode: statSync(real).mode & 0o777,
+      mode: IS_WINDOWS ? null : statSync(real).mode & 0o777,
     };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -95,37 +97,40 @@ test('a disk-full batch finish leaves the previous pipeline.md', () => {
   assert.ok(exitedNonZero(result), describeSpawn(result, 'disk full must fail the finish'));
   assert.match(result.stderr, /ENOSPC|injected disk full/);
   assert.equal(body, ORIGINAL);
-  assert.equal(mode, 0o600);
+  if (!IS_WINDOWS) assert.equal(mode, 0o600);
 });
 
 test('a killed batch finish leaves the previous pipeline.md', () => {
   const { result, body, mode } = run({ failure: 'kill' });
-  assert.equal(result.signal, 'SIGKILL', describeSpawn(result, 'the finish must die on the injected kill'));
+  // Windows reports a killed child as a non-zero status and no signal.
+  const killed = result.signal === 'SIGKILL' || (IS_WINDOWS && exitedNonZero(result));
+  assert.ok(killed, describeSpawn(result, 'the finish must die on the injected kill'));
   assert.equal(body, ORIGINAL);
-  assert.equal(mode, 0o600);
+  if (!IS_WINDOWS) assert.equal(mode, 0o600);
 });
 
 test('a finished batch still marks the offer done', () => {
   const { result, body, mode } = run({ failure: '' });
   assert.equal(result.status, 0, describeSpawn(result, 'a normal finish'));
   assert.equal(body, DONE);
-  assert.equal(mode, 0o600);
+  if (!IS_WINDOWS) assert.equal(mode, 0o600);
 });
 
-test('a finished batch writes through a symlinked pipeline.md', () => {
+test('a finished batch writes through a symlinked pipeline.md', { skip: IS_WINDOWS && 'file symlink requires privileges' }, () => {
   const got = run({ failure: '', link: true });
   assert.equal(got.result.status, 0, describeSpawn(got.result, 'a finish through a symlink'));
   assert.equal(got.link, true);
   assert.equal(got.target, join('..', 'real', 'pipeline.md'));
   assert.equal(got.body, DONE);
-  assert.equal(got.mode, 0o600);
+  if (!IS_WINDOWS) assert.equal(got.mode, 0o600);
 });
 
-test('a killed batch finish leaves a symlinked pipeline.md in place', () => {
+test('a killed batch finish leaves a symlinked pipeline.md in place', { skip: IS_WINDOWS && 'file symlink requires privileges' }, () => {
   const got = run({ failure: 'kill', link: true });
-  assert.equal(got.result.signal, 'SIGKILL', describeSpawn(got.result, 'a kill through a symlink'));
+  const killed = got.result.signal === 'SIGKILL' || (IS_WINDOWS && exitedNonZero(got.result));
+  assert.ok(killed, describeSpawn(got.result, 'a kill through a symlink'));
   assert.equal(got.link, true);
   assert.equal(got.target, join('..', 'real', 'pipeline.md'));
   assert.equal(got.body, ORIGINAL);
-  assert.equal(got.mode, 0o600);
+  if (!IS_WINDOWS) assert.equal(got.mode, 0o600);
 });
