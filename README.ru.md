@@ -629,6 +629,8 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 для использования сообществом, зарезервированной для названий коммерческих продуктов
 и одобрений.
 
+Код распространяется по лицензии MIT; данные в [`employers/`](employers/) распространяются по лицензии [CC BY 4.0](employers/LICENSE).
+
 ## История звёзд
 
 <p align="center">

@@ -609,6 +609,8 @@ Mã được cấp phép theo [MIT](LICENSE). Tên và thương hiệu "career-o
 cộng đồng, bảo lưu cho việc đặt tên sản phẩm thương mại và
 bảo chứng.
 
+Mã nguồn theo giấy phép MIT; dữ liệu trong [`employers/`](employers/) theo giấy phép [CC BY 4.0](employers/LICENSE).
+
 ## Lịch sử sao
 
 <p align="center">
