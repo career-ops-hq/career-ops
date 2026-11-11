@@ -1,0 +1,71 @@
+// Tests for the bug reporter's PII / secret scrubber.
+//
+// The scrubber used to strip only POSIX home directories and `key=`-style
+// secrets, so a Windows account name (C:\Users\jdoe) and prefixed tokens with
+// nothing in front of them (ghp_…, xoxb-…) went into the public issue as-is.
+//
+// Run:  node --test tests/lib/report-scrub.test.mjs
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { scrub } from "../../src/lib/report/scrub.mjs";
+
+const leaks = (out, secret) => assert.ok(!out.includes(secret), `still contains ${secret}: ${out}`);
+
+test("scrub: POSIX home directories become ~", () => {
+  assert.equal(scrub("/Users/jdoe/career-ops/cv.md"), "~/career-ops/cv.md");
+  assert.equal(scrub("/home/jdoe/career-ops/cv.md"), "~/career-ops/cv.md");
+});
+
+test("scrub: Windows home directories become ~, either slash style", () => {
+  assert.equal(scrub("C:\\Users\\jdoe\\career-ops\\cv.md"), "~\\career-ops\\cv.md");
+  assert.equal(scrub("c:/Users/jdoe/career-ops/cv.md"), "~/career-ops/cv.md");
+  assert.equal(scrub("D:\\users\\jdoe\\x"), "~\\x");
+  assert.equal(scrub("open 'C:\\Users\\jdoe\\cv.md' failed"), "open '~\\cv.md' failed");
+});
+
+test("scrub: a Windows path inside JSON-escaped text is caught", () => {
+  const out = scrub('{"path":"C:\\\\Users\\\\jdoe\\\\cv.md"}');
+  leaks(out, "jdoe");
+});
+
+test("scrub: prefixed tokens are redacted with nothing in front of them", () => {
+  for (const tok of [
+    "ghp_abcdefghijklmnopqrstuvwx0123",
+    "gho_abcdefghijklmnopqrstuvwx0123",
+    "github_pat_11ABCDEFG0123456789_abcdefghijklmnop",
+    "xoxb-1234567890-abcdefghijkl",
+    "AKIAIOSFODNN7EXAMPLE",
+  ]) {
+    const out = scrub(`failed with ${tok} in header`);
+    leaks(out, tok);
+    assert.equal(out, "failed with [redacted] in header");
+  }
+});
+
+test("scrub: keyed secrets are still redacted", () => {
+  assert.equal(scrub("sk-ant-api03-abcdefghijk"), "sk-[redacted]");
+  assert.equal(scrub("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.abc"), "Authorization: Bearer [redacted]");
+  assert.equal(scrub("GITHUB_TOKEN=abcdefghij12"), "GITHUB_TOKEN=[redacted]");
+  assert.equal(scrub("secret_key=abcdefghij12"), "secret_key=[redacted]");
+  assert.equal(scrub("x-api-key: abcdefghij12"), "x-api-key: [redacted]");
+});
+
+test("scrub: ordinary text is left alone", () => {
+  for (const s of [
+    "the task-12345678 failed",
+    "monkey: bananas-and-more",
+    "ghp is not a token, nor is ghp_short",
+    "xoxo hugs",
+    "C:\\Program Files\\career-ops\\node.exe",
+    "/users/settings",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+  ]) {
+    assert.equal(scrub(s), s);
+  }
+});
+
+test("scrub: empty input", () => {
+  assert.equal(scrub(""), "");
+  assert.equal(scrub(undefined), "");
+});
