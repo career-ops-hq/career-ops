@@ -213,7 +213,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
         </>
       )}
       {pendingApplied && (
-        <span className="inline-flex items-center gap-2">
+        <span data-status-confirm="" className="absolute right-0 top-full z-20 mt-1 flex w-56 flex-wrap items-center gap-x-2 gap-y-1 whitespace-normal rounded-md border border-border bg-surface px-2 py-1.5 text-left">
           <span className="text-xs text-foreground">{appliedAsk.prompt}</span>
           <button type="button" onClick={() => void confirmApplied()} disabled={savingNow} className="text-xs font-medium text-brand-text disabled:opacity-60">
             {appliedAsk.yesLabel}

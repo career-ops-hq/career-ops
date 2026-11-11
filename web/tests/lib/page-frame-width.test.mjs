@@ -37,6 +37,11 @@ test("pipeline company and role use the wide row and the date cell stays put", (
   assert.match(pipeline, /min-\[1440px\]:table-fixed/);
   assert.match(pipeline, /min-w-\[44rem\]/);
   assert.match(pipeline, /max-w-64 truncate min-\[1440px\]:min-w-0 min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{company\.label\}/);
-  assert.match(pipeline, /max-w-72 truncate min-\[1440px\]:min-w-0 min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{r\.role\}/);
+  assert.match(pipeline, /max-w-72 truncate min-\[1440px\]:min-w-\[8rem\] min-\[1440px\]:flex-1 min-\[1440px\]:max-w-none" title=\{r\.role\}/);
+  assert.match(pipeline, /max-\[1439px\]:shrink-0 items-center gap-1 text-xs text-brand-text hover:underline min-\[1440px\]:max-w-\[40%\] min-\[1440px\]:min-w-0 min-\[1440px\]:overflow-hidden/);
+  assert.match(pipeline, /min-\[1440px\]:min-w-0 min-\[1440px\]:truncate/);
+  assert.match(pipeline, /\[data-status-confirm\]/);
+  assert.match(pipeline, /<td className="relative whitespace-nowrap px-4 py-3 text-muted">/);
+  assert.match(read("components/status-select.tsx"), /data-status-confirm="" className="absolute right-0 top-full/);
   assert.match(pipeline, /<td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">\{r\.date\}<\/td>/);
 });

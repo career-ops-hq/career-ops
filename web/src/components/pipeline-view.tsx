@@ -417,7 +417,7 @@ export function PipelineView({
       // shared height.
       let rowHeight = rowPx;
       for (const row of el.querySelectorAll("tr[data-application-key]")) {
-        if (row.querySelector("[role='alert'], [aria-busy='true']")) continue;
+        if (row.querySelector("[role='alert'], [aria-busy='true'], [data-status-confirm]")) continue;
         rowHeight = row.getBoundingClientRect().height || rowPx;
         break;
       }
@@ -1092,9 +1092,9 @@ const TrackerRow = memo(function TrackerRow({
           <span className="block max-w-64 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={company.label}>{company.label}</span>
         </Link>
       </td>
-      <td className="px-4 py-3 text-muted">
+      <td className="min-w-0 px-4 py-3 text-muted min-[1440px]:overflow-hidden">
         <div className="flex min-w-0 items-center gap-2">
-          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-[8rem] min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
           {r.closesAt ? (
             <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
           ) : null}
@@ -1104,10 +1104,10 @@ const TrackerRow = memo(function TrackerRow({
               target="_blank"
               rel="noreferrer"
               title={posting}
-              className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
+              className="inline-flex max-[1439px]:shrink-0 items-center gap-1 text-xs text-brand-text hover:underline min-[1440px]:max-w-[40%] min-[1440px]:min-w-0 min-[1440px]:overflow-hidden"
             >
-              {postingLabel(posting)}
-              <ExternalLink className="size-3" />
+              <span className="min-[1440px]:min-w-0 min-[1440px]:truncate">{postingLabel(posting)}</span>
+              <ExternalLink className="size-3 shrink-0" />
             </a>
           )}
         </div>
@@ -1115,7 +1115,7 @@ const TrackerRow = memo(function TrackerRow({
       <td className="px-4 py-3">
         <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-muted">
+      <td className="relative whitespace-nowrap px-4 py-3 text-muted">
         <StatusSelect
           n={r.n}
           current={r.status}
