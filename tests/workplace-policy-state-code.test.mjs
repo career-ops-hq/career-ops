@@ -147,7 +147,7 @@ test('a trailing Hybrid tag does not turn a state code into a country', () => {
   assert.deepEqual(us('Berlin, DE (Hybrid)'), { eligible: true, reason: 'onsite_location_allowed' });
   assert.deepEqual(us('Office City, SC (Hybrid) | River Bend, SC'), { eligible: true, reason: 'onsite_location_allowed' });
   assert.deepEqual(us('Office City, SC (Hybrid) · River Bend, SC'), { eligible: true, reason: 'onsite_location_allowed' });
-  assert.equal(us('Office City, SC (Hybrid) | Berlin, Germany').reason, 'onsite_country_restricted');
+  assert.deepEqual(us('Office City, SC (Hybrid) | Berlin, Germany'), { eligible: true, reason: 'onsite_location_allowed' });
   assert.equal(us('Berlin, Germany (Hybrid)').reason, 'onsite_country_restricted');
 });
 
@@ -171,5 +171,13 @@ test('a state code is US evidence unless the policy country uses those letters',
   assert.equal(germany('Bremen, DE (Hybrid)').eligible, true);
   assert.equal(germany('Berlin, TX').reason, 'onsite_country_restricted');
   assert.deepEqual(germany('Berlin, Germany | Austin, TX'), { eligible: true, reason: 'onsite_location_allowed' });
+  assert.equal(germany('Berlin, TX | Munich, Germany').reason, 'onsite_country_restricted');
   assert.equal(germany('Remote, Germany | Austin, TX').reason, 'remote_region_allowed');
+  assert.equal(germany('Remote | Bremen, DE').reason, 'remote_region_allowed');
+  const spain = buildWorkplacePolicy({
+    onsite_locations: ['Barcelona'],
+    remote_countries: ['Spain'],
+    remote_regions: ['Europe'],
+  });
+  assert.equal(spain('Remote | Bremen, DE').reason, 'remote_country_restricted');
 });

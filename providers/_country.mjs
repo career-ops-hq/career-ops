@@ -164,19 +164,16 @@ const isoCountryCode = (token) => {
   const name = fold(countryNameFromIso(token));
   return COUNTRY_NAMES.find(country => country.name === name)?.code || '';
 };
+const placeSegments = (text) => text.split(/[;·|]/).map(part => part.trim()).filter(Boolean);
 const recognizedStateCodes = (text) => {
   const found = new Set();
-  for (const raw of text.split(/[;·|]/)) {
-    const segment = withoutTrailingHybrid(raw.trim());
-    if (!segment) continue;
-    for (const code of uspsStateCodesBeatingIso(segment)) found.add(code);
+  for (const segment of placeSegments(text)) {
+    for (const code of uspsStateCodesBeatingIso(withoutTrailingHybrid(segment))) found.add(code);
   }
   return found;
 };
 // A state code is a US place when the policy's country does not use those
-// letters. It restricts the posting only when no other place already names
-// an allowed country. France rejects "Paris, ID". Germany still accepts
-// "Bremen, DE" and "Berlin, Germany | Austin, TX".
+// letters. France rejects "Paris, ID". Germany still accepts "Bremen, DE".
 const stateOutsideAllowedCountries = (text, allowed, found) => {
   if (allowed.has('US')) return false;
   if ([...found].some(code => allowed.has(code))) return false;
@@ -186,6 +183,19 @@ const stateOutsideAllowedCountries = (text, allowed, found) => {
     return true;
   }
   return false;
+};
+const stateMatchesAllowedCountry = (text, allowed) => {
+  for (const code of recognizedStateCodes(text)) {
+    const iso = isoCountryCode(code);
+    if (iso && allowed.has(iso)) return true;
+  }
+  return false;
+};
+const segmentOnsiteAllowed = (segment, onsite, allowed) => {
+  if (!has(segment, onsite)) return false;
+  const found = countries(segment, true);
+  if (found.size && ![...found].some(code => allowed.has(code))) return false;
+  return !stateOutsideAllowedCountries(segment, allowed, found);
 };
 // Config country lists and structured applicant-country fields have an exact
 // country token, unlike prose where "in", "it" or "no" are ordinary words.
@@ -353,11 +363,14 @@ export function buildWorkplacePolicy(policy) {
     const remote = !structuredOffice && !NOT_REMOTE.test(loc) && !NOT_REMOTE.test(heading)
       && (REMOTE.test(loc) || workplace === 'remote' || offer.isRemote === true || (!workplace && REMOTE_TITLE.test(heading)));
     if (!remote) {
-      if (!has(loc, onsite)) return fail(loc ? 'onsite_outside_allowed_locations' : 'location_unknown');
-      const found = countries(loc, true);
-      if (found.size && ![...found].some(c => localCodes.has(c))) return fail('onsite_country_restricted');
-      if (stateOutsideAllowedCountries(loc, localCodes, found)) return fail('onsite_country_restricted');
-      return { eligible: true, reason: 'onsite_location_allowed' };
+      // Each place needs its own city and country. Berlin, TX does not borrow
+      // Germany from another place in the same posting.
+      const places = placeSegments(loc);
+      if (places.some(segment => segmentOnsiteAllowed(segment, onsite, localCodes))) {
+        return { eligible: true, reason: 'onsite_location_allowed' };
+      }
+      const cityHit = places.some(segment => has(segment, onsite));
+      return fail(cityHit ? 'onsite_country_restricted' : (loc ? 'onsite_outside_allowed_locations' : 'location_unknown'));
     }
     // Explicit structured countries narrow a covering region. Europe + UK-only
     // never implies Spain. Multiple genuine eligible countries including Spain
@@ -370,7 +383,7 @@ export function buildWorkplacePolicy(policy) {
     const conditionalRegion = description.split(/[.!?;\n]+/).some(clause => REMOTE.test(clause) && has(clause, regions)
       && /\bwhere (?:we|the company|the employer) (?:have|has) (?:a |an |our )?hiring presence\b/.test(clause));
     if (conditionalRegion && !supportsHome(geoLoc) && !supportsHome(meta) && !explicitHomeGeography(description)) return fail('remote_eligibility_unconfirmed');
-    if (supportsHome(geoLoc) || has(geoLoc, regions) || (meta && (supportsHome(meta) || has(meta, regions))) || remoteDescription) return { eligible: true, reason: 'remote_region_allowed' };
+    if (supportsHome(geoLoc) || stateMatchesAllowedCountry(geoLoc, homeCodes) || has(geoLoc, regions) || (meta && (supportsHome(meta) || has(meta, regions))) || remoteDescription) return { eligible: true, reason: 'remote_region_allowed' };
     return fail(loc ? 'remote_eligibility_unconfirmed' : 'location_unknown');
   };
 }
