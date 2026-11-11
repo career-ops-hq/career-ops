@@ -511,7 +511,16 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     // LockTimeoutError even though the lock was healthy and briskly shared —
     // which for agent-inbox.mjs meant its request was silently dropped. The
     // timeout is for a WEDGED holder, not for losing the retry lottery.
-    const lock = await acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 15 });
+    //
+    // maxWaitMs is explicit, not inherited: without it the ceiling comes from
+    // CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS, and a shell exporting less than the
+    // churn below (~2.6 windows) fails this case for a reason that has nothing
+    // to do with the code under test. 10 windows is the module's own default.
+    const lock = await acquirePipelineLock(p, {
+      timeoutMs: EXTENSION_WINDOW_MS,
+      retryMs: 15,
+      maxWaitMs: EXTENSION_WINDOW_MS * 10,
+    });
     const elapsed = Date.now() - startedAt;
     lock.release();
     const handoffs = await freeItLater;
