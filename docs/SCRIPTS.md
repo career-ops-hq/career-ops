@@ -49,6 +49,8 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
 | `sh web/scripts/uninstall-scan-schedule.sh` | `web/scripts/uninstall-scan-schedule.sh` | Remove the macOS launchd agent or Linux cron line for the scheduled-jobs queue worker |
+| `node web/scripts/web-service.mjs install` | `web/scripts/web-service.mjs` | Install the web dashboard as a login service for the current user (macOS launchd, Linux `systemd --user`, Windows Task Scheduler). It installs dependencies and builds only when the lockfile, Node version or checkout changed. `--dry-run` prints the definition and changes nothing |
+| `node web/scripts/web-service.mjs uninstall` | `web/scripts/web-service.mjs` | Stop and remove the web dashboard service (keeps the log). `restart` rebuilds first when the code changed, and `status` shows the service's state |
 | `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 | `npm run tracker` | `tracker.mjs` | SQLite derived index over applications.md — sync/query/history/export |
