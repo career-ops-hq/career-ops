@@ -185,11 +185,13 @@ const stateOutsideAllowedCountries = (text, allowed, found) => {
   return false;
 };
 const stateMatchesAllowedCountry = (text, allowed) => {
-  for (const code of recognizedStateCodes(text)) {
+  const codes = [...recognizedStateCodes(text)];
+  if (!codes.length) return false;
+  if (allowed.has('US')) return true;
+  return codes.some(code => {
     const iso = isoCountryCode(code);
-    if (iso && allowed.has(iso)) return true;
-  }
-  return false;
+    return Boolean(iso && allowed.has(iso));
+  });
 };
 const segmentOnsiteAllowed = (segment, onsite, allowed) => {
   if (!has(segment, onsite)) return false;

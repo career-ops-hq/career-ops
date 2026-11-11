@@ -183,4 +183,14 @@ test('a state code is US evidence unless the policy country uses those letters',
   });
   assert.equal(spain('Remote | Bremen, DE').reason, 'remote_country_restricted');
   assert.equal(spain('Remote | Bremen, DE', '', { description: presence }).reason, 'remote_country_restricted');
+
+  const usRemote = buildWorkplacePolicy({
+    onsite_locations: ['Office City'],
+    onsite_countries: ['United States'],
+    remote_countries: ['United States'],
+    remote_regions: ['North America'],
+  });
+  const northAmerica = 'Remote work in North America where we have a hiring presence.';
+  assert.equal(usRemote('Remote | Office City, SC', '', { description: northAmerica }).reason, 'remote_region_allowed');
+  assert.equal(usRemote('Remote | Berlin, Germany', '', { description: northAmerica }).reason, 'remote_country_restricted');
 });
