@@ -1,15 +1,17 @@
 // persist-evaluation-report.mjs writes the report and the headed addition.
 // It does not reserve a number and it does not merge the tracker.
 import { test } from "node:test";
+import * as fs from "node:fs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { trackerTsvLine as coreLine } from "../lib/tracker-addition.mjs";
 import { writeEvaluationArtifacts } from "../persist-evaluation-report.mjs";
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
+import { listTree } from '../lib/walk-tree.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, "persist-evaluation-report.mjs");
@@ -28,24 +30,18 @@ const ROW = {
 
 function payload(overrides = {}) {
   return {
-    markdown: "# Evaluation: Globex -- Manager\n\nA role.\n",
+    markdown: "# Evaluation: Globex -- Manager\n\nA role.\n\n## Job Description (archived verbatim)\nThe manager owns service delivery, works with product stakeholders, documents requirements, and improves quality with the engineering team.\n",
     ...ROW,
     ...overrides,
   };
 }
 
-function tsvWriteFails(real = { mkdirSync, existsSync, unlinkSync, writeFileSync }) {
+function tsvWriteFails(real = fs) {
   return {
-    mkdirSync: real.mkdirSync,
-    existsSync: real.existsSync,
-    unlinkSync: real.unlinkSync,
-    writeFileSync(file, data, enc) {
-      if (String(file).endsWith(".tsv")) {
-        const err = new Error("tracker additions dir is not writable");
-        err.code = "EACCES";
-        throw err;
-      }
-      real.writeFileSync(file, data, enc);
+    ...real,
+    openSync(file, flags, mode) {
+      if (String(file).endsWith('.tsv')) throw new Error('tracker additions dir is not writable');
+      return real.openSync(file, flags, mode);
     },
   };
 }
@@ -149,7 +145,7 @@ test("a failed addition write removes only the new report", () => {
   }
 });
 
-test("a failed addition write leaves a report that already existed", () => {
+test("an existing report collision is refused and the original bytes remain", () => {
   const root = mkdtempSync(join(tmpdir(), "co-persist-report-"));
   const reportPath = join(root, "reports", ROW.reportFile);
   try {
@@ -158,7 +154,7 @@ test("a failed addition write leaves a report that already existed", () => {
     const result = writeEvaluationArtifacts(root, payload(), tsvWriteFails());
     assert.equal(result.ok, false);
     assert.equal(existsSync(reportPath), true);
-    assert.equal(readFileSync(reportPath, "utf8"), payload().markdown);
+    assert.equal(readFileSync(reportPath, "utf8"), "already here\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -168,13 +164,12 @@ test("cleanup ignores ENOENT when the new report is already gone", () => {
   const result = writeEvaluationArtifacts("/tmp/co-persist-enoent", payload(), {
     mkdirSync() {},
     existsSync() { return false; },
-    writeFileSync(file) {
-      if (String(file).endsWith(".tsv")) {
-        const err = new Error("tracker additions dir is not writable");
-        err.code = "EACCES";
-        throw err;
-      }
+    openSync(file) {
+      if (String(file).endsWith('.tsv')) throw new Error('tracker additions dir is not writable');
+      return 1;
     },
+    closeSync() {},
+    writeFileSync() {},
     unlinkSync() {
       const err = new Error("gone");
       err.code = "ENOENT";
@@ -184,4 +179,45 @@ test("cleanup ignores ENOENT when the new report is already gone", () => {
   assert.equal(result.ok, false);
   assert.match(result.error, /not writable/);
   assert.doesNotMatch(result.error, /gone/);
+});
+
+
+// The capability handshake is a pure runtime probe, including when its stdin
+// stays open. A legacy writer must never receive an unsupported payload key.
+test('native --capabilities finishes before stdin or side-effect operations', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'co-native-capability-'));
+  const preload = join(root, 'forbid-capability-side-effects.mjs');
+  const guard = `import fs from 'node:fs';\nimport {syncBuiltinESMExports} from 'node:module';\nconst denied = () => { throw Error('capability side effect forbidden'); };\nfor (const name of ['writeFile','writeFileSync','appendFile','appendFileSync','mkdir','mkdirSync','mkdtemp','mkdtempSync','rename','renameSync','unlink','unlinkSync','rm','rmSync','chmod','chmodSync','chown','chownSync']) if (name in fs) fs[name] = denied;\nconst open = fs.openSync; fs.openSync = (file, flags, ...rest) => { if (typeof flags === 'string' ? /[wa+]/.test(flags) : Boolean(flags & (fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_APPEND))) denied(); return open(file, flags, ...rest); };\nfor (const name of ['writeFile','appendFile','mkdir','mkdtemp','rename','unlink','rm','chmod','chown']) if (name in fs.promises) fs.promises[name] = denied;\nglobalThis.fetch = denied; syncBuiltinESMExports();\n`;
+  writeFileSync(preload, guard);
+  try {
+    const before = listTree(root);
+    const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, SCRIPT, '--capabilities'], {
+      cwd: root, env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: root }, stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '', stderr = '', timedOut = false, error;
+    child.stdout.on('data', data => { stdout = (stdout + data).slice(0, 4096); });
+    child.stderr.on('data', data => { stderr = (stderr + data).slice(0, 4096); });
+    const result = await new Promise(resolve => {
+      const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, 5000);
+      child.once('error', value => { error = value; });
+      child.once('close', (code, signal) => { clearTimeout(timer); resolve({ code, signal }); });
+    });
+    assert.equal(timedOut, false, 'the read-only flag never waits for stdin EOF');
+    assert.equal(error, undefined); assert.equal(result.signal, null); assert.equal(result.code, 0, stderr);
+    const capabilities = JSON.parse(stdout);
+    assert.deepEqual(Object.keys(capabilities).sort(), ['archiveSourcePacketVersions', 'version']);
+    assert.equal(capabilities.version, 1);
+    assert.ok(JSON.stringify(capabilities.archiveSourcePacketVersions) === '[]' || JSON.stringify(capabilities.archiveSourcePacketVersions) === '[2]');
+    assert.deepEqual(listTree(root), before, 'no data directory, sentinel, archive or report is created');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('the synchronous writer cannot credit valid inline text with an invalid explicit source packet', () => {
+  const root = mkdtempSync(join(tmpdir(), 'co-native-invalid-source-'));
+  try {
+    const result = writeEvaluationArtifacts(root, payload({ archiveSource: { version: 2 } }));
+    assert.equal(result.ok, false);
+    assert.match(result.error, /source|adapter/i);
+    assert.deepEqual(listTree(root), [], 'invalid supplied provenance never reaches artifact writes');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

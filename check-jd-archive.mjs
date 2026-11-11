@@ -314,6 +314,13 @@ const NON_CONTENT_MARKERS = [
     re: /(\(paraphras(?:e|ed)\b[^)\n]*\)\s*(?::|$)|\b(?:what follows|the following|(?:the )?(?:text|passages?|content) below|this(?: (?:description|section|posting|text|summary|document))?) (?:is|are) (?:a |an )?(?:(?:close|detailed|faithful|complete|non-fabricated|full|accurate)[ ,]+)*(?:paraphrase|paraphrased|restatement|restated)\b|\bthis section restates\b|\bthis (?:description|section|posting|text|summary|document) (?:was|has been|is) (?:paraphrased|restated)\b|^[\s*_>#-]*(?:paraphrased|restated) (?:from|version)\b|[—–-]\s*paraphras(?:e|ed)\s*$|\b(?:what follows|the following|(?:the )?(?:text|passages?|content) below|this (?:is|description|section|posting|text|summary|document))[^.\n]{0,60}?\bnot (?:a |the )?(?:literal|verbatim) (?:copy|quote|text|reproduction|archive|posting)\b|\bparaphrase,? not (?:a |the )?(?:literal|verbatim)\b|\b(?:tool|fetcher|evaluator|scraper)\b[^.\n]{0,30}?\b(?:could|would|did|can) ?not (?:be )?(?:reproduc|quot|return|captur|copi)\w*[^.\n]{0,40}\b(?:literal|verbatim)\b)/im,
   },
   {
+    category: 'omission',
+    // Evaluator disclosures about missing posting text are not archives.
+    // Do not match ordinary copyright notices or a role's archival duties.
+    reason: 'says the full posting was omitted or the JD archive is incomplete',
+    re: /\b(?:the )?(?:full|complete|verbatim) (?:reproduction(?: of (?:the )?(?:source )?(?:job description|JD|posting|text))?|(?:source )?(?:job description|JD|posting|text))\s+(?:(?:is|was|has been)\s+)?(?:omitted|not (?:reproduced|quoted|included|archived|captured))\b|\bthis(?: (?:section|report|document))? is not (?:a |the )?(?:completed?|full|verbatim) (?:(?:JD|job description) )?archive\b|\b(?:the )?(?:full|complete|verbatim) (?:source )?(?:job description|JD|posting|text) (?:cannot|can not|could not) be (?:reproduced|quoted|included)\b/i,
+  },
+  {
     category: 'bot-challenge',
     // Matched on established challenge PHRASES, deliberately not the bare
     // word "captcha" — a real posting can legitimately mention CAPTCHA as a
@@ -380,7 +387,10 @@ export function detectJdSectionMarker(content) {
   const headingDisclosure = /\bnot (?:a |the )?(?:literal|verbatim)\b/i.test(heading)
     ? NON_CONTENT_MARKERS.find((m) => m.category === 'paraphrase')
     : null;
-  return detectNonContentMarker(stripped) ?? detectNonContentMarker(heading) ?? headingDisclosure;
+  const headingOmission = /\bnot archived\b/i.test(heading)
+    ? NON_CONTENT_MARKERS.find((m) => m.category === 'omission')
+    : null;
+  return detectNonContentMarker(stripped) ?? detectNonContentMarker(heading) ?? headingDisclosure ?? headingOmission;
 }
 
 export function hasEmbeddedJdArchive(content) {

@@ -208,10 +208,10 @@ function today() {
  * report number, which is what makes the capture findable later: the date and
  * the scraped company/role all change between runs, the report number does not.
  */
-function captureFilename(company, role, url) {
+function captureFilename(company, role, url, report = reportNum) {
   const identity = createHash('sha256').update(url).digest('hex').slice(0, 16);
   const base = `${today()}_${captureSlug(company)}_${captureSlug(role)}_${identity}.pdf`;
-  return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
+  return report ? `${reportPrefix(report)}-${base}` : base;
 }
 
 /**
@@ -336,8 +336,9 @@ export async function installEgressGuard(context) {
   });
 }
 
-export async function archiveUrl(browser, url, { company: companyHint, role: roleHint } = {}) {
-  console.log(`\n🔗  ${url}`);
+export async function archiveUrl(browser, url, { company: companyHint, role: roleHint,
+  report: captureReport = reportNum, directory = JDS_DIR, requirePosting = null, log = console.log } = {}) {
+  log(`\n🔗  ${url}`);
 
   // Refuse before launching any navigation, so an obviously-internal target
   // never reaches Playwright at all.
@@ -350,6 +351,21 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
   await installEgressGuard(context);
   const page = await context.newPage();
 
+  let navigationRequests = 0;
+  let uninspectableNavigation = typeof page.on !== 'function' || typeof page.mainFrame !== 'function';
+  // Same-document history can emit framenavigated without another HTTP
+  // document. Only an actual main-frame navigation request invalidates the
+  // response we inspected; resource/subframe requests do not replace it.
+  if (!uninspectableNavigation) page.on('request', request => {
+    try {
+      const navigating = request.isNavigationRequest();
+      if (typeof navigating !== 'boolean') throw new Error('unknown request type');
+      if (!navigating) return;
+      const frame = request.frame(), mainFrame = page.mainFrame();
+      if (!frame || !mainFrame) throw new Error('unknown navigation frame');
+      if (frame === mainFrame) navigationRequests++;
+    } catch { uninspectableNavigation = true; }
+  });
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
     const httpStatus = response?.status() ?? 0;
@@ -357,7 +373,9 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     // Re-check where we actually landed. The route guard already inspects every
     // redirect hop, so this is defence-in-depth: a first-hop-only check is the
     // classic miss here, and asserting on the settled URL costs nothing.
-    const landedUrl = page.url();
+    const initialUrl = page.url();
+    const initialNavigationRequests = navigationRequests;
+    let landedUrl = initialUrl;
     const postGuard = rejectPrivateOrInvalid(landedUrl);
     if (postGuard) {
       throw new Error(`refusing to archive restricted destination after redirect: ${postGuard.reason}`);
@@ -366,6 +384,19 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     // Give SPAs (Ashby, Lever, Workday) time to hydrate
     await page.waitForTimeout(2000);
 
+    const currentDocument = () => {
+      const actual = page.url();
+      const rejected = rejectPrivateOrInvalid(actual);
+      if (rejected) throw new Error('refusing to archive: restricted settled destination');
+      if (requirePosting && uninspectableNavigation) {
+        throw new Error('refusing to archive: cannot inspect document navigation');
+      }
+      if (requirePosting && (actual !== initialUrl || navigationRequests !== initialNavigationRequests)) {
+        throw new Error('refusing to archive: posting document navigated after its HTTP response');
+      }
+      return actual;
+    };
+    landedUrl = currentDocument();
     const pageTitle = await page.title();
     const h1Text = await page.$eval('h1', el => el.innerText.trim()).catch(() => '');
     const urlCompany = extractCompanyFromUrl(url);
@@ -390,6 +421,7 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     // this block exists to add. Fail closed: propagate the error, refusing
     // to archive rather than archiving blind.
     const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+    landedUrl = currentDocument();
     if (!bodyText.trim()) {
       throw new Error('refusing to archive: page has no visible text');
     }
@@ -410,8 +442,8 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     const company = resolvedCompany.replace(/^job\s+application\s+for\s+/i, '').trim();
     const role = resolvedRole.replace(/^job\s+application\s+for\s+/i, '').trim();
 
-    console.log(`   Company: ${company}`);
-    console.log(`   Role:    ${role}`);
+    log(`   Company: ${company}`);
+    log(`   Role:    ${role}`);
     if (httpStatus === 404) {
       throw new Error('refusing to archive: HTTP 404');
     }
@@ -420,11 +452,17 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       throw new Error(`refusing to archive: HTTP ${httpStatus} Cloudflare ${interstitial} ("${pageTitle.trim()}"), not a posting`);
     }
     if (httpStatus && httpStatus >= 400) {
-      console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
+      log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
 
-    mkdirSync(JDS_DIR, { recursive: true });
-
+    // A trusted persistence caller can require stronger source identity before
+    // any capture is written. Legacy manual archive behavior stays unchanged.
+    if (requirePosting && (typeof requirePosting !== 'function' || !requirePosting({
+      settledUrl: landedUrl, httpStatus, title: `${pageTitle} ${h1Text}`, bodyText,
+    }))) throw new Error('refusing to archive: source is not the exact substantive posting');
+    if (captureReport != null && (!/^\d+$/.test(String(captureReport)) || Number(captureReport) <= 0)) {
+      throw new Error('refusing to archive: invalid report number');
+    }
     const pdfBuffer = await page.pdf({
       format: 'a4',
       printBackground: true,
@@ -432,13 +470,15 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       preferCSSPageSize: false,
     });
 
-    const baseFilename = captureFilename(company, role, url);
+    landedUrl = currentDocument();
+    mkdirSync(directory, { recursive: true });
+    const baseFilename = captureFilename(company, role, url, captureReport);
     let filename;
     // URL identity separates requisitions; exclusive creation also preserves
     // older snapshots of the same URL, including simultaneous captures.
     for (let attempt = 0; ; attempt++) {
       filename = attempt ? baseFilename.replace(/\.pdf$/, `-${attempt + 1}.pdf`) : baseFilename;
-      const outputPath = join(JDS_DIR, filename);
+      const outputPath = join(directory, filename);
       let file;
       try {
         file = await open(outputPath, 'wx');
@@ -457,13 +497,14 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       break;
     }
     const reference = `local:jds/${filename}`;
-    console.log(`   Output:  jds/${filename}`);
+    log(`   Output:  jds/${filename}`);
 
     const sizeKb = (pdfBuffer.length / 1024).toFixed(1);
-    console.log(`Saved (${sizeKb} KB)`);
-    console.log(`Reference: ${reference}`);
+    log(`Saved (${sizeKb} KB)`);
+    log(`Reference: ${reference}`);
 
-    return { filename, reference, url, size: pdfBuffer.length };
+    return { filename, reference, url, settledUrl: landedUrl,
+      httpStatus: !uninspectableNavigation && landedUrl === initialUrl && navigationRequests === initialNavigationRequests ? httpStatus : null, size: pdfBuffer.length };
 
   } finally {
     await context.close();

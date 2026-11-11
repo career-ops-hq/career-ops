@@ -6,9 +6,9 @@
  * Stdin is one JSON object:
  * { markdown, num, today, company, role, score, via, url, notes, reportFile }
  *
- * The web app validates the report, reserves the number, and merges.
- * This script does neither. It writes under the process cwd, which the
- * caller sets to the data root.
+ * The web app reserves the number and merges. This script validates/captures
+ * the full JD archive before writing report/TSV under the process cwd, which
+ * the caller sets to the data root. It never reserves or merges.
  *
  * Success prints {"ok":true} and exits 0. Failure prints on stderr and
  * exits 1. A failed write removes only files this call created.
@@ -17,6 +17,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { isPostingUrl, trackerTsvLine } from "./lib/tracker-addition.mjs";
+import { isEvaluationArtifactOwner, prepareEvaluationArchive, validateEvaluationArchive, archiveSourceCapabilities } from "./lib/evaluation-archive.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const NUM_RE = /^\d{3,}$/;
@@ -38,10 +39,10 @@ function textProblem(name, value) {
 /**
  * @param {string} root
  * @param {object} payload
- * @param {Pick<typeof fs, "mkdirSync"|"existsSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
+ * @param {typeof fs} [fsImpl]
  * @returns {{ok: true} | {ok: false, error: string}}
  */
-export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
+export function validateEvaluationArtifactPayload(root, payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return fail("expected one JSON object");
   }
@@ -90,10 +91,30 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
   }
 
   const tsv = trackerTsvLine({ num, today, company, role, score, reportFile, notes, via, url });
+  return { ok: true, reportPath, tsvPath, reportsDir, additionsDir, markdown, tsv };
+}
+
+/** Direct callers cannot bypass archive enforcement by skipping the CLI. */
+export function writeEvaluationArtifacts(root, payload, fsImpl = fs, { sourceAdapterLoader } = {}) {
+  const plan = validateEvaluationArtifactPayload(root, payload);
+  if (!plan.ok) return plan;
+  const archived = validateEvaluationArchive(root, payload, { sourceAdapterLoader });
+  if (!archived.ok) return archived;
+  const { reportPath, tsvPath, reportsDir, additionsDir, markdown, tsv } = plan;
   const attempted = [];
   try {
-    fsImpl.mkdirSync(reportsDir, { recursive: true });
-    fsImpl.mkdirSync(additionsDir, { recursive: true });
+    let dataRootUid;
+    for (const dir of [root, reportsDir, path.join(root, 'batch'), additionsDir]) {
+      if (fsImpl.existsSync(dir)) {
+        const st = fsImpl.lstatSync(dir);
+        if (dir === root) dataRootUid = st.uid;
+        if (!st.isDirectory() || st.isSymbolicLink() || !isEvaluationArtifactOwner(st, dataRootUid)) {
+          throw new Error('artifact directory is not a contained own-user directory');
+        }
+      }
+    }
+    fsImpl.mkdirSync(reportsDir, { recursive: true, mode: 0o700 });
+    fsImpl.mkdirSync(additionsDir, { recursive: true, mode: 0o700 });
     writeNew(fsImpl, reportPath, markdown, attempted);
     writeNew(fsImpl, tsvPath, tsv, attempted);
   } catch (err) {
@@ -105,9 +126,20 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
 }
 
 function writeNew(fsImpl, filePath, content, attempted) {
-  const existed = fsImpl.existsSync(filePath);
-  attempted.push({ filePath, existed });
-  fsImpl.writeFileSync(filePath, content, "utf8");
+  // Exclusive open proves which files this attempt owns. In particular an
+  // EEXIST race must never make cleanup delete another writer's artifact.
+  const fd = fsImpl.openSync(filePath, 'wx', 0o600);
+  attempted.push({ filePath, existed: false });
+  try { fsImpl.writeFileSync(fd, content, 'utf8'); } finally { fsImpl.closeSync(fd); }
+}
+
+/** Reserved-number orchestration: capture/check before report, TSV or merge. */
+export async function persistEvaluationArtifacts(root, payload, { captureFn, fsImpl = fs, sourceAdapterLoader } = {}) {
+  const valid = validateEvaluationArtifactPayload(root, payload);
+  if (!valid.ok) return valid;
+  const prepared = await prepareEvaluationArchive(root, payload, { captureFn, sourceAdapterLoader });
+  if (!prepared.ok) return prepared;
+  return writeEvaluationArtifacts(root, { ...payload, markdown: prepared.markdown }, fsImpl, { sourceAdapterLoader });
 }
 
 function cleanupNew(fsImpl, attempted) {
@@ -134,6 +166,7 @@ function readStdin() {
 
 const USAGE_LINES = [
   "Usage: node persist-evaluation-report.mjs < payload.json",
+  "       node persist-evaluation-report.mjs --capabilities (read-only JSON)",
   "",
   "Read one JSON object on stdin and write the evaluation report plus a",
   "headed tracker-addition TSV under the process cwd (the data root).",
@@ -146,6 +179,10 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--help") || args.includes("-h")) {
     process.stdout.write(`${USAGE_LINES.join("\n")}\n`);
+    return;
+  }
+  if (args.length === 1 && args[0] === "--capabilities") {
+    process.stdout.write(`${JSON.stringify(archiveSourceCapabilities())}\n`);
     return;
   }
   if (args.length > 0) {
@@ -161,7 +198,7 @@ async function main() {
     process.exitCode = 1;
     return;
   }
-  const result = writeEvaluationArtifacts(process.cwd(), payload);
+  const result = await persistEvaluationArtifacts(process.cwd(), payload);
   if (!result.ok) {
     process.stderr.write(`${result.error}\n`);
     process.exitCode = 1;
