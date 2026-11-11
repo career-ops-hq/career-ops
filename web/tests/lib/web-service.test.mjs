@@ -155,7 +155,7 @@ test("the Task Scheduler definition runs at logon as the user, unelevated, and r
   assert.match(xml, /<RunLevel>LeastPrivilege<\/RunLevel>/);
   assert.match(xml, /<ExecutionTimeLimit>PT0S<\/ExecutionTimeLimit>/);
   assert.match(xml, /<MultipleInstancesPolicy>IgnoreNew<\/MultipleInstancesPolicy>/);
-  assert.match(xml, /<RestartOnFailure>\s*<Interval>PT1M<\/Interval>\s*<Count>999<\/Count>/);
+  assert.match(xml, /<RestartOnFailure>\s*<Interval>PT1M<\/Interval>\s*<Count>255<\/Count>/);
   assert.match(xml, /<Command>C:\\Program Files\\nodejs\\node\.exe<\/Command>/);
   // A space in a path needs quotes on the Windows command line; in XML text they are &quot;.
   assert.match(
@@ -185,4 +185,15 @@ test("definitionPath is the LaunchAgents plist, the systemd user unit, or nothin
     "/cfg/systemd/user/career-ops-web.service",
   );
   assert.equal(definitionPath({ platform: "win32", home: "C:\\Users\\me" }), null);
+});
+
+test("the restart count stays within the Task Scheduler schema's unsigned byte", () => {
+  const xml = renderTaskXml({ node: "n", args: ["a"], workDir: "w", user: "u" });
+  const count = Number(/<Count>(\d+)<\/Count>/.exec(xml)[1]);
+  assert.ok(count >= 1 && count <= 255);
+});
+
+test("a spaced argument that ends in a backslash does not escape its closing quote", () => {
+  const xml = renderTaskXml({ node: "n", args: ["C:\\my logs\\"], workDir: "w", user: "u" });
+  assert.ok(xml.includes("&quot;C:\\my logs\\\\&quot;"));
 });

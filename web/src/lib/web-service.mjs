@@ -202,7 +202,9 @@ WantedBy=default.target
 
 // Windows command lines treat a space as a separator, so an argument that has one
 // is wrapped in quotes. The values were already refused if they hold a quote.
-const winArg = (s) => (/[\s]/.test(s) || s === "" ? `"${s}"` : s);
+// A quoted argument's trailing backslashes would escape the closing quote, so they double.
+const winArg = (s) =>
+  /[\s]/.test(s) || s === "" ? `"${s.replace(/(\\+)$/, "$1$1")}"` : s;
 
 /**
  * The Task Scheduler definition, for `schtasks /Create /XML`. It runs at logon as
@@ -258,7 +260,7 @@ export function renderTaskXml({ node, args, workDir, user }) {
     <Priority>7</Priority>
     <RestartOnFailure>
       <Interval>PT1M</Interval>
-      <Count>999</Count>
+      <Count>255</Count>
     </RestartOnFailure>
   </Settings>
   <Actions Context="Author">

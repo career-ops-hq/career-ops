@@ -77,10 +77,12 @@ export function npmInvocation({ platform, execPath, exists }) {
  *   git: stdout of `git <args>` in the checkout, or null when it is not a repository
  *   or git is missing
  */
-export function sourceFingerprint({ git, walk }) {
+export function sourceFingerprint({ git, walk, untracked = () => "" }) {
   const head = git(["rev-parse", "HEAD"]);
   if (head === null) return digest("files", walk());
-  return digest("git", head.trim(), git(["status", "--porcelain"]) ?? "", git(["diff", "HEAD"]) ?? "");
+  // `status` names an untracked file but not its contents, and `diff HEAD` skips it, so an
+  // edit to a new file needs its own signature.
+  return digest("git", head.trim(), git(["status", "--porcelain"]) ?? "", git(["diff", "HEAD"]) ?? "", untracked());
 }
 
 /**
@@ -115,6 +117,29 @@ export function walkSignature({ fs, walkTree, repoRoot }) {
       return `${path.relative(repoRoot, file).split(path.sep).join("/")}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
     })
     .sort()
+    .join("\n");
+}
+
+/**
+ * Size and mtime of every untracked, non-ignored file git reports, for the fingerprint.
+ *
+ * @param {{ fs: typeof import("node:fs"), git: (args: string[]) => string | null, repoRoot: string }} input
+ */
+export function untrackedSignature({ fs, git, repoRoot }) {
+  const listed = git(["ls-files", "--others", "--exclude-standard", "-z"]);
+  if (!listed) return "";
+  return listed
+    .split("\0")
+    .filter(Boolean)
+    .sort()
+    .map((rel) => {
+      try {
+        const stat = fs.statSync(path.join(repoRoot, rel));
+        return `${rel}:${stat.size}:${Math.trunc(stat.mtimeMs)}`;
+      } catch {
+        return `${rel}:gone`;
+      }
+    })
     .join("\n");
 }
 

@@ -30,6 +30,7 @@ import {
   npmInvocation,
   prepareService,
   sourceFingerprint,
+  untrackedSignature,
   walkSignature,
 } from "../src/lib/web-service-prepare.mjs";
 import { parseRunArgs } from "../src/lib/web-service.mjs";
@@ -127,7 +128,12 @@ async function runService(argv) {
       runtime: `${process.version} ${process.platform} ${process.arch}`,
       env,
       fs,
-      fingerprint: () => sourceFingerprint({ git, walk: () => walkSignature({ fs, walkTree, repoRoot }) }),
+      fingerprint: () =>
+        sourceFingerprint({
+          git,
+          walk: () => walkSignature({ fs, walkTree, repoRoot }),
+          untracked: () => untrackedSignature({ fs, git, repoRoot }),
+        }),
       runNpm,
       log,
     });

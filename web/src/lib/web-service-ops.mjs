@@ -158,6 +158,12 @@ function installTask(ctx, text) {
   out(`Logs: ${ctx.logPath}`);
 }
 
+// A stop command may fail because there was nothing to stop; any other failure means the
+// service may still be running, so the definition must stay for another attempt.
+function stoppedOrAbsent(result, absentCodes, absentText) {
+  return result.status === 0 || absentCodes.includes(result.status) || absentText.test(`${result.stderr}\n${result.stdout}`);
+}
+
 /** Stop and remove the service. Keeps the log. */
 export function uninstallService(ctx) {
   const { platform, fs, run, out } = ctx;
@@ -166,12 +172,18 @@ export function uninstallService(ctx) {
 
   if (platform === "darwin") {
     const existed = fs.existsSync(file);
-    run("launchctl", ["bootout", `gui/${ctx.uid}/${SERVICE.launchdLabel}`]);
+    const stopped = run("launchctl", ["bootout", `gui/${ctx.uid}/${SERVICE.launchdLabel}`]);
+    if (!stoppedOrAbsent(stopped, [3, 113], /no such process|could not find|not found|not loaded/i)) {
+      throw new Error(`launchctl bootout failed, so the definition was kept: ${describe(stopped)}`);
+    }
     fs.rmSync(file, { force: true });
     out(existed ? `Removed ${SERVICE.launchdLabel}.` : `${SERVICE.launchdLabel} is not installed.`);
   } else if (platform === "linux") {
     const existed = fs.existsSync(file);
-    run("systemctl", ["--user", "disable", "--now", SERVICE.systemdUnit]);
+    const stopped = run("systemctl", ["--user", "disable", "--now", SERVICE.systemdUnit]);
+    if (!stoppedOrAbsent(stopped, [], /does not exist|not found|not loaded|no such file/i)) {
+      throw new Error(`systemctl disable failed, so the unit was kept: ${describe(stopped)}`);
+    }
     fs.rmSync(file, { force: true });
     if (existed) run("systemctl", ["--user", "daemon-reload"]);
     out(existed ? `Removed ${SERVICE.systemdUnit}.` : `${SERVICE.systemdUnit} is not installed.`);
@@ -215,16 +227,21 @@ export function serviceStatus(ctx) {
   if (!PLATFORMS.includes(platform)) throw unsupported(platform);
 
   let result;
+  let absent = false;
   if (platform === "darwin") {
     result = run("launchctl", ["print", `gui/${ctx.uid}/${SERVICE.launchdLabel}`]);
+    absent = result.status === 113 || /could not find|not found/i.test(result.stderr);
   } else if (platform === "linux") {
     result = run("systemctl", ["--user", "status", "--no-pager", SERVICE.systemdUnit]);
     // status exits 3 for a unit that exists but is inactive; only "not found" (4) means absent.
     if (result.status === 3) result = { ...result, status: 0 };
+    absent = result.status === 4 || /could not be found|not-found/i.test(result.stderr);
   } else {
     result = run("schtasks", ["/Query", "/TN", SERVICE.taskName, "/FO", "LIST", "/V"]);
+    absent = true; // schtasks reports a missing task and a failure alike, with localized text
   }
   if (result.status !== 0) {
+    if (!absent) throw new Error(`could not query the service: ${describe(result)}`);
     out("Not installed.");
     return false;
   }

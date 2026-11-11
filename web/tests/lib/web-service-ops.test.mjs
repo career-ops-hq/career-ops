@@ -316,7 +316,7 @@ test("status prints the platform's account and reports installed", () => withSan
 ));
 
 test("status reports not installed, and treats an inactive Linux unit as installed", async () => {
-  await withSandbox("darwin", { results: { "launchctl print": [fail()] } }, async (sb) => {
+  await withSandbox("darwin", { results: { "launchctl print": [{ status: 113, stdout: "", stderr: "Could not find service" }] } }, async (sb) => {
     assert.equal(serviceStatus(sb.ctx), false);
     assert.deepEqual(sb.lines, ["Not installed."]);
   });
@@ -334,4 +334,30 @@ test("status reports not installed, and treats an inactive Linux unit as install
       assert.equal(serviceStatus(sb.ctx), false);
     },
   );
+});
+
+test("status reports a command failure instead of claiming the service is absent", async () => {
+  await withSandbox("linux", { results: { "systemctl --user status": [{ status: 1, stdout: "", stderr: "Failed to connect to bus" }] } }, async (sb) => {
+    assert.throws(() => serviceStatus(sb.ctx), /could not query the service.*Failed to connect to bus/s);
+  });
+  await withSandbox("darwin", { results: { "launchctl print": [fail("Bootstrap failed")] } }, async (sb) => {
+    assert.throws(() => serviceStatus(sb.ctx), /could not query the service/);
+  });
+});
+
+test("uninstall keeps the definition when the service could not be stopped", async () => {
+  await withSandbox("darwin", { results: { "launchctl bootout": [fail("Operation not permitted")] } }, async (sb) => {
+    const plist = path.join(sb.ctx.home, "Library", "LaunchAgents", "io.career-ops.web.plist");
+    fs.mkdirSync(path.dirname(plist), { recursive: true });
+    fs.writeFileSync(plist, "x");
+    assert.throws(() => uninstallService(sb.ctx), /bootout failed/);
+    assert.ok(fs.existsSync(plist));
+  });
+  await withSandbox("linux", { results: { "systemctl --user disable": [fail("Failed to connect to bus")] } }, async (sb) => {
+    const unit = path.join(sb.ctx.home, ".config", "systemd", "user", "career-ops-web.service");
+    fs.mkdirSync(path.dirname(unit), { recursive: true });
+    fs.writeFileSync(unit, "x");
+    assert.throws(() => uninstallService(sb.ctx), /disable failed/);
+    assert.ok(fs.existsSync(unit));
+  });
 });

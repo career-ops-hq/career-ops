@@ -10,6 +10,7 @@ import {
   npmInvocation,
   prepareService,
   sourceFingerprint,
+  untrackedSignature,
   walkSignature,
 } from "../../src/lib/web-service-prepare.mjs";
 
@@ -208,6 +209,30 @@ test("walkSignature covers web/, lib/ and root scripts, and ignores installs, bu
 
     put("web/src/app/page.tsx", "xx");
     assert.notEqual(walkSignature({ fs, walkTree, repoRoot: root }), sig);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("sourceFingerprint changes when an untracked file's contents change", () => {
+  const git = (args) => ({ "rev-parse HEAD": "abc\n", "status --porcelain": "?? new.ts\n" })[args.join(" ")] ?? "";
+  const walk = () => assert.fail("git is available");
+  const a = sourceFingerprint({ git, walk, untracked: () => "new.ts:10:1" });
+  assert.notEqual(a, sourceFingerprint({ git, walk, untracked: () => "new.ts:11:2" }));
+});
+
+test("untrackedSignature lists untracked files with size and mtime, and survives a vanished one", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "co-svc-untracked-"));
+  try {
+    fs.writeFileSync(path.join(root, "b.ts"), "12");
+    fs.writeFileSync(path.join(root, "a.ts"), "1");
+    const git = () => "b.ts\0a.ts\0gone.ts\0";
+    const sig = untrackedSignature({ fs, git, repoRoot: root });
+    const lines = sig.split("\n");
+    assert.match(lines[0], /^a\.ts:1:\d+$/);
+    assert.match(lines[1], /^b\.ts:2:\d+$/);
+    assert.equal(lines[2], "gone.ts:gone");
+    assert.equal(untrackedSignature({ fs, git: () => null, repoRoot: root }), "");
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
