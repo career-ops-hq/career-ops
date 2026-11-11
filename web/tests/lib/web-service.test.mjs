@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
 import {
   CARRIED_ENV,
   RESTART_SECONDS,
@@ -178,15 +179,15 @@ const MAC_HOME = ["", "Users", "me"].join("/");
 test("definitionPath is the LaunchAgents plist, the systemd user unit, or nothing on Windows", () => {
   assert.equal(
     definitionPath({ platform: "darwin", home: MAC_HOME }),
-    `${MAC_HOME}/Library/LaunchAgents/io.career-ops.web.plist`,
+    path.join(MAC_HOME, "Library", "LaunchAgents", "io.career-ops.web.plist"),
   );
   assert.equal(
     definitionPath({ platform: "linux", home: "/home/me" }),
-    "/home/me/.config/systemd/user/career-ops-web.service",
+    path.join("/home/me", ".config", "systemd", "user", "career-ops-web.service"),
   );
   assert.equal(
     definitionPath({ platform: "linux", home: "/home/me", xdgConfigHome: "/cfg" }),
-    "/cfg/systemd/user/career-ops-web.service",
+    path.join("/cfg", "systemd", "user", "career-ops-web.service"),
   );
   assert.equal(definitionPath({ platform: "win32", home: "C:\\Users\\me" }), null);
 });
