@@ -5,13 +5,20 @@
  * The discard log (data/discard.log, or batch/logs/discard.log for batch runs)
  * is the only record of what the filters threw away and why. This script reads
  * it and produces a summary of rejection reasons, domains, and daily volume,
- * plus the most frequent title_mismatch URLs for the candidate to review.
+ * plus the most-discarded URLs for the candidate to review by hand.
  *
  * Read-only: never modifies the log.
  *
- * The top title_mismatch section is deliberately dumb — it lists the URLs and
- * lets the candidate judge whether a keyword is costing them real roles. It
- * never infers which keyword to add; that is a guess wearing a number.
+ * The reasons are whatever the writers put there: batch-runner.sh writes
+ * `dealbreaker: "{rule}"` and `below-min-score`, and the interactive pipeline
+ * gate writes a free-text reason. No reason vocabulary is assumed. Title
+ * keyword tuning belongs to filter-audit.mjs: title filtering happens in
+ * scan.mjs and is recorded in data/scan-history.tsv, not in this log.
+ *
+ * The most-discarded section is deliberately dumb — it lists the URLs with
+ * their latest reason and lets the candidate judge whether the gate is
+ * costing them real roles. It never infers a rule change; that is a guess
+ * wearing a number. Combine it with --reason to review one reason's URLs.
  *
  * Run: node discard-analytics.mjs [--log <path>] [--reason <pattern>] [--top N] [--since YYYY-MM-DD]
  *
@@ -61,14 +68,14 @@ export function parseDiscardLog(text) {
  *   byReason: Array<[string, number]>,
  *   byDomain: Array<[string, number]>,
  *   byDay: Array<[string, number]>,
- *   titleMismatch: Array<[string, number]>
+ *   byUrl: Array<{url: string, count: number, lastReason: string}>
  * }}
  */
 export function aggregateDiscards(entries) {
   const reasonCounts = {};
   const domainCounts = {};
   const dayCounts = {};
-  const titleMismatchCounts = {};
+  const urlStats = new Map();
 
   for (const e of entries) {
     reasonCounts[e.reason] = (reasonCounts[e.reason] || 0) + 1;
@@ -78,17 +85,23 @@ export function aggregateDiscards(entries) {
     } catch { /* malformed URL */ }
     const day = e.timestamp.slice(0, 10);
     dayCounts[day] = (dayCounts[day] || 0) + 1;
-    if (e.reason.includes('title_mismatch')) {
-      titleMismatchCounts[e.url] = (titleMismatchCounts[e.url] || 0) + 1;
+    const stat = urlStats.get(e.url) || { url: e.url, count: 0, lastReason: '', lastTimestamp: '' };
+    stat.count += 1;
+    if (e.timestamp >= stat.lastTimestamp) {
+      stat.lastTimestamp = e.timestamp;
+      stat.lastReason = e.reason;
     }
+    urlStats.set(e.url, stat);
   }
 
   const byReason = Object.entries(reasonCounts).sort((a, b) => b[1] - a[1]);
   const byDomain = Object.entries(domainCounts).sort((a, b) => b[1] - a[1]);
   const byDay = Object.entries(dayCounts).sort((a, b) => a[0].localeCompare(b[0]));
-  const titleMismatch = Object.entries(titleMismatchCounts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const byUrl = [...urlStats.values()]
+    .sort((a, b) => b.count - a.count || a.url.localeCompare(b.url))
+    .map(({ url, count, lastReason }) => ({ url, count, lastReason }));
 
-  return { total: entries.length, byReason, byDomain, byDay, titleMismatch };
+  return { total: entries.length, byReason, byDomain, byDay, byUrl };
 }
 
 /**
@@ -127,10 +140,10 @@ export function renderSummary(agg, topN, firstDate, lastDate) {
   }
   lines.push('');
 
-  if (agg.titleMismatch.length > 0) {
-    lines.push(`Top title_mismatch URLs (review for keyword tuning):`);
-    for (const [url, count] of agg.titleMismatch.slice(0, topN)) {
-      lines.push(`  ${count}. ${url}`);
+  if (agg.byUrl.length > 0) {
+    lines.push(`Most-discarded URLs (top ${topN}, check by hand for wrong rejections):`);
+    for (const { url, count, lastReason } of agg.byUrl.slice(0, topN)) {
+      lines.push(`  ${pad(count, 5)} ${url}  (${lastReason})`);
     }
     lines.push('');
   }
