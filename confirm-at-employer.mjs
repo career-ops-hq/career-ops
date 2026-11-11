@@ -16,15 +16,16 @@
  *   4. Find the employer's board: `tracked_companies` in portals.yml, then ATS links
  *      of the same company already in data/scan-history.tsv, then slug probing over
  *      the discover-ats vendors (plus Personio). No board → `no_board`.
- *   5. List the board and match the title:
- *      - the same title (gender tags dropped, `Sr.` → `senior`), or the only
- *        near title (token Dice ≥ 0.8) when both have three words or more →
- *        `found`: the employer URL is canonical, open today;
- *      - exactly one board title that contains ours, or is contained in it,
- *        with at least three content words → `likely`: same role with a team
- *        suffix, the agent compares the text;
+ *   5. List every board found and match the title:
+ *      - the same title (gender tags dropped, `Sr.` → `senior`), the only near
+ *        title (token Dice ≥ 0.8) when both have three words or more, or the
+ *        only board title that contains ours or is contained in it (three
+ *        content words or more) → `found` with `match` saying which; a board
+ *        title match is a candidate the agent compares with the listing;
  *      - otherwise → `board_without_role` with the three nearest titles, so the
  *        agent decides between "renamed" and "stale" (AGENTS.md step 3).
+ *        `complete: false` when a board was read only in part or was found by
+ *        slug probing alone: then the absence is not established.
  *
  * Read-only: it writes nothing. Untrusted strings (URL, company, title come
  * from the posting) never go through a shell: they are read from a JSON file.
@@ -37,6 +38,7 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { checkLivenessViaApi, isAtsPosting, resolveAtsApi } from './liveness-api.mjs';
 import { isAggregatorUrl } from './url-key.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
@@ -48,8 +50,10 @@ import { parsedScanHistory } from './lib/scan-history-columns.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { validateFlags, flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { boardTruncation, markTruncated } from './lib/board-truncation.mjs';
+import { resolveHost as builtinHost } from './providers/builtin.mjs';
 
-export const VERDICTS = Object.freeze(['employer_url', 'found', 'likely', 'board_without_role', 'no_board', 'unidentified']);
+export const VERDICTS = Object.freeze(['employer_url', 'found', 'board_without_role', 'no_board', 'unidentified']);
 export const TITLE_MATCH = 0.8;
 
 // ── Title matching ─────────────────────────────────────────────────────
@@ -141,7 +145,8 @@ export function knownBoards(company, { portalsText = '', historyText = '' } = {}
 /** Slugs to probe for a company name: hyphenated and joined, legal suffixes dropped. */
 export function companySlugs(company) {
   const base = String(company || '').replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim().replace(LEGAL, '');
-  const slug = deriveSlug(base);
+  // deriveSlug keeps ASCII only: fold accents first, so "Café" probes "cafe", not "caf".
+  const slug = deriveSlug(base.replace(/ß/g, 'ss').normalize('NFKD').replace(/\p{Mn}/gu, ''));
   return [...new Set([slug, slug.replace(/-/g, '')])].filter((s) => s && s.length >= 3);
 }
 
@@ -155,30 +160,44 @@ export function probeCandidates(company) {
   return [...new Set(out)];
 }
 
-/** Default board lister: the provider that reads that board, through providers/. */
+/**
+ * Default board lister: the provider that reads that board, through providers/.
+ * The whole board is read (the provider's own page limit, no probe cap); a
+ * board the provider read only in part keeps its lib/board-truncation.mjs mark.
+ * null means the board did not answer; [] is an answered, empty board.
+ */
 export function makeBoardLister(ctx = makeHttpCtx()) {
   let providers = null;
   return async (careersUrl, company) => {
-    providers ||= await loadProviders(new URL('./providers', import.meta.url).pathname);
+    providers ||= await loadProviders(fileURLToPath(new URL('./providers', import.meta.url)));
     const entry = { name: company, careers_url: careersUrl };
-    const { provider } = resolveProvider(entry, providers, { skipIds: ['local-parser'] });
-    if (!provider) return null;
+    const resolved = resolveProvider(entry, providers, { skipIds: ['local-parser'] });
+    if (!resolved?.provider) return null;
     try {
-      const jobs = await provider.fetch(entry, { ...ctx, maxPages: 3 });
-      return Array.isArray(jobs) ? jobs.filter((j) => j?.title && j?.url) : null;
+      const jobs = await resolved.provider.fetch(entry, ctx);
+      if (!Array.isArray(jobs)) return null;
+      const kept = jobs.filter((j) => j?.title && j?.url);
+      const cut = boardTruncation(jobs);
+      return cut ? markTruncated(kept, cut.reason || 'truncated') : kept;
     } catch { return null; }
   };
 }
 
 // ── The confirmation ───────────────────────────────────────────────────
 const liveOf = (v) => (v?.result === 'active' ? 'open' : v?.result === 'expired' ? 'closed' : 'unknown');
-const isAggregator = (u) => { try { return isAggregatorUrl(u); } catch { return false; } };
+// Built In runs one platform on several market hosts (builtinseattle.com, builtinchicago.org, ...);
+// the shared list names builtin.com only, so the allowlist in providers/builtin.mjs covers the rest.
+const isAggregator = (u) => {
+  try { if (isAggregatorUrl(u)) return true; } catch { /* fall through */ }
+  const h = hostOf(u);
+  return !!h && builtinHost(h) !== null;
+};
 const unknownEmployer = (c) => !c || c === '?' || /^(confidential|undisclosed|unknown|vertraulich|anonym)/i.test(c);
 
 /**
  * @param {{url: string, company?: string, title?: string, origin?: string}} posting
  * @param {{listBoard?: Function, checkLiveness?: Function, portalsText?: string, historyText?: string, candidates?: Function}} [deps]
- * @returns {Promise<{verdict: string, employerUrl: string, board: string, live: 'open'|'closed'|'unknown', near: Array<{title: string, url: string}>, evidence: string}>}
+ * @returns {Promise<{verdict: string, match: ''|'origin'|'exact'|'near'|'contained', employerUrl: string, board: string, live: 'open'|'closed'|'unknown', complete: boolean, near: Array<{title: string, url: string}>, evidence: string}>}
  */
 export async function confirmAtEmployer(posting, deps = {}) {
   const {
@@ -191,7 +210,7 @@ export async function confirmAtEmployer(posting, deps = {}) {
   const company = String(posting?.company || '').trim();
   const title = String(posting?.title || '').trim();
   const origin = String(posting?.origin || '').trim();
-  const out = (o) => ({ employerUrl: '', board: '', live: 'unknown', near: [], evidence: '', ...o });
+  const out = (o) => ({ employerUrl: '', board: '', live: 'unknown', match: '', complete: false, near: [], evidence: '', ...o });
 
   // 1. Already the employer's posting.
   if (url && !isAggregator(url)) {
@@ -202,56 +221,56 @@ export async function confirmAtEmployer(posting, deps = {}) {
   // 2. The posting links to the employer.
   if (origin && !isAggregator(origin)) {
     const v = isAtsPosting(origin) ? await checkLiveness(origin) : null;
-    return out({ verdict: 'found', employerUrl: origin, board: boardOfPosting(origin), live: liveOf(v),
+    return out({ verdict: 'found', match: 'origin', employerUrl: origin, board: boardOfPosting(origin), live: liveOf(v),
       evidence: `employer link given by the posting${v ? `; ATS API: ${v.result}` : ''}` });
   }
   // 3. No employer to look for.
   if (unknownEmployer(company)) return out({ verdict: 'unidentified', evidence: 'the posting does not name the employer' });
 
-  // 4. The employer's board: known boards first, then probing.
+  // 4. The employer's boards: known boards first; with none, every probe candidate that answers.
+  // A board known from the user's own data is the employer's; a slug match alone is not proof of that.
   const lists = new Map();
-  const boards = knownBoards(company, { portalsText, historyText });
+  const boards = knownBoards(company, { portalsText, historyText }).map((url) => ({ url, source: 'known' }));
   if (!boards.length) {
-    for (const careersUrl of candidates(company)) {
-      const jobs = await listBoard(careersUrl, company);
-      if (jobs?.length) { boards.push(careersUrl); lists.set(careersUrl, jobs); break; }
-    }
+    const probed = await Promise.all(candidates(company).map(async (c) => [c, await listBoard(c, company)]));
+    for (const [c, jobs] of probed) if (Array.isArray(jobs)) { boards.push({ url: c, source: 'probe' }); lists.set(c, jobs); }
   }
   if (!boards.length) return out({ verdict: 'no_board', evidence: `no ATS board found for "${company}"` });
 
-  // 5. Match the title on the board(s).
+  // 5. Match the title across the boards.
   const jobs = [];
   const read = [];
+  let complete = boards.every((b) => b.source === 'known');
   for (const b of boards) {
-    const list = lists.get(b) || await listBoard(b, company);
-    if (!list) continue;
-    read.push(b);
-    for (const j of list) jobs.push({ ...j, board: b, s: titleSimilarity(title, j.title), c: titleContains(title, j.title) });
+    const list = lists.has(b.url) ? lists.get(b.url) : await listBoard(b.url, company);
+    if (!Array.isArray(list)) { complete = false; continue; }
+    read.push(b.url);
+    if (boardTruncation(list)) complete = false;
+    for (const j of list) jobs.push({ ...j, board: b.url, s: titleSimilarity(title, j.title), c: titleContains(title, j.title) });
   }
-  if (!read.length) return out({ verdict: 'no_board', evidence: `the board did not answer: ${boards[0]}` });
+  if (!read.length) return out({ verdict: 'no_board', evidence: `the board did not answer: ${boards[0].url}` });
   jobs.sort((a, b) => b.s - a.s);
-  // An exact title (the same role listed per location counts once) is found. A near title is found only when it is
-  // the one near title on the board and both titles have three words or more: "Product Manager" vs
-  // "Product Manager - Realtime" is a guess, not a match.
-  const exact = jobs.filter((j) => j.s === 1);
-  const near = jobs.filter((j) => j.s >= TITLE_MATCH);
+  // An exact title (the same role listed per location counts once) is found. A near or containing title
+  // is found only when it is the one such title and both titles have three words or more: "Product
+  // Manager" vs "Product Manager - Realtime" is a guess, not a match.
+  const key = (j) => titleTokens(j.title).join(' ');
+  const sole = (list) => (list.length && new Set(list.map(key)).size === 1 ? list[0] : null);
   const words = (t) => new Set(titleTokens(t)).size;
-  const hit = exact[0] || (near.length && new Set(near.map((j) => titleTokens(j.title).join(' '))).size === 1
-    && words(title) >= 3 && words(near[0].title) >= 3 ? near[0] : null);
+  const exact = jobs.find((j) => j.s === 1);
+  const near = sole(jobs.filter((j) => j.s >= TITLE_MATCH));
+  const contained = sole(jobs.filter((j) => j.c));
+  const [hit, match] = exact ? [exact, 'exact']
+    : near && words(title) >= 3 && words(near.title) >= 3 ? [near, 'near']
+    : contained ? [contained, 'contained'] : [null, ''];
   if (hit) {
-    return out({ verdict: 'found', employerUrl: hit.url, board: hit.board, live: 'open',
-      evidence: `"${hit.title}" is listed on ${hit.board} today` });
-  }
-  const contained = jobs.filter((j) => j.c);
-  if (contained.length === 1) {
-    const j = contained[0];
-    return out({ verdict: 'likely', employerUrl: j.url, board: j.board, live: 'open',
-      evidence: `"${j.title}" on ${j.board} differs by a suffix: compare the text before treating it as the same role` });
+    return out({ verdict: 'found', match, employerUrl: hit.url, board: hit.board, live: 'open',
+      evidence: `"${hit.title}" is listed on ${hit.board} today (${match} title match): compare it with the listing before treating it as the same role` });
   }
   const nearest = [];
   for (const j of jobs) if (nearest.length < 3 && !nearest.some((n) => n.title === j.title)) nearest.push({ title: j.title, url: j.url });
-  return out({ verdict: 'board_without_role', board: read[0], near: nearest,
-    evidence: `${read[0]} lists ${jobs.length} roles today, none with this title` });
+  const why = complete ? '' : '; the absence is not established (a board was read in part, did not answer, or was found by slug probing only)';
+  return out({ verdict: 'board_without_role', board: read[0], near: nearest, complete,
+    evidence: `${read.join(', ')} list${read.length > 1 ? '' : 's'} ${jobs.length} roles today, none with this title${why}` });
 }
 
 // ── CLI ────────────────────────────────────────────────────────────────
@@ -266,20 +285,23 @@ Verdicts: ${VERDICTS.join(', ')}`;
 function readText(p) { try { return existsSync(p) ? readFileSync(p, 'utf8') : ''; } catch { return ''; } }
 
 async function main(argv) {
-  validateFlags(argv, ['--input', '--json', '--help', '-h'], USAGE, { valueFlags: ['--input'], usageExitCode: 2 });
+  validateFlags(argv, ['--input', '--json', '--help', '-h'], USAGE, { valueFlags: ['--input'], requireOperand: true, usageExitCode: 2 });
   if (hasFlag(argv, '--help') || hasFlag(argv, '-h')) { console.log(USAGE); return 0; }
   const file = flagValue(argv, '--input');
   if (!file) { console.error(USAGE); return 2; }
   let posting;
   try { posting = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { console.error(`confirm-at-employer: cannot read ${file}: ${e.message}`); return 2; }
-  if (!posting || typeof posting.url !== 'string' || !/^https?:\/\//i.test(posting.url)) { console.error('confirm-at-employer: "url" must be an http(s) URL'); return 2; }
+  const httpUrl = (u) => { try { return ['http:', 'https:'].includes(new URL(u).protocol); } catch { return false; } };
+  if (!posting || typeof posting.url !== 'string' || !httpUrl(posting.url.trim())) { console.error('confirm-at-employer: "url" must be an http(s) URL'); return 2; }
   const { PORTALS_PATH, SCAN_HISTORY_PATH } = await import('./scan.mjs');
   const r = await confirmAtEmployer(posting, { portalsText: readText(PORTALS_PATH), historyText: readText(SCAN_HISTORY_PATH) });
   if (hasFlag(argv, '--json')) { console.log(JSON.stringify(r, null, 2)); return 0; }
   console.log(`verdict:  ${r.verdict}`);
   if (r.employerUrl) console.log(`employer: ${r.employerUrl}`);
   if (r.board) console.log(`board:    ${r.board}`);
+  if (r.match) console.log(`match:    ${r.match}`);
   console.log(`live:     ${r.live}`);
+  if (r.verdict === 'board_without_role') console.log(`complete: ${r.complete}`);
   for (const n of r.near) console.log(`nearest:  ${n.title} — ${n.url}`);
   console.log(`evidence: ${r.evidence}`);
   return 0;

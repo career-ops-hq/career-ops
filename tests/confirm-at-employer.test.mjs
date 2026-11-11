@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import {
   confirmAtEmployer, titleSimilarity, titleContains, boardOfPosting, knownBoards, companySlugs, VERDICTS,
 } from '../confirm-at-employer.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const AGG = 'https://www.linkedin.com/jobs/view/4000000001/';
 const HEADER = 'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\tfingerprint\tposted_at\ttrust_score\ttrust_flags\tnormalized_company\n';
@@ -52,6 +53,7 @@ test('step 2: an employer link given by the posting is used as the employer URL'
     listBoard: async () => assert.fail('no board listing when the posting gives the employer link'),
   });
   assert.equal(r.verdict, 'found');
+  assert.equal(r.match, 'origin');
   assert.equal(r.employerUrl, origin);
   assert.equal(r.board, 'https://jobs.lever.co/acme');
 });
@@ -86,15 +88,40 @@ test('step 4b: an ATS link of the same company in scan history gives the board',
   assert.deepEqual(knownBoards('Acme', { historyText }), ['https://jobs.ashbyhq.com/acme']);
 });
 
-test('step 4c: with no known board, slugs are probed and the first board with jobs is used', async () => {
-  const { listBoard, calls } = fakeBoards({ 'https://acme-labs.jobs.personio.de': [{ title: 'Product Owner', url: 'https://acme-labs.jobs.personio.de/job/7' }] });
-  const r = await confirmAtEmployer({ url: AGG, company: 'Acme Labs GmbH', title: 'Product Owner (m/w/d)' }, {
-    listBoard, checkLiveness: noLiveness,
-    candidates: () => ['https://job-boards.greenhouse.io/acme-labs', 'https://acme-labs.jobs.personio.de', 'https://jobs.lever.co/acme-labs'],
+test('step 4c: with no known board, every probe candidate is tried and each board is listed once', async () => {
+  const { listBoard, calls } = fakeBoards({
+    'https://job-boards.greenhouse.io/acme-labs': [{ title: 'Data Engineer', url: 'https://job-boards.greenhouse.io/acme-labs/jobs/1' }],
+    'https://acme-labs.jobs.personio.de': [{ title: 'Product Owner', url: 'https://acme-labs.jobs.personio.de/job/7' }],
   });
-  assert.equal(r.verdict, 'found');
+  const candidates = ['https://job-boards.greenhouse.io/acme-labs', 'https://acme-labs.jobs.personio.de', 'https://jobs.lever.co/acme-labs'];
+  const r = await confirmAtEmployer({ url: AGG, company: 'Acme Labs GmbH', title: 'Product Owner (m/w/d)' }, {
+    listBoard, checkLiveness: noLiveness, candidates: () => candidates,
+  });
+  assert.equal(r.verdict, 'found', 'the first board with jobs does not stop the search on the others');
+  assert.equal(r.match, 'exact');
   assert.equal(r.board, 'https://acme-labs.jobs.personio.de');
-  assert.deepEqual(calls, ['https://job-boards.greenhouse.io/acme-labs', 'https://acme-labs.jobs.personio.de'], 'stops at the first board with jobs and does not list it twice');
+  assert.deepEqual([...calls].sort(), [...candidates].sort(), 'each candidate listed once');
+});
+
+test('step 4c: an answered empty board is a board, and a probed board never establishes absence', async () => {
+  const r = await confirmAtEmployer({ url: AGG, company: 'Acme', title: 'Product Owner' }, {
+    listBoard: async (u) => (u === 'https://jobs.ashbyhq.com/acme' ? [] : null), checkLiveness: noLiveness,
+    candidates: () => ['https://jobs.ashbyhq.com/acme', 'https://jobs.lever.co/acme'],
+  });
+  assert.equal(r.verdict, 'board_without_role');
+  assert.equal(r.board, 'https://jobs.ashbyhq.com/acme');
+  assert.equal(r.complete, false);
+});
+
+test('step 5: a board read only in part does not establish absence', async () => {
+  const portalsText = 'tracked_companies:\n  - name: Acme\n    careers_url: https://jobs.lever.co/acme\n';
+  const partial = markTruncated([{ title: 'Recruiter', url: 'https://jobs.lever.co/acme/1' }], 'cap');
+  const r = await confirmAtEmployer({ url: AGG, company: 'Acme', title: 'Product Owner' }, { portalsText, listBoard: async () => partial, checkLiveness: noLiveness });
+  assert.equal(r.verdict, 'board_without_role');
+  assert.equal(r.complete, false);
+  const whole = await confirmAtEmployer({ url: AGG, company: 'Acme', title: 'Product Owner' }, {
+    portalsText, listBoard: async () => [{ title: 'Recruiter', url: 'https://jobs.lever.co/acme/1' }], checkLiveness: noLiveness });
+  assert.equal(whole.complete, true, 'a known board read whole');
 });
 
 test('step 4d: no board anywhere → no_board', async () => {
@@ -104,14 +131,15 @@ test('step 4d: no board anywhere → no_board', async () => {
   assert.equal(r.verdict, 'no_board');
 });
 
-test('step 5: one board title that contains ours is likely the same role', async () => {
+test('step 5: the one board title that contains ours is found as a contained match', async () => {
   const portalsText = 'tracked_companies:\n  - name: Acme\n    careers_url: https://jobs.ashbyhq.com/acme\n';
   const { listBoard } = fakeBoards({ 'https://jobs.ashbyhq.com/acme': [
     { title: 'Senior Product Manager, Payments Platform', url: 'https://jobs.ashbyhq.com/acme/5' },
     { title: 'Office Manager', url: 'https://jobs.ashbyhq.com/acme/6' },
   ] });
   const r = await confirmAtEmployer({ url: AGG, company: 'Acme', title: 'Senior Product Manager' }, { portalsText, listBoard, checkLiveness: noLiveness });
-  assert.equal(r.verdict, 'likely');
+  assert.equal(r.verdict, 'found');
+  assert.equal(r.match, 'contained');
   assert.equal(r.employerUrl, 'https://jobs.ashbyhq.com/acme/5');
 });
 
@@ -142,8 +170,13 @@ test('step 5: a two-word title is not matched to a longer one, and several near 
   assert.deepEqual(many.near.map((n) => n.title), ['Senior Product Manager Payments', 'Senior Product Manager Identity', 'Product Manager - Realtime'], 'nearest titles listed once each');
 });
 
+test('step 1: a Built In market host is an aggregator, not the employer', async () => {
+  const r = await confirmAtEmployer({ url: 'https://www.builtinseattle.com/job/product-manager/123', company: '', title: 'PM' }, { checkLiveness: noLiveness });
+  assert.equal(r.verdict, 'unidentified');
+});
+
 test('every verdict the function returns is a declared one', () => {
-  assert.deepEqual([...VERDICTS].sort(), ['board_without_role', 'employer_url', 'found', 'likely', 'no_board', 'unidentified']);
+  assert.deepEqual([...VERDICTS].sort(), ['board_without_role', 'employer_url', 'found', 'no_board', 'unidentified']);
 });
 
 test('title matching ignores gender tags and Sr./Senior, and needs three words to contain', () => {
@@ -167,15 +200,20 @@ test('boardOfPosting maps posting links to the board the providers read', () => 
 test('companySlugs drops legal suffixes and gives hyphenated and joined forms', () => {
   assert.deepEqual(companySlugs('Acme Labs GmbH'), ['acme-labs', 'acmelabs']);
   assert.deepEqual(companySlugs('Foo (m/w/d) AG'), ['foo']);
+  assert.deepEqual(companySlugs('Café Müller'), ['cafe-muller', 'cafemuller'], 'accents folded, not dropped');
 });
 
 test('CLI: bad input exits 2 without touching the network', () => {
   const script = fileURLToPath(new URL('../confirm-at-employer.mjs', import.meta.url));
   const dir = mkdtempSync(join(tmpdir(), 'confirm-employer-'));
   const bad = join(dir, 'p.json');
-  writeFileSync(bad, JSON.stringify({ url: 'not a url', company: 'Acme', title: 'PM' }));
-  const r = spawnSync(process.execPath, [script, '--input', bad], { encoding: 'utf8' });
-  assert.equal(r.status, 2, r.stderr);
+  for (const url of ['not a url', 'https://', 'ftp://example.com/job']) {
+    writeFileSync(bad, JSON.stringify({ url, company: 'Acme', title: 'PM' }));
+    const r = spawnSync(process.execPath, [script, '--input', bad], { encoding: 'utf8' });
+    assert.equal(r.status, 2, `${url}: ${r.stderr}`);
+  }
+  const noOperand = spawnSync(process.execPath, [script, '--input'], { encoding: 'utf8' });
+  assert.equal(noOperand.status, 2);
   const none = spawnSync(process.execPath, [script], { encoding: 'utf8' });
   assert.equal(none.status, 2);
 });
