@@ -9,7 +9,7 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { markTruncated } from '../lib/board-truncation.mjs';
 
 
-const DARWINBOX_HOST_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.darwinbox\.in$/;
+const DARWINBOX_HOST_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.darwinbox\.(?:in|com)$/;
 const CAREERS_PATH_RE = /^\/ms\/candidatev2\/([a-z0-9_-]+)\/careers(?:\/|$)/i;
 
 
@@ -158,7 +158,7 @@ export default {
   async fetch(entry, ctx) {
     const board = resolveBoard(entry);
     if (!board) {
-      throw new Error(`darwinbox: cannot derive a board for ${entry?.name} — set careers_url to https://<tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/allJobs`);
+      throw new Error(`darwinbox: cannot derive a board for ${entry?.name} — set careers_url to https://<tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/allJobs (or the same path on <tenant>.darwinbox.com)`);
     }
     const endpoint = `${board.origin}/ms/candidateapi/job/alljobs?companyId=${board.companyId}`;
 
