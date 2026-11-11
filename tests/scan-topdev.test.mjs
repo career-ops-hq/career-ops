@@ -12,6 +12,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   ALLOWED_HOST,
   REGION_IDS,
@@ -29,6 +30,7 @@ import {
   TopDevChallengeError,
   TopDevRenderError,
 } from '../scan-topdev.mjs';
+import { PORTAL_TOP_LEVEL_KEYS, portalTopLevelTypos } from '../validate-portals.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const NOW = Date.UTC(2026, 10, 10, 12, 0, 0); // 2026-11-10T12:00:00Z
@@ -60,11 +62,32 @@ test('parseArgs reads CLI flags and takes no argv by default side effect', () =>
 
 test('there is no --all flag: recency never decides, the seen set does', () => {
   // The date cutoff was removed on review: an unseen posting older than the
-  // last run is still new to the user. --all would now be a dead flag, so the
-  // scanner must reject it rather than silently accept a no-op.
+  // last run is still new to the user, so there is nothing for --all to switch
+  // off. parseArgs itself only ignores unknown flags — the rejection lives in
+  // validateFlags in the main-module guard, which the CLI test below covers.
   assert.deepStrictEqual(parseArgs(['--all']), {
     dryRun: false, debug: false, singleKeyword: null,
   });
+});
+
+test('the CLI rejects --all before it can scan, so the dead flag cannot pass silently', () => {
+  // validateFlags runs before main(), so this needs no network and must not
+  // reach the browser at all.
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../scan-topdev.mjs', import.meta.url)), '--all'], {
+    encoding: 'utf8',
+    timeout: 30000,
+  });
+  assert.strictEqual(result.status, 1, describeSpawn(result));
+  assert.match(String(result.stderr), /unrecognized flag\(s\): --all/);
+  assert.match(String(result.stderr), /Valid flags: --dry-run, --debug, --keyword, --help, -h/);
+});
+
+test('topdev_searches is a registered portals.yml key, so a typo is reported', () => {
+  // Same class of bug as `tracked_companys`: `topdev_searche` would leave the
+  // real list unread and the scan would report nothing while exiting 0.
+  assert.ok(PORTAL_TOP_LEVEL_KEYS.includes('topdev_searches'));
+  const typos = portalTopLevelTypos({ topdev_searche: [{ keyword: 'backend' }] });
+  assert.deepStrictEqual(typos, [{ key: 'topdev_searche', suggestion: 'topdev_searches' }]);
 });
 
 test('regionIdFor maps the three observed cities, plus abbreviations', () => {
