@@ -313,6 +313,8 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
   else fail(`darwinbox.fetch() redirect opts: ${JSON.stringify(ctx.calls.map((c) => c.opts.redirect))}`);
   if (ctx.sleeps.length === 2) pass('darwinbox.fetch() delays only between pages');
   else fail(`darwinbox.fetch() sleeps: ${ctx.sleeps}`);
+  if (jobs.truncated === undefined) pass('a board read to its end is not marked truncated');
+  else fail(`darwinbox.fetch() marked a complete walk: ${JSON.stringify(jobs.truncated)}`);
 }
 
 // fetch() — an exact multiple of the page size ends on the empty page after it.
@@ -351,6 +353,9 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
   else fail(`darwinbox.fetch() cap: ${ctx.calls.length} calls, ${jobs?.length} jobs`);
   if (logged.some((l) => /truncated at max_pages=20 \(1000 of 5000 jobs\) — raise max_pages/.test(l))) pass('darwinbox.fetch() warns when the ceiling truncated the board');
   else fail(`darwinbox.fetch() cap warning: ${JSON.stringify(logged)}`);
+  const t = jobs?.truncated;
+  if (t?.reason === 'page-cap' && t.fetched === 1000 && t.total === 5000) pass('a page-cap stop marks the result truncated, with the counts');
+  else fail(`darwinbox.fetch() page-cap marker: ${JSON.stringify(t)}`);
 }
 {
   const ctx = pagedCtx([fullPage('a'), fullPage('b'), fullPage('c')]);
@@ -361,9 +366,10 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
 // A cap landing exactly on the board's end, and a short page at the cap, are not truncations.
 {
   const ctx = pagedCtx([fullPage('a', 100), fullPage('b', 100)]);
-  const logged = await captureErrors(() => darwinbox.fetch({ name: 'Acme', careers_url: CAREERS, max_pages: 2 }, ctx));
-  if (logged.length === 0) pass('no truncation warning when the source count says the full last page was the end');
-  else fail(`darwinbox.fetch() false cap warning: ${JSON.stringify(logged)}`);
+  let jobs;
+  const logged = await captureErrors(async () => { jobs = await darwinbox.fetch({ name: 'Acme', careers_url: CAREERS, max_pages: 2 }, ctx); });
+  if (logged.length === 0 && jobs?.truncated === undefined) pass('no truncation warning or marker when the source count says the full last page was the end');
+  else fail(`darwinbox.fetch() false cap: ${JSON.stringify(logged)} ${JSON.stringify(jobs?.truncated)}`);
 }
 {
   const ctx = pagedCtx([fullPage('a', 60), envelope([row('b1')], 60)]);
@@ -375,11 +381,14 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
 // fetch() — probe cooperation: one list request, no warning, rejections unwrapped.
 {
   const ctx = pagedCtx([fullPage('a', 5000), fullPage('b', 5000)], { maxPages: 1 });
-  const logged = await captureErrors(() => darwinbox.fetch({ name: 'Acme', careers_url: CAREERS }, ctx));
+  let jobs;
+  const logged = await captureErrors(async () => { jobs = await darwinbox.fetch({ name: 'Acme', careers_url: CAREERS }, ctx); });
   if (ctx.calls.length === 1) pass('darwinbox.fetch() issues exactly one list request under ctx.maxPages: 1');
   else fail(`darwinbox.fetch() probe: ${ctx.calls.length} calls`);
   if (logged.length === 0) pass('the probe cap does not fire the raise-max_pages warning');
   else fail(`darwinbox.fetch() probe warned: ${JSON.stringify(logged)}`);
+  if (jobs?.truncated === undefined) pass('the probe cap does not mark the result truncated');
+  else fail(`darwinbox.fetch() probe marked: ${JSON.stringify(jobs?.truncated)}`);
 }
 {
   const boom = new Error('budget');
@@ -422,6 +431,9 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
   else fail(`darwinbox.fetch() partial: ${jobs?.length} jobs`);
   if (logged.some((l) => /stopped at page 2/.test(l)) && !logged.some((l) => /raise max_pages/.test(l))) pass('a fetch-error stop warns without blaming max_pages');
   else fail(`darwinbox.fetch() fetch-error warning: ${JSON.stringify(logged)}`);
+  const t = jobs?.truncated;
+  if (t?.reason === 'fetch-error' && t.fetched === PAGE_SIZE && t.total === 120) pass('a later-page failure marks the result truncated, with the counts');
+  else fail(`darwinbox.fetch() fetch-error marker: ${JSON.stringify(t)}`);
 }
 {
   const ctx = pagedCtx([fullPage('a', 120), { message: 'maintenance' }]);
@@ -429,6 +441,8 @@ const fullPage = (prefix, jobCounts) => envelope(Array.from({ length: PAGE_SIZE 
   const logged = await captureErrors(async () => { jobs = await darwinbox.fetch({ name: 'Acme', careers_url: CAREERS }, ctx); });
   if (jobs?.length === PAGE_SIZE && logged.some((l) => /stopped at page 2.*unexpected response/.test(l))) pass('a broken envelope on a later page keeps the pages collected and names the cause');
   else fail(`darwinbox.fetch() later broken envelope: ${jobs?.length} jobs, ${JSON.stringify(logged)}`);
+  if (jobs?.truncated?.reason === 'fetch-error') pass('a broken envelope on a later page marks the result truncated');
+  else fail(`darwinbox.fetch() broken-envelope marker: ${JSON.stringify(jobs?.truncated)}`);
 }
 {
   let msg = '';
