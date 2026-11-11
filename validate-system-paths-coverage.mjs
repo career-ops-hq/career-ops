@@ -61,7 +61,6 @@ const EXCLUDES = [
   '.coderabbit.yaml',
   '.editorconfig',
   '.envrc',
-  '.npmignore',
   '.release-please-manifest.json',
   'release-please-config.json',
   'renovate.json',
@@ -186,7 +185,6 @@ if (process.argv.includes('--self-test')) {
   assert(covered('providers-sibling/justjoin.mjs') === false, 'providers-sibling/justjoin.mjs must NOT be covered');
   assert(covered('web/package.json') === true, 'web/ tree must be covered (isolation-contract prefix exclude)');
   assert(covered('web-dashboard/index.html') === false, 'web-dashboard/ must NOT ride the web/ prefix exclude');
-  assert(covered('.npmignore') === true, '.npmignore must be covered (excluded)');
   // Through the mechanism too: the registry must stay repo-only, never shipped by the updater.
   assert(covered('employers/boards/greenhouse/a.ndjson') === true, 'employers/ must be covered (repo-only prefix exclude)');
   assert(!SYSTEM_PATHS.some((p) => p === 'employers/' || p.startsWith('employers/')), 'employers/ must NOT enter SYSTEM_PATHS: the updater does not ship the registry');
