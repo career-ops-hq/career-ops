@@ -43,6 +43,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan:hn` | `scan-hn.mjs` | Hacker News "Who is hiring?" scanner, filtered by `hn_hiring.keywords` |
 | `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing |
 | `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing; `--tenant NAME` scans one board |
+| `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing; `--keyword TEXT` scans one keyword |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
