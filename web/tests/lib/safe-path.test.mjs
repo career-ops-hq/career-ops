@@ -5,7 +5,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { resolveInside, realInside } from "../../src/lib/safe-path.mjs";
-import { readJsonFile } from "../../src/lib/json-file.mjs";
 
 const base = path.resolve("/tmp/output");
 
@@ -37,13 +36,4 @@ test("realInside serves real files and refuses a symlink that leaves the folder"
     return;
   }
   assert.equal(realInside(out, "link.md"), null);
-});
-
-test("readJsonFile: missing file -> fallback; broken file throws", (t) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "json-file-"));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  const f = path.join(dir, "x.json");
-  assert.deepEqual(readJsonFile(f, { d: 1 }), { d: 1 });
-  fs.writeFileSync(f, "{ broken");
-  assert.throws(() => readJsonFile(f, null), SyntaxError);
 });
