@@ -145,13 +145,22 @@ async function runService(argv) {
 
   let stopping = false;
   let current = null;
+  let restartTimer = null;
   for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
     process.on(signal, () => {
       stopping = true;
+      // Stopped while waiting out a crash delay: no child is running, so leave now.
+      if (restartTimer) {
+        clearTimeout(restartTimer);
+        restartTimer = null;
+        process.exit(128 + (os.constants.signals[signal] ?? 0));
+      }
       current?.kill(signal);
     });
   }
   const start = () => {
+    restartTimer = null;
+    if (stopping) return;
     log("starting the dashboard");
     current = spawn(process.execPath, [path.join(webDir, "server.mjs"), "start"], {
       cwd: webDir,
@@ -168,7 +177,7 @@ async function runService(argv) {
       const delay = crashRestartDelayMs({ platform: process.platform, code, signal, stopping });
       if (delay !== null) {
         log(`the dashboard exited with code ${code}; restarting in ${delay / 1000} seconds`);
-        setTimeout(start, delay);
+        restartTimer = setTimeout(start, delay);
         return;
       }
       process.exit(signal ? 128 + (os.constants.signals[signal] ?? 0) : (code ?? 1));
