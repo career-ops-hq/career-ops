@@ -43,20 +43,20 @@ const BOLD = `${BLOCKS}
 `;
 const BULLET = `${BLOCKS}
 ---SCORE_SUMMARY---
-- COMPANY: Marrowfield Grocers
-- ROLE: Senior Data Analyst
-- SCORE: 4.3
-- ARCHETYPE: Data Analyst
-- LEGITIMACY: High Confidence
+• COMPANY: Marrowfield Grocers
+• OLE: Senior Data Analyst
+• SCORE: 4.3
+• ARCHETYPE: Data Analyst
+• LEGITIMACY: High Confidence
 ---END_SUMMARY---
 `;
 const BOLD_AND_BULLET = `${BLOCKS}
 ---SCORE_SUMMARY---
-- **COMPANY:** Marrowfield Grocers
-- **ROLE:** Senior Data Analyst
-- **SCORE**: 4.3/5
-- **ARCHETYPE:** Data Analyst
-- **LEGITIMACY:** High Confidence
+• **COMPANY:** Marrowfield Grocers
+• **ROLE:** Senior Data Analyst
+• **SCORE**: 4.3/5
+• **ARCHETYPE:** Data Analyst
+• **LEGITIMACY:** High Confidence
 ---END_SUMMARY---
 `;
 
