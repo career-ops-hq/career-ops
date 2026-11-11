@@ -3,7 +3,7 @@ import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
 import { join, resolve } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdirSync, mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync, realpathSync, utimesSync, symlinkSync, chmodSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync, realpathSync, utimesSync, symlinkSync, chmodSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import assert from 'node:assert/strict';
 
@@ -562,6 +562,32 @@ try {
   const missingChosen = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir: join(tmp, 'no-such', 'memory'), memoryDirChosen: true, includeClaudeMemory: true });
   assert.equal(missingChosen.failed.length, 1);
   assert.match(missingChosen.failed[0].error, /does not exist/);
+  // Same size and same mtime is not proof of "unchanged" for memory files: the content is compared too.
+  const sameDir = join(tmp, 'claude-same', 'memory');
+  put(sameDir, 'MEMORY.md', 'AAAA');
+  const sameDest = join(tmp, 'backup', 'mem-same');
+  assert.equal(b.runBackup({ dataRoot: memRoot, dest: sameDest, memoryDir: sameDir, includeClaudeMemory: true }).failed.length, 0);
+  const keepTime = statSync(join(sameDir, 'MEMORY.md'));
+  writeFileSync(join(sameDir, 'MEMORY.md'), 'BBBB');
+  utimesSync(join(sameDir, 'MEMORY.md'), keepTime.atime, keepTime.mtime);
+  const sameRun = b.runBackup({ dataRoot: memRoot, dest: sameDest, memoryDir: sameDir, includeClaudeMemory: true });
+  assert.equal(readFileSync(join(sameDest, 'claude-memory', 'MEMORY.md'), 'utf8'), 'BBBB');
+  assert.equal(sameRun.copied, 1, 'only the edited memory file is copied again');
+  assert.equal(b.runBackup({ dataRoot: memRoot, dest: sameDest, memoryDir: sameDir, includeClaudeMemory: true }).copied, 0, 'confirmed unchanged files are skipped');
+  // A memory folder that cannot be read is a failure with its error code, not "absent".
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    const locked = join(tmp, 'claude-locked');
+    put(locked, 'memory/MEMORY.md', 'x');
+    chmodSync(locked, 0o000);
+    try {
+      const lockedRun = b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'backup', 'mem-locked'), memoryDir: join(locked, 'memory'), includeClaudeMemory: true });
+      assert.equal(lockedRun.failed.length, 1);
+      assert.match(lockedRun.failed[0].error, /EACCES/);
+      assert.equal(lockedRun.warnings.some((w) => /no Claude memory folder/.test(w)), false);
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+  }
   // A fork that declares its own claude-memory path keeps it: the memory copy does not write over it.
   const clashRoot = join(tmp, 'clash-root');
   put(clashRoot, 'cv.md', 'cv');
@@ -609,6 +635,14 @@ try {
   assert.equal(namedMissing.status, 1);
   const namedOverlap = spawnSync(NODE, ['backup.mjs', '--dest', join(namedDir, 'b'), '--claude-memory-dir', namedDir, '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
   assert.equal(namedOverlap.status, 2);
+  // A blank --claude-memory-dir is a usage error, in either spelling, not a silent "no memory".
+  for (const blank of [['--claude-memory-dir', ''], ['--claude-memory-dir', '   '], ['--claude-memory-dir=']]) {
+    const blankRun = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'blank'), ...blank, '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+    assert.equal(blankRun.status, 2, JSON.stringify(blank) + blankRun.stdout + blankRun.stderr);
+    // The `=` spelling is already refused by the shared flag check, which reports on stderr.
+    assert.match(blank.length === 1 ? blankRun.stderr : JSON.parse(blankRun.stdout).error, blank.length === 1 ? /requires a value/ : /needs a folder/);
+  }
+  assert.equal(existsSync(join(tmp, 'backup', 'blank')), false);
   // Memory files do not hide an empty data root.
   const emptyWithMem = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'e3'), '--include-claude-memory', '--json'], {
     cwd: ROOT, env: { ...memEnv, CAREER_OPS_ROOT: empty }, encoding: 'utf8',

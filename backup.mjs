@@ -42,7 +42,7 @@ import {
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
 import { kebab, loadProfileDefault } from './cv-templates.mjs';
@@ -460,6 +460,16 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
   return files;
 }
 
+// Equal size and near-equal mtime can still hide an edit that kept both, so a
+// file the caller wants verified is also compared byte for byte.
+const sameContent = (a, b) => {
+  try {
+    return readFileSync(a).equals(readFileSync(b));
+  } catch {
+    return false;
+  }
+};
+
 const unchanged = (src, destPath) => {
   try {
     const d = statSync(destPath);
@@ -497,7 +507,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   if (includeClaudeMemory) assertMemoryApartFromDestination(dest, memoryDir);
   if (!dryRun) mkdirSync(dest, { recursive: true });
   // Copy one discovered file from `srcRoot` to `destRel` under the destination.
-  const copyFile = (srcRoot, file, destRel) => {
+  const copyFile = (srcRoot, file, destRel, { verify = false } = {}) => {
     result.found++;
     const target = join(dest, destRel);
     // A symlinked folder inside the destination could point back at live files.
@@ -505,7 +515,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
       fail(destRel, new Error('a folder in the backup destination is a symlink; not copying through it'));
       return;
     }
-    if (unchanged(file, target)) { result.unchanged++; return; }
+    if (unchanged(file, target) && (!verify || sameContent(join(srcRoot, file.rel), target))) { result.unchanged++; return; }
     if (dryRun) { result.copied++; result.bytes += file.size; return; }
     const part = `${target}.part`;
     try {
@@ -555,18 +565,28 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     result.claudeMemory = 0;
     const label = (rel) => (rel ? join(CLAUDE_MEMORY_FOLDER, rel) : memoryDir);
     let files = [];
+    // Only ENOENT/ENOTDIR mean "no memory folder"; any other error keeps its code and is a failure.
+    let memoryState = 'present';
+    try {
+      statSync(memoryDir);
+    } catch (error) {
+      memoryState = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'absent' : error;
+    }
     // A fork can declare its own claude-memory path (config/local-paths.txt).
     // Its files were just copied to that folder, so the memory copy stays out of it.
     const taken = entries.map((e) => e.toLowerCase()).some((e) => e === CLAUDE_MEMORY_FOLDER || e.startsWith(`${CLAUDE_MEMORY_FOLDER}/`));
     if (taken) {
       fail(CLAUDE_MEMORY_FOLDER, new Error(`a backed-up path is named ${CLAUDE_MEMORY_FOLDER}, where the Claude memory copy goes; memory was not copied`));
-    } else if (!existsSync(memoryDir)) {
+    } else if (memoryState === 'absent') {
       if (memoryDirChosen) {
         fail(memoryDir, new Error('the Claude memory folder named with --claude-memory-dir does not exist'));
       } else {
         // A checkout Claude Code has written no memory for: not an error.
         result.warnings.push(`no Claude memory folder at ${memoryDir}; nothing copied for --include-claude-memory. If Claude Code keeps it elsewhere, pass --claude-memory-dir <dir>.`);
       }
+    } else if (memoryState instanceof Error) {
+      // Not "absent": a folder that cannot be read must not look like a clean run.
+      fail(memoryDir, memoryState);
     } else {
       try {
         files = listEntry(memoryDir, '', {
@@ -580,7 +600,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     for (const file of files) {
       result.claudeMemory++;
-      copyFile(memoryDir, file, join(CLAUDE_MEMORY_FOLDER, file.rel));
+      copyFile(memoryDir, file, join(CLAUDE_MEMORY_FOLDER, file.rel), { verify: true });
     }
   }
   if (skippedAgentFiles > 0) {
@@ -627,14 +647,18 @@ function main(args) {
   const quiet = args.includes('--quiet');
   const dryRun = args.includes('--dry-run');
   const includeContacts = args.includes('--include-contacts');
-  const chosenMemoryDir = (flagValue(args, '--claude-memory-dir') ?? '').trim();
-  const includeClaudeMemory = args.includes('--include-claude-memory') || Boolean(chosenMemoryDir);
-  const memoryDir = chosenMemoryDir ? resolve(chosenMemoryDir) : claudeMemoryDir();
   const refuse = (message) => {
     if (json) console.log(JSON.stringify({ ok: false, error: message }));
     else console.error(`backup: ${message}`);
     return 2;
   };
+  // A blank operand must not quietly turn the memory copy off.
+  const chosenMemoryDir = (flagValue(args, '--claude-memory-dir') ?? '').trim();
+  if (hasFlag(args, '--claude-memory-dir') && !chosenMemoryDir) {
+    return refuse('--claude-memory-dir needs a folder, not an empty value.');
+  }
+  const includeClaudeMemory = args.includes('--include-claude-memory') || Boolean(chosenMemoryDir);
+  const memoryDir = chosenMemoryDir ? resolve(chosenMemoryDir) : claudeMemoryDir();
 
   // The export holds other people's contact details and a provider folder is
   // uploaded by a sync client, so the two flags never combine.
