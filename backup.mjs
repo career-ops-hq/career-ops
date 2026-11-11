@@ -568,7 +568,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     // Only ENOENT/ENOTDIR mean "no memory folder"; any other error keeps its code and is a failure.
     let memoryState = 'present';
     try {
-      statSync(memoryDir);
+      if (!statSync(memoryDir).isDirectory()) memoryState = new Error('the Claude memory path is not a folder');
     } catch (error) {
       memoryState = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'absent' : error;
     }
