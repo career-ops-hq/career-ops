@@ -421,15 +421,15 @@ pi
 /skill:career-ops tracker
 ```
 
-### वन-शॉट Pi (`pi -p`)
+### वन-शॉट Pi (`pi -a -p`)
 
 ```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
+pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -a -p "Run career-ops scan mode and summarize new matches."
+pi -a -p "Run career-ops tracker mode and summarize the current statuses."
 ```
 
-अगर Pi का कोई बिल्ड प्रोजेक्ट संसाधनों को भरोसे के फ़ैसले के पीछे रखता है, तो रिपॉज़िटरी के अंदर एक बार `/trust` चलाएँ और `pi` को दोबारा शुरू करें ताकि प्रोजेक्ट स्किल लोड हो जाए (`/trust` आगे के Pi प्रोसेस पर लागू होता है), या `-a` के साथ शुरू करें, जो सिर्फ़ एक रन पर भरोसा करता है और उसमें रीस्टार्ट की ज़रूरत नहीं होती।
+अगर Pi का कोई बिल्ड प्रोजेक्ट संसाधनों को भरोसे के फ़ैसले के पीछे रखता है, तो रिपॉज़िटरी के अंदर एक बार `/trust` चलाएँ और `pi` को दोबारा शुरू करें ताकि प्रोजेक्ट स्किल लोड हो जाए (`/trust` आगे के Pi प्रोसेस पर लागू होता है), या `-a` के साथ शुरू करें, जो सिर्फ़ एक रन पर भरोसा करता है और उसमें रीस्टार्ट की ज़रूरत नहीं होती। `-a` Pi 0.79.0 में आया: उससे पुराने वर्ज़न यह फ़्लैग स्वीकार नहीं करते, वहाँ `pi -p "prompt"` चलाएँ। Pi 0.54.0 से पुराना वर्ज़न `.agents/skills` में देखता ही नहीं, इसलिए उसे अपडेट करें ([docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md))।
 
 ### स्टैंडअलोन Gemini API स्क्रिप्ट (CLI इंस्टॉल की ज़रूरत नहीं)
 

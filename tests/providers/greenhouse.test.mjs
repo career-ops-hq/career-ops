@@ -398,6 +398,22 @@ try {
     },
   );
 
+  // /offices outgrows the shared 10 MB / 10 s defaults (Stripe's: 29.2 MB), so
+  // the call must carry its own larger ceiling, or every run aborts it.
+  let officesOpts = null;
+  await greenhouse.fetch(
+    { name: 'Stripe', careers_url: 'https://stripe.com/jobs/search', api: 'https://boards-api.greenhouse.io/v1/boards/stripe/jobs' },
+    {
+      fetchJson: async (url, opts) => {
+        if (url.endsWith('/offices')) { officesOpts = opts; return officesBody; }
+        return { jobs: [{ id: 201, title: 'Strategy & Operations', absolute_url: 'https://stripe.com/jobs/listing/x/201', location: { name: 'Hybrid' } }] };
+      },
+    },
+  );
+  if (officesOpts && officesOpts.maxBytes >= 32 * 1024 * 1024 && officesOpts.timeoutMs >= 30_000 && officesOpts.redirect === 'error')
+    pass('greenhouse.fetch() gives /offices its own body and time ceiling (Stripe /offices is 29 MB) and keeps redirect: error');
+  else fail(`greenhouse.fetch() /offices options = ${JSON.stringify(officesOpts)}`);
+
   if (requested.length === 2 && requested[1] === 'https://boards-api.greenhouse.io/v1/boards/cloudflare/offices')
     pass('greenhouse.fetch() requests /offices when the board reports work-model-only locations');
   else fail(`greenhouse.fetch() requested ${JSON.stringify(requested)}`);

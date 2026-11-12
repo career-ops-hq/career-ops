@@ -448,6 +448,10 @@ async function runSelfTest() {
     'date: 2026-07-21',
     'interviewer_role: Senior HR Partner',
     'source: debrief',
+    'format: panel',
+    'people_on_call: 3',
+    'tone: structured-formal',
+    'candidate_comfort: "3/5, a bit stiff"',
     '---',
     '',
     '## Q1',
@@ -467,6 +471,7 @@ async function runSelfTest() {
     check(parsed.role === 'Instructional Designer', 'role extracted');
     check(parsed.round === 'behavioral' && ROUND_ENUM.includes(parsed.round), 'round extracted and in enum');
     check(parsed.date === '2026-07-21', 'date extracted');
+    check(parsed.company === 'Acme Corp', 'optional format/tone front-matter keys do not break parsing');
     check(parsed.competencyTags.length === 3, 'all competency tags collected across Q&A pairs');
     check(parsed.competencyTags.filter((t) => t === 'stakeholder-management').length === 2, 'repeated tag counted once per occurrence');
   }

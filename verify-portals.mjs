@@ -48,8 +48,8 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
 import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 
-import { fetchJson as defaultFetchJson, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
-import { ASHBY_TIMEOUT_MS } from './providers/ashby.mjs';
+import { fetchJson as defaultFetchJson, fetchText as defaultFetchFullText, fetchTextHead as defaultFetchText, makeHttpCtx } from './providers/_http.mjs';
+import { ASHBY_MAX_BYTES, ASHBY_TIMEOUT_MS, buildEmbedUrl as ashbyEmbedUrl, parseEmbedAppData as parseAshbyEmbed } from './providers/ashby.mjs';
 import { LEVER_TIMEOUT_MS } from './providers/lever.mjs';
 import { isBlockedAddress } from './providers/_ip-guard.mjs';
 
@@ -133,6 +133,17 @@ export const ATS = {
     probeUrl: (slug) =>
       `https://api.ashbyhq.com/posting-api/job-board/${slug}?includeCompensation=true`,
     timeoutMs: ASHBY_TIMEOUT_MS,
+    // The same body ceiling the provider reads this endpoint with, so a board
+    // the scan can read is never reported missing here.
+    maxBytes: ASHBY_MAX_BYTES,
+    // Past even that ceiling the provider reads the embed listing instead
+    // (providers/ashby.mjs), so the probe counts the board the same way rather
+    // than reporting a board the scan can read as missing.
+    oversized: async (slug, { fetchEmbed }) => {
+      const html = await fetchEmbed(ashbyEmbedUrl(slug), { timeoutMs: ASHBY_TIMEOUT_MS, redirect: 'error' });
+      const board = parseAshbyEmbed(String(html));
+      return board ? board.jobPostings.length : null;
+    },
     jobCount: (json) => (Array.isArray(json?.jobs) ? json.jobs.length : null),
     // The posting API returns only {jobs, apiVersion}; the board page titles
     // itself with the owner ('deepset Jobs'), which is the only name either
@@ -517,8 +528,9 @@ export function classifyFetchError(err) {
  *
  * @param {string} ats - Key into ATS (greenhouse | ashby | lever).
  * @param {string} slug - Candidate slug to probe.
- * @param {{fetchJson?: Function, eu?: boolean}} [deps] - Injectable HTTP for
- *   testability; `eu` selects Lever's EU data-residency instance.
+ * @param {{fetchJson?: Function, fetchEmbed?: Function, eu?: boolean}} [deps] - Injectable
+ *   HTTP for testability; `eu` selects Lever's EU data-residency instance;
+ *   `fetchEmbed` reads a full page for an ATS with an `oversized` fallback.
  * @returns {Promise<{ats,slug,url,status,jobCount?,httpStatus?,errorKind?,reason?}>}
  *   status is 'live' (jobs > 0), 'empty' (200, no jobs), or 'missing'
  *   (404/error/unexpected shape).
@@ -526,7 +538,7 @@ export function classifyFetchError(err) {
 export async function probeSlug(
   ats,
   slug,
-  { fetchJson = probeFetchJson, eu = false } = {},
+  { fetchJson = probeFetchJson, fetchEmbed = defaultFetchFullText, eu = false } = {},
 ) {
   const spec = ATS[ats];
   if (!spec)
@@ -540,7 +552,11 @@ export async function probeSlug(
     };
   const url = spec.probeUrl(slug, { eu });
   try {
-    const json = await fetchJson(url, spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : undefined);
+    const probeOpts = {
+      ...(spec.timeoutMs ? { timeoutMs: spec.timeoutMs } : {}),
+      ...(spec.maxBytes ? { maxBytes: spec.maxBytes } : {}),
+    };
+    const json = await fetchJson(url, Object.keys(probeOpts).length ? probeOpts : undefined);
     const count = spec.jobCount(json);
     if (count == null)
       return {
@@ -559,6 +575,14 @@ export async function probeSlug(
       jobCount: count,
     };
   } catch (err) {
+    if (/** @type {any} */ (err)?.code === 'response_too_large' && spec.oversized) {
+      try {
+        const count = await spec.oversized(slug, { fetchEmbed });
+        if (count != null) return { ats, slug, url, status: count > 0 ? 'live' : 'empty', jobCount: count };
+      } catch {
+        // Fall through: report the original size error, not the fallback's.
+      }
+    }
     return {
       ats,
       slug,
@@ -1251,7 +1275,8 @@ async function main() {
   if (hasFlag(args, '--unmined')) {
     const n = await runUnmined(filePath, { fetchJson });
     // --strict makes this a CI gate: an unmined board is a silent coverage hole.
-    if (strict && n > 0) process.exit(1);
+    // process.exitCode, not process.exit(1), for the reason given at the end of main().
+    if (strict && n > 0) process.exitCode = 1;
     return;
   }
 
@@ -1301,7 +1326,15 @@ async function main() {
 
   if (strict && missing.length > 0) {
     console.log('🔴 Unresolved slugs found (--strict).');
-    process.exit(1);
+    // process.exitCode, not process.exit(1): main() returns, and the process
+    // exits 1 once the event loop drains. On Windows, Node 24 aborts when
+    // process.exit() runs right after a request (nodejs/node#56645): it prints a
+    // libuv assertion and exits with a crash code instead of 1. Measured
+    // 2026-11-12 on Node 24.14.1: --strict on a Workday board that does not
+    // exist, and --unmined --strict on a name with a Greenhouse board, aborted 4
+    // times out of 4. The exits that run before any request (a bad flag or
+    // --help, an empty --file, a name runAdd() cannot slug) keep process.exit().
+    process.exitCode = 1;
   }
 }
 
@@ -1310,6 +1343,6 @@ async function main() {
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`verify-portals failed: ${err.message}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the end of main()
   });
 }

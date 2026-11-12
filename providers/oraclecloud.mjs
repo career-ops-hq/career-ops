@@ -50,7 +50,7 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs'
 const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(?:[1-9][0-9]?)?\.com$/i;
 
 const PAGE_SIZE = 200;
-const MAX_PAGES = 25;             // default cap (~5000 jobs) when the entry sets no max_pages
+const MAX_PAGES = 25;             // default cap (~5000 jobs) when the entry sets no max_pages and the tenant reports no total
 // Upper bound an entry may opt in to with `max_pages` (~20000 jobs, 100 requests
 // of 200 rows at 250ms spacing). JPMorgan Chase alone has 7000+ postings, which
 // the default cannot cover; the bound stays finite so a typo can't walk a board
@@ -244,11 +244,17 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    const entryMaxPages = resolveMaxPages(entry);
+    let entryMaxPages = resolveMaxPages(entry);
+    // An entry's own max_pages is the user's choice and is kept as set. Without
+    // one, a tenant that reports TotalJobsCount already bounds the walk, so the
+    // default rises to cover that total, up to HARD_MAX_PAGES: a fixed 25 pages
+    // read 5000 of JPMorgan's 7118 postings. MAX_PAGES stays the cap only for a
+    // tenant that reports no total, where nothing else ends the walk.
+    const autoRaise = !(Number.isInteger(entry?.max_pages) && entry.max_pages > 0);
     // Health probes / audits pass ctx.maxPages (1) to ask for a single page;
-    // honour it, and don't call that deliberate stop a truncation.
+    // honour it as the upper bound, and don't call that deliberate stop a truncation.
     const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
-    const maxPages = Math.min(entryMaxPages, ctxCap);
+    let maxPages = Math.min(entryMaxPages, ctxCap);
 
     const all = [];
     let total = null;
@@ -268,7 +274,13 @@ export default {
       all.push(...parsed);
 
       const item = Array.isArray(json?.items) ? json.items[0] : null;
-      if (total === null && item && typeof item.TotalJobsCount === 'number') total = item.TotalJobsCount;
+      if (total === null && item && typeof item.TotalJobsCount === 'number') {
+        total = item.TotalJobsCount;
+        if (autoRaise) {
+          entryMaxPages = Math.max(entryMaxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+          maxPages = Math.min(entryMaxPages, ctxCap);
+        }
+      }
       const listLen = item && Array.isArray(item.requisitionList) ? item.requisitionList.length : 0;
 
       // Stop conditions. NOTE: `hasMore` is unreliable on some tenants (e.g.

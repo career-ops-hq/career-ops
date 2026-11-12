@@ -46,11 +46,89 @@ function canonicalizeSeparators(numStr) {
   return numStr.replace(grouped, '$1').replace(sep, '.');
 }
 
+// Chinese spellings: 万/萬 (x10,000), "N薪" (months of pay per year), the
+// 年薪 / 月薪 period words, 税前 (gross) and the 人民币 / 元 currency words.
+const ZH_HINT_RE = /[万萬薪元]|人民币|人民幣|[税稅][前后後]|[\/／]\s*[年月]|每[年月]/;
+const ZH_MONTHS_RE = /[\s·•*×xX,]*(\d+)\s*薪/g;
+const ZH_ANNUAL_RE = /年薪|\/\s*年|每年/;
+const ZH_MONTHLY_RE = /月薪|\/\s*月|每月/;
+const ZH_UNIT = /** @type {Record<string, number>} */ ({ k: 1000, K: 1000, 万: 10000, 萬: 10000 });
+
+/**
+ * The one "N薪" month count a text states, undefined when it states none, NaN
+ * when it states two different ones.
+ *
+ * @param {string} text
+ * @returns {number | undefined}
+ */
+function zhMonthCount(text) {
+  const counts = new Set([...text.matchAll(ZH_MONTHS_RE)].map((m) => Number(m[1])));
+  if (counts.size > 1) return NaN;
+  return counts.size === 1 ? [...counts][0] : undefined;
+}
+
+/**
+ * parseAmount() for a string written the Chinese way ("25-40K·15薪",
+ * "年薪 60-80 万人民币"). The result is always an annual figure: a 年薪 amount
+ * is taken as written, and an amount with a month count is that count of
+ * monthly pay ("25-40K·15薪" is 375,000-600,000). A monthly amount with no
+ * month count stays unparseable, for the reason parseAmount() gives for "per
+ * month": the multiplier is not in the string. So does 税后 (net pay), and so
+ * does anything with words left over once the known tokens are removed
+ * ("35k 起", "50 万用户").
+ *
+ * A parenthetical is a note, not part of the figure: it is read for the
+ * period words, and for a month count when the text outside it states none
+ * ("25-40K（15薪）").
+ *
+ * @param {string} raw
+ * @returns {{min: number, max: number, mid: number} | null}
+ */
+function parseChineseAmount(raw) {
+  const text = raw.normalize('NFKC');
+  if (/[税稅][后後]/.test(text)) return null;
+  const notes = [...text.matchAll(/\(([^()]*)\)/g)].map((m) => m[1]).join(' ');
+  let s = text.replace(/\([^()]*\)/g, ' ');
+
+  const months = zhMonthCount(s) ?? zhMonthCount(notes);
+  // A count outside 12-24 ("0薪", "3薪") is not months of pay per year.
+  if (months !== undefined && !(months >= 12 && months <= 24)) return null;
+  // The period words count wherever they stand: "25-40K（月薪）" is monthly.
+  const annual = ZH_ANNUAL_RE.test(text);
+  const monthly = ZH_MONTHLY_RE.test(text);
+  if (annual && monthly) return null;
+  if (monthly && months === undefined) return null;
+
+  s = s
+    .replace(ZH_MONTHS_RE, ' ')
+    .replace(/年薪|月薪|[税稅]前|每[年月]|\/\s*[年月]/g, ' ')
+    .replace(/人民[币幣]|(?<![A-Za-z])(?:[A-Z]{3}|rmb|cny)(?![A-Za-z])|[€$£¥元]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  const bounds = s.match(/^(\d[\d.,]*)\s*([kK万萬])?(?:\s*(?:[-–—~]|至|到)\s*(\d[\d.,]*)\s*([kK万萬])?)?$/);
+  if (!bounds) return null;
+  const toNum = (numStr, unit) => {
+    // "2.5万" is a decimal, never period-grouped thousands.
+    const n = /[万萬]/.test(unit ?? '')
+      ? (/^\d+(?:\.\d+)?$/.test(numStr) ? parseFloat(numStr) : NaN)
+      : parseFloat(canonicalizeSeparators(numStr));
+    return Number.isNaN(n) ? null : n * (unit ? ZH_UNIT[unit] : 1);
+  };
+  const lo = toNum(bounds[1], bounds[2] || bounds[4]); // "60-80 万": 万 applies to both
+  const hi = bounds[3] === undefined ? lo : toNum(bounds[3], bounds[4] || bounds[2]);
+  if (lo === null || hi === null) return null;
+  const factor = annual ? 1 : months ?? 1;
+  const min = Math.min(lo, hi) * factor, max = Math.max(lo, hi) * factor;
+  return { min, max, mid: (min + max) / 2 };
+}
+
 /**
  * Parse a written amount or range into numbers. Annual suffixes and currency
  * tokens are stripped, never interpreted: the currency is the caller's to
  * read, and a non-annual period ("/hr", "per month") leaves the string
  * unparseable, so it returns null rather than a figure in the wrong unit.
+ * Chinese spellings are read by parseChineseAmount() above.
  *
  * @param {unknown} raw
  * @returns {{min: number, max: number, mid: number} | null}
@@ -58,6 +136,7 @@ function canonicalizeSeparators(numStr) {
 export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
+  if (ZH_HINT_RE.test(s)) return parseChineseAmount(s);
   // Keep period recognition separate from amount parsing, but allow an explicit
   // annual suffix to coexist with the numeric value.
   // It may appear on either side of a trailing currency token ("60k CAD per
@@ -114,6 +193,11 @@ export function parseAmount(raw) {
  */
 export function compensationPeriod(raw) {
   const value = String(raw ?? '');
+  // Chinese: 年薪 is annual, and so is an amount with an "N薪" month count,
+  // because parseAmount() annualizes it. 月薪 alone is monthly.
+  const zh = value.normalize('NFKC');
+  if (ZH_ANNUAL_RE.test(zh) || /\d\s*薪/.test(zh)) return 'annual';
+  if (ZH_MONTHLY_RE.test(zh)) return 'monthly';
   if (/(?:\/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b)/i.test(value)) return 'annual';
   if (/(?:\/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b)/i.test(value)) return 'monthly';
   if (/(?:\/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b)/i.test(value)) return 'hourly';

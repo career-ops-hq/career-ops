@@ -96,7 +96,9 @@ node backup.mjs --provider google-drive                 # or a signed-in cloud d
 It copies what the updater treats as yours (`USER_PATHS` in `update-system.mjs`). The files that hold other people's contact details (`data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json`, `output/contacts.vcf` (and any other `.vcf` file)) are
 left out unless you add `--include-contacts`, which cannot be combined with `--provider` or with a `--dest` inside a provider folder at its default location (a sync client would upload them). A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder. The backup includes your agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`), which can
 hold API tokens, so back up to a place only you can read. When the destination is inside a recognized
-sync folder (including every `--provider` destination) these are left out and the run says so. Several signed-in accounts are
+sync folder (including every `--provider` destination) these are left out and the run says so. Claude Code's auto-memory for the
+checkout (`~/.claude/projects/<checkout>/memory/`: your saved preferences and corrections) sits outside your data folder, so it is
+copied only when you add `--include-claude-memory` (or `--claude-memory-dir <dir>` when Claude Code keeps it somewhere else), into `claude-memory/` in the backup. Several signed-in accounts are
 handled with `--account`; see
 [SCRIPTS.md](SCRIPTS.md#backupmjs). It keeps no history, so it protects against a lost
 machine, not against a mistaken edit. Use Pattern 1 or 3 below when you want to go back to
