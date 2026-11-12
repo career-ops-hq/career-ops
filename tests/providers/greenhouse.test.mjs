@@ -410,8 +410,8 @@ try {
       },
     },
   );
-  if (officesOpts && officesOpts.maxBytes >= 32 * 1024 * 1024 && officesOpts.timeoutMs >= 30_000)
-    pass('greenhouse.fetch() gives /offices its own body and time ceiling (Stripe /offices is 29 MB)');
+  if (officesOpts && officesOpts.maxBytes >= 32 * 1024 * 1024 && officesOpts.timeoutMs >= 30_000 && officesOpts.redirect === 'error')
+    pass('greenhouse.fetch() gives /offices its own body and time ceiling (Stripe /offices is 29 MB) and keeps redirect: error');
   else fail(`greenhouse.fetch() /offices options = ${JSON.stringify(officesOpts)}`);
 
   if (requested.length === 2 && requested[1] === 'https://boards-api.greenhouse.io/v1/boards/cloudflare/offices')
