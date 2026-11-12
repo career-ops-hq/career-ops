@@ -180,6 +180,9 @@ export function parseArticles(htmlText, origin) {
       } catch {
         continue;
       }
+      // A href with its own scheme (javascript:, data:, mailto:) is absolute,
+      // so new URL keeps it as it is: only http(s) is a job link.
+      if (!/^https?:\/\//i.test(url)) continue;
     }
     const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
     out.push({
@@ -256,6 +259,11 @@ export default {
       return fresh;
     };
 
+    // A page is stalled when it has no cards (empty) or every parsed article
+    // was already seen (the offset repeated a page). Zero fresh jobs alone is
+    // not enough: a page of cards that parseArticles dropped is still progress.
+    const stalled = (result, fresh) => result.cards === 0 || (fresh === 0 && result.articles.length > 0);
+
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       let result = await getPage(offsetParam, page);
@@ -267,9 +275,9 @@ export default {
       // Retry this page once with the fallback key; if it advances, adopt it for
       // the remainder. Only on page 1 — inert pagination manifests immediately,
       // so a later non-advancing page is a genuine end-of-board, not a mismatch.
-      // NOTE: fresh === 0 must be evaluated before the empty-page break below,
+      // NOTE: the stall check must run before the empty-page break below,
       // or an inert key that returns an empty page 1 would exit without healing.
-      if (fresh === 0 && canHeal && page === 1) {
+      if (stalled(result, fresh) && canHeal && page === 1) {
         canHeal = false;
         await sleep(INTER_PAGE_DELAY_MS, ctx);
         const altResult = await getPage(FALLBACK_OFFSET_PARAM, page);
@@ -285,7 +293,9 @@ export default {
       // comment) — a later empty/short page is just the end of a real board.
       if (page === 0 && result.articles.length === 0) assertParsedSomething(result.html, result.url);
 
-      if (fresh === 0) break; // empty page / looped / offset ignored / last page
+      // Stop only on an empty or repeated page. A full page whose links were all
+      // dropped (non-http scheme, no title) still advanced, so the walk goes on.
+      if (stalled(result, fresh)) break; // empty page / looped / offset ignored / last page
       if (result.cards < PAGE_SIZE) break; // last page (raw card count, not the parsed one)
     }
     return jobs;
