@@ -265,6 +265,14 @@ try {
   if (shortPageJobs.length === 3 && shortPageCtx.calls.length === 1) pass('avature.fetch() still stops after a short page of valid cards');
   else fail(`avature.fetch() returned ${shortPageJobs.length} jobs after ${shortPageCtx.calls.length} calls, expected 3 after 1`);
 
+  // A full page whose links are all dropped (non-http scheme) is not an empty or
+  // repeated page: the walk must go on to the next one instead of stopping there.
+  const scriptCard = (id) => `<article class="article article--result"><h3 class="title"><a class="link" href="javascript:void(0)//JobDetail?jobId=${id}">Role ${id}</a></h3></article>`;
+  const droppedPageCtx = mkPagedCtx([mkHtml([1, 2, 3, 4, 5, 6]), [7, 8, 9, 10, 11, 12].map(scriptCard).join(''), mkHtml([13, 14])]);
+  const droppedPageJobs = await avature.fetch({ name: 'X', api: base }, droppedPageCtx);
+  if (droppedPageJobs.length === 8 && droppedPageCtx.calls.length === 3) pass('avature.fetch() keeps paging past a full page whose links were all dropped');
+  else fail(`avature.fetch() returned ${droppedPageJobs.length} jobs after ${droppedPageCtx.calls.length} calls, expected 8 after 3`);
+
   // Self-heal must fire even when the inert primary key returns an EMPTY page 1
   // (not a repeat of page 0) — the empty-page break must not pre-empt the heal.
   const emptyP1Ctx = {
