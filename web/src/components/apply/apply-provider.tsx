@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
+import { READBACK_ISSUE_CODES } from "@/lib/apply/prefilled-banner.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
 import { issuesAfterAgent, issuesAfterFill } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
@@ -355,8 +356,12 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
       setSteps(d.steps ?? []);
       if (typeof d.cvAttached === "boolean") setCvAttached(d.cvAttached);
-      // Gaps stay up while the request runs. This body is what replaces them.
-      setIssues((prev) => issuesAfterFill(prev, Array.isArray(d.issues) ? d.issues as ApplyIssue[] : []));
+      // A later fill replaces the last read-back and the last handoff gaps.
+      const incoming = Array.isArray(d.issues) ? (d.issues as ApplyIssue[]) : [];
+      setIssues((prev) => issuesAfterFill(
+        prev.filter((issue) => !READBACK_ISSUE_CODES.has(issue.code)),
+        incoming,
+      ));
       if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
       if (d.handedOff) {
         setStatus("done");

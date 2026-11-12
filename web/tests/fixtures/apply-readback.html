@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Readback fixture</title></head>
+<body>
+  <form id="wrong">
+    <label for="name">First name</label>
+    <input id="name" data-co-field="name" value="Fixture" required>
+    <fieldset>
+      <legend>Will you now or in the future require visa sponsorship?</legend>
+      <label><input type="radio" name="sponsor" data-co-field="visa" data-co-option="Yes" value="yes" checked> Yes</label>
+      <label><input type="radio" name="sponsor" data-co-field="visa" data-co-option="No" value="no"> No</label>
+    </fieldset>
+    <label for="agree"><input id="agree" type="checkbox" data-co-field="agree" checked> I agree to the privacy notice</label>
+    <div class="select__container select-shell">
+      <label id="office-label">Office</label>
+      <input class="select__input" role="combobox" aria-labelledby="office-label" data-co-field="office">
+    </div>
+  </form>
+  <form id="right" hidden>
+    <label for="name2">First name</label>
+    <input id="name2" data-co-field="name" value="Fixture" required>
+    <fieldset>
+      <legend>Will you now or in the future require visa sponsorship?</legend>
+      <label><input type="radio" name="sponsor2" data-co-field="visa" data-co-option="Yes" value="yes"> Yes</label>
+      <label><input type="radio" name="sponsor2" data-co-field="visa" data-co-option="No" value="no" checked> No</label>
+    </fieldset>
+    <div class="select__container select-shell">
+      <label id="office-label-2">Office</label>
+      <input class="select__input" role="combobox" aria-labelledby="office-label-2" data-co-field="office">
+      <div class="select__single-value">Springfield, IL</div>
+    </div>
+  </form>
+</body>
+</html>
