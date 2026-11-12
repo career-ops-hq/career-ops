@@ -86,4 +86,22 @@ test("a password box is a login wall and stays blank", async (t) => {
   const application = await extractForm(page.mainFrame());
   assert.equal(isApplicationFormFn(application), true);
   assert.equal(application.fields.some((field) => field.type === "password"), false);
+
+  await page.evaluate(() => {
+    const input = document.createElement("input");
+    input.type = "password";
+    input.name = "late-password";
+    document.body.appendChild(input);
+  });
+  const lateId = `fixture-${crypto.randomUUID()}`;
+  globalThis.__coApplySessions.set(lateId, { id: lateId, frame: page.mainFrame(), page, title: application.title, url: page.url() });
+  try {
+    const email = application.fields.find((field) => field.type === "email");
+    const filled = await fillSession(lateId, { [email.id]: "person@example.test" }, application.fields);
+    assert.equal(filled.issues.some((issue) => issue.code === "login-wall"), true);
+    assert.equal(filled.steps.length, 0);
+  } finally {
+    globalThis.__coApplySessions.delete(lateId);
+  }
+  assert.equal(await page.locator("input[name=email]").inputValue(), "");
 });

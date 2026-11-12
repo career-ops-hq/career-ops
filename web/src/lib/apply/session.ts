@@ -90,6 +90,17 @@ function formHasPassword(form: ExtractedForm): boolean {
   return form.fields.some((f) => f.type === "password" || /\bpassword\b/i.test(f.label || ""));
 }
 
+// fieldsMeta is the extract snapshot. A sign-in dialog that opens later is on
+// the live page and missing from that snapshot, so the fill would still upload
+// and type. Count password inputs in every frame before either of those.
+async function pageHasPassword(page: Page): Promise<boolean> {
+  for (const frame of page.frames()) {
+    const count = await frame.locator('input[type="password"]').count().catch(() => 0);
+    if (count > 0) return true;
+  }
+  return false;
+}
+
 function looksLikeApplicationForm(form: ExtractedForm): boolean {
   if (formHasPassword(form)) return false;
   const fs = form.fields;
@@ -497,7 +508,7 @@ export async function fillSession(
 ): Promise<{ steps: FillStep[]; navigated: boolean; issues: ApplyIssue[] }> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found (it may have expired)");
-  if (formHasPassword({ title: s.title, url: s.url, fields: fieldsMeta })) {
+  if (formHasPassword({ title: s.title, url: s.url, fields: fieldsMeta }) || await pageHasPassword(s.page)) {
     return { steps: [], navigated: false, issues: [{ level: "block", code: "login-wall", message: LOGIN_WALL_MESSAGE }] };
   }
   const byId = new Map(fieldsMeta.map((f) => [f.id, f]));
