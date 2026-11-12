@@ -19,6 +19,8 @@ import fs from 'node:fs';
  * "José Müller" -> "Jose-Muller": Latin accents dropped, any run that is not a
  * letter, mark or digit becomes "-". Letters of every script stay, so
  * "Иван Петров" -> "Иван-Петров" and "张伟" -> "张伟" (#6478 follow-up).
+ * Only a mark on a Latin letter is dropped: the breve of "й" or the accent
+ * of Greek "ά" is part of the letter, so "Йосиф" stays "Йосиф".
  * With recaseCaps (the candidate's name), an all-caps word of 2+ letters is a
  * surname typed in capitals and is recased: "Jane DOE" -> "Jane-Doe". Without
  * it (the role), words keep their casing, so acronyms such as BI, HRIS or
@@ -30,7 +32,7 @@ import fs from 'node:fs';
 export function fileWords(s, { recaseCaps = false } = {}) {
   return String(s ?? '')
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/(\p{Script=Latin})[\u0300-\u036f]+/gu, '$1')
     .normalize('NFC')
     .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter(Boolean)

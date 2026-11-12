@@ -49,3 +49,11 @@ test("names in non-Latin scripts keep their letters", () => {
   assert.equal(cvUploadName({ fullName: "राहुल शर्मा", role: "" }), "राहुल-शर्मा-CV.pdf");
   assert.equal(cvUploadName({ fullName: "محمد علي", role: "" }), "محمد-علي-CV.pdf");
 });
+
+test("a mark that belongs to a non-Latin letter stays, a Latin accent goes", () => {
+  assert.equal(cvUploadName({ fullName: "Йосиф Сергеевич", role: "" }), "Йосиф-Сергеевич-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "Андрій Їжак", role: "" }), "Андрій-Їжак-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "Νίκος Παπαδάκης", role: "" }), "Νίκος-Παπαδάκης-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "Nguyễn Văn An", role: "" }), "Nguyen-Van-An-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "José Müller", role: "" }), "Jose-Muller-CV.pdf");
+});
