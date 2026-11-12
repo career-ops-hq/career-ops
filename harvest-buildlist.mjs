@@ -513,18 +513,34 @@ export function titleCaseSlug(slug) {
  * reads robots.txt once. The page itself goes through the shared provider
  * transport (career-ops UA, timeout, body cap, private-address guard, no
  * redirects followed), retried on a 429 or 5xx with the shared policy, which
- * waits out a Retry-After (clamped to a minute).
+ * waits out a Retry-After.
  *
  * @param {string} url
+ * @param {number} [minGapMs] - The run's pause between requests (a stated
+ *   Crawl-delay included); a retry never comes sooner than this.
  * @returns {Promise<string>}
  */
-async function fetchPage(url) {
+async function fetchPage(url, minGapMs = MIN_DELAY_MS) {
   const robots = await robotsAllows(url);
   if (!robots.allowed) throw new Error(`robots.txt ${robots.reason}`);
   return fetchTextWithRetry(HTTP_CTX, url, {
     timeoutMs: REQUEST_TIMEOUT_MS,
     headers: { Accept: 'text/html,application/xhtml+xml,application/xml' },
-  }, { retries: 2, baseDelayMs: MIN_DELAY_MS, maxDelayMs: 15_000 });
+  }, retryPolicy(minGapMs));
+}
+
+/**
+ * The shared retry policy, held to the run's pace: the first backoff is the
+ * pause between requests (so a retry after a 503 never comes sooner than a
+ * stated Crawl-delay allows), and the ceiling grows with it. A Retry-After is
+ * honoured up to four times the ceiling (providers/_http.mjs withRetry).
+ *
+ * @param {number} minGapMs
+ * @returns {{retries: number, baseDelayMs: number, maxDelayMs: number}}
+ */
+export function retryPolicy(minGapMs) {
+  const gap = Math.max(MIN_DELAY_MS, Number(minGapMs) || 0);
+  return { retries: 2, baseDelayMs: gap, maxDelayMs: Math.max(15_000, gap * 2) };
 }
 
 const HTTP_CTX = makeHttpCtx();
@@ -547,7 +563,8 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
  * @param {(done: number, total: number) => void} [opts.onProgress]
  * @param {(partial: {resolved: object[], hintOnly: object[], unresolved: object[], errors: object[]}) => void} [opts.onCheckpoint]
  *   Called every CHECKPOINT_EVERY companies with what has been harvested so far.
- * @param {(url: string) => Promise<string>} [opts.fetchImpl] - Injected for tests.
+ * @param {(url: string, minGapMs: number) => Promise<string>} [opts.fetchImpl] - Injected for tests;
+ *   receives the run's pause so its retries keep the same pace.
  * @param {() => Promise<number|null>} [opts.crawlDelayImpl] - Injected for tests.
  * @returns {Promise<{resolved: object[], hintOnly: object[], unresolved: object[], errors: object[], total: number, capped: number, pending: number, crawlDelay: number|null}>}
  *   `capped` is the count the sitemap listed when it exceeded MAX_COMPANIES
@@ -573,7 +590,7 @@ export async function harvest(opts = {}) {
   let pause = Math.min(delay, MAX_DELAY_MS);
   if (crawlDelay > 0) pause = Math.max(pause, Math.ceil(crawlDelay * 1000));
 
-  const sitemapXml = await fetchImpl(SITEMAP_URL);
+  const sitemapXml = await fetchImpl(SITEMAP_URL, pause);
   const roster = parseCompanySitemap(sitemapXml);
   // An empty roster is a failed read (a soft-error page served with HTTP 200),
   // not an empty BuildList: carrying on would overwrite --out with nothing and
@@ -604,7 +621,7 @@ export async function harvest(opts = {}) {
       if (i >= slugs.length) return;
       const slug = slugs[i];
       try {
-        const html = await fetchImpl(`${SITE_ORIGIN}/${slug}`);
+        const html = await fetchImpl(`${SITE_ORIGIN}/${slug}`, pause);
         const name = extractCompanyName(html, slug);
         const profile = extractProfile(html, name);
         const boards = extractAtsBoards(html);
@@ -1307,6 +1324,12 @@ async function main(argv) {
 
   if (wantResume && !outFile) {
     console.error('harvest-buildlist: --resume needs --out <file>; the progress file lives next to that file.');
+    return 1;
+  }
+  // --summary and --json print instead of writing the YAML, so with --out a
+  // finished run would leave neither the file asked for nor a progress file.
+  if (outFile && (flag('--summary') || flag('--json'))) {
+    console.error('harvest-buildlist: --out writes the YAML; --summary and --json print instead. Use one or the other.');
     return 1;
   }
   // "Never writes portals.yml" has to hold for a mistyped --out too: refuse the

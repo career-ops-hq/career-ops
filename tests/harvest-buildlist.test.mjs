@@ -19,7 +19,7 @@ import { ROOT, NODE, pass, fail, ownRootEnv, rmSync } from './helpers.mjs';
 import {
   CHECKPOINT_EVERY, MAX_COMPANIES, boardFromUrl, decodeEntities, dedupeBoards, extractAtsBoards,
   extractCompanyName, harvest, loadTrackedEntries, oneLine, readCheckpoint,
-  renderPortalsYaml, renderSummary, yamlString,
+  renderPortalsYaml, renderSummary, retryPolicy, yamlString,
 } from '../harvest-buildlist.mjs';
 
 const SCRIPT = join(ROOT, 'harvest-buildlist.mjs');
@@ -327,6 +327,23 @@ try {
     }
   });
 
+  check('a retry never comes sooner than the run\'s pause, a stated Crawl-delay included', () => {
+    const normal = retryPolicy(1000);
+    const slow = retryPolicy(30_000);
+    const ok = normal.baseDelayMs === 1000 && normal.maxDelayMs === 15_000
+      && slow.baseDelayMs === 30_000 && slow.maxDelayMs >= 30_000 && retryPolicy(0).baseDelayMs === 1000;
+    return ok ? null : JSON.stringify({ normal, slow });
+  });
+
+  await checkAsync('every fetch is handed the run\'s pause, so its retries keep the same pace', async () => {
+    const gaps = new Set();
+    await harvest({
+      delay: 0, crawlDelayImpl: async () => 0.02,
+      fetchImpl: async (url, minGapMs) => { gaps.add(minGapMs); return url.endsWith('.xml') ? sitemapOf(['a1', 'b2']) : page('Co', ''); },
+    });
+    return JSON.stringify([...gaps]) === '[20]' ? null : `gaps ${JSON.stringify([...gaps])}`;
+  });
+
   await checkAsync('requests are made one at a time, and a stated Crawl-delay sets the gap', async () => {
     let inFlight = 0;
     let most = 0;
@@ -374,6 +391,8 @@ try {
     ...(haveHardlink ? [['--out at a hard link to portals.yml', ['--out', join(root, 'hard.yml')], NEVER]] : []),
     ['--out whose progress file is the --portals-file', ['--out', join(root, 'x'), '--portals-file', join(root, 'x.progress.json')], NEVER],
     ['--resume without --out', ['--resume'], /--resume needs --out/],
+    ['--out with --summary, which would print instead of writing the file', ['--out', join(root, 'a.yml'), '--summary'], /Use one or the other/],
+    ['--out with --json', ['--out', join(root, 'a.yml'), '--json'], /Use one or the other/],
     ['--limit that is not a number', ['--limit', 'abc'], /--limit needs a whole number/],
     ['--limit 0', ['--limit', '0'], /--limit needs a whole number/],
     ['--concurrency, since requests are always one at a time', ['--concurrency', '4'], /unrecognized flag/],

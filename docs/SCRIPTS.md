@@ -1424,7 +1424,7 @@ It skips companies `portals.yml` already tracks, by name **or** by board (`dedup
 
 **Interrupted runs.** With `--out`, progress is saved to `<file>.progress.json` every 25 companies, and kept while anything is left to do (pages that failed, or companies `--limit` did not reach). Run the same command with `--resume` to continue; a progress file that does not check out is ignored entry by entry, never trusted.
 
-**Guards.** `--out` refuses any file named `portals.yml` in any letter case, the file `--portals-file` names (followed through symlinks and hard links), and an `--out` whose progress file would land on it. An unrecognized flag or a malformed number (`--limit abc`) is an error, not a silent fallback to the default.
+**Guards.** `--out` refuses any file named `portals.yml` in any letter case, the file `--portals-file` names (followed through symlinks and hard links), and an `--out` whose progress file would land on it. An unrecognized flag or a malformed number (`--limit abc`) is an error, not a silent fallback to the default. `--summary` and `--json` print instead of writing, so they cannot be combined with `--out`.
 
 Company profile text (sector, description, HQ, headcount, funding) is BuildList's own editorial content, carried into the `notes:` field as context only. It is never a scoring input and never reaches generated user-facing content. Page text is untrusted: a board is emitted only when its link reads back to a valid board, names are quoted unless they are plainly a string, and control characters and line breaks are stripped from anything printed or written to a comment, so nothing read off a page can add or change an entry in the file you paste.
 
