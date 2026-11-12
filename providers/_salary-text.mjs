@@ -49,7 +49,7 @@ function canonicalizeSeparators(numStr) {
 // Chinese spellings: 万/萬 (x10,000), "N薪" (months of pay per year), the
 // 年薪 / 月薪 period words, 税前 (gross) and the 人民币 / 元 currency words.
 const ZH_HINT_RE = /[万萬薪元]|人民币|人民幣|[税稅][前后後]|[\/／]\s*[年月]|每[年月]/;
-const ZH_MONTHS_RE = /[\s·•*×xX,]*(\d{1,2})\s*薪/g;
+const ZH_MONTHS_RE = /[\s·•*×xX,]*(\d+)\s*薪/g;
 const ZH_ANNUAL_RE = /年薪|\/\s*年|每年/;
 const ZH_MONTHLY_RE = /月薪|\/\s*月|每月/;
 const ZH_UNIT = /** @type {Record<string, number>} */ ({ k: 1000, K: 1000, 万: 10000, 萬: 10000 });

@@ -77,6 +77,9 @@ expect('税后年薪 50 万', null);
 expect('25-40K·13薪或15薪', null);
 expect('25-40K·3薪', null);
 expect('25-40K·0薪', null);
+// The whole count is read, so "115薪" is not taken as "15薪".
+expect('25-40K·115薪', null);
+expect('25-40K（115薪）', null);
 expect('年薪 50 万（月薪约 4 万）', null);
 expect('年薪 50 万，月薪 35k', null);
 expect('年薪 10-15 万美元', null);
