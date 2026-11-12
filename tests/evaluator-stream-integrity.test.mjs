@@ -9,7 +9,9 @@ import { pathToFileURL } from 'node:url';
 import { fail, linkRepoPackage, NODE, pass, rmSync, ROOT } from './helpers.mjs';
 
 const exec = promisify(execFile);
-const evaluation = 'Synthetic evaluation: caf\u00e9.\n---SCORE_SUMMARY---\nCOMPANY: Example\nROLE: Engineer\nSCORE: 4.2\nARCHETYPE: IC\nLEGITIMACY: High Confidence\n---END_SUMMARY---';
+const answer = 'Synthetic evaluation: caf\u00e9.';
+const scoreSummary = '---SCORE_SUMMARY---\nCOMPANY: Example\nROLE: Engineer\nSCORE: 4.2\nARCHETYPE: IC\nLEGITIMACY: High Confidence\n---END_SUMMARY---';
+const evaluation = `${answer}\n${scoreSummary}`;
 const jd = 'Synthetic JD marker: build reliable software with a team of engineers.\n## Responsibilities\nWrite tests.';
 function write(path, text) {
   mkdirSync(dirname(path), { recursive: true });
@@ -248,7 +250,12 @@ await fixture('openai', { name: 'simultaneous reasoning and answer',
     + '\n\n' + terminal('openai'),
 }, ({ code, stdout, stderr }) => {
   assert.equal(code, 0, stderr);
-  assert.ok(stdout.includes(evaluation));
+  assert.ok(stdout.includes('<think>\nReasoning\n</think>'));
+  const answerAt = stdout.indexOf(answer);
+  assert.ok(answerAt >= 0, 'the answer is displayed alongside reasoning');
+  // Evidence normalization can insert a compensation caveat before the summary.
+  assert.ok(stdout.indexOf(scoreSummary, answerAt + answer.length) > answerAt,
+    'the complete score summary follows the answer');
 });
 for (const status of [400, 422]) {
   await fixture('openai', { name: `unsupported include_usage retry (${status})`,
