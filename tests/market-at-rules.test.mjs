@@ -11,8 +11,8 @@
 //   - The layer runs on top of modes/_shared.md and changes no workflow rule.
 //     The router layers market files on the English canon (#6728); the rule
 //     covers entry points that load a market file on its own.
-//   - Thresholds change every year, so no euro amount is written into the
-//     mode files: the agent verifies figures at runtime.
+//   - Thresholds and rates change, so no euro amount or percentage rate is
+//     written into the mode files: the agent verifies figures at runtime.
 //
 // Run:  node --test tests/market-at-rules.test.mjs
 
@@ -58,11 +58,11 @@ test('the evaluation layer runs the canonical oferta.md and adds the Austrian he
   assert.match(offer, /\*\*Salary statement:\*\*/);
 });
 
-test('no euro amounts are hardcoded in the Austrian mode files', () => {
-  // A literal amount here would go stale with the next KV round or threshold
-  // update. Placeholders like € {amount} are fine.
+test('no euro amounts or percentage rates are hardcoded in the Austrian mode files', () => {
+  // A literal amount or rate here would go stale with the next KV round,
+  // threshold update or contribution change. Placeholders like € {amount} are fine.
   for (const name of readdirSync(AT).filter((f) => f.endsWith('.md'))) {
-    const hits = read(name).match(/€\s?\d|\d[\d.,]*\s?(?:€|EUR\b)/g) ?? [];
-    assert.deepEqual(hits, [], `modes/at/${name} hardcodes an amount: ${hits.join(', ')}`);
+    const hits = read(name).match(/€\s?\d|\d[\d.,]*\s?(?:€|EUR\b|%|percent\b|Prozent\b)/g) ?? [];
+    assert.deepEqual(hits, [], `modes/at/${name} hardcodes an amount or rate: ${hits.join(', ')}`);
   }
 });
