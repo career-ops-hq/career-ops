@@ -1,9 +1,9 @@
 // tests/backup.test.mjs — backup.mjs: destination discovery, exclusions, copy.
 import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { spawnSync } from 'child_process';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdirSync, mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync, realpathSync, utimesSync, symlinkSync, chmodSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync, realpathSync, utimesSync, symlinkSync, chmodSync, statSync } from 'fs';
 import { tmpdir } from 'os';
 import assert from 'node:assert/strict';
 
@@ -494,6 +494,173 @@ try {
   assert.equal(fresh.status, 0, fresh.stdout + fresh.stderr);
   assert.equal(existsSync(join(freshHome, 'Dropbox', 'Backups', 'career-ops', 'cv.md')), true);
   pass('CLI exits 0 on success, 1 for a failed or empty run, 2 for a bad destination or option');
+
+  // --include-claude-memory: Claude Code's auto-memory lives outside the data root.
+  // The slug is the resolved checkout path (a drive letter on Windows) with every non-alphanumeric character as "-".
+  const slugOf = (p) => resolve(p).replace(/[^a-zA-Z0-9]/g, '-');
+  const slugRoot = join(tmp, 'slug', 'career_ops.v2');
+  mkdirSync(slugRoot, { recursive: true });
+  assert.match(slugOf(slugRoot), /career-ops-v2$/);
+  assert.equal(/^[a-zA-Z0-9-]+$/.test(slugOf(slugRoot)), true);
+  assert.equal(
+    b.claudeMemoryDir({ codeRoot: slugRoot, home: join(tmp, 'h'), env: {} }),
+    join(tmp, 'h', '.claude', 'projects', slugOf(slugRoot), 'memory'),
+  );
+  assert.equal(
+    b.claudeMemoryDir({ codeRoot: slugRoot, home: join(tmp, 'h'), env: { CLAUDE_CONFIG_DIR: join(tmp, 'cfg') } }),
+    join(tmp, 'cfg', 'projects', slugOf(slugRoot), 'memory'),
+  );
+  // A linked git worktree shares the main checkout's memory folder.
+  const mainRepo = join(tmp, 'wt', 'main');
+  const linkedTree = join(tmp, 'wt', 'linked');
+  put(mainRepo, '.git/worktrees/linked/commondir', '../..\n');
+  put(linkedTree, '.git', `gitdir: ${join(mainRepo, '.git', 'worktrees', 'linked')}\n`);
+  assert.equal(b.mainCheckoutOf(linkedTree), mainRepo);
+  assert.equal(b.mainCheckoutOf(mainRepo), mainRepo);
+  assert.equal(b.claudeMemoryDir({ codeRoot: linkedTree, home: join(tmp, 'h'), env: {} }), b.claudeMemoryDir({ codeRoot: mainRepo, home: join(tmp, 'h'), env: {} }));
+  // A `.git` file that is not a worktree pointer (a submodule, or unreadable) leaves the checkout as it is.
+  const sub = join(tmp, 'wt', 'sub');
+  put(join(tmp, 'wt'), 'modules/sub/HEAD', 'ref');
+  put(sub, '.git', `gitdir: ${join(tmp, 'wt', 'modules', 'sub')}\n`);
+  assert.equal(b.mainCheckoutOf(sub), sub);
+  const memRoot = join(tmp, 'mem-root');
+  put(memRoot, 'cv.md', 'cv');
+  const memoryDir = join(tmp, 'claude-home', 'projects', '-x', 'memory');
+  put(memoryDir, 'MEMORY.md', '- index');
+  put(memoryDir, 'notes/feedback.md', 'note');
+  put(memoryDir, '.env', 'SECRET=1');
+  put(memoryDir, '.MEMORY.md.swp', 'swap');
+  const memDest = join(tmp, 'backup', 'mem');
+  // Off by default: the memory folder is not read.
+  const noMem = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir });
+  assert.equal(noMem.claudeMemory, undefined);
+  assert.equal(existsSync(join(memDest, b.CLAUDE_MEMORY_FOLDER)), false);
+  const dryMem = b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'backup', 'mem-dry'), memoryDir, includeClaudeMemory: true, dryRun: true });
+  assert.equal(dryMem.claudeMemory, 2);
+  assert.equal(existsSync(join(tmp, 'backup', 'mem-dry')), false);
+  const withMem = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir, includeClaudeMemory: true });
+  assert.deepEqual(withMem.failed, []);
+  assert.equal(withMem.claudeMemory, 2);
+  assert.equal(withMem.found, 3);
+  assert.equal(withMem.copied, 2, 'cv.md was already there');
+  assert.equal(readFileSync(join(memDest, 'claude-memory', 'MEMORY.md'), 'utf8'), '- index');
+  assert.equal(readFileSync(join(memDest, 'claude-memory', 'notes', 'feedback.md'), 'utf8'), 'note');
+  assert.equal(existsSync(join(memDest, 'claude-memory', '.env')), false, 'secrets stay out of memory too');
+  assert.equal(existsSync(join(memDest, 'claude-memory', '.MEMORY.md.swp')), false);
+  // A repeat run copies nothing, and nothing is deleted at the destination.
+  rmSync(join(memoryDir, 'notes', 'feedback.md'));
+  const againMem = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir, includeClaudeMemory: true });
+  assert.equal(againMem.copied, 0);
+  assert.equal(againMem.claudeMemory, 1);
+  assert.equal(existsSync(join(memDest, 'claude-memory', 'notes', 'feedback.md')), true);
+  // No memory folder is a warning, not a failure.
+  const missing = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir: join(tmp, 'no-such', 'memory'), includeClaudeMemory: true });
+  assert.deepEqual(missing.failed, []);
+  assert.equal(missing.claudeMemory, 0);
+  assert.equal(missing.warnings.some((w) => /no Claude memory folder/.test(w)), true);
+  // A folder the caller named must exist: that is a failure, not a warning.
+  const missingChosen = b.runBackup({ dataRoot: memRoot, dest: memDest, memoryDir: join(tmp, 'no-such', 'memory'), memoryDirChosen: true, includeClaudeMemory: true });
+  assert.equal(missingChosen.failed.length, 1);
+  assert.match(missingChosen.failed[0].error, /does not exist/);
+  // A memory path that is a file, not a folder, is a failure and copies nothing.
+  const fileAsMemory = join(tmp, 'memory-is-a-file');
+  writeFileSync(fileAsMemory, 'not a folder');
+  const notFolder = b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'backup', 'mem-file'), memoryDir: fileAsMemory, includeClaudeMemory: true });
+  assert.equal(notFolder.claudeMemory, 0);
+  assert.equal(notFolder.failed.length, 1);
+  assert.match(notFolder.failed[0].error, /not a folder/);
+  // Same size and same mtime is not proof of "unchanged" for memory files: the content is compared too.
+  const sameDir = join(tmp, 'claude-same', 'memory');
+  put(sameDir, 'MEMORY.md', 'AAAA');
+  const sameDest = join(tmp, 'backup', 'mem-same');
+  assert.equal(b.runBackup({ dataRoot: memRoot, dest: sameDest, memoryDir: sameDir, includeClaudeMemory: true }).failed.length, 0);
+  const keepTime = statSync(join(sameDir, 'MEMORY.md'));
+  writeFileSync(join(sameDir, 'MEMORY.md'), 'BBBB');
+  utimesSync(join(sameDir, 'MEMORY.md'), keepTime.atime, keepTime.mtime);
+  const sameRun = b.runBackup({ dataRoot: memRoot, dest: sameDest, memoryDir: sameDir, includeClaudeMemory: true });
+  assert.equal(readFileSync(join(sameDest, 'claude-memory', 'MEMORY.md'), 'utf8'), 'BBBB');
+  assert.equal(sameRun.copied, 1, 'only the edited memory file is copied again');
+  assert.equal(b.runBackup({ dataRoot: memRoot, dest: sameDest, memoryDir: sameDir, includeClaudeMemory: true }).copied, 0, 'confirmed unchanged files are skipped');
+  // A memory folder that cannot be read is a failure with its error code, not "absent".
+  if (process.platform !== 'win32' && process.getuid?.() !== 0) {
+    const locked = join(tmp, 'claude-locked');
+    put(locked, 'memory/MEMORY.md', 'x');
+    chmodSync(locked, 0o000);
+    try {
+      const lockedRun = b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'backup', 'mem-locked'), memoryDir: join(locked, 'memory'), includeClaudeMemory: true });
+      assert.equal(lockedRun.failed.length, 1);
+      assert.match(lockedRun.failed[0].error, /EACCES/);
+      assert.equal(lockedRun.warnings.some((w) => /no Claude memory folder/.test(w)), false);
+    } finally {
+      chmodSync(locked, 0o755);
+    }
+  }
+  // A fork that declares its own claude-memory path keeps it: the memory copy does not write over it.
+  const clashRoot = join(tmp, 'clash-root');
+  put(clashRoot, 'cv.md', 'cv');
+  put(clashRoot, 'config/local-paths.txt', 'claude-memory/\n');
+  put(clashRoot, 'claude-memory/MEMORY.md', 'the fork file');
+  const clashDest = join(tmp, 'backup', 'clash');
+  assert.equal(b.backupPaths(clashRoot).includes('claude-memory'), true);
+  const clash = b.runBackup({ dataRoot: clashRoot, dest: clashDest, memoryDir, includeClaudeMemory: true });
+  assert.equal(clash.claudeMemory, 0);
+  assert.equal(clash.failed.some((f) => /where the Claude memory copy goes/.test(f.error)), true);
+  assert.equal(readFileSync(join(clashDest, 'claude-memory', 'MEMORY.md'), 'utf8'), 'the fork file');
+  // A symlinked memory folder is skipped like any other symlink.
+  if (process.platform !== 'win32') {
+    const linked = join(tmp, 'claude-link', 'memory');
+    mkdirSync(join(linked, '..'), { recursive: true });
+    symlinkSync(memoryDir, linked);
+    const viaLink = b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'backup', 'mem-link'), memoryDir: linked, includeClaudeMemory: true });
+    assert.equal(viaLink.claudeMemory, 0);
+    assert.equal(viaLink.warnings.some((w) => /it is a symlink/.test(w)), true);
+  }
+  // The destination and the memory folder must not hold one another.
+  assert.throws(() => b.runBackup({ dataRoot: memRoot, dest: join(memoryDir, 'backup'), memoryDir, includeClaudeMemory: true }), /overlaps the Claude memory folder/);
+  assert.throws(() => b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'claude-home'), memoryDir, includeClaudeMemory: true }), /overlaps the Claude memory folder/);
+  assert.doesNotThrow(() => b.runBackup({ dataRoot: memRoot, dest: join(tmp, 'claude-home'), memoryDir, dryRun: true }));
+  pass('--include-claude-memory copies the memory folder to claude-memory/ by the same rules');
+
+  // CLI: the flag reads the memory folder of this checkout under the config dir, synced destinations included.
+  const cfg = join(tmp, 'claude-cfg');
+  const cliMemory = b.claudeMemoryDir({ env: { CLAUDE_CONFIG_DIR: cfg } });
+  put(cliMemory, 'MEMORY.md', '- cli');
+  const memEnv = { ...homeEnv, CLAUDE_CONFIG_DIR: cfg };
+  const memSyncedDest = join(fakeHome, 'Dropbox', 'Backups', 'with-memory');
+  const memCli = spawnSync(NODE, ['backup.mjs', '--dest', memSyncedDest, '--include-claude-memory', '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+  assert.equal(memCli.status, 0, memCli.stdout + memCli.stderr);
+  assert.equal(JSON.parse(memCli.stdout).claudeMemory, 1);
+  assert.equal(readFileSync(join(memSyncedDest, 'claude-memory', 'MEMORY.md'), 'utf8'), '- cli');
+  // --claude-memory-dir names the folder and implies the copy; a missing one is exit 1.
+  const namedDir = join(tmp, 'named-memory');
+  put(namedDir, 'MEMORY.md', '- named');
+  const namedDest = join(tmp, 'backup', 'named');
+  const named = spawnSync(NODE, ['backup.mjs', '--dest', namedDest, '--claude-memory-dir', namedDir, '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+  assert.equal(named.status, 0, named.stdout + named.stderr);
+  assert.equal(readFileSync(join(namedDest, 'claude-memory', 'MEMORY.md'), 'utf8'), '- named');
+  const namedMissing = spawnSync(NODE, ['backup.mjs', '--dest', namedDest, '--claude-memory-dir', join(tmp, 'nope'), '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+  assert.equal(namedMissing.status, 1);
+  const namedOverlap = spawnSync(NODE, ['backup.mjs', '--dest', join(namedDir, 'b'), '--claude-memory-dir', namedDir, '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+  assert.equal(namedOverlap.status, 2);
+  // A blank --claude-memory-dir is a usage error, in either spelling, not a silent "no memory".
+  for (const blank of [['--claude-memory-dir', ''], ['--claude-memory-dir', '   '], ['--claude-memory-dir=']]) {
+    const blankRun = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'blank'), ...blank, '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+    assert.equal(blankRun.status, 2, JSON.stringify(blank) + blankRun.stdout + blankRun.stderr);
+    // The `=` spelling is already refused by the shared flag check, which reports on stderr.
+    assert.match(blank.length === 1 ? blankRun.stderr : JSON.parse(blankRun.stdout).error, blank.length === 1 ? /requires a value/ : /needs a folder/);
+  }
+  assert.equal(existsSync(join(tmp, 'backup', 'blank')), false);
+  // Memory files do not hide an empty data root.
+  const emptyWithMem = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'e3'), '--include-claude-memory', '--json'], {
+    cwd: ROOT, env: { ...memEnv, CAREER_OPS_ROOT: empty }, encoding: 'utf8',
+  });
+  assert.equal(emptyWithMem.status, 1);
+  assert.equal(JSON.parse(emptyWithMem.stdout).ok, false);
+  // A destination inside the memory folder is exit 2.
+  const overlap = spawnSync(NODE, ['backup.mjs', '--dest', join(cliMemory, 'b'), '--include-claude-memory', '--json'], { cwd: ROOT, env: memEnv, encoding: 'utf8' });
+  assert.equal(overlap.status, 2);
+  assert.match(JSON.parse(overlap.stdout).error, /overlaps the Claude memory folder/);
+  pass('CLI --include-claude-memory works with a synced destination and keeps the empty-root check');
 } catch (e) {
   fail(`backup.mjs: ${e.message}`);
 } finally {

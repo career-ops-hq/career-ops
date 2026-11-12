@@ -803,6 +803,31 @@ requirement_importance:
   if (classifyRemote('US-only remote') !== 'geo-restricted') {
     failures.push('classifyRemote geo-restricted precedence regressed');
   }
+  // Chinese Block A values (language.output: zh-CN) used to read as 'unknown'.
+  for (const [value, want] of [
+    ['远程为主：“可远程，仅限中国大陆境内”', 'regional remote'],
+    ['混合办公，每周 3 天到岗，新加坡', 'hybrid/onsite'],
+    ['每周 4 天到岗，不支持纯远程', 'hybrid/onsite'],
+    ['全球远程', 'global remote'],
+    ['全遠端', 'regional remote'],
+    // A negated requirement is not an onsite one.
+    ['全球远程，无需到岗', 'global remote'],
+    ['远程，不需要到岗', 'regional remote'],
+    ['無需進辦公室，全球遠端', 'global remote'],
+    // Every global rule runs before either regional fallback.
+    ['全球远程（fully remote）', 'global remote'],
+  ]) {
+    if (classifyRemote(value) !== want) failures.push(`classifyRemote('${value}') → '${classifyRemote(value)}', expected '${want}'`);
+  }
+  for (const [description, want] of [
+    ['工作地点冲突：上海徐汇每周 4 天到岗且不支持纯远程', 'geo-restriction'],
+    ['每周 4 天到岗，不支持纯远程', 'onsite-requirement'],
+    ['要求 8 年以上经验，年限不足', 'seniority-mismatch'],
+    ['薪资上限低于底线', 'other'],
+  ]) {
+    const got = extractBlockerType({ description, severity: 'hard stop' });
+    if (got !== want) failures.push(`extractBlockerType('${description}') → '${got}', expected '${want}'`);
+  }
 
   // Reports-root containment: a legit link stays inside reports/, a crafted
   // traversal link escapes root and must be rejected before parseReport. join()
@@ -1061,11 +1086,15 @@ function parseReport(reportPath) {
   // Extract Block A table (Role Summary) — works with both EN and ES headers
   // Archetype cell may be labeled "Archetype", "Arquetipo", or "Detected archetype" (drift from EN translation).
   const blockARegex = /\|\s*(?:Detected\s+)?(?:Archetype|Arquetipo)\s*\|\s*(.*?)\s*\|/i;
-  const seniorityRegex = /\|\s*(?:Seniority|Nivel|Level)\s*\|\s*(.*?)\s*\|/i;
-  const remoteRegex = /\|\s*(?:Remote|Remoto|Location)\s*\|\s*(.*?)\s*\|/i;
-  const teamRegex = /\|\s*(?:Team|Team size|Equipo)\s*\|\s*(.*?)\s*\|/i;
+  // The Chinese labels are the ones modes/zh/oferta.md and modes/zh-TW/oferta.md
+  // gloss each Block A row with, which is what a `language.output: zh-CN` report
+  // writes in the label cell. Without them every such report read as remote /
+  // seniority / team "unknown".
+  const seniorityRegex = /\|\s*(?:Seniority|Nivel|Level|资深程度|資深程度)\s*\|\s*(.*?)\s*\|/i;
+  const remoteRegex = /\|\s*(?:Remote|Remoto|Location|工作模式)\s*\|\s*(.*?)\s*\|/i;
+  const teamRegex = /\|\s*(?:Team|Team size|Equipo|团队规模|團隊規模)\s*\|\s*(.*?)\s*\|/i;
   const compRegex = /\|\s*(?:Comp|Salary|Salario|Listed salary)\s*\|\s*(.*?)\s*\|/i;
-  const domainRegex = /\|\s*(?:Domain|Dominio|Industry)\s*\|\s*(.*?)\s*\|/i;
+  const domainRegex = /\|\s*(?:Domain|Dominio|Industry|(?:技术)?领域|(?:技術)?領域)\s*\|\s*(.*?)\s*\|/i;
 
   // Fallback: report header field `Archetype: ...` (newer reports use this).
   const headerArchRegex = REPORT_ARCHETYPE_RE;
@@ -1151,12 +1180,21 @@ function classifyRemote(raw) {
   if (/\b(us[- ]?only|canada[- ]?only|residents only|usa only|us residents|canada residents)\b/.test(lower)) return 'geo-restricted';
   if (/\bargentina\s+remote\s+only\b/.test(lower)) return 'geo-restricted';
   if (/\b(hybrid|on-?site|office|columbus|cape town|relocat)\b/.test(lower)) return 'hybrid/onsite';
+  // Chinese values carry no word boundaries, so they are matched as plain
+  // substrings. "不支持远程" is checked here, before the remote bucket below
+  // reads its "远程". A negated requirement ("无需到岗", "不需要坐班") is not
+  // an onsite one.
+  if (/(?<!(?:无|無|不)(?:需|須|须|必|用)要?)(?:混合|现场|現場|到岗|到崗|坐班|进办公室|進辦公室)|不支持(?:纯|純)?(?:远程|遠端|遠程)/.test(lower)) return 'hybrid/onsite';
+  // Every global rule runs before either regional fallback, so a mixed value
+  // such as "全球远程（fully remote）" is not caught by the English "remote".
   // (?<!\w)/(?!\w) not \b: the "70+" signal ends in "+", and a trailing \b
   // never matches after a symbol edge, so "remote in 70+ countries" fell
   // through to the weaker 'regional remote' bucket. Word alternatives behave
   // identically under either boundary, so this only rescues the "70+" case.
   if (/(?<!\w)(global|anywhere|worldwide|no restrict|70\+|work from anywhere)(?!\w)/.test(lower)) return 'global remote';
+  if (/全球(?:远程|遠端|遠程)|不限地[点點區区]/.test(lower)) return 'global remote';
   if (/\b(remote|latam|americas|brazil|fully remote)\b/.test(lower)) return 'regional remote';
+  if (/远程|遠端|遠程|居家办公|居家辦公/.test(lower)) return 'regional remote';
   return 'unknown';
 }
 
@@ -1191,6 +1229,10 @@ function extractBlockerType(gap) {
   if (/\b(javascript|typescript|python|ruby|java|go|rust|node|react|angular|vue|django|flask|rails)\b/.test(desc)) return 'stack-mismatch';
   if (/\b(senior|staff|lead|principal|director|manager|head)\b/.test(desc)) return 'seniority-mismatch';
   if (/\b(hybrid|on-?site|office|relocat)\b/.test(desc)) return 'onsite-requirement';
+  // Chinese hard stops, in the same order as the English checks above.
+  if (/签证|簽證|工作许可|工作許可|地点|地點|地域|国家|國家|迁居|遷居|搬迁|搬遷/.test(desc)) return 'geo-restriction';
+  if (/年限|资深|資深|职级|職級|级别|級別/.test(desc)) return 'seniority-mismatch';
+  if (/混合|到岗|到崗|坐班|现场|現場|不支持(?:纯|純)?(?:远程|遠端|遠程)/.test(desc)) return 'onsite-requirement';
   return 'other';
 }
 
@@ -1228,12 +1270,26 @@ function discardReasonKey(label) {
   return label.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
+// An id followed by a note ("geo_restriction: relocation to Singapore") is
+// still that id. The text before the first colon is matched by the same
+// spelling rule and the note is dropped; a label is cut nowhere else.
+function canonicalDiscardReason(label, vocabulary) {
+  if (!vocabulary) return null;
+  const key = discardReasonKey(label);
+  if (vocabulary.has(key)) return key;
+  const colon = label.search(/[:：]/);
+  if (colon < 1) return null;
+  const head = discardReasonKey(label.slice(0, colon));
+  return vocabulary.has(head) ? head : null;
+}
+
 /**
  * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
  * entries whose linked report explicitly supplies prediction data, including
  * an empty list; a missing or malformed field is unknown, not an empty forecast.
  * All statuses remain eligible: advancing later does not erase a prediction.
- * Only canonical ids from templates/discard-reasons.yml enter the shares. Every
+ * Only canonical ids from templates/discard-reasons.yml enter the shares; an id
+ * followed by a colon and a note counts as that id. Every
  * other label is listed under `predictedDiscardReasonOther` with its own
  * spelling (case and surrounding whitespace normalized) and is never counted
  * in `predictedDiscardReasonStats`.
@@ -1269,8 +1325,8 @@ export function buildPredictedDiscardReasonSignals(enriched, vocabulary = loadDi
     const canonical = new Set();
     const other = new Set();
     for (const reason of reasons) {
-      const key = discardReasonKey(reason);
-      if (vocabulary?.has(key)) canonical.add(key);
+      const key = canonicalDiscardReason(reason, vocabulary);
+      if (key) canonical.add(key);
       else other.add(reason);
     }
     for (const reason of canonical) counts.set(reason, (counts.get(reason) || 0) + 1);

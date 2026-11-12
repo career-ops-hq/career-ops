@@ -196,7 +196,6 @@ const KNOWN_WITHOUT_HELP = new Set([
   //
   // keyword-match.mjs left once --help printed usage and exited 0
   // before it looked for a report.
-  'batch/aggregate-tokens.mjs',
   'plugins/h1b-sponsor/install-h1b-index.mjs',
   'plugins/h1b-sponsor/token.mjs',
 

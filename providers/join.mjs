@@ -129,6 +129,28 @@ function resolveMaxPages(entry) {
   return DEFAULT_MAX_PAGES;
 }
 
+/**
+ * The posting's ATS-native identity: the company slug the board was fetched
+ * at and the job's numeric `id` from the payload, never parsed out of a URL.
+ * The slug is the company's own spelling (join.com answers the careers page
+ * only at it; any other spelling is a redirect, which fetch refuses). The id
+ * is join.com's integer job id, the identifier that stays the same for the
+ * posting's whole life, rendered in its one decimal form, as greenhouse.mjs
+ * does for its numeric ids. Returns undefined for anything else (a non-integer,
+ * unsafe or non-positive id, or a slug that is empty, padded or carries control
+ * characters), so that row falls back to URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'join', board_slug: string, posting_id: string} | undefined}
+ */
+export function joinListingIdentity(slug, id) {
+  if (typeof slug !== 'string' || slug === '' || slug !== slug.trim() || /[\u0000-\u001f\u007f]/u.test(slug)) return undefined;
+  if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) return undefined;
+  return { ats_provider: 'join', board_slug: slug, posting_id: String(id) };
+}
+
 export function extractSlug(url) {
   let parsed;
   try { parsed = new URL(url || ''); } catch { return null; }
@@ -327,10 +349,12 @@ export default {
         const postedAt = toEpochMs(j.createdAt);
         const description = htmlToText(j.descriptionHtml, { cap: Infinity });
         const language = typeof j.language?.iso6391 === 'string' ? j.language.iso6391.trim() : '';
+        const listingIdentity = joinListingIdentity(slug, j.id);
         return {
           title: j.title.trim(),
           url: `https://join.com/companies/${slug}/${j.id}`,
           company: entry.name,
+          ...(listingIdentity ? { listingIdentity } : {}),
           location: formatLocation(j),
           ...(postedAt ? { postedAt } : {}),
           ...(description ? { description } : {}),

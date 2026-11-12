@@ -14991,6 +14991,7 @@ try {
   }
 
   const cjkFilledTemplate = () => cjkTemplateSrc
+    .replace(/\{\{PAPER\}\}/g, 'letterpaper')
     .replace(/\{\{NAME\}\}/g, 'Test Candidate')
     .replace(/\{\{CONTACT_LINE\}\}/g, 'Toronto, ON')
     .replace(/\{\{EMAIL_URL\}\}/g, 'test@example.com')

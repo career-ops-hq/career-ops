@@ -472,6 +472,7 @@ acquire_state_lock() {
 
   local waited=0
   local owner_file=""
+  local create_misses=0
   local max_waits=$((STATE_LOCK_TIMEOUT_SECONDS * 10))
 
   while true; do
@@ -504,6 +505,13 @@ acquire_state_lock() {
     fi
 
     if [[ ! -d "$STATE_LOCK_DIR" ]]; then
+      # mkdir can fail because the lock exists and the holder can release it
+      # before this check (a wide window on Windows/Git Bash): retry mkdir a few
+      # times before treating the directory as impossible to create.
+      if (( create_misses < 3 )); then
+        create_misses=$((create_misses + 1))
+        continue
+      fi
       if (( PARALLEL <= 1 )); then
         echo "WARN: State lock creation failed. Falling back to lock-free operation (single-worker mode)." >&2
         STATE_LOCK_DISABLED=1
@@ -513,6 +521,7 @@ acquire_state_lock() {
       echo "ERROR: Failed to create state lock directory $STATE_LOCK_DIR" >&2
       return 1
     fi
+    create_misses=0
 
     local lock_file="" candidate
     # Accept a dead lock left by the older fixed-name protocol as well.
