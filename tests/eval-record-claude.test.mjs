@@ -160,7 +160,18 @@ try {
     Object.keys(claudeEnv).join(','));
   check(ALLOWED_BASH.length > 0 && ALLOWED_BASH.every((c) => /^node [\w.-]+\.mjs( check)?$/.test(c)),
     'the child may only run named repo scripts, never a general shell', ALLOWED_BASH.join(', '));
+  // The read-only checks the oferta flow calls are allowed, company-history
+  // with its --company argument but not its path overrides.
+  check(['node cv-sync-check.mjs', 'node company-history.mjs'].every((c) => ALLOWED_BASH.includes(c))
+    && ALLOWED_BASH.every((c) => existsSync(join(ROOT, c.split(' ')[1]))),
+  'ALLOWED_BASH carries cv-sync-check and company-history, and every entry names a script in the repo');
+  const modeText = readFileSync(join(ROOT, 'modes', '_shared.md'), 'utf8') + readFileSync(join(ROOT, 'modes', 'oferta.md'), 'utf8');
+  check(modeText.includes('`node cv-sync-check.mjs`') && modeText.includes('node company-history.mjs --company <company>'),
+    'the oferta flow still runs both scripts the way the allowlist expects');
   const perm = permissionArgs();
+  check(perm.includes('Bash(node company-history.mjs:*)') && perm.includes('Bash(node cv-sync-check.mjs:*)')
+    && perm.includes('Bash(node company-history.mjs *--scan-history*)') && perm.includes('Bash(node company-history.mjs *--followups*)'),
+  'company-history is allowed by prefix (so --company "<name>" passes) and its --scan-history/--followups overrides are denied');
   check(!perm.some((a) => /^(Read|Write|Edit|Glob|Grep)$/.test(a)),
     'no bare file-tool grant, so paths outside the sandbox stay unapproved', perm.join(' '));
   check(perm.includes('Edit(**/*.mjs)') && perm.includes('Edit(**/node_modules/**)') && perm.includes('Edit(**/.career-ops-data)')

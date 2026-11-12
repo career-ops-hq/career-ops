@@ -376,6 +376,12 @@ export const ALLOWED_BASH = [
   'node update-system.mjs check',
   'node verify-pipeline.mjs',
   'node check-jd-archive.mjs',
+  // Read-only checks the oferta flow runs: modes/_shared.md (first evaluation
+  // of a session) and modes/oferta.md § Prior-contact FYI
+  // (`node company-history.mjs --company <company>`). The rule is a prefix, so
+  // company-history's arguments pass; DENY_BASH refuses its path overrides.
+  'node cv-sync-check.mjs',
+  'node company-history.mjs',
 ];
 
 /**
@@ -396,6 +402,8 @@ export const DENY_BASH = [
   'node check-jd-archive.mjs *--tracker*',
   'node check-jd-archive.mjs *--reports-dir*',
   'node check-jd-archive.mjs *--jds-dir*',
+  'node company-history.mjs *--scan-history*',
+  'node company-history.mjs *--followups*',
 ];
 
 /**
