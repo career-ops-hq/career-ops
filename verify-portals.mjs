@@ -1275,7 +1275,8 @@ async function main() {
   if (hasFlag(args, '--unmined')) {
     const n = await runUnmined(filePath, { fetchJson });
     // --strict makes this a CI gate: an unmined board is a silent coverage hole.
-    if (strict && n > 0) process.exit(1);
+    // process.exitCode, not process.exit(1), for the reason given at the end of main().
+    if (strict && n > 0) process.exitCode = 1;
     return;
   }
 
@@ -1325,7 +1326,15 @@ async function main() {
 
   if (strict && missing.length > 0) {
     console.log('🔴 Unresolved slugs found (--strict).');
-    process.exit(1);
+    // process.exitCode, not process.exit(1): main() returns, and the process
+    // exits 1 once the event loop drains. On Windows, Node 24 aborts when
+    // process.exit() runs right after a request (nodejs/node#56645): it prints a
+    // libuv assertion and exits with a crash code instead of 1. Measured
+    // 2026-11-12 on Node 24.14.1: --strict on a Workday board that does not
+    // exist, and --unmined --strict on a name with a Greenhouse board, aborted 4
+    // times out of 4. The exits that run before any request (a bad flag or
+    // --help, an empty --file, a name runAdd() cannot slug) keep process.exit().
+    process.exitCode = 1;
   }
 }
 
@@ -1334,6 +1343,6 @@ async function main() {
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`verify-portals failed: ${err.message}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the end of main()
   });
 }
