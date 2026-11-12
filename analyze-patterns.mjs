@@ -810,6 +810,12 @@ requirement_importance:
     ['每周 4 天到岗，不支持纯远程', 'hybrid/onsite'],
     ['全球远程', 'global remote'],
     ['全遠端', 'regional remote'],
+    // A negated requirement is not an onsite one.
+    ['全球远程，无需到岗', 'global remote'],
+    ['远程，不需要到岗', 'regional remote'],
+    ['無需進辦公室，全球遠端', 'global remote'],
+    // Every global rule runs before either regional fallback.
+    ['全球远程（fully remote）', 'global remote'],
   ]) {
     if (classifyRemote(value) !== want) failures.push(`classifyRemote('${value}') → '${classifyRemote(value)}', expected '${want}'`);
   }
@@ -1176,15 +1182,18 @@ function classifyRemote(raw) {
   if (/\b(hybrid|on-?site|office|columbus|cape town|relocat)\b/.test(lower)) return 'hybrid/onsite';
   // Chinese values carry no word boundaries, so they are matched as plain
   // substrings. "不支持远程" is checked here, before the remote bucket below
-  // reads its "远程".
-  if (/混合|现场|現場|到岗|到崗|坐班|进办公室|進辦公室|不支持(?:纯|純)?(?:远程|遠端|遠程)/.test(lower)) return 'hybrid/onsite';
+  // reads its "远程". A negated requirement ("无需到岗", "不需要坐班") is not
+  // an onsite one.
+  if (/(?<!(?:无|無|不)(?:需|須|须|必|用)要?)(?:混合|现场|現場|到岗|到崗|坐班|进办公室|進辦公室)|不支持(?:纯|純)?(?:远程|遠端|遠程)/.test(lower)) return 'hybrid/onsite';
+  // Every global rule runs before either regional fallback, so a mixed value
+  // such as "全球远程（fully remote）" is not caught by the English "remote".
   // (?<!\w)/(?!\w) not \b: the "70+" signal ends in "+", and a trailing \b
   // never matches after a symbol edge, so "remote in 70+ countries" fell
   // through to the weaker 'regional remote' bucket. Word alternatives behave
   // identically under either boundary, so this only rescues the "70+" case.
   if (/(?<!\w)(global|anywhere|worldwide|no restrict|70\+|work from anywhere)(?!\w)/.test(lower)) return 'global remote';
-  if (/\b(remote|latam|americas|brazil|fully remote)\b/.test(lower)) return 'regional remote';
   if (/全球(?:远程|遠端|遠程)|不限地[点點區区]/.test(lower)) return 'global remote';
+  if (/\b(remote|latam|americas|brazil|fully remote)\b/.test(lower)) return 'regional remote';
   if (/远程|遠端|遠程|居家办公|居家辦公/.test(lower)) return 'regional remote';
   return 'unknown';
 }

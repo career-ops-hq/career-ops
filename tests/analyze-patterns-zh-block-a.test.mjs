@@ -20,6 +20,10 @@ const REPORTS = [
   { num: 2, company: '流明港', label: '工作模式', remote: '每周 4 天到岗（徐汇区），不支持纯远程', team: '团队规模', want: 'hybrid/onsite' },
   { num: 3, company: '北風帳本', label: '工作模式', remote: '混合，每週 3 天進辦公室', team: '團隊規模', want: 'hybrid/onsite' },
   { num: 4, company: 'Acme', label: 'Remote', remote: 'Hybrid, 3 days/week in office', team: 'Team size', want: 'hybrid/onsite' },
+  // A negated requirement is not an onsite one, and the Chinese global rule
+  // runs before the English "remote" fallback.
+  { num: 5, company: '远帆数据', label: '工作模式', remote: '全球远程，无需到岗', team: '团队规模', want: 'global remote' },
+  { num: 6, company: '星河云', label: '工作模式', remote: '全球远程（fully remote）', team: '团队规模', want: 'global remote' },
 ];
 
 const work = mkdtempSync(join(tmpdir(), 'co-ap-zh-'));
