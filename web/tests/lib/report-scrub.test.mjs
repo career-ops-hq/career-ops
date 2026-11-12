@@ -66,6 +66,11 @@ test("scrub: a JSON escape ends a POSIX account name", () => {
   assert.equal(scrub('{"path":"/home/jdoe\\"}'), '{"path":"~\\"}');
 });
 
+test("scrub: a JSON \\u escape inside a POSIX account name is part of it", () => {
+  assert.equal(scrub('{"path":"/home/\\u006aane/cv.md"}'), '{"path":"~/cv.md"}');
+  assert.equal(scrub('{"path":"/home/j\\u0061ne\\nEACCES"}'), '{"path":"~\\nEACCES"}');
+});
+
 test("scrub: a Windows name with spaces is removed whole across mixed separators", () => {
   assert.equal(scrub("C:\\Users\\Jane Doe/cv.md"), "~/cv.md");
   assert.equal(scrub(`C:/${U}/Jane Doe\\cv.md`), "~\\cv.md");

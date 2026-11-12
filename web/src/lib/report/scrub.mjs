@@ -23,8 +23,9 @@ const WINDOWS_HOME = new RegExp(
 );
 // POSIX account names cannot contain spaces, and `\` is an ordinary character,
 // except where it starts a JSON escape: in a serialized log line
-// ("/home/jdoe\nEACCES") the name ends at the `\n`.
-const POSIX_HOME = /\/(?:Users|home)\/(?:[^/\s"'\\]|\\(?![nrtbfu"\\/]))+/g;
+// ("/home/jdoe\nEACCES") the name ends at the `\n`. A `\uXXXX` escape is a
+// character of the name ("/home/\u006aane" is "/home/jane").
+const POSIX_HOME = /\/(?:Users|home)\/(?:[^/\s"'\\]|\\u[0-9A-Fa-f]{4}|\\(?![nrtbfu"\\/]))+/g;
 
 // Tokens recognisable by their prefix alone, with no `key=` in front of them.
 const PREFIXED_TOKEN = new RegExp(
