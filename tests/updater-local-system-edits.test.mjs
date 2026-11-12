@@ -926,3 +926,99 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#24 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
   }
 }
+
+/**
+ * Upstream history for cases 25 and 26: a side branch writes v1 from the
+ * shared base, the main line writes v2, the install takes the v2 update, and
+ * upstream then merges the side branch with a conflict resolved to v3. The
+ * merge leaves v1 and v2 on two lines of history, so their order in a log
+ * listing says nothing about which one upstream published later.
+ * `sideFirst` puts the side branch as the merge's first parent.
+ */
+function sideBranchMerge(repo, { sideFirst }) {
+  const file = join(repo.dir, 'modes', 'pdf.md');
+  repo.g('checkout', '-q', '-b', 'side', 'upstream');
+  writeFileSync(file, 'shipped pdf v1\n');
+  repo.g('commit', '-qam', 'side: pdf v1');
+  repo.g('checkout', '-q', 'upstream');
+  writeFileSync(file, 'shipped pdf v2\n');
+  repo.g('commit', '-qam', 'upstream: pdf v2');
+  repo.g('checkout', '-q', 'main');
+  replayUpdate(repo, '2');
+  repo.g('checkout', '-q', sideFirst ? 'side' : 'upstream');
+  try {
+    repo.g('merge', '-q', '--no-ff', '-m', 'merge', sideFirst ? 'upstream' : 'side');
+  } catch {
+    // The conflict is the point: the merge resolves it to content of its own.
+  }
+  writeFileSync(file, 'shipped pdf v3\n');
+  repo.g('add', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'merge side, pdf v3');
+  if (sideFirst) repo.g('branch', '-f', 'upstream', 'side');
+  repo.g('checkout', '-q', 'main');
+}
+
+// ── 25. A revert to a side branch's OLDER version stays reported ──
+//    The install reverts to v1, which upstream published on a branch that
+//    never contained the delivered v2. Upstream did not publish v1 after v2,
+//    so it is the user's choice and stays reported, as in case 17, whichever
+//    side the merge took as its first parent (#6891 review).
+for (const sideFirst of [false, true]) {
+  const repo = makeRepo();
+  sideBranchMerge(repo, { sideFirst });
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v1\n');
+  repo.g('commit', '-qam', 'go back to the side branch pdf.md');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  const label = sideFirst ? 'side branch first' : 'main line first';
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass(`a revert to an older side-branch version is still reported (${label})`);
+  } else {
+    fail(`#25 (${label}) expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 26. ...while the version the merge itself created is newer ──
+//    v3 exists only as the merge's resolution, which descends from the commit
+//    that published v2. Taking it ahead of a release is case 23 again.
+for (const sideFirst of [false, true]) {
+  const repo = makeRepo();
+  sideBranchMerge(repo, { sideFirst });
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'take the merged pdf.md ahead of the release');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  const label = sideFirst ? 'side branch first' : 'main line first';
+  if (atRisk.length === 0) {
+    pass(`a newer version created by an upstream merge is not reported (${label})`);
+  } else {
+    fail(`#26 (${label}) expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 27. A newer upstream version with a local mode change stays reported ──
+//    The content matches upstream's v3 but the install made the file
+//    executable, which upstream never shipped. Clearing it would let the next
+//    update reset the mode without a backup (#6891 review). The mode is set in
+//    the index with core.fileMode off, so the worktree's own mode bits never
+//    enter the case and it runs the same on Windows.
+{
+  const repo = makeRepo();
+  repo.g('config', 'core.fileMode', 'false');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  repo.g('update-index', '--chmod=+x', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'take upstream pdf.md and make it executable');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('a newer upstream version with a local mode change is still reported');
+  } else {
+    fail(`#27 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}

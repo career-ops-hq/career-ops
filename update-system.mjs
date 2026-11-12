@@ -2549,56 +2549,81 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
     const deliveredDiffers = [...changedLocally].filter((file) => deliveredBy.has(file));
     if (deliveredDiffers.length > 0) {
       try {
-        // Blob each update commit installed, per file.
-        const deliveredBlob = new Map();
+        // Mode and blob each update commit installed, per file. A version is
+        // matched on both, so upstream's content with a mode upstream never
+        // shipped (a local chmod) stays the user's (#6891 review).
+        const deliveredVersion = new Map();
         for (const [commit, files] of byCommit) {
           const pending = files.filter((file) => changedLocally.has(file));
           for (const batch of argvBatches(pending)) {
             for (const line of runGit('ls-tree', '-r', '--full-tree', commit, '--', ...batch).split('\n')) {
               const tab = line.indexOf('\t');
               if (tab < 0) continue;
-              deliveredBlob.set(line.slice(tab + 1), line.slice(0, tab).split(' ')[2]);
+              const [mode, , sha] = line.slice(0, tab).split(' ');
+              deliveredVersion.set(line.slice(tab + 1), `${mode} ${sha}`);
             }
           }
         }
-        // Worktree blob per file (the new side of `git diff --raw`). A zero sha
-        // means git did not hash the worktree file; it stays reported.
-        const worktreeBlob = new Map();
+        // `mode sha` of the new side of a `--raw` line, or null for a zero sha:
+        // a deletion, or a worktree file git did not hash, which stays reported.
+        const rawVersion = (line) => {
+          const parts = line.slice(0, line.indexOf('\t')).split(' ');
+          return parts[3] && !/^0+$/.test(parts[3]) ? `${parts[1]} ${parts[3]}` : null;
+        };
+        const worktreeVersion = new Map();
         for (const batch of argvBatches(deliveredDiffers)) {
           for (const line of runGit('diff', '--raw', '--no-abbrev', '--no-renames', upstreamRef, '--', ...batch).split('\n')) {
             if (!line.startsWith(':')) continue;
-            const tab = line.indexOf('\t');
-            const sha = line.slice(0, tab).split(' ')[3];
-            if (sha && !/^0+$/.test(sha)) worktreeBlob.set(line.slice(tab + 1), sha);
+            const version = rawVersion(line);
+            if (version) worktreeVersion.set(line.slice(line.indexOf('\t') + 1), version);
           }
         }
-        // Upstream history newest first: the blobs seen for a path before the
-        // most recent publication of its delivered blob are the newer ones.
+        // The commits that published each version of each path upstream. A
+        // merge is diffed against its first parent, so a version that exists
+        // only as a merge's resolution is attributed to that merge. Git older
+        // than 2.31 has no --diff-merges, and the throw keeps the candidates.
         const publishedRange = mergeBase ? `${mergeBase}..${upstreamRef}` : upstreamRef;
-        const newer = new Map();
-        const reachedDelivered = new Set();
+        const publishedBy = new Map();
         for (const batch of argvBatches(deliveredDiffers)) {
-          const log = runGit('log', '--topo-order', '--raw', '--no-abbrev', '--no-renames', '--format=%x1e%H', publishedRange, '--', ...batch);
+          const log = runGit('log', '--diff-merges=first-parent', '--raw', '--no-abbrev', '--no-renames', '--format=%x1e%H', publishedRange, '--', ...batch);
+          let commit = null;
           for (const line of log.split('\n')) {
-            if (!line.startsWith(':')) continue;
-            const tab = line.indexOf('\t');
-            const path = line.slice(tab + 1);
-            const sha = line.slice(0, tab).split(' ')[3];
-            if (!sha || /^0+$/.test(sha) || reachedDelivered.has(path)) continue;
-            if (sha === deliveredBlob.get(path)) {
-              reachedDelivered.add(path);
+            if (line.startsWith('\x1e')) {
+              commit = line.slice(1).trim();
               continue;
             }
-            if (!newer.has(path)) newer.set(path, new Set());
-            newer.get(path).add(sha);
+            if (!commit || !line.startsWith(':')) continue;
+            const version = rawVersion(line);
+            if (!version) continue;
+            const path = line.slice(line.indexOf('\t') + 1);
+            if (!publishedBy.has(path)) publishedBy.set(path, new Map());
+            const byVersion = publishedBy.get(path);
+            if (!byVersion.has(version)) byVersion.set(version, new Set());
+            byVersion.get(version).add(commit);
           }
         }
+        const isAncestor = (older, newer) => {
+          try {
+            runGit('merge-base', '--is-ancestor', older, newer);
+            return true;
+          } catch {
+            return false;
+          }
+        };
         for (const file of deliveredDiffers) {
-          // Only when the delivered blob was found: without it, newer and older
-          // cannot be told apart, and over-reporting is the safe side.
-          if (!reachedDelivered.has(file)) continue;
-          const sha = worktreeBlob.get(file);
-          if (sha && newer.get(file)?.has(sha)) changedLocally.delete(file);
+          // Both versions must be found upstream: without the delivered one,
+          // newer and older cannot be told apart, and over-reporting is the
+          // safe side.
+          const versions = publishedBy.get(file);
+          const delivered = versions?.get(deliveredVersion.get(file));
+          const taken = versions?.get(worktreeVersion.get(file));
+          if (!delivered || !taken) continue;
+          // Newer means published on history that already held the delivered
+          // version: a commit that published it is an ancestor of one that
+          // published the worktree's. Position in a log listing cannot say
+          // this once a merge joins two lines of history (#6891 review).
+          const newer = [...taken].some((t) => [...delivered].some((d) => d !== t && isAncestor(d, t)));
+          if (newer) changedLocally.delete(file);
         }
       } catch {
         // Unreadable history keeps the candidates: over-report.
