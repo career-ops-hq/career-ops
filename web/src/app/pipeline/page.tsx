@@ -25,17 +25,17 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   // Rows are keyed the way /api/cv-pdf?application= resolves them: through the
   // report cell, so a row with no resolvable report never gets a dead link.
   // Skipped on the inbox tab, which has no table.
-  // One manifest read for the whole table, not one per row (see
-  // pdfReadyReportNumbers: per-row lookups took 10-20 s on ~1,000 rows).
-  const pdfReady = onInbox ? null : await pdfReadyReportNumbers();
-  const cvRows = pdfReady
-    ? applications
-        .filter((a) => {
-          const report = reportNumberFromCell(a.report);
-          return report !== null && report > 0 && pdfReady.has(report);
-        })
-        .map((a) => a.n)
-    : [];
+  // One manifest read for the whole table, not one per row (#6974: per-row
+  // lookups took 8 s on a 5,000-row tracker).
+  const cvRows: string[] = [];
+  if (!onInbox) {
+    const rowReports = applications.flatMap((a) => {
+      const report = reportNumberFromCell(a.report);
+      return report !== null && report > 0 ? [{ n: a.n, report }] : [];
+    });
+    const ready = await pdfReadyReportNumbers(new Set(rowReports.map((r) => r.report)));
+    for (const r of rowReports) if (ready.has(r.report)) cvRows.push(r.n);
+  }
   return (
     <Suspense>
       <PipelineView
