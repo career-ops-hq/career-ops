@@ -54,7 +54,7 @@ func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 		40,
 	)
 	pm.sortMode = sortCompany
-	pm.activeTab = 0
+	pm.activeTab = tabIndexForFilter(t, filterAll)
 	pm.viewMode = "flat"
 	pm.applyFilterAndSort()
 	pm.cursor = 1

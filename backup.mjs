@@ -36,8 +36,8 @@
  */
 
 import {
-  accessSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync,
-  renameSync, rmSync, statSync, utimesSync, writeFileSync,
+  accessSync, closeSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, openSync,
+  readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
@@ -460,21 +460,33 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
   return files;
 }
 
-// Equal size and near-equal mtime can still hide an edit that kept both, so a
-// file the caller wants verified is also compared byte for byte.
-const sameContent = (a, b) => {
+function sameContents(srcPath, destPath) {
+  const src = openSync(srcPath, 'r');
   try {
-    return readFileSync(a).equals(readFileSync(b));
-  } catch {
-    return false;
+    const dest = openSync(destPath, 'r');
+    try {
+      const left = Buffer.allocUnsafe(64 * 1024);
+      const right = Buffer.allocUnsafe(left.length);
+      while (true) {
+        const size = readSync(src, left, 0, left.length, null);
+        if (readSync(dest, right, 0, right.length, null) !== size) return false;
+        if (size === 0) return true;
+        if (!left.subarray(0, size).equals(right.subarray(0, size))) return false;
+      }
+    } finally {
+      closeSync(dest);
+    }
+  } finally {
+    closeSync(src);
   }
-};
+}
 
-const unchanged = (src, destPath) => {
+const unchanged = (src, srcPath, destPath) => {
   try {
-    const d = statSync(destPath);
-    // Drive and network volumes round mtimes, so allow two seconds of slack.
-    return d.size === src.size && Math.abs(d.mtimeMs - src.mtimeMs) < 2000;
+    const d = lstatSync(destPath);
+    // Drive and network volumes round mtimes, so compare contents when metadata matches.
+    return d.isFile() && d.size === src.size && Math.abs(d.mtimeMs - src.mtimeMs) < 2000
+      && sameContents(srcPath, destPath);
   } catch {
     return false;
   }
@@ -507,20 +519,21 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   if (includeClaudeMemory) assertMemoryApartFromDestination(dest, memoryDir);
   if (!dryRun) mkdirSync(dest, { recursive: true });
   // Copy one discovered file from `srcRoot` to `destRel` under the destination.
-  const copyFile = (srcRoot, file, destRel, { verify = false } = {}) => {
+  const copyFile = (srcRoot, file, destRel) => {
     result.found++;
+    const source = join(srcRoot, file.rel);
     const target = join(dest, destRel);
     // A symlinked folder inside the destination could point back at live files.
     if (hasSymlinkedParent(dest, destRel.split(sep).join('/'))) {
       fail(destRel, new Error('a folder in the backup destination is a symlink; not copying through it'));
       return;
     }
-    if (unchanged(file, target) && (!verify || sameContent(join(srcRoot, file.rel), target))) { result.unchanged++; return; }
+    if (unchanged(file, source, target)) { result.unchanged++; return; }
     if (dryRun) { result.copied++; result.bytes += file.size; return; }
     const part = `${target}.part`;
     try {
       mkdirSync(dirname(target), { recursive: true });
-      copyFileSync(join(srcRoot, file.rel), part);
+      copyFileSync(source, part);
       utimesSync(part, new Date(), new Date(file.mtimeMs));
       renameSync(part, target);
       result.copied++;
@@ -600,7 +613,7 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     for (const file of files) {
       result.claudeMemory++;
-      copyFile(memoryDir, file, join(CLAUDE_MEMORY_FOLDER, file.rel), { verify: true });
+      copyFile(memoryDir, file, join(CLAUDE_MEMORY_FOLDER, file.rel));
     }
   }
   if (skippedAgentFiles > 0) {
