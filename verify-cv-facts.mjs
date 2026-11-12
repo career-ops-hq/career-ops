@@ -1379,7 +1379,8 @@ function spellZhDates(value) {
     .replace(/((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月份?/g, '$2/$1')
     .replace(/((?:19|20)\d{2})\s*年/g, '$1')
     .replace(/(?<=\d)\s*(?:至|到|~|～)\s*(?=\d)/g, ' - ')
-    .replace(/(?<=\d)\s*(?=(?:至今|迄今|现在|現在|目前)$)/, ' - ');
+    // "2021年3月至今", "2021年3月到现在", "2021年3月至目前"
+    .replace(/(?<=\d)\s*(?:至|到|~|～)?\s*(?=(?:至今|迄今|现在|現在|目前)$)/, ' - ');
 }
 
 function dateEndpoints(value) {
@@ -2749,11 +2750,13 @@ function compactMagnitude(raw) {
 // rewrite moves that word freely ("调用300万次" / "调用量达300万") and the
 // figure is what gets inflated.
 //
-// Not read: a calendar year ("2021年"), an ordinal ("第3名"), a range
-// ("3-5年"), and a number glued to a Latin name ("Python3", "GPT-4").
+// Not read: a calendar year ("2021年"), an ordinal ("第3名"), a range in any
+// spelling ("3-5年", "3至5年", "三到五年": neither end is a claim, so two
+// spellings of one range cannot disagree), and a number glued to a Latin
+// name ("Python3", "GPT-4").
 const ZH_MEASURES = '年(?![级代度])|个月|人(?![民工])|名|位(?!数)|个|次(?![方元])|倍|家|项(?!目)';
 const ZH_COUNT_RE = new RegExp(
-  String.raw`(?<![A-Za-z0-9.,_/#+\-第])(\d[\d,]*(?:\.\d+)?)\s*[+多余]?\s*(?:(百万|千万|万|亿)\s*[+多余]?\s*)?(${ZH_MEASURES})?`,
+  String.raw`(?<![A-Za-z0-9.,_/#+\-–—－~～第])(?<![\d一二两三四五六七八九十]\s?[至到]\s?)(\d[\d,]*(?:\.\d+)?)\s*[+多余]?\s*(?:(百万|千万|万|亿)\s*[+多余]?\s*)?(${ZH_MEASURES})?`,
   'gu',
 );
 // "五年", "十余人", "二十名", "两倍": a spelled number before the measure words

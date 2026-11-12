@@ -106,11 +106,11 @@ try {
 
   ok('Chinese date spellings compare by value', () => {
     // Same dates, written another way: still supported.
-    for (const period of ['2021年3月至今', '2021年03月 - 现在', '2021年3月 — 至今', '2021年 - 至今', '2021年至今']) {
+    for (const period of ['2021年3月至今', '2021年03月 - 现在', '2021年3月 — 至今', '2021年 - 至今', '2021年至今', '2021年3月到现在', '2021年3月至目前', '2021年3月～至今']) {
       assert.strictEqual(check(zhCv({ period }), zhSrc).verdict, 'pass', period);
     }
     // A different month, a different year, or an end date the source does not have.
-    for (const period of ['2021年5月 - 至今', '2020年至今', '2021年3月 - 2023年6月', '2021年3月至2023年6月']) {
+    for (const period of ['2021年5月 - 至今', '2020年至今', '2019年3月到现在', '2021年3月 - 2023年6月', '2021年3月至2023年6月']) {
       assert.deepStrictEqual(facts(check(zhCv({ period }), zhSrc)), [`employment-dates: 示例科技: ${period}`], period);
     }
   });
@@ -144,6 +144,7 @@ try {
     assert.deepStrictEqual(counts('服务20家企业客户，上线6个月'), ['20家', '6个月']);
     assert.deepStrictEqual(counts('完成3次架构升级，获得5项专利，负责4个模块'), ['3次', '4个', '5项']);
     assert.deepStrictEqual(counts('10+年经验，团队50余人'), ['10年', '50人']);
+    assert.deepStrictEqual(counts('经验达到5年，用户增长至3倍'), ['3倍', '5年']);
   });
 
   ok('万 and 亿 are magnitudes, and the figure is keyed without its measure word', () => {
@@ -167,6 +168,7 @@ try {
       '大学3年级',
       '获得第3名',                 // an ordinal
       '3-5年经验',                 // a range
+      '3至5年经验', '3到5年经验', '3~5年经验', '3–5年经验', '三至五年经验', '三到五年经验',
       '使用 Python3 与 GPT-4 开发', // digits inside a name
       '负责二次开发',              // 二次 is a word, not two times
       '一名工程师，一年后转正',    // 一 is left alone, like "one"
