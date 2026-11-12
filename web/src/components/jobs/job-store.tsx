@@ -19,6 +19,7 @@ export type Job = {
   page?: string; // route the job was launched from / refers to
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
+  format?: string | null;
   evaluationSections?: string[];
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
   status: "running" | "done" | "error" | "gated";
@@ -32,7 +33,7 @@ export type Job = {
   endedAt?: number;
 };
 
-type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; brief?: Record<string, string>; evaluationSections?: string[] };
+type StartOpts = { title: string; subtitle?: string; kind: string; input: string; page?: string; batchId?: string; brief?: Record<string, string>; evaluationSections?: string[]; format?: string | null };
 
 type Ctx = {
   jobs: Job[];
@@ -138,6 +139,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         page: opts.page,
         input: opts.input,
         kind: opts.kind,
+        format: opts.format,
         evaluationSections: opts.evaluationSections ? [...opts.evaluationSections] : undefined,
         batchId: opts.batchId,
         status: "running",
@@ -216,7 +218,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           const res = await fetch("/api/run", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections }),
+            body: JSON.stringify({ kind: opts.kind, input: opts.input, cliId, brief: opts.brief, evaluationSections: opts.evaluationSections, format: opts.format }),
           });
           if (!res.ok || !res.body) {
             const e = await res.json().catch(() => ({}));
