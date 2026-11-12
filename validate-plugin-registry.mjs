@@ -198,7 +198,19 @@ export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestR
   return out;
 }
 
+const USAGE = `Usage: node validate-plugin-registry.mjs [--deep] [--check-stale]
+
+Checks the plugin registry (plugins-registry/<id>.json) for shape and uniqueness,
+without network access. Exits 1 when it finds a problem.
+  --deep         also clone each entry at its pinned SHA (network) and audit it
+  --check-stale  also compare each pin with the plugin's latest release (network)`;
+
 if (isMainModule(import.meta.url)) {
+  // Before any check: --help used to run the full validation and print its verdict.
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
+  }
   const root = process.cwd();
   const deep = process.argv.includes('--deep');
   const problems = validateRegistry(root);

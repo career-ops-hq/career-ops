@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        The [employer registry](https://github.com/career-ops-hq/career-ops/tree/main/employers) is a community-maintained list of employer job boards that the local scanner can read: one pointer per board (company, ATS, board URL), with no job postings and no personal data.
+        The [employer registry](https://github.com/career-ops-hq/career-ops/tree/main/employers) is a community-maintained list of employer job boards that the local scanner can read: one pointer per board (company, ATS, board URL), with no job postings. The rows hold no personal data; the contribution manifests do publish the GitHub username of whoever contributed a board and the name of whoever granted its license.
 
         If your company's board is listed and you want it removed, fill in this form. Within 7 days a maintainer marks the row `retired: true` with `retired_reason: owner_request`. The row stays in the file, retired, so the same board is not added again by a later contribution, and tools that read the registry stop reading it.
 

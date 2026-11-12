@@ -470,7 +470,7 @@ test('in GitHub Actions, the garbage fixture fails with one ::error per finding 
     assert.equal(errorCommands.length, EXPECTED.length, r.stdout);
     assert.equal(warningCommands.length, 1, r.stdout);
     assert.ok(errorCommands.includes('::error file=employers/boards/greenhouse/a.ndjson,line=2::duplicate careers_url, already at employers/boards/greenhouse/a.ndjson:1'), r.stdout);
-    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards'), r.stdout);
+    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox'), r.stdout);
     assert.match(warningCommands[0], /^::warning file=employers\/boards\/lever\/e\.ndjson,line=2::website "euco\.example" is also on /);
     // The plain per-finding lines are not repeated; the closing count stays.
     assert.ok(!r.stderr.split('\n').some((l) => l.startsWith('employers/') || l.startsWith('warning: ')), r.stderr);

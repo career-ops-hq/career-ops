@@ -606,6 +606,8 @@ Diterima kerja berkat career-ops? [Bagikan cerita Anda!](https://github.com/care
 
 Kode program dilisensikan di bawah [MIT](LICENSE). Nama dan merek "career-ops" diatur dalam [Kebijakan Merek Dagang](TRADEMARK.md), yang bersifat terbuka untuk penggunaan komunitas namun dilindungi untuk penamaan produk komersial dan *endorsement*.
 
+Kode berlisensi MIT; data di [`employers/`](employers/) berlisensi [CC BY 4.0](employers/LICENSE).
+
 ## Riwayat Bintang (Star History)
 
 <p align="center">

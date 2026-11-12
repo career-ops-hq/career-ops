@@ -487,12 +487,34 @@ function normalizeKeywordList(value) {
 // V8 in Node 26 returns false for /[\p{L}]$/u against an astral letter at
 // end-of-string (#4478), so "𐐀" lost its trailing boundary and matched "𐐀x".
 const LOCATION_WORD_CP = /^[\p{L}\p{M}\p{N}]$/u;
+// Chinese and Japanese put no space or punctuation between words, so a letter
+// next to a Han or kana keyword does not mean the keyword sits inside a longer
+// word: "北京市海淀区" is 北京 + 市 + 海淀区, and "中国北京" is 中国 + 北京. With a
+// boundary on those edges, `allow: [北京]` rejected "北京市" (what the Meituan
+// provider returns) and "北京市 海淀区" (MokaHR), and `block: [上海]` let "上海市"
+// through. An edge in one of these scripts therefore takes no boundary and the
+// keyword matches as a substring, the way it did before the boundaries became
+// Unicode-aware. Hangul is left out: Korean separates words with spaces.
+// Kana are tested by Script_Extensions: the long-vowel mark ー (U+30FC) has
+// Script=Common, so `ニュージャージー` would otherwise keep a trailing boundary
+// and reject "ニュージャージー州".
+const UNSPACED_SCRIPT_CP = /^[\p{Script=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}]$/u;
+const needsLocationBoundary = (cp) => LOCATION_WORD_CP.test(cp ?? '') && !UNSPACED_SCRIPT_CP.test(cp ?? '');
+
+// Boards ship locations with no-break spaces and doubled spaces: joinup.ch
+// returns "St.\u00a0Gallen", and `&#160;` decodes to a raw U+00A0. A
+// multi-word keyword is a literal sequence, so "st. gallen" missed it, allow
+// rejected the posting, and block let "New\u00a0York" through. Keywords and
+// locations both collapse every whitespace run to one ASCII space, as
+// foldTitle does for the title filter. Case is left alone, because ISO codes
+// are matched against the original-case location (#6605).
+const foldLocationWhitespace = (s) => s.replace(/\s+/g, ' ');
 
 function compileLocationKeyword(keyword) {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const codePoints = [...keyword];
-  const startsWord = LOCATION_WORD_CP.test(codePoints[0] ?? '');
-  const endsWord = LOCATION_WORD_CP.test(codePoints.at(-1) ?? '');
+  const startsWord = needsLocationBoundary(codePoints[0]);
+  const endsWord = needsLocationBoundary(codePoints.at(-1));
   const prefix = startsWord ? '(?<![\\p{L}\\p{M}\\p{N}])' : '';
   const suffix = endsWord ? '(?![\\p{L}\\p{M}\\p{N}])' : '';
   const re = new RegExp(`${prefix}${escaped}${suffix}`, 'u');
@@ -512,7 +534,7 @@ function compileLocationKeywordList(value) {
   return raw
     .filter(k => typeof k === 'string' && k.trim())
     .map((entry) => {
-      const trimmed = entry.trim();
+      const trimmed = foldLocationWhitespace(entry).trim();
       if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
       const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
       return (lower, original) => typeof original === 'string' && re.test(original);
@@ -725,7 +747,7 @@ const WORLDWIDE_LOCATION_LABELS = new Set([
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
-  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow);
+  const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow).map(foldLocationWhitespace);
   const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
   // US-targeted configs list the country in always_allow and foreign cities
   // in block. "Dublin, OH" does not contain "United States", so without this
@@ -735,7 +757,7 @@ export function buildLocationFilter(locationFilter) {
   if (usExpansion) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
-  const allowKeywords = normalizeKeywordList(locationFilter.allow);
+  const allowKeywords = normalizeKeywordList(locationFilter.allow).map(foldLocationWhitespace);
   const allow = compileLocationKeywordList(locationFilter.allow);
   // Do not widen city-only or mixed city/country targeting. Reuse the shared
   // country vocabulary rather than introducing a second country-name list.
@@ -756,7 +778,7 @@ export function buildLocationFilter(locationFilter) {
 
   const filter = (location, url, title, offer) => {
     if (!workplacePolicy(location, title, offer).eligible) return false;
-    const original = typeof location === 'string' ? location.trim() : '';
+    const original = typeof location === 'string' ? foldLocationWhitespace(location).trim() : '';
     const lower = original.toLowerCase();
     const hint = locationHintFromUrl(url);
     // Nothing to judge on either field → pass (don't penalize missing data),
@@ -3737,13 +3759,27 @@ function sameJobWriteKey(url) {
 function releasedHistoryKeys(historyText, policy) {
   const pinned = new Set();
   const released = new Set();
+  const dupRows = [];
   for (const row of scanHistoryRows(historyText)) {
     const status = row.status || 'added';
     if (!row.url || OBSERVATIONAL_SCAN_HISTORY_STATUSES.has(status)) continue;
     const key = sameJobWriteKey(row.url);
     if (!key) continue;
+    // A repeat sighting takes its verdict from the URL's other rows, as in
+    // collectSeenUrls, so the gate and this write agree on what was released.
+    if (status === 'skipped_dup' && policy?.recheckAfterDays != null) {
+      dupRows.push({ key, firstSeen: row.first_seen });
+      continue;
+    }
     if (shouldDedupScanHistoryRow({ firstSeen: row.first_seen, status }, policy)) pinned.add(key);
     else released.add(key);
+  }
+  for (const { key, firstSeen } of dupRows) {
+    // Its original was released: the repeat goes with it.
+    if (released.has(key) && !pinned.has(key)) continue;
+    // No original here: it pins while young, and an aged one releases nothing,
+    // so it never un-pins the checked-off entry it repeats.
+    if (shouldDedupScanHistoryRow({ firstSeen, status: 'skipped_dup' }, policy)) pinned.add(key);
   }
   for (const key of pinned) released.delete(key);
   return released;

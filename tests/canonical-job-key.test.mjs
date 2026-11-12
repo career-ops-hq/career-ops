@@ -60,6 +60,19 @@ const SAME = [
     'indeed.com:abc123',
   ],
   [
+    'smartrecruiters posting page with and without its title slug, and the API ref',
+    [
+      // The slug the page links to keeps a trailing hyphen after "(m/f/d)"; the
+      // scanner rebuilds the slug from the title and drops it. One posting.
+      'https://jobs.smartrecruiters.com/ACME/744000000000042-security-analyst-m-f-d-',
+      'https://jobs.smartrecruiters.com/acme/744000000000042-security-analyst-m-f-d',
+      'https://jobs.smartrecruiters.com/ACME/744000000000042',
+      'https://jobs.smartrecruiters.com/ACME/744000000000042/?trid=abc&utm_source=li',
+      'https://api.smartrecruiters.com/v1/companies/ACME/postings/744000000000042',
+    ],
+    'smartrecruiters:acme/744000000000042',
+  ],
+  [
     'tracking params on an ordinary posting',
     [
       'https://jobs.example.com/j/7',
@@ -77,6 +90,8 @@ const DIFFERENT = [
   ['https://boards.greenhouse.io/acme/jobs/1?gh_jid=1', 'https://boards.greenhouse.io/acme/jobs/1?gh_jid=2'],
   ['https://www.linkedin.com/jobs/view/4100000001', 'https://www.linkedin.com/jobs/view/4100000002'],
   ['https://www.indeed.com/viewjob?jk=aaa', 'https://www.indeed.com/viewjob?jk=bbb'],
+  ['https://jobs.smartrecruiters.com/Acme/744000000000001-analyst', 'https://jobs.smartrecruiters.com/Acme/744000000000002-analyst'],
+  ['https://jobs.smartrecruiters.com/Acme/744000000000001-analyst', 'https://jobs.smartrecruiters.com/Other/744000000000001-analyst'],
   ['https://jobs.lever.co/acme/111', 'https://jobs.lever.co/acme/222'],
   ['https://jobs.example.com/careers#/jobs/123', 'https://jobs.example.com/careers#/jobs/456'],
 ];

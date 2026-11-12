@@ -144,7 +144,19 @@ export function hasCanonicalHeading(text) {
 // Everything below is the CLI. Guarded so importing this module for its pure
 // helpers (deriveIngestingModes, isUserLayerPath, hasDirectiveMarker) does not
 // run the validation and process.exit() out from under the importer.
+const USAGE = `Usage: node validate-untrusted-content-coverage.mjs [--self-test]
+
+Checks that AGENTS.md carries the untrusted external content directive, that
+modes/_shared.md references it, and that every mode which ingests external
+text does too. Exits 1 when one of them is missing.
+  --self-test  run the checker's own unit checks instead`;
+
 if (isMainModule(import.meta.url)) {
+  // Before any check: --help used to run the coverage check and print its verdict.
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
+  }
   if (process.argv.includes('--self-test')) {
     console.log('Running validate-untrusted-content-coverage.mjs self-tests...');
 

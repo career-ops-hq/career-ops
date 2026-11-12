@@ -94,7 +94,7 @@ test('usage repeated on every chunk counts once, from the last chunk', () => {
 
 test('an endpoint that sends no usage still finishes and prints the footer', () => {
   const { stdout } = evaluate([]);
-  assert.match(stdout, /evaluation:\s+\(zero-token by design\)/);
+  assert.match(stdout, /evaluation:\s+usage unavailable/);
 });
 
 // Mistral answers an unknown request field with 422 and names it

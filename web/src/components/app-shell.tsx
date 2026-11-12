@@ -73,13 +73,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
 
           <div className="mt-auto space-y-3 pb-16 pt-4 md-tall:pb-40">
             <UsageMeter />
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between px-1">
-                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
-                <span className="font-mono text-[10px] text-faint">THEME</span>
-              </div>
-              <ThemeToggle showLabel />
-            </div>
+            <ThemeToggle showLabel />
           </div>
         </aside>
         <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>

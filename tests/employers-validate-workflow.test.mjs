@@ -26,6 +26,10 @@ const checkouts = steps.filter((s) => String(s.uses || '').startsWith('actions/c
 const runs = steps.filter((s) => typeof s.run === 'string');
 const BASE_HAS_VALIDATOR = "hashFiles('base/seeds/employers-validate.mjs') != ''";
 const BASE_LACKS_VALIDATOR = "hashFiles('base/seeds/employers-validate.mjs') == ''";
+// The inbox-only check runs after the validation whatever its result, so its
+// guard also says !cancelled().
+const BASE_HAS_INBOX = "${{ !cancelled() && hashFiles('base/seeds/employers-inbox.mjs') != '' }}";
+const BASE_LACKS_INBOX = "${{ !cancelled() && hashFiles('base/seeds/employers-inbox.mjs') == '' }}";
 
 // ── The workflow ─────────────────────────────────────────────────────────
 
@@ -37,9 +41,9 @@ test('keeps its security posture: pull_request, contents: read, no secrets', () 
   assert.ok(!/GITHUB_TOKEN/.test(text), 'the job must not hand the token to a step');
 });
 
-test('runs when the registry, the validator or the URL builder changes', () => {
+test('runs when the registry, the validator, its inbox rules or the URL builder changes', () => {
   const paths = (wf.on || wf[true]).pull_request.paths;
-  for (const p of ['employers/**', 'seeds/employers-validate.mjs', 'lib/ats-board-url.mjs']) {
+  for (const p of ['employers/**', 'seeds/employers-validate.mjs', 'seeds/employers-inbox.mjs', 'lib/ats-board-url.mjs']) {
     assert.ok(paths.includes(p), `paths must include ${p}`);
   }
 });
@@ -57,19 +61,31 @@ test('checks the base branch out beside the PR checkout', () => {
 
 test('runs the base copy of the validator, and the PR copy only when the base has none', () => {
   const commands = runs.flatMap((s) => s.run.split('\n').map((l) => ({ step: s, line: l.trim() }))).filter((c) => c.line);
-  assert.equal(commands.length, 2, 'two commands: the base run and the bootstrap run');
+  const expected = new Map([
+    ['node base/seeds/employers-validate.mjs --base base', BASE_HAS_VALIDATOR],
+    ['node seeds/employers-validate.mjs --base base', BASE_LACKS_VALIDATOR],
+    ['node base/seeds/employers-validate.mjs --inbox-only --base HEAD^1', BASE_HAS_INBOX],
+    ['node seeds/employers-validate.mjs --inbox-only --base HEAD^1', BASE_LACKS_INBOX],
+  ]);
+  assert.equal(commands.length, expected.size, 'four commands: validation and inbox-only check, each from the base or as bootstrap');
   for (const { step, line } of commands) {
-    if (line.startsWith('node base/')) {
-      assert.equal(line, 'node base/seeds/employers-validate.mjs --base base');
-      assert.equal(step.if, BASE_HAS_VALIDATOR, 'the base run is the normal path');
-    } else {
-      assert.equal(line, 'node seeds/employers-validate.mjs --base base', `unexpected command: ${line}`);
-      assert.equal(step.if, BASE_LACKS_VALIDATOR, 'the PR copy runs only when the base has no validator');
-    }
+    assert.ok(expected.has(line), `unexpected command: ${line}`);
+    assert.equal(step.if, expected.get(line), `${line}: the PR copy runs only when the base has none`);
   }
-  // Every step after the checkouts that runs code is one of those two.
-  for (const s of runs) assert.ok(s.if === BASE_HAS_VALIDATOR || s.if === BASE_LACKS_VALIDATOR, `unguarded run step: ${s.name}`);
+  // Every step that runs code is one of those four, each in its own step.
+  assert.equal(runs.length, expected.size);
   assert.ok(!/npm |npx /.test(text), 'the gate installs nothing');
+});
+
+test('the inbox-only check reads the diff from the merge commit and exposes its answer', () => {
+  const pr = checkouts.find((s) => !(s.with && s.with.path));
+  assert.equal(pr.with['fetch-depth'], 2, 'HEAD^1 (the base tip) must be in the PR checkout');
+  const ids = runs.filter((s) => / --inbox-only /.test(s.run)).map((s) => s.id).sort();
+  assert.deepEqual(ids, ['inbox_only', 'inbox_only_bootstrap']);
+  assert.equal(wf.jobs.validate.outputs.inbox_only,
+    '${{ steps.inbox_only.outputs.inbox_only || steps.inbox_only_bootstrap.outputs.inbox_only }}');
+  // It reports; it does not act. No label, merge, comment or write permission.
+  assert.ok(!/gh |labels|merge|issues: write|pull-requests: write/.test(text.replace(/^\s*#.*$/gm, '')), 'the workflow must not act on the answer');
 });
 
 test('pins every action to a full commit SHA', () => {

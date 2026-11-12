@@ -165,7 +165,12 @@ export function admitPluginJobs(found, { id, jobPostings = false, pipelineUrls =
     ? { config }
     : { titleFilter: () => true, locationFilter: () => true, blacklist: new Map() };
   const gate = createAdmissionGate({ ...discoveryFilters, ...gateOptions });
-  const { admitted } = gate.partition(newPipelineJobs(found, pipelineUrls).map(j => ({ ...j, source: `plugin:${id}` })));
+  // Dedup against the pipeline entries the gate still holds as seen. A
+  // checked-off entry whose scan-history rows the recheck window released is
+  // not one of them, so it comes back through plugin ingest as it does through
+  // scan.mjs. A pending entry always is, and with no window every entry is.
+  const pinned = new Set([...pipelineUrls].filter((url) => gate.isSeen({ url })));
+  const { admitted } = gate.partition(newPipelineJobs(found, pinned).map(j => ({ ...j, source: `plugin:${id}` })));
   return { jobs: admitted, counts: gate.counts };
 }
 

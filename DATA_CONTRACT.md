@@ -140,6 +140,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/retro.md` | Session review instructions: propose rules for `learn.mjs` to check |
 | `modes/update.md` | System update instructions |
 | `modes/ar/*` | Arabic language modes |
+| `modes/at/*` | Austria market modes (English) |
 | `modes/da/*` | Danish language modes |
 | `modes/de/*` | German language modes |
 | `modes/es/*` | Spanish language modes |
@@ -171,7 +172,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
 | `plugins-registry/` | Curated community plugins, one `<id>.json` per plugin (the trust root) |
 | `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
-| `seeds/` | Scanner seed sources: the VC portfolio fetchers (`seeds/vc-portfolios.mjs`) and the employer registry's validator (`seeds/employers-validate.mjs`) |
+| `seeds/` | Scanner seed sources: the VC portfolio fetchers (`seeds/vc-portfolios.mjs`) and the employer registry's tools: validator, inbox rules, importer and fold (`seeds/employers-*.mjs`) |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
 | `opencode.example.json` | OpenCode project config template (seed for `opencode.json`; ships Playwright MCP registration) |
 | `batch/batch-prompt.md` | Batch worker prompt |

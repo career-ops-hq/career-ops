@@ -14,6 +14,7 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { scanSuccessLabel } from "@/lib/scan-success.mjs";
 import { EMPTY_SCHEDULES_HINT, SCHEDULED_SCANS_INTRO } from "@/lib/schedule-label.mjs";
 import { CreateJobModal } from "./scheduled-scans/create-job-modal";
@@ -152,7 +153,7 @@ export function ScheduledJobsView() {
   const osScheduler = scheduler ? OS_SCHEDULERS[scheduler.platform] : undefined;
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8 space-y-8">
+    <div className={`mx-auto px-5 py-8 md:px-8 space-y-8 ${pageFrameWidthClass.wide}`}>
       {/* Header matching Explore & Portals format */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
         <div>

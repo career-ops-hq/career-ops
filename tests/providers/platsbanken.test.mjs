@@ -461,6 +461,40 @@ try {
     } else {
       fail(`platsbanken.fetch() with one failing keyword returned ${JSON.stringify(fetched.map((j) => j.title))}`);
     }
+    // The failed keyword's share of the board was never read, so the board is
+    // partial, not complete (#6820).
+    if (fetched.truncated && fetched.truncated.reason === 'fetch-error' && fetched.truncated.fetched === 1) {
+      pass('platsbanken.fetch() marks the board truncated (fetch-error) when one keyword fails on its first page');
+    } else {
+      fail(`a keyword failing on page 1 should mark jobs.truncated = { reason: 'fetch-error', fetched: 1 }, got ${JSON.stringify(fetched.truncated)}`);
+    }
+  }
+
+  // The first cause seen still wins: a cap hit by the first keyword is not
+  // overwritten by a later keyword's failure.
+  {
+    const fetched = await platsbanken.fetch(
+      { provider: 'platsbanken', name: 'Cap then failure', platsbanken: { keywords: ['capped', 'bad'] }, max_pages: 1 },
+      {
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          if (new URL(url).searchParams.get('q') === 'bad') throw new Error('network error');
+          return response(Array.from({ length: 100 }, (_, i) => ad({ id: `6${i}` })));
+        },
+      },
+    );
+    if (fetched.truncated?.reason === 'page-cap') pass('platsbanken.fetch(): the first truncation cause seen wins over a later keyword failure');
+    else fail(`first cause should win: got ${JSON.stringify(fetched.truncated)}`);
+  }
+
+  // A probe whose keywords all answer stays unmarked.
+  {
+    const fetched = await platsbanken.fetch(
+      { provider: 'platsbanken', name: 'Probe ok', platsbanken: { keywords: ['a', 'b'] } },
+      { maxPages: 1, sleep: async () => {}, fetchJson: async () => response([ad({ id: '55555555', headline: 'ok' })]) },
+    );
+    if (!fetched.truncated) pass('platsbanken.fetch(): a health probe whose keywords answer is not marked truncated');
+    else fail(`a probe was marked truncated: ${JSON.stringify(fetched.truncated)}`);
   }
 
   // A later-page failure keeps the pages already collected.

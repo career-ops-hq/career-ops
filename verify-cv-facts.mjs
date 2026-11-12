@@ -1044,6 +1044,50 @@ function atEmployerClaims(text) {
  * shape-only behaviour as before: a tool-shaped fragment is extracted, an
  * ordinary lowercase one is not.
  */
+// A tool list in a Chinese sentence: "使用 Go、Kafka 和 Elasticsearch 搭建消息管道",
+// "基于 Spring Boot 开发", "技术栈：React、Node.js". The trigger is the Chinese
+// for "using" / "built on" / "tech stack:", and the list is the run of names
+// in Latin script right after it, joined by 、 , / 和 与 及 以及. It ends at the
+// first Chinese word that is not one of those joiners, so the rest of the
+// sentence is never read as a name. A tool with a Chinese name (飞书, 钉钉) is
+// not read: without word boundaries a name cannot be told from the prose
+// around it.
+const HAN_RE = /\p{Script=Han}/u;
+const ZH_TOOL_TRIGGER_RE = /(?:使用|基于|基於|采用|採用|技术栈\s*[:：]|技術棧\s*[:：])\s*/gu;
+const ZH_TOOL_NAME = String.raw`[A-Za-z.][A-Za-z0-9+#./-]*(?: [A-Za-z0-9][A-Za-z0-9+#./-]*){0,3}`;
+const ZH_TOOL_ITEM_RE = new RegExp(String.raw`^\s*(${ZH_TOOL_NAME})\s*(?:等)?\s*(?:(?:、|,|，|/|以及|和|与|與|及)\s*(?=[A-Za-z.]))?`, 'u');
+
+// Chinese puts a name flush against the words around it ("使用Go和Kafka搭建"),
+// and a Han character is a letter, so the word-boundary lookup every other fact
+// uses (`sourceSpellsFact`) does not find "go" there. For a name read from a
+// Chinese list, a Han character beside it is a boundary too.
+function sourceNamesZhTool(sourceNormalized, name) {
+  if (sourceContainsFact(sourceNormalized, name)) return true;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-]|(?<=\\p{Script=Han}))${escaped}(?=$|[^\\p{L}\\p{N}+#/-]|\\p{Script=Han})`, 'iu').test(sourceNormalized);
+}
+
+/**
+ * Tool names in Chinese tool lists that the sources do not name.
+ *
+ * @param {string} clean - text with markup already stripped
+ * @param {string|null} sourceNormalized - the source lookup text; null reads every name
+ * @returns {string[]}
+ */
+function zhToolClaims(clean, sourceNormalized = null) {
+  if (!HAN_RE.test(clean)) return [];
+  const names = [];
+  for (const trigger of clean.matchAll(ZH_TOOL_TRIGGER_RE)) {
+    let rest = clean.slice(trigger.index + trigger[0].length, trigger.index + trigger[0].length + MAX_SOURCE_LOOKUP_LENGTH);
+    for (let item = ZH_TOOL_ITEM_RE.exec(rest); item; item = ZH_TOOL_ITEM_RE.exec(rest)) {
+      const name = normalizeFact(item[1].replace(/[./-]+$/, ''));
+      if (name && LETTER_RE.test(name) && !(sourceNormalized != null && sourceNamesZhTool(sourceNormalized, name))) names.push(name);
+      rest = rest.slice(item[0].length);
+    }
+  }
+  return names;
+}
+
 export function factClaims(text, sourceNormalized = null) {
   const clean = stripMarkup(text);
   const claims = [];
@@ -1152,6 +1196,7 @@ export function factClaims(text, sourceNormalized = null) {
       }
     }
   }
+  for (const value of zhToolClaims(clean, sourceNormalized)) claims.push({ kind: 'tool', value });
   // Pushed one at a time, like the tool names: spread into push(), a page of
   // 150,000 statements overflows the call stack.
   for (const claim of atEmployerClaims(text)) claims.push(claim);
@@ -1340,12 +1385,27 @@ function sourceEducation(text) {
 }
 
 const DATE_MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+// "2021年3月 - 至今", "2021年3月至2023年6月", "2021年至今": the Chinese spelling of
+// "Mar 2021 - Present". Rewritten as "3/2021 - 至今" so the reader below takes it.
+// Only a string with a 年 date or a Chinese "present" is touched.
+const ZH_DATE_RE = /(?:19|20)\d{2}\s*年|至今|迄今|现在|現在|目前/;
+const ZH_PRESENT_RE = /^(?:至今|迄今|现在|現在|目前)$/;
+function spellZhDates(value) {
+  if (!ZH_DATE_RE.test(value)) return value;
+  return value
+    .replace(/((?:19|20)\d{2})\s*年\s*(\d{1,2})\s*月份?/g, '$2/$1')
+    .replace(/((?:19|20)\d{2})\s*年/g, '$1')
+    .replace(/(?<=\d)\s*(?:至|到|~|～)\s*(?=\d)/g, ' - ')
+    // "2021年3月至今", "2021年3月到现在", "2021年3月至目前"
+    .replace(/(?<=\d)\s*(?:至|到|~|～)?\s*(?=(?:至今|迄今|现在|現在|目前)$)/, ' - ');
+}
+
 function dateEndpoints(value) {
-  const clean = normalizeFact(stripMarkup(value)).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const clean = spellZhDates(normalizeFact(stripMarkup(value))).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
   const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
   if (parts.length > 2) return null;
   const dates = parts.map(part => {
-    if (/^(?:present|current|now)$/.test(part)) return { year: 'present', month: '' };
+    if (/^(?:present|current|now)$/.test(part) || ZH_PRESENT_RE.test(part)) return { year: 'present', month: '' };
     const m = part.trim().match(/^(?:(\d{1,2})[/.]|([a-z]+)\s+)?((?:19|20)\d{2})$/);
     if (!m) return null;
     const month = m[1] ? Number(m[1]) : m[2] ? DATE_MONTHS.indexOf(m[2].slice(0, 3)) + 1 : '';
@@ -2695,6 +2755,78 @@ function compactMagnitude(raw) {
   });
 }
 
+// Counts in a Chinese sentence: "拥有8年经验", "30人团队", "日均调用500万次",
+// "提升3倍". COUNT_CLAIM_RE needs a noun from METRIC_NOUNS after a space;
+// Chinese writes the number flush against a measure word, so none of these
+// was a claim and a raised figure passed the gate (#6941).
+//
+// A claim is a digit run with a measure word from a closed list, with 万 and
+// 亿 as magnitudes. The key keeps the number as written: "8年", "3倍", "30人"
+// (人, 名 and 位 all count people), "20家". A figure with a magnitude is keyed
+// without its measure word ("500万次" and "500万" are both "500万"), because a
+// rewrite moves that word freely ("调用300万次" / "调用量达300万") and the
+// figure is what gets inflated.
+//
+// Not read: a calendar year ("2021年"), an ordinal ("第3名"), a range in any
+// spelling ("3-5年", "3至5年", "三到五年": neither end is a claim, so two
+// spellings of one range cannot disagree), and a number glued to a Latin
+// name ("Python3", "GPT-4").
+const ZH_MEASURES = '年(?![级代度])|个月|人(?![民工])|名|位(?!数)|个|次(?![方元])|倍|家|项(?!目)';
+const ZH_COUNT_RE = new RegExp(
+  String.raw`(?<![A-Za-z0-9.,_/#+\-–—－~～第])(?<![\d一二两三四五六七八九十]\s?[至到]\s?)(\d[\d,]*(?:\.\d+)?)\s*[+多余]?\s*(?:(百万|千万|万|亿)\s*[+多余]?\s*)?(${ZH_MEASURES})?`,
+  'gu',
+);
+// "五年", "十余人", "二十名", "两倍": a spelled number before the measure words
+// a CV counts with. 一 is left alone, as "one" is in English ("一名工程师"), and
+// so are 个 and 次, which follow a numeral in ordinary words ("二次开发").
+const ZH_NUMERAL_RE = /(?<![第数几十百千万亿零〇一二两三四五六七八九\d.])([二两三四五六七八九]?十[一二三四五六七八九]?|[二两三四五六七八九])(?=\s*[多余]?\s*(?:年(?![级代度])|个月|人(?![民工])|名|倍))/gu;
+const ZH_NUMERAL_DIGITS = '一二三四五六七八九';
+
+function zhNumeralValue(raw) {
+  const digit = c => (c === '两' ? 2 : ZH_NUMERAL_DIGITS.indexOf(c) + 1);
+  const ten = raw.indexOf('十');
+  if (ten === -1) return digit(raw);
+  return (ten === 1 ? digit(raw[0]) : 1) * 10 + (ten < raw.length - 1 ? digit(raw[ten + 1]) : 0);
+}
+
+// A plan, not a record: "未来3年", "接下来6个月", and "前3个月" in a clause that
+// looks forward ("入职后前3个月将梳理现有系统"). The English rule is the same:
+// a time span after "first" / "next" in a forward-looking clause is a horizon.
+const ZH_FORWARD_LEAD_RE = /(?:未来|未來|今后|今後|接下来的?|接下來的?)\s*$/u;
+const ZH_HORIZON_LEAD_RE = /[前头頭]\s*$/u;
+const ZH_FORWARD_MARKER_RE = /将|將|计划|計劃|打算|希望|准备|準備|入职后|入職後/u;
+
+function isZhPlanHorizon(text, index) {
+  const lead = text.slice(Math.max(0, index - 6), index);
+  if (ZH_FORWARD_LEAD_RE.test(lead)) return true;
+  if (!ZH_HORIZON_LEAD_RE.test(lead)) return false;
+  const start = Math.max(...['。', '；', '！', '？', '\n'].map(stop => text.lastIndexOf(stop, index - 1))) + 1;
+  const stop = text.slice(index).search(/[。；！？\n]/);
+  return ZH_FORWARD_MARKER_RE.test(text.slice(start, stop === -1 ? text.length : index + stop));
+}
+
+/**
+ * Count claims written the Chinese way, as canonical keys.
+ *
+ * @param {string} clean - text with markup already stripped
+ * @returns {string[]}
+ */
+function zhCountClaims(clean, { keepPlanHorizons = false } = {}) {
+  if (!HAN_RE.test(clean)) return [];
+  const claims = [];
+  const text = clean.replace(ZH_NUMERAL_RE, numeral => String(zhNumeralValue(numeral)));
+  for (const match of text.matchAll(ZH_COUNT_RE)) {
+    const [, rawNumber, magnitude, measure] = match;
+    if (!magnitude && !measure) continue;
+    const number = rawNumber.replace(/,/g, '');
+    if (measure === '年' && !magnitude && YEAR_LIKE.test(number)) continue;
+    if (!keepPlanHorizons && !magnitude && (measure === '年' || measure === '个月') && isZhPlanHorizon(text, match.index)) continue;
+    const unit = magnitude ? '' : /^[人名位]$/.test(measure) ? '人' : measure;
+    claims.push(`${number}${magnitude ?? ''}${unit}`);
+  }
+  return claims;
+}
+
 /** Extract metric-like claims that require source evidence. */
 export function metricClaims(text, { keepPlanHorizons = false } = {}) {
   // Expand only known count units in numeric compounds, then run the same
@@ -2715,6 +2847,7 @@ export function metricClaims(text, { keepPlanHorizons = false } = {}) {
     const noun = match[2].toLowerCase();
     claims.add(normalizeClaim(`${compactMagnitude(match[1])} ${NOUN_SYNONYMS.get(noun) ?? noun}`));
   }
+  for (const claim of zhCountClaims(clean, { keepPlanHorizons })) claims.add(claim);
   return claims;
 }
 
@@ -2809,8 +2942,10 @@ function countShapedSpans(text) {
  *     regex — separate work, and the reason this is a partial answer.
  *
  * So this closes the silent pass for space-delimited languages (de, es, tr, pt,
- * it, pl, ru, ...). A ja/zh CV can still reach 'pass' unchecked, which is why
- * the real answer is a lexicon those languages are in, not a better detector.
+ * it, pl, ru, ...). Chinese counts are read by zhCountClaims() and compared
+ * with the sources like the English ones (#6941); a Chinese count with a
+ * measure word outside its list, and every Japanese count, can still reach
+ * 'pass' unchecked.
  *
  * @param {string} targetText
  * @returns {{reason: string, message: string, spans: string[]}|null}
@@ -2824,8 +2959,11 @@ export function diagnoseCoverage(targetText) {
   // horizons report "none matched the metric extractor, whose noun list is
   // English-only" -- a false warn blaming the lexicon for counts it had read fine.
   COUNT_CLAIM_RE.lastIndex = 0;
-  const recognized = [...stripMarkup(String(targetText ?? '')).matchAll(COUNT_CLAIM_RE)];
-  if (recognized.length > 0) return null;
+  const plain = stripMarkup(String(targetText ?? ''));
+  const recognized = [...plain.matchAll(COUNT_CLAIM_RE)];
+  // A Chinese count the extractor read ("8 年", "30 人团队") was checked.
+  // Raw here too: a plan horizon ("未来 3 个月") was read, not missed.
+  if (recognized.length > 0 || zhCountClaims(plain, { keepPlanHorizons: true }).length > 0) return null;
   return {
     reason: 'no-count-claims-recognized',
     message:
