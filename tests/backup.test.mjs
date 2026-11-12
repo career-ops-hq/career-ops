@@ -135,7 +135,7 @@ try {
   const dest = join(tmp, 'backup', 'career-ops');
   mkdirSync(join(tmp, 'backup'));
 
-  // The exported API refuses contact files bound for a synced folder too, not only the CLI.
+  // The exported API warns, rather than refuses, when contact files go to a synced folder.
   const apiHome = join(tmp, 'api-home');
   mkdirSync(join(apiHome, 'Dropbox'), { recursive: true });
   const savedHome = process.env.HOME;
@@ -144,9 +144,11 @@ try {
   process.env.USERPROFILE = apiHome;
   try {
     const syncedDest = join(apiHome, 'Dropbox', 'Backups', 'career-ops');
-    assert.throws(() => b.runBackup({ dataRoot: root, dest: syncedDest, includeContacts: true }), /inside dropbox/);
-    assert.equal(existsSync(syncedDest), false);
-    assert.doesNotThrow(() => b.runBackup({ dataRoot: root, dest: syncedDest, dryRun: true }));
+    const withContacts = b.runBackup({ dataRoot: root, dest: syncedDest, includeContacts: true });
+    assert.equal(withContacts.warnings.some((w) => /contact files.*dropbox.*sync client uploads/.test(w)), true);
+    assert.equal(existsSync(join(syncedDest, 'data', 'contacts.tsv')), true);
+    const withoutContacts = b.runBackup({ dataRoot: root, dest: join(apiHome, 'Dropbox', 'Backups', 'plain'), dryRun: true });
+    assert.equal(withoutContacts.warnings.some((w) => /contact files/.test(w)), false);
   } finally {
     // Assigning undefined would store the string "undefined", so delete when unset.
     for (const [key, value] of [['HOME', savedHome], ['USERPROFILE', savedProfile]]) {
@@ -478,26 +480,26 @@ try {
   });
   assert.equal(emptyRun.status, 1);
   assert.match(emptyRun.stderr, /found nothing to back up/);
-  const combo = cli('--provider', 'google-drive', '--include-contacts', '--json');
-  assert.equal(combo.status, 2);
-  assert.match(JSON.parse(combo.stdout).error, /cannot be combined/);
-  // --dest inside a sync folder is refused with --include-contacts too.
+  // --dest inside a sync folder is allowed with --include-contacts, with a warning.
   const fakeHome = join(tmp, 'home');
   mkdirSync(join(fakeHome, 'Dropbox', 'Backups'), { recursive: true });
+  mkdirSync(join(fakeHome, 'dropbox', 'Backups'), { recursive: true });
   const homeEnv = { ...env, HOME: fakeHome, USERPROFILE: fakeHome };
   const syncedDest = join(fakeHome, 'Dropbox', 'Backups', 'career-ops');
   const synced = spawnSync(NODE, ['backup.mjs', '--dest', syncedDest, '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
-  assert.equal(synced.status, 2);
-  assert.match(JSON.parse(synced.stdout).error, /inside dropbox/);
-  assert.equal(existsSync(syncedDest), false);
+  assert.equal(synced.status, 0);
+  assert.equal(JSON.parse(synced.stdout).warnings.some((w) => /contact files.*dropbox/.test(w)), true);
+  assert.equal(existsSync(join(syncedDest, 'data', 'contacts.tsv')), true);
   const mixedCase = spawnSync(NODE, ['backup.mjs', '--dest', join(fakeHome, 'dropbox', 'Backups', 'career-ops'), '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
-  assert.equal(mixedCase.status, 2);
-  assert.match(JSON.parse(mixedCase.stdout).error, /inside dropbox/);
-  // Without the flag the same destination is fine, and a non-synced one is fine with it.
+  assert.equal(mixedCase.status, 0);
+  assert.equal(JSON.parse(mixedCase.stdout).warnings.some((w) => /contact files.*dropbox/.test(w)), true);
+  // Without the flag the same destination gives no contact warning, and a non-synced one gives none with it.
   const syncedOk = spawnSync(NODE, ['backup.mjs', '--dest', syncedDest, '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
   assert.equal(syncedOk.status, 0);
+  assert.equal(JSON.parse(syncedOk.stdout).warnings.some((w) => /contact files/.test(w)), false);
   const localOk = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'local-contacts'), '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
   assert.equal(localOk.status, 0);
+  assert.equal(JSON.parse(localOk.stdout).warnings.some((w) => /contact files/.test(w)), false);
   // A fresh drive with no Backups/ folder yet works with --provider.
   const freshHome = join(tmp, 'fresh-home');
   mkdirSync(join(freshHome, 'Dropbox'), { recursive: true });
