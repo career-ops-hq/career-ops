@@ -523,17 +523,33 @@ export function titleCaseSlug(slug) {
 async function fetchPage(url, minGapMs = MIN_DELAY_MS) {
   const robots = await robotsAllows(url);
   if (!robots.allowed) throw new Error(`robots.txt ${robots.reason}`);
-  return fetchTextWithRetry(HTTP_CTX, url, {
+  return fetchTextWithRetry(pacedRetryCtx(HTTP_CTX, minGapMs), url, {
     timeoutMs: REQUEST_TIMEOUT_MS,
     headers: { Accept: 'text/html,application/xhtml+xml,application/xml' },
   }, retryPolicy(minGapMs));
 }
 
 /**
+ * A transport context whose waits are never shorter than the run's pause.
+ * providers/_http.mjs withRetry sleeps through ctx.sleep, and it uses a
+ * Retry-After in place of the backoff, so a `Retry-After: 1` under a
+ * 10-second Crawl-delay would otherwise retry after one second.
+ *
+ * @param {object} base - The transport context (HTTP_CTX, or a test double).
+ * @param {number} minGapMs
+ * @returns {object}
+ */
+export function pacedRetryCtx(base, minGapMs) {
+  const gap = Math.max(MIN_DELAY_MS, Number(minGapMs) || 0);
+  const wait = typeof base.sleep === 'function' ? base.sleep : (ms) => new Promise(r => setTimeout(r, ms));
+  return { ...base, sleep: (ms) => wait(Math.max(Number(ms) || 0, gap)) };
+}
+
+/**
  * The shared retry policy, held to the run's pace: the first backoff is the
- * pause between requests (so a retry after a 503 never comes sooner than a
- * stated Crawl-delay allows), and the ceiling grows with it. A Retry-After is
- * honoured up to four times the ceiling (providers/_http.mjs withRetry).
+ * pause between requests, and the ceiling grows with it. A Retry-After is
+ * honoured up to four times the ceiling (providers/_http.mjs withRetry), and
+ * pacedRetryCtx keeps a shorter one from undercutting the pause.
  *
  * @param {number} minGapMs
  * @returns {{retries: number, baseDelayMs: number, maxDelayMs: number}}

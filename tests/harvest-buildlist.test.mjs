@@ -16,10 +16,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { ROOT, NODE, pass, fail, ownRootEnv, rmSync } from './helpers.mjs';
+import { fetchTextWithRetry } from '../providers/_http.mjs';
 import {
   CHECKPOINT_EVERY, MAX_COMPANIES, boardFromUrl, decodeEntities, dedupeBoards, extractAtsBoards,
   extractCompanyName, harvest, loadTrackedEntries, oneLine, readCheckpoint,
-  renderPortalsYaml, renderSummary, retryPolicy, yamlString,
+  pacedRetryCtx, renderPortalsYaml, renderSummary, retryPolicy, yamlString,
 } from '../harvest-buildlist.mjs';
 
 const SCRIPT = join(ROOT, 'harvest-buildlist.mjs');
@@ -333,6 +334,21 @@ try {
     const ok = normal.baseDelayMs === 1000 && normal.maxDelayMs === 15_000
       && slow.baseDelayMs === 30_000 && slow.maxDelayMs >= 30_000 && retryPolicy(0).baseDelayMs === 1000;
     return ok ? null : JSON.stringify({ normal, slow });
+  });
+
+  await checkAsync('a Retry-After shorter than the run\'s pause does not shorten the wait', async () => {
+    const waits = [];
+    let calls = 0;
+    const base = {
+      sleep: async (ms) => { waits.push(ms); },
+      fetchText: async () => {
+        calls++;
+        if (calls === 1) { const err = new Error('HTTP 503'); err.status = 503; err.retryAfter = '1'; throw err; }
+        return 'ok';
+      },
+    };
+    const body = await fetchTextWithRetry(pacedRetryCtx(base, 10_000), 'https://buildlist.xyz/x', {}, retryPolicy(10_000));
+    return body === 'ok' && JSON.stringify(waits) === '[10000]' ? null : `body=${body} waits=${JSON.stringify(waits)}`;
   });
 
   await checkAsync('every fetch is handed the run\'s pause, so its retries keep the same pace', async () => {
