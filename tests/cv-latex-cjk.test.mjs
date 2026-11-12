@@ -29,6 +29,10 @@ const PAYLOAD = {
   email: { url: 'test@example.com', display: 'test@example.com' },
   linkedin: { url: 'https://linkedin.com/in/test', display: 'linkedin.com/in/test' },
   github: { url: 'https://github.com/test', display: 'github.com/test' },
+  portfolio: { url: 'https://zhangwei.example.com', display: 'zhangwei.example.com' },
+  // Both slots used to be missing from the CJK template, so --template=cjk
+  // silently dropped a summary and a portfolio link a candidate had written.
+  summary: '五年前端工程师，专注于交互性能与设计系统 (Frontend engineer).',
   education: [{
     institution: '示例大学 (Sample University)',
     location: 'Toronto, ON',
@@ -95,6 +99,11 @@ try {
       ['award title', '优秀毕业生奖'],
       ['skills category', '语言'],
       ['skills items', '中文，英语'],
+      // The two slots the CJK template lacked. A summary or portfolio link a
+      // candidate wrote must reach the page under --template=cjk, not vanish.
+      ['summary section heading', '\\section{Professional Summary}'],
+      ['summary text', '五年前端工程师'],
+      ['portfolio link in the header', 'zhangwei.example.com'],
     ];
     for (const [what, needle] of contentChecks) {
       tex.includes(needle) ? pass(`${what} survives generation unmangled`) : fail(`${what} did not survive generation — expected to find ${JSON.stringify(needle)} in the .tex`);

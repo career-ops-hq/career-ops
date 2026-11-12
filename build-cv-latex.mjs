@@ -118,9 +118,11 @@ function buildProjects(entries) {
   return blocks.join('\n\n');
 }
 
-// Awards are one line each — no bullet list — so they reuse
-// \resumeProjectHeading (bold left column, year right) rather than
-// \resumeSubheading, which would leave an empty second row. The issuing body
+// Awards are one line each — no bullet list — so they use
+// \resumeAwardHeading (bold left column, year right): \resumeProjectHeading
+// would fit the row but its -7pt tail pulls whatever follows into the award
+// line, and a blank line between two awards would start a new paragraph and
+// widen the gap. One newline keeps them a single list. The issuing body
 // follows the title in the same $|$ style buildProjects() uses for context.
 function buildAwards(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return '';
@@ -128,9 +130,9 @@ function buildAwards(entries) {
   for (const e of entries) {
     if (!hasRequiredFields(e, 'awards', 'tex')) continue;
     const org = e.org ? ` \\emph{$|$ ${escapeLatex(e.org)}}` : '';
-    blocks.push(`    \\resumeProjectHeading\n      {\\textbf{${escapeLatex(e.title)}}${org}}{${escapeLatex(e.year)}}`);
+    blocks.push(`    \\resumeAwardHeading\n      {\\textbf{${escapeLatex(e.title)}}${org}}{${escapeLatex(e.year)}}`);
   }
-  return blocks.join('\n\n');
+  return blocks.join('\n');
 }
 
 function buildSkills(categories) {
@@ -257,6 +259,8 @@ async function main() {
   const linkedinDisplay = payload.linkedin?.display || '';
   const githubUrl = sanitizeUrl(payload.github?.url || '');
   const githubDisplay = payload.github?.display || '';
+  const portfolioUrl = sanitizeUrl(payload.portfolio?.url || '');
+  const portfolioDisplay = payload.portfolio?.display || '';
 
   const substitutions = {
     NAME: escapeLatex(payload.name || ''),
@@ -277,6 +281,13 @@ async function main() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    // The Professional Summary section and the portfolio link in the header.
+    // Both render empty when the payload omits them, so the template can carry
+    // the slots unconditionally (the LaTeX CV layout requires both).
+    SUMMARY: escapeLatex(payload.summary || ''),
+    PORTFOLIO_BLOCK: portfolioUrl
+      ? ` ~ \\href{${portfolioUrl}}{\\raisebox{-0.2\\height}\\faGlobe\\ \\underline{${escapeLatex(portfolioDisplay || portfolioUrl)}}}`
+      : '',
     EDUCATION: buildEducation(payload.education),
     EXPERIENCE: buildExperience(payload.experience),
     PROJECTS: buildProjects(payload.projects),
@@ -486,17 +497,20 @@ async function runSelfTest() {
     process.exit(1);
   }
 
-  // An unsupported section given a scalar value must warn too: the .tex
-  // template drops summary whatever shape it arrives in.
-  for (const scalar of [2026, 0, true, false, 'hi']) {
+  // A summary that is not text must warn: the .tex builder passes the value
+  // through `escapeLatex(payload.summary || '')`, so 0 and false vanish and a
+  // number or boolean prints its String() form — neither is what the author
+  // wrote. A STRING is not in this list: {{SUMMARY}} renders it, so warning
+  // would be a false positive on every valid payload.
+  for (const scalar of [2026, 0, true, false]) {
     if (!validatePayload({ ...sample, summary: scalar }, 'tex').warnings.some(w => w.startsWith('summary:'))) {
-      console.error(`Self-test failed: scalar unsupported section ${JSON.stringify(scalar)} was not reported`);
+      console.error(`Self-test failed: non-string summary ${JSON.stringify(scalar)} was not reported`);
       process.exit(1);
     }
   }
-  for (const empty of [null, undefined, '', '   ']) {
+  for (const empty of [null, undefined, '', '   ', 'hi']) {
     if (validatePayload({ ...sample, summary: empty }, 'tex').warnings.some(w => w.startsWith('summary:'))) {
-      console.error(`Self-test failed: empty unsupported section ${JSON.stringify(empty)} warned`);
+      console.error(`Self-test failed: empty or valid summary ${JSON.stringify(empty)} warned`);
       process.exit(1);
     }
   }
@@ -554,9 +568,18 @@ async function runSelfTest() {
   const linkedinDisplay = sample.linkedin?.display || '';
   const githubUrl = sanitizeUrl(sample.github?.url || '');
   const githubDisplay = sample.github?.display || '';
+  const portfolioUrl = sanitizeUrl(sample.portfolio?.url || '');
+  const portfolioDisplay = sample.portfolio?.display || '';
 
   const substitutions = {
     NAME: escapeLatex(sample.name),
+    // Same expression as the render path: without it the self-test leaves
+    // {{PAPER}} unresolved in the template and fails before it can check
+    // anything else.
+    PAPER: resolvePageFormat(sample.page_format, {
+      profilePath: getProfilePath(),
+      country: sample.country,
+    }) === 'a4' ? 'a4paper' : 'letterpaper',
     CONTACT_LINE: escapeLatex(sample.contact_line),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),
@@ -564,6 +587,10 @@ async function runSelfTest() {
     LINKEDIN_DISPLAY: escapeLatex(linkedinDisplay),
     GITHUB_URL: githubUrl,
     GITHUB_DISPLAY: escapeLatex(githubDisplay),
+    SUMMARY: escapeLatex(sample.summary || ''),
+    PORTFOLIO_BLOCK: portfolioUrl
+      ? ` ~ \\href{${portfolioUrl}}{\\raisebox{-0.2\\height}\\faGlobe\\ \\underline{${escapeLatex(portfolioDisplay || portfolioUrl)}}}`
+      : '',
     EDUCATION: buildEducation(sample.education),
     EXPERIENCE: buildExperience(sample.experience),
     PROJECTS: buildProjects(sample.projects),
