@@ -11,6 +11,11 @@
  * hold other people's contact details and are left out unless you pass
  * --include-contacts.
  *
+ * Claude Code's auto-memory for this checkout lives outside the data root
+ * (~/.claude/projects/<checkout-slug>/memory/). --include-claude-memory copies
+ * it too, into claude-memory/ at the destination; --claude-memory-dir <dir>
+ * names the folder yourself when Claude Code keeps it somewhere else.
+ *
  * Nothing is chosen for you: say where the backup goes. First match wins:
  *   1. --dest <dir>                 exactly this folder
  *   2. CAREER_OPS_BACKUP_DIR        exactly this folder
@@ -23,6 +28,7 @@
  *
  * Usage: node backup.mjs (--dest <dir> | --provider <name>) [--account <text>]
  *                        [--folder <path>] [--include-contacts]
+ *                        [--include-claude-memory | --claude-memory-dir <dir>]
  *                        [--dry-run] [--json] [--quiet]
  *
  * Exit status: 0 success, 1 a file failed to copy or there was nothing to
@@ -36,7 +42,7 @@ import {
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
-import { flagValue, validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { walkTree } from './lib/walk-tree.mjs';
 import { kebab, loadProfileDefault } from './cv-templates.mjs';
@@ -54,6 +60,9 @@ const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_FOLDER = join('Backups', 'career-ops');
 export const PROVIDERS = ['google-drive', 'dropbox', 'onedrive', 'icloud'];
 export const MANIFEST_NAME = '.career-ops-backup.json';
+// Where --include-claude-memory puts the memory files at the destination. Not
+// a User Layer path, so it cannot collide with one.
+export const CLAUDE_MEMORY_FOLDER = 'claude-memory';
 
 // Files that hold other people's contact details (DATA_CONTRACT.md: third-party
 // PII). Any other .vcf file is left out too. All of it stays out unless the
@@ -336,6 +345,48 @@ export function assertSafeDestination(dest, dataRoot, codeRoot = CODE_ROOT) {
   }
 }
 
+/**
+ * The main checkout of a linked git worktree, or `codeRoot` itself. Claude Code
+ * keys auto-memory on the repository, so every worktree shares the main
+ * checkout's folder. A linked worktree's `.git` is a file naming its git dir,
+ * whose `commondir` file points at the shared `.git`.
+ */
+export function mainCheckoutOf(codeRoot) {
+  const root = resolve(codeRoot);
+  try {
+    const dotGit = join(root, '.git');
+    if (!lstatSync(dotGit).isFile()) return root;
+    const gitDir = resolve(root, readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+)$/m)[1].trim());
+    const common = resolve(gitDir, readFileSync(join(gitDir, 'commondir'), 'utf8').trim());
+    // Only a shared `.git` folder has a checkout above it (a submodule's git dir does not).
+    return basename(common) === '.git' ? dirname(common) : root;
+  } catch {
+    return root;
+  }
+}
+
+/**
+ * Claude Code's default auto-memory folder for a checkout (AGENTS.md,
+ * "Auto-memory scope"). Claude Code keeps one folder per repository under its
+ * config dir, named after the main checkout's path with every non-alphanumeric
+ * character replaced by "-". It is outside the data root, so it is not part of
+ * the User Layer. A Claude Code setting that moves the folder is not read
+ * here: pass the folder with --claude-memory-dir instead.
+ */
+export function claudeMemoryDir({ codeRoot = CODE_ROOT, home = homedir(), env = process.env } = {}) {
+  const configDir = (env.CLAUDE_CONFIG_DIR ?? '').trim() || join(home, '.claude');
+  return join(configDir, 'projects', mainCheckoutOf(codeRoot).replace(/[^a-zA-Z0-9]/g, '-'), 'memory');
+}
+
+/** The destination and the memory folder must not hold one another (it would copy itself, or onto itself). */
+export function assertMemoryApartFromDestination(dest, memoryDir) {
+  const d = canonical(dest);
+  const m = canonical(memoryDir);
+  if (within(d, m) || within(m, d)) {
+    throw new Error(`Backup folder ${dest} overlaps the Claude memory folder ${memoryDir}. Choose a separate folder.`);
+  }
+}
+
 // ── Copy ─────────────────────────────────────────────────────────────────
 
 /** True when a folder on the way down to `entry` is a symlink (it could lead out of the data root). */
@@ -409,6 +460,16 @@ function listEntry(dataRoot, entry, { include, onError, onSkip = () => {} }) {
   return files;
 }
 
+// Equal size and near-equal mtime can still hide an edit that kept both, so a
+// file the caller wants verified is also compared byte for byte.
+const sameContent = (a, b) => {
+  try {
+    return readFileSync(a).equals(readFileSync(b));
+  } catch {
+    return false;
+  }
+};
+
 const unchanged = (src, destPath) => {
   try {
     const d = statSync(destPath);
@@ -425,9 +486,16 @@ const unchanged = (src, destPath) => {
  * `failed` and the run carries on. `found` counts the files discovered (copied
  * or not), so a run that found nothing is distinguishable from one that found
  * only unchanged files.
- * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[]}}
+ *
+ * With `includeClaudeMemory`, the files under `memoryDir` (default: this
+ * checkout's Claude Code auto-memory) are copied to `dest/claude-memory/` by
+ * the same rules. They are counted in `found` and again in `claudeMemory`, so a
+ * caller can tell an empty data root from one that only had memory files. A
+ * missing default folder is a warning; a missing `memoryDir` the caller named
+ * (`memoryDirChosen`) is a failure.
+ * @returns {{found: number, copied: number, unchanged: number, failed: {path: string, error: string}[], bytes: number, warnings: string[], claudeMemory?: number}}
  */
-export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = false }) {
+export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = false, includeClaudeMemory = false, memoryDir = claudeMemoryDir(), memoryDirChosen = false }) {
   const syncedTo = syncProviderOf(dest);
   const include = { includeContacts, skipAgentSettings: Boolean(syncedTo) };
   const result = { found: 0, copied: 0, unchanged: 0, failed: [], bytes: 0, warnings: [] };
@@ -436,7 +504,32 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
   // able to point a backup at a folder that overlaps what it reads.
   assertSafeDestination(dest, dataRoot);
   assertContactsNotSynced(dest, includeContacts);
+  if (includeClaudeMemory) assertMemoryApartFromDestination(dest, memoryDir);
   if (!dryRun) mkdirSync(dest, { recursive: true });
+  // Copy one discovered file from `srcRoot` to `destRel` under the destination.
+  const copyFile = (srcRoot, file, destRel, { verify = false } = {}) => {
+    result.found++;
+    const target = join(dest, destRel);
+    // A symlinked folder inside the destination could point back at live files.
+    if (hasSymlinkedParent(dest, destRel.split(sep).join('/'))) {
+      fail(destRel, new Error('a folder in the backup destination is a symlink; not copying through it'));
+      return;
+    }
+    if (unchanged(file, target) && (!verify || sameContent(join(srcRoot, file.rel), target))) { result.unchanged++; return; }
+    if (dryRun) { result.copied++; result.bytes += file.size; return; }
+    const part = `${target}.part`;
+    try {
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(join(srcRoot, file.rel), part);
+      utimesSync(part, new Date(), new Date(file.mtimeMs));
+      renameSync(part, target);
+      result.copied++;
+      result.bytes += file.size;
+    } catch (error) {
+      try { rmSync(part, { force: true }); } catch { /* best effort */ }
+      fail(destRel, error);
+    }
+  };
   // With an external data root, fork-local files declared in the checkout's
   // config/local-paths.txt are not looked up there: say so instead of
   // reporting a clean run that silently left them out.
@@ -444,7 +537,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     result.warnings.push(`${LOCAL_PATHS_FILE} in the checkout is not read when the data root is elsewhere; back up fork-local files it declares separately.`);
   }
   let skippedAgentFiles = 0;
-  for (const entry of backupPaths(dataRoot, result.warnings, result.failed)) {
+  const entries = backupPaths(dataRoot, result.warnings, result.failed);
+  for (const entry of entries) {
     // Count what a synced destination leaves out, from the effective backup
     // paths themselves (declared ones such as .claude/settings.local.json too),
     // so the warning below appears only when a settings file was really skipped.
@@ -465,28 +559,48 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
       fail(entry, error);
       continue;
     }
-    for (const file of files) {
-      result.found++;
-      const target = join(dest, file.rel);
-      // A symlinked folder inside the destination could point back at live files.
-      if (hasSymlinkedParent(dest, file.rel.split(sep).join('/'))) {
-        fail(file.rel, new Error('a folder in the backup destination is a symlink; not copying through it'));
-        continue;
+    for (const file of files) copyFile(dataRoot, file, file.rel);
+  }
+  if (includeClaudeMemory) {
+    result.claudeMemory = 0;
+    const label = (rel) => (rel ? join(CLAUDE_MEMORY_FOLDER, rel) : memoryDir);
+    let files = [];
+    // Only ENOENT/ENOTDIR mean "no memory folder"; any other error keeps its code and is a failure.
+    let memoryState = 'present';
+    try {
+      if (!statSync(memoryDir).isDirectory()) memoryState = new Error('the Claude memory path is not a folder');
+    } catch (error) {
+      memoryState = error.code === 'ENOENT' || error.code === 'ENOTDIR' ? 'absent' : error;
+    }
+    // A fork can declare its own claude-memory path (config/local-paths.txt).
+    // Its files were just copied to that folder, so the memory copy stays out of it.
+    const taken = entries.map((e) => e.toLowerCase()).some((e) => e === CLAUDE_MEMORY_FOLDER || e.startsWith(`${CLAUDE_MEMORY_FOLDER}/`));
+    if (taken) {
+      fail(CLAUDE_MEMORY_FOLDER, new Error(`a backed-up path is named ${CLAUDE_MEMORY_FOLDER}, where the Claude memory copy goes; memory was not copied`));
+    } else if (memoryState === 'absent') {
+      if (memoryDirChosen) {
+        fail(memoryDir, new Error('the Claude memory folder named with --claude-memory-dir does not exist'));
+      } else {
+        // A checkout Claude Code has written no memory for: not an error.
+        result.warnings.push(`no Claude memory folder at ${memoryDir}; nothing copied for --include-claude-memory. If Claude Code keeps it elsewhere, pass --claude-memory-dir <dir>.`);
       }
-      if (unchanged(file, target)) { result.unchanged++; continue; }
-      if (dryRun) { result.copied++; result.bytes += file.size; continue; }
-      const part = `${target}.part`;
+    } else if (memoryState instanceof Error) {
+      // Not "absent": a folder that cannot be read must not look like a clean run.
+      fail(memoryDir, memoryState);
+    } else {
       try {
-        mkdirSync(dirname(target), { recursive: true });
-        copyFileSync(join(dataRoot, file.rel), part);
-        utimesSync(part, new Date(), new Date(file.mtimeMs));
-        renameSync(part, target);
-        result.copied++;
-        result.bytes += file.size;
+        files = listEntry(memoryDir, '', {
+          include,
+          onError: (rel, error) => fail(label(rel), error),
+          onSkip: () => result.warnings.push(`skipped ${memoryDir}: it is a symlink`),
+        });
       } catch (error) {
-        try { rmSync(part, { force: true }); } catch { /* best effort */ }
-        fail(file.rel, error);
+        fail(memoryDir, error);
       }
+    }
+    for (const file of files) {
+      result.claudeMemory++;
+      copyFile(memoryDir, file, join(CLAUDE_MEMORY_FOLDER, file.rel), { verify: true });
     }
   }
   if (skippedAgentFiles > 0) {
@@ -510,8 +624,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
 
 // ── CLI ──────────────────────────────────────────────────────────────────
 
-const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-contacts', '--dry-run', '--json', '--quiet', '--help', '-h'];
-const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder'];
+const KNOWN_FLAGS = ['--dest', '--provider', '--account', '--folder', '--include-contacts', '--include-claude-memory', '--claude-memory-dir', '--dry-run', '--json', '--quiet', '--help', '-h'];
+const VALUE_FLAGS = ['--dest', '--provider', '--account', '--folder', '--claude-memory-dir'];
 
 const USAGE = `Usage:
   node backup.mjs --dest <dir>             # back up to exactly this folder
@@ -519,6 +633,8 @@ const USAGE = `Usage:
   node backup.mjs --provider <name> --account <text>   # pick one drive when several are signed in
   node backup.mjs --provider <name> --folder <relative/path>   # folder under the drive (default Backups/career-ops)
   node backup.mjs ... --include-contacts # also copy Connections.csv, contacts.tsv, reply-candidates.json, output/contacts.vcf and any other .vcf (other people's contact details); not with --provider. A --dest inside a recognized sync folder is refused too, but verify yourself that the destination is not synced
+  node backup.mjs ... --include-claude-memory # also copy Claude Code's auto-memory for this checkout (~/.claude/projects/<checkout>/memory/) into claude-memory/
+  node backup.mjs ... --claude-memory-dir <dir> # the same, from a memory folder you name (when Claude Code keeps it elsewhere)
   node backup.mjs ... --dry-run            # show what would be copied, copy nothing
   node backup.mjs ... --json | --quiet     # machine-readable result | errors only
   CAREER_OPS_BACKUP_DIR=<dir>              # same as --dest
@@ -536,6 +652,13 @@ function main(args) {
     else console.error(`backup: ${message}`);
     return 2;
   };
+  // A blank operand must not quietly turn the memory copy off.
+  const chosenMemoryDir = (flagValue(args, '--claude-memory-dir') ?? '').trim();
+  if (hasFlag(args, '--claude-memory-dir') && !chosenMemoryDir) {
+    return refuse('--claude-memory-dir needs a folder, not an empty value.');
+  }
+  const includeClaudeMemory = args.includes('--include-claude-memory') || Boolean(chosenMemoryDir);
+  const memoryDir = chosenMemoryDir ? resolve(chosenMemoryDir) : claudeMemoryDir();
 
   // The export holds other people's contact details and a provider folder is
   // uploaded by a sync client, so the two flags never combine.
@@ -555,6 +678,7 @@ function main(args) {
     });
     assertSafeDestination(target.dest, dataRoot);
     assertContactsNotSynced(target.dest, includeContacts);
+    if (includeClaudeMemory) assertMemoryApartFromDestination(target.dest, memoryDir);
     // A provider destination only needs its drive to be there: runBackup creates
     // Backups/career-ops under it. --dest and CAREER_OPS_BACKUP_DIR need their parent.
     const mustExist = target.base ?? dirname(target.dest);
@@ -567,11 +691,12 @@ function main(args) {
 
   let result;
   try {
-    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeContacts });
+    result = runBackup({ dataRoot, dest: target.dest, dryRun, includeContacts, includeClaudeMemory, memoryDir, memoryDirChosen: Boolean(chosenMemoryDir) });
   } catch (error) {
     return refuse(`cannot write to ${target.dest}: ${error.message}`);
   }
-  const empty = result.found === 0;
+  // Memory files sit outside the data root: they must not hide an empty one.
+  const empty = result.found - (result.claudeMemory ?? 0) === 0;
   const ok = result.failed.length === 0 && !empty;
   if (json) {
     console.log(JSON.stringify({ ok, dryRun, dest: target.dest, via: target.source, ...result }));

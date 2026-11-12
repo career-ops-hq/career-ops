@@ -163,10 +163,10 @@ function sweep(dir, dnsCode, extraArgs = []) {
       // A caller that reads only the JSON (the web UI does) must be able to
       // tell a resumable stop from a finished sweep without stat'ing the
       // checkpoint file itself.
-      if (result.stoppedByOutage === true) {
-        pass('--json reports the run as stopped by the resolver breaker');
+      if (result.stoppedByOutage === true && result.outageCheckpointWritten === true) {
+        pass('--json reports the run as stopped by the resolver breaker, with a checkpoint written');
       } else {
-        fail(`--json hides the outage stop: stoppedByOutage=${result.stoppedByOutage}`);
+        fail(`--json hides the outage stop: stoppedByOutage=${result.stoppedByOutage} outageCheckpointWritten=${result.outageCheckpointWritten}`);
       }
     }
 
@@ -236,12 +236,13 @@ function sweep(dir, dnsCode, extraArgs = []) {
   try {
     const out = sweep(dir, 'ENOTFOUND');
     const cpPath = join(dir, CHECKPOINT_REL);
+    const parsed = out === null ? null : JSON.parse(out);
     if (out === null) {
       fail(`clean sweep did not complete${formatRunFailure()}`);
     } else if (existsSync(cpPath)) {
       fail('a completed sweep left its checkpoint behind — the next run will demand --resume');
-    } else if (JSON.parse(out).stoppedByOutage !== false) {
-      fail(`a completed sweep reported stoppedByOutage=${JSON.parse(out).stoppedByOutage}`);
+    } else if (parsed.stoppedByOutage !== false || parsed.outageCheckpointWritten !== false) {
+      fail(`a completed sweep reported stoppedByOutage=${parsed.stoppedByOutage} outageCheckpointWritten=${parsed.outageCheckpointWritten}`);
     } else {
       pass('a completed sweep still deletes its checkpoint and reports no outage stop');
     }

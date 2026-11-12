@@ -22,6 +22,7 @@ import { rejectPrivateOrInvalid, checkUrlLiveness, LIVENESS_CONTEXT_OPTIONS } fr
 import { isClosureEvidence } from './liveness-core.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
@@ -588,7 +589,9 @@ export async function finishPipelineBatch(pipelinePath, originals, results) {
     for (const url of unmatched) {
       console.error(`⚠️ pipeline.md changed during the run; left ${url} as it is`);
     }
-    writeFileSync(pipelinePath, text, 'utf-8');
+    // A rename onto the path itself would swap a symlink for a regular file
+    // and leave the inbox the scans share untouched.
+    replaceUserFile(pipelinePath, text);
   });
 }
 

@@ -140,6 +140,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/retro.md` | Session review instructions: propose rules for `learn.mjs` to check |
 | `modes/update.md` | System update instructions |
 | `modes/ar/*` | Arabic language modes |
+| `modes/at/*` | Austria market modes (English) |
 | `modes/da/*` | Danish language modes |
 | `modes/de/*` | German language modes |
 | `modes/es/*` | Spanish language modes |

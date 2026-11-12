@@ -393,8 +393,9 @@ export function PipelineView({
       ? windowState.span
       : clampTrackerWindow(windowState.span, filtered.length);
   const bodyRef = useRef<HTMLTableSectionElement>(null);
-  // TRACKER_ROW_PX is the first-paint guess. The status cell wraps to two
-  // lines at some widths, so the spacers use the height a mounted row has.
+  // TRACKER_ROW_PX is the first-paint guess. Spacers copy one mounted row
+  // so the window stays aligned with the scroll position. A confirmation,
+  // an error, or a save in flight is taller and does not set that height.
   const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
   const mountedRows = filtered.slice(span.start, span.end);
   const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
@@ -417,7 +418,7 @@ export function PipelineView({
       // shared height.
       let rowHeight = rowPx;
       for (const row of el.querySelectorAll("tr[data-application-key]")) {
-        if (row.querySelector("[role='alert'], [aria-busy='true']")) continue;
+        if (row.querySelector("[role='alert'], [aria-busy='true'], [data-status-confirm]")) continue;
         rowHeight = row.getBoundingClientRect().height || rowPx;
         break;
       }
@@ -649,7 +650,7 @@ export function PipelineView({
   }, [span.start, span.end]);
 
   return (
-    <PageFrame>
+    <PageFrame width="wide">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
@@ -921,7 +922,11 @@ export function PipelineView({
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table aria-label="Tracked applications" aria-rowcount={filtered.length + 1} className="w-full min-w-[44rem] text-sm">
+          <table
+            aria-label="Tracked applications"
+            aria-rowcount={filtered.length + 1}
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+          >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
                 <th className="w-8 px-3 py-2.5">
@@ -1083,14 +1088,14 @@ const TrackerRow = memo(function TrackerRow({
         </Link>
       </td>
       <td className="px-4 py-3 font-medium">
-        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 transition-colors group-hover:text-brand-text">
+        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 min-w-0 transition-colors group-hover:text-brand-text min-[1440px]:w-full">
           <CompanyLogo name={company.logoName} size={20} />
-          <span className="block max-w-64 truncate" title={company.label}>{company.label}</span>
+          <span className="block max-w-64 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={company.label}>{company.label}</span>
         </Link>
       </td>
-      <td className="px-4 py-3 text-muted">
-        <div className="flex items-center gap-2">
-          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate" title={r.role}>{r.role}</Link>
+      <td className="min-w-0 px-4 py-3 text-muted min-[1440px]:overflow-hidden">
+        <div className="flex min-w-0 items-center gap-2">
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-[8rem] min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
           {r.closesAt ? (
             <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
           ) : null}
@@ -1100,10 +1105,10 @@ const TrackerRow = memo(function TrackerRow({
               target="_blank"
               rel="noreferrer"
               title={posting}
-              className="inline-flex shrink-0 items-center gap-1 text-xs text-brand-text hover:underline"
+              className="inline-flex max-[1439px]:shrink-0 items-center gap-1 text-xs text-brand-text hover:underline min-[1440px]:max-w-[40%] min-[1440px]:min-w-0 min-[1440px]:overflow-hidden"
             >
-              {postingLabel(posting)}
-              <ExternalLink className="size-3" />
+              <span className="min-[1440px]:min-w-0 min-[1440px]:truncate">{postingLabel(posting)}</span>
+              <ExternalLink className="size-3 shrink-0" />
             </a>
           )}
         </div>
