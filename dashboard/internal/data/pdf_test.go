@@ -158,6 +158,26 @@ func TestResolvePDFsDoesNotMatchCompanyPrefix(t *testing.T) {
 	}
 }
 
+func TestResolvePDFsSkipsOverflowDrafts(t *testing.T) {
+	// A render over its page budget leaves only a sibling .overflow.pdf draft
+	// (#6377), written after any deliverable, so newest-first would otherwise
+	// offer the rejected version. A company with nothing but a draft has no PDF.
+	root := t.TempDir()
+	writeFixture(t, root, "output/cv-jane-doe-acme-2026-06-05.overflow.pdf", "draft")
+	writeFixture(t, root, "output/cv-jane-doe-acme-2026-06-05.overflow-2.pdf", "draft")
+
+	app := model.CareerApplication{Company: "Acme", ReportNumber: "012"}
+	if got := ResolvePDFs(root, app, LoadPDFManifest(root)); len(got) != 0 {
+		t.Fatalf("a directory holding only overflow drafts must resolve no PDF, got %v", got)
+	}
+
+	writeFixture(t, root, "output/cv-jane-doe-acme-2026-06-01.pdf", "pdf")
+	got := ResolvePDFs(root, app, LoadPDFManifest(root))
+	if len(got) != 1 || got[0] != "output/cv-jane-doe-acme-2026-06-01.pdf" {
+		t.Fatalf("expected only the deliverable, never a newer draft, got %v", got)
+	}
+}
+
 func TestResolvePDFsNoMatch(t *testing.T) {
 	root := t.TempDir()
 	writeFixture(t, root, "output/cv-jane-doe-acme-2026-06-05.pdf", "pdf")

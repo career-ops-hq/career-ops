@@ -22,19 +22,23 @@ import { rejectPrivateOrInvalid, checkUrlLiveness, LIVENESS_CONTEXT_OPTIONS } fr
 import { isClosureEvidence } from './liveness-core.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { parseOutputLanguage } from './profile-language.mjs';
 import {
-  normalizedTrackerScore, slugifyCompany, tsvSafe,
+  normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
 import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-launch.mjs';
 const execFileAsync = promisify(execFile);
 const BROWSER_PROCESS_ENV = snapshotBrowserProcessEnv();
 try {
   const { config } = await import('dotenv');
-  config();
+  // The data root's .env first: doctor.mjs, remember-cli.mjs, scan.mjs and the
+  // plugin engine all read it there. The working directory's .env, the only one
+  // read before, still supplies what the data root's leaves unset.
+  config({ path: [join(getCareerOpsRoot(), '.env'), join(process.cwd(), '.env')] });
 } catch {}
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
@@ -485,23 +489,20 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
     }
 
 
-    const summaryMatch = evaluationText.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
-    if (!summaryMatch) {
+    // parseScoreSummary drops the bold and bullet marks a model puts on the
+    // keys, as in the other evaluators (#6332). Matched with `^KEY:`, a bolded
+    // summary wrote a tracker row for company and role "unknown".
+    const summary = parseScoreSummary(evaluationText);
+    if (!summary) {
       console.error('Missing SCORE_SUMMARY block from model output:\n' + evaluationText.slice(0, 500));
       throw new Error('Missing SCORE_SUMMARY block from model output');
     }
-    
-    const block = summaryMatch[1];
-    const extract = (key) => {
-      const m = block.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, 'mi'));
-      return m ? m[1].trim() : 'unknown';
-    };
 
-    const company = extract('COMPANY');
-    const role = extract('ROLE');
-    const score = extract('SCORE');
-    const archetype = extract('ARCHETYPE');
-    const legitimacy = parseLegitimacy(extract('LEGITIMACY'));
+    const company = summary.company || 'unknown';
+    const role = summary.role || 'unknown';
+    const score = summary.score || 'unknown';
+    const archetype = summary.archetype || 'unknown';
+    const legitimacy = parseLegitimacy(summary.legitimacy || 'unknown');
 
     // Save
     mkdirSync(PATHS.reports, { recursive: true });
@@ -588,7 +589,9 @@ export async function finishPipelineBatch(pipelinePath, originals, results) {
     for (const url of unmatched) {
       console.error(`⚠️ pipeline.md changed during the run; left ${url} as it is`);
     }
-    writeFileSync(pipelinePath, text, 'utf-8');
+    // A rename onto the path itself would swap a symlink for a regular file
+    // and leave the inbox the scans share untouched.
+    replaceUserFile(pipelinePath, text);
   });
 }
 

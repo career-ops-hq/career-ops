@@ -50,8 +50,12 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs'
 const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(?:[1-9][0-9]?)?\.com$/i;
 
 const PAGE_SIZE = 200;
-const MAX_PAGES = 25;             // cap when the tenant reports no total (~5000 jobs)
-const HARD_MAX_PAGES = 100;       // absolute ceiling (~20,000 jobs) for total-bounded walks
+const MAX_PAGES = 25;             // default cap (~5000 jobs) when the entry sets no max_pages and the tenant reports no total
+// Upper bound an entry may opt in to with `max_pages` (~20000 jobs, 100 requests
+// of 200 rows at 250ms spacing). JPMorgan Chase alone has 7000+ postings, which
+// the default cannot cover; the bound stays finite so a typo can't walk a board
+// forever.
+export const HARD_MAX_PAGES = 100;
 const RETRY_POLICY = { retries: 3 };
 const INTER_PAGE_DELAY_MS = 250;  // WAF-aware spacing between same-host pages
 
@@ -211,6 +215,18 @@ export function parseOracleResponse(json, site, companyName) {
   return out;
 }
 
+/**
+ * Page cap for an entry: a positive integer `max_pages` up to HARD_MAX_PAGES,
+ * else the default. Exported for unit tests.
+ * @param {{max_pages?: unknown}} entry
+ */
+export function resolveMaxPages(entry) {
+  const v = entry?.max_pages;
+  return Number.isInteger(v) && /** @type {number} */ (v) > 0
+    ? Math.min(/** @type {number} */ (v), HARD_MAX_PAGES)
+    : MAX_PAGES;
+}
+
 /** @type {Provider} */
 export default {
   id: 'oraclecloud',
@@ -228,18 +244,21 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    // MAX_PAGES is the cap for a walk with NO reported total (the only case where
-    // the loop could otherwise run unbounded). When the tenant reports
-    // TotalJobsCount, the walk is already bounded by that total, so the cap rises
-    // to cover it, up to HARD_MAX_PAGES. A fixed 25-page cap read only 5,000 of
-    // JPMorgan's 7,118 jobs (2026-11-07). entry.max_pages may raise the default
-    // the same way, never past HARD_MAX_PAGES.
-    let maxPages = Number.isInteger(entry.max_pages) && entry.max_pages > 0
-      ? Math.min(entry.max_pages, HARD_MAX_PAGES)
-      : MAX_PAGES;
+    let entryMaxPages = resolveMaxPages(entry);
+    // An entry's own max_pages is the user's choice and is kept as set. Without
+    // one, a tenant that reports TotalJobsCount already bounds the walk, so the
+    // default rises to cover that total, up to HARD_MAX_PAGES: a fixed 25 pages
+    // read 5000 of JPMorgan's 7118 postings. MAX_PAGES stays the cap only for a
+    // tenant that reports no total, where nothing else ends the walk.
+    const autoRaise = !(Number.isInteger(entry?.max_pages) && entry.max_pages > 0);
+    // Health probes / audits pass ctx.maxPages (1) to ask for a single page;
+    // honour it as the upper bound, and don't call that deliberate stop a truncation.
+    const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
+    let maxPages = Math.min(entryMaxPages, ctxCap);
 
     const all = [];
     let total = null;
+    let capped = true; // flips to false whenever a stop condition ends the walk
     for (let page = 0; page < maxPages; page++) {
       const offset = page * PAGE_SIZE;
       const apiUrl = buildApiUrl(site, offset, PAGE_SIZE);
@@ -257,7 +276,10 @@ export default {
       const item = Array.isArray(json?.items) ? json.items[0] : null;
       if (total === null && item && typeof item.TotalJobsCount === 'number') {
         total = item.TotalJobsCount;
-        maxPages = Math.max(maxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+        if (autoRaise) {
+          entryMaxPages = Math.max(entryMaxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+          maxPages = Math.min(entryMaxPages, ctxCap);
+        }
       }
       const listLen = item && Array.isArray(item.requisitionList) ? item.requisitionList.length : 0;
 
@@ -273,10 +295,26 @@ export default {
       // than the number requested … even if not at the end of the collection"
       // (Google AIP-158). So a short page only ends the walk when the tenant
       // reports no total to check it against.
-      if (listLen === 0) break;
+      if (listLen === 0) { capped = false; break; }
       if (total !== null) {
-        if (offset + PAGE_SIZE >= total) break;
-      } else if (listLen < PAGE_SIZE) break;
+        if (offset + PAGE_SIZE >= total) { capped = false; break; }
+      } else if (listLen < PAGE_SIZE) { capped = false; break; }
+    }
+
+    // The page cap ended the walk with rows still unread (or, when the tenant
+    // reports no total, with no sign the board ended). Say so: a silently
+    // short board reads as a complete one.
+    if (capped && entryMaxPages < ctxCap) {
+      const counts = total === null ? `${all.length} jobs fetched, total unknown` : `${all.length} of ${total} jobs`;
+      const advice = maxPages < HARD_MAX_PAGES
+        ? `raise max_pages on this entry for more (up to ${HARD_MAX_PAGES})`
+        : `max_pages is already at the ${HARD_MAX_PAGES}-page ceiling`;
+      console.error(`⚠️  oraclecloud: ${entry.name} truncated at max_pages=${maxPages} (${counts}) — ${advice}`);
+      // Same tag workday.mjs / eightfold.mjs put on a cut-short board, so a
+      // caller that cannot see stderr can still tell.
+      /** @type {any} */ (all).oraclecloudTruncated = true;
+      // Canonical shape read by lib/board-truncation.mjs (scan.mjs).
+      /** @type {any} */ (all).truncated = { reason: 'page-cap', fetched: all.length, ...(total === null ? {} : { total }) };
     }
     return all;
   },

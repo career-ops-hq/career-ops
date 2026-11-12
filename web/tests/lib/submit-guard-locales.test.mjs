@@ -21,6 +21,7 @@ const REFUSED_IN_FORM = {
   hi: ["जमा करें", "सबमिट करें", "आवेदन करें"],
   da: ["Indsend", "Ansøg"],
   nb: ["Send søknad", "Send inn", "Søk", "Søk nå", "Søk no", "Søk på stillingen", "Søk her"],
+  vi: ["Nộp đơn", "Nộp hồ sơ", "NỘP ĐƠN ỨNG TUYỂN", "Ứng tuyển", "Ứng tuyển ngay", "Gửi", "Gửi CV"],
 };
 
 const REFUSED_ANYWHERE = {
@@ -34,7 +35,7 @@ const REFUSED_ANYWHERE = {
   nb: ["Send søknad", "Send søknaden", "Send inn", "Send inn søknaden", "Fullfør søknad"],
 };
 
-const ALLOWED = ["Weiter", "Siguiente", "Próximo", "Dalej", "Далі", "التالي", "Lanjut", "अगला", "Næste", "Sendung verfolgen", "Lamaran saya", "Neste", "Søknaden din", "Søker"];
+const ALLOWED = ["Weiter", "Siguiente", "Próximo", "Dalej", "Далі", "التالي", "Lanjut", "अगला", "Næste", "Sendung verfolgen", "Lamaran saya", "Neste", "Søknaden din", "Søker", "Tiếp tục", "Tiếp theo", "Quay lại"];
 
 for (const [locale, labels] of Object.entries(REFUSED_IN_FORM)) {
   for (const label of labels) {

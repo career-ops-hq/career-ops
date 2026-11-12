@@ -59,7 +59,11 @@ function linesOf(text) {
     .replace(/<\/(?:p|li|h\d|div|tr|section|article)>/gi, '\n');
   return stripMarkup(broken, { keepLineBreaks: true })
     .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
+    // stripMarkup turns each block tag into ". ", so a printed line starts with
+    // a period its source line never had. Left in, "I built it." in an answer
+    // and in the letter were two different lines, and the answer's own dash
+    // was still reported.
+    .map((line) => line.replace(/^(?:\.\s+)+/, '').replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 }
 

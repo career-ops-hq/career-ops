@@ -14,7 +14,9 @@ import {
   Sparkles,
   Zap,
 } from "lucide-react";
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { scanSuccessLabel } from "@/lib/scan-success.mjs";
+import { EMPTY_SCHEDULES_HINT, SCHEDULED_SCANS_INTRO } from "@/lib/schedule-label.mjs";
 import { CreateJobModal } from "./scheduled-scans/create-job-modal";
 import { EditJobModal } from "./scheduled-scans/edit-job-modal";
 import { JobCard } from "./scheduled-scans/job-card";
@@ -151,7 +153,7 @@ export function ScheduledJobsView() {
   const osScheduler = scheduler ? OS_SCHEDULERS[scheduler.platform] : undefined;
 
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8 md:px-8 space-y-8">
+    <div className={`mx-auto px-5 py-8 md:px-8 space-y-8 ${pageFrameWidthClass.wide}`}>
       {/* Header matching Explore & Portals format */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-6">
         <div>
@@ -160,7 +162,7 @@ export function ScheduledJobsView() {
             <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Scheduled Scans</h1>
           </div>
           <p className="mt-1.5 max-w-2xl text-sm text-muted">
-            Persistent, automated crawler jobs supporting Zero-Token and Full ATS Dataset sweeps.
+            {SCHEDULED_SCANS_INTRO}
           </p>
         </div>
 
@@ -298,7 +300,7 @@ export function ScheduledJobsView() {
         <div className="rounded-2xl border border-dashed border-border p-12 text-center">
           <CalendarClock className="mx-auto size-8 text-faint" />
           <h2 className="mt-3 text-sm font-semibold text-foreground">No scheduled scans found</h2>
-          <p className="mt-1 text-xs text-muted">Create a new scan to start automatically discovering matching jobs.</p>
+          <p className="mt-1 text-xs text-muted">{EMPTY_SCHEDULES_HINT}</p>
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}

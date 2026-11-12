@@ -58,6 +58,18 @@ test('Z and a numeric offset use the UTC calendar day', () => {
   assert.equal(closesAtIso('2026-12-31T22:00:00-05:00'), '2027-01-01');
 });
 
+test('an offset written without a colon is the same offset', () => {
+  // PHP's DATE_ISO8601 and Java's default formatter write "+0000".
+  assert.equal(closesAtIso('2026-11-11T23:59:59+0000'), '2026-11-11');
+  assert.equal(closesAtIso('2026-11-11T23:59:59.000+0000'), '2026-11-11');
+  assert.equal(closesAtIso('2026-11-12T00:30:00+0200'), '2026-11-11');
+  assert.equal(closesAtIso('2026-11-11T23:00:00-0500'), '2026-11-12');
+  assert.equal(closesAtIso('2026-11-11T23:59:59+1500'), '');
+  assert.equal(closesAtIso('2026-11-11T23:59:59+0060'), '');
+  assert.equal(closesAtIso('2026-11-11T23:59:59+000'), '');
+  assert.equal(closesAtIso('2026-11-11T23:59:59+00:0'), '');
+});
+
 test('a datetime that is not a real instant is absent', () => {
   assert.equal(closesAtIso('2026-02-31T00:00:00Z'), '');
   assert.equal(closesAtIso('2026-11-11T24:00:00Z'), '');

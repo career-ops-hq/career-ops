@@ -36,6 +36,7 @@
  * (no slashes / traversal), and server-side redirects are refused.
  */
 
+import { resolveHimalayasPosting, retrieveHimalayasPosting } from './himalayas-posting.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
 import { hireHiveTenantOf } from './providers/hirehive.mjs';
@@ -1167,6 +1168,18 @@ export const JD_TEXT_API_ATS = new Set([
  *   and could not read it, and no other rung would do better.
  */
 export async function checkLivenessViaApi(url, { boardCache } = {}) {
+  // Himalayas is not an ATS, but it publishes a single-job API (himalayas-posting.mjs,
+  // #6501). Its pages sit behind a Cloudflare challenge, so the browser rung
+  // could only report a challenge, and its headed retry put that challenge in
+  // front of the user. The API answers instead: a documented 410 closes the
+  // posting, a 200 for this exact posting is live, and anything else (404,
+  // transport, partial payload) stays inconclusive for the browser to try.
+  if (resolveHimalayasPosting(url)) {
+    const h = await retrieveHimalayasPosting(url);
+    if (h.publisherStatus === 'open') return { result: 'active', code: 'himalayas_publisher_open', reason: 'Himalayas API: posting is listed' };
+    if (h.publisherStatus === 'closed') return { result: 'expired', code: 'himalayas_closed', reason: 'Himalayas API 410: posting expired' };
+    return null;
+  }
   const resolved = resolveAtsApi(url);
   if (!resolved) return null;
   const { ats, apiUrl, method, body, parts, interpret, interpretStatuses, timeoutMs, throttleMs, accept, headers, followEmbed, api404Authoritative, interpretBoard } = resolved;

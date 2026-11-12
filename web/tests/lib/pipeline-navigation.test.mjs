@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pipelineQuery, pipelineTab, rowOnPipelineTab, PIPELINE_TABS } from "../../src/lib/pipeline-navigation.mjs";
+import { pipelineQuery, pipelineTab, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref, PIPELINE_TABS } from "../../src/lib/pipeline-navigation.mjs";
 import { classifyLeaf } from "../../src/lib/pipeline-sankey.mjs";
 
 test("direct report visits retain the default Pipeline destination", () => {
@@ -12,6 +12,12 @@ test("the client and server round trip every existing list filter", () => {
   const query = "tab=EVALUATED&min=3.5&sort=company&dir=1&q=Fixture";
   assert.equal(pipelineQuery(query), query);
   assert.equal(pipelineQuery(Object.fromEntries(new URLSearchParams(query))), query);
+});
+
+test("a row link uses the search typed now, even when the deferred link is still old", () => {
+  assert.equal(trackerDetailHref("11", "tab=ALL&q=old", "new"), "/pipeline/11?tab=ALL&q=new");
+  assert.equal(trackerDetailHref("11", "tab=ALL&q=old", ""), "/pipeline/11?tab=ALL");
+  assert.equal(trackerDetailHref("a/b", "tab=ALL", "R&D"), "/pipeline/a%2Fb?tab=ALL&q=R%26D");
 });
 
 test("local typing overrides a stale URL search and an explicit clear removes it", () => {
@@ -65,6 +71,13 @@ test("tabs read a status the way the Analytics sankey does", () => {
     const otherLeaf = classifyLeaf({ n: 1, status }, []) === "other";
     assert.equal(rowOnPipelineTab(status, "OTHER"), otherLeaf, `${JSON.stringify(status)} OTHER tab vs sankey`);
   }
+});
+
+test("a selected tab scrolls inside the strip and a visible tab stays put", () => {
+  const strip = { left: 100, right: 400 };
+  assert.equal(tabStripScrollLeft(strip, { left: 40, right: 120 }, 80), 20);
+  assert.equal(tabStripScrollLeft(strip, { left: 360, right: 460 }, 80), 140);
+  assert.equal(tabStripScrollLeft(strip, { left: 120, right: 200 }, 80), 80);
 });
 
 test("pipelineTab falls back to INBOX and reads the first repeated value", () => {

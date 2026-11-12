@@ -235,7 +235,7 @@ Les libelles de l'en-tete (`**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:*
 ## Score Evidence
 (cinq dimensions, statut de la preuve, questions ouvertes, Evidence confidence, priorites)
 
-## H) Brouillons de reponses pour la candidature
+## H) Brouillons de reponses pour la candidature (draft)
 (uniquement si score >= 4.5 -- brouillons de reponses pour le formulaire de candidature)
 
 ---
@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Format du tracker :**
 
 ```markdown
-| # | Date | Entreprise | Role | Score | Statut | PDF | Report |
+| # | Date | Entreprise | Role | Score | Statut | PDF | Report | Notes |
 ```
 
 ### 3. Observations salariales (montant souhaite uniquement)

@@ -17,7 +17,9 @@ import { LinkedInPaste } from "@/components/linkedin-paste";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
-import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, groupAwaiting, pickApplyNext, includeApplyTarget } from "@/lib/home/awaiting.mjs";
+import { orderTodayQueue } from "@/lib/home/today-queue.mjs";
+import { selectDueFollowups } from "@/lib/core/followup-view.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
 import { ApplyNext } from "@/components/apply-next";
 import { resolveHeroState, mayClaimAllClear, showsQueue, missingSourceLabel, displayCounts } from "@/lib/home/hero-state.mjs";
@@ -33,7 +35,6 @@ export function TodayDashboard({
   reasons,
   legitimacy,
   inbox,
-  inBetween,
   applyFacts = {},
 }: {
   applications: Application[];
@@ -140,11 +141,20 @@ export function TodayDashboard({
   // Awaiting decision: scored (Evaluated) but no terminal status yet. The
   // ordering lives in lib/home/awaiting.mjs so it can be tested — see the file
   // for why "first six in the array" was a bug waiting for #3529.
-  const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const ranked = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const applyTarget = useMemo(
+    () => pickApplyNext(
+      applications,
+      scoreNum,
+      (row) => reasons[row.n]?.decision ?? "",
+      (row) => legitimacy[row.n],
+    ),
+    [applications, reasons, legitimacy],
+  );
+  const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page
-  // labels it (#5300), so "Apply next" below never points at one.
+  // labels it (#5300).
   const awaitingGroups = useMemo(() => groupAwaiting(awaiting, (a) => legitimacy[a.n]), [awaiting, legitimacy]);
-  const recommended = awaitingGroups.find(([label]) => label === "Recommended")?.[1] ?? [];
 
   const newThisWeek = freshCount;
   const dataLoading = followupsLoading || freshLoading;
@@ -169,6 +179,14 @@ export function TodayDashboard({
   const shown = displayCounts({ followupsError, freshError, overdue, newThisWeek });
   const followupRest = homeFollowupRemainder(followups.length, overdue);
   const inboxUrls = useMemo(() => new Set(inbox.map((j) => j.url)), [inbox]);
+  const dueFollowups = useMemo(
+    () => selectDueFollowups(followups, Math.max(followups.length, 1)),
+    [followups],
+  );
+  const queueLead = orderTodayQueue([
+    { kind: "follow-up", due: true, count: shown.overdue },
+    { kind: "match", due: false, count: shown.newThisWeek },
+  ]).filter((item) => item.count > 0);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
@@ -189,21 +207,24 @@ export function TodayDashboard({
               <>You&apos;re all caught up.</>
             ) : showsQueue(heroState) ? (
               <>
-                {shown.newThisWeek > 0 && (
-                  <>
-                    <span className="text-brand-text tabular-nums">{shown.newThisWeek}</span> new match{shown.newThisWeek === 1 ? "" : "es"} this week
-                  </>
-                )}
-                {shown.newThisWeek > 0 && shown.overdue > 0 && <span className="text-faint"> · </span>}
-                {shown.overdue > 0 && (
-                  <>
-                    <span className="text-brand-text tabular-nums">{shown.overdue}</span> follow-up{shown.overdue === 1 ? "" : "s"} due
-                  </>
-                )}
+                {queueLead.map((item, index) => (
+                  <span key={item.kind}>
+                    {index > 0 && <span className="text-faint"> · </span>}
+                    {item.kind === "follow-up" ? (
+                      <>
+                        <span className="text-brand-text tabular-nums">{item.count}</span> follow-up{item.count === 1 ? "" : "s"} due
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-brand-text tabular-nums">{item.count}</span> new match{item.count === 1 ? "" : "es"} this week
+                      </>
+                    )}
+                  </span>
+                ))}
                 {/* queue-partial with work known only from the server snapshot:
                     both loops are down but the pipeline still has decisions
                     waiting, so the queue is real while neither count is. */}
-                {shown.newThisWeek === 0 && shown.overdue === 0 && <>Your queue is waiting.</>}
+                {queueLead.length === 0 && <>Your queue is waiting.</>}
               </>
             ) : (
               <>Your queue is waiting.</>
@@ -228,7 +249,7 @@ export function TodayDashboard({
               Open pipeline
             </Link>
           </div>
-          {inBetween && <QuickEvaluate />}
+          <QuickEvaluate />
         </div>
       </section>
 
@@ -244,10 +265,10 @@ export function TodayDashboard({
         <FollowupsDueSectionSkeleton />
       ) : followupsError ? (
         null
-      ) : followups.length > 0 ? (
+      ) : dueFollowups.length > 0 ? (
         <Section icon={Bell} title="Follow-ups due" hint="Keep your applications alive — a nudge beats silence">
           <div className="grid gap-2.5">
-            {followups.map((f) => (
+            {dueFollowups.map((f) => (
               // Refetch (not a local decrement) so the parent's followups/upcoming
               // stay in sync with the server. Logging the LAST due item must flip this
               // section over to "Upcoming" instead of leaving it empty.
@@ -284,13 +305,13 @@ export function TodayDashboard({
       {/* B. Awaiting your decision */}
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first">
-          {recommended.length > 0 && (
+          {applyTarget && (
             <ApplyNext
-              n={recommended[0].n}
-              company={companyPresentation(recommended[0]).label}
-              score={recommended[0].score}
-              pdfOnDisk={applyFacts[recommended[0].n]?.pdfOnDisk ?? false}
-              postingUrl={applyFacts[recommended[0].n]?.postingUrl ?? ""}
+              n={applyTarget.n}
+              company={companyPresentation(applyTarget).label}
+              score={applyTarget.score}
+              pdfOnDisk={applyFacts[applyTarget.n]?.pdfOnDisk ?? false}
+              postingUrl={applyFacts[applyTarget.n]?.postingUrl ?? ""}
             />
           )}
           {awaitingGroups.map(([label, group]) => (
