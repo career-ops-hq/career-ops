@@ -592,8 +592,14 @@ const ANY_HEADING_RE = /^#{1,6}\s/;
 // Habilidades" and "Competencias Técnicas". Without them a Spanish cv.md had
 // no named-skills section at all, so every skill it listed was reported as a
 // gap — the check's own "already in Skills section" bucket stayed empty.
-const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b/i;
-const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b/i;
+//
+// The Chinese words are the ones generate-pdf.mjs's SECTION_ALIASES maps to
+// `skills`, in both scripts: 技能 (also inside 专业技能), 专长, 技术能力 and
+// 技术栈. They sit outside the `\b` group because a word boundary does not
+// exist between two Han characters, so `\b技能\b` never matches 专业技能.
+// 技术栈 is "Tech Stack" and counts on the same levels.
+const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b|技能|专长|專長|技术能力|技術能力/i;
+const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b|技术栈|技術棧/i;
 
 function isSkillsHeading(line) {
   // `\s*` rather than `\s+` keeps the historical `#Skills` (no space) form.
