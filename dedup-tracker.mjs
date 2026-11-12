@@ -56,7 +56,9 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const STATUS_RANK = {
   'skip': 0,
   'discarded': 0,
-  'rejected': 1,
+  // Evaluated must not outrank Rejected. A higher score used to promote a
+  // rejection to Evaluated, or delete the rejected row, on a title match.
+  'rejected': 2,
   'evaluated': 2,
   'applied': 3,
   'responded': 4,
@@ -125,6 +127,18 @@ function statusRank(status) {
  */
 function isAdvancedStatus(status) {
   return statusRank(status) >= STATUS_RANK.applied;
+}
+
+/**
+ * A rejection is kept beside an exact-title sibling unless both rows are the
+ * same report. Title match alone is not identity, and Evaluated is not a
+ * later status than Rejected.
+ *
+ * @param {string} status
+ * @returns {boolean}
+ */
+function isRejectedStatus(status) {
+  return resolveCanonicalStateId(status, CANONICAL_STATES) === 'rejected';
 }
 
 /**
@@ -360,11 +374,14 @@ function roleMatch(a, b) {
   // because a higher-scored exact-title sibling exists would lose status,
   // report, and notes. Keep both unless the rows point to the exact same
   // report identity.
-  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status)) {
+  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status) || isRejectedStatus(a.status) || isRejectedStatus(b.status)) {
     const key = pairKey(a, b);
     if (!protectedTitlePairs.has(key)) {
       protectedTitlePairs.add(key);
-      console.warn(`⚠️  Keep #${a.num} and #${b.num}: exact-title match but advanced status requires exact report identity`);
+      const why = isRejectedStatus(a.status) || isRejectedStatus(b.status)
+        ? 'a rejection is kept unless the report is the same'
+        : 'advanced status requires exact report identity';
+      console.warn(`⚠️  Keep #${a.num} and #${b.num}: exact-title match but ${why}`);
     }
     return false;
   }
