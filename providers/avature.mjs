@@ -180,6 +180,9 @@ export function parseArticles(htmlText, origin) {
       } catch {
         continue;
       }
+      // A href with its own scheme (javascript:, data:, mailto:) is absolute,
+      // so new URL keeps it as it is: only http(s) is a job link.
+      if (!/^https?:\/\//i.test(url)) continue;
     }
     const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
     out.push({
