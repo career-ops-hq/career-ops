@@ -220,7 +220,14 @@ export function reportToObservation(content, num, date) {
   // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
   // UNKNOWN (excluded from gap math, surfaced in currencyMismatches) — acceptable;
   // a corrective TSV observation with an explicit currency overrides it.
-  const currencyGuess = adv ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
+  // 人民币 and RMB both name CNY. A bare 元 or ¥ names no single currency
+  // (CNY, TWD, HKD, JPY), so it stays UNKNOWN like a bare $. A code that
+  // contradicts 人民币 ("USD 60-80 万人民币") is UNKNOWN too.
+  const code = adv?.match(/\b[A-Z]{3}\b/)?.[0]?.replace(/^RMB$/, 'CNY');
+  const zhCode = adv && /人民[币幣]/.test(adv) ? 'CNY' : undefined;
+  const currencyGuess = adv
+    ? (code && zhCode && code !== zhCode ? 'UNKNOWN' : code ?? zhCode ?? 'UNKNOWN')
+    : null;
   return {
     company, role, postingLocation,
     observation: adv === null ? null : {
