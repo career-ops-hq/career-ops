@@ -1228,12 +1228,26 @@ function discardReasonKey(label) {
   return label.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
+// An id followed by a note ("geo_restriction: relocation to Singapore") is
+// still that id. The text before the first colon is matched by the same
+// spelling rule and the note is dropped; a label is cut nowhere else.
+function canonicalDiscardReason(label, vocabulary) {
+  if (!vocabulary) return null;
+  const key = discardReasonKey(label);
+  if (vocabulary.has(key)) return key;
+  const colon = label.search(/[:：]/);
+  if (colon < 1) return null;
+  const head = discardReasonKey(label.slice(0, colon));
+  return vocabulary.has(head) ? head : null;
+}
+
 /**
  * Forecasts stay separate from recorded outcomes (#2785). The base is tracker
  * entries whose linked report explicitly supplies prediction data, including
  * an empty list; a missing or malformed field is unknown, not an empty forecast.
  * All statuses remain eligible: advancing later does not erase a prediction.
- * Only canonical ids from templates/discard-reasons.yml enter the shares. Every
+ * Only canonical ids from templates/discard-reasons.yml enter the shares; an id
+ * followed by a colon and a note counts as that id. Every
  * other label is listed under `predictedDiscardReasonOther` with its own
  * spelling (case and surrounding whitespace normalized) and is never counted
  * in `predictedDiscardReasonStats`.
@@ -1269,8 +1283,8 @@ export function buildPredictedDiscardReasonSignals(enriched, vocabulary = loadDi
     const canonical = new Set();
     const other = new Set();
     for (const reason of reasons) {
-      const key = discardReasonKey(reason);
-      if (vocabulary?.has(key)) canonical.add(key);
+      const key = canonicalDiscardReason(reason, vocabulary);
+      if (key) canonical.add(key);
       else other.add(reason);
     }
     for (const reason of canonical) counts.set(reason, (counts.get(reason) || 0) + 1);
