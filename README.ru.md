@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a> при участии&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders">700+ контрибьюторов</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a> при участии&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders">800+ контрибьюторов</a></p>
 
 <p align="center">
 <strong>Месяцы отправки резюме в&nbsp;тишину.</strong><br>
