@@ -15,6 +15,7 @@
  * report 64 never picks up report 640's capture.
  */
 
+import { createHash } from 'crypto';
 import { readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
 
@@ -148,5 +149,74 @@ export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
     filename: chosen.name,
     ext: extname(chosen.name),
     candidates: byRecency.map(e => e.name),
+  };
+}
+
+/**
+ * The URL identity every capture filename carries.
+ *
+ * `archive-posting.mjs` writes `{date}_{company}_{role}_{sha256(url)[0:16]}` and
+ * `capture-jd.mjs` writes the same identity with a `.md` extension, so a capture
+ * can be found from the URL alone — no report number, no date, no re-scraped
+ * company or role. Hashing the raw URL string (not a normalized form) is
+ * deliberate: it is what the existing captures on disk already contain, and
+ * changing it would orphan every one of them.
+ *
+ * @param {string} url
+ * @returns {string} 16 lowercase hex characters.
+ */
+export function captureIdentity(url) {
+  return createHash('sha256').update(String(url ?? '')).digest('hex').slice(0, 16);
+}
+
+/**
+ * Find the capture written for `url`, if one exists.
+ *
+ * Used by `auto-pipeline` Step 0 to read a JD the user already captured instead
+ * of opening a browser for it. Text captures are preferred over PDFs because
+ * they are what the model reads directly; among equals the most recent wins.
+ *
+ * @param {string} jdsDir            Directory holding captures (usually jds/).
+ * @param {string} url               The posting URL as it was captured.
+ * @param {object} [opts]
+ * @param {string[]} [opts.extensions] Extensions to consider, in preference order.
+ * @returns {{path: string, filename: string, ext: string, candidates: string[]}|null}
+ *   null when the URL is not http(s) or no capture carries its identity.
+ */
+export function findCaptureForUrl(jdsDir, url, { extensions = ['.md', '.txt', '.html', '.pdf'] } = {}) {
+  const raw = String(url ?? '').trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+
+  const identity = captureIdentity(raw);
+  let entries;
+  try {
+    entries = readdirSync(jdsDir);
+  } catch {
+    return null; // No captures directory yet — nothing to resolve, not an error.
+  }
+
+  const matches = entries.filter(name => name.includes(identity));
+  if (matches.length === 0) return null;
+
+  const rank = (name) => {
+    const i = extensions.indexOf(extname(name).toLowerCase());
+    return i === -1 ? extensions.length : i;
+  };
+  const byPreference = matches
+    .map(name => {
+      let mtimeMs = 0;
+      try {
+        mtimeMs = statSync(join(jdsDir, name)).mtimeMs;
+      } catch { /* vanished mid-scan — sorts last, still returned as a candidate */ }
+      return { name, mtimeMs };
+    })
+    .sort((a, b) => rank(a.name) - rank(b.name) || b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+
+  const chosen = byPreference[0];
+  return {
+    path: join(jdsDir, chosen.name),
+    filename: chosen.name,
+    ext: extname(chosen.name),
+    candidates: byPreference.map(e => e.name),
   };
 }
