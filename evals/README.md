@@ -154,6 +154,13 @@ against the reference model's first pass, rep-to-rep score spread, output
 contract compliance (Machine Summary + archived JD + tracker row), `expect`
 checks, and mean $/evaluation.
 
+A schema-valid Machine Summary (`validateMachineSummary`) has every key of the
+`batch/batch-prompt.md` skeleton, no extra key, every value of its type or
+enum, and two value rules from that file's list: each `discard_reasons` item
+is a canonical id alone or free text, never an id with a note after it (ids
+from `templates/discard-reasons.yml`, loaded through `analyze-patterns.mjs`),
+and `advertised_comp` is a verbatim substring of the report's archived JD.
+
 **`expect` assertions (v2 cases).** Cases with a `profile` key are scored
 against that pinned profile and may carry objective checks that do not depend
 on a reference model's taste: `score_min` / `score_max`, `legitimacy` /

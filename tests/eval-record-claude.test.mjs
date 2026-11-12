@@ -104,6 +104,28 @@ try {
   check(validateMachineSummary({ ...good, hard_stops: 'none' }).includes('hard_stops not list'), 'list-typed keys must be lists');
   check(validateMachineSummary(null)[0] === 'no Machine Summary YAML', 'absent YAML is one issue');
 
+  // 2b'. Value drifts a shape check cannot see (batch/batch-prompt.md rules).
+  //      Canonical ids come from templates/discard-reasons.yml through
+  //      analyze-patterns.mjs, not from a list here.
+  const withNote = validateMachineSummary({ ...good, discard_reasons: ['geo_restriction: needs relocation', 'Salary too low (below floor)'] });
+  check(withNote.some((i) => i.includes('"geo_restriction: needs relocation"') && i.endsWith('canonical id geo_restriction'))
+    && withNote.some((i) => i.endsWith('canonical id salary_too_low')),
+  'a discard_reasons item that continues past a canonical id is flagged', withNote.join('; '));
+  const cleanReasons = validateMachineSummary({ ...good, discard_reasons: ['geo_restriction', 'Tech stack mismatch', 'visa sponsorship unavailable'] });
+  check(cleanReasons.length === 0, 'a bare canonical id (any spelling) and a free-text reason pass', cleanReasons.join('; '));
+  const archived = 'Senior AI Engineer, Madrid.\nSalary: 80-90k EUR\nplus equity.';
+  check(validateMachineSummary({ ...good, advertised_comp: '80-90k EUR' }, { jdText: archived }).length === 0
+    && validateMachineSummary({ ...good, advertised_comp: 'Salary: 80-90k EUR plus equity.' }, { jdText: archived }).length === 0,
+  'advertised_comp quoted from the archived JD passes, line breaks included');
+  const estimated = validateMachineSummary({ ...good, advertised_comp: '€85,000 (market estimate)' }, { jdText: archived });
+  check(estimated.some((i) => i.startsWith('advertised_comp') && i.endsWith('not verbatim in the archived JD')),
+    'advertised_comp that is not a verbatim substring of the archived JD is flagged', estimated.join('; '));
+  check(validateMachineSummary({ ...good, advertised_comp: '€85,000' }).length === 0, 'without an archived JD the comp rule is not checked');
+  const compReport = (comp) => `# E\n\n**Score:** 3.0/5\n\n## Job Description (archived verbatim)\n\n${'z'.repeat(220)}\nPay: 70-80k EUR.\n\n## Machine Summary\n\n\`\`\`yaml\nadvertised_comp: "${comp}"\n\`\`\`\n`;
+  check(!parseReport(compReport('70-80k EUR')).summary_issues.some((i) => i.startsWith('advertised_comp'))
+    && parseReport(compReport('75k EUR')).summary_issues.some((i) => i.startsWith('advertised_comp')),
+  'parseReport checks advertised_comp against the report\'s own archived JD');
+
   // 2c. A null YAML score falls back to the header instead of becoming 0.
   const nullScore = parseReport('# E\n\n**Score:** 3.9/5\n\n## Machine Summary\n\n```yaml\nscore: null\n```\n');
   check(nullScore.score === 3.9, 'score: null in the YAML keeps the header score', String(nullScore.score));
