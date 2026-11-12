@@ -231,7 +231,9 @@
 #
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography. Keywords match whole words
-# and take no `word:`/`stem:` prefix. Some providers mark remote roles in their
+# and take no `word:`/`stem:` prefix. A Chinese or Japanese keyword matches
+# anywhere in the location (北京 matches "北京市海淀区"), because those scripts
+# put no space between words. Some providers mark remote roles in their
 # own words: arbeitsagentur writes "Deutschlandweit (Homeoffice)", so a German
 # commute filter needs always_allow: ["Deutschlandweit"] (see its entry below).
 
