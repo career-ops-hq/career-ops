@@ -22,7 +22,7 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // Pure parser, no I/O — shared with the apply flow's CV resolver so the two
 // don't drift into two different definitions of "which report does this
 // index row belong to" (#2599, #2008 review).
-import { pdfIndexEntriesByReport } from "@/lib/apply/cv-selection.mjs";
+import { pdfIndexEntriesByReport, readyReportNumbers } from "@/lib/apply/cv-selection.mjs";
 // The managed-block markers and the profile read live together in one plain
 // module, so rememberFact() (the block's only WRITER) and readMemory() (its
 // reader) cannot drift apart, and so the read rule is testable from web/tests.
@@ -340,17 +340,12 @@ export async function pdfPathStatusForReport(n: string, kind: "cv" | "cover" = "
  *  are stat'ed: manifest rows for reports no longer in the tracker cost
  *  nothing, and an empty tracker checks no files at all. */
 export async function pdfReadyReportNumbers(reports: ReadonlySet<number>): Promise<Set<number>> {
-  const ready = new Set<number>();
-  if (reports.size === 0) return ready;
+  if (reports.size === 0) return new Set();
   const entries = await indexedPdfEntries("cv");
-  if (!entries) return ready;
+  if (!entries) return new Set();
   const root = careerOpsRoot();
   const outputDir = path.resolve(root, "output");
-  for (const [n, entry] of entries) {
-    if (!reports.has(n)) continue;
-    if (entry.path && containedOutputFile(root, outputDir, entry.path)) ready.add(n);
-  }
-  return ready;
+  return readyReportNumbers(entries, reports, (rel: string) => containedOutputFile(root, outputDir, rel) !== null);
 }
 
 /** Parsed manifest, report number -> first entry of that kind. Reused until

@@ -100,6 +100,21 @@ export function pdfIndexEntriesByReport(indexText, kind = "cv") {
   return entries;
 }
 
+/** The members of `reports` whose manifest entry has a path that
+ *  `isContained(path)` accepts. `entries` is pdfIndexEntriesByReport's map;
+ *  `isContained` is the caller's filesystem containment check, so this rule
+ *  stays testable without a filesystem. It is called only for requested
+ *  reports that have a path: a manifest row for a report that is not asked
+ *  about costs nothing. */
+export function readyReportNumbers(entries, reports, isContained) {
+  const ready = new Set();
+  for (const n of reports) {
+    const entry = entries.get(n);
+    if (entry?.path && isContained(entry.path)) ready.add(n);
+  }
+  return ready;
+}
+
 /** Resolve the exact PDF path recorded for a report in pdf-index.tsv. */
 export function pdfPathForReport(indexText, reportNumber, kind = "cv") {
   const entry = pdfIndexEntryForReport(indexText, reportNumber, kind);
