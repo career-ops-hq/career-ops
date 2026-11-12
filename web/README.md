@@ -113,6 +113,56 @@ current user (never as root), and Windows and macOS need a logged-in session. Th
 an AI model. Job definitions and run history stay in the gitignored `data/`
 directory.
 
+## Run as a login service
+
+`npm start` serves the dashboard only while its terminal stays open. To keep it up
+across reboots and crashes, install it as a service of your own user, from the
+repository root:
+
+```sh
+node web/scripts/web-service.mjs install
+```
+
+It uses what each system already has, and runs as you, never as root:
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Mechanism | launchd LaunchAgent `io.career-ops.web` | `systemd --user` unit `career-ops-web.service` | Task Scheduler task `career-ops web` |
+| Starts | at login | at login (at boot after `loginctl enable-linger "$USER"`) | at logon |
+| Restarts | 30 s after it exits | 30 s after it exits | 30 s after a crash (the runner waits; Task Scheduler's own minimum is one minute and stays as the backstop) |
+| Log | `data/web-service.log` | `journalctl --user -u career-ops-web` | `data/web-service.log` |
+
+```sh
+node web/scripts/web-service.mjs status
+node web/scripts/web-service.mjs restart
+node web/scripts/web-service.mjs uninstall   # keeps the log
+node web/scripts/web-service.mjs install --dry-run   # print the definition, change nothing
+```
+
+- **Same bind as `npm start`.** Loopback only. The service adds no network exposure;
+  `CAREER_OPS_WEB_ALLOWED_HOSTS` is still the only way to widen it.
+- **Install and build happen only when needed.** The first start runs `npm ci` and
+  `npm run build`, which takes a few minutes. Every later start skips each step while
+  its inputs are unchanged: the install while `package-lock.json` and the Node version
+  are the same, the build while the checkout (its commit and any uncommitted change)
+  is the same. A restart with nothing changed answers in a few seconds. If an install
+  or build fails, the reason is in the log, and the service waits five minutes before
+  it tries again, so a broken build does not spin.
+- **After `git pull` or an update, run `restart`.** The running dashboard keeps serving
+  the old build until then; the restart rebuilds first, then serves the new one.
+- **Overrides are baked in when you install.** `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR`,
+  `CAREER_OPS_SCHEDULED_JOBS_PATH`, `CAREER_OPS_TRACKER`, `CAREER_OPS_PROFILE`, `CAREER_OPS_CODE_ROOT`,
+  `CAREER_OPS_WEB_ALLOWED_HOSTS` and `PORT` are carried into the service if they are set
+  in the shell that runs `install`. A service starts with an almost empty environment,
+  and without them the dashboard would read a different store than the CLI. Nothing else
+  is carried. Run `install` again after you change one.
+- **Do not run `npm start` or `npm run ui` on the same port while it is installed.** The
+  second server cannot bind and exits.
+- macOS needs a logged-in GUI session. Linux needs a systemd user session, which a normal
+  login has and `su`/`sudo` do not. On Windows the task runs in your interactive session,
+  so a console window for it stays open; closing it stops the dashboard until the next
+  logon or `restart`.
+
 ## Development
 
 ```bash
