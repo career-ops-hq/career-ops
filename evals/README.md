@@ -129,7 +129,9 @@ directory — and may write only inside its sandbox, never to a script, module,
 `package.json`, `.env` or `.career-ops-data` it could then run or be redirected
 by (`permissionArgs`). Its environment is minimal: what `claude` needs to start
 and reach the API, without unrelated tokens or `CAREER_OPS_*` data-root
-overrides. Dependencies are copied in, not linked to the host's. Each run
+overrides. `CLAUDE_*` names pass only from an allowlist (`CHILD_CLAUDE_ENV`:
+the OAuth token, config dir and mTLS/CA settings), so a parent Claude Code
+session's id, effort and entrypoint never reach the run under test. Dependencies are copied in, not linked to the host's. Each run
 records the tool calls the sandbox refused (`permission_denials`).
 
 Those rules are only as good as the CLI that enforces them, so

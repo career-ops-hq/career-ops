@@ -146,6 +146,18 @@ try {
   check(!('GITHUB_TOKEN' in env) && !('AWS_SECRET_ACCESS_KEY' in env) && !('OPENAI_API_KEY' in env)
     && !('CAREER_OPS_ROOT' in env) && !('CLAUDE_CODE_SESSION_ID' in env),
   'child env drops unrelated secrets, CAREER_OPS_* data-root overrides and the parent session id');
+  // CLAUDE_* is an allowlist: auth and config through, a parent session's
+  // markers and run-altering knobs not.
+  const claudeEnv = childEnv({
+    CLAUDE_CODE_OAUTH_TOKEN: 't', CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_CODE_CLIENT_CERT: '/c.pem', CLAUDE_CODE_CLIENT_KEY: '/k.pem',
+    CLAUDE_EFFORT: 'high', CLAUDE_CODE_ENTRYPOINT: 'cli', CLAUDE_CODE_CHILD_SESSION: '1', CLAUDE_CODE_SESSION_ID: 's',
+    CLAUDE_CODE_EFFORT_LEVEL: 'max', CLAUDE_CODE_MESSAGING_TOKEN: 'm', CLAUDE_CODE_MESSAGING_SOCKET: '/sock',
+    CLAUDE_ENV_FILE: '/env.sh', CLAUDE_CODE_SHELL_PREFIX: 'wrap', CLAUDE_CODE_SIMPLE: '1', CLAUDE_CODE_USE_BEDROCK: '1',
+    CLAUDE_CODE_SOMETHING_NEW: 'x',
+  });
+  check(Object.keys(claudeEnv).sort().join(',') === 'CLAUDE_CODE_CLIENT_CERT,CLAUDE_CODE_CLIENT_KEY,CLAUDE_CODE_OAUTH_TOKEN,CLAUDE_CONFIG_DIR',
+    'child env forwards only allowlisted CLAUDE_* names (auth, config dir, mTLS), not session, effort, entrypoint or unknown ones',
+    Object.keys(claudeEnv).join(','));
   check(ALLOWED_BASH.length > 0 && ALLOWED_BASH.every((c) => /^node [\w.-]+\.mjs( check)?$/.test(c)),
     'the child may only run named repo scripts, never a general shell', ALLOWED_BASH.join(', '));
   const perm = permissionArgs();

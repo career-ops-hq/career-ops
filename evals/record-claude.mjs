@@ -434,19 +434,44 @@ export function judgeProbeStep(step, uses, denied, effectLeft) {
 }
 
 /**
+ * CLAUDE_* variables a recorded run may inherit, by exact name: the ones the
+ * claude CLI reads to authenticate and to reach the API
+ * (https://code.claude.com/docs/en/env-vars). Every other CLAUDE_* name stays
+ * behind, and that is most of what a parent Claude Code session exports:
+ * session and parent-process markers (CLAUDE_CODE_SESSION_ID,
+ * CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_ENTRYPOINT, the messaging socket and
+ * its token), CLAUDE_EFFORT, and knobs that would change the run under test
+ * (CLAUDE_CODE_EFFORT_LEVEL overrides --effort; CLAUDE_CODE_SIMPLE swaps the
+ * system prompt; CLAUDE_ENV_FILE and CLAUDE_CODE_SHELL_PREFIX run code before
+ * each Bash call). The cloud-provider switches (CLAUDE_CODE_USE_BEDROCK,
+ * _VERTEX, _FOUNDRY) stay behind too: their credentials (AWS_*, GOOGLE_*) are
+ * not forwarded, and recordings price runs at first-party list prices.
+ */
+export const CHILD_CLAUDE_ENV = new Set([
+  'CLAUDE_CODE_OAUTH_TOKEN', // subscription auth without /login (docs/RUNNING_ON_A_BUDGET.md § 2b)
+  'CLAUDE_CONFIG_DIR', // where the operator's login and credentials live, when not ~/.claude
+  'CLAUDE_CODE_CLIENT_CERT', // mTLS to a gateway
+  'CLAUDE_CODE_CLIENT_KEY',
+  'CLAUDE_CODE_CLIENT_KEY_PASSPHRASE',
+  'CLAUDE_CODE_CERT_STORE', // CA sources, like NODE_EXTRA_CA_CERTS
+  'CLAUDE_CODE_PROXY_RESOLVES_HOSTS', // proxy setups, like HTTPS_PROXY
+]);
+
+/**
  * The environment a recorded run inherits: what the claude CLI needs to start
  * and reach the API (auth, proxy, CA bundle, locale), and nothing else — no
- * unrelated tokens, and no CAREER_OPS_* overrides that would point the child's
- * scripts at the operator's real data root instead of the sandbox.
+ * unrelated tokens, no parent-session variables, and no CAREER_OPS_* overrides
+ * that would point the child's scripts at the operator's real data root
+ * instead of the sandbox.
  *
  * @param {Record<string, string>} env - Parent environment.
  * @returns {Record<string, string>}
  */
 export function childEnv(env) {
-  const keep = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|TMPDIR|TZ|LANG|LC_[A-Z_]+|XDG_[A-Z_]+|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|ANTHROPIC_[A-Z_]+|CLAUDE_[A-Z_]+)$/;
+  const keep = /^(PATH|HOME|USER|LOGNAME|SHELL|TERM|TMPDIR|TZ|LANG|LC_[A-Z_]+|XDG_[A-Z_]+|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|HTTPS?_PROXY|NO_PROXY|https?_proxy|no_proxy|ANTHROPIC_[A-Z_]+)$/;
   const out = {};
   for (const [k, v] of Object.entries(env)) {
-    if (keep.test(k) && k !== 'CLAUDE_CODE_SESSION_ID') out[k] = v;
+    if (keep.test(k) || CHILD_CLAUDE_ENV.has(k)) out[k] = v;
   }
   return out;
 }
