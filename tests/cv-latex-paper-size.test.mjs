@@ -114,7 +114,9 @@ test('the CJK template honors page_format too', () => {
   writeFileSync(input, JSON.stringify({ ...BASE, page_format: 'a4' }));
   execFileSync(process.execPath, [join(ROOT, 'build-cv-latex.mjs'), input, out, '--template=cjk'], {
     cwd: ROOT, encoding: 'utf-8',
-    env: { ...process.env, CAREER_OPS_PROFILE: join(dir, 'absent.yml') },
+    // An empty root too: with the user's real cv.md the fact gate would run
+    // against unrelated data and could fail this synthetic payload.
+    env: { ...process.env, CAREER_OPS_PROFILE: join(dir, 'absent.yml'), CAREER_OPS_ROOT: dir },
     maxBuffer: 10 * 1024 * 1024,
   });
   const tex = readFileSync(out, 'utf-8');
