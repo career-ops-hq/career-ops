@@ -495,7 +495,10 @@ const LOCATION_WORD_CP = /^[\p{L}\p{M}\p{N}]$/u;
 // through. An edge in one of these scripts therefore takes no boundary and the
 // keyword matches as a substring, the way it did before the boundaries became
 // Unicode-aware. Hangul is left out: Korean separates words with spaces.
-const UNSPACED_SCRIPT_CP = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]$/u;
+// Kana are tested by Script_Extensions: the long-vowel mark ー (U+30FC) has
+// Script=Common, so `ニュージャージー` would otherwise keep a trailing boundary
+// and reject "ニュージャージー州".
+const UNSPACED_SCRIPT_CP = /^[\p{Script=Han}\p{Script_Extensions=Hiragana}\p{Script_Extensions=Katakana}]$/u;
 const needsLocationBoundary = (cp) => LOCATION_WORD_CP.test(cp ?? '') && !UNSPACED_SCRIPT_CP.test(cp ?? '');
 
 // Boards ship locations with no-break spaces and doubled spaces: joinup.ch

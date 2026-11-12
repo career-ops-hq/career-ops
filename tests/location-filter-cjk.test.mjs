@@ -20,6 +20,8 @@ const cases = [
   ['東京', ['東京', '東京都', '東京都渋谷区', '日本東京'], '大阪府'],
   ['リモート', ['リモート', 'フルリモート', 'リモート可'], '東京都'],
   ['とうきょう', ['とうきょうと'], 'おおさか'],
+  // The long-vowel mark ー (U+30FC) has Script=Common and is shared by both kana.
+  ['ニュージャージー', ['ニュージャージー', 'ニュージャージー州', '米国ニュージャージー州'], '東京都'],
 ];
 
 for (const [keyword, containing, other] of cases) {
