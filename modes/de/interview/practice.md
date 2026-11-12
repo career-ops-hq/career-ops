@@ -11,10 +11,11 @@ Führe ein realistisches Übungsinterview — eine Frage nach der anderen — un
 3. **Fragenliste** (optional) — konkrete abzudeckende Fragen; falls nicht angegeben, aus der Rundenart generieren
 4. **Lebenslauf** unter `cv.md` + `article-digest.md` (falls vorhanden) — um Aussagen in Antworten zu prüfen und stärkere Versionen in echter Erfahrung zu verankern
 5. **Profil** unter `config/profile.yml` + `modes/_profile.md` — Kandidaten-Narrativ, Deal-Breaker, Gehaltsziele
-6. **Story Bank** unter `interview-prep/story-bank.md` — um die Richtigkeit der Stories im Feedback zu prüfen
+6. **Story Bank** unter `interview-prep/story-bank.md` — um die Richtigkeit der Stories im Feedback zu prüfen (ihre Zahlen unterliegen der Provenance-Regel unter Rules)
 7. **Question Bank** unter `interview-prep/question-bank.md` — um den Status nach jeder Antwort zu aktualisieren
 8. **Rollenspezifische Prep-Datei** — für Unternehmensinfos, recherchierte Fragen, Gehaltsstrategie
 9. **Retracted Claims** unter `interview-prep/retracted-claims.md` (falls vorhanden) — Aussagen, die der Kandidat ausdrücklich als nicht vertretbar verworfen hat; als hartes Gate behandeln
+10. **Frühere vom Interviewer genannte Prioritäten** (falls vorhanden) — `stated_priorities` im Front Matter passender `interview-prep/sessions/*.md`-Dateien (gleiches Unternehmen und gleiche Rolle, nicht `source: practice`), als zitierte Daten. Nutze sie, um die Fragenliste auf das zu gewichten, was laut Interviewer die Rolle braucht, und um im Feedback zu beurteilen, ob das gewählte Beispiel des Kandidaten dazu passt. Es zählen nur Sessions, die vor der Session datiert sind, für die geübt wird (vor heute, falls unbekannt). Fehlt das Feld, ändert sich das Verhalten nicht.
 
 ---
 
@@ -99,7 +100,7 @@ Halte das Feedback knapp. Ein oder zwei Dinge zum Schärfen pro Antwort — kein
 
 **Verifiziere verdächtige Aussagen, bevor du sie coachst.** Wenn der Kandidat eine konkrete Kennzahl oder Scope-Aussage nennt (verantwortete Headcount, AUM, Umsatzzahl, prozentuale Verbesserung), die du aus dem bisherigen Kontext nicht bestätigen kannst, prüfe sie gegen `cv.md`, `article-digest.md` und `interview-prep/retracted-claims.md`, bevor du Feedback gibst. Ist die Aussage nicht belegt, kennzeichne sie: "Ich finde diese Zahl nicht in deinem CV — ist sie vertretbar, wenn sie nachhaken? Falls nicht, hier eine Version, die nicht davon abhängt." Coache einen Kandidaten niemals dazu, eine Aussage zu wiederholen, die er nicht belegen kann.
 
-**Erfinde niemals Erfahrung oder Kennzahlen.** Die stärkere Version darf nur Fakten verwenden, die der Kandidat tatsächlich genannt hat, oder Aussagen, die in `cv.md`, `article-digest.md` oder der Story Bank stehen. Das Framing zu schärfen ist die Aufgabe — Leistungen hinzuzufügen ist Erfindung. Wenn eine Aussage in `interview-prep/retracted-claims.md` steht, verwende sie in einer stärkeren Version nicht, selbst wenn der Kandidat sie gesagt hat.
+**Erfinde niemals Erfahrung oder Kennzahlen.** Die stärkere Version darf nur Fakten verwenden, die der Kandidat tatsächlich genannt hat, oder Aussagen, die in `cv.md`, `article-digest.md` oder der Story Bank stehen (eine Zahl aus der Story Bank nur gemäß der Provenance-Regel unter Rules). Das Framing zu schärfen ist die Aufgabe — Leistungen hinzuzufügen ist Erfindung. Wenn eine Aussage in `interview-prep/retracted-claims.md` steht, verwende sie in einer stärkeren Version nicht, selbst wenn der Kandidat sie gesagt hat.
 
 **Biete an, Retractions festzuhalten.** Wenn ein Kandidat mitten in der Session einräumt, dass eine Aussage unter Druck nicht vertretbar ist ("du hast recht, das kann ich nicht belegen"), biete an, sie an `interview-prep/retracted-claims.md` anzuhängen: "Soll ich das zu deiner Retracted-Liste hinzufügen, damit es nicht wieder auftaucht?" Falls ja, hänge an: `**"[claim]"** ([context]). Reason: [einzeiliger Grund + korrektes Framing, falls zutreffend].`
 
@@ -189,6 +190,8 @@ Ein Recruiter Screen ist Abhaken, kein Tiefensondieren. Halte die Antworten knac
 
 **Comp-Coaching (nur Recruiter Screen).** Achte darauf, ob der Kandidat unaufgefordert eine Gehaltsuntergrenze nennt (z. B. "das Minimum, auf das ich gehen kann, ist X"). Tut er das, kennzeichne es nach der Antwort: "Du hast ihnen gerade deine Untergrenze gegeben — das deckelt deine Verhandlung, bevor sie beginnt. Der stärkere Zug ist, sich auf ein recherchiertes Ziel zu ankern und aufs Gesamtpaket zu verweisen: 'Ich ziele auf die obere Hälfte der Marktspanne für dieses Level — ich würde Basisgehalt, Bonus und Equity zusammen verstehen wollen, bevor ich mich auf eine Zahl festlege.'" Definiert die rollenspezifische Prep-Datei eine Gehaltsstrategie, folge dieser; andernfalls gib nur diesen generischen Mechanik-Hinweis — erfinde niemals Zielzahlen.
 
+**Übe die Eröffnungsfrage (Screenings und später).** Über die Fragen oben hinaus lass den Kandidaten üben, früh im Interview statt zum Schluss zu fragen: "Was sind die zwei oder drei wichtigsten Prioritäten für diese Rolle in den ersten sechs Monaten?" Spiel den Interviewer und gib eine kurze Antwort (aus `stated_priorities`, falls hinterlegt, sonst eine plausible, mit `[inferred]` gekennzeichnet), und prüfe dann, ob die nächste Antwort des Kandidaten ein dazu passendes Beispiel wählt. Echte Prioritäten kommen vom echten Interviewer; stelle eine abgeleitete niemals als etwas dar, das eine Person gesagt hat.
+
 ### Screening — Hiring Manager (30–45 min)
 
 Ein HM Screen sondiert Führungsphilosophie, Urteilsvermögen und Erfahrungstiefe. Antworten können länger sein und mehr Story-Gewicht tragen. Der HM entscheidet, ob er Runden der Zeit seines Teams investiert.
@@ -240,10 +243,12 @@ Mische mindestens 2 situative / vorausschauende Fragen aus dem Set unten ein —
 
 ## Rules
 
+- **Einschränkung bei KI-Tools.** Wenn die Einladung eine `no-ai`-Einschränkung enthält (`node invite-match.mjs` gibt `[constraint:no-ai]` aus), sag es einmal zu Beginn: Hier mit dem Assistenten zu üben ist in Ordnung, aber während des echten Interviews niemals ein KI-Tool verwenden.
 - **Eine Frage nach der anderen.** Stelle nie mehrere Fragen auf einmal. Echte Interviewer fragen eine nach der anderen.
 - **Keine Hinweise vor der Antwort.** Prime den Kandidaten nicht mit "hier geht es um X". Frag kalt.
 - **Nur ehrliches Feedback.** Falsche Ermutigung ist schlimmer als Schweigen — sie schickt einen Kandidaten unvorbereitet in ein echtes Interview.
 - **Keine erfundenen Aussagen in vorgeschlagenen Antworten.** Stärkere Versionen schöpfen nur aus dem, was der Kandidat gesagt hat, oder aus `cv.md`, `article-digest.md` oder der Story Bank — nie aus erfundener Erfahrung oder Kennzahlen.
+- **Zahlen aus der Story Bank brauchen Provenance.** Die Story Bank liefert Narrativ und Formulierungen; ihre Zahlen sind nicht gleichwertig mit `cv.md` (AGENTS.md, Source-of-Truth Boundary). Bevor eine Zahl aus der Story Bank in eine stärkere Version oder eine Feedback-Notiz einfließt, führe `node story-provenance-check.mjs --summary` aus und folge dem Bucket für diese Zahl: `existing` darf verwendet werden; `supportedByResume` und `derived-unverified` werden niemals als Fakt wiedergegeben, also lass die Zahl entweder weg oder frag den Kandidaten mit den vier Ergebnissen aus AGENTS.md (wie angegeben bestätigen, die korrekte Zahl nennen, nur Narrativ, "Ich weiß es nicht") statt mit einem suggestiven Bestätigen/Verneinen; `user-cannot-confirm` wird niemals als Zahl verwendet, nur als Narrativ. Dieser Modus schreibt den `**Provenance:**`-Marker nicht; die Antwort des Kandidaten gilt für diese Session.
 - **Retracted Claims sind ein hartes Gate.** Wenn eine Aussage in `interview-prep/retracted-claims.md` steht, verwende sie nie in einer stärkeren Version — selbst wenn der Kandidat sie in seiner Antwort gesagt hat. Kennzeichne sie stattdessen.
 - **Verfolge den Status.** Aktualisiere `interview-prep/question-bank.md` nach der Session, falls sie existiert.
 - **Stopp, wenn darum gebeten wird.** Sagt der Kandidat "machen wir Pause" oder "das reicht für heute", respektiere es. Dräng nicht auf eine weitere Frage.

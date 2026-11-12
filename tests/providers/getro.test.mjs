@@ -133,6 +133,64 @@ try {
   if (unresolvedThrew) pass('getro.fetch() throws an actionable error when collection_id cannot be resolved');
   else fail('getro.fetch() should throw when __NEXT_DATA__ has no network.id');
 
+  // ctx.idCache — the collection id is kept per board host between scans.
+  const memCache = (initial = {}) => {
+    const values = new Map(Object.entries(initial));
+    return { values, get: (k) => values.get(k), set: (k, v) => values.set(k, v), delete: (k) => values.delete(k) };
+  };
+  const searchOnly = (id) => async (url) => {
+    if (url !== `https://api.getro.com/api/v2/collections/${id}/search/jobs`) throw new Error(`unexpected collection in URL: ${url}`);
+    return { results: { count: 0, jobs: [] } };
+  };
+  const autoEntry = { name: 'Auto Fund', careers_url: 'https://Careers.ExampleVC.example/jobs' };
+
+  const hitCache = memCache({ 'careers.examplevc.example': { id: '5555', checkedAt: new Date().toISOString() } });
+  let hitPageCalls = 0;
+  await getro.fetch(autoEntry, { idCache: hitCache, fetchText: async () => { hitPageCalls++; return nextDataHtml; }, fetchJson: searchOnly('5555') });
+  if (hitPageCalls === 0) pass('getro.fetch() uses a cached collection id (keyed by the lower-cased board host) without reading the board page');
+  else fail(`getro.fetch() cache hit still read the board page ${hitPageCalls} time(s)`);
+
+  const missCache = memCache();
+  await getro.fetch(autoEntry, { idCache: missCache, fetchText: async () => nextDataHtml, fetchJson: searchOnly('9911') });
+  const storedCollection = missCache.values.get('careers.examplevc.example');
+  if (storedCollection?.id === '9911' && Number.isFinite(Date.parse(storedCollection.checkedAt))) pass('getro.fetch() stores a resolved collection id as { id, checkedAt }');
+  else fail(`getro.fetch() cache miss stored ${JSON.stringify(storedCollection)}`);
+
+  const oldCheck = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+  const pageGoneCache = memCache({ 'careers.examplevc.example': { id: '5555', checkedAt: oldCheck } });
+  let pageGoneSearchUrl = null;
+  await getro.fetch(autoEntry, {
+    idCache: pageGoneCache,
+    fetchText: async () => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); },
+    fetchJson: async (url) => { pageGoneSearchUrl = url; return { results: { count: 0, jobs: [] } }; },
+  });
+  if (pageGoneSearchUrl?.includes('/collections/5555/') && pageGoneCache.values.get('careers.examplevc.example')?.id === '5555') {
+    pass('getro.fetch() keeps a cached collection id when the recheck of the board page fails, even with 404');
+  } else {
+    fail(`getro.fetch() failed recheck wrong: search=${pageGoneSearchUrl}, cached=${JSON.stringify(pageGoneCache.values.get('careers.examplevc.example'))}`);
+  }
+
+  const apiGoneCache = memCache({ 'careers.examplevc.example': { id: '5555', checkedAt: new Date().toISOString() } });
+  let apiGoneError = null;
+  try {
+    await getro.fetch(autoEntry, {
+      idCache: apiGoneCache,
+      fetchJson: async () => { throw Object.assign(new Error('HTTP 404'), { status: 404 }); },
+    });
+  } catch (err) {
+    apiGoneError = err;
+  }
+  if (apiGoneError?.status === 404 && !apiGoneCache.values.has('careers.examplevc.example')) {
+    pass('getro.fetch() drops the cached collection id when the search API answers 404, and still throws');
+  } else {
+    fail(`getro.fetch() API 404 wrong: error=${apiGoneError?.status}, cached=${apiGoneCache.values.has('careers.examplevc.example')}`);
+  }
+
+  const overrideCache = memCache({ 'jobs.examplevc.example': { id: '5555', checkedAt: new Date().toISOString() } });
+  await getro.fetch(okEntry, { idCache: overrideCache, fetchJson: searchOnly('4283') });
+  if (overrideCache.values.get('jobs.examplevc.example').id === '5555') pass('getro.fetch() lets getro_collection win over a cached id and leaves the cache alone');
+  else fail('getro.fetch() should not touch the cache when getro_collection is set');
+
   // fetch() passes redirect:'error' and a referer derived from careers_url.
   let getroOpts = null;
   const getroJobs = await getro.fetch(okEntry, {
@@ -231,6 +289,118 @@ try {
   if (getroAged.length === 0 && getroAgePages === 1) pass('getro.fetch() stops pagination once postings cross getro_max_age_days');
   else fail(`getro.fetch() age-cutoff handling: ${getroAgePages} pages, ${getroAged.length} jobs kept`);
 
+  // A board can pin `featured` postings above the newest-first order. An old pin
+  // is dropped, but it must not stop the walk: the pages after it are still new.
+  const freshCreatedAt = Math.floor((Date.now() - 2 * 86_400_000) / 1000);
+  const row = (id, createdAt, featured = false) => ({ title: id, url: `https://jobs.examplevc.example/${id}`, organization: { name: 'Acme' }, created_at: createdAt, featured });
+  const pinnedPages = [
+    [row('pin-fresh', freshCreatedAt, true), row('pin-old', staleCreatedAt, true), row('a', freshCreatedAt)],
+    [row('b', freshCreatedAt)],
+    [row('c', staleCreatedAt), row('d', freshCreatedAt)],
+    [row('never-read', freshCreatedAt)],
+  ];
+  let pinnedCalls = 0;
+  const pinned = await getro.fetch({ ...okEntry, getro_max_age_days: 90 }, {
+    fetchJson: async () => {
+      const jobs = pinnedPages[pinnedCalls++] || [];
+      return { results: { count: 80, jobs } };
+    },
+  });
+  const pinnedTitles = pinned.map((j) => j.title).join(',');
+  if (pinnedCalls === 3 && pinnedTitles === 'pin-fresh,a,b,d') {
+    pass('getro.fetch() drops an old featured pin without stopping the walk, and still stops at an old posting in order');
+  } else {
+    fail(`getro.fetch() featured pin: ${pinnedCalls} pages, kept ${pinnedTitles}`);
+  }
+
+  // The page cap warns only when it is what ended the walk with postings left.
+  // Undated rows, so the age cutoff never applies unless a case dates them.
+  // `count: undefined` leaves the board's count out of the response; `lastPageRows`
+  // shortens the last page; `failPage` makes that page throw.
+  const capRun = async (entryExtra, { count, pages, maxPages, lastPageCreatedAt, lastPageRows = 20, failPage } = {}) => {
+    const warnings = [];
+    const origError = console.error;
+    console.error = (m) => warnings.push(String(m));
+    let calls = 0;
+    let jobsOut = [];
+    try {
+      jobsOut = await getro.fetch({ ...okEntry, ...entryExtra }, {
+        ...(maxPages ? { maxPages } : {}),
+        sleep: async () => {},
+        fetchJson: async (_url, opts) => {
+          calls++;
+          // The page index from the request body, not the call count, so a retry
+          // of a failed page asks for that page again.
+          const p = JSON.parse(opts.body).page;
+          if (p === failPage) throw new Error(`page ${p} blew up`);
+          const withCount = (jobs) => ({ results: { ...(count === undefined ? {} : { count }), jobs } });
+          if (p >= pages) return withCount([]);
+          const rows = p === pages - 1 ? lastPageRows : 20;
+          return withCount(Array.from({ length: rows }, (_, i) => ({
+            title: `t${p}-${i}`, url: `https://jobs.examplevc.example/cap-${p}-${i}`, organization: { name: 'Acme' },
+            ...(p === pages - 1 && lastPageCreatedAt ? { created_at: lastPageCreatedAt } : {}),
+          })));
+        },
+      });
+    } finally {
+      console.error = origError;
+    }
+    return { calls, jobs: jobsOut.length, warnings, capWarnings: warnings.filter((w) => w.includes('getro_max_pages')) };
+  };
+
+  const capHit = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5 });
+  if (capHit.calls === 2 && capHit.capWarnings.length === 1
+      && capHit.capWarnings[0].includes('ExampleVC truncated at getro_max_pages=2 (40 of 100 jobs)')) {
+    pass('getro.fetch() warns, naming the entry, when getro_max_pages ends the walk with postings left');
+  } else {
+    fail(`getro.fetch() cap warning: ${capHit.calls} pages, warnings ${JSON.stringify(capHit.capWarnings)}`);
+  }
+
+  // At the hard cap, raising getro_max_pages reads nothing more, so the warning
+  // must not tell the user to; below it, it does.
+  const capHard = await capRun({ getro_max_pages: 5000 }, { count: 40000, pages: 1600 });
+  if (capHard.calls === 1500 && capHard.capWarnings.length === 1
+      && capHard.capWarnings[0].includes('truncated at getro_max_pages=1500 (30000 of 40000 jobs) — the 1500-page hard cap')
+      && !capHard.capWarnings[0].includes('raise getro_max_pages on this entry')
+      && capHit.capWarnings[0]?.includes('— raise getro_max_pages on this entry for more')) {
+    pass('getro.fetch() names the hard cap instead of advising a higher getro_max_pages when it is the 1500-page ceiling');
+  } else {
+    fail(`getro.fetch() hard-cap warning: ${capHard.calls} pages, ${JSON.stringify(capHard.capWarnings)}`);
+  }
+
+  const capExact = await capRun({ getro_max_pages: 2 }, { count: 40, pages: 2 });
+  const capProbe = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, maxPages: 1 });
+  const capAged = await capRun({ getro_max_pages: 2, getro_max_age_days: 90 }, { count: 100, pages: 2, lastPageCreatedAt: staleCreatedAt });
+  if (capExact.capWarnings.length === 0 && capProbe.capWarnings.length === 0 && capAged.capWarnings.length === 0) {
+    pass('getro.fetch() does not warn when the board ends at the cap, a ctx.maxPages probe cuts it, or the age cutoff ends the last page');
+  } else {
+    fail(`getro.fetch() cap warning misfired: exact ${capExact.capWarnings.length}, probe ${capProbe.capWarnings.length}, aged ${capAged.capWarnings.length}`);
+  }
+
+  // A short last page means the board ended there, even when the count is
+  // missing or claims more.
+  const capShortNoCount = await capRun({ getro_max_pages: 2 }, { count: undefined, pages: 2, lastPageRows: 15 });
+  const capShortOverCount = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 2, lastPageRows: 15 });
+  const capFullNoCount = await capRun({ getro_max_pages: 2 }, { count: undefined, pages: 5 });
+  if (capShortNoCount.capWarnings.length === 0 && capShortOverCount.capWarnings.length === 0
+      && capFullNoCount.capWarnings.length === 1 && capFullNoCount.capWarnings[0].includes('(40 jobs)')) {
+    pass('getro.fetch() treats a short last page as the board ending, with or without a count, and still warns on a full one with no count');
+  } else {
+    fail(`getro.fetch() short last page: no count ${capShortNoCount.capWarnings.length}, count 100 ${capShortOverCount.capWarnings.length}, full with no count ${JSON.stringify(capFullNoCount.capWarnings)}`);
+  }
+
+  // A probe cap equal to the entry's cap is still the probe's cut.
+  const capProbeEqual = await capRun({ getro_max_pages: 1 }, { count: 100, pages: 5, maxPages: 1 });
+  // The last allowed page failing ends the walk on the error, not the cap.
+  const capFailLast = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, failPage: 1 });
+  if (capProbeEqual.capWarnings.length === 0 && capProbeEqual.calls === 1
+      && capFailLast.capWarnings.length === 0 && capFailLast.jobs === 20
+      && capFailLast.warnings.some((w) => w.includes('truncated at page 2 of 2'))) {
+    pass('getro.fetch() does not warn on the cap when a probe cap equals it, or when the last allowed page fails');
+  } else {
+    fail(`getro.fetch() cap warning: probe=cap ${capProbeEqual.capWarnings.length} (${capProbeEqual.calls} calls), failed last page ${capFailLast.capWarnings.length} (${capFailLast.jobs} jobs, ${JSON.stringify(capFailLast.warnings)})`);
+  }
+
   // A transient failure (timeout/abort — no .status set, matching a real AbortError)
   // is retried and recovers transparently instead of truncating the board (#2506).
   let getroRetryAttempts = 0;
@@ -273,6 +443,37 @@ try {
   } else {
     fail(`getro.fetch() later-page failure handling: ${JSON.stringify(getroLaterPageFail)}`);
   }
+
+  // The truncation warning names the failed page in 1-based numbering, the pages
+  // the walk planned to read, and the requests really made for that page.
+  const truncationWarning = async (rejection) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    try {
+      await getro.fetch(okEntry, {
+        sleep: async () => {},
+        fetchJson: async (_url, opts) => {
+          const { page } = JSON.parse(opts.body);
+          if (page === 0) return { results: { count: 100, jobs: [{ title: 'First', url: 'https://jobs.examplevc.example/f', organization: { name: 'Acme' } }] } };
+          throw rejection;
+        },
+      });
+    } finally {
+      console.error = realConsoleError;
+    }
+    return warnings.join('\n');
+  };
+  const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const retriedWarning = await truncationWarning(httpError(429));
+  if (retriedWarning.includes('ExampleVC truncated at page 2 of 5 after 3 attempts (1 jobs): HTTP 429')) pass('getro.fetch() warning names the failed page, the planned pages and the attempts after a retried 429');
+  else fail(`getro.fetch() retried truncation warning: ${retriedWarning}`);
+  const notRetriedWarning = await truncationWarning(httpError(403));
+  if (notRetriedWarning.includes('truncated at page 2 of 5 after 1 attempt (1 jobs): HTTP 403')) pass('getro.fetch() warning counts one attempt for a non-retryable failure');
+  else fail(`getro.fetch() non-retried truncation warning: ${notRetriedWarning}`);
+  const stringWarning = await truncationWarning('plain string rejection');
+  if (stringWarning.includes('truncated at page 2 of 5 after an unknown number of attempts (1 jobs): plain string rejection')) pass('getro.fetch() warning says the attempts are unknown when a later page rejects with a non-object');
+  else fail(`getro.fetch() string rejection truncation warning: ${stringWarning}`);
 
   // Malformed / empty payload → empty array, no crash, no infinite pagination.
   const getroEmpty = await getro.fetch(okEntry, { fetchJson: async () => ({}) });

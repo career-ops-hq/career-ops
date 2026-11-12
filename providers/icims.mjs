@@ -5,15 +5,16 @@
 // Auto-detects from careers_url on any `*.icims.com` https host
 // (canonical form: `https://careers-<tenant>.icims.com/jobs/search?ss=1`).
 //
-// iCIMS list pages carry title/location/URL but NO posted date; dates live
-// only on the job detail page's JSON-LD (schema.org JobPosting `datePosted`).
+// iCIMS list pages carry title/location/URL but no dates. Posted and close
+// dates live on the job detail page's JSON-LD (`datePosted`, `validThrough`).
 // The provider therefore returns undated jobs plus an `enrichDate(job, ctx)`
 // hook — scan-ats-full.mjs calls it only for jobs that already passed the
 // cheap title/location filters, so a 10k-tenant sweep pays detail-page
 // requests for real candidates only, never for noise.
 
-import { BROWSER_LIKE_USER_AGENT } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { closesAtIso } from '../lib/posting-close.mjs';
 
 // ~20 postings/page → 30 pages covers 600 postings; tenants bigger than that
 // are rare on iCIMS and a reverse scan only needs the fresh slice anyway.
@@ -27,11 +28,6 @@ const HEADERS = {
   'user-agent': BROWSER_LIKE_USER_AGENT,
   'accept-language': 'en-US,en;q=0.9',
 };
-
-function sleep(ms, ctx) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 function resolveOrigin(entry) {
   // entry.api takes precedence over careers_url (mirrors greenhouse/ashby).
@@ -54,8 +50,9 @@ const searchUrl = (origin, page) => `${origin}/jobs/search?ss=1&pr=${page}&in_if
  *
  * Postings are `<li class="iCIMS_JobCardItem">` cards: posting URL in an
  * `iCIMS_Anchor` href (`/jobs/{id}/{title-slug}/job`, query stripped), title
- * in the anchor's `<h3>`, location in the span following the card's
- * `field-label` "Location" label. Cards whose href resolves off-origin are
+ * in the anchor's `<h3>`, location in the span following a `field-label`
+ * whose text starts with the word Location ("Location", "Location : Country").
+ * Cards whose href resolves off-origin are
  * dropped (defense in depth —
  * a portal page should never link a posting on another host).
  *
@@ -84,11 +81,14 @@ export function parseIcimsSearchPage(html, origin, companyName) {
     if (!title || !title[1].trim()) continue;
     // `field-label` is one token in a themed class list, not reliably the last
     // one, so anchoring on the literal `field-label">` read an empty location
-    // off any tenant that appended a class. An empty location then fails
-    // location_filter and the posting is dropped with nothing to explain it.
+    // off any tenant that appended a class.
     // The lookarounds keep `field-label` a whole token, so a longer hyphenated
     // class like `field-label-inline` still doesn't count as a match.
-    const location = card.match(/<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\s*<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
+    // The label text has to start with the word Location. Tenants suffix it
+    // ("Location : Country", "Location : City") and put the value in the next
+    // span. Requiring the span to contain only "Location" left those boards
+    // blank. "Locations" does not match: the word boundary stops it.
+    const location = card.match(/<span\b[^>]*class=["'][^"']*(?<![\w-])field-label(?![\w-])[^"']*["'][^>]*>\s*Location\b[^<]*<\/span>\s*<span\b[^>]*>\s*([\s\S]*?)<\/span>/);
     jobs.push({
       title: decodeEntities(title[1].replace(/\s+/g, ' ').trim()),
       url: `${parsed.origin}${parsed.pathname}`,
@@ -100,6 +100,44 @@ export function parseIcimsSearchPage(html, origin, companyName) {
   return jobs;
 }
 
+/**
+ * Walk one host's search pages for `entry`. Split out of fetch() so a
+ * fallback host runs exactly the same pagination and truncation rules.
+ */
+async function fetchPortal(origin, entry, ctx) {
+  const all = [];
+  let prevFirstUrl = null;
+  // Distinguishes "walked the whole board" from "stopped at the page cap".
+  // Exhausting the cap silently would drop every later posting and look
+  // identical to a complete board — the same failure mode the Workday
+  // truncation tag exists to prevent.
+  let reachedEnd = false;
+  for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
+    if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+    let html;
+    try {
+      html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
+    } catch (err) {
+      // Only a first-page failure says anything about whether this host
+      // has a board at all; fetch() uses the mark to decide on a fallback.
+      // Later pages are marked too, explicitly false: an error with no mark
+      // is what every other provider throws, and dead-board tracking has to
+      // tell "this board had already answered" apart from that.
+      if (err && typeof err === 'object') err.firstPage = pageNum === 0;
+      throw err;
+    }
+    const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
+    if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
+    // Some tenants serve the last real page again for an out-of-range pr
+    // instead of an empty one — a repeated first URL means we're looping.
+    if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
+    prevFirstUrl = pageJobs[0].url;
+    all.push(...pageJobs);
+  }
+  if (!reachedEnd) all.icimsTruncated = true;
+  return all;
+}
+
 /** @type {Provider} */
 export default {
   id: 'icims',
@@ -109,35 +147,53 @@ export default {
     return origin ? { url: searchUrl(origin, 0) } : null;
   },
 
+  /**
+   * Walk a tenant's search pages. An entry may carry `fallback_urls`: other
+   * hosts the same tenant could be served from (scan-ats-full.mjs builds them,
+   * because the public dataset stores some tenants bare and some as a full
+   * portal subdomain). A fallback is tried only when the previous host answers
+   * 404 on its FIRST page, the one response that means "no board here". Any
+   * other failure (throttle, timeout, DNS, a later-page 404) is rethrown as-is.
+   * A first-page throttle or timeout carries its own status, which dead-board
+   * tracking reads as "unknown". A later-page failure carries `firstPage:
+   * false`, which is how tracking knows the board had already answered and
+   * does not count a later-page 404 as a miss (recordBoardFailure()).
+   */
   async fetch(entry, ctx) {
-    const origin = resolveOrigin(entry);
-    if (!origin) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
-    const all = [];
-    let prevFirstUrl = null;
-    // Distinguishes "walked the whole board" from "stopped at the page cap".
-    // Exhausting the cap silently would drop every later posting and look
-    // identical to a complete board — the same failure mode the Workday
-    // truncation tag exists to prevent.
-    let reachedEnd = false;
-    for (let pageNum = 0; pageNum < ICIMS_MAX_PAGES; pageNum++) {
-      if (pageNum > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      const html = await ctx.fetchText(searchUrl(origin, pageNum), { headers: HEADERS, redirect: 'error' });
-      const pageJobs = parseIcimsSearchPage(html, origin, entry.name);
-      if (pageJobs.length === 0) { reachedEnd = true; break; } // past the last page
-      // Some tenants serve the last real page again for an out-of-range pr
-      // instead of an empty one — a repeated first URL means we're looping.
-      if (pageJobs[0].url === prevFirstUrl) { reachedEnd = true; break; }
-      prevFirstUrl = pageJobs[0].url;
-      all.push(...pageJobs);
+    const primary = resolveOrigin(entry);
+    if (!primary) throw new Error(`icims: cannot derive portal origin for ${entry.name}`);
+    const origins = [primary];
+    for (const raw of Array.isArray(entry.fallback_urls) ? entry.fallback_urls : []) {
+      // Same https + *.icims.com gate as the primary: a fallback can never
+      // point the scanner at another host.
+      const origin = resolveOrigin({ careers_url: raw });
+      if (origin && !origins.includes(origin)) origins.push(origin);
     }
-    if (!reachedEnd) all.icimsTruncated = true;
-    return all;
+    let notFound;
+    for (const origin of origins) {
+      try {
+        return await fetchPortal(origin, entry, ctx);
+      } catch (err) {
+        if (err?.status !== 404 || !err.firstPage) throw err;
+        notFound = err;
+      }
+    }
+    throw notFound;
   },
 
   /**
    * Fill in job.postedAt from the posting's detail page (JSON-LD JobPosting
-   * `datePosted`) — the list pages carry no date at all. Any failure leaves
-   * the job undated; the caller's undated policy then applies as usual.
+   * `datePosted`) — the list pages carry no date at all. A real `validThrough`
+   * on that same node becomes job.closesAt. Any failure leaves the job
+   * undated; the caller's undated policy then applies as usual.
+   *
+   * The same detail page also carries `jobLocation.address`, so an empty
+   * list-page location is filled here too. Several tenants render the search
+   * card without a location span at all; the empty string that produced then
+   * passes location_filter (an empty location can't match a block term), so a
+   * US-only board reaches the results with no country attached and the reader
+   * has to look each posting up by hand. Measured 2026-08-13: all six iCIMS
+   * matches in a 1,000-company sweep were US postings that arrived this way.
    */
   async enrichDate(job, ctx) {
     const sep = job.url.includes('?') ? '&' : '?';
@@ -158,19 +214,85 @@ export default {
     }
     const ts = Date.parse(pickDatePosted(nodes) || '');
     if (!Number.isNaN(ts)) job.postedAt = ts;
+    const closesAt = pickClosesAt(nodes);
+    if (closesAt) job.closesAt = closesAt;
+    if (!String(job.location || '').trim() || /^n\/?a$/i.test(String(job.location).trim())) {
+      const loc = pickLocation(nodes);
+      if (loc) job.location = loc;
+    }
   },
 };
 
-// From flattened JSON-LD nodes, return the datePosted of the first JobPosting
-// node; if none carries a @type, fall back to the first node that has a
-// datePosted at all (preserves the original lenient single-object behavior).
-function pickDatePosted(nodes) {
+// ISO country codes are what iCIMS emits, but location_filter matches on the
+// words a human wrote in portals.yml ("Canada", "United States"), so a bare
+// "US" would sail past a block list that spells the country out.
+const COUNTRY_NAMES = { US: 'United States', CA: 'Canada' };
+
+// From flattened JSON-LD nodes, build "Locality, Region, Country" out of the
+// first jobLocation entry (across all JobPosting nodes) that yields any usable
+// parts. Some tenants emit an all-UNAVAILABLE entry ahead of the real address,
+// so reading only the first entry would return no location even though a
+// later one has one. Partial addresses are kept: the country alone is already
+// enough for location_filter to decide.
+function pickLocation(nodes) {
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object' || !node.jobLocation) continue;
+    const places = Array.isArray(node.jobLocation) ? node.jobLocation : [node.jobLocation];
+    for (const place of places) {
+      const addr = place?.address;
+      if (!addr || typeof addr !== 'object') continue;
+      const clean = v => {
+        const s = String(v ?? '').trim();
+        // iCIMS writes the literal string UNAVAILABLE into fields it has no value
+        // for, so an unchecked join yields "UNAVAILABLE, MD, United States".
+        return !s || /^unavailable$/i.test(s) ? '' : s;
+      };
+      const country = clean(addr.addressCountry);
+      const parts = [
+        clean(addr.addressLocality),
+        clean(addr.addressRegion),
+        COUNTRY_NAMES[country.toUpperCase()] || country,
+      ].filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    }
+  }
+  return null;
+}
+
+function jobPostingType(node) {
+  const type = node?.['@type'];
+  return type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'));
+}
+
+function datedPostingNode(nodes) {
   let fallback = null;
   for (const node of nodes) {
     if (!node || typeof node !== 'object' || !node.datePosted) continue;
-    const type = node['@type'];
-    if (type === 'JobPosting' || (Array.isArray(type) && type.includes('JobPosting'))) return node.datePosted;
-    if (fallback == null) fallback = node.datePosted;
+    if (jobPostingType(node)) return node;
+    if (fallback == null) fallback = node;
   }
   return fallback;
+}
+
+function pickDatePosted(nodes) {
+  const node = datedPostingNode(nodes);
+  return node ? node.datePosted : null;
+}
+
+function pickClosesAt(nodes) {
+  const posted = datedPostingNode(nodes);
+  if (posted) return closesAtIso(posted) || '';
+  let fallback = '';
+  let sawTyped = false;
+  for (const node of nodes) {
+    if (!node || typeof node !== 'object') continue;
+    const day = closesAtIso(node);
+    if (jobPostingType(node)) {
+      sawTyped = true;
+      if (day) return day;
+      continue;
+    }
+    if (!fallback && day) fallback = day;
+  }
+  return sawTyped ? '' : fallback;
 }

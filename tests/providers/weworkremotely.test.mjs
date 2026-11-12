@@ -101,6 +101,27 @@ try {
     fail(`row 1 location = ${JSON.stringify(jobs[1]?.location)}`);
   }
 
+  // description: every item carries the posting's HTML, entity-escaped or in
+  // CDATA. Dropped, it left content_filter, country_eligibility_filter and
+  // visa_filter nothing to read for any We Work Remotely posting, and the
+  // scan-history fingerprint empty.
+  const item = (slug, description) => `<item><title>Acme: Data Engineer</title><link>https://weworkremotely.com/remote-jobs/${slug}</link>${description ?? ''}</item>`;
+  const described = parseWwrFeed(`<rss><channel>${[
+    item('d1', '<description>&lt;p&gt;You will write &lt;strong&gt;Python&lt;/strong&gt; &amp;amp; dbt.&lt;/p&gt;</description>'),
+    item('d2', '<description><![CDATA[<p>Remote across <em>Europe</em> only.</p>]]></description>'),
+    item('d3'), item('d4', '<description></description>'), item('d5', '<description>   </description>'), item('d6', '<description>&lt;p&gt;&lt;/p&gt;</description>'),
+  ].join('')}</channel></rss>`);
+  if (described[0]?.description === 'You will write Python & dbt.' && described[1]?.description === 'Remote across Europe only.') {
+    pass('parseWwrFeed passes an escaped or CDATA description through as plain text');
+  } else {
+    fail(`parseWwrFeed descriptions = ${JSON.stringify(described.slice(0, 2).map((j) => j.description))}`);
+  }
+  if (described.length === 6 && described.slice(2).every((j) => !('description' in j))) {
+    pass('parseWwrFeed omits description when it is absent, empty, whitespace or markup-only');
+  } else {
+    fail(`parseWwrFeed description presence = ${JSON.stringify(described.map((j) => j.description))}`);
+  }
+
   if (parseWwrFeed('', 'X').length === 0 && parseWwrFeed(null, 'X').length === 0) {
     pass('parseWwrFeed empty / non-string feed -> empty result (no crash)');
   } else {

@@ -1,0 +1,28 @@
+# Prepares the environment for Copilot cloud agent sessions.
+# Mirrors test.yml: same Node and Go, dependencies installed without
+# lifecycle scripts. The agent's network firewall does not apply to this
+# job, so this file stays under CODEOWNERS like every other workflow.
+name: Copilot setup steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+  pull_request:
+    paths: [.github/workflows/copilot-setup-steps.yml]
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.27'
+          cache-dependency-path: dashboard/go.sum
+      - run: npm install --ignore-scripts

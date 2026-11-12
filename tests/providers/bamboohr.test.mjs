@@ -93,10 +93,206 @@ try {
     fetchJson: async (url, opts) => { fetchedUrl = url; fetchedOpts = opts; return sample; },
   };
   const fetched = await bamboohr.fetch({ name: 'Acme', careers_url: 'https://acme.bamboohr.com/careers' }, mockCtx);
-  if (fetchedUrl === 'https://acme.bamboohr.com/careers/list' && fetchedOpts?.redirect === 'error' && fetched.length === 2) {
-    pass('bamboohr.fetch() calls /careers/list with redirect:error and returns parsed jobs');
+  if (fetchedUrl === 'https://acme.bamboohr.com/careers/list' && fetchedOpts?.redirect === 'manual' && fetched.length === 2) {
+    pass('bamboohr.fetch() calls /careers/list with redirect:manual and returns parsed jobs');
   } else {
     fail(`bamboohr.fetch() url=${fetchedUrl} redirect=${JSON.stringify(fetchedOpts)} jobs=${fetched.length}`);
+  }
+
+  // SSRF guard — an untrusted host must never reach ctx.fetchJson at all.
+  // A stub that only throws would pass whether the guard fired or a fetch
+  // was wrongly attempted, so assert the call count directly.
+  {
+    let calls = 0;
+    const untrustedCtx = { fetchJson: async () => { calls++; throw new Error('should never be called'); } };
+    try {
+      await bamboohr.fetch({ name: 'Evil', careers_url: 'https://evil.example/acme.bamboohr.com/foo' }, untrustedCtx);
+      fail('bamboohr.fetch() should throw for an untrusted host');
+    } catch {
+      if (calls === 0) pass('bamboohr.fetch() rejects an untrusted host before any fetchJson call');
+      else fail(`bamboohr.fetch() should not call fetchJson for an untrusted host (called ${calls} time(s))`);
+    }
+  }
+
+  // fetch() — a redirect away from /careers/list is not by itself proof the
+  // board is dead. The marketing-site bounce is the one exception (skipped
+  // straight to dead, tested separately below); any other redirect probes
+  // the embed-widget feed (/jobs/embed2.php) to tell a live-but-empty board
+  // from the account-suspension signature, whose job pages answer with a
+  // login wall regardless of how many positions the feed reports (verified
+  // live 2026-09-21 against three such tenants) — so a populated feed there
+  // is treated the same as no answer at all: dead.
+  {
+    const redirectErr = new Error('HTTP 302');
+    redirectErr.status = 302;
+    redirectErr.location = '/settings/account/temporarily_suspended';
+
+    // Fallback answers with zero positions — a live, currently-empty board;
+    // fetch() must succeed with [], not throw. Also asserts the probe uses
+    // redirect:'error' (it never reads .location, so 'manual' is not
+    // warranted for this request).
+    let embed2Opts;
+    const emptyLiveCtx = {
+      fetchJson: async (url, opts) => {
+        if (url.includes('/careers/list')) throw redirectErr;
+        embed2Opts = opts;
+        return { success: true, departments: [] };
+      },
+    };
+    const emptyLive = await bamboohr.fetch({ name: 'Empty', careers_url: 'https://empty.bamboohr.com/careers' }, emptyLiveCtx);
+    if (Array.isArray(emptyLive) && emptyLive.length === 0 && embed2Opts?.redirect === 'error') {
+      pass('bamboohr.fetch() returns [] (not an error) when the embed-widget probe confirms a live, empty board, using redirect:error');
+    } else {
+      fail(`bamboohr.fetch() live-empty case: jobs=${JSON.stringify(emptyLive)}, probe redirect=${JSON.stringify(embed2Opts)}`);
+    }
+
+    // Fallback answers with real positions — the suspended-account
+    // signature, whose job pages are confirmed unusable regardless of count.
+    // Still mapped to dead, not returned as matches.
+    const populatedCtx = {
+      fetchJson: async (url) => {
+        if (url.includes('/careers/list')) throw redirectErr;
+        return { success: true, departments: [{ id: 1, label: 'Ops', positions: [{ id: 7, name: 'Caregiver', location: 'OR', url: 'https://dead.bamboohr.com/careers/7' }] }] };
+      },
+    };
+    try {
+      await bamboohr.fetch({ name: 'Suspended', careers_url: 'https://dead.bamboohr.com/careers' }, populatedCtx);
+      fail('bamboohr.fetch() should throw when the embed-widget probe returns a populated (suspended-account) board');
+    } catch (err) {
+      if (err.status === 404) pass('bamboohr.fetch() maps a populated embed-widget probe (suspended-account signature) to status 404');
+      else fail(`bamboohr.fetch() populated-probe case got status ${err.status}, want 404`);
+    }
+
+    // Fallback is itself unreachable — dead, same as a populated board.
+    const bothFailCtx = { fetchJson: async () => { throw redirectErr; } };
+    try {
+      await bamboohr.fetch({ name: 'Dead', careers_url: 'https://dead.bamboohr.com/careers' }, bothFailCtx);
+      fail('bamboohr.fetch() should throw when both /careers/list and the embed-widget probe fail');
+    } catch (err) {
+      if (err.status === 404) pass('bamboohr.fetch() maps a doubly-unreachable redirect to status 404');
+      else fail(`bamboohr.fetch() doubly-unreachable case got status ${err.status}, want 404`);
+    }
+  }
+
+  // fetch() — the marketing-site bounce specifically skips the embed-widget
+  // probe entirely (92% of a full sweep's redirected tenants, confirmed
+  // dead by the probe every time sampled — paying that request there is
+  // pure waste). Prove the skip, not just the outcome: the mock ctx would
+  // answer with a live, empty board if the probe were called, so a passing
+  // test here means it never was.
+  for (const [label, location] of [
+    ['bare host', 'https://www.bamboohr.com/'],
+    ['no www', 'https://bamboohr.com'],
+  ]) {
+    const marketingRedirectErr = new Error('HTTP 302');
+    marketingRedirectErr.status = 302;
+    marketingRedirectErr.location = location;
+    let probeCalled = false;
+    const fastPathCtx = {
+      fetchJson: async (url) => {
+        if (url.includes('/careers/list')) throw marketingRedirectErr;
+        probeCalled = true;
+        return { success: true, departments: [] };
+      },
+    };
+    try {
+      await bamboohr.fetch({ name: 'Dead', careers_url: 'https://dead.bamboohr.com/careers' }, fastPathCtx);
+      fail(`bamboohr.fetch() should throw for a marketing-site bounce (${label})`);
+    } catch (err) {
+      if (err.status === 404 && !probeCalled) pass(`bamboohr.fetch() skips the embed-widget probe for a marketing-site bounce (${label})`);
+      else fail(`bamboohr.fetch() marketing bounce (${label}): status=${err.status}, probeCalled=${probeCalled} (want 404, false)`);
+    }
+  }
+
+  // fetch() — a non-redirect failure (timeout, DNS, 5xx) must pass through
+  // unchanged: it is not a confirmed-dead signal, only "unknown" (dead-boards.mjs).
+  {
+    const transientErr = new Error('This operation was aborted');
+    transientErr.code = 20;
+    const transientCtx = { fetchJson: async () => { throw transientErr; } };
+    try {
+      await bamboohr.fetch({ name: 'Slow', careers_url: 'https://slow.bamboohr.com/careers' }, transientCtx);
+      fail('bamboohr.fetch() should throw for a transport error');
+    } catch (err) {
+      if (err === transientErr && err.status !== 404) pass('bamboohr.fetch() passes a non-redirect failure through unmapped');
+      else fail(`bamboohr.fetch() should not remap a transport error, got status ${err.status}`);
+    }
+  }
+
+  // enrichDate() — the detail-page fetch passes redirect:'error' like every
+  // non-inspection request.
+  {
+    let detailOpts;
+    const detailCtx = {
+      fetchJson: async (url, opts) => {
+        detailOpts = opts;
+        return { result: { jobOpening: { datePosted: '2026-01-17' } } };
+      },
+    };
+    const job = { url: 'https://acme.bamboohr.com/careers/15' };
+    await bamboohr.enrichDate(job, detailCtx);
+    if (detailOpts?.redirect === 'error' && job.postedAt === Date.parse('2026-01-17')) {
+      pass('bamboohr.enrichDate() fetches /careers/<id>/detail with redirect:error and sets postedAt');
+    } else {
+      fail(`bamboohr.enrichDate() redirect=${JSON.stringify(detailOpts)} postedAt=${job.postedAt}`);
+    }
+  }
+
+  // listingIdentity (#6908): the id the payload already carries becomes the
+  // strong ATS-native identity, next to the tenant subdomain.
+  {
+    const { bamboohrListingIdentity } = bamboohrModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+    const [stringId, numberId] = parseBambooHRResponse(sample, 'Acme', 'https://acme.bamboohr.com');
+    const identity = stringId?.listingIdentity;
+    if (identity?.ats_provider === 'bamboohr' && identity?.board_slug === 'acme' && identity?.posting_id === '15'
+        && Object.keys(identity).length === 3) {
+      pass('parseBambooHRResponse returns the bamboohr/<tenant>/<id> listingIdentity');
+    } else {
+      fail(`bamboohr identity = ${JSON.stringify(identity)}`);
+    }
+    if (numberId?.listingIdentity?.posting_id === '22') pass('a numeric BambooHR id gives the same decimal posting_id as its string form');
+    else fail(`numeric-id identity = ${JSON.stringify(numberId?.listingIdentity)}`);
+
+    // The same posting reached at another URL (the legacy /jobs/view.php?id=
+    // share link, or a branded page embedding the tenant's widget) is the
+    // same listing; URL dedup alone cannot join the two.
+    const sharePage = { ...stringId, url: 'https://acme.bamboohr.com/jobs/view.php?id=15' };
+    const seen = new Set();
+    markOfferSeen(stringId, seen);
+    if (isOfferSeen(sharePage, seen)) {
+      pass('the same BambooHR posting under another URL is already seen (one row, not two)');
+    } else {
+      fail('BambooHR posting under another URL was not recognised as the same posting');
+    }
+
+    const [otherTenant] = parseBambooHRResponse({ result: [{ id: '15', jobOpeningName: 'IT Security Engineer' }] }, 'Other', 'https://other.bamboohr.com');
+    if (listingIdentityToken(otherTenant) && listingIdentityToken(otherTenant) !== listingIdentityToken(stringId) && !isOfferSeen(otherTenant, seen)) {
+      pass('the same BambooHR id on another tenant is a different listing');
+    } else {
+      fail(`other-tenant token = ${listingIdentityToken(otherTenant)}`);
+    }
+
+    // A row the provider keeps but whose id has no canonical decimal form gets no identity.
+    const [padded] = parseBambooHRResponse({ result: [{ id: ' 15 ', jobOpeningName: 'Padded' }] }, 'Acme', 'https://acme.bamboohr.com');
+    if (padded && !('listingIdentity' in padded)) pass('a padded BambooHR id keeps the row but leaves listingIdentity off');
+    else fail(`padded-id row = ${JSON.stringify(padded)}`);
+
+    if (bamboohrListingIdentity('acme', 7)?.posting_id === '7'
+        && bamboohrListingIdentity('acme', '7')?.posting_id === '7'
+        && bamboohrListingIdentity('acme', '007') === undefined
+        && bamboohrListingIdentity('acme', '7a') === undefined
+        && bamboohrListingIdentity('acme', 7.5) === undefined
+        && bamboohrListingIdentity('acme', Number.MAX_SAFE_INTEGER + 1) === undefined
+        && bamboohrListingIdentity('acme', 0) === undefined
+        && bamboohrListingIdentity('acme', null) === undefined
+        && bamboohrListingIdentity('', 7) === undefined
+        && bamboohrListingIdentity(null, 7) === undefined) {
+      pass('bamboohrListingIdentity() accepts only a tenant and a canonical positive integer id');
+    } else {
+      fail('bamboohrListingIdentity() accepted an id or tenant that cannot form a strong identity');
+    }
   }
 
 } catch (e) {

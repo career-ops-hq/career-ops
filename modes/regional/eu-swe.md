@@ -50,6 +50,7 @@ Use these as prompts for what to verify, not as final legal advice.
 |----------------|------------------------------------|
 | Netherlands | Sponsor readiness, recognized employer requirements, office/hybrid expectations, English vs Dutch, finance/security screening such as VOG/PES when relevant. Verify immigration and salary threshold facts from official Dutch sources at runtime. |
 | Germany / DACH | Blue Card or residence/work permit fit, German vs English expectations, city-specific compensation, notice/probation norms, and highly formal application expectations in some companies. Verify legal and permit facts from official sources at runtime. |
+| Austria | EU/EEA free movement vs. Rot-Weiß-Rot – Karte or Blaue Karte EU, German vs English expectations, the KV minimum-pay statement in Austrian postings, annual pay on a 14-salary basis, and Vienna vs regional compensation. Use `modes/at/` for the full Austrian rules. Verify permit facts at migration.gv.at at runtime. |
 | Ireland | Employment permit or local work authorization fit, Dublin vs regional compensation, English-language expectations, and multinational hiring-process norms. Verify permit facts from official Irish sources at runtime. |
 | France | French vs English expectations, CDI/CDD or contract framing, Paris vs regional compensation, and sector-specific benefits or collective-agreement context when visible in the JD. Verify work authorization and labor facts from official sources at runtime. |
 | UK | Skilled Worker sponsorship, salary/visa feasibility, London vs regional compensation, and right-to-work wording. Verify legal and immigration facts from official UK sources at runtime. |
@@ -102,4 +103,4 @@ Produce a concise addendum:
 - Do not invent work authorization, language level, compensation targets, degree equivalence, or relocation availability.
 - Do not put sensitive logistics in the CV unless the user explicitly wants that or the local market clearly expects it.
 - Do not provide legal advice. Provide verification prompts and cite official sources when legal facts are used.
-- Keep output in the JD language unless the user asks otherwise.
+- Write output in `language.output`, whatever the JD language: that setting is how the user asks for a language.

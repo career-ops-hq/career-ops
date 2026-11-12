@@ -55,8 +55,12 @@ for (const file of MIGRATED_FILES) {
 
   // And the migrated write path actually routes through the shared helper —
   // a file could pass the check above by deleting the write entirely.
-  const seamCalls = [...src.matchAll(/renameSyncWithRetry\s*\(/g)].length;
-  ok(seamCalls >= 1, `${file}: renames through renameSyncWithRetry (found ${seamCalls} call(s))`);
+  // writeFileAtomic counts as the seam too: it is tracker-utils.mjs's own
+  // write-tmp-then-rename, and its closing rename is the one
+  // tests/rename-contention.test.mjs §4 pins to renameSyncWithRetry.
+  // paste-reply.mjs moved onto it in #4920 to get a per-write temp name.
+  const seamCalls = [...src.matchAll(/\b(?:renameSyncWithRetry|writeFileAtomic)\s*\(/g)].length;
+  ok(seamCalls >= 1, `${file}: renames through renameSyncWithRetry or writeFileAtomic (found ${seamCalls} call(s))`);
 
   // The helper has to come from the one canonical definition, not a local
   // reimplementation — that drift is exactly what #2984 cost weeks chasing.
@@ -64,12 +68,12 @@ for (const file of MIGRATED_FILES) {
   // note): no static top-level relative import, so it pulls the helper in
   // via a lazy `await import(...)` instead — both forms count here.
   const importsFromTrackerUtils = new RegExp(
-    `import\\s*\\{[^}]*\\brenameSyncWithRetry\\b[^}]*\\}\\s*from\\s*['"]\\.\\/tracker-utils\\.mjs['"]`,
+    `import\\s*\\{[^}]*\\b(?:renameSyncWithRetry|writeFileAtomic)\\b[^}]*\\}\\s*from\\s*['"]\\.\\/tracker-utils\\.mjs['"]`,
   ).test(src);
   const lazyImportsFromTrackerUtils =
-    /(?:const|let|var)\s*\{[^}]*\brenameSyncWithRetry\b[^}]*\}\s*=\s*await\s+import\(\s*['"]\.\/tracker-utils\.mjs['"]\s*\)/.test(src);
+    /(?:const|let|var)\s*\{[^}]*\b(?:renameSyncWithRetry|writeFileAtomic)\b[^}]*\}\s*=\s*await\s+import\(\s*['"]\.\/tracker-utils\.mjs['"]\s*\)/.test(src);
   ok(
     importsFromTrackerUtils || lazyImportsFromTrackerUtils,
-    `${file}: renameSyncWithRetry is imported from the canonical tracker-utils.mjs (not reimplemented)`,
+    `${file}: the rename helper is imported from the canonical tracker-utils.mjs (not reimplemented)`,
   );
 }

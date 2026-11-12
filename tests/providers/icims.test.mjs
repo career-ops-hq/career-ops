@@ -174,6 +174,56 @@ const mkCtx = (pages) => ({
   if (job.postedAt === undefined) pass('enrichDate tolerates malformed JSON-LD without throwing');
   else fail(`postedAt unexpectedly set: ${job.postedAt}`);
 }
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-20","validThrough":"2026-11-11T23:59:59"}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-20') && job.closesAt === '2026-11-11') {
+    pass('enrichDate copies a real validThrough day to closesAt');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-20","validThrough":"2026-02-31"}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-20') && !('closesAt' in job)) {
+    pass('enrichDate leaves closesAt unset when validThrough is not a calendar day');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">[{"@type":"Organization","validThrough":"2026-01-01"},{"@type":"JobPosting","datePosted":"2026-07-19"}]</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-19') && !('closesAt' in job)) {
+    pass('enrichDate does not borrow a close day from a sibling node');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">[{"@type":"JobPosting","datePosted":"2026-07-19"},{"@type":"JobPosting","validThrough":"2026-01-02"}]</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-19') && !('closesAt' in job)) {
+    pass('enrichDate does not borrow a close day from a later JobPosting');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
+{
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'US' };
+  const detail = `<script type="application/ld+json">{"validThrough":"2026-08-08","datePosted":"2026-07-17"}</script>`;
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.postedAt === Date.parse('2026-07-17') && job.closesAt === '2026-08-08') {
+    pass('enrichDate reads validThrough from an untyped JSON-LD object');
+  } else {
+    fail(`postedAt=${job.postedAt} closesAt=${JSON.stringify(job.closesAt)}`);
+  }
+}
 
 // ── attribute ordering must not change what we extract ──────────────
 // Tenants theme their portals, so `field-label` is one token in a class list,
@@ -190,6 +240,36 @@ const mkCtx = (pages) => ({
     if (j && j.location === 'US-TX-Austin') pass(`location extracted with class="${cls}"`);
     else fail(`class="${cls}" → location ${JSON.stringify(j?.location)}`);
   }
+}
+
+// Some tenants suffix the label ("Location : Country") and put the value in
+// the next span, including a leading newline. A second "Location : Location"
+// field lives in a <dt> with its value in a later <dd>, not the next span.
+// The header value is the one a scan should show. "Locations" is a different
+// word and must not win.
+{
+  const card = `<li class="iCIMS_JobCardItem"><div class="row">
+    <div class="col-xs-6 header left"><span class="sr-only field-label">Location : Country</span><span >
+Oslo</span></div>
+    <div class="col-xs-12 title"><a href="${ORIGIN}/jobs/5151/bridge-engineer/job" class="iCIMS_Anchor"><h3>Bridge Engineer</h3></a></div>
+    <div class="col-xs-12 additionalFields">
+      <dt class="iCIMS_JobHeaderField"><span class="sr-only field-label">Location : Location</span></dt>
+      <dd class="iCIMS_JobHeaderData"><span >OSL-</span></dd>
+    </div>
+  </div></li>`;
+  const [j] = parseIcimsSearchPage(`<ul>${card}</ul>`, ORIGIN, 'acmefreight');
+  if (j && j.title === 'Bridge Engineer' && j.location === 'Oslo') pass('suffixed Location label yields the next span, not the later dd');
+  else fail(`suffix label → ${JSON.stringify(j && { title: j.title, location: j.location })}`);
+}
+{
+  const card = `<li class="iCIMS_JobCardItem"><div class="row">
+    <div class="col-xs-6 header left"><span class="field-label">Locations</span><span >Not A Place</span></div>
+    <div class="col-xs-6 header left"><span class="field-label">Location : City</span><span >Bend, OR</span></div>
+    <div class="col-xs-12 title"><a href="${ORIGIN}/jobs/5152/city-role/job" class="iCIMS_Anchor"><h3>City Role</h3></a></div>
+  </div></li>`;
+  const [j] = parseIcimsSearchPage(`<ul>${card}</ul>`, ORIGIN, 'acmefreight');
+  if (j && j.location === 'Bend, OR') pass('Locations does not satisfy a label that starts with Location');
+  else fail(`Locations label → ${JSON.stringify(j?.location)}`);
 }
 
 // Same failure mode on the detail page. A tenant running Content-Security-
@@ -211,4 +291,71 @@ const mkCtx = (pages) => ({
     if (job.postedAt === Date.parse('2026-07-17')) pass(`enrichDate reads JSON-LD with ${label}`);
     else fail(`JSON-LD with ${label}: postedAt ${job.postedAt}`);
   }
+}
+
+// Location enrichment. Several tenants render the search card with no location
+// span, so the list-page location arrives empty. An empty location cannot match
+// a location_filter block term, so a US-only board reaches the results with no
+// country attached — measured 2026-08-13, all six iCIMS matches in a sweep were
+// US postings that arrived that way. The detail page already being fetched for
+// the date also carries jobLocation.address.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-17","jobLocation":[{"@type":"Place","address":{"@type":"PostalAddress","addressCountry":"US","addressLocality":"Annapolis Junction","addressRegion":"MD","postalCode":"UNAVAILABLE"}}]}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  // Spelled out, not "US": location_filter matches the words written in
+  // portals.yml, where the block term is "United States".
+  if (job.location === 'Annapolis Junction, MD, United States') pass('enrichDate fills an empty location from jobLocation');
+  else fail(`location: ${job.location}`);
+}
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"@type":"Place","address":{"@type":"PostalAddress","addressCountry":"CA","addressLocality":"Toronto","addressRegion":"ON"}}}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'N/A' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Toronto, ON, Canada') pass('enrichDate replaces an N/A location, single jobLocation object');
+  else fail(`location: ${job.location}`);
+}
+// iCIMS writes the literal string UNAVAILABLE into address fields it has no
+// value for; joining it unchecked yields "UNAVAILABLE, MD, United States".
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"address":{"addressCountry":"US","addressLocality":"UNAVAILABLE","addressRegion":"MD"}}}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'MD, United States') pass('enrichDate drops UNAVAILABLE address parts');
+  else fail(`location: ${job.location}`);
+}
+// Regression for #3727: the first jobLocation entry is entirely UNAVAILABLE
+// and the real address lives in a later entry. Reading only jobLocation[0]
+// returned no location at all even though a usable one was in the array.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":[{"address":{"addressCountry":"UNAVAILABLE"}},{"address":{"addressLocality":"Toronto","addressRegion":"ON","addressCountry":"CA"}}]}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Toronto, ON, Canada') pass('enrichDate walks past an all-UNAVAILABLE jobLocation entry to a later one');
+  else fail(`location: ${job.location}`);
+}
+// Single-entry jobLocation behavior is unchanged.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":[{"address":{"addressLocality":"Denver","addressRegion":"CO","addressCountry":"US"}}]}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Denver, CO, United States') pass('enrichDate still handles a single jobLocation entry');
+  else fail(`location: ${job.location}`);
+}
+// A location the list page did supply is authoritative: enrichment never
+// overwrites it.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","jobLocation":{"address":{"addressCountry":"US","addressLocality":"Phoenix","addressRegion":"AZ"}}}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: 'Mississauga, ON' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === 'Mississauga, ON') pass('enrichDate leaves a populated location untouched');
+  else fail(`location overwritten: ${job.location}`);
+}
+// No jobLocation at all: the job keeps whatever it had, enrichment stays silent.
+{
+  const detail = `<script type="application/ld+json">{"@type":"JobPosting","datePosted":"2026-07-17"}</script>`;
+  const job = { title: 'X', url: `${ORIGIN}/jobs/1234/x/job`, company: 'acmefreight', location: '' };
+  await icims.enrichDate(job, { fetchText: async () => detail });
+  if (job.location === '') pass('enrichDate leaves location empty when jobLocation is absent');
+  else fail(`location: ${job.location}`);
 }

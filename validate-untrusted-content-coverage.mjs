@@ -24,10 +24,12 @@
  * Exit 0 = clean. Exit 1 = coverage gap listed.
  */
 
-import { readFileSync, existsSync, globSync } from 'fs';
-import { dirname, join, sep } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { readFileSync, existsSync, readdirSync } from 'fs';
+import { dirname, join, relative, sep } from 'path';
+import { fileURLToPath } from 'url';
 import { USER_PATHS } from './update-system.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { listTree } from './lib/walk-tree.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 
@@ -142,7 +144,19 @@ export function hasCanonicalHeading(text) {
 // Everything below is the CLI. Guarded so importing this module for its pure
 // helpers (deriveIngestingModes, isUserLayerPath, hasDirectiveMarker) does not
 // run the validation and process.exit() out from under the importer.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+const USAGE = `Usage: node validate-untrusted-content-coverage.mjs [--self-test]
+
+Checks that AGENTS.md carries the untrusted external content directive, that
+modes/_shared.md references it, and that every mode which ingests external
+text does too. Exits 1 when one of them is missing.
+  --self-test  run the checker's own unit checks instead`;
+
+if (isMainModule(import.meta.url)) {
+  // Before any check: --help used to run the coverage check and print its verdict.
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
+  }
   if (process.argv.includes('--self-test')) {
     console.log('Running validate-untrusted-content-coverage.mjs self-tests...');
 
@@ -240,9 +254,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     problems.push(`modes/_shared.md does not reference "${MARKER}"`);
   }
 
+  // globSync expands the whole subtree in one call, so a nested checkout is
+  // filtered out of the result rather than skipped during a descent: a worktree
+  // under modes/ turned 174 candidate files into 459, all of them somebody
+  // else's, and this validator would have graded them as ours (#3762).
   const candidates = [
-    ...globSync('modes/**/*.md', { cwd: ROOT }),
-    ...globSync('batch/*.md', { cwd: ROOT }),
+    // listTree, not globSync: glob has no idea what a nested checkout is, so a
+    // worktree parked under modes/ would put a second repository's mode files
+    // under this gate (#3818).
+    ...listTree(join(ROOT, 'modes'), { match: /\.md$/ }).map((f) => relative(ROOT, f)),
+    // batch/ is flat and gitignored apart from its scripts and prompt, so a
+    // plain read is right here — and existsSync keeps a checkout without it
+    // from turning a coverage report into an ENOENT.
+    ...(existsSync(join(ROOT, 'batch'))
+      ? readdirSync(join(ROOT, 'batch')).filter((f) => f.endsWith('.md')).map((f) => `batch/${f}`)
+      : []),
   ].map((p) => p.split(sep).join('/'));
 
   const required = deriveIngestingModes(candidates, (rel) => readFileSync(join(ROOT, rel), 'utf-8'));

@@ -1,161 +1,789 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useOptimistic, useRef, useState, useTransition, type MouseEvent, type PointerEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Search, ChevronsUpDown, X, Compass, ArrowRight } from "lucide-react";
+import { Search, ChevronsUpDown, X, Compass, ArrowRight, ExternalLink, Download, FileText } from "lucide-react";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
 import { CompanyLogo } from "@/components/company-logo";
-import { canonStatus, scoreNum, scoreTone, statusDot } from "@/lib/format";
+import { CANONICAL_STATES, scoreNum, scoreTone } from "@/lib/format";
+import { StatusSelect } from "@/components/status-select";
+import { applicationKey, applySavedStatus, saveStatuses } from "@/lib/pipeline-status.mjs";
 import { InboxTriage } from "@/components/inbox/inbox-triage";
 import { cn } from "@/lib/cn";
+import { companyPresentation, companySearchText } from "@/lib/company-presentation.mjs";
+import { PipelineTableRowsSkeleton } from "@/components/page-loading-skeletons";
+import { startRouteProgress } from "@/components/route-progress";
+import { sortRows } from "@/lib/core/pipeline-sort.mjs";
+import { PageFrame } from "@/components/page-frame";
+import { PIPELINE_TABS, pipelineQuery, pipelineTab, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref } from "@/lib/pipeline-navigation.mjs";
+import { isSearchOnlyWrite, queryWithLiveSearch } from "@/lib/list-search-sync.mjs";
+import { useListSearch } from "@/lib/use-list-search";
+import { COMPARE_MAX } from "@/lib/pipeline-compare.mjs";
+import { postingHref, postingLabel } from "@/lib/posting-url.mjs";
+import { trackerCsv, trackerCsvFilename } from "@/lib/tracker-csv.mjs";
+import { clampTrackerWindow, initialTrackerWindow, TRACKER_OVERSCAN, TRACKER_ROW_PX, trackerWindow } from "@/lib/tracker-window.mjs";
+import { clearHeldSaves, excludeInFlightStatusRows, offscreenStatusFailures, reduceHeldSave } from "@/lib/status-save-hold.mjs";
+import { moveCursor, typingFromTarget } from "@/lib/inbox-keys.mjs";
+import { rangeKeys, selectionAfterFailedSave, trackerCommand } from "@/lib/tracker-keys.mjs";
+import { appliedPromptStale, appliedSelectionToken, appliedWriteAllowed } from "@/lib/applied-confirm.mjs";
+import { SCORE_FLOORS, keepsPendingNames, keepsStoredNames, normalizeView, omissionAfterAttempt, parseViews, removeView, savedViewPayload, upsertView, viewUpdates, viewsForMutation } from "@/lib/pipeline-views.mjs";
+import { trackerEmptyPresentation, trackerEmptyState, type TrackerEmptyState } from "@/lib/tracker-empty-state.mjs";
+import { trackerEmptyMessage } from "@/lib/tracker-empty.mjs";
+import { listEntrySync } from "@/lib/history-back.mjs";
+import { pipelineFindRolesHref } from "@/lib/scan-on-load.mjs";
 
-// INBOX (the triage queue) is the default tab; the rest filter the tracker.
-const TABS = [
-  "INBOX",
-  "ALL",
-  "EVALUATED",
-  "APPLIED",
-  "RESPONDED",
-  "INTERVIEW",
-  "OFFER",
-  "HIRED",
-  "REJECTED",
-  "DISCARDED",
-  "SKIP",
-] as const;
-type Tab = (typeof TABS)[number];
+type Tab = (typeof PIPELINE_TABS)[number];
+type SavedView = NonNullable<ReturnType<typeof normalizeView>>;
 
-const SORT_KEYS = ["company", "role", "score", "status", "date"] as const;
+const SORT_KEYS = ["tracker", "company", "role", "score", "status", "date"] as const;
+const VIEWS_KEY = "career-ops:pipeline-views";
+const REMOVAL_WARNING = "This removal is not saved yet. Reloading brings the view back.";
 type SortKey = (typeof SORT_KEYS)[number];
 
 export function PipelineView({
   applications,
   inbox,
+  inboxCount,
+  inboxFitError = null,
+  trackerShape = "rows",
+  cvRows = [],
 }: {
   applications: Application[];
-  inbox: InboxJob[];
+  inbox: InboxJob[] | null;
+  inboxCount: number;
+  inboxFitError?: string | null;
+  trackerShape?: "missing" | "empty" | "malformed" | "rows";
+  /** Tracker row numbers that have a tailored CV PDF on disk. */
+  cvRows?: string[];
 }) {
+  const hasCv = useMemo(() => new Set(cvRows), [cvRows]);
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  const [isPending, startNavigation] = useTransition();
+  const [pendingTab, setPendingTab] = useState<Tab | null>(null);
+  // Starts AFTER the POST succeeds. React replays the confirmed save over
+  // intervening snapshots and discards it when the refresh transition settles.
+  const [visibleApplications, showSavedStatus] = useOptimistic(applications, applySavedStatus<Application>);
+  const [announcement, setAnnouncement] = useState("");
+  // Status saves outlive the virtual row. Pending keeps the chosen status if
+  // the row remounts mid-request. Failed is shown on the row, or above the
+  // table when that row is off screen.
+  const [heldSaves, setHeldSaves] = useState<ReturnType<typeof reduceHeldSave>>(() => new Map());
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkError, setBulkError] = useState("");
+  const [appliedAsk, setAppliedAsk] = useState<Application[] | null>(null);
+  const appliedAskYesRef = useRef<HTMLButtonElement>(null);
+  const appliedAskScope = useRef<{ selection: string; cursor: number; cursorKey: string } | null>(null);
+  const [cursor, setCursor] = useState(-1);
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [viewError, setViewError] = useState("");
+  const [removalWarning, setRemovalWarning] = useState("");
+  const storageRejected = useRef(false);
+  const omittedWhileRejected = useRef(new Set<string>());
+  const pendingWhileRejected = useRef(new Set<string>());
+  const activeTab = useRef<HTMLButtonElement>(null);
+  const anchor = useRef<string | null>(null);
+  const busyRef = useRef(false);
 
   // The URL is the SINGLE source of truth for tab/min/sort/dir, so the home stat
   // tiles' deep links AND the assistant's filterPipeline/navigate actions drive
   // the table identically (no useState mirror → no desync).
-  const pTab = (params.get("tab") ?? "").toUpperCase();
-  const tab: Tab = (TABS as readonly string[]).includes(pTab) ? (pTab as Tab) : "INBOX";
+  const tab: Tab = pipelineTab(params.get("tab"));
+  const visibleTab = isPending && pendingTab ? pendingTab : tab;
   const pMin = parseFloat(params.get("min") ?? "");
   const minFilter: number | null = Number.isFinite(pMin) ? pMin : null;
   const pSort = params.get("sort") ?? "";
   const sortKey: SortKey = (SORT_KEYS as readonly string[]).includes(pSort) ? (pSort as SortKey) : "score";
-  const sort = { key: sortKey, dir: (params.get("dir") === "1" ? 1 : -1) as 1 | -1 };
+  const sortDir: 1 | -1 = params.get("dir") === "1" ? 1 : -1;
+  const sort = { key: sortKey, dir: sortDir };
 
-  // Search stays LOCAL for snappy typing; seeded from the URL and re-synced only
-  // when the URL's q changes (i.e. the assistant set it) — never per keystroke.
-  const [q, setQ] = useState(params.get("q") ?? "");
-  const lastUrlQ = useRef(params.get("q") ?? "");
-  useEffect(() => {
-    const urlQ = params.get("q") ?? "";
-    if (urlQ !== lastUrlQ.current) {
-      lastUrlQ.current = urlQ;
-      setQ(urlQ);
-    }
-  }, [params]);
-
-  const setParams = useCallback(
+  // Search filters locally. The URL catches up once typing pauses, so a
+  // reload or the browser Back button still has it. Tab changes include the
+  // typed value immediately, before that pause.
+  const qRef = useRef(params.get("q") ?? "");
+  const commitParams = useCallback(
     (updates: Record<string, string | number | null>) => {
-      const sp = new URLSearchParams(params.toString());
-      for (const [k, v] of Object.entries(updates)) {
-        if (v == null || v === "") sp.delete(k);
-        else sp.set(k, String(v));
+      const qs = queryWithLiveSearch(params.toString(), updates, qRef.current);
+      if (qs === params.toString()) return false;
+      const href = `${pathname}${qs ? `?${qs}` : ""}`;
+      // Search already filtered the rows. A transition would hide them.
+      if (isSearchOnlyWrite(updates)) {
+        router.replace(href, { scroll: false });
+        return true;
       }
-      const qs = sp.toString();
-      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false });
+      if (Object.prototype.hasOwnProperty.call(updates, "tab")) {
+        const nextTab = String(updates.tab ?? "INBOX").toUpperCase();
+        if ((PIPELINE_TABS as readonly string[]).includes(nextTab)) setPendingTab(nextTab as Tab);
+      }
+      startRouteProgress();
+      startNavigation(() => {
+        router.replace(href, { scroll: false });
+      });
+      return true;
     },
-    [params, router, pathname],
+    [params, router, pathname, startNavigation],
+  );
+  const { q, setQ, setParams, cancelPendingSearch } = useListSearch(params, commitParams, qRef);
+  // Typing stays local until the URL catches up, so include it when leaving.
+  const liveListQuery = pipelineQuery(params.toString(), q);
+  // The list entry has to carry that search too. Otherwise Back compares the
+  // return link with an older URL and opens a fresh list at the top.
+  function syncTypedSearch(event: MouseEvent<HTMLAnchorElement>) {
+    // A modified click leaves Pipeline open and opens the link elsewhere.
+    // replaceState would show the typed search while Next still has the old
+    // params, so the next sort deletes it. The other tab already has the href.
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1) return;
+    // The search timer would router.replace this list and can steal the click
+    // if the list is still mounted while the next page loads.
+    cancelPendingSearch();
+    const next = listEntrySync(pathname, params.toString(), q);
+    if (!next) return;
+    const state = window.history.state;
+    if (!state || state.__NA !== true) return;
+    window.history.replaceState(state, "", next);
+  }
+
+  useEffect(() => {
+    if (!isPending) setPendingTab(null);
+  }, [isPending]);
+
+  useLayoutEffect(() => {
+    const strip = activeTab.current?.parentElement;
+    if (!strip) return;
+    // The tab value does not change when the window narrows, so the strip
+    // measures itself again when its width changes.
+    const place = () => {
+      const button = activeTab.current;
+      if (!button || button.parentElement !== strip) return;
+      const left = tabStripScrollLeft(strip.getBoundingClientRect(), button.getBoundingClientRect(), strip.scrollLeft);
+      if (left !== strip.scrollLeft) strip.scrollLeft = left;
+    };
+    place();
+    const observer = new ResizeObserver(place);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [tab]);
+
+  useEffect(() => {
+    try {
+      setViews(parseViews(localStorage.getItem(VIEWS_KEY) || "[]"));
+    } catch {
+      setViews([]);
+    }
+  }, []);
+
+  function writeSavedViews(action: "save" | "remove", next: SavedView[]) {
+    const payload = savedViewPayload(action, next);
+    if (payload == null) return false;
+    try {
+      localStorage.setItem(VIEWS_KEY, payload);
+      storageRejected.current = false;
+      omittedWhileRejected.current.clear();
+      pendingWhileRejected.current.clear();
+      setViewError("");
+      setRemovalWarning("");
+      return true;
+    } catch {
+      storageRejected.current = true;
+      if (action === "remove") setRemovalWarning(REMOVAL_WARNING);
+      else setViewError("This view stays on this page only.");
+      return false;
+    }
+  }
+
+  function mutationBase(extraOmitted: string[] = []) {
+    const omitted = [...omittedWhileRejected.current, ...extraOmitted];
+    const pending = [...pendingWhileRejected.current];
+    try {
+      const stored = parseViews(localStorage.getItem(VIEWS_KEY) || "[]");
+      return { stored, base: viewsForMutation(views, stored, storageRejected.current, omitted, pending) };
+    } catch {
+      // Disk could not be read, so keep the in-memory list rather than dropping unchanged views.
+      return { stored: [] as SavedView[], base: viewsForMutation(views, [], true, omitted) };
+    }
+  }
+
+  function saveCurrentView(name: string) {
+    const view = normalizeView({ name, tab, q, min: minFilter, sort: sort.key, dir: sort.dir });
+    if (!view) {
+      setViewError("Name the view first.");
+      return;
+    }
+    const { stored, base } = mutationBase();
+    const next = upsertView(base, view);
+    const added = base.some((item) => item.name === view.name) || next.length > base.length;
+    const allow = [...omittedWhileRejected.current];
+    const pending = [...pendingWhileRejected.current];
+    if (!added || !keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      setViewError("Remove a view first.");
+      return;
+    }
+    omittedWhileRejected.current = new Set(omissionAfterAttempt(allow, view.name, true));
+    setViews(next);
+    setNaming(false);
+    setDraftName("");
+    setViewError("");
+    if (!writeSavedViews("save", next)) pendingWhileRejected.current.add(view.name);
+  }
+
+  function removeSavedView(name: string) {
+    const allow = [...omittedWhileRejected.current, name];
+    const pending = [...pendingWhileRejected.current];
+    const { stored, base } = mutationBase([name]);
+    const next = removeView(base, name);
+    if (!keepsStoredNames(next, stored, allow) || !keepsPendingNames(next, pending, allow)) {
+      // One removal may not free room for every pending view. Remember it
+      // and wait for a later write that can keep those views.
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+      setViews((current) => current.filter((view) => view.name !== name));
+      setRemovalWarning(REMOVAL_WARNING);
+      return;
+    }
+    setViews(next);
+    if (!writeSavedViews("remove", next)) {
+      omittedWhileRejected.current.add(name);
+      pendingWhileRejected.current.delete(name);
+    }
+  }
+
+  function applySaved(view: SavedView) {
+    setQ(view.q);
+    setParams(viewUpdates(view));
+  }
+
+  // The table filters on a deferred copy of the search text. The input shows
+  // each keystroke at once; re-filtering and re-rendering every tracker row
+  // runs at low priority, and React drops a stale render when the next
+  // keystroke arrives, so typing no longer waits on the whole table.
+  const deferredQ = useDeferredValue(q);
+  // The rendered link keeps the deferred search, so a keystroke does not
+  // re-render every row. A click reads the box as it is now. The list URL is
+  // written after commit, so a render React abandons cannot change it.
+  const detailQuery = pipelineQuery(params.toString(), deferredQ);
+  const paramsText = params.toString();
+  const paramsRef = useRef(paramsText);
+  const routerRef = useRef(router);
+  // followDetail stays the same function across keystrokes so a memoized row
+  // can skip the render. The ref still sees the latest list-entry write.
+  const syncSearchRef = useRef(syncTypedSearch);
+  useLayoutEffect(() => {
+    paramsRef.current = paramsText;
+    routerRef.current = router;
+    syncSearchRef.current = syncTypedSearch;
+  }, [paramsText, router, syncTypedSearch]);
+  const followDetail = useCallback((event: MouseEvent<HTMLAnchorElement>, n: string) => {
+    const href = trackerDetailHref(n, paramsRef.current, qRef.current);
+    event.currentTarget.href = href;
+    syncSearchRef.current(event);
+    const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button === 1;
+    if (modified) return;
+    event.preventDefault();
+    routerRef.current.push(href);
+  }, []);
+  const stampDetail = useCallback((event: PointerEvent<HTMLAnchorElement>, n: string) => {
+    event.currentTarget.href = trackerDetailHref(n, paramsRef.current, qRef.current);
+  }, []);
+  const onStatusSaved = useCallback(
+    (r: Application, status: string, restoreFocus: boolean) => {
+      const key = applicationKey(r);
+      const focusedRow = document.activeElement?.closest("tr");
+      if (tab !== "ALL" && !rowOnPipelineTab(status, tab) && (restoreFocus || focusedRow?.dataset.applicationKey === key)) {
+        activeTab.current?.focus();
+      }
+      setAnnouncement(`Application #${r.n} status saved as ${status}.`);
+      startTransition(() => {
+        showSavedStatus({ key, status });
+        router.refresh();
+      });
+    },
+    [tab, router, showSavedStatus],
+  );
+  const onHeldSave = useCallback((
+    key: string,
+    n: string,
+    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
+  ) => {
+    // A clear event has no application number. Adding one
+    // makes the object fail the event union.
+    const update = event.type === "clear"
+      ? { type: "clear" as const, key }
+      : { ...event, key, n };
+    setHeldSaves((prev) => reduceHeldSave(prev, update));
+  }, []);
+
+  const query = deferredQ.trim();
+  const matchesFilters = useCallback(
+    (r: Application) => {
+      if (minFilter != null) {
+        const n = scoreNum(r.score);
+        if (Number.isNaN(n) || n < minFilter) return false;
+      }
+      return !query || companySearchText(r).toLowerCase().includes(query.toLowerCase());
+    },
+    [minFilter, query],
   );
 
-  // Pending + deduped by URL (pipeline.md can list the same posting twice) so the
-  // header count, the tab count and the triage list all agree on one number.
-  const pendingInbox = useMemo(() => {
-    const seen = new Set<string>();
-    const out: InboxJob[] = [];
-    for (const j of inbox) {
-      if (j.done || seen.has(j.url)) continue;
-      seen.add(j.url);
-      out.push(j);
-    }
-    return out;
-  }, [inbox]);
-
-  const filtered = useMemo(() => {
+  const tabRows = useMemo(() => {
     if (tab === "INBOX") return [];
-    let rows = applications;
-    if (tab !== "ALL") rows = rows.filter((r) => canonStatus(r.status).includes(tab));
-    if (minFilter != null) {
-      rows = rows.filter((r) => {
-        const n = scoreNum(r.score);
-        return !Number.isNaN(n) && n >= minFilter;
-      });
-    }
-    if (q.trim()) {
-      const needle = q.toLowerCase();
-      rows = rows.filter((r) => `${r.company} ${r.role}`.toLowerCase().includes(needle));
-    }
-    return [...rows].sort((a, b) => {
-      if (sort.key === "score") {
-        const an = scoreNum(a.score);
-        const bn = scoreNum(b.score);
-        const av = Number.isNaN(an) ? -Infinity : an;
-        const bv = Number.isNaN(bn) ? -Infinity : bn;
-        return (av - bv) * sort.dir;
-      }
-      return (a[sort.key] || "").localeCompare(b[sort.key] || "") * sort.dir;
+    if (tab === "ALL") return visibleApplications;
+    return visibleApplications.filter((r) => rowOnPipelineTab(r.status, tab));
+  }, [visibleApplications, tab]);
+
+  const filtered = useMemo(
+    () =>
+      // scoreNum is the real score parser (it handles the tracker's "4.2/5"
+      // cells); sortRows takes it rather than keeping a second copy (#4333).
+      sortRows(
+        tabRows.filter(matchesFilters),
+        { key: sortKey, dir: sortDir },
+        scoreNum,
+        (row) => companyPresentation(row).label,
+      ) as Application[],
+    [tabRows, matchesFilters, sortKey, sortDir],
+  );
+
+  const filtering = query !== "" || minFilter != null;
+  const tabLabel = tab === "ALL" ? null : tab.charAt(0) + tab.slice(1).toLowerCase();
+  // The empty state needs the All-tab match count. Memoize it with the same
+  // inputs as the table filter so a keystroke, while the deferred query is
+  // unchanged, does not scan the tracker again.
+  const matchesInAll = useMemo(
+    () => visibleApplications.filter(matchesFilters).length,
+    [visibleApplications, matchesFilters],
+  );
+  const emptyState =
+    filtered.length > 0
+      ? null
+      : trackerEmptyState({ tabLabel, query, minScore: minFilter, matchesInAll });
+  const searchInput = useRef<HTMLInputElement>(null);
+
+  function clearSearch() {
+    setQ("");
+    searchInput.current?.focus();
+  }
+
+  const empty =
+    emptyState &&
+    emptyStateView(emptyState, {
+      tabLabel,
+      query,
+      minFilter,
+      showAll: () => setParams({ tab: "ALL" }),
+      clearSearch,
+      clearMin: () => setParams({ min: null }),
     });
-  }, [applications, tab, q, sort, minFilter]);
+  const filterStatus = isPending || !filtering ? "" : empty ? empty.heading : `${filtered.length} of ${tabRows.length} shown`;
+
+  const filterKey = `${visibleTab}|${deferredQ}|${sort.key}|${sort.dir}|${minFilter ?? ""}|${filtered.length}`;
+  const [windowState, setWindowState] = useState<{ key: string; span: { start: number; end: number } } | null>(null);
+  // Until the next measurement after a filter change, keep the last measured
+  // rows (fitted to the new count) so a row on screen keeps its editor state.
+  // The first-screen guess is only for the paint before any measurement.
+  const span = !windowState
+    ? initialTrackerWindow(filtered.length)
+    : windowState.key === filterKey
+      ? windowState.span
+      : clampTrackerWindow(windowState.span, filtered.length);
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  // TRACKER_ROW_PX is the first-paint guess. Spacers copy one mounted row
+  // so the window stays aligned with the scroll position. A confirmation,
+  // an error, or a save in flight is taller and does not set that height.
+  const [rowPx, setRowPx] = useState(TRACKER_ROW_PX);
+  const mountedRows = filtered.slice(span.start, span.end);
+  const offscreenFailures = offscreenStatusFailures(heldSaves, mountedRows.map((row) => applicationKey(row)));
+  // The checkbox, the sortable columns and the resume column.
+  const columnCount = SORT_KEYS.length + 2;
+  // Same test as the selection bar's selectedRows.length > 0.
+  const hasSelection = filtered.some((r) => selected.has(applicationKey(r)));
+
+  // A failed save for a row that is off screen, the bulk-save error and the
+  // selection bar all render above the table and move it. Remeasure then.
+  // Scroll and resize do not fire for those changes.
+  useLayoutEffect(() => {
+    const el = bodyRef.current;
+    if (!el) return;
+    const measure = () => {
+      if (el.hidden) return;
+      const rect = el.getBoundingClientRect();
+      // A failed save adds a line. A save in flight can wrap the status
+      // controls. Spacers stand in for a normal row, so neither sets the
+      // shared height.
+      let rowHeight = rowPx;
+      for (const row of el.querySelectorAll("tr[data-application-key]")) {
+        if (row.querySelector("[role='alert'], [aria-busy='true'], [data-status-confirm]")) continue;
+        rowHeight = row.getBoundingClientRect().height || rowPx;
+        break;
+      }
+      if (rowHeight !== rowPx) setRowPx(rowHeight);
+      const next = trackerWindow({
+        count: filtered.length,
+        rowHeight,
+        overscan: TRACKER_OVERSCAN,
+        tableTop: rect.top,
+        viewportHeight: window.innerHeight,
+      });
+      setWindowState((prev) => {
+        if (prev?.key === filterKey && prev.span.start === next.start && prev.span.end === next.end) return prev;
+        return { key: filterKey, span: next };
+      });
+    };
+    window.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", measure);
+    // Back restores the list's scroll position after this commit, and that
+    // move does not always emit a scroll event. Keep measuring until it lands.
+    let frames = 0;
+    let raf = 0;
+    const followScrollRestore = () => {
+      measure();
+      frames += 1;
+      if (frames < 30) raf = requestAnimationFrame(followScrollRestore);
+    };
+    raf = requestAnimationFrame(followScrollRestore);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", measure);
+    };
+  }, [filterKey, filtered.length, rowPx, heldSaves, bulkError, hasSelection]);
+
+  const filteredKeys = filtered.map(applicationKey);
+  const selectedRows = filtered.filter((r) => selected.has(applicationKey(r)));
+  const allSelected = filteredKeys.length > 0 && filteredKeys.every((k) => selected.has(k));
+
+  // Same function every render, so a checkbox tick repaints one row.
+  // The ref holds the filtered keys for a Shift-click range.
+  const filteredKeysRef = useRef(filteredKeys);
+  useLayoutEffect(() => {
+    filteredKeysRef.current = filteredKeys;
+  });
+  const toggleRow = useCallback((key: string, shift: boolean) => {
+    // Read the anchor now. The updater runs later, after it moves to this row.
+    const from = anchor.current;
+    anchor.current = key;
+    const keys = filteredKeysRef.current;
+    setSelected((prev) => {
+      if (shift && from) {
+        const range = rangeKeys(keys, from, key);
+        if (range) {
+          const next = new Set(prev);
+          for (const item of range) next.add(item);
+          return next;
+        }
+      }
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  function downloadCsv() {
+    const url = URL.createObjectURL(new Blob([trackerCsv(filtered)], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = trackerCsvFilename(tab, new Date());
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function commitStatus(rows: Application[], status: string) {
+    if (!status || rows.length === 0 || busyRef.current) return;
+    const { write, inFlight } = excludeInFlightStatusRows(rows, heldSaves, applicationKey);
+    busyRef.current = true;
+    setBulkBusy(true);
+    setBulkError("");
+    try {
+      const { saved, failed } = await saveStatuses(write, status);
+      const notSaved = [
+        ...failed,
+        ...inFlight.map((row) => ({ n: row.n, error: "a status save is already in progress" })),
+      ];
+      const failedNums = new Set(notSaved.map((f) => f.n));
+      const savedNums = new Set(saved);
+      setSelected((current) => new Set(selectionAfterFailedSave([...current], rows, failedNums, applicationKey)));
+      if (notSaved.length > 0) {
+        setBulkError(`${notSaved.length} not saved: ${notSaved.map((f) => `#${f.n} (${f.error})`).join(", ")}`);
+      }
+      if (saved.length > 0 || failed.length > 0) {
+        setAnnouncement(`${saved.length} application${saved.length === 1 ? "" : "s"} set to ${status}.`);
+      }
+      // A row saved here no longer has an older failure to show.
+      const savedKeys = write.filter((row) => savedNums.has(row.n)).map((row) => applicationKey(row));
+      setHeldSaves((prev) => clearHeldSaves(prev, savedKeys));
+      startTransition(() => {
+        for (const row of write) {
+          if (savedNums.has(row.n)) showSavedStatus({ key: applicationKey(row), status });
+        }
+        router.refresh();
+      });
+    } finally {
+      busyRef.current = false;
+      setBulkBusy(false);
+    }
+  }
+
+  function requestStatus(rows: Application[], status: string, confirmed = false) {
+    const gate = appliedWriteAllowed({ status, confirmed });
+    if (!gate.write) {
+      appliedAskScope.current = {
+        selection: appliedSelectionToken(selectedRows.map((row) => applicationKey(row))),
+        cursor,
+        cursorKey: cursor >= 0 && filtered[cursor] ? applicationKey(filtered[cursor]) : "",
+      };
+      setAppliedAsk(rows);
+      return;
+    }
+    appliedAskScope.current = null;
+    setAppliedAsk(null);
+    void commitStatus(rows, status);
+  }
+
+  const keyState = useRef({ visibleTab, filtered, cursor, selectedRows, isPending });
+  const requestRef = useRef(requestStatus);
+  useLayoutEffect(() => {
+    keyState.current = { visibleTab, filtered, cursor, selectedRows, isPending };
+    requestRef.current = requestStatus;
+  });
+  const selectionToken = appliedSelectionToken(selectedRows.map((row) => applicationKey(row)));
+  const cursorKey = cursor >= 0 && filtered[cursor] ? applicationKey(filtered[cursor]) : "";
+  useEffect(() => {
+    if (!appliedAsk || !appliedAskScope.current) return;
+    if (!appliedPromptStale({
+      askedSelection: appliedAskScope.current.selection,
+      askedCursor: appliedAskScope.current.cursor,
+      askedCursorKey: appliedAskScope.current.cursorKey,
+      selection: selectionToken,
+      cursor,
+      cursorKey,
+    })) return;
+    appliedAskScope.current = null;
+    setAppliedAsk(null);
+  }, [appliedAsk, selectionToken, cursor, cursorKey]);
+  useEffect(() => {
+    if (!appliedAsk || appliedAsk.length === 0) return;
+    appliedAskYesRef.current?.focus();
+  }, [appliedAsk]);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const state = keyState.current;
+      if (state.visibleTab === "INBOX") return;
+      const target = event.target;
+      const typing = typingFromTarget(target instanceof Element ? {
+        tagName: target.tagName,
+        type: target instanceof HTMLInputElement ? target.type : undefined,
+        isContentEditable: target instanceof HTMLElement && target.isContentEditable,
+        closestDialog: Boolean(target.closest("dialog, [role='dialog']")),
+      } : null);
+      const command = trackerCommand({
+        key: event.key,
+        typing,
+        composing: event.isComposing || event.key === "Process",
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        altKey: event.altKey,
+        pending: state.isPending,
+        repeat: event.repeat,
+      });
+      if (!command) return;
+      if (command.name === "next" || command.name === "prev") {
+        event.preventDefault();
+        const delta = command.name === "next" ? 1 : -1;
+        setCursor((index) => moveCursor(index, state.filtered.length, delta));
+        return;
+      }
+      const rows = state.selectedRows.length > 0
+        ? state.selectedRows
+        : state.cursor >= 0 && state.filtered[state.cursor]
+          ? [state.filtered[state.cursor]]
+          : [];
+      if (rows.length === 0) return;
+      event.preventDefault();
+      requestRef.current(rows, command.status);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  // Keyed on the count, not the array. filtered is rebuilt whenever sort or the
+  // optimistic rows change identity, and a state update after each rebuild kept
+  // the deferred search render from finishing.
+  const rowCount = filtered.length;
+  useEffect(() => {
+    setCursor((index) => (rowCount === 0 ? -1 : index < 0 ? index : Math.min(index, rowCount - 1)));
+  }, [rowCount]);
+  // Set when j/k moved to a row the window had not mounted. Once that row
+  // mounts it is scrolled into view by its real height, which can differ from
+  // the spacer's per-row guess.
+  const cursorScrollPending = useRef(false);
+  useEffect(() => {
+    if (cursor < 0 || visibleTab === "INBOX") return;
+    const row = document.querySelector('[data-tracker-cursor="true"]');
+    if (row) {
+      cursorScrollPending.current = false;
+      row.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    // The cursor row is outside the window, so it has no element yet. Scroll
+    // to where the spacer puts it. The scroll listener then mounts it.
+    const body = bodyRef.current;
+    if (!body || body.hidden) return;
+    cursorScrollPending.current = true;
+    const top = body.getBoundingClientRect().top + window.scrollY + cursor * rowPx;
+    if (top < window.scrollY) window.scrollTo({ top });
+    else window.scrollTo({ top: top + rowPx - window.innerHeight });
+    // Not keyed on rowPx: a new measurement must not move the page.
+  }, [cursor, visibleTab]);
+  useLayoutEffect(() => {
+    if (!cursorScrollPending.current) return;
+    const row = document.querySelector('[data-tracker-cursor="true"]');
+    if (!row) return;
+    cursorScrollPending.current = false;
+    row.scrollIntoView({ block: "nearest" });
+  }, [span.start, span.end]);
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24">
+    <PageFrame width="wide">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl tracking-tight text-landing">Pipeline</h1>
           <p className="mt-1 text-sm text-muted">
-            <span className="tabular-nums">{pendingInbox.length}</span> in inbox ·{" "}
-            <span className="tabular-nums">{applications.length}</span> tracked
+            <span className="tabular-nums">{inboxCount}</span> in inbox ·{" "}
+            <span className="tabular-nums">{visibleApplications.length}</span> tracked
           </p>
         </div>
         {/* the tracker has its own search; the inbox brings its own facet filters */}
-        {tab !== "INBOX" && (
-          <div className="relative w-64 max-w-[40vw]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search company or role…"
-              className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40"
-            />
+        {visibleTab !== "INBOX" && (
+          <div className="flex items-center gap-2">
+            <div className="relative w-64 max-w-[40vw]">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
+              <input
+                ref={searchInput}
+                type="search"
+                aria-label="Search applications"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape" && q) {
+                    e.preventDefault();
+                    setQ("");
+                  }
+                }}
+                placeholder="Search company or role…"
+                className="w-full rounded-md border border-border bg-surface/60 py-2 pl-9 pr-9 text-sm outline-none transition-colors placeholder:text-faint focus:border-brand/50 focus-visible:ring-2 focus-visible:ring-brand/40 [&::-webkit-search-cancel-button]:appearance-none"
+              />
+              {q && (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onClick={clearSearch}
+                  className="absolute right-1.5 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded text-faint transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40"
+                >
+                  <X aria-hidden="true" className="size-4" />
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={downloadCsv}
+              disabled={isPending || filtered.length === 0}
+              title={`Download the ${filtered.length} row${filtered.length === 1 ? "" : "s"} shown as a CSV file`}
+              className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-md border border-border bg-surface/60 px-3 py-2 text-sm text-muted transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-50 max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center max-sm:px-0"
+            >
+              <Download aria-hidden="true" className="size-4" />
+              <span className="max-sm:sr-only">Download CSV</span>
+            </button>
           </div>
         )}
       </div>
 
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {visibleTab !== "INBOX" && <label className="inline-flex items-center gap-2 text-xs text-muted">
+          Score
+          <select
+            aria-label="Minimum score"
+            value={minFilter ?? ""}
+            onChange={(event) => setParams({ min: event.target.value === "" ? null : event.target.value })}
+            className="rounded-md border border-border bg-surface px-2 py-1 text-sm text-foreground"
+          >
+            <option value="">Any</option>
+            {minFilter != null && !SCORE_FLOORS.includes(minFilter) && (
+              <option value={String(minFilter)}>{minFilter}+</option>
+            )}
+            {SCORE_FLOORS.map((floor) => (
+              <option key={floor} value={String(floor)}>{floor.toFixed(1)}+</option>
+            ))}
+          </select>
+        </label>}
+        {views.map((view) => {
+          const active = view.tab === tab && view.q === q && view.min === minFilter && view.sort === sort.key && view.dir === sort.dir;
+          return (
+            <span key={view.name} className={cn("inline-flex items-center rounded-full border", active ? "border-brand/40 bg-brand-soft" : "border-border bg-surface/60")}>
+              <button type="button" onClick={() => applySaved(view)} className="px-2.5 py-1 text-xs font-medium text-foreground">
+                {view.name}
+              </button>
+              <button type="button" aria-label={`Remove view ${view.name}`} onClick={() => removeSavedView(view.name)} className="px-1.5 text-xs text-faint hover:text-foreground">
+                ×
+              </button>
+            </span>
+          );
+        })}
+        {naming ? (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveCurrentView(draftName);
+            }}
+            className="inline-flex items-center gap-2"
+          >
+            <input
+              aria-label="View name"
+              value={draftName}
+              autoFocus
+              onChange={(event) => setDraftName(event.target.value)}
+              className="w-36 rounded-md border border-border bg-surface px-2 py-1 text-sm outline-none focus:border-brand/50"
+            />
+            <button type="submit" className="text-xs font-medium text-brand-text">Save</button>
+            <button type="button" onClick={() => { setNaming(false); setDraftName(""); setViewError(""); }} className="text-xs text-muted">Cancel</button>
+          </form>
+        ) : (
+          <button type="button" onClick={() => { setViewError(""); setNaming(true); }} className="rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted hover:text-foreground">
+            Save view
+          </button>
+        )}
+        {viewError && <span role="alert" className="text-xs text-red-500">{viewError}</span>}
+        {removalWarning && <span role="alert" className="text-xs text-red-500">{removalWarning}</span>}
+      </div>
+
       {/* tabs */}
-      <div className="mt-6 flex flex-wrap gap-1 border-b border-border">
-        {TABS.map((t) => {
+      <div className="mt-6 flex min-w-0 flex-nowrap gap-1 overflow-x-auto overflow-y-hidden border-b border-border">
+        {PIPELINE_TABS.map((t) => {
           const count =
             t === "INBOX"
-              ? pendingInbox.length
+              ? inboxCount
               : t === "ALL"
-                ? applications.length
-                : applications.filter((r) => canonStatus(r.status).includes(t)).length;
+                ? visibleApplications.length
+                : visibleApplications.filter((r) => rowOnPipelineTab(r.status, t)).length;
+          if (t === "OTHER" && count === 0 && visibleTab !== "OTHER") return null;
           return (
             <button
               key={t}
+              type="button"
+              ref={tab === t ? activeTab : undefined}
+              aria-pressed={visibleTab === t}
               onClick={() => setParams({ tab: t === "INBOX" ? null : t })}
               className={cn(
-                "-mb-px inline-flex items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                tab === t
+                // gap-1, not a whitespace text node: flex containers drop
+                // whitespace-only anonymous items, which rendered "INBOX0".
+                "-mb-px inline-flex shrink-0 items-center justify-center gap-1 border-b-2 px-3 py-2 text-xs font-medium transition-colors max-sm:min-h-[44px]",
+                visibleTab === t
                   ? "border-brand text-foreground"
                   : "border-transparent text-muted hover:text-foreground",
               )}
@@ -166,13 +794,15 @@ export function PipelineView({
         })}
       </div>
 
-      {tab !== "INBOX" && minFilter != null && (
+      <p role="status" className="sr-only">{announcement}</p>
+
+      {visibleTab !== "INBOX" && minFilter != null && (
         <div className="mt-3 flex items-center gap-2">
           <span className="text-xs text-faint">Filtered:</span>
           <button
             type="button"
             onClick={() => setParams({ min: null })}
-            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand transition-colors hover:bg-brand/15"
+            className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text transition-colors hover:bg-brand/15"
             title="Clear score filter"
           >
             score ≥ {minFilter.toFixed(1)}
@@ -181,85 +811,391 @@ export function PipelineView({
         </div>
       )}
 
-      {tab === "INBOX" ? (
+      {visibleTab !== "INBOX" && (
+        <p role="status" className={cn("text-xs tabular-nums text-muted", empty ? "sr-only" : filterStatus && "mt-3")}>
+          {filterStatus}
+        </p>
+      )}
+
+      {visibleTab !== "INBOX" && selectedRows.length > 0 && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-surface/60 px-3 py-2 text-sm">
+          <span className="tabular-nums">{selectedRows.length} selected</span>
+          <select
+            aria-label="Status for selected applications"
+            value={bulkStatus}
+            onChange={(e) => setBulkStatus(e.target.value)}
+            disabled={bulkBusy}
+            className="rounded-md border border-border bg-surface px-2 py-1 text-sm"
+          >
+            <option value="">Set status…</option>
+            {CANONICAL_STATES.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => requestStatus(selectedRows, bulkStatus)}
+            disabled={!bulkStatus || bulkBusy}
+            className="rounded-md border border-brand/40 bg-brand-soft px-2.5 py-1 text-xs font-medium text-brand-text disabled:opacity-50"
+          >
+            {bulkBusy ? "Saving…" : "Apply"}
+          </button>
+          {selectedRows.length >= 2 && selectedRows.length <= COMPARE_MAX && (
+            <Link
+              href={`/pipeline/compare?n=${selectedRows.map((r) => r.n).join(",")}${liveListQuery ? `&${liveListQuery}` : ""}`}
+              onClick={syncTypedSearch}
+              className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-foreground hover:border-brand/40 hover:text-brand-text"
+            >
+              Compare
+            </Link>
+          )}
+          <button type="button" onClick={() => setSelected(new Set())} className="text-xs text-muted hover:text-foreground">
+            Clear
+          </button>
+        </div>
+      )}
+
+      {visibleTab !== "INBOX" && appliedAsk && appliedAsk.length > 0 && (
+        <div role="alert" className="mt-3 rounded-md border border-border bg-surface px-3 py-2">
+          <p className="text-xs text-foreground">{appliedWriteAllowed({ status: "Applied", confirmed: false }).prompt}</p>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              ref={appliedAskYesRef}
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => requestStatus(appliedAsk, "Applied", true)}
+              className="rounded-md bg-brand px-2.5 py-1 text-xs font-medium text-brand-foreground disabled:opacity-60"
+            >
+              {appliedWriteAllowed({ status: "Applied", confirmed: false }).yesLabel}
+            </button>
+            <button type="button" disabled={bulkBusy} onClick={() => setAppliedAsk(null)} className="text-xs text-muted hover:text-foreground disabled:opacity-60">
+              Not yet
+            </button>
+          </div>
+        </div>
+      )}
+
+      {visibleTab !== "INBOX" && bulkError && (
+        <p role="alert" className="mt-2 text-xs text-red-500">{bulkError}</p>
+      )}
+
+      {visibleTab !== "INBOX" && offscreenFailures.length > 0 && (
+        <div className="mt-3 space-y-1">
+          {offscreenFailures.map((failure) => (
+            <p key={failure.key} role="alert" className="text-xs text-red-500">
+              Application #{failure.n} was not saved. {failure.error}
+            </p>
+          ))}
+        </div>
+      )}
+
+      {visibleTab !== "INBOX" && (
+        <p className="mt-2 text-xs text-faint">j and k move. 1 Evaluated, 2 Applied, 3 Responded, 4 Interview, 5 Offer, 6 Rejected, 7 Discarded, 8 SKIP. Shift-click selects the rows in between.</p>
+      )}
+
+      {visibleTab === "INBOX" ? (
         /* ── Inbox: the triage surface (Abundance → Triage → Shortlist → Score) ── */
-        pendingInbox.length > 0 ? (
-          <InboxTriage inbox={pendingInbox} />
-        ) : (
-          <InboxEmpty count={0} filtered={false} />
-        )
-      ) : filtered.length > 0 ? (
+        <>
+          {inbox === null ? (
+            <div role="status" className="mt-4 overflow-x-auto rounded-2xl border border-border">
+              <span className="sr-only">Loading inbox…</span>
+              <table aria-hidden="true" className="w-full min-w-[44rem] text-sm">
+                <tbody className="divide-y divide-border">
+                  <PipelineTableRowsSkeleton />
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <>
+              {inboxFitError && (
+                <p role="alert" className="mt-2 whitespace-pre-wrap text-xs text-red-500">{inboxFitError}</p>
+              )}
+              <InboxTriage inbox={inbox} />
+              {inbox.length === 0 && <InboxEmpty tracked={visibleApplications.length} />}
+            </>
+          )}
+        </>
+      ) : isPending || filtered.length > 0 ? (
         /* ── Tracker table ──
            overflow-x-auto, not overflow-hidden: the rounded corners still clip,
            but a table too wide for the viewport can now be scrolled to instead
            of being silently cut off. min-w keeps the columns readable rather
            than letting w-full crush them on a phone. */
         <div className="mt-4 overflow-x-auto rounded-2xl border border-border">
-          <table className="w-full min-w-[44rem] text-sm">
+          <table
+            aria-label="Tracked applications"
+            aria-rowcount={filtered.length + 1}
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+          >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
-              <tr>
+              <tr aria-rowindex={1}>
+                <th className="w-8 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all shown applications"
+                    checked={allSelected}
+                    onChange={() => setSelected(allSelected ? new Set() : new Set(filteredKeys))}
+                  />
+                </th>
                 {SORT_KEYS.map((k) => (
                   <th
                     key={k}
-                    className="cursor-pointer select-none whitespace-nowrap px-4 py-2.5 font-medium hover:text-foreground"
-                    onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
+                    className={cn(
+                      "whitespace-nowrap px-4 py-2.5 font-medium",
+                      k === "date" && "hidden lg:table-cell",
+                    )}
                   >
-                    <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      className="inline-flex cursor-pointer select-none items-center gap-1 uppercase tracking-wide hover:text-foreground"
+                      onClick={() => setParams({ sort: k, dir: sort.key === k ? sort.dir * -1 : -1 })}
+                    >
                       {k}
-                      <ChevronsUpDown className="size-3" />
-                    </span>
+                      <ChevronsUpDown aria-hidden="true" className="size-3" />
+                    </button>
                   </th>
                 ))}
+                <th className="whitespace-nowrap px-4 py-2.5 font-medium">resume</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((r, i) => (
-                <tr key={`${r.n}-${i}`} className="group transition-colors hover:bg-surface/40">
-                  <td className="px-4 py-3 font-medium">
-                    <Link href={`/pipeline/${r.n}`} className="flex items-center gap-2.5 transition-colors group-hover:text-brand">
-                      <CompanyLogo name={r.company} size={20} />
-                      {r.company}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-muted">
-                    <Link href={`/pipeline/${r.n}`}>{r.role}</Link>
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-muted">
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className={cn("size-1.5 shrink-0 rounded-full", statusDot(r.status))} />
-                      {r.status}
-                    </span>
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-3 text-faint tabular-nums">{r.date}</td>
+            {/* Keep editors mounted while query navigation is pending: sorting
+                must not discard an open editor or an in-flight status save. */}
+            <tbody ref={bodyRef} className="divide-y divide-border" hidden={isPending} aria-busy={false}>
+              {span.start > 0 && (
+                <tr aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: span.start * rowPx, padding: 0, border: 0 }} />
                 </tr>
-              ))}
+              )}
+              {mountedRows.map((r, i) => {
+                // The cursor is an index into filtered, not into the window.
+                const index = span.start + i;
+                const key = applicationKey(r);
+                return (
+                  <TrackerRow
+                    key={key}
+                    r={r}
+                    rowIndex={index}
+                    selected={selected.has(key)}
+                    isCursor={cursor === index}
+                    hasCv={hasCv.has(r.n)}
+                    detailQuery={detailQuery}
+                    heldSave={heldSaves.get(key)}
+                    onToggle={toggleRow}
+                    onSaved={onStatusSaved}
+                    onHeldSave={onHeldSave}
+                    onOpen={followDetail}
+                    onArm={stampDetail}
+                  />
+                );
+              })}
+              {span.end < filtered.length && (
+                <tr aria-hidden="true">
+                  <td colSpan={columnCount} style={{ height: (filtered.length - span.end) * rowPx, padding: 0, border: 0 }} />
+                </tr>
+              )}
             </tbody>
+            {isPending && (
+              <tbody className="divide-y divide-border" aria-busy="true">
+                <PipelineTableRowsSkeleton trackerColumn />
+              </tbody>
+            )}
           </table>
         </div>
-      ) : (
+      ) : trackerEmptyMessage({ shape: trackerShape, query, min: minFilter, tab }).kind === "filtered" ? (
         <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-          <p className="font-display text-lg">No matches</p>
-          <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Try a different tab or clear the search.</p>
+          <h2 className="font-display text-lg">{empty?.heading}</h2>
+          {empty && empty.actions.length > 0 && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {empty.actions.map(({ label, run }, i) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={run}
+                  className={cn(
+                    "rounded-md border px-3 py-1.5 text-sm font-medium transition-colors focus-visible:ring-2 focus-visible:ring-brand/40",
+                    i === 0
+                      ? "border-brand/40 bg-brand-soft text-brand-text hover:bg-brand/15"
+                      : "border-border text-muted hover:text-foreground",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+      ) : (
+        <EmptyTracker shape={trackerShape} query={deferredQ} min={minFilter} tab={tab} />
       )}
+    </PageFrame>
+  );
+}
+
+const TrackerRow = memo(function TrackerRow({
+  r,
+  rowIndex,
+  selected,
+  isCursor,
+  hasCv,
+  detailQuery,
+  heldSave,
+  onToggle,
+  onSaved,
+  onHeldSave,
+  onOpen,
+  onArm,
+}: {
+  r: Application;
+  rowIndex: number;
+  selected: boolean;
+  isCursor: boolean;
+  hasCv: boolean;
+  detailQuery: string;
+  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
+  onToggle: (key: string, shift: boolean) => void;
+  onSaved: (r: Application, status: string, restoreFocus: boolean) => void;
+  onHeldSave: (
+    key: string,
+    n: string,
+    event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" },
+  ) => void;
+  onOpen: (event: MouseEvent<HTMLAnchorElement>, n: string) => void;
+  onArm: (event: PointerEvent<HTMLAnchorElement>, n: string) => void;
+}) {
+  const company = companyPresentation(r);
+  const key = applicationKey(r);
+  const detailHref = `/pipeline/${encodeURIComponent(r.n)}${detailQuery ? `?${detailQuery}` : ""}`;
+  const posting = postingHref(r.url);
+  const open = (event: MouseEvent<HTMLAnchorElement>) => onOpen(event, r.n);
+  const arm = (event: PointerEvent<HTMLAnchorElement>) => onArm(event, r.n);
+  return (
+    <tr data-application-key={key} aria-rowindex={rowIndex + 2} data-tracker-cursor={isCursor ? "true" : undefined} className={cn("group transition-colors hover:bg-surface/40", isCursor && "bg-brand-soft/60")}>
+      <td className="w-8 px-3 py-3">
+        <input
+          type="checkbox"
+          aria-label={`Select ${company.label}, ${r.role} (#${r.n})`}
+          checked={selected}
+          onChange={(event) => {
+            const native = event.nativeEvent;
+            onToggle(key, "shiftKey" in native && native.shiftKey === true);
+          }}
+        />
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 font-medium tabular-nums">
+        <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="transition-colors group-hover:text-brand-text">
+          #{r.n}
+        </Link>
+      </td>
+      <td className="px-4 py-3 font-medium">
+        <Link href={detailHref} onPointerDown={arm} onClick={open} className="flex items-center gap-2.5 min-w-0 transition-colors group-hover:text-brand-text min-[1440px]:w-full">
+          <CompanyLogo name={company.logoName} size={20} />
+          <span className="block max-w-64 truncate min-[1440px]:min-w-0 min-[1440px]:flex-1 min-[1440px]:max-w-none" title={company.label}>{company.label}</span>
+        </Link>
+      </td>
+      <td className="min-w-0 px-4 py-3 text-muted min-[1440px]:overflow-hidden">
+        <div className="flex min-w-0 items-center gap-2">
+          <Link href={detailHref} tabIndex={-1} onPointerDown={arm} onClick={open} className="block max-w-72 truncate min-[1440px]:min-w-[8rem] min-[1440px]:flex-1 min-[1440px]:max-w-none" title={r.role}>{r.role}</Link>
+          {r.closesAt ? (
+            <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
+          ) : null}
+          {posting && (
+            <a
+              href={posting}
+              target="_blank"
+              rel="noreferrer"
+              title={posting}
+              className="inline-flex max-[1439px]:shrink-0 items-center gap-1 text-xs text-brand-text hover:underline min-[1440px]:max-w-[40%] min-[1440px]:min-w-0 min-[1440px]:overflow-hidden"
+            >
+              <span className="min-[1440px]:min-w-0 min-[1440px]:truncate">{postingLabel(posting)}</span>
+              <ExternalLink className="size-3 shrink-0" />
+            </a>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
+      </td>
+      <td className="whitespace-nowrap px-4 py-3 text-muted">
+        <StatusSelect
+          n={r.n}
+          current={r.status}
+          inline
+          applicationLabel={`${company.label} — ${r.role} (#${r.n})`}
+          heldSave={heldSave}
+          onHeldSave={(event) => onHeldSave(key, r.n, event)}
+          onSaved={(status, restoreFocus) => onSaved(r, status, restoreFocus)}
+        />
+      </td>
+      <td className="hidden whitespace-nowrap px-4 py-3 text-faint tabular-nums lg:table-cell">{r.date}</td>
+      <td className="whitespace-nowrap px-4 py-3">
+        {hasCv ? (
+          <a
+            href={`/api/cv-pdf?application=${encodeURIComponent(r.n)}`}
+            target="_blank"
+            rel="noreferrer"
+            title="Open the tailored CV PDF"
+            className="inline-flex items-center gap-1.5 text-brand-text hover:underline"
+          >
+            <FileText aria-hidden="true" className="size-3.5" /> PDF
+          </a>
+        ) : (
+          <span className="text-faint">—</span>
+        )}
+      </td>
+    </tr>
+  );
+});
+
+function emptyStateView(
+  state: TrackerEmptyState,
+  ctx: {
+    tabLabel: string | null;
+    query: string;
+    minFilter: number | null;
+    showAll: () => void;
+    clearSearch: () => void;
+    clearMin: () => void;
+  },
+): { heading: string; actions: { label: string; run: () => void }[] } {
+  const copy = trackerEmptyPresentation(state, { tabLabel: ctx.tabLabel, query: ctx.query, minScore: ctx.minFilter });
+  const run = {
+    "show-all": ctx.showAll,
+    "clear-search": ctx.clearSearch,
+    "clear-min": ctx.clearMin,
+  };
+  return {
+    heading: copy.heading,
+    actions: copy.actions.map((action) => ({ label: action.label, run: run[action.id] })),
+  };
+}
+
+function EmptyTracker({
+  shape,
+  query,
+  min,
+  tab,
+}: {
+  shape: string;
+  query: string;
+  min: number | null;
+  tab: string;
+}) {
+  const copy = trackerEmptyMessage({ shape, query, min, tab });
+  return (
+    <div
+      role={copy.kind === "malformed" ? "alert" : "status"}
+      className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center"
+    >
+      <p className="font-display text-lg">{copy.title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-sm text-muted">{copy.detail}</p>
     </div>
   );
 }
 
 // Empty inbox. Self-sufficient for the mainstream user (a primary in-web action),
 // honest for devs (the CLI/file path stays, demoted to progressive transparency).
-function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
-  if (filtered) {
-    return (
-      <div className="mt-4 rounded-2xl border border-dashed border-border bg-surface/30 px-6 py-12 text-center">
-        <p className="font-display text-lg">No matches</p>
-        <p className="mx-auto mt-1 max-w-sm text-sm text-muted">Clear the search to see the full inbox.</p>
-      </div>
-    );
-  }
+function InboxEmpty({ tracked }: { tracked: number }) {
   return (
     <div className="dot-bg mt-4 overflow-hidden rounded-2xl border border-border bg-surface/50 bg-origin-border bg-gradient-to-tr from-brand/10 via-transparent to-transparent shadow-lg">
       <div className="flex items-center gap-2 border-b border-foreground/10 px-5 py-3">
@@ -270,25 +1206,28 @@ function InboxEmpty({ count, filtered }: { count: number; filtered: boolean }) {
       </div>
       <div className="px-6 py-10 text-center">
         <p className="font-display text-lg">
-          Your <span className="text-brand">inbox</span> is empty.
+          Your <span className="text-brand-text">inbox</span> is empty.
         </p>
-        {count > 0 ? (
-          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Nothing pending right now.</p>
-        ) : (
-          <>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
-            <Link
-              href="/explore?run=1"
-              className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
-            >
-              <Compass className="size-4" /> Run your first free scan <ArrowRight className="size-4" />
-            </Link>
-            <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
-              Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
-              <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
-            </p>
-          </>
+        {tracked > 0 && (
+          <p className="mx-auto mt-2 max-w-sm text-sm text-muted">
+            New postings land here. Your{" "}
+            <Link href="/pipeline?tab=ALL" className="font-medium text-brand-text underline-offset-2 hover:underline">
+              {tracked} tracked role{tracked === 1 ? "" : "s"}
+            </Link>{" "}
+            {tracked === 1 ? "is" : "are"} under All.
+          </p>
         )}
+        <p className="mx-auto mt-2 max-w-sm text-sm text-muted">Find roles that match your CV — free, no tokens spent.</p>
+        <Link
+          href={pipelineFindRolesHref()}
+          className="mt-5 inline-flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-sm font-medium text-brand-foreground shadow-sm transition-all duration-200 hover:bg-brand-200 hover:-translate-y-0.5 hover:shadow-md"
+        >
+          <Compass className="size-4" /> Find roles <ArrowRight className="size-4" />
+        </Link>
+        <p className="mx-auto mt-4 max-w-sm text-xs text-muted">
+          Prefer the terminal? Run <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">career-ops scan</code>, or add job URLs to{" "}
+          <code className="rounded bg-surface-hover px-1 py-0.5 font-mono">data/pipeline.md</code>.
+        </p>
       </div>
     </div>
   );

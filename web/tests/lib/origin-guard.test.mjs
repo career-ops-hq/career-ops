@@ -1,11 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   normalizeHost,
   isLoopbackHost,
   parseAllowedHosts,
+  parseAllowedOrigins,
+  normalizeOrigin,
   checkRequest,
 } from "../../src/lib/origin-guard.mjs";
+
+const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // --- normalizeHost --------------------------------------------------------
 
@@ -53,6 +60,38 @@ test("parseAllowedHosts returns an empty set for blank/undefined", () => {
   assert.equal(parseAllowedHosts(undefined).size, 0);
 });
 
+// The bind decision that reads this module's parseAllowedHosts lives in
+// bind-host.mjs and is covered by tests/lib/bind-host.test.mjs.
+
+// --- where the guard runs -------------------------------------------------
+
+// A decision this module cannot make about itself: proxy.ts's matcher chooses
+// which requests reach checkRequest at all, and a guard that never runs is
+// indistinguishable from one that always allows. The matcher is a plain regex
+// path, so it is extracted and exercised rather than pattern-matched as text.
+test("the guard runs on page routes, not only on /api", () => {
+  // Given the matcher proxy.ts exports
+  const source = readFileSync(join(WEB_ROOT, "src", "proxy.ts"), "utf8");
+  const matcher = /matcher:\s*"([^"]+)"/.exec(source)?.[1];
+  assert.ok(matcher, "proxy.ts should export a single string matcher");
+  const matches = (path) => new RegExp(`^${matcher}$`).test(path);
+
+  // When the paths that carry the user's data are tested against it
+  // Then they are gated. Scoping this to /api left every page ungated, which a
+  // loopback bind does not cover: a DNS-rebinding page reads /pipeline from the
+  // user's own browser as same-origin, and force-dynamic pages read the tracker
+  // off disk on each request.
+  assert.equal(matches("/"), true, "the dashboard root renders user data");
+  assert.equal(matches("/pipeline"), true, "page routes must be gated");
+  assert.equal(matches("/cv"), true);
+  assert.equal(matches("/api/run"), true, "the API must stay gated");
+
+  // And build assets stay out: they carry no user data, and a 403 on them would
+  // break the very error page that explains the 403.
+  assert.equal(matches("/_next/static/chunks/main.js"), false);
+  assert.equal(matches("/favicon.ico"), false);
+});
+
 // --- checkRequest: the app's own same-origin traffic passes ---------------
 
 test("allows a same-origin fetch from the local app", () => {
@@ -76,6 +115,11 @@ test("allows a direct address-bar navigation (Sec-Fetch-Site: none)", () => {
 });
 
 test("allows a non-browser client with no Origin and no Sec-Fetch-Site (curl)", () => {
+  // Nothing here distinguishes this caller from one on the LAN spelling a
+  // loopback Host: the header is client-chosen and there is no trustworthy peer
+  // address at this layer. That is why the socket, not this filter, is what
+  // closes LAN reachability — see bind-host.mjs. Hardening this branch later
+  // would be more conservative, not a contradiction.
   const d = checkRequest({
     secFetchSite: null,
     origin: null,
@@ -139,7 +183,7 @@ test("blocks an opaque 'null' Origin", () => {
   assert.equal(d.ok, false);
 });
 
-// --- checkRequest: F2 LAN reachability is blocked unless opted in ---------
+// --- checkRequest: the Host filter, which is NOT the LAN control ----------
 
 test("blocks a request reaching the server on a LAN host, even same-origin", () => {
   const d = checkRequest({
@@ -180,4 +224,123 @@ test("a cross-site request is blocked even on an allowed LAN host", () => {
     allowedHosts: parseAllowedHosts("192.168.1.50"),
   });
   assert.equal(d.ok, false);
+});
+
+// --- the origin allowlist (CAREER_OPS_ALLOWED_ORIGINS) -------------------
+
+test("normalizeOrigin lowercases and strips trailing slashes", () => {
+  assert.equal(normalizeOrigin("Chrome-Extension://ABCDEF/"), "chrome-extension://abcdef");
+  assert.equal(normalizeOrigin(undefined), "");
+});
+
+test("normalizeOrigin drops a port that is the scheme's default", () => {
+  // The browser omits it: a page on http://localhost:80 sends
+  // `Origin: http://localhost`. Both spellings have to land on one string, or
+  // an allowlist entry written with the port never matches a real request.
+  assert.equal(normalizeOrigin("http://localhost:80"), normalizeOrigin("http://localhost"));
+  assert.equal(normalizeOrigin("https://dash.example:443"), normalizeOrigin("https://dash.example"));
+  // A non-default port is part of the origin and stays.
+  assert.equal(normalizeOrigin("http://localhost:3000"), "http://localhost:3000");
+  // A value the URL parser refuses still matches itself rather than vanishing.
+  assert.equal(normalizeOrigin("not an origin"), "not an origin");
+});
+
+test("an allowlist entry written with the default port matches the header without it", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "http://dash.example",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("http://dash.example:80"),
+  });
+  assert.equal(d.ok, true);
+});
+
+test("the reverse spelling matches too, and an unrelated origin still does not", () => {
+  const allowedOrigins = parseAllowedOrigins("https://dash.example");
+  const allowed = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "https://dash.example:443",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins,
+  });
+  assert.equal(allowed.ok, true);
+  const blocked = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "https://evil.example",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins,
+  });
+  assert.equal(blocked.ok, false);
+  assert.equal(blocked.status, 403);
+});
+
+test("parseAllowedOrigins is empty when the variable is unset or blank", () => {
+  assert.equal(parseAllowedOrigins(undefined).size, 0);
+  assert.equal(parseAllowedOrigins("").size, 0);
+  assert.equal(parseAllowedOrigins("   ").size, 0);
+});
+
+test("parseAllowedOrigins splits on commas and whitespace", () => {
+  const origins = parseAllowedOrigins("chrome-extension://abcdef, http://localhost:3000");
+  assert.equal(origins.has("chrome-extension://abcdef"), true);
+  assert.equal(origins.has("http://localhost:3000"), true);
+  assert.equal(origins.size, 2);
+});
+
+test("allows an allowlisted extension origin despite Sec-Fetch-Site: cross-site", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://abcdef",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, true);
+});
+
+test("still blocks a cross-site origin that is not on the allowlist", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "https://evil.example.com",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, false);
+  assert.equal(d.status, 403);
+});
+
+test("the allowlist never rescues the opaque 'null' origin", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "null",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("null, chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, false);
+});
+
+test("the allowlist does not lift the LAN host block", () => {
+  const d = checkRequest({
+    secFetchSite: "cross-site",
+    origin: "chrome-extension://abcdef",
+    host: "192.168.1.50:3000",
+    allowedHosts: parseAllowedHosts(""),
+    allowedOrigins: parseAllowedOrigins("chrome-extension://abcdef"),
+  });
+  assert.equal(d.ok, false);
+});
+
+test("the guard still works with no allowedOrigins passed at all", () => {
+  const d = checkRequest({
+    secFetchSite: "same-origin",
+    origin: "http://localhost:3000",
+    host: "localhost:3000",
+    allowedHosts: parseAllowedHosts(""),
+  });
+  assert.equal(d.ok, true);
 });

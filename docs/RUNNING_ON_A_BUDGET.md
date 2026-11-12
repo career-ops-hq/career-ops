@@ -81,7 +81,7 @@ Project-level `.claude/settings.json` and `~/.claude/settings.local.json` can se
 
 ### The batch mode is the exception worth knowing
 
-`batch/batch-runner.sh` drives `claude -p` workers, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
+`batch/batch-runner.sh` drives `claude -p` workers by default, and the headless path does not use the interactive login. If you want batch runs on your subscription rather than on credits, generate a long-lived token once:
 
 ```bash
 claude setup-token          # requires an active Claude subscription
@@ -104,26 +104,77 @@ Different CLIs offer different levels of flexibility for model routing. The two 
 OpenCode is an open-source coding agent that easily routes to custom API providers (like DeepSeek, OpenRouter, Together AI) or local endpoints (Ollama).
 
 To configure OpenCode with a custom provider:
-1. Initialize/open OpenCode in the project directory:
+
+1. Create `opencode.json` in the project root. OpenCode looks for it in the
+   current directory and then walks up to the nearest git root, so the
+   career-ops checkout is the right place for it. A custom endpoint goes in
+   `provider.<name>.options.baseURL`, and credentials come in through `{env:VAR}`
+   substitution rather than being pasted in:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+     "provider": {
+       "openrouter": {
+         "options": {
+           "apiKey": "{env:OPENROUTER_API_KEY}"
+         }
+       }
+     }
+   }
+   ```
+
+   `openrouter` is one of OpenCode's built-in providers, so it already knows the
+   base URL — you only supply the key. For a provider OpenCode does not ship,
+   add `"baseURL": "https://your-endpoint/v1"` alongside `apiKey` and set
+   `"npm": "@ai-sdk/openai-compatible"`, as in the verified Kimi recipe below.
+
+2. Export only the key named in the config, then open OpenCode in the project
+   directory:
+
+   ```bash
+   # Git Bash / Linux / macOS:
+   export OPENROUTER_API_KEY="your_openrouter_api_key_here"
+
+   # Windows CMD:
+   set OPENROUTER_API_KEY=your_openrouter_api_key_here
+
+   # Windows PowerShell:
+   $env:OPENROUTER_API_KEY="your_openrouter_api_key_here"
+   ```
+
    ```bash
    opencode
    ```
-2. Open its configuration settings (usually located in `.opencode/config.json` or configured via CLI prompts/settings).
-3. Set the `provider` to your chosen endpoint (e.g., OpenRouter or a custom OpenAI-compatible endpoint).
-4. Configure the environment variables for custom endpoints if needed:
-   ```bash
-   # For Git Bash / Linux / macOS:
-   export OPENAI_API_BASE="https://openrouter.ai/api/v1"
-   export OPENAI_API_KEY="your_openrouter_api_key_here"
 
-   # For Windows CMD:
-   set OPENAI_API_BASE=https://openrouter.ai/api/v1
-   set OPENAI_API_KEY=your_openrouter_api_key_here
+> **`OPENAI_API_BASE` does nothing here.** OpenCode reads neither
+> `OPENAI_API_BASE` nor `OPENAI_BASE_URL`; a base URL is only ever config, as
+> above. Exporting it and nothing else leaves OpenCode with no provider
+> configured — which fails in a confusing way, especially in headless
+> `opencode run` usage where there is no `/models` picker to fall back on.
+> (`OPENAI_BASE_URL` *is* read by career-ops' own direct-API scripts —
+> `openai-eval.mjs`, `openai-tailor.mjs` — see `.env.example`. That is a
+> separate path from running a CLI as your engine.)
 
-   # For Windows PowerShell:
-   $env:OPENAI_API_BASE="https://openrouter.ai/api/v1"
-   $env:OPENAI_API_KEY="your_openrouter_api_key_here"
-   ```
+> **Headless runs need a model in config.** `opencode run` resolves its model
+> from the top-level `model` key (format `provider/model`, so an OpenRouter id
+> that itself contains a slash reads `openrouter/vendor/model:free`). Scripts
+> that shell out to `opencode run` — `rank-pipeline.mjs`, for one — do not pass
+> `--model`, so without that key there is nothing to select one.
+
+Free model ids on OpenRouter rotate, and the one above will eventually stop
+resolving. List what is currently free with:
+
+```bash
+curl -s https://openrouter.ai/api/v1/models \
+  | jq -r '.data[] | select(.id|endswith(":free")) | "\(.context_length)\t\(.id)"' \
+  | sort -rn
+```
+
+Prefer a large context window for career-ops: the batch paths send many rows in
+a single prompt and parse strict JSON back, so a small context or a chatty small
+model both fail the parse.
 ### Kimi K2.5 via OpenCode (Verified)
 
 > **Kimi the model, not Kimi the CLI.** This recipe runs the Kimi K2.5 *model* through the **OpenCode** CLI. That is a different thing from using the standalone **Kimi CLI** as your host (see [Supported CLIs](SUPPORTED_CLIS.md)). The names collide; the setups don't. Follow the steps below inside OpenCode.
@@ -231,16 +282,89 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 | **Kimi K2.5** | Moonshot AI | API pricing applies | Verified with OpenCode using the Moonshot OpenAI-compatible endpoint. Produces structured Markdown suitable for Career-Ops evaluations. See the verified OpenCode recipe below. |
 
 
-> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
+> **Standalone evaluator (no CLI config needed):** every OpenAI-compatible provider above (DeepSeek, Qwen, GLM, Together, Groq, OpenRouter, Requesty, Cheaper Inference, API Route, Runcrate, …) works directly through `node openai-eval.mjs` — just set a base URL, model, and key:
 > ```bash
 > OPENAI_BASE_URL=https://openrouter.ai/api/v1 \
 > OPENAI_MODEL=deepseek/deepseek-chat \
 > OPENAI_API_KEY=your_key \
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
+> Requesty (`https://router.requesty.ai/v1`) is another OpenAI-compatible router that works the same way — one key across OpenAI, Anthropic, Google, DeepSeek and others. Prompt caching depends on the model: Anthropic models honor the `cache_control` breakpoints the script already sends, while OpenAI models such as `gpt-4o-mini` cache automatically on the provider side without any request changes:
+> ```bash
+> OPENAI_BASE_URL=https://router.requesty.ai/v1 \
+> OPENAI_MODEL=openai/gpt-4o-mini \
+> OPENAI_API_KEY=your_requesty_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> Cheaper Inference (`https://api.cheaperinference.com/v1`) is an OpenAI-compatible gateway that works the same way. Model ids are bare (no vendor prefix), such as `gpt-5.4-mini`:
+> ```bash
+> OPENAI_BASE_URL=https://api.cheaperinference.com/v1 \
+> OPENAI_MODEL=gpt-5.4-mini \
+> OPENAI_API_KEY=your_cheaperinference_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+>
+> API Route (`https://global.api-route.com/v1`) uses the same OpenAI-compatible configuration. Set an exact chat-completions model id available to your account (listed by its authenticated `/v1/models` endpoint); `gpt-5.5` is an example, not a new default:
+> ```bash
+> OPENAI_BASE_URL=https://global.api-route.com/v1 \
+> OPENAI_MODEL=gpt-5.5 \
+> OPENAI_API_KEY=your_api_route_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. Use it only if you choose to share that data with the provider.
+>
+> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` and `openai-tailor.mjs` send a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
+>
+> Runcrate (`https://api.runcrate.ai/v1`) is another OpenAI-compatible endpoint that works the same way. Model ids carry the vendor prefix, such as `deepseek-ai/DeepSeek-V4.1-Flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.runcrate.ai/v1 \
+> OPENAI_MODEL=deepseek-ai/DeepSeek-V4.1-Flash \
+> OPENAI_API_KEY=your_runcrate_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> CloudGPU (`https://cloudgpu.app/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4.1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://cloudgpu.app/v1 \
+> OPENAI_MODEL=deepseek-v4.1-flash \
+> OPENAI_API_KEY=your_cloudgpu_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> cheapaimodel (`https://api.cheapaimodel.ai/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek-v4-1-flash`:
+> ```bash
+> OPENAI_BASE_URL=https://api.cheapaimodel.ai/v1 \
+> OPENAI_MODEL=deepseek-v4-1-flash \
+> OPENAI_API_KEY=your_cheapaimodel_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> UberLLM (`https://api.uberllm.dev/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
+> ```bash
+> OPENAI_BASE_URL=https://api.uberllm.dev/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-flash \
+> OPENAI_API_KEY=your_uberllm_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> Standard Compute (`https://api.stdcmpt.com/v1`) is another OpenAI-compatible endpoint that works the same way. The `StandardCompute` model id sends each request to the cheapest enabled model that can handle it, with automatic fallback; pinned model ids are listed at `https://api.stdcmpt.com/v1/models`:
+> ```bash
+> OPENAI_BASE_URL=https://api.stdcmpt.com/v1 \
+> OPENAI_MODEL=StandardCompute \
+> OPENAI_API_KEY=your_standardcompute_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
 > NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
+
+> **Output cap (`CAREER_OPS_MAX_TOKENS`, default `32768`).** `openai-eval.mjs` and `openai-tailor.mjs` send this as `max_tokens` (as `max_completion_tokens` to `api.openai.com`, whose reasoning models reject `max_tokens`). Without a cap, OpenRouter reserves credit for the model's whole output window before generating anything and answers **HTTP 402** when your balance cannot cover that reservation, even when the report itself costs cents. The default holds a full A-G report (about 9K tokens) plus the reasoning a thinking model spends first. If you see a 402 on a low balance, lower it (`CAREER_OPS_MAX_TOKENS=16384`); if the script warns that the reply stopped at the cap, raise it. `openai-tailor.mjs` saves nothing in that case, since a CV cut off at the cap is missing its last sections.
 
 ## 5. Local LLM Tradeoffs (Ollama / Llama.cpp)
 
@@ -257,6 +381,37 @@ Running 32B or 70B models locally requires substantial system resources:
 
 > 💡 **Budget Tip**: For most users, running **DeepSeek V3** or **Qwen 2.5 Coder 72B** via a cheap hosted API (like DeepSeek directly or OpenRouter) is far more efficient and cost-effective than investing in local hardware, costing only a few cents for dozens of evaluations.
 
+### Ollama + OpenCode Quick-Start (Verified)
+For users who want a completely local setup on Apple Silicon, Ollama can be used with OpenCode without an API key.
+
+The following setup was verified on an Apple Silicon Mac with 16 GB unified memory.
+
+1. Install Ollama and make sure it is running.
+2. Pull the model:
+
+   ```bash
+   ollama pull command-r7b
+   ```
+3. Verify that the model is available:
+   ```bash
+   ollama list
+   ```
+4. Launch OpenCode with the local model:
+
+    ```bash
+    ollama launch opencode --model command-r7b
+    ```
+5. From OpenCode, point the agent at your Career-Ops checkout and run a simple repository task to confirm that the model can interact with the repository.
+
+- **Verified hardware:** Apple M4, 16 GB unified memory
+- **Model:** `command-r7b` (7B parameters)
+- **Inference:** Local through Ollama
+- **API key:** Not required
+- **API cost:** $0
+
+Observed result: OpenCode launched successfully with `command-r7b`. A simple prompt completed in approximately 57 seconds. The model produced a reasonable high-level README summary, but it did not reliably read repository files through OpenCode during testing. For complex repository tasks, larger models may provide better accuracy.
+
+> **Performance and quality note:** Smaller local models can be useful on memory-constrained hardware, but they may be less reliable than larger hosted models for complex Career-Ops evaluations, repository analysis, and resume tailoring. Use this setup when local execution and zero API cost are more important than maximum output quality.
 ---
 
 ## 6. Token-Saving Best Practices
@@ -274,15 +429,29 @@ To prevent unnecessary API costs or hitting rate limits, implement the following
    ./batch/batch-runner.sh --dry-run
    ```
 3. **Resume Interrupted Runs**:
-   If a batch run is interrupted by a rate limit or network error, do not restart from scratch. Use the `--resume-paused` flag to continue from where it left off, skipping completed jobs and preventing wasted tokens:
+   If a batch run stops part-way, do not restart from scratch. Run the same command again: completed offers are skipped and the rest are picked up, so no tokens go to work that already finished:
+   ```bash
+   ./batch/batch-runner.sh
+   ```
+   If the run paused on a Claude session or usage limit, the offers that hit it are marked `paused_rate_limit`, and a plain run leaves them alone. Once the limit resets, re-run just those with `--resume-paused`, then run without it for the offers that had not started:
    ```bash
    ./batch/batch-runner.sh --resume-paused
+   ./batch/batch-runner.sh
    ```
 4. **Use `--verify` on Scans**:
    When running job board scans, use the liveness verifier to filter out expired postings before they enter your pipeline. This prevents wasting LLM tokens evaluating closed jobs:
    ```bash
    npm run scan -- --verify
    ```
+
+
+### Cap interactive sessions (~10 roles)
+
+Evaluating many roles in one interactive session degrades the output well before the quota runs out. At 40+ evaluations in a single session, reports started mixing job titles and dates, and CV PDFs came out wrong. Cap an interactive session at about ten role evaluations, then `/clear` or start a fresh session.
+
+The real limit is tokens of accumulated job text, not a hard role count. When descriptions are long, cut the batch roughly in half.
+
+To evaluate more than that in one go, use `batch/batch-runner.sh`. It reuses one worker instead of letting context pile up across interactive turns. Source: [discussion #1089](https://github.com/career-ops-hq/career-ops/discussions/1089).
 
 ---
 
@@ -313,9 +482,9 @@ node openai-eval.mjs \
 ```
 
 **Approximate Token Usage:**
-- **Input:** ~20,000 tokens. The static prefix alone is **17,728**: the script sends `modes/_shared.md` (4,127) plus `modes/oferta.md` (13,601) as the system prompt, and your `cv.md` and the JD come on top of that.
+- **Input:** ~32,000 tokens. The static prefix alone is **29,341**: the script sends `modes/_shared.md` (7,307) plus `modes/oferta.md` (22,034) as the system prompt, and your `cv.md` and the JD come on top of that. Measured on 4 November 2026 with the command below.
 - **Output:** ~1,000 tokens (the A-G evaluation report).
-- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.003 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
+- **Cost:** at DeepSeek V3 prices (~$0.14/1M input, ~$0.28/1M output), roughly **$0.005 per evaluation**. Still cheap, and cheap enough that the number below matters more than this one.
 
 Measure it yourself rather than trusting this paragraph, because these files grow with every release:
 
@@ -329,12 +498,12 @@ for (const f of ['modes/_shared.md','modes/oferta.md','AGENTS.md'])
 
 ### What the default path costs (this is the number most people are actually paying)
 
-The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (8,285) + `modes/_shared.md` (4,127) + `modes/oferta.md` (13,601) = about 26,000 tokens of instructions per evaluation**, before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
+The figures above are for the standalone script. **If you paste a job URL into your CLI instead, the agent loads `AGENTS.md` (23,430) + `modes/_shared.md` (7,307) + `modes/oferta.md` (22,034) = about 53,000 tokens of instructions per evaluation** (measured on 4 November 2026 with the command above), before your CV, the job description, or any tool output. That is the real floor of an interactive evaluation, and it is why a long session of pasting URLs burns a quota that a batch of standalone script calls would not.
 
 Two things follow from that, and they are the cheapest wins available:
 
 - **Batch beats pasting** when you have several roles: `batch/batch-runner.sh` reuses one worker instead of re-sending the instructions per role.
-- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.003 evaluation and an exhausted five-hour limit.
+- **One evaluation is not the risk; unbounded research is.** A single evaluation used to be able to fan out into dozens of subagents and burn tens of millions of tokens (issue #1235). The modes now cap web research at five queries and forbid spawning subagents for it, so an evaluation stays bounded. If you write your own mode, keep that cap: it is the difference between a $0.005 evaluation and an exhausted five-hour limit.
 
 ### Step 4: Tailor the CV HTML (~3,000 Tokens)
 

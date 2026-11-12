@@ -1,0 +1,96 @@
+import { statusToken } from "./pipeline-sankey.mjs";
+
+// Carry only the list's own filters through a report URL. Return destinations
+// remain fixed to /pipeline; no arbitrary "returnTo" URL or browser storage.
+const FILTER_KEYS = ["tab", "min", "sort", "dir", "q"];
+
+/**
+ * @param {string | Record<string, string | string[] | undefined>} params
+ * @param {string} [search] The current local search, including an explicit clear.
+ */
+export function pipelineQuery(params, search) {
+  const query = new URLSearchParams();
+  const source = typeof params === "string" ? new URLSearchParams(params) : params;
+  for (const key of FILTER_KEYS) {
+    const raw = source instanceof URLSearchParams ? source.get(key) : source[key];
+    // Match useSearchParams().get(): a repeated query key uses its first value.
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    if (typeof value === "string" && value !== "") query.set(key, value);
+  }
+  if (search !== undefined) {
+    if (search) query.set("q", search);
+    else query.delete("q");
+  }
+  return query.toString();
+}
+
+/** Detail URL for one tracker row. `search` is the text in the box right now,
+ * which can be ahead of the deferred value baked into the row link.
+ * @param {string} n
+ * @param {string | Record<string, string | string[] | undefined>} params
+ * @param {string} search
+ */
+export function trackerDetailHref(n, params, search) {
+  const query = pipelineQuery(params, search);
+  return `/pipeline/${encodeURIComponent(n)}${query ? `?${query}` : ""}`;
+}
+
+// INBOX (the triage queue) is the default tab; the rest filter the tracker.
+export const PIPELINE_TABS = /** @type {const} */ ([
+  "INBOX",
+  "ALL",
+  "EVALUATED",
+  "APPLIED",
+  "RESPONDED",
+  "ASSESSMENT",
+  "INTERVIEW",
+  "OFFER",
+  "HIRED",
+  "REJECTED",
+  "DISCARDED",
+  "SKIP",
+  "OTHER",
+]);
+
+const RESIDUAL_TABS = new Set(["INBOX", "ALL", "OTHER"]);
+
+const STAGE_TABS = new Set(PIPELINE_TABS.filter((tab) => !RESIDUAL_TABS.has(tab)));
+
+/**
+ * A row sits on the tab named by the Analytics sankey's statusToken, so tab
+ * counts and sankey leaves agree: "Not evaluated" is OTHER, and a dated
+ * "Aplicado 2026-08-20" is APPLIED. OTHER is every token that is no stage.
+ * @param {string} status
+ * @param {string} tab
+ * @returns {boolean}
+ */
+export function rowOnPipelineTab(status, tab) {
+  const token = statusToken(status);
+  if (tab === "OTHER") return !STAGE_TABS.has(token);
+  return token === tab;
+}
+
+/**
+ * The tab a `?tab=` value selects. The server page and the client view both
+ * call this, so they agree on which tab shows the inbox.
+ * @param {string | string[] | null | undefined} raw
+ * @returns {(typeof PIPELINE_TABS)[number]}
+ */
+export function pipelineTab(raw) {
+  const value = String((Array.isArray(raw) ? raw[0] : raw) ?? "").toUpperCase();
+  return PIPELINE_TABS.find((t) => t === value) ?? "INBOX";
+}
+
+/**
+ * How far the tab strip should scroll so the selected tab is inside it.
+ * scrollIntoView would also scroll the list.
+ *
+ * @param {{ left: number, right: number }} strip
+ * @param {{ left: number, right: number }} tab
+ * @param {number} scrollLeft
+ */
+export function tabStripScrollLeft(strip, tab, scrollLeft) {
+  if (tab.left < strip.left) return scrollLeft - (strip.left - tab.left);
+  if (tab.right > strip.right) return scrollLeft + (tab.right - strip.right);
+  return scrollLeft;
+}

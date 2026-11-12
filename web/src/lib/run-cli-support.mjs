@@ -5,6 +5,7 @@
 // without an extension, ESM specifiers for plain JS modules must be fully
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
+import { claudeUsageTokens } from "./claude-usage.mjs";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
@@ -13,7 +14,12 @@ import { isReservedReportFile } from "./report-files.mjs";
  * co-occur on a Claude `result` event.
  * `costUsd` is `number | null`: null is a REPORTED absence, not a missing field —
  * Codex sends usage with no cost, and callers must not fill that in with a rate.
- * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, costUsd?: number | null, error?: string}} ParsedEvent
+ * `tokensAreTotal` marks a CLI whose usage frame carries the RUN TOTAL rather
+ * than one turn's delta. It exists because the two conventions are not
+ * distinguishable from the number alone, and guessing wrong is silent: summing
+ * totals over-counts, and overwriting deltas under-counts. Absent means delta,
+ * which is what Codex and Claude send.
+ * @typedef {{status?: string, tool?: string, text?: string, tokens?: number, tokensAreTotal?: boolean, costUsd?: number | null, error?: string}} ParsedEvent
  */
 
 const STATUS_READY = "Agent ready";
@@ -24,13 +30,14 @@ const STATUS_RECONNECTING = "Reconnecting…";
  * formula is the only place that difference is visible (adapted from #2689,
  * which reached this from the accounting side).
  *
- * The dashboard's metric is TOKENS BILLED AT FULL RATE — `/api/usage/route.ts`
- * defines it as input + output + cache-creation, deliberately omitting
- * discounted cache reads.
+ * The dashboard's Claude metric is TOTAL TOKEN ACTIVITY — input + output +
+ * cache creation + cache reads. Cache reads are discounted, so this is a
+ * context-volume signal rather than a dollar-cost estimate. `/api/usage` and
+ * this per-run parser share `claudeUsageTokens` so those totals cannot drift.
  *
  *   Claude  `input_tokens` EXCLUDES cache reads (they live in
- *           `cache_read_input_tokens`), and cache writes are a separate pool
- *           billed at full rate. → input + output + cache_creation
+ *           `cache_read_input_tokens`), and cache writes are separate too.
+ *           → input + output + cache_creation + cache_read
  *   Codex   `input_tokens` INCLUDES `cached_input_tokens` (OpenAI's
  *           convention), so adding is double-counting and the cached portion
  *           must be SUBTRACTED. → (input − cached) + output
@@ -267,11 +274,9 @@ export function parseClaudeEvent(line) {
     // user most wants to see the cost of.
     const result = {};
     if (ev.usage) {
-      // Addition here, subtraction for Codex — see the header note. Claude's
-      // input_tokens excludes cache reads, so cache writes must be added back
-      // in; this is the same formula /api/usage uses.
-      const u = ev.usage;
-      result.tokens = tokenCount(u.input_tokens) + tokenCount(u.output_tokens) + tokenCount(u.cache_creation_input_tokens);
+      // Addition here, subtraction for Codex — see the header note. This shared
+      // helper keeps the per-run total identical to /api/usage.
+      result.tokens = claudeUsageTokens(ev.usage);
       if (typeof ev.total_cost_usd === "number") result.costUsd = ev.total_cost_usd;
     }
     // A terminal failure, the counterpart of parseCodexEvent's turn.failed. The
@@ -299,17 +304,87 @@ export function parseClaudeEvent(line) {
 }
 
 /**
- * Fold one parsed event's token count into a running total. `turn.completed`
- * (Codex) and `result` (Claude) usage is per-event, not cumulative-since-start,
- * so callers must accumulate across multiple events in one run rather than
- * overwrite — otherwise a multi-turn run silently undercounts.
+ * Convert one Grok Build CLI `--output-format streaming-json` line into the
+ * same shape the other two parsers produce.
+ *
+ * Two things here differ from Codex and Claude, and both are format facts
+ * rather than preferences:
+ *
+ * 1. **`end` carries the turn TOTAL, not a delta.** `usage` frames arrive
+ *    first and `end` reports the whole run, so summing them adds the parts to
+ *    the whole. Both kinds are emitted with `tokensAreTotal` so the fold takes
+ *    the latest — keeping the intermediates means a run killed mid-flight
+ *    still records something rather than zero.
+ * 2. **`thought` is dropped.** It carries chain-of-thought; forwarding it would
+ *    put reasoning in the report pane and, worse, mark a run as having produced
+ *    text when it never produced an answer, defeating the route's honesty gate.
+ *    `available_commands` is a multi-kilobyte tool manifest repeated every turn.
+ *
+ * @param {string} line
+ * @returns {ParsedEvent | null}
+ */
+export function parseGrokEvent(line) {
+  let ev;
+  try {
+    ev = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  // Same reason as the other two parsers' guard: JSON.parse("null") succeeds.
+  if (!ev || typeof ev !== "object") return null;
+
+  if (ev.type === "text") {
+    if (typeof ev.data !== "string" || ev.data === "") return null;
+    return { text: ev.data };
+  }
+
+  if (ev.type === "tool_call") {
+    const name = ev.toolName ?? ev.title;
+    return { tool: typeof name === "string" && name ? name : "Working" };
+  }
+
+  if (ev.type === "usage" || ev.type === "end") {
+    const usage = ev.usage;
+    // No usage block means nothing to report — null rather than {tokens: 0}, so
+    // the fold's `typeof === "number"` guard skips it instead of zeroing a
+    // total an earlier frame already established.
+    if (!usage || typeof usage !== "object") return null;
+    // Same subtraction as Codex: cached input is billed at a different rate, so
+    // counting it at full rate overstates the run. Clamped at 0 so a malformed
+    // usage block can never report negative tokens.
+    const fresh = Math.max(0, tokenCount(usage.input_tokens) - tokenCount(usage.cached_input_tokens));
+    /** @type {ParsedEvent} */
+    const result = { tokens: fresh + tokenCount(usage.output_tokens), tokensAreTotal: true };
+    // Last NUMERIC cost wins upstream, so emitting null here would not erase a
+    // figure already reported; grok sends the real number only on `end`.
+    result.costUsd = typeof ev.total_cost_usd === "number" ? ev.total_cost_usd : null;
+    return result;
+  }
+
+  return null;
+}
+
+/**
+ * Fold one parsed event's token count into a running total.
+ *
+ * Two wire conventions, and the fold has to be told which one it is holding:
+ *
+ * - **Delta** (Codex `turn.completed`, Claude `result`): each usage frame
+ *   reports one turn, so the caller must ADD or a multi-turn run undercounts.
+ * - **Total** (Grok `end`): the frame reports the whole run, so the caller must
+ *   take the LATEST or the run over-counts by the sum of its own intermediates.
+ *
+ * The parser sets `tokensAreTotal` because the parser is the only place that
+ * knows the CLI's format; the route stays CLI-agnostic. Defaulting to delta
+ * keeps every existing caller and CLI behaving exactly as before.
  *
  * @param {number} current
  * @param {ParsedEvent | null | undefined} ev
  * @returns {number}
  */
 export function accumulateTokens(current, ev) {
-  return typeof ev?.tokens === "number" ? current + ev.tokens : current;
+  if (typeof ev?.tokens !== "number") return current;
+  return ev.tokensAreTotal ? ev.tokens : current + ev.tokens;
 }
 
 /**
@@ -333,10 +408,88 @@ export function completedReportNames(entries) {
  * @returns {boolean}
  */
 export function hasNewCompletedReport(beforeEntries, afterEntries) {
+  return newCompletedReportName(beforeEntries, afterEntries) != null;
+}
+
+/** Basename of the first completed report that appeared after `beforeEntries`. */
+export function newCompletedReportName(beforeEntries, afterEntries) {
   const before = completedReportNames(beforeEntries);
   const after = completedReportNames(afterEntries);
   for (const name of after) {
-    if (!before.has(name)) return true;
+    if (!before.has(name)) return name;
   }
-  return false;
+  return null;
+}
+
+/** Leading report number from a new completed report, or null. */
+export function newCompletedReportNum(beforeEntries, afterEntries) {
+  const name = newCompletedReportName(beforeEntries, afterEntries);
+  if (!name) return null;
+  const n = parseInt(name, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Graceful-SIGTERM budget (ms) for a run, kept safely under the route's 800s
+// maxDuration. pdf reserves headroom for its post-agent Chromium render.
+// evaluate reserves 60s for report-persist (write the report, merge the
+// tracker, release the sentinel), which runs after the agent. Other kinds
+// have no post-agent phase, so they keep nearly the whole budget. The old
+// 285s evaluate floor killed real evaluations mid-run — ~25 Bash calls plus web
+// searches routinely run longer — and the kill then misreported as "didn't save
+// a report" (#3124).
+export const RUN_MAX_DURATION_S = 800;
+export function killMsForKind(kind) {
+  if (kind === "pdf") return 600_000;
+  if (kind === "evaluate") return 740_000;
+  return 780_000;
+}
+
+/**
+ * The error for a run whose CLI gave us no assistant text, or null when it did.
+ *
+ * `stderrSnippet` is the first stderr line the runtime's classifier flagged. It is
+ * detail only: it never decides that the run failed, it just says why. It is
+ * appended on BOTH branches. A CLI can exit 0 and still do nothing: Antigravity
+ * prints "a tool required the "command" permission that headless mode cannot
+ * prompt for" to stderr, exits cleanly and writes nothing to stdout, and that
+ * line used to be dropped, leaving only "is it installed and authenticated?".
+ *
+ * With no snippet the text is exactly what it was before this existed.
+ *
+ * @param {{emittedText: boolean, sawError: boolean, cleanExit: boolean, stderrSnippet?: string | null}} state
+ * @returns {string | null}
+ */
+export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet }) {
+  if (emittedText || sawError) return null;
+  const detail = stderrSnippet ? ` (${stderrSnippet})` : "";
+  if (!cleanExit) return `The CLI exited with an error — is it installed and authenticated?${detail}`;
+  return `The CLI produced no output — is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;
+}
+
+// Message for a run the route stopped at its own time limit. It names the limit,
+// offers a re-run / Claude Code, and DELIBERATELY never says the CLI "didn't save
+// a report": a timeout and a CLI that couldn't write are different failures, and
+// blaming the CLI sends the user to re-check the wrong thing (#3124).
+export function timeoutMessage(killMs, kind) {
+  return `This run passed the ${Math.round(killMs / 1000)}s time limit and was stopped before it could finish — re-run it, or run a very long ${kind} on Claude Code directly. The CLI was working; we cut it off, so it isn't recorded as a result.`;
+}
+
+/**
+ * Structured CLIs stream each assistant message as text deltas with nothing
+ * between messages. A tool call ends a message, so the next text starts on a new
+ * line. Without the break, a <<cv-html>> opener that starts a new message lands
+ * mid-line after the previous message's prose, and parseCvEnvelope, which needs
+ * the opener on its own line, reports no envelope.
+ *
+ * @returns {(ev: ParsedEvent | null | undefined) => string} the text to append
+ */
+export function createAgentTextJoiner() {
+  let newMessage = false;
+  return (ev) => {
+    if (ev?.tool) newMessage = true;
+    if (!ev?.text) return "";
+    const text = newMessage ? `\n${ev.text}` : ev.text;
+    newMessage = false;
+    return text;
+  };
 }

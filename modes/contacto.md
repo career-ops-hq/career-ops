@@ -20,17 +20,58 @@ short message; otherwise run the LinkedIn power move below.
 
 ## LinkedIn power move (default)
 
-1. **Identify targets** via WebSearch:
-   - Hiring manager of the team
+0. **Check for a warm lead before searching cold (#4691).** Before any
+   WebSearch, run `node contact-lookup.mjs --company "{company}" --summary`
+   against `data/contacts.tsv`. This is the saved-contacts phonebook —
+   written by a prior `contacto` run or by `add` from an earlier,
+   *different-role* application — and a real prior relationship there beats
+   a cold search every time.
+
+   - **If one or more matches come back:** surface them to the candidate
+     ahead of doing any searching, naming each one's name, title, and which
+     tracker#/prior role ties them to this company (e.g. "You already have
+     Jane Doe (Eng Manager) saved from tracker #042 — she interviewed you for
+     the SWE role in March. Want to reach out to her for an internal referral
+     on this new role instead of searching cold?"). With more than one match,
+     list each briefly and let the candidate pick, or say "search cold
+     instead."
+     - If the candidate says yes → skip step 1 entirely, set contact type to
+       **Internal Referral** (see step 2), and go to step 4 using that
+       persona.
+     - If the candidate declines, or wants a different/fresh contact →
+       continue to step 1 as normal. Nothing here changes step 1's behavior.
+   - **If no match exists** (empty `data/contacts.tsv`, or no row for this
+     company): say nothing extra, continue straight to step 1. This check is
+     silent on a miss -- it is not a reason to pause the flow.
+
+1. **Find ONE target** via WebSearch -- search in this order and stop at the first
+   one you can actually confirm:
+   - Hiring manager of the team (usually the strongest primary at this stage)
    - Assigned recruiter
-   - 2-3 team peers (people with similar roles)
-   - Interviewer (if the candidate already has a scheduled interview)
+   - A team peer (someone with a similar role)
+   - Interviewer, if the candidate already has a scheduled interview
+
+   **Three WebSearch calls is a hard ceiling, not a suggestion.** Step 3 selects a
+   single primary target and step 4 writes one message, so every search past the
+   first confirmed hit is paid for and thrown away. One confirmed contact is a
+   complete result, not a partial one -- do not keep searching to round out a
+   roster nobody asked for.
+
+   Best-effort and no login: when a target cannot be confirmed, say so plainly and
+   move to the next one in the order. Never guess a name.
 
 2. **Classify contact type** -- ask the candidate or infer from context:
    - **Recruiter** -- person whose role is talent acquisition, sourcing, or recruiting
    - **Hiring Manager** -- the person who leads the hiring team
-   - **Peer** -- someone with a similar role in the team (indirect referral)
+   - **Peer** -- someone with a similar role in the team (indirect referral,
+     NO prior relationship assumed)
    - **Interviewer** -- someone who will interview the candidate (known date)
+   - **Internal Referral** -- a contact surfaced by step 0, where a REAL
+     prior relationship already exists (they interviewed the candidate
+     before, or are a saved contact from an earlier application at this
+     company). This is the opposite of Peer: Peer explicitly assumes no
+     relationship yet; Internal Referral exists only because one already
+     does.
 
 3. **Select primary target**: the person who would benefit most from the candidate being there
 
@@ -58,11 +99,32 @@ short message; otherwise run the LinkedIn power move below.
    - **Sentence 3 (CTA)**: "Looking forward to our conversation on [date]"
    - **Note**: Light tone, not desperate. The goal is to show that you prepared.
 
+   ### Internal Referral (#4691)
+   - **Sentence 1 (Acknowledge the history)**: Name the real prior relationship
+     directly and specifically -- e.g. "We spoke during my interview for the
+     [prior role] back in [month/year]" or "You were kind enough to save my
+     details after my [prior role] application last [year]." Pull the prior
+     role and date from the saved contact's tracker#/notes (step 0), never
+     invent one.
+   - **Sentence 2 (Bridge)**: One line on why this new role is a genuine fit
+     (brief -- this is not a full pitch, the relationship already does most
+     of the work).
+   - **Sentence 3 (CTA)**: Ask DIRECTLY -- "Would you be willing to pass my
+     resume along for [new role]?" or "Any chance you could refer me for
+     [new role]?"
+   - **Note**: This is the opposite of Peer's "do not ask for a job." A real
+     prior relationship already exists, so asking directly is the honest,
+     time-respecting move -- hedging here reads as if the candidate forgot
+     the relationship happened.
+
 5. **Versions**:
    - EN (default)
    - ES (if Spanish company)
 
-6. **Alternative targets** with justification for why they are good second choices
+6. **Alternative targets**, if the search happened to confirm any others: one line
+   each (who they are, and the single reason to try them). Omit this section
+   entirely when there is only one target -- it is a note on what you already
+   found, never a reason to go searching again
 
 7. **Offer to save the contact** -- once the candidate picks a target, ask whether
    to save that person to `data/contacts.tsv` (one line:
@@ -71,7 +133,23 @@ short message; otherwise run the LinkedIn power move below.
    the person's existing line in place if they are already there — match by
    name+company, the same key the vCard UID uses. NEVER save without the
    candidate confirming first. Saved contacts export to the phone with
-   `node contacts.mjs --vcf` (vCard).
+   `node contacts.mjs --vcf` (vCard). A target that came from step 0 (an
+   existing row) gets its `type` cell UPDATED to `internal-referral` in
+   place rather than appended as a new line, but **only once the candidate
+   has confirmed a real prior relationship with this specific person** --
+   the step 0 company match alone is not that confirmation. A row already
+   saved as `peer` explicitly assumed NO prior relationship (see step 2);
+   surfacing it as a same-company option and the candidate agreeing to send
+   a referral ask does not, by itself, retroactively make that relationship
+   real. If the candidate can't point to an actual prior interaction (an
+   interview, a real conversation, anything beyond "we're both at this
+   company"), leave the saved row's type as-is and treat this as a fresh
+   `peer`/`recruiter` outreach instead, not an `internal-referral` one.
+
+   When the contact comes from a pasted recruiter/interviewer reply, run
+   `node contact-extract.mjs --file <email.txt>` instead. It reuses the reply
+   matcher, confirms before writing, and updates an existing name+company row;
+   it never sends a message or changes tracker status.
 
 **Contact channel preference:** Read `contact_preferences.preferred_channel` from
 `config/profile.yml`. If it is absent or set to `"either"`, write the CTA

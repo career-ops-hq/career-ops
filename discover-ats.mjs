@@ -28,16 +28,17 @@
  * Probing hits live third-party APIs, so honor CAREER_OPS_PORTALS to point at a
  * scratch portals file during tests/experiments.
  *
- * Issue #1864 — github.com/santifer/career-ops
+ * Issue #1864 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-import * as yaml from 'js-yaml';
+import { fileURLToPath } from 'url';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { renameSyncWithRetry } from './tracker-utils.mjs';
+import { withPipelineLock } from './pipeline-lock.mjs';
 
-import { makeHttpCtx } from './providers/_http.mjs';
+import { makeHttpCtx, isRefusedRedirectError } from './providers/_http.mjs';
 import greenhouse from './providers/greenhouse.mjs';
 import ashby from './providers/ashby.mjs';
 import lever from './providers/lever.mjs';
@@ -50,15 +51,28 @@ import bamboohr from './providers/bamboohr.mjs';
 import pinpoint from './providers/pinpoint.mjs';
 import rippling from './providers/rippling.mjs';
 import joinProvider from './providers/join.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { DEFAULT_SMALL_THRESHOLD, isSmallBoard, smallBoardDetail } from './lib/small-board.mjs';
+import { findBlacklistEntry, loadBlacklist } from './scan.mjs';
+import { BOARD_URL_BUILDERS, SLUG_RE } from './lib/ats-board-url.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
+const DATA_ROOT = getCareerOpsRoot();
+const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || join(DATA_ROOT, 'portals.yml');
+const BLACKLIST_PATH = process.env.CAREER_OPS_BLACKLIST || join(DATA_ROOT, 'data', 'blacklist.md');
 
 // Safe charset for a slug that will be interpolated into an ATS URL. Consistent
 // with the SLUG_RE guard in scan-ats-full.mjs and seeds/vc-portfolios.mjs — a
 // tampered or malformed input can never inject unexpected characters into a URL.
 // Mixed case is intentional: Ashby boards are case-sensitive (AlephAlpha, DeepL).
-export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
+// Defined in lib/ats-board-url.mjs next to the URL builders it guards.
+export { SLUG_RE };
+
+// The canonical board URL of a registry row ({ats, region, board, workday_host}),
+// built by the same functions VENDORS uses below. employers/ keys every
+// row on it.
+export { buildBoardUrl } from './lib/ats-board-url.mjs';
 
 // Bounded concurrency for live probes — lower than scan-ats-full.mjs's 20
 // because Ashby's provider holds a ~30s connection per board.
@@ -82,23 +96,25 @@ const DEFAULT_CONCURRENCY = 8;
 // present. Those hosts are matched lowercase-only by their providers, so their
 // buildUrl lowercases the slug rather than emitting a URL the provider would
 // then reject (Ashby is the reason slugs are not lowercased globally: its boards
-// are case-sensitive).
+// are case-sensitive). The buildUrl functions live in lib/ats-board-url.mjs, so
+// the employer registry builds its canonical URLs with exactly these.
 const lower = (s) => String(s).toLowerCase();
+const B = BOARD_URL_BUILDERS;
 
 const VENDORS = {
-  gh:    { id: 'greenhouse', provider: greenhouse, host: 'job-boards.greenhouse.io', buildUrl: (s) => `https://job-boards.greenhouse.io/${s}`, api: (s) => `https://boards-api.greenhouse.io/v1/boards/${s}/jobs` },
-  ashby: { id: 'ashby',      provider: ashby,      host: 'jobs.ashbyhq.com',        buildUrl: (s) => `https://jobs.ashbyhq.com/${s}` },
-  lever: { id: 'lever',      provider: lever,      host: 'jobs.lever.co',           buildUrl: (s) => `https://jobs.lever.co/${s}` },
+  gh:    { id: 'greenhouse', provider: greenhouse, host: 'job-boards.greenhouse.io', buildUrl: B.greenhouse, api: (s) => `https://boards-api.greenhouse.io/v1/boards/${s}/jobs` },
+  ashby: { id: 'ashby',      provider: ashby,      host: 'jobs.ashbyhq.com',        buildUrl: B.ashby },
+  lever: { id: 'lever',      provider: lever,      host: 'jobs.lever.co',           buildUrl: B.lever },
 
   // Long tail, probed only after the three above miss (see VENDOR_ORDER).
-  workable:        { id: 'workable',        provider: workable,        host: 'apply.workable.com',          buildUrl: (s) => `https://apply.workable.com/${s}` },
-  smartrecruiters: { id: 'smartrecruiters', provider: smartrecruiters, host: 'careers.smartrecruiters.com', buildUrl: (s) => `https://careers.smartrecruiters.com/${s}` },
-  rippling:        { id: 'rippling',        provider: rippling,        host: 'ats.rippling.com',            buildUrl: (s) => `https://ats.rippling.com/${s}/jobs` },
-  join:            { id: 'join',            provider: joinProvider,            host: 'join.com',                    buildUrl: (s) => `https://join.com/companies/${s}` },
-  recruitee:       { id: 'recruitee',       provider: recruitee,       hostFor: (s) => `${lower(s)}.recruitee.com`,  buildUrl: (s) => `https://${lower(s)}.recruitee.com` },
-  breezy:          { id: 'breezy',          provider: breezy,          hostFor: (s) => `${lower(s)}.breezy.hr`,      buildUrl: (s) => `https://${lower(s)}.breezy.hr` },
-  bamboohr:        { id: 'bamboohr',        provider: bamboohr,        hostFor: (s) => `${lower(s)}.bamboohr.com`,   buildUrl: (s) => `https://${lower(s)}.bamboohr.com` },
-  pinpoint:        { id: 'pinpoint',        provider: pinpoint,        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: (s) => `https://${lower(s)}.pinpointhq.com` },
+  workable:        { id: 'workable',        provider: workable,        host: 'apply.workable.com',          buildUrl: B.workable },
+  smartrecruiters: { id: 'smartrecruiters', provider: smartrecruiters, host: 'careers.smartrecruiters.com', buildUrl: B.smartrecruiters },
+  rippling:        { id: 'rippling',        provider: rippling,        host: 'ats.rippling.com',            buildUrl: B.rippling },
+  join:            { id: 'join',            provider: joinProvider,            host: 'join.com',                    buildUrl: B.join },
+  recruitee:       { id: 'recruitee',       provider: recruitee,       hostFor: (s) => `${lower(s)}.recruitee.com`,  buildUrl: B.recruitee },
+  breezy:          { id: 'breezy',          provider: breezy,          hostFor: (s) => `${lower(s)}.breezy.hr`,      buildUrl: B.breezy },
+  bamboohr:        { id: 'bamboohr',        provider: bamboohr,        hostFor: (s) => `${lower(s)}.bamboohr.com`,   buildUrl: B.bamboohr },
+  pinpoint:        { id: 'pinpoint',        provider: pinpoint,        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: B.pinpoint },
 };
 // Slug-resolvable vendors, probed in order for each company (first match wins).
 // Probe order is also a cost decision. resolveCompany probes candidates in this
@@ -125,6 +141,7 @@ const USAGE = `Usage:
   node discover-ats.mjs --in companies.yml --summary  # human-readable table
   node discover-ats.mjs --in companies.yml --vendors gh,ashby,lever  # restrict probes
   node discover-ats.mjs --in companies.yml --vendors workday         # Workday only
+  node discover-ats.mjs --in companies.yml --small-threshold 10  # what counts as a small board (default ${DEFAULT_SMALL_THRESHOLD}, 0 = off)
   node discover-ats.mjs --self-test                   # inline test suite
   node discover-ats.mjs --help                        # print this usage block
 
@@ -210,7 +227,7 @@ export function parseCompanyInput(rawYaml, cliNames = []) {
   if (rawYaml && rawYaml.trim()) {
     let doc;
     try {
-      doc = yaml.load(rawYaml);
+      doc = loadYaml(rawYaml);
     } catch (err) {
       warnings.push(`input: malformed YAML — ${err.message}`);
       doc = null;
@@ -308,8 +325,10 @@ const WORKDAY_SEGMENT_RE = /^[A-Za-z0-9_-]+$/;
 /**
  * Extract Workday coordinates {tenant, instance?, site} from a company's hints.
  * Accepts, in priority order:
- *   1. A full Workday URL in `workday`, `careers_url`, or `website`:
+ *   1. A full Workday URL in `workday`, `careers_url`, or `website`, either as a
+ *      careers page or as the CXS endpoint it resolves to:
  *      https://<tenant>.<instance>.myworkdayjobs.com[/<locale>]/<site>[/...]
+ *      https://<tenant>.<instance>.myworkdayjobs.com/wday/cxs/<tenant>/<site>[/jobs]
  *   2. An explicit object `workday: { tenant, site, instance? }`.
  * Returns null when no Workday coordinates are present. `instance` may be null
  * (caller then auto-probes WORKDAY_INSTANCES). Every returned segment is
@@ -331,13 +350,28 @@ export function parseWorkdayHint(company) {
 
   // 2. URL form — check every field that might carry a Workday link. No
   // substring pre-filter here (CodeQL js/incomplete-url-substring-sanitization):
-  // the anchored regex below is the actual gate and already rejects anything
+  // the anchored regexes below are the actual gate and already reject anything
   // that isn't a well-formed *.myworkdayjobs.com URL.
   const urlCandidates = [company.workday, company.careers_url, company.website]
     .filter((v) => typeof v === 'string');
   for (const raw of urlCandidates) {
-    // Mirrors the tenant regex in providers/workday.mjs resolveEndpoint().
-    const m = raw.match(/https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
+    // A CXS endpoint carries the site one level deeper, behind /wday/cxs/{tenant}/.
+    // It also matches the careers-page pattern below, which captures the literal
+    // `wday` as the site — here that lands in a generated portals.yml entry as
+    // `careers_url: https://{tenant}.{instance}.myworkdayjobs.com/wday`, a
+    // plausible-looking line for a board that doesn't exist (#3498). Checked
+    // first, same as providers/workday.mjs resolveEndpoint().
+    // Both patterns are anchored: unanchored, they match a Workday URL embedded
+    // anywhere in the candidate (e.g. `https://evil.example/r?next=https://acme
+    // .wd5.myworkdayjobs.com/Careers`), so a redirect wrapper silently yields
+    // coordinates for whatever tenant it carries. Anchoring is also what the
+    // comment above has always claimed this gate does.
+    const cxs = raw.match(/^https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/wday\/cxs\/[\w-]+\/([^/?#]+)(?:\/jobs)?(?:[/?#]|$)/);
+    // The tenant comes from the host, not from the /wday/cxs/{tenant}/ segment:
+    // these coordinates rebuild a careers URL host-first (buildWorkdayCandidates),
+    // and the host is what has to stay reachable.
+    const m = cxs
+      || raw.match(/^https?:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/);
     if (!m) continue;
     const [, tenant, instance, site] = m;
     if (clean(tenant) && clean(instance) && clean(site)) {
@@ -395,7 +429,25 @@ export function renderPortalEntry(match) {
   if (match.provider) lines.push(`    provider: ${match.provider}`);
   lines.push(`    enabled: true`);
   if (match.notes) lines.push(`    notes: ${yamlScalar(match.notes)}`);
+  // A comment, not a key: portals.yml still parses to the same fields, but the
+  // user sees the prompt next to the entry when they open the file (#4772).
+  if (match.smallBoard) lines.push(`    # verify: ${smallBoardDetail(match.jobCount)}`);
   return '\n' + lines.join('\n') + '\n';
+}
+
+/**
+ * Flag resolved boards that list few postings. Purely advisory: it adds a
+ * `smallBoard: true` field and never changes what resolves (#4772).
+ *
+ * @param {any[]} resolved
+ * @param {number} [threshold]
+ * @returns {any[]} the same array, entries mutated in place
+ */
+export function flagSmallBoards(resolved, threshold = DEFAULT_SMALL_THRESHOLD) {
+  for (const r of resolved) {
+    if (isSmallBoard(r.jobCount, threshold)) r.smallBoard = true;
+  }
+  return resolved;
 }
 
 /** Normalize a careers_url/api for dedupe comparison: lowercase, strip trailing slash. */
@@ -452,31 +504,70 @@ export function dedupeAgainstPortals(matches, existingEntries) {
  */
 export function insertIntoTrackedCompanies(fileText, snippets) {
   if (!snippets.length) return fileText;
-  const block = snippets.join('');
+  let block = snippets.join('');
 
-  const header = fileText.match(/^tracked_companies:[ \t]*$/m);
+  // The header line as a user can legitimately write it: bare, with a trailing
+  // comment, or as an empty flow list (`tracked_companies: []`). The last two
+  // used to miss this match, so a SECOND `tracked_companies:` key was appended
+  // to the file, which no YAML parser accepts.
+  const header = fileText.match(/^tracked_companies:[ \t]*(?:\[[ \t]*\][ \t]*)?(?:#[^\n]*)?$/m);
   if (!header) {
     // No block at all — append a fresh one at EOF.
     const sep = fileText.endsWith('\n') ? '\n' : '\n\n';
     return `${fileText}${sep}tracked_companies:${block}`;
   }
 
+  // An empty flow list becomes the block form; its trailing comment stays.
+  const headerText = header[0].replace(/^(tracked_companies:)[ \t]*\[[ \t]*\]/, '$1');
   const headerEnd = header.index + header[0].length; // index of the newline after the header
   const rest = fileText.slice(headerEnd);
   // Find the block's end: the next top-level key (a line starting with a
   // non-space, non-# char and containing a colon). Comments and indented lines
   // stay in-block. `m` anchors ^ to line starts; the leading \n keeps us from
-  // matching the header line itself.
-  const boundary = rest.match(/\n[^\s#][^\n]*:/);
-  const insertAt = boundary ? headerEnd + boundary.index : fileText.length;
+  // matching the header line itself. A list item written at column 0 (`- name:`,
+  // valid YAML and what some YAML emitters produce) is part of the block, not a
+  // key, so a line that starts a sequence entry is never the boundary.
+  const boundary = rest.match(/\n(?!-(?:[ \t]|\r?\n|$))[^\s#][^\n]*:/);
+  const blockEnd = boundary ? headerEnd + boundary.index : fileText.length;
 
-  let before = fileText.slice(0, insertAt);
-  const after = fileText.slice(insertAt);
+  // Match the indentation of the entries already there: our snippets are
+  // indented for the template's two-space style, and a sequence whose entries
+  // sit at two different indents is not valid YAML.
+  const firstItem = fileText.slice(headerEnd, blockEnd).match(/\n([ ]*)-[ \t]/);
+  if (firstItem && firstItem[1].length !== 2) {
+    const shift = firstItem[1].length - 2;
+    block = block.replace(/^( *)(\S)/gm, (_m, spaces, ch) => (
+      shift > 0 ? `${' '.repeat(shift)}${spaces}${ch}` : `${spaces.slice(Math.min(-shift, spaces.length))}${ch}`
+    ));
+  }
+
+  let before = fileText.slice(0, header.index) + headerText + fileText.slice(headerEnd, blockEnd);
+  const after = fileText.slice(blockEnd);
   // Trim trailing blank lines that belong to the block so our leading-newline
   // snippets don't stack extra blank lines before the next key.
-  before = before.replace(/\n[ \t]*(?=\n*$)/g, (m2, off) => (off >= headerEnd ? '\n' : m2));
+  const bodyStart = header.index + headerText.length;
+  before = before.replace(/\n[ \t]*(?=\n*$)/g, (m2, off) => (off >= bodyStart ? '\n' : m2));
 
   return before + block + after;
+}
+
+/**
+ * Whether a spliced portals.yml text still parses and carries exactly the
+ * expected number of tracked_companies entries. The text splice above works on
+ * lines, not on the YAML, so --write checks its own output before replacing the
+ * user's file.
+ *
+ * @param {string} text
+ * @param {number} expectedCount
+ * @returns {boolean}
+ */
+export function splicedCorrectly(text, expectedCount) {
+  try {
+    const doc = loadYaml(text);
+    return Array.isArray(doc?.tracked_companies) && doc.tracked_companies.length === expectedCount;
+  } catch {
+    return false;
+  }
 }
 
 // ── Network functions (separated from pure logic, like vc-portfolios.mjs) ──
@@ -502,6 +593,18 @@ export async function probeVendor(company, candidate, ctx) {
     // what lets the caller tell a definitive 404 from a transient 5xx instead of
     // re-parsing the message text (#2883).
     if (Number.isInteger(err?.status)) out.httpStatus = err.status;
+    // A refused redirect has no status at all: it is a bare `TypeError: fetch
+    // failed`, and the vendor's actual answer lives one level down in
+    // err.cause. Recording only err.message discarded that answer, so a
+    // BambooHR tenant that does not exist — answered with `302 →
+    // www.bamboohr.com`, not a 404 — reached the user as the single word
+    // "fetch failed" under advice to re-run it. Same reasoning as the
+    // httpStatus line above: keep the discriminator on the object rather than
+    // re-parsing prose downstream (#3788).
+    if (isRefusedRedirectError(err)) {
+      out.refusedRedirect = true;
+      out.error = `${out.error} (${err.cause.message})`;
+    }
     return out;
   }
 }
@@ -536,6 +639,7 @@ export async function resolveWorkday(company, coords, ctx) {
   const tried = [];
   let emptyUrl = null;
   let lastError;
+  let lastRefusedRedirect = false;
 
   for (const candidate of candidates) {
     tried.push(candidate.careers_url);
@@ -561,11 +665,22 @@ export async function resolveWorkday(company, coords, ctx) {
       if (!emptyUrl) emptyUrl = candidate.careers_url;
     } catch (err) {
       lastError = err?.message || String(err);
+      // The file's second `.fetch(` site, and workday.mjs passes
+      // redirect:'error' too — so a Workday host that redirects arrives here as
+      // the same bare "fetch failed" probeVendor used to report. Keeping the
+      // cause costs nothing and stops the two error paths from describing the
+      // same failure differently (#3788).
+      if (isRefusedRedirectError(err)) {
+        lastError = `${lastError} (${err.cause.message})`;
+        lastRefusedRedirect = true;
+      } else {
+        lastRefusedRedirect = false;
+      }
     }
   }
   return emptyUrl
     ? { status: 'empty', tried, careers_url: emptyUrl }
-    : { status: 'error', tried, detail: lastError };
+    : { status: 'error', tried, detail: lastError, refusedRedirect: lastRefusedRedirect };
 }
 
 /**
@@ -595,12 +710,27 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       if (cfg.api) resolved.api = cfg.api(candidate.slug);
       return { resolved };
     }
-    if (result.status === 'empty') {
+    if (result.status === 'empty' && candidate.vendor === 'smartrecruiters') {
+      // SmartRecruiters' public postings API answers 200 with totalFound:0
+      // for ANY slug, including one that does not exist — unlike every other
+      // probed vendor, "empty" here establishes nothing. Counting it in
+      // emptyBoards let a single phantom hit outrank a real "not found"
+      // verdict from every other vendor, since emptyBoards is checked first
+      // in the reason ladder below: an unmatched company name would read as
+      // "board(s) found but currently list 0 jobs — re-run later", advising
+      // a retry that can never produce a different answer (#4179). Silently
+      // excluded from both emptyBoards and errors[] — the vendor still shows
+      // up in triedVendors, it just contributes no verdict either way. The
+      // accepted cost: a genuinely existing SmartRecruiters board with zero
+      // OPEN postings right now also reads as "not found" instead of "found,
+      // empty" — cheaper than every unmatched name reading as "found".
+    } else if (result.status === 'empty') {
       emptyBoards.push({ vendor: candidate.vendor, careers_url: candidate.careers_url });
     } else {
       /** @type {any} */
       const entry = { vendor: candidate.vendor, error: result.error };
       if (Number.isInteger(result.httpStatus)) entry.httpStatus = result.httpStatus;
+      if (result.refusedRedirect) entry.refusedRedirect = true;
       if (isDefinitiveAbsence(result)) entry.definitive = true;
       errors.push(entry);
     }
@@ -617,7 +747,15 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
       // Use the host resolveWorkday actually confirmed empty, not always wd1.
       emptyBoards.push({ vendor: 'workday', careers_url: wd.careers_url });
     } else if (wd.detail) {
-      errors.push({ vendor: 'workday', error: wd.detail });
+      /** @type {any} */
+      const wdEntry = { vendor: 'workday', error: wd.detail };
+      // Carried so errors[] describes a Workday refusal the same way it
+      // describes a BambooHR one. It cannot reach the reason ladder — the
+      // refused-redirect branch is guarded by !coords and a Workday probe only
+      // runs WITH coords — but a machine reading errors[] should not have to
+      // know that (#3788).
+      if (wd.refusedRedirect) wdEntry.refusedRedirect = true;
+      errors.push(wdEntry);
     }
   }
 
@@ -629,36 +767,59 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
   const workdayHintProvided = includeWorkday
     && (typeof company.workday === 'string' ? !!company.workday.trim()
       : (company.workday && typeof company.workday === 'object'));
+  // A failure is SETTLED when the vendor answered and re-running the identical
+  // probe cannot produce a different answer. Two ways that happens, and they
+  // mean different things:
+  //
+  //   - a definitive 404/410 — the board is not there (#2883);
+  //   - a refused redirect — the vendor pointed us off-tenant, which says "not
+  //     this slug", NOT "no board". BambooHR does not 404 an unknown tenant; it
+  //     answers `302 → www.bamboohr.com`. MaRS Discovery District redirects on
+  //     the derived `mars-discovery-district` and returns three jobs on
+  //     `marsdd`, so calling that absence would be as wrong as calling it
+  //     transient (#3788).
+  //
+  // Both are settled, so neither should advise re-running the same probe; only
+  // the first establishes absence, which is why refusedRedirect gets its own
+  // verdict below instead of joining isDefinitiveAbsence().
+  const isSettled = (e) => isDefinitiveAbsence(e) || e.refusedRedirect === true;
   const reason = emptyBoards.length
     ? 'board(s) found but currently list 0 jobs — re-run later or force-add manually'
     // Every probe errored and nothing was confirmed absent or empty — don't
     // claim "no board found", the status is unknown.
     //
-    // Unless every failure was DEFINITIVE. A 404 from Greenhouse/Ashby/Lever is
+    // Unless every failure was SETTLED. A 404 from Greenhouse/Ashby/Lever is
     // an answer, not a hiccup: the board is not there and re-running will say so
     // again. Advising a retry in that case erased the difference between "this
     // company has no board" and "the network hiccuped", which is exactly the
     // pair a user pruning portals.yml has to tell apart (#2883). One transient
     // failure among them is enough to leave the question open — that vendor
     // never answered, so absence is not established.
-    : (errors.length && !coords && !errors.every(isDefinitiveAbsence))
+    : (errors.length && !coords && !errors.every(isSettled))
       ? 'probe error(s) occurred — board status unknown, see errors[] and re-run'
-      // A hint was given but rejected by parseWorkdayHint (bad chars, missing
-      // tenant/site): tell the user to fix it, not to add one.
-      : (workdayHintProvided && !coords)
-        ? 'Workday hint given but rejected (invalid/missing tenant or site) — check the `workday` field and re-run'
-        : coords
-          ? 'Workday coordinates given but no live board with open jobs found at the probed host(s).'
-          // Nothing was probeable: every vendor's own contract rejected this
-          // slug's shape, so no board was ruled out — say that, rather than
-          // implying we looked and found nothing.
-          : (!candidates.length && unsupported.length)
-            ? `slug "${company.slug || deriveSlug(company.name)}" is not a valid board slug for any probed vendor `
-              + `(${unsupported.join(', ')}) — nothing was probed; fix the \`slug\` field and re-run.`
-            // VENDOR_ORDER covers eleven vendors now, so name none of them here.
-            : 'no supported ATS board found. If this company uses Workday, add a hint — '
-              + 'a full careers URL (workday: https://<tenant>.wd<N>.myworkdayjobs.com/<site>) or '
-              + 'workday: {tenant, site} — and re-run; discover-ats will confirm and add it.';
+      // Settled, but by a redirect rather than a 404: the actionable fix is the
+      // slug, not a retry and not a Workday hint.
+      : (errors.length && !coords && errors.some((e) => e.refusedRedirect))
+        ? 'vendor(s) redirected off-tenant ('
+          + errors.filter((e) => e.refusedRedirect).map((e) => e.vendor).join(', ')
+          + ') — the slug is wrong, or no board exists under it. The same probe '
+          + 'will redirect again, so set an explicit `slug` and re-run.'
+        // A hint was given but rejected by parseWorkdayHint (bad chars, missing
+        // tenant/site): tell the user to fix it, not to add one.
+        : (workdayHintProvided && !coords)
+          ? 'Workday hint given but rejected (invalid/missing tenant or site) — check the `workday` field and re-run'
+          : coords
+            ? 'Workday coordinates given but no live board with open jobs found at the probed host(s).'
+            // Nothing was probeable: every vendor's own contract rejected this
+            // slug's shape, so no board was ruled out — say that, rather than
+            // implying we looked and found nothing.
+            : (!candidates.length && unsupported.length)
+              ? `slug "${company.slug || deriveSlug(company.name)}" is not a valid board slug for any probed vendor `
+                + `(${unsupported.join(', ')}) — nothing was probed; fix the \`slug\` field and re-run.`
+              // VENDOR_ORDER covers eleven vendors now, so name none of them here.
+              : 'no supported ATS board found. If this company uses Workday, add a hint — '
+                + 'a full careers URL (workday: https://<tenant>.wd<N>.myworkdayjobs.com/<site>) or '
+                + 'workday: {tenant, site} — and re-run; discover-ats will confirm and add it.';
 
   /** @type {any} */
   const unresolved = { name: company.name, triedVendors, reason };
@@ -670,6 +831,43 @@ export async function resolveCompany(company, { vendors = VENDOR_ORDER, ctx, inc
   if (errors.length) unresolved.errors = errors;
   if (company.website) unresolved.website = company.website;
   return { unresolved };
+}
+
+/**
+ * Split companies on the user's do-not-apply list (data/blacklist.md) away from
+ * the rest, using scan.mjs's own findBlacklistEntry so discovery and scanning
+ * agree on what is blacklisted. Before probing, a company is checked by name and
+ * by every URL it carries (a Workday URL hint AND `website`: either one can be
+ * the host a domain-scope entry names); after probing, `urlsOf` lets the caller
+ * re-check a resolved board's careers_url. A blacklisted company is never
+ * written to portals.yml: scan.mjs would drop every posting from it anyway.
+ *
+ * @returns {{allowed:any[], blacklisted:{name:string, entry:string, reason:string}[]}}
+ */
+export function partitionBlacklisted(companies, blacklist, urlsOf = (c) => [typeof c.workday === 'string' ? c.workday : null, c.website]) {
+  const allowed = [];
+  const blacklisted = [];
+  for (const c of companies) {
+    const urls = urlsOf(c).filter(Boolean).map(asBlacklistUrl);
+    let hit = null;
+    for (const url of urls.length ? urls : ['']) {
+      hit = findBlacklistEntry(blacklist, c.name, url);
+      if (hit) break;
+    }
+    if (hit) blacklisted.push({ name: c.name, entry: hit.company, reason: hit.reason });
+    else allowed.push(c);
+  }
+  return { allowed, blacklisted };
+}
+
+/**
+ * The input format documents a bare `website: mollie.com`, which `new URL()`
+ * inside findBlacklistEntry rejects, so a scheme-less value would never reach a
+ * domain-scope entry. Give it one; a value that already has a scheme is kept.
+ */
+function asBlacklistUrl(value) {
+  const v = String(value).trim();
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(v) ? v : `https://${v}`;
 }
 
 /** Bounded-concurrency map (mirrors scan-ats-full.mjs parallelEach; not exported there). */
@@ -705,10 +903,10 @@ export async function runDiscovery(companies, { vendors = VENDOR_ORDER, ctx, con
 
 // ── Summary output ────────────────────────────────────────────────────
 
-function printSummary({ resolved, unresolved, duplicates }) {
+function printSummary({ resolved, unresolved, duplicates, blacklisted = [] }) {
   console.log(`\n${'='.repeat(78)}`);
   console.log('  ATS Discovery — career-ops');
-  console.log(`  resolved: ${resolved.length} | unresolved: ${unresolved.length} | duplicates skipped: ${duplicates.length}`);
+  console.log(`  resolved: ${resolved.length} | unresolved: ${unresolved.length} | duplicates skipped: ${duplicates.length} | blacklisted skipped: ${blacklisted.length}`);
   console.log(`${'='.repeat(78)}\n`);
 
   if (resolved.length) {
@@ -716,7 +914,8 @@ function printSummary({ resolved, unresolved, duplicates }) {
     console.log('  ' + '-'.repeat(90));
     for (const r of resolved) {
       console.log('  ' + String(r.name).substring(0, 22).padEnd(24)
-        + String(r.vendor).padEnd(12) + String(r.jobCount).padEnd(7) + r.careers_url);
+        + String(r.vendor).padEnd(12) + String(r.jobCount).padEnd(7) + r.careers_url
+        + (r.smallBoard ? `  [small board — verify ownership]` : ''));
     }
     console.log('');
   }
@@ -726,6 +925,14 @@ function printSummary({ resolved, unresolved, duplicates }) {
     for (const u of unresolved) {
       const site = u.website ? ` [${u.website}]` : '';
       console.log(`    - ${u.name}${site}: ${u.reason}`);
+    }
+    console.log('');
+  }
+
+  if (blacklisted.length) {
+    console.log('  Skipped — on data/blacklist.md (never added):');
+    for (const b of blacklisted) {
+      console.log(`    - ${b.name} (matched "${b.entry}")${b.reason ? `: ${b.reason}` : ''}`);
     }
     console.log('');
   }
@@ -838,6 +1045,12 @@ function runSelfTest() {
   const q = renderPortalEntry({ name: 'Foo: Bar', careers_url: 'https://jobs.ashbyhq.com/foo' });
   check(q.includes('name: "Foo: Bar"'), 'renderPortalEntry quotes name with colon');
 
+  // small-board flag (#4772): advisory field + `# verify:` comment, only when flagged
+  const sb = flagSmallBoards([{ name: 'A', jobCount: 1 }, { name: 'B', jobCount: 6 }]);
+  check(sb[0].smallBoard === true && sb[1].smallBoard === undefined, 'flagSmallBoards flags only boards at or under the threshold');
+  check(renderPortalEntry({ name: 'A', careers_url: 'https://x', smallBoard: true, jobCount: 1 }).includes('# verify:'), 'renderPortalEntry adds # verify: for a small board');
+  check(!renderPortalEntry({ name: 'B', careers_url: 'https://x', jobCount: 6 }).includes('# verify:'), 'renderPortalEntry omits # verify: for a larger board');
+
   // dedupeAgainstPortals
   const existing = [{ name: 'Adyen', careers_url: 'https://job-boards.greenhouse.io/adyen/' }];
   const d1 = dedupeAgainstPortals([{ name: 'Adyen', careers_url: 'x' }], existing);
@@ -856,7 +1069,7 @@ function runSelfTest() {
   check(inserted.startsWith('title_filter:\n  positive: [a]\n'), 'insert preserves leading bytes');
   check(inserted.includes('job_boards:\n  - name: Foo\n'), 'insert preserves trailing block');
   // idempotency via dedupe: the same board already present → nothing fresh → no insert
-  const parsed = yaml.load(inserted);
+  const parsed = loadYaml(inserted);
   const again = dedupeAgainstPortals([{ name: 'New', careers_url: 'https://jobs.lever.co/new' }], parsed.tracked_companies);
   check(again.fresh.length === 0, 'insert is idempotent through dedupe');
 
@@ -900,8 +1113,8 @@ function runSelfTest() {
 // --write is the explicit opt-in to modify portals.yml (a user-layer file);
 // without it the run is preview-only. --dry-run is accepted as a harmless alias
 // for "don't write" (the default) so an older invocation never surprises anyone.
-const KNOWN_FLAGS = ['--in', '--vendors', '--write', '--dry-run', '--summary', '--self-test', '--help', '-h'];
-const VALUE_FLAGS = ['--in', '--vendors'];
+const KNOWN_FLAGS = ['--in', '--vendors', '--small-threshold', '--write', '--dry-run', '--summary', '--self-test', '--help', '-h'];
+const VALUE_FLAGS = ['--in', '--vendors', '--small-threshold'];
 
 function parseArgs(argv) {
   const args = argv.slice(2);
@@ -952,7 +1165,16 @@ function parseArgs(argv) {
   // Positional args (not flags, not a consumed flag value) are company names.
   const names = args.filter((a, idx) => !a.startsWith('-') && !consumedValueIndices.has(idx));
 
+  // Same shape check as audit-portals.mjs: a non-negative number, 0 = off.
+  const rawThreshold = valueOf('--small-threshold');
+  const smallThreshold = rawThreshold === null ? DEFAULT_SMALL_THRESHOLD : Number(rawThreshold);
+  if (!Number.isFinite(smallThreshold) || smallThreshold < 0 || String(rawThreshold).trim() === '') {
+    console.error(`Error: --small-threshold expects a non-negative number, got "${rawThreshold}"`);
+    process.exit(1);
+  }
+
   return {
+    smallThreshold,
     inPath: valueOf('--in'),
     vendors,
     includeWorkday,
@@ -989,54 +1211,81 @@ async function main() {
     // zero-company run gets the documented envelope, not undefined fields.
     const out = {
       metadata: {
-        resolved: 0, unresolved: 0, duplicatesSkipped: 0, fresh: 0, freshWritten: 0,
+        resolved: 0, unresolved: 0, duplicatesSkipped: 0, blacklistedSkipped: 0, fresh: 0, freshWritten: 0,
         written: false, previewOnly: true, portalsPath: PORTALS_PATH, warnings,
       },
-      resolved: [], unresolved: [],
+      resolved: [], unresolved: [], blacklisted: [],
     };
     if (opts.summary) printSummary({ resolved: [], unresolved: [], duplicates: [] });
     else console.log(JSON.stringify(out, null, 2));
     process.exit(0);
   }
 
-  const { resolved, unresolved } = await runDiscovery(companies, { vendors: opts.vendors, includeWorkday: opts.includeWorkday });
+  const blacklist = loadBlacklist(BLACKLIST_PATH);
+  const pre = partitionBlacklisted(companies, blacklist);
+  const discovered = await runDiscovery(pre.allowed, { vendors: opts.vendors, includeWorkday: opts.includeWorkday });
+  const unresolved = discovered.unresolved;
+  // A resolved board's host can hit a domain-scope entry the name did not
+  // (e.g. a company listed under a different name on a blacklisted host).
+  const post = partitionBlacklisted(discovered.resolved, blacklist, (r) => [r.careers_url]);
+  const resolved = post.allowed;
+  const blacklisted = [...pre.blacklisted, ...post.blacklisted];
+  // Advisory only: resolution and exit codes are unchanged (#4772).
+  flagSmallBoards(resolved, opts.smallThreshold);
 
-  // Dedupe resolved matches against the existing tracker.
-  let existingEntries = [];
-  if (existsSync(PORTALS_PATH)) {
-    try {
-      const parsed = yaml.load(readFileSync(PORTALS_PATH, 'utf-8'));
-      existingEntries = Array.isArray(parsed?.tracked_companies) ? parsed.tracked_companies : [];
-    } catch (err) {
-      warnings.push(`portals.yml: could not parse for dedupe — ${err.message}`);
+  // Hold the portals lock across dedupe and replacement so concurrent
+  // --write runs merge their discoveries instead of overwriting each other.
+  const updatePortals = () => {
+    // Dedupe resolved matches against the existing tracker.
+    let existingEntries = [];
+    if (existsSync(PORTALS_PATH)) {
+      try {
+        const parsed = loadYaml(readFileSync(PORTALS_PATH, 'utf-8'));
+        existingEntries = Array.isArray(parsed?.tracked_companies) ? parsed.tracked_companies : [];
+      } catch (err) {
+        warnings.push(`portals.yml: could not parse for dedupe — ${err.message}`);
+      }
     }
-  }
-  const { fresh, duplicates } = dedupeAgainstPortals(resolved, existingEntries);
-  const snippets = fresh.map(renderPortalEntry);
+    const { fresh, duplicates } = dedupeAgainstPortals(resolved, existingEntries);
+    const snippets = fresh.map(renderPortalEntry);
 
-  // Data-contract rule: portals.yml is a USER-LAYER file and is NEVER written
-  // unless the user explicitly opts in with --write. The default is preview —
-  // we print the entries we WOULD add and touch nothing. This mirrors how the
-  // rest of career-ops treats user files (see DATA_CONTRACT.md).
-  let written = false;
-  if (opts.write && fresh.length && existsSync(PORTALS_PATH)) {
-    const current = readFileSync(PORTALS_PATH, 'utf-8');
-    // Write-to-temp-then-rename: atomic on the same filesystem, so a crash
-    // mid-write can't leave the user's portals.yml truncated.
-    const tmpPath = `${PORTALS_PATH}.tmp-${process.pid}`;
-    writeFileSync(tmpPath, insertIntoTrackedCompanies(current, snippets), 'utf-8');
-    renameSyncWithRetry(tmpPath, PORTALS_PATH);
-    written = true;
-  } else if (opts.write && fresh.length && !existsSync(PORTALS_PATH)) {
-    warnings.push(`--write given but portals.yml not found at ${PORTALS_PATH} — printing entries instead`);
-  } else if (!opts.write && fresh.length) {
-    warnings.push(`preview only — ${fresh.length} new entr${fresh.length === 1 ? 'y' : 'ies'} shown in pendingEntries; re-run with --write to append them to portals.yml`);
-  }
+    // Data-contract rule: portals.yml is a USER-LAYER file and is NEVER written
+    // unless the user explicitly opts in with --write. The default is preview —
+    // we print the entries we WOULD add and touch nothing. This mirrors how the
+    // rest of career-ops treats user files (see DATA_CONTRACT.md).
+    let written = false;
+    if (opts.write && fresh.length && existsSync(PORTALS_PATH)) {
+      const current = readFileSync(PORTALS_PATH, 'utf-8');
+      const next = insertIntoTrackedCompanies(current, snippets);
+      if (splicedCorrectly(next, existingEntries.length + fresh.length)) {
+        // Write-to-temp-then-rename: atomic on the same filesystem, so a crash
+        // mid-write can't leave the user's portals.yml truncated.
+        const tmpPath = `${PORTALS_PATH}.tmp-${process.pid}`;
+        writeFileSync(tmpPath, next, 'utf-8');
+        renameSyncWithRetry(tmpPath, PORTALS_PATH);
+        written = true;
+      } else {
+        // A text splice cannot cover every way tracked_companies can be written.
+        // Rather than leave a portals.yml the scanner cannot parse, keep the file
+        // as it is and print the entries for the user to paste.
+        warnings.push(`--write skipped — splicing into ${PORTALS_PATH} would not leave it as valid YAML with ${existingEntries.length + fresh.length} tracked_companies entries; the file is unchanged and the entries are shown in pendingEntries to add by hand`);
+      }
+    } else if (opts.write && fresh.length && !existsSync(PORTALS_PATH)) {
+      warnings.push(`--write given but portals.yml not found at ${PORTALS_PATH} — printing entries instead`);
+    } else if (!opts.write && fresh.length) {
+      warnings.push(`preview only — ${fresh.length} new entr${fresh.length === 1 ? 'y' : 'ies'} shown in pendingEntries; re-run with --write to append them to portals.yml`);
+    }
+    return { fresh, duplicates, snippets, written };
+  };
+  const { fresh, duplicates, snippets, written } = opts.write
+    ? await withPipelineLock(PORTALS_PATH, updatePortals)
+    : updatePortals();
 
   const metadata = {
     resolved: resolved.length,
     unresolved: unresolved.length,
     duplicatesSkipped: duplicates.length,
+    blacklistedSkipped: blacklisted.length,
     fresh: fresh.length,
     freshWritten: written ? fresh.length : 0,
     written,
@@ -1046,21 +1295,27 @@ async function main() {
   };
 
   if (opts.summary) {
-    printSummary({ resolved, unresolved, duplicates });
+    printSummary({ resolved, unresolved, duplicates, blacklisted });
   } else {
-    const out = { metadata, resolved, unresolved };
+    const out = { metadata, resolved, unresolved, blacklisted };
     // Show the would-be YAML whenever we didn't write it (preview, or --write
     // that couldn't find the file), so the user can paste it manually.
     if (!written) out.pendingEntries = snippets.join('');
     console.log(JSON.stringify(out, null, 2));
   }
-  process.exit(0);
+  // No process.exit(0) here: main() returns, and the process exits 0 once the
+  // event loop drains. On Windows, Node 24 aborts when process.exit() runs right
+  // after a request (nodejs/node#56645): it prints a libuv assertion and exits
+  // with a crash code instead of 0, the crash reported in #3788. Measured
+  // 2026-11-08 on Node 24.14.1: a run that resolved one BambooHR board, or found
+  // no Greenhouse, Ashby or BambooHR board, aborted 4 times out of 4. The exits
+  // earlier in main() run before any request, so they keep process.exit().
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`discover-ats: ${err?.stack || err?.message || err}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the end of main()
   });
 }

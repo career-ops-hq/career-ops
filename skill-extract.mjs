@@ -40,10 +40,49 @@ export const SKILL_TOKENS = [
   // Data / ML / AI
   'PyTorch', 'TensorFlow', 'scikit-learn', 'Pandas', 'NumPy', 'Spark',
   'Airflow', 'dbt', 'MLOps', 'MLflow', 'LangChain', 'LlamaIndex',
-  'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering', 'Fine-?tuning',
+  'Hugging Face', 'RAG', 'LLMs?', 'Prompt Engineering',
   'Computer Vision', 'NLP',
+  // How an LLM application invokes tools (#5292). LLM-engineering postings name
+  // it as a requirement in its own right, and in jd-skill-gap an unlisted phrase
+  // is split into two meaningless gaps ("Tool", "Calling"). The two names stay
+  // separate skills: no alias between them.
+  'Function Calling', 'Tool Calling',
+  // Other spellings of the AI/ML tokens above (2026-10-04), each aliased to its
+  // display name in CANONICAL. jd-skill-gap and upskill compare a CV with a JD
+  // only through that name, so a spelling missing here turns a skill the CV
+  // lists into a reported gap: the shipped example CV
+  // examples/dual-track-engineer-instructor/cv.md writes "HuggingFace
+  // Transformers" under Skills, and jd-skill-gap listed Hugging Face as a gap.
+  // The spelled-out NLP and LLM forms are the pairs keyword-match.mjs's
+  // SYNONYMS already treats as one skill.
+  //
+  // Left out on purpose: the verb forms ('fine-tune', 'fine-tuned'). Both are
+  // ordinary prose in GTM and ops writing ("fine-tune campaign spend"), so a
+  // match says nothing about models: in a posting it mints the phantom gap the
+  // 'CSM' note below describes, and in a CV it reads as knowing Fine-tuning, the
+  // silent "no gap found" the Demandbase note calls worse than a visible gap.
+  // The noun is just as common in that prose, but it is also the skill's name,
+  // so it is matched outside this list, and only where it names the skill: see
+  // FINE_TUNING_PATTERN.
+  'HuggingFace', 'sklearn',
+  'Retrieval-Augmented Generation', 'Retrieval Augmented Generation',
+  'Large Language Models?', 'Natural Language Processing',
   // Analytics / enterprise
   'Tableau', 'Power BI', 'Looker', 'Salesforce', 'SAP',
+  // Testing / QA (added 2026-09-20). The vocabulary had NO testing term at all,
+  // so a testing-framework gap could never surface however often JDs demanded
+  // one — 16 reports name TDD, 13 JUnit, 10 Jest. Same structural blindness the
+  // certification block below was added to fix, one category over.
+  'JUnit', 'TestNG', 'NUnit', 'xUnit', 'MSTest', 'Cucumber', 'Mockito',
+  'Jest', 'pytest', 'Selenium', 'Playwright', 'Cypress', 'Karate', 'Postman',
+  'TDD', 'BDD',
+  // Observability (added 2026-09-20). Prometheus/Grafana/Datadog were already
+  // above under Cloud/infra; the log-and-trace half of the stack was not, so a
+  // posting asking for "Grafana, ELK, Splunk" scored as a partial hit. 'ELK' is
+  // case-insensitive like its neighbours: the animal and the Illinois town both
+  // exist, but extraction runs over gap descriptions only, never the whole
+  // report, so a location line can't reach it.
+  'OpenTelemetry', 'OTel', 'ELK', 'Splunk', 'CloudWatch',
   // ── Certifications, frameworks and methodologies (added 2026-08-07) ──────
   // Every token above this line is an engineering tool. That made `upskill`
   // structurally blind to the gap class that actually screens out delivery and
@@ -91,6 +130,75 @@ export const SKILL_TOKENS = [
   //
   // 'SAFe' is NOT here either — it is handled case-sensitively below, for the
   // same reason 'Go' is: 'safe' is an everyday English word.
+
+  // ── Marketing / GTM / revenue operations (added 2026-08-30) ──────────────
+  // The certification block above records that the vocabulary, not the scoring,
+  // was the constraint for delivery and program managers. The same hole ran one
+  // discipline further over: every token above this line is an engineering tool
+  // or a delivery credential, so a marketing-operations candidate was
+  // structurally invisible to the gap map.
+  //
+  // Measured on a real marketing-operations corpus: "ABM" was logged as an
+  // explicit soft_gap in several linked reports — twice flagged in the report
+  // text itself as a recurring gap — and never once reached the output. The
+  // map's top-ranked entry was instead an observability vendor's name, matched
+  // out of the provenance asides inside those very ABM sentences (a report
+  // logging a recurring gap tends to cite the sibling companies where it was
+  // logged before). The same blindness ran on the known-skills side: a
+  // marketing cv.md yielded a known-skills set of FIVE, so almost nothing could
+  // be excluded as already-held.
+  //
+  // Longest-first within each family, matching the 'React Native'-before-'React'
+  // and 'Lean Six Sigma'-before-'Six Sigma' convention above.
+  'Account-Based Marketing', 'Account Based Marketing', 'ABM',
+  'Demand-Side Platform', 'Demand Side Platform', 'DSPs', 'DSP',
+  // Only the MEDIA senses of "programmatic" — see the omission note below.
+  'Programmatic Advertising', 'Programmatic Display', 'Programmatic Media',
+  'Programmatic Buying',
+  'Media Agency Management', 'Media Agencies', 'Media Agency',
+  'Demand Generation', 'Demand Gen',
+  'Marketing Automation', 'Marketing Operations',
+  'Revenue Operations', 'RevOps',
+  'Lifecycle Marketing', 'Growth Marketing', 'Product Marketing',
+  'Partner Marketing', 'Performance Marketing', 'Field Marketing',
+  'Content Marketing', 'Email Marketing',
+  'Paid Media', 'Paid Social', 'Paid Search',
+  'Conversion Rate Optimization',
+  'Marketing Mix Modeling', 'Media Mix Modeling', 'Incrementality',
+  'Lead Scoring', 'Marketing Attribution',
+  // 'SEMrush' precedes 'SEM' by convention; the (?!\w) boundary already stops
+  // 'SEM' from firing inside it, and the ordering keeps that independent of the
+  // boundary rule.
+  'SEMrush', 'SEO', 'SEM', 'PPC',
+  // Platforms a marketing CV actually lists. These earn their place mostly on
+  // the KNOWN side of the comparison: without them the known-skills set built
+  // from a marketing cv.md cannot suppress anything the candidate already has.
+  'HubSpot', 'Marketo', 'Pardot', 'Braze', 'Klaviyo', 'OneSignal', 'Intercom',
+  'Ahrefs', 'Demandbase', '6sense', 'Google Tag Manager', 'Google Analytics',
+  'Google Ads', 'GA4', 'Amplitude', 'Mixpanel', 'n8n', 'Zapier',
+  //
+  // DELIBERATELY OMITTED from this block, on the same asymmetry the 'CSM' note
+  // above sets out — a missing token costs a real skill once, visibly, while a
+  // colliding one mints a phantom gap out of ordinary prose on every posting:
+  //
+  //   'CRO'          — Conversion Rate Optimization in marketing copy, Chief
+  //                    Revenue Officer in the org chart, and GTM postings are
+  //                    full of the second ("reports to the CRO"). The spelled-out
+  //                    'Conversion Rate Optimization' is listed instead.
+  //   'GEO'          — Generative Engine Optimization in AI-search work, and
+  //                    "geography" everywhere else, including the location prose
+  //                    in most postings ("the EMEA geo").
+  //   'Programmatic' — bare, it is an everyday engineering adjective
+  //                    ("programmatic access to the API"). Only the media senses
+  //                    are listed above; each canonicalizes to 'Programmatic',
+  //                    so the display name survives without the collision.
+  //   'Segment'      — the CDP, but "segment" is an everyday noun in exactly the
+  //                    prose this block was added to read.
+  //   'Iterable'     — the ESP, but this module is shared with jd-skill-gap,
+  //                    which runs over full engineering JDs where "iterable" is
+  //                    a language term.
+  //   'MOps'/'MMM'   — abbreviations whose expansions are already listed and
+  //                    whose bare forms read as noise ("mops", "mmm").
 ];
 
 // 'SAFe' cannot join the case-insensitive list — "a safe environment", "safe to
@@ -118,6 +226,43 @@ export const SKILL_PATTERN = new RegExp(
 // language (punctuation like "Go," "Go/Rust" "(Go)" still counts).
 const GO_SKILL_PATTERN = /(?<!\w)Go(?![\w-])/;
 
+// 'Fine-tuning' is not in the list either, and case can't separate it from
+// prose the way it does for 'Go': "fine-tuning LLMs" is the skill, while
+// "Fine-tuning the funnel" and "fine-tuning Postgres queries" are everyday
+// work. Matched anywhere, a backend CV that tuned its queries holds the skill
+// an ML posting asks for, and upskill files that gap as known. So a mention
+// counts only where it names the skill: as an entry of its own in a list or
+// table row ("PyTorch, Fine-tuning, RAG", "- Fine-tuning (LoRA)", or the bare
+// name jd-skill-gap passes in to ask whether a skill is known), or in model
+// context, meaning the word "model" right beside it ("model fine-tuning",
+// "fine-tuning models") or a model skill on the same line (MODEL_SKILLS).
+const FINE_TUNING_PATTERN = /(?<!\w)fine[- ]?tuning(?!\w)/i;
+
+// Right beside it only: "fine-tuning dbt models" and "fine-tuning attribution
+// models" are analytics work.
+const MODEL_FINE_TUNING =
+  /(?<!\w)models?\s+fine[- ]?tuning(?!\w)|(?<!\w)fine[- ]?tuning\s+(?:of\s+)?models?(?!\w)/i;
+
+// What separates the entries of a skills list, a table row or a parenthetical.
+// Captured, so split() keeps each separator after its piece: a colon only
+// closes a label, and the piece in front of one is not an entry ("AI/ML:
+// PyTorch, Fine-tuning" lists it; "Fine-tuning: dbt models to cut warehouse
+// spend" is a label over prose).
+const LIST_ENTRY_SEPARATOR = /([,;:|/()[\]"•·])/;
+
+// An entry that is the skill and nothing else, give or take a bullet marker,
+// emphasis and a closing period.
+const FINE_TUNING_ENTRY = /^(?:[-*+]\s+)?[*_]*fine[- ]?tuning[*_.]*$/i;
+
+// The skills that put a fine-tuning mention on their line in model territory.
+// The block's data tools (Pandas, NumPy, Spark, Airflow, dbt) are left out:
+// "fine-tuning Spark jobs" is performance work.
+const MODEL_SKILLS = new Set([
+  'PyTorch', 'TensorFlow', 'scikit-learn', 'MLOps', 'MLflow', 'LangChain',
+  'LlamaIndex', 'Hugging Face', 'RAG', 'LLMs', 'Prompt Engineering',
+  'Computer Vision', 'NLP',
+]);
+
 // lowercase → canonical display casing, derived from SKILL_TOKENS by stripping
 // regex syntax ('Vue\\.?js' → 'Vue.js'). Keeps case-insensitive matches like
 // "graphql" resolving to the same key ("GraphQL") as the CV-known-skills set.
@@ -142,6 +287,7 @@ export const CANONICAL = {
   'nextjs': 'Next.js', 'next.js': 'Next.js',
   'llm': 'LLMs', 'llms': 'LLMs',
   'finetuning': 'Fine-tuning', 'fine-tuning': 'Fine-tuning',
+  'fine tuning': 'Fine-tuning',
   'power bi': 'Power BI',
   'github actions': 'GitHub Actions',
   'gitlab ci': 'GitLab CI',
@@ -154,6 +300,15 @@ export const CANONICAL = {
   'c++': 'C++', 'c#': 'C#', '.net': '.NET',
   'nlp': 'NLP', 'rag': 'RAG', 'sql': 'SQL', 'aws': 'AWS', 'gcp': 'GCP',
   'grpc': 'gRPC', 'dbt': 'dbt', 'mlops': 'MLOps', 'mlflow': 'MLflow',
+  'otel': 'OpenTelemetry',
+  // AI / ML (2026-10-04): the other spellings listed after the Data / ML / AI
+  // tokens. Each lands on the display name its sibling token already resolves
+  // to, so the known-skills set and the gap list meet however the CV spells it.
+  'huggingface': 'Hugging Face',
+  'sklearn': 'scikit-learn',
+  'large language model': 'LLMs', 'large language models': 'LLMs',
+  'retrieval-augmented generation': 'RAG', 'retrieval augmented generation': 'RAG',
+  'natural language processing': 'NLP',
   // Certifications / methodologies (2026-08-07). Uppercase display forms, since
   // DISPLAY lowercases its keys and these are acronyms rather than title-case
   // words — without these, "pmp" in a JD would canonicalize to "Pmp" and miss
@@ -176,6 +331,42 @@ export const CANONICAL = {
   'prince 2': 'PRINCE2',
   'lean six-sigma': 'Lean Six Sigma',
   'six-sigma': 'Six Sigma',
+  // Marketing / GTM (2026-08-30). Only ALTERNATE spellings need an entry —
+  // DISPLAY already resolves a token to its own casing ('abm' -> 'ABM'), so a
+  // single-spelling token like 'HubSpot' needs nothing here. What must be
+  // aliased is every way the same skill gets written, because the known-skills
+  // set is built from the CV's spelling and the gap map from the report's, and
+  // the two only cancel if both collapse to one display form.
+  'account-based marketing': 'ABM', 'account based marketing': 'ABM',
+  'demand-side platform': 'DSP', 'demand side platform': 'DSP', 'dsps': 'DSP',
+  // Every media sense of "programmatic" lands on one display name, so the gap
+  // map does not split one competency across four rows.
+  'programmatic advertising': 'Programmatic',
+  'programmatic display': 'Programmatic',
+  'programmatic media': 'Programmatic',
+  'programmatic buying': 'Programmatic',
+  // "Lead relationships with media agencies" and "media agency management" are
+  // the same competency in gap prose; splitting them would halve the count of a
+  // gap that is already only named a handful of times.
+  'media agency management': 'Media Agency Management',
+  'media agencies': 'Media Agency Management',
+  'media agency': 'Media Agency Management',
+  'demand gen': 'Demand Generation',
+  'revenue operations': 'RevOps',
+  'marketing mix modeling': 'Media Mix Modeling',
+  //
+  // NOT aliased, deliberately, and the most consequential line in this block:
+  // 'demandbase' does NOT map to 'ABM'. Demandbase is an ABM PLATFORM, and
+  // holding a seat in it is not owning an ABM program — the corpus this block
+  // was built from makes that distinction explicitly, in report after report,
+  // because it is the difference between a defensible CV claim and an
+  // indefensible one.
+  // Aliasing the tool to the discipline would put ABM into the known-skills set
+  // of anyone whose CV lists the tool, suppressing the exact gap this
+  // vocabulary exists to surface — and it would read as "no gap found", which
+  // is strictly worse than the silence being fixed. Same rule as the
+  // no-umbrella-aliases policy above: "cloud" must never count as knowing AWS.
+  //
   // NOTE: no 'safe' entry here, deliberately. canonicalize() lowercases its
   // input before reading this map, so a 'safe' key would make
   // canonicalize('safe') return 'SAFe' — re-opening through the exported
@@ -201,6 +392,38 @@ export function canonicalize(token) {
 }
 
 /**
+ * Whether `line` lists fine-tuning as an entry of its own (see
+ * LIST_ENTRY_SEPARATOR for why a piece closed by a colon is skipped).
+ * @param {string} line
+ * @returns {boolean}
+ */
+function listsFineTuning(line) {
+  const parts = line.split(LIST_ENTRY_SEPARATOR);
+  for (let i = 0; i < parts.length; i += 2) {
+    if (parts[i + 1] !== ':' && FINE_TUNING_ENTRY.test(parts[i].trim())) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether any line of `text` mentions fine-tuning as the ML skill: as a list
+ * entry of its own, or in model context (see FINE_TUNING_PATTERN).
+ * @param {string} text
+ * @returns {boolean}
+ */
+function mentionsFineTuning(text) {
+  for (const line of text.split('\n')) {
+    if (!FINE_TUNING_PATTERN.test(line)) continue;
+    if (MODEL_FINE_TUNING.test(line)) return true;
+    if (listsFineTuning(line)) return true;
+    for (const m of line.matchAll(SKILL_PATTERN)) {
+      if (MODEL_SKILLS.has(canonicalize(m[0]))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Extract the set of canonical skill names present in a free-text blob.
  * @param {string} text
  * @returns {Set<string>}
@@ -213,5 +436,6 @@ export function extractSkills(text) {
   }
   if (GO_SKILL_PATTERN.test(text)) found.add('Go');
   if (SAFE_CERT_PATTERN.test(text)) found.add('SAFe');
+  if (mentionsFineTuning(text)) found.add('Fine-tuning');
   return found;
 }

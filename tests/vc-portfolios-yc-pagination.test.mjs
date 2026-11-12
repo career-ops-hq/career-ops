@@ -2,7 +2,7 @@
 // page the YC API reports, follow the nextPage target when totalPages is absent,
 // and never spin past the YC_MAX_PAGES hard ceiling.
 //
-// The API caps its page size (~30 today) and ignores per_page=1000, so a naive
+// The API sets its own page size and ignores per_page, so a naive
 // "stop when a page returns fewer than N companies" walk only ever saw the
 // newest batch. These tests serve small paginated batches through a stubbed
 // global.fetch and assert the walk follows the API's own totalPages / nextPage

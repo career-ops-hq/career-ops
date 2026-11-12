@@ -10,7 +10,7 @@
 // release would be an unintended variable in every provider's fingerprint,
 // introduced without anyone deciding it should be there. Pin it.
 
-export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.0; +https://github.com/santifer/career-ops)';
+export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.0; +https://github.com/career-ops-hq/career-ops)';
 
 /**
  * Browser-like User-Agent for callers that must clear WAF/CDN bot management
@@ -21,3 +21,11 @@ export const DEFAULT_USER_AGENT = 'Mozilla/5.0 (compatible; career-ops/1.0; +htt
  */
 export const BROWSER_LIKE_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36';
+
+/**
+ * macOS browser User-Agent for providers whose WAF rejects the shared Windows
+ * browser signature. Kept next to the other shared identities so another
+ * provider does not grow a private copy when it encounters the same rule.
+ */
+export const MACOS_BROWSER_LIKE_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36';

@@ -23,6 +23,34 @@ export const SUB_BASELINE_SENIORITY = new Set([
   'associate', 'junior', 'entry', 'intern',
 ]);
 
+// A stated level — "Insurance Specialist II", "Registered Nurse 3", "Data
+// Engineer Level 2" — is the employer's own statement that this requisition is
+// not its sibling: a different pay band, scope and req number under one base
+// title. The tokenizer cannot see it. `w.length > 3` drops every roman numeral
+// up to VIII and every single digit, so "Insurance Specialist I" and
+// "Insurance Specialist II" tokenize identically and score a perfect Jaccard
+// ratio; merge-tracker then folds the second requisition into the first, keeps
+// the first's title, and the second stops existing. Measured on a real
+// 316-posting corpus: 15 titles (1 in 20) carry a level, and none of those
+// postings stated a requisition number the Notes-column guard (#1524) could
+// have caught instead.
+//
+// Roman and arabic forms fold onto one number so "Nurse II" and "Nurse 2" are
+// the same statement. Bounded at six: beyond that the roman forms start to
+// collide with real words and abbreviations, and no title needs them.
+export const LEVEL_TOKENS = new Map([
+  ['i', 1], ['ii', 2], ['iii', 3], ['iv', 4], ['v', 5], ['vi', 6],
+  ['1', 1], ['2', 2], ['3', 3], ['4', 4], ['5', 5], ['6', 6],
+]);
+
+// A level token standing as its own word, optionally introduced by "level" /
+// "grade" / "tier". The lookahead is what keeps "5G", "3.0" and "Web3" out —
+// a digit glued to a letter or a point is not a level — and the boundary
+// classes are what let "II (Remote)", "II, Days" and "II/III" read as levels
+// despite the suffix. A slash bounds both sides, so a posting hiring at either
+// of two levels states both.
+const LEVEL_RE = /(?:^|[\s,(\/\-\u2013\u2014])(?:level|lvl|grade|tier)?\s*(i{1,3}|iv|vi?|[1-6])(?=$|[\s,)\/\-\u2013\u2014])/giu;
+
 // Tokens that almost every role shares must not count as strong matching
 // signal. This set covers seniority, work mode, contract shape, locations, and
 // other words that frequently appear in titles without identifying the opening.
@@ -149,6 +177,21 @@ export function roleTokens(role) {
     .filter(w => (w.length > 3 || SHORT_SPECIALTY.has(w)) && !ROLE_STOPWORDS.has(w));
 }
 
+/**
+ * The levels a title states, as numbers, so roman and arabic forms compare equal.
+ *
+ * @param {string} title - Raw role title.
+ * @returns {Set<number>} Empty when the title states no level.
+ */
+export function extractLevels(title) {
+  const levels = new Set();
+  for (const m of normalizeTitle(title).matchAll(LEVEL_RE)) {
+    const level = LEVEL_TOKENS.get(m[1]);
+    if (level !== undefined) levels.add(level);
+  }
+  return levels;
+}
+
 function extractSeniorities(title) {
   return new Set(
     normalizeTitle(title)
@@ -156,6 +199,29 @@ function extractSeniorities(title) {
       .split(/\s+/)
       .filter(w => SENIORITY_TOKENS.has(w))
   );
+}
+
+// Short acronyms are invisible to the tokenizer (it drops every word of three
+// letters or fewer except SHORT_SPECIALTY), so "Enterprise Account Executive -
+// DNB" and "Enterprise Account Executive - FSI" tokenize identically. Read them
+// from the raw title instead, and only when written in capitals inside a title
+// that is not itself all capitals: the capitals are what mark a segment, region
+// or platform code ("FSI", "GCP", "DE") rather than a short common word. The
+// noise list holds capitalised words that carry no requisition identity.
+const SHORT_ACRONYM_NOISE = new Set([
+  'ALL', 'AND', 'FOR', 'THE', 'NEW', 'FTE', 'PTE', 'LLC', 'INC', 'LTD',
+  'SR', 'JR', 'II', 'III', 'IV', 'VI',
+]);
+
+export function extractShortAcronyms(title) {
+  const text = String(title ?? '');
+  // Any letter that is not upper case (lower case, or a script without case
+  // such as Japanese or Arabic) means the title is not written in capitals,
+  // whatever the script around the code.
+  const letters = text.replace(/[^\p{L}]/gu, '');
+  if (letters === '' || letters.replace(/\p{Lu}/gu, '') === '') return new Set();
+  const found = text.match(/(?<![A-Za-z0-9])[A-Z]{2,3}(?![A-Za-z0-9])/g) ?? [];
+  return new Set(found.filter(w => !SHORT_ACRONYM_NOISE.has(w)));
 }
 
 /**
@@ -200,6 +266,15 @@ export function roleFuzzyMatch(a, b) {
     if ([...lone].some(s => SUB_BASELINE_SENIORITY.has(s))) return false;
   }
 
+  // A level stated on BOTH sides must agree, on the same terms as seniority
+  // above: "Specialist I" vs "Specialist II" is two openings, while a level on
+  // one side alone is a loose rewrite of one opening ("Engineer" vs "Senior
+  // Engineer"), not evidence of two. Compared as sets, so a title that states
+  // two levels ("Engineer II/III") still matches either of them.
+  const lvlA = extractLevels(a);
+  const lvlB = extractLevels(b);
+  if (lvlA.size > 0 && lvlB.size > 0 && ![...lvlA].some(l => lvlB.has(l))) return false;
+
   const wordsA = [...new Set(roleTokens(a))];
   const wordsB = [...new Set(roleTokens(b))];
   if (wordsA.length === 0 || wordsB.length === 0) return false;
@@ -230,6 +305,35 @@ export function roleFuzzyMatch(a, b) {
     const extraTokens = larger.filter(w => !smallerSet.has(w));
     if (extraTokens.some(w => !BASELINE_TOKENS.has(w))) return false;
   }
+
+  // A content word on EACH side that the other title lacks is two
+  // disagreements, not a loose rewrite of one opening. The subset guard above
+  // only sees a word on one side, and the Jaccard cut-off below cannot see
+  // this at all: three shared words plus one unique word per side score
+  // exactly 0.6. "Customer Success Manager, Enterprise" vs "Customer Success
+  // Manager, Commercial" (and "Machine Learning Engineer, Vision" vs "...,
+  // Speech") therefore matched, and merge-tracker folded the second
+  // requisition into the first, overwriting its score, date and report link.
+  //
+  // #4058 added this guard for the one case where a level sat on one side
+  // only ("Front Desk Assistant (Summer Housing)" vs "Administrative
+  // Assistant II (Housing Front Desk)"); the vocabulary disagreement is the
+  // signal, the level was only how that report found it. Mirrors the subset
+  // guard: baseline-only differences do not split, and neither does a plural
+  // ("Solution Architecture" vs "Solutions Architecture").
+  const setA = new Set(wordsA);
+  const isPluralOf = (x, y) => x === `${y}s` || y === `${x}s`;
+  const uniqueA = wordsA.filter(w => !setB.has(w) && !BASELINE_TOKENS.has(w));
+  const uniqueB = wordsB.filter(w => !setA.has(w) && !BASELINE_TOKENS.has(w));
+  const unmatchedA = uniqueA.filter(x => !uniqueB.some(y => isPluralOf(x, y)));
+  const unmatchedB = uniqueB.filter(y => !uniqueA.some(x => isPluralOf(x, y)));
+  if (unmatchedA.length > 0 && unmatchedB.length > 0) return false;
+
+  // A short acronym on EACH side that the other title lacks is the same
+  // disagreement as a unique word on each side; see extractShortAcronyms.
+  const acrA = extractShortAcronyms(a);
+  const acrB = extractShortAcronyms(b);
+  if ([...acrA].some(w => !acrB.has(w)) && [...acrB].some(w => !acrA.has(w))) return false;
 
   // Use a true set-based Jaccard ratio. Dividing by the smaller title inflates
   // matches for roles that share a long generic prefix but differ in specialty.

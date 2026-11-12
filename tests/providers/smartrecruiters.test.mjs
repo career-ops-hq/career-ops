@@ -450,6 +450,210 @@ try {
     }
   }
 
+  // ── Requisition id + posting language ──
+  // `refNumber` is the employer's requisition id: shared by every language
+  // version of one requisition and kept across re-releases, while the posting
+  // id changes. `language.code` is the posting text's language code.
+  {
+    const twins = parseSmartRecruitersResponse({
+      content: [
+        { id: '1001', name: 'Senior QA Manager', refNumber: 'ID2608-00427A', language: { code: 'de', label: 'German' } },
+        { id: '1002', name: 'Senior QA Manager', refNumber: 'ID2608-00427A', language: { code: 'en-GB' } },
+      ],
+    }, 'Acme');
+    if (twins[0]?.requisitionId === 'ID2608-00427A' && twins[0]?.language === 'de'
+        && twins[1]?.requisitionId === 'ID2608-00427A' && twins[1]?.language === 'en-GB') {
+      pass('parseSmartRecruitersResponse maps refNumber → requisitionId and language.code → language');
+    } else {
+      fail(`twins = ${JSON.stringify(twins)}`);
+    }
+  }
+
+  {
+    const odd = parseSmartRecruitersResponse({
+      content: [
+        { id: 'A', name: 'Spaced', refNumber: '  JREQ 12757  ', language: { code: ' en ' } },
+        { id: 'B', name: 'Numeric', refNumber: 4647 },
+        { id: 'C', name: 'Blank', refNumber: '   ', language: { code: '' } },
+        { id: 'D', name: 'Object', refNumber: { value: 'R1' }, language: 'de' },
+        { id: 'E', name: 'Absent' },
+      ],
+    }, 'Acme');
+    const [spaced, numeric, blank, object, absent] = odd;
+    if (spaced?.requisitionId === 'JREQ 12757' && spaced?.language === 'en') {
+      pass('parseSmartRecruitersResponse trims both values and keeps an inner space in the requisition id');
+    } else {
+      fail(`spaced = ${JSON.stringify(spaced)}`);
+    }
+    if (numeric?.requisitionId === '4647' && !('language' in numeric)) {
+      pass('parseSmartRecruitersResponse stringifies a numeric refNumber');
+    } else {
+      fail(`numeric = ${JSON.stringify(numeric)}`);
+    }
+    if ([blank, object, absent].every((j) => j && !('requisitionId' in j) && !('language' in j))) {
+      pass('parseSmartRecruitersResponse omits both keys for blank, non-scalar or missing values');
+    } else {
+      fail(`blank/object/absent = ${JSON.stringify([blank, object, absent])}`);
+    }
+  }
+
+  // fetch() strips the internal posting id but keeps both new fields.
+  {
+    const rows = await sr.fetch(
+      { name: 'KeepCo', careers_url: 'https://careers.smartrecruiters.com/keepco' },
+      {
+        fetchJson: async () => ({
+          content: [{ id: '77', name: 'Role', refNumber: 'REF7515N', language: { code: 'pt' } }],
+        }),
+      },
+    );
+    if (rows[0]?.requisitionId === 'REF7515N' && rows[0]?.language === 'pt' && !('id' in rows[0])) {
+      pass('fetch() returns requisitionId and language and still strips the internal id');
+    } else {
+      fail(`fetch row = ${JSON.stringify(rows[0])}`);
+    }
+  }
+
+  // releasedDate becomes postedAt, so max_posting_age_days and --since can
+  // act on SmartRecruiters boards. Before, every row came back undated and
+  // buildPostingAgeFilter passes an undated row, so a 2022 requisition
+  // survived a 45-day limit.
+  {
+    const rows = parseSmartRecruitersResponse({
+      content: [
+        { id: '1', name: 'Dated', company: { name: 'DateCo' }, releasedDate: '2022-07-05T08:50:05.000Z' },
+        { id: '2', name: 'Undated', company: { name: 'DateCo' } },
+        { id: '3', name: 'Garbled', company: { name: 'DateCo' }, releasedDate: 'not a date' },
+        { id: '4', name: 'Object', company: { name: 'DateCo' }, releasedDate: { toString: 1 } },
+      ],
+    }, 'DateCo', 'dateco');
+    const [dated, undated, garbled, objectDate] = rows;
+    if (rows.length === 4 && objectDate && !('postedAt' in objectDate)) {
+      pass('a releasedDate that is not a string is ignored, not thrown on');
+    } else {
+      fail(`object-date row = ${JSON.stringify(objectDate)}, rows = ${rows.length}`);
+    }
+    if (dated?.postedAt === Date.parse('2022-07-05T08:50:05.000Z')) {
+      pass('parseSmartRecruitersResponse maps releasedDate to postedAt (epoch ms)');
+    } else {
+      fail(`dated row = ${JSON.stringify(dated)}`);
+    }
+    if (undated && !('postedAt' in undated) && garbled && !('postedAt' in garbled)) {
+      pass('a missing or unparseable releasedDate leaves postedAt unset');
+    } else {
+      fail(`undated/garbled = ${JSON.stringify([undated, garbled])}`);
+    }
+    const { buildPostingAgeFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const keep = buildPostingAgeFilter(45, Date.parse('2026-10-30T00:00:00Z'));
+    if (keep(dated?.postedAt) === false && keep(undated?.postedAt) === true) {
+      pass('a 2022 SmartRecruiters posting is dropped by a 45-day max_posting_age_days');
+    } else {
+      fail(`age filter kept dated=${keep(dated?.postedAt)} undated=${keep(undated?.postedAt)}`);
+    }
+
+    const fetched = await sr.fetch(
+      { name: 'DateCo', careers_url: 'https://careers.smartrecruiters.com/dateco' },
+      { fetchJson: async () => ({ content: [{ id: '9', name: 'Role', releasedDate: '2026-10-29T10:00:00.000Z' }] }) },
+    );
+    if (fetched[0]?.postedAt === Date.parse('2026-10-29T10:00:00.000Z')) {
+      pass('fetch() keeps postedAt on the rows it returns');
+    } else {
+      fail(`fetch row = ${JSON.stringify(fetched[0])}`);
+    }
+  }
+
+  // ── listingIdentity (#6908): the posting id the payload already carries
+  //    becomes the strong ATS-native identity instead of being thrown away.
+  {
+    const { smartRecruitersListingIdentity } = smartrecruitersModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const entry = { name: 'Acme', careers_url: 'https://careers.smartrecruiters.com/acme' };
+    const fetchWith = (content) => sr.fetch(entry, { fetchJson: async () => ({ content }) });
+
+    const [row] = await fetchWith([{ id: '744000012345678', name: 'Staff Engineer' }]);
+    if (row?.listingIdentity?.ats_provider === 'smartrecruiters'
+        && row?.listingIdentity?.board_slug === 'acme'
+        && row?.listingIdentity?.posting_id === '744000012345678'
+        && !('id' in row)) {
+      pass('fetch() returns the smartrecruiters/<slug>/<posting id> identity and still strips the raw id');
+    } else {
+      fail(`identity row = ${JSON.stringify(row)}`);
+    }
+
+    // The board slug comes from the configured entry, not from the posting URL:
+    // a branded careers_url with the slug pinned via api: keys on that slug.
+    const [pinned] = await sr.fetch(
+      { name: 'Continental', careers_url: 'https://jobs.continental.com', api: 'https://careers.smartrecruiters.com/Continental' },
+      { fetchJson: async () => ({ content: [{ id: '42', name: 'Role' }] }) },
+    );
+    if (pinned?.listingIdentity?.board_slug === 'Continental' && pinned?.listingIdentity?.posting_id === '42') {
+      pass('fetch() keys the identity on the api:-pinned slug of a branded careers_url');
+    } else {
+      fail(`pinned identity = ${JSON.stringify(pinned?.listingIdentity)}`);
+    }
+
+    // The same posting reached through a second URL (the employer's branded
+    // careers page instead of the ATS host) is one listing, not two. URL dedup
+    // alone cannot join these; only the ATS-native identity can.
+    const [before] = await fetchWith([{ id: '744000099', name: 'Backend Engineer' }]);
+    const branded = { ...before, url: 'https://careers.acme.example/jobs/744000099-backend-engineer' };
+    const seen = new Set();
+    markOfferSeen(before, seen);
+    if (isOfferSeen(branded, seen)) {
+      pass('the same SmartRecruiters posting under a branded URL is already seen (one row, not two)');
+    } else {
+      fail(`branded URL not seen; identity = ${JSON.stringify(before?.listingIdentity)}`);
+    }
+
+    // A different posting on the same board stays a different listing.
+    const [other] = await fetchWith([{ id: '744000100', name: 'Backend Engineer' }]);
+    if (listingIdentityToken(other) !== listingIdentityToken(before) && !isOfferSeen(other, seen)) {
+      pass('a different posting id on the same board is a different listing');
+    } else {
+      fail(`other token = ${listingIdentityToken(other)}`);
+    }
+
+    // No usable id → no identity, so the scan falls back to URL dedup.
+    const unusable = await fetchWith([
+      { name: 'No id', ref: 'https://api.smartrecruiters.com/v1/companies/acme/postings/1' },
+      { id: ' 7 ', name: 'Padded id' },
+      { id: 'a\u0007b', name: 'Control in id' },
+    ]);
+    if (unusable.length === 3 && unusable.every((j) => !('listingIdentity' in j))) {
+      pass('a missing, padded or control-bearing posting id leaves listingIdentity off');
+    } else {
+      fail(`unusable rows = ${JSON.stringify(unusable)}`);
+    }
+
+    // A numeric payload id is stringified for the detail call and the URL, but
+    // identity ids are never coerced: 1 and '1' must not become one listing.
+    const [numeric] = await fetchWith([{ id: 1, name: 'Numeric id' }]);
+    const [stringOne] = await fetchWith([{ id: '1', name: 'String id' }]);
+    if (numeric && !('listingIdentity' in numeric)
+        && numeric.url === 'https://jobs.smartrecruiters.com/acme/1-numeric-id'
+        && stringOne?.listingIdentity?.posting_id === '1') {
+      pass('a numeric payload id keeps its URL but gets no identity (no numeric coercion)');
+    } else {
+      fail(`numeric = ${JSON.stringify(numeric)}, string = ${JSON.stringify(stringOne?.listingIdentity)}`);
+    }
+
+    // The internal postingId never reaches a Job row.
+    if ([row, numeric, stringOne, ...unusable].every((j) => j && !('postingId' in j) && !('id' in j))) {
+      pass('fetch() strips both the raw id and the internal postingId from Job rows');
+    } else {
+      fail('postingId or id leaked into a Job row');
+    }
+
+    if (smartRecruitersListingIdentity('', '1') === undefined
+        && smartRecruitersListingIdentity(null, '1') === undefined
+        && smartRecruitersListingIdentity('acme', 1) === undefined
+        && smartRecruitersListingIdentity('acme', '') === undefined) {
+      pass('smartRecruitersListingIdentity() returns undefined for an empty slug or a non-string/empty id');
+    } else {
+      fail('smartRecruitersListingIdentity() accepted an incomplete triple');
+    }
+  }
+
 } catch (e) {
   fail(`smartrecruiters provider tests crashed: ${e.message}`);
 }

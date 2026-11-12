@@ -23,18 +23,30 @@
  */
 
 import { readFileSync, existsSync, statSync, realpathSync, writeFileSync, symlinkSync, rmSync } from 'fs';
-import { join, dirname, relative, sep } from 'path';
+import { join, dirname, relative, resolve, sep } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
-import { load as yamlLoad } from 'js-yaml';
-import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
+import { resolveColumns, parseTrackerRow, firstLinkTarget } from './tracker-parse.mjs';
+import { validateFlags, flagValue, hasFlag } from './lib/cli-flags.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
+import { rankSkipBlockers, parseRequirementImportance } from './skip-blockers.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const APPS_FILE = existsSync(join(CAREER_OPS, 'data/applications.md'))
-  ? join(CAREER_OPS, 'data/applications.md')
-  : join(CAREER_OPS, 'applications.md');
+import { getCareerOpsRoot, getProfilePath, rawTrackerPath, resolveTrackerPath } from './path-resolver.mjs';
+
+const ROOT = dirname(fileURLToPath(import.meta.url));
+const CAREER_OPS = getCareerOpsRoot();
+const APPS_FILE = resolveTrackerPath(CAREER_OPS);
+// Report links resolve against the tracker's directory as spelled first:
+// withinReports() compares candidates lexically against CAREER_OPS, so the
+// realpath above alone (macOS /var -> /private/var, or any symlinked data
+// root) would push every valid link outside reports/. The realpath's own
+// directory stays a candidate for a tracker file that is itself a symlink,
+// whose links are written relative to its target.
+const TRACKER_DIR = dirname(resolve(rawTrackerPath(CAREER_OPS)));
 const CV_FILE = join(CAREER_OPS, 'cv.md');
-const PROFILE_FILE = join(CAREER_OPS, 'config/profile.yml');
+const PROFILE_FILE = getProfilePath();
+const STATES_FILE = join(ROOT, 'templates/states.yml');
 
 // Canonical reports-root containment. A tracker link resolves to a candidate
 // path; accept it only if it stays inside the repo's reports/ directory. Two
@@ -85,7 +97,12 @@ function readTextIfExists(path) {
 // older runs non-comparable. The upskill mode's diff-vs-previous section only
 // compares reports with the same schema_version, so a regex change can't
 // masquerade as "gap closed".
-export const SCHEMA_VERSION = 1;
+// v2 (2026-08-30): the marketing/GTM vocabulary block in skill-extract.mjs and
+// the company-name exclusion below both change WHICH skills a report yields, so
+// a v1 gap list and a v2 one are not comparable — a gap "appearing" in v2 may
+// simply be a word the v1 vocabulary could not see, and a gap "closing" may be
+// an employer name that v1 mistook for a skill.
+export const SCHEMA_VERSION = 2;
 
 // Reports below this global score count as "low fit" — the population whose
 // gaps matter most. Matches the apply threshold in Ethical Use (CLAUDE.md).
@@ -95,6 +112,8 @@ const LOW_FIT_SCORE = 4.0;
 // upskill, jd-skill-gap, and analyze-patterns share ONE source of truth. Re-
 // exported here so existing importers of extractSkills keep working unchanged.
 import { extractSkills } from './skill-extract.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 export { extractSkills };
 
 // --- Known-skills text assembly ---
@@ -144,7 +163,7 @@ export function yamlValueText(raw, onParseFailure) {
   if (!raw) return '';
   let doc;
   try {
-    doc = yamlLoad(raw);
+    doc = loadYaml(raw);
   } catch (err) {
     if (onParseFailure) onParseFailure(err);
     return raw;
@@ -156,7 +175,7 @@ export function yamlValueText(raw, onParseFailure) {
   // which js-yaml resolves into a real JS cycle (doc.root.self === doc.root).
   // An unguarded walk chases that forever and dies with a RangeError, killing
   // the whole run — the parse try/catch above cannot help, because the throw
-  // happens here, not in yamlLoad(). The WeakSet also collapses a non-cyclic
+  // happens here, not in loadYaml(). The WeakSet also collapses a non-cyclic
   // alias reused in several places, which is harmless: the caller turns this
   // into a Set of skills, so emitting a value once is sufficient.
   const seen = new WeakSet();
@@ -248,12 +267,12 @@ export function readOptionalText(filePath) {
 // --- Machine Summary + Gap table parsing ---
 // Mirrors analyze-patterns.mjs (duplicated by design, see header comment).
 function parseMachineSummary(content) {
-  const fenceMatch = content.match(/##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
+  const fenceMatch = machineSummarySection(content).match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml|json)?\s*\n([\s\S]*?)\n```/i);
   if (!fenceMatch) return null;
   const raw = fenceMatch[1].trim();
   if (!raw) return null;
   try {
-    const parsed = yamlLoad(raw);
+    const parsed = loadYaml(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     return parsed;
   } catch {
@@ -277,6 +296,7 @@ export function parseReportGaps(content) {
   const gapDescriptions = [];
   let score = null;
   let hasMachineSummary = false;
+  let requirements = [];
 
   const summary = parseMachineSummary(content);
   if (summary) {
@@ -284,6 +304,7 @@ export function parseReportGaps(content) {
     if (typeof summary.score === 'number' && Number.isFinite(summary.score)) score = summary.score;
     gapDescriptions.push(...normalizeList(summary.hard_stops));
     gapDescriptions.push(...normalizeList(summary.soft_gaps));
+    requirements = parseRequirementImportance(summary.requirement_importance);
   }
 
   const plain = content.replace(/\*\*/g, '');
@@ -300,7 +321,19 @@ export function parseReportGaps(content) {
     }
   }
 
-  return { score, gapText: gapDescriptions.join('\n'), hasMachineSummary };
+  return { score, gapText: gapDescriptions.join('\n'), hasMachineSummary, requirements };
+}
+
+/**
+ * Normalized lookup key for a company name. Lowercased and whitespace-collapsed
+ * so a tracker cell (`  Snowflake `) matches an extracted skill token
+ * (`Snowflake`).
+ *
+ * @param {string} name
+ * @returns {string}
+ */
+export function companyKey(name) {
+  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /**
@@ -308,20 +341,43 @@ export function parseReportGaps(content) {
  *
  * @param {Array<{num:number|string, score:number|null, gapText:string}>} reports
  * @param {Set<string>} knownSkills — canonical names already in cv/profile
+ * @param {Set<string>} [companyNames] — normalized names of companies the user
+ *   has evaluated (see companyKey). A skill token that IS one of them is an
+ *   employer being cited, not a skill being demanded.
  */
-export function aggregateGaps(reports, knownSkills) {
+export function aggregateGaps(reports, knownSkills, companyNames = new Set()) {
   const scored = reports.filter(r => Number.isFinite(r.score));
   const lowFit = scored.filter(r => r.score < LOW_FIT_SCORE);
   const totalLowFit = lowFit.length;
 
+  // Accept either an already-normalized set or raw tracker cells.
+  const companyLookup = new Set([...companyNames].map(companyKey).filter(Boolean));
+
   const bySkill = new Map();
   const excludedCounts = new Map();
+  const companyCounts = new Map();
 
   for (const report of reports) {
     const skills = extractSkills(report.gapText);
     for (const skill of skills) {
       if (knownSkills.has(skill)) {
         excludedCounts.set(skill, (excludedCounts.get(skill) || 0) + 1);
+        continue;
+      }
+      // A company from the user's OWN pipeline appearing in gap prose is
+      // almost always provenance, not demand — a report logging a recurring
+      // gap names the sibling companies where it was logged before ("4th
+      // occurrence: <company>, <company>, now here"), and the extractor cannot
+      // tell that from a JD asking for the tool of the same name.
+      //
+      // Checked AFTER known-skills so a company that is also a genuine known
+      // skill stays in the bucket that says "you already have this". Counted
+      // and reported rather than dropped: this module's own history (see the
+      // known-skills header above) is that a silent suppression is
+      // indistinguishable from "never appeared", which is what made the
+      // original bug expensive.
+      if (companyLookup.has(companyKey(skill))) {
+        companyCounts.set(skill, (companyCounts.get(skill) || 0) + 1);
         continue;
       }
       if (!bySkill.has(skill)) {
@@ -356,7 +412,11 @@ export function aggregateGaps(reports, knownSkills) {
     .map(([skill, reports]) => ({ skill, reports }))
     .sort((a, b) => b.reports - a.reports);
 
-  return { gaps, excludedAsKnown, totalLowFit };
+  const excludedAsCompanyName = [...companyCounts.entries()]
+    .map(([skill, reports]) => ({ skill, reports }))
+    .sort((a, b) => b.reports - a.reports);
+
+  return { gaps, excludedAsKnown, excludedAsCompanyName, totalLowFit };
 }
 
 /**
@@ -394,21 +454,34 @@ function analyze(minReports) {
   const lines = readFileSync(APPS_FILE, 'utf-8').split('\n');
   const colmap = resolveColumns(lines);
   const rows = lines.map(l => parseTrackerRow(l, colmap)).filter(Boolean);
+  const states = loadCanonicalStates(STATES_FILE);
 
   let reportsLinked = 0;
   let reportsRead = 0;
   let reportsWithMachineSummary = 0;
   const parsedReports = [];
+  // Every company the user has evaluated, linked report or not — a row with no
+  // report still names an employer that can turn up in someone else's gap prose.
+  // '?' is the tracker's locale-invariant marker for an unknown end employer
+  // (see AGENTS.md) and names nothing, so it is skipped.
+  const companyNames = new Set(
+    rows.map(r => companyKey(r.company)).filter(name => name && name !== '?')
+  );
 
   for (const row of rows) {
-    const linkMatch = (row.report || '').match(/\]\(([^)]+)\)/);
-    if (!linkMatch) continue;
+    const linkTarget = firstLinkTarget(row.report);
+    if (linkTarget == null) continue;
     reportsLinked += 1;
     // Tracker links are normalized relative to the tracker file's directory
-    // (see merge-tracker.mjs); resolve against it, with a root-relative fallback.
+    // (see merge-tracker.mjs); resolve against it as spelled and as realpathed
+    // (see TRACKER_DIR), with a root-relative fallback.
     // The read is attempted directly instead of probing with existsSync first,
     // which costs a full stat per report and races with the read (#2385).
-    const candidates = new Set([join(dirname(APPS_FILE), linkMatch[1]), join(CAREER_OPS, linkMatch[1])]);
+    const candidates = new Set([
+      join(TRACKER_DIR, linkTarget),
+      join(dirname(APPS_FILE), linkTarget),
+      join(CAREER_OPS, linkTarget),
+    ]);
     let content = null;
     for (const p of candidates) {
       if (!withinReports(p)) continue;
@@ -417,13 +490,16 @@ function analyze(minReports) {
     }
     if (content === null) continue;
     reportsRead += 1;
-    const { score, gapText, hasMachineSummary } = parseReportGaps(content);
+    const { score, gapText, hasMachineSummary, requirements } = parseReportGaps(content);
     if (hasMachineSummary) reportsWithMachineSummary += 1;
     const trackerScore = parseFloat(row.score);
     parsedReports.push({
       num: row.num,
       score: Number.isFinite(trackerScore) ? trackerScore : score,
       gapText,
+      date: row.date,
+      state: resolveCanonicalStateId(row.status, states),
+      requirements,
     });
   }
 
@@ -443,7 +519,8 @@ function analyze(minReports) {
   );
   const knownSkills = extractSkills(knownText);
 
-  const { gaps, excludedAsKnown, totalLowFit } = aggregateGaps(parsedReports, knownSkills);
+  const { gaps, excludedAsKnown, excludedAsCompanyName, totalLowFit } =
+    aggregateGaps(parsedReports, knownSkills, companyNames);
 
   return {
     schema_version: SCHEMA_VERSION,
@@ -455,10 +532,13 @@ function analyze(minReports) {
       lowFitReports: totalLowFit,
       lowFitScoreThreshold: LOW_FIT_SCORE,
       knownSkillCount: knownSkills.size,
+      trackedCompanyCount: companyNames.size,
     },
     gaps,
     excludedAsKnown,
+    excludedAsCompanyName,
     knownSkills: [...knownSkills].sort(),
+    skipBlockers: rankSkipBlockers(parsedReports),
   };
 }
 
@@ -468,31 +548,49 @@ function printSummary(result) {
     return;
   }
   const m = result.metadata;
+  const pad = (s, n) => String(s).padEnd(n);
   console.log(`UPSKILL GAP MAP (schema v${result.schema_version})`);
   console.log(`Reports: ${m.reportsRead}/${m.reportsLinked} read, ${m.reportsScored} scored, ${m.lowFitReports} low-fit (<${m.lowFitScoreThreshold}), ${m.reportsWithMachineSummary} with Machine Summary`);
   console.log('');
   if (result.gaps.length === 0) {
     console.log('No skill gaps detected across your evaluated reports.');
   } else {
-    const pad = (s, n) => String(s).padEnd(n);
     console.log(`${pad('TIER', 10)}${pad('SKILL', 22)}${pad('REPORTS', 9)}${pad('LOW-FIT', 9)}WEIGHTED`);
     for (const g of result.gaps) {
       console.log(`${pad(g.tier, 10)}${pad(g.skill, 22)}${pad(g.reports, 9)}${pad(`${g.lowFitReports}/${result.metadata.lowFitReports}`, 9)}${g.weightedScore}`);
+    }
+  }
+  const { skips, blockers } = result.skipBlockers;
+  if (blockers.length > 0) {
+    const next = { learn: 'learn it', evidence: 'add evidence if you have it' };
+    console.log('');
+    console.log(`BLOCKED YOUR LAST ${skips} SKIPS (critical or high requirement marked missing or partial)`);
+    console.log(`${pad('SKIPS', 7)}${pad('MISSING', 9)}${pad('PARTIAL', 9)}${pad('3.5+', 6)}${pad('NEXT', 29)}REQUIREMENT`);
+    for (const b of blockers) {
+      console.log(`${pad(b.skips, 7)}${pad(b.missing, 9)}${pad(b.partial, 9)}${pad(b.closeCalls, 6)}${pad(next[b.nudge], 29)}${b.label}`);
     }
   }
   if (result.excludedAsKnown.length > 0) {
     console.log('');
     console.log(`Excluded (already in cv.md/profile): ${result.excludedAsKnown.map(e => e.skill).join(', ')}`);
   }
+  // Printed, never silent: if one of these is genuinely a tool the user needs
+  // rather than an employer they cited, this line is how they find out.
+  if (result.excludedAsCompanyName?.length > 0) {
+    console.log('');
+    console.log(`Excluded (company in your tracker, not a skill): ${result.excludedAsCompanyName.map(e => e.skill).join(', ')}`);
+  }
 }
 
-// --- Self-test (pure functions, no filesystem) ---
+// --- Self-test (pure helpers, plus a reports/ link probe that writes and unlinks temp files) ---
 function runSelfTest() {
   const failures = [];
 
   // The extractSkills canonicalization/boundary fixtures now live with the
-  // module in tests/skill-extract.test.mjs (#1896). upskill's self-test keeps
-  // the aggregation/suppression/targeted checks that are upskill's own logic.
+  // module in tests/skill-extract.test.mjs (#1896), and the known-skills comment
+  // handling lives in tests/upskill-known-skills.test.mjs (#5183). upskill's
+  // self-test keeps the aggregation/suppression/targeted checks that are
+  // upskill's own logic.
 
   // Over-suppression guard: cv "Java" must NOT swallow a "JavaScript" gap,
   // and cv "AWS" must not swallow GCP/Azure. This is the failure mode the
@@ -668,120 +766,12 @@ soft_gaps:
     }
   }
 
-  // --- known-skills text: comments must never register as known skills ---
-  // A comment recording that the user does NOT have something must not make it
-  // count as known and suppress it from the gap map.
-  {
-    const profile = [
-      'candidate:',
-      '  full_name: "Test User"',
-      '# We dropped Kubernetes last year and never picked up Terraform.',
-      'skills:',
-      '  - Python',
-    ].join('\n');
-    const cv = '# CV\n\n<!-- template note: list Snowflake if you have used it -->\n\n## Skills\nSQL, AWS\n';
-
-    const leaked = extractSkills([cv, profile].join('\n'));
-    if (!leaked.has('Kubernetes') || !leaked.has('Snowflake')) {
-      failures.push('known-skills: fixture no longer reproduces the raw-concat leak — rewrite it, not the fix');
-    }
-
-    const fixed = extractSkills(knownSkillsText(cv, profile));
-    for (const ghost of ['Kubernetes', 'Terraform', 'Snowflake']) {
-      if (fixed.has(ghost)) failures.push(`known-skills: "${ghost}" leaked from a comment`);
-    }
-    for (const real of ['Python', 'SQL', 'AWS']) {
-      if (!fixed.has(real)) failures.push(`known-skills: real skill "${real}" was dropped`);
-    }
-
-    // A skill in KEY position stays known — dropping keys would silently narrow
-    // what counts as known, a different behaviour change than removing comments.
-    if (!extractSkills(yamlValueText('skills:\n  Python: expert\n')).has('Python')) {
-      failures.push('known-skills: key-position skill dropped');
-    }
-
-    // Parsing beats regex-stripping: a '#' inside a quoted string is not a comment.
-    if (!extractSkills(yamlValueText('note: "uses C# daily"\n')).has('C#')) {
-      failures.push('known-skills: "#" inside a quoted string was treated as a comment');
-    }
-
-    // Unparseable YAML degrades to the raw text (previous behaviour). Returning
-    // nothing would empty the known-skills set and flood the map with false gaps.
-    if (!yamlValueText('key: [unclosed\n  bad: : :').includes('unclosed')) {
-      failures.push('known-skills: unparseable YAML should fall back to raw text');
-    }
-
-    // ...but that fallback re-exposes the bug, so it must not be silent. The
-    // caller has to be told, or a malformed profile quietly reinstates exactly
-    // the suppression this fix removes.
-    {
-      const badProfile = '# We dropped Kubernetes.\nkey: [unclosed\n  bad: : :';
-      let notified = 0;
-      const text = yamlValueText(badProfile, () => { notified++; });
-      if (notified !== 1) {
-        failures.push(`known-skills: unparseable YAML must notify the caller exactly once (got ${notified})`);
-      }
-      if (!text.includes('unclosed')) {
-        failures.push('known-skills: notifying must not change the raw-text fallback');
-      }
-      // The leak the warning exists to announce — assert it is real, so this
-      // test cannot pass because the fixture stopped being malformed.
-      if (!extractSkills(text).has('Kubernetes')) {
-        failures.push('known-skills: malformed-YAML fixture no longer leaks — rewrite it, not the warning');
-      }
-      // Valid YAML must stay quiet: a warning on every run is noise, and noise
-      // is how a real one gets ignored.
-      let spurious = 0;
-      yamlValueText('skills:\n  - Python\n', () => { spurious++; });
-      if (spurious !== 0) {
-        failures.push('known-skills: valid YAML must not emit a parse-failure warning');
-      }
-      // knownSkillsText must forward the callback — the CLI paths rely on it,
-      // and a dropped forward would silently disable both warnings at once.
-      let forwarded = 0;
-      knownSkillsText('# CV\n', badProfile, () => { forwarded++; });
-      if (forwarded !== 1) {
-        failures.push(`known-skills: knownSkillsText must forward the parse-failure callback (got ${forwarded})`);
-      }
-    }
-
-    if (stripMarkdownComments('a <!-- x --> b').includes('x')) {
-      failures.push('known-skills: markdown comment not stripped');
-    }
-
-    // A YAML alias can produce a genuinely cyclic object. Without a visited-set
-    // the walk recurses until the stack dies, taking the whole run with it —
-    // and the parse try/catch cannot help, because the throw is in the walk.
-    const cyclicYaml = 'root: &a\n  name: Python\n  self: *a\n';
-    // Load ONCE and compare within that graph — two separate loads produce two
-    // independent object trees, so a cross-load identity check never holds and
-    // would assert nothing.
-    const cyclicDoc = yamlLoad(cyclicYaml);
-    if (cyclicDoc?.root?.self !== cyclicDoc?.root) {
-      failures.push('known-skills: cyclic fixture no longer produces a cycle — rewrite it, not the guard');
-    }
-    try {
-      if (!extractSkills(yamlValueText(cyclicYaml)).has('Python')) {
-        failures.push('known-skills: cyclic YAML lost a real value');
-      }
-    } catch (e) {
-      failures.push(`known-skills: cyclic YAML alias threw (${e.constructor.name}) instead of terminating`);
-    }
-
-    // Optional files: missing, unreadable, and not-a-file must all read as ''.
-    if (readOptionalText(join(CAREER_OPS, 'no-such-file-xyz.md')) !== '') {
-      failures.push('readOptionalText: a missing file should read as empty');
-    }
-    if (readOptionalText(CAREER_OPS) !== '') {
-      failures.push('readOptionalText: a DIRECTORY should read as empty, not throw EISDIR');
-    }
-  }
 
   if (failures.length > 0) {
     console.error(`upskill self-test failed: ${failures.join('; ')}`);
     process.exit(1);
   }
-  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing, known-skills comment handling)');
+  console.log('upskill self-test OK (extraction, suppression guards, weighting, tiering, report parsing)');
   process.exit(0);
 }
 
@@ -839,13 +829,13 @@ async function validateUrlSecurity(urlString) {
 //     rejects a discovered suite for.
 //
 // Same shape as the other CLIs in this repo (add-entry.mjs, detect-reposts.mjs,
-// contacts.mjs, check-table-freshness.mjs, ...): compare import.meta.url against
-// argv[1]. Node resolves the ESM entry through realpath while pathToFileURL does
-// not, so invoking this file through a SYMLINK reads as "not main" and prints
-// nothing — the same edge contacts.test.mjs documents on macOS. Every caller
-// (test-all.mjs, the modes, package scripts) uses the real path, and matching the
-// repo convention is worth more here than covering a path nothing takes.
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// contacts.mjs, check-table-freshness.mjs, ...), and now literally the same code:
+// lib/is-main-module.mjs. The hand-rolled comparison this comment used to describe
+// accepted a real defect — reached through a SYMLINK the two sides never matched,
+// so the CLI printed nothing and exited 0 — on the premise that every caller uses
+// the real path. That premise did not hold (#3170): a symlinked checkout, a ~/bin
+// shim and macOS's own tmpdir all take it. The helper realpaths both sides.
+const isMain = isMainModule(import.meta.url);
 
 // An unrecognized or mistyped flag (e.g. `--min-report` for `--min-reports`)
 // used to fall through silently: the aggregate branch just ran with its
@@ -855,7 +845,10 @@ const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv
 // are read, and before --help, so `--help --bogus` still errors.
 const KNOWN_FLAGS = ['--min-reports', '--summary', '--url-text', '--self-test', '--help', '-h'];
 
-// Only --min-reports and --url-text take their value as the next argv token.
+// Only --min-reports and --url-text take a value, as the next argv token or as
+// `--flag=value`. validateFlags accepts either form, so both are read with
+// flagValue(): an indexOf() lookup cannot see `--url-text=<url>` (the aggregate
+// map ran instead) or `--min-reports=3` (the default of 5 applied instead).
 const VALUE_FLAGS = ['--min-reports', '--url-text'];
 
 const USAGE = `Usage:
@@ -869,17 +862,25 @@ const USAGE = `Usage:
 
 if (isMain) {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
+  // requireOperand: neither value flag caught a MISSING operand on its own, so
+  // this is the shared guard's case, not an own-validator exemption.
+  // `--min-reports --summary` read '--summary' as the count, parseInt gave NaN
+  // and the aggregate branch silently fell back to 5 — a gap map for a threshold
+  // nobody asked for, at exit 0. `--url-text --help` printed usage and exited 0
+  // before the "provide a valid URL" check below could run (#2961). The
+  // non-numeric fallback (`--min-reports abc` → 5) is separate behaviour and is
+  // deliberately left alone here.
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (args.includes('--self-test')) runSelfTest();
 
   // ====== SECURE TARGETED MODE PHASE 2a IMPLEMENTATION ======
-  const urlTextIdx = args.indexOf('--url-text');
+  const urlTextGiven = hasFlag(args, '--url-text');
   const directUrl = args.find(arg => arg.startsWith('http://') || arg.startsWith('https://'));
 
-  if (urlTextIdx !== -1 || directUrl) {
+  if (urlTextGiven || directUrl) {
     (async () => {
       let targetText = '';
-      const inputSource = urlTextIdx !== -1 ? args[urlTextIdx + 1] : directUrl;
+      const inputSource = urlTextGiven ? flagValue(args, '--url-text') : directUrl;
 
       if (!inputSource) {
         console.error('Error: Please provide a valid URL or file path after --url-text');
@@ -891,7 +892,7 @@ if (isMain) {
         try {
           const secureUrl = await validateUrlSecurity(inputSource);
           const { chromium } = await import('playwright');
-          browser = await chromium.launch({ headless: true });
+          browser = await chromium.launch(browserLaunchOptions({ headless: true }));
           const page = await browser.newPage();
 
           await page.route('**/*', async (route) => {
@@ -1001,10 +1002,10 @@ if (isMain) {
     });
   } else {
     // ====== ORIGINAL AGGREGATE MODE PIPELINE ======
-    const minReportsIdx = args.indexOf('--min-reports');
+    const minReportsRaw = flagValue(args, '--min-reports');
     const MIN_REPORTS = (() => {
-      if (minReportsIdx === -1 || args[minReportsIdx + 1] === undefined) return 5;
-      const n = parseInt(args[minReportsIdx + 1], 10);
+      if (minReportsRaw === undefined) return 5;
+      const n = parseInt(minReportsRaw, 10);
       return Number.isNaN(n) || n < 1 ? 5 : n;
     })();
 

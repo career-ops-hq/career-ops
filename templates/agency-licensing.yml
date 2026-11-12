@@ -74,3 +74,41 @@ jurisdictions:
       - "Blakes — Ontario licensing regime and administrative penalties bulletin"
       - "HGR Graham Partners — Working for Workers Act licensing bulletin"
     as_of: "2026-07-18"
+
+  UK:
+    jurisdiction_name: "United Kingdom (Great Britain)"
+    licensing_required_for: both   # employment agencies (permanent introduction) AND employment businesses (temporary placement)
+    effective: "2004-04-06"        # commencement date of the Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319); Act passed 1973-07-18 (c. 35)
+    registry:
+      url: "https://www.gov.uk/employment-agencies-and-businesses"
+      what_it_shows: "GOV.UK official guidance and compliance resources for employment agencies and employment businesses — details statutory conduct rules, worker rights, enforcement under the Employment Agency Standards (EAS) Inspectorate (Department for Business and Trade), and official list of prohibited persons."
+    legal_basis: "Employment Agencies Act 1973 (c. 35) + Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319)"
+    client_side_prohibition: "Hirers/clients in general recruitment are not broadly prohibited from using agencies as general licensing was replaced by statutory conduct rules under EAS, though hirers are barred from using unlicensed labor providers in GLAA-regulated sectors (Gangmasters (Licensing) Act 2004)."
+    penalties: "Prosecution in Magistrates' Court (unlimited fines), tribunal awards, and formal prohibition orders banning individuals from operating or managing an employment agency/business for up to 10 years."
+    transitional_notes: "General recruitment in Great Britain is governed by statutory conduct regulations enforced by the EAS Inspectorate rather than universal pre-licensing — compliance is enforced via inspections and complaints, making outside assertions of non-compliance impossible without official enforcement actions."
+    sources:
+      - "https://www.legislation.gov.uk/ukpga/1973/35 — Employment Agencies Act 1973 (c. 35)"
+      - "https://www.legislation.gov.uk/uksi/2003/3319 — Conduct of Employment Agencies and Employment Businesses Regulations 2003 (SI 2003/3319)"
+      - "https://www.gov.uk/employment-agencies-and-businesses — GOV.UK guidance: Employment agencies and businesses"
+      - "https://www.gov.uk/government/organisations/employment-agency-standards-inspectorate — Employment Agency Standards (EAS) Inspectorate (DBT)"
+    as_of: "2026-09-03"
+
+  # Key quoted: a YAML 1.1 parser reads a bare NO as boolean false.
+  "NO":
+    jurisdiction_name: "Norway"
+    licensing_required_for: temporary_help_agency   # staffing enterprises (bemanningsforetak) only; no approval rule for recruiters is stated here
+    effective: "2024-01-01"        # approval regime in force from 2024-01-01 (FOR-2023-05-25-733); an earlier client-side rule (then § 10) applied from 2009-03-01, wording not stated here
+    registry:
+      url: "https://www.arbeidstilsynet.no/bemanningsvirksomhet/"
+      what_it_shows: "Arbeidstilsynet's public register of staffing enterprises (Finn godkjente bemanningsforetak): search by name or organisation number, filter by county and municipality, and see each enterprise's status ('lovlig – godkjent' or 'ulovlig – ikke godkjent'). The guidance page at https://www.arbeidstilsynet.no/godkjenninger/godkjente-bemanningsforetak/ describes the register and links to it."
+    legal_basis: "Forskrift om offentlig godkjenning av bemanningsforetak (FOR-2008-06-04-541) §§ 2, 5, 11, 13 and 14, as amended by FOR-2023-05-25-733 (in force 2024-01-01); hjemmel arbeidsmarkedsloven § 27 second paragraph and arbeidsmiljøloven § 18-3; arbeidsmiljøloven § 14-14 (verified on lovdata.no)"
+    client_side_prohibition: "§ 11 first paragraph: hiring in a worker from a staffing enterprise is allowed only from an enterprise that is approved (godkjent, § 5). § 11 second paragraph: for hiring in contrary to the first paragraph, arbeidsmiljøloven § 14-14 applies correspondingly, under which a court shall, on the hired-in worker's claim, rule that the worker has a permanent employment relationship with the client (the court may decide otherwise in special cases where that would be clearly unreasonable)."
+    penalties: "§ 14: intentional or negligent breach of the regulation, or of a decision under it, or complicity in one, is punishable under arbeidsmarkedsloven § 30 (fines, unless a stricter penal provision applies). Withdrawal is a separate measure, not a penalty: under § 13 Arbeidstilsynet may withdraw an approval and change the enterprise's register status when the conditions for approval are no longer met."
+    transitional_notes: "§ 5 lists three register statuses: godkjent, søknad under behandling (application pending) and ikke godkjent. From 2024-01-01 to 2024-03-31 hiring in was also allowed from an enterprise whose application was pending (§ 11 first paragraph); that transitional rule has expired. A status can change at any time, so only the register, checked by the candidate, answers whether an enterprise is approved today. The approval duty covers staffing enterprises that hire out workers (utleie); it says nothing about a recruiter that only carries out placement for permanent hire (privat arbeidsformidling, defined in arbeidsmarkedsloven § 25), so the register does not answer for such a recruiter."
+    sources:
+      - "Lovdata — Forskrift om offentlig godkjenning av bemanningsforetak, FOR-2008-06-04-541 (lovdata.no/dokument/SF/forskrift/2008-06-04-541)"
+      - "Lovdata — arbeidsmiljøloven § 14-14 (lovdata.no/dokument/NL/lov/2005-06-17-62)"
+      - "Arbeidstilsynet — Godkjente bemanningsforetak (arbeidstilsynet.no/godkjenninger/godkjente-bemanningsforetak/; primary, includes the public register)"
+      - "Arbeidstilsynet — Staffing enterprises (arbeidstilsynet.no/en/pay-and-engagement-of-employees/innleie-av-arbeidskraft/hiring-labour-from-staffing-enterprises/staffing-enterprises/)"
+    as_of: "2026-11-06"
+

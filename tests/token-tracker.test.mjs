@@ -1,6 +1,6 @@
 // tests/token-tracker.test.mjs — token tracking & cost estimation unit tests
 import { pass, fail } from './helpers.mjs';
-import { estimateCost, TokenAccumulator, formatBreakdown } from '../utils/token-tracker.mjs';
+import { estimateCost, TokenAccumulator, formatBreakdown, formatK } from '../utils/token-tracker.mjs';
 import { parseTokenVal } from '../batch/aggregate-tokens.mjs';
 
 console.log('\ntoken-tracker.mjs & aggregate-tokens.mjs unit tests');
@@ -59,6 +59,18 @@ try {
     fail(`Unknown model fallback failed: expected null, got ${unknownCost}`);
   }
 
+  // 5b. An OpenAI-compatible run with a model that has no rate is not priced
+  // as gpt-4o-mini: a local server's model would otherwise show a cost.
+  const localCost = estimateCost('local-model-example', usage, 'openai');
+  const accLocal = new TokenAccumulator();
+  accLocal.record('evaluation', { prompt_tokens: 1000, completion_tokens: 500, total_tokens: 1500 });
+  const localBreakdown = formatBreakdown(accLocal, 'local-model-example', 'openai');
+  if (localCost === null && localBreakdown.includes('est. cost n/a')) {
+    pass('openai provider with an unknown model reports est. cost n/a');
+  } else {
+    fail(`openai unknown model should be n/a, got ${localCost}:\n${localBreakdown}`);
+  }
+
   // 6. formatBreakdown renders "est. cost n/a" (not $0.0000) when cost is null
   const accNull = new TokenAccumulator();
   accNull.record('evaluation', { prompt_tokens: 1000, completion_tokens: 500, total_tokens: 1500 });
@@ -78,6 +90,30 @@ try {
     pass('formatBreakdown renders zero-token step as "(zero-token by design)"');
   } else {
     fail(`formatBreakdown zero-token step rendering failed:\n${breakdownZero}`);
+  }
+
+  // 8. MiniMax model rates include uncached input, cached input, and output
+  const minimaxUsage = { prompt_tokens: 1000000, completion_tokens: 1000000, cached_tokens: 500000 };
+  const minimaxCases = [
+    ['MiniMax-M3.1-Flash', 0.6825],
+    ['MiniMax-M3', 2.76],
+    ['MiniMax-M2.7', 1.38],
+  ];
+  for (const [model, expected] of minimaxCases) {
+    const actual = estimateCost(model, minimaxUsage, 'minimax');
+    if (actual !== null && Math.abs(actual - expected) < 1e-9) {
+      pass(`estimateCost for ${model} includes its cached-input rate`);
+    } else {
+      fail(`estimateCost for ${model} failed: expected ${expected}, got ${actual}`);
+    }
+  }
+
+  // 9. formatK returns '12.4k' for 12400
+  const formatted = formatK(12400);
+  if (formatted === '12.4k') {
+    pass('formatK(12400) returns "12.4k"');
+  } else {
+    fail(`formatK failed: expected "12.4k", got "${formatted}"`);
   }
 } catch (e) {
   fail(`token-tracker tests crashed: ${e.message}`);

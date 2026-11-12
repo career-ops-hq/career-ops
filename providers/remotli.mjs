@@ -14,7 +14,8 @@
 // Note the doubly-nested shape: each element of the top-level `jobs` array is a
 // join row `{ jobs, companies }`, and the posting itself lives under `.jobs`.
 //
-// Wire in as a tracked_companies entry:
+// Configure via a `job_boards` (or `tracked_companies`) entry with
+// `provider: remotli`:
 //
 //   - name: Remotli (Swiss remote board)
 //     provider: remotli

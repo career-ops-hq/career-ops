@@ -16,59 +16,65 @@
 states:
   - id: evaluated
     label: Evaluated
-    aliases: [evaluada, condicional, hold, evaluar, verificar, değerlendirildi, degerlendirildi]
+    aliases: [evaluada, condicional, hold, evaluar, verificar, değerlendirildi, degerlendirildi, 已评估, 已評估]
     description: Offer evaluated with report, pending decision
     dashboard_group: evaluated
 
   - id: applied
     label: Applied
-    aliases: [aplicado, enviada, aplicada, sent, başvuruldu, basvuruldu]
+    aliases: [aplicado, enviada, aplicada, sent, başvuruldu, basvuruldu, 已投递, 已申请, 已投遞, 已申請]
     description: Application submitted
     dashboard_group: applied
 
   - id: responded
     label: Responded
-    aliases: [respondido, "yanıt verildi", yanıt_verildi, "yanit verildi", yanit_verildi]
+    aliases: [respondido, "yanıt verildi", yanıt_verildi, "yanit verildi", yanit_verildi, 已回复, 已回覆]
     description: Company has responded (not yet interview)
     dashboard_group: responded
 
+  - id: assessment
+    label: Assessment
+    aliases: [screening, "online assessment", online_assessment, "online screening", 笔试, 测评, 筆試, 測評]
+    description: Online assessment or asynchronous screening stage
+    dashboard_group: assessment
+
   - id: interview
     label: Interview
-    aliases: [entrevista, mülakat, mulakat]
+    aliases: [entrevista, mülakat, mulakat, 面试, 面試]
     description: Active interview process
     dashboard_group: interview
 
   - id: offer
     label: Offer
-    aliases: [oferta, teklif]
+    aliases: [oferta, teklif, 录用, 錄用]
     description: Offer received
     dashboard_group: offer
     terminal: true
 
   - id: rejected
     label: Rejected
-    aliases: [rechazado, rechazada, reddedildi]
+    aliases: [rechazado, rechazada, reddedildi, 已拒绝, 被拒, 已拒絕]
     description: Rejected by company
     dashboard_group: rejected
     terminal: true
 
   - id: discarded
     label: Discarded
-    aliases: [descartado, descartada, cerrada, cancelada, "iptal edildi", iptal_edildi, "ıptal edildi", ıptal_edildi]
+    aliases: [descartado, descartada, cerrada, cancelada, "iptal edildi", iptal_edildi, "ıptal edildi", ıptal_edildi, lapsed, 已放弃, 放弃, 已关闭, 已放棄, 放棄, 已關閉]
     description: Discarded by candidate or offer closed
     dashboard_group: discarded
     terminal: true
 
   - id: skip
     label: SKIP
-    aliases: [no_aplicar, no aplicar, skip, monitor, geo blocker, geo_blocker, "uygun değil", uygun_değil, "uygun degil", uygun_degil]
+    aliases: [no_aplicar, no aplicar, skip, monitor, geo blocker, geo_blocker, "uygun değil", uygun_değil, "uygun degil", uygun_degil, 不投, 跳过, 跳過]
     description: Doesn't fit, don't apply
     dashboard_group: skip
     terminal: true
 
   - id: hired
     label: Hired
-    aliases: [contratado, contratada, hired, accepted, accept, "kabul edildi", kabul_edildi, "işe alındı", "ise alindi", "işe alindi"]
+    aliases: [contratado, contratada, hired, accepted, accept, "kabul edildi", kabul_edildi, "işe alındı", "ise alindi", "işe alindi", 已入职, 已入職]
     description: Offer accepted, job landed!
     dashboard_group: hired
     terminal: true

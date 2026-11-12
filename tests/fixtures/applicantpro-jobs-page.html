@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head><title>Careers - Acme Example</title></head>
+<body>
+<div id="job_listings" class="bootstrap-area"><job-listings v-bind="componentData"></div>
+<script type="text/javascript">
+  $(function() {
+    window.bootstrapVue(
+      "#job_listings",
+      [ 'JobListings' ],
+      { componentData: { organizationId : 5501, domainId : 70123, getParams : {"cityUrl":"","isInternal":0,"showLocation":1,"showDate":0}, domainName : "applicantpro.com", subdomainName : "acme-example", siteCss : {"accent":"#336699"}, airaEnabled : false, }}
+    );
+  });
+</script>
+<div id="social_media_widget" class="bootstrap-area"><social-media-widget v-bind="componentData"></div>
+<script type="text/javascript">
+  $(function() {
+    window.bootstrapVue(
+      "#social_media_widget",
+      [ 'SocialMediaWidget' ],
+      { componentData: { job : {"id":0,"title":""}, organizationId : 5501, rootDomainId : 4, domainId : 70123, domainName : "applicantpro.com", domainTitle : "Acme Example", subdomainName : "acme-example", }}
+    );
+  });
+</script>
+</body>
+</html>

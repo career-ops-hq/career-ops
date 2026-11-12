@@ -47,17 +47,21 @@
  *      node check-table-freshness.mjs --today 2026-10-02 (deterministic date for tests)
  *      node check-table-freshness.mjs --self-test
  *
- * Issue #2036 — github.com/santifer/career-ops
+ * Issue #2036 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-import * as yaml from 'js-yaml';
+import { fileURLToPath } from 'url';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { parseDate } from './lib/parse-date.mjs';
+import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
 const TEMPLATES_DIR = join(CAREER_OPS, 'templates');
 const DEFAULT_MAX_AGE_MONTHS = 12;
 
@@ -102,14 +106,6 @@ export function parsePositiveInt(value) {
 }
 
 // --- Date helpers (UTC-midnight calendar math — no time-of-day drift) ---
-export function parseDate(dateStr) {
-  const iso = String(dateStr ?? '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
-
 const isoDay = (date) => date.toISOString().slice(0, 10);
 
 // Shift a UTC-midnight date by whole calendar months, clamping the day to the
@@ -267,7 +263,7 @@ function loadTables(dir = TEMPLATES_DIR) {
     try {
       // CRLF-safe: normalize line endings before parsing so Windows checkouts
       // and LF checkouts see byte-identical documents.
-      doc = yaml.load(readFileSync(join(dir, file), 'utf-8').replace(/\r\n/g, '\n'));
+      doc = loadYaml(readFileSync(join(dir, file), 'utf-8').replace(/\r\n/g, '\n'));
     } catch (e) {
       parseWarnings.push({
         type: 'warning', file, jurisdiction: null, field: null,
@@ -286,10 +282,10 @@ function loadTables(dir = TEMPLATES_DIR) {
 // partially parsed or silently swallowed: months stays null (default applies)
 // and a warning entry reports the rejected value.
 function loadConfigMaxAge() {
-  const profilePath = join(CAREER_OPS, 'config/profile.yml');
+  const profilePath = getProfilePath();
   if (!existsSync(profilePath)) return { months: null, warning: null };
   try {
-    const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
+    const profile = loadYaml(readFileSync(profilePath, 'utf-8'));
     if (!Object.hasOwn(profile?.table_freshness ?? {}, 'max_age_months')) {
       return { months: null, warning: null };
     }
@@ -365,7 +361,7 @@ function runSelfTest() {
   check(today !== null, 'fixture today parses');
 
   // Fictional jurisdictions only (XX-TEST / YY-TEST, Acme-style sources).
-  const NESTED_TABLE = yaml.load([
+  const NESTED_TABLE = loadYaml([
     'covenants:',
     '  # expired: next_effective passed, row not re-verified since',
     '  - jurisdiction: "XX-TEST"',
@@ -408,13 +404,13 @@ function runSelfTest() {
     '    rule: "test missing as_of"',
   ].join('\n'));
 
-  const TOP_LEVEL_ARRAY_TABLE = yaml.load([
+  const TOP_LEVEL_ARRAY_TABLE = loadYaml([
     '- jurisdiction: "SS-TEST"',
     '  rule: "top-level-array shape"',
     '  as_of: "2026-06-25"',
   ].join('\n'));
 
-  const NOT_A_TABLE = yaml.load([
+  const NOT_A_TABLE = loadYaml([
     'states:',
     '  - name: "Evaluated"',
     '  - name: "Applied"',
@@ -427,7 +423,7 @@ function runSelfTest() {
   // synthesize it. (This shape has no real-world table consumer at present
   // — kept as generic, self-tested discovery support for any future
   // mapping-keyed jurisdiction table.)
-  const MAPPING_TABLE = yaml.load([
+  const MAPPING_TABLE = loadYaml([
     'jurisdictions:',
     '  QQ-TEST:',
     '    rule: "test mapping-shaped fresh row"',
@@ -549,7 +545,7 @@ function runSelfTest() {
     const p = join(TEMPLATES_DIR, file);
     if (!existsSync(p)) continue; // template set can evolve; only pin what ships
     let doc = null;
-    try { doc = yaml.load(readFileSync(p, 'utf-8').replace(/\r\n/g, '\n')); } catch { /* parse error = not a table either */ }
+    try { doc = loadYaml(readFileSync(p, 'utf-8').replace(/\r\n/g, '\n')); } catch { /* parse error = not a table either */ }
     check(extractRows(doc).length === 0, `existing template ${file} does not qualify as a jurisdiction table`);
   }
 
@@ -558,7 +554,7 @@ function runSelfTest() {
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS });
   if (selfTestMode) {
     runSelfTest();
