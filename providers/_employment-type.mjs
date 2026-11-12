@@ -31,17 +31,30 @@
  */
 export const EMPLOYMENT_TYPES = Object.freeze(['internship', 'temporary', 'contract', 'part_time', 'full_time']);
 
+// A term right after a negation ("Non-Contract", "No contractors", "Not a
+// contract role", "Without freelancers") states the opposite of the type, so it
+// does not count. Only the term the negation precedes is skipped: "Full-time,
+// non-contract" still reads as full_time. Applied to the folded text, where
+// "Non-Contract" has become "non contract".
+const NOT_NEGATED = String.raw`(?<!\b(?:non|no|not|without)(?: an?)? )`;
+
+/**
+ * @param {string} terms - the alternation of whole-word terms for one type.
+ * @returns {RegExp}
+ */
+const termPattern = (terms) => new RegExp(String.raw`${NOT_NEGATED}\b(?:${terms})\b`);
+
 // Each canonical value, with the words that state it. Matched as whole words
 // on the folded text (see foldEmploymentText), so "contract" never matches
 // inside "contractual obligations" text — the inputs here are short labels, not
 // job descriptions, but a label like "Contract-to-hire" still has to work.
 /** @type {ReadonlyArray<[EmploymentType, RegExp]>} */
 const PATTERNS = [
-  ['internship', /\b(?:intern|interns|internship|internships)\b/],
-  ['temporary', /\b(?:temporary|temp|fixed term|short term|seasonal)\b/],
-  ['contract', /\b(?:contract|contractor|contracts|freelance|freelancer|freelancing)\b/],
-  ['part_time', /\b(?:part time|parttime)\b/],
-  ['full_time', /\b(?:full time|fulltime)\b/],
+  ['internship', termPattern('intern|interns|internship|internships')],
+  ['temporary', termPattern('temporary|temp|fixed term|short term|seasonal')],
+  ['contract', termPattern('contract|contractor|contractors|contracts|freelance|freelancer|freelancers|freelancing')],
+  ['part_time', termPattern('part time|parttime')],
+  ['full_time', termPattern('full time|fulltime')],
 ];
 
 /**
@@ -74,6 +87,7 @@ function foldEmploymentText(raw) {
  *   normalizeEmploymentType('Fixed-Term')   // 'temporary'  (Lever)
  *   normalizeEmploymentType('Full-time Contract') // 'contract'
  *   normalizeEmploymentType('Permanent')    // undefined — states the term, not the type
+ *   normalizeEmploymentType('Non-Contract') // undefined — a negated type is not that type
  *
  * @param {unknown} raw - the source's value: a label, an array of labels, or anything else.
  * @returns {EmploymentType | undefined} the canonical value, or undefined when

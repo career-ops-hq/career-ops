@@ -91,6 +91,23 @@ check('whole words only: a type inside a longer word is not read', [
   ['Temperature Controlled', undefined],
 ]);
 
+check('a negated type is not read as that type', [
+  ['Non-Contract', undefined],
+  ['No contractors', undefined],
+  ['non contract', undefined],
+  ['Not a contract role', undefined],
+  ['Not part-time', undefined],
+  ['Without freelancers', undefined],
+  // the negation covers only the term it precedes; another stated type still counts
+  ['Full-time, non-contract', 'full_time'],
+  ['Part-time, not temporary', 'part_time'],
+  // "no" that negates nothing next to the type is not a negation
+  ['Contract, no relocation', 'contract'],
+  // the plural nouns a negated label uses also count when not negated
+  ['Contractors', 'contract'],
+  ['Freelancers', 'contract'],
+]);
+
 check('empty, blank and non-string input is unknown', [
   ['', undefined],
   ['   ', undefined],
