@@ -48,23 +48,23 @@ function canonicalizeSeparators(numStr) {
 
 // Chinese spellings: 万/萬 (x10,000), "N薪" (months of pay per year), the
 // 年薪 / 月薪 period words, 税前 (gross) and the 人民币 / 元 currency words.
-const ZH_HINT_RE = /[万萬薪元]|人民币|人民幣|[税稅][前后後]/;
+const ZH_HINT_RE = /[万萬薪元]|人民币|人民幣|[税稅][前后後]|[\/／]\s*[年月]|每[年月]/;
 const ZH_MONTHS_RE = /[\s·•*×xX,]*(\d{1,2})\s*薪/g;
 const ZH_ANNUAL_RE = /年薪|\/\s*年|每年/;
 const ZH_MONTHLY_RE = /月薪|\/\s*月|每月/;
 const ZH_UNIT = /** @type {Record<string, number>} */ ({ k: 1000, K: 1000, 万: 10000, 萬: 10000 });
 
 /**
- * The one "N薪" month count a text states, 0 when it states none, null when it
- * states two different ones.
+ * The one "N薪" month count a text states, undefined when it states none, NaN
+ * when it states two different ones.
  *
  * @param {string} text
- * @returns {number | null}
+ * @returns {number | undefined}
  */
 function zhMonthCount(text) {
   const counts = new Set([...text.matchAll(ZH_MONTHS_RE)].map((m) => Number(m[1])));
-  if (counts.size > 1) return null;
-  return counts.size === 1 ? [...counts][0] : 0;
+  if (counts.size > 1) return NaN;
+  return counts.size === 1 ? [...counts][0] : undefined;
 }
 
 /**
@@ -77,8 +77,9 @@ function zhMonthCount(text) {
  * does anything with words left over once the known tokens are removed
  * ("35k 起", "50 万用户").
  *
- * A parenthetical is a note, not part of the figure: it is only read for a
- * month count when the text outside it states none ("25-40K（15薪）").
+ * A parenthetical is a note, not part of the figure: it is read for the
+ * period words, and for a month count when the text outside it states none
+ * ("25-40K（15薪）").
  *
  * @param {string} raw
  * @returns {{min: number, max: number, mid: number} | null}
@@ -89,13 +90,14 @@ function parseChineseAmount(raw) {
   const notes = [...text.matchAll(/\(([^()]*)\)/g)].map((m) => m[1]).join(' ');
   let s = text.replace(/\([^()]*\)/g, ' ');
 
-  let months = zhMonthCount(s);
-  if (months === 0) months = zhMonthCount(notes);
-  if (months === null || (months !== 0 && (months < 12 || months > 24))) return null;
-  const annual = ZH_ANNUAL_RE.test(s);
-  const monthly = ZH_MONTHLY_RE.test(s);
+  const months = zhMonthCount(s) ?? zhMonthCount(notes);
+  // A count outside 12-24 ("0薪", "3薪") is not months of pay per year.
+  if (months !== undefined && !(months >= 12 && months <= 24)) return null;
+  // The period words count wherever they stand: "25-40K（月薪）" is monthly.
+  const annual = ZH_ANNUAL_RE.test(text);
+  const monthly = ZH_MONTHLY_RE.test(text);
   if (annual && monthly) return null;
-  if (!annual && months === 0 && monthly) return null;
+  if (monthly && months === undefined) return null;
 
   s = s
     .replace(ZH_MONTHS_RE, ' ')
@@ -116,7 +118,7 @@ function parseChineseAmount(raw) {
   const lo = toNum(bounds[1], bounds[2] || bounds[4]); // "60-80 万": 万 applies to both
   const hi = bounds[3] === undefined ? lo : toNum(bounds[3], bounds[4] || bounds[2]);
   if (lo === null || hi === null) return null;
-  const factor = annual || months === 0 ? 1 : months;
+  const factor = annual ? 1 : months ?? 1;
   const min = Math.min(lo, hi) * factor, max = Math.max(lo, hi) * factor;
   return { min, max, mid: (min + max) / 2 };
 }

@@ -47,6 +47,10 @@ expect('年薪 60～80 万元', { min: 600000, max: 800000 });
 expect('年薪 60 至 80 万 RMB', { min: 600000, max: 800000 });
 expect('CNY 600,000-800,000 年薪', { min: 600000, max: 800000 });
 expect('年薪 100-150 萬', { min: 1000000, max: 1500000 });
+expect('25-40万/年', { min: 250000, max: 400000 });
+expect('300K/年', { min: 300000, max: 300000 });
+expect('300K 每年', { min: 300000, max: 300000 });
+expect('25-40K（年薪）', { min: 25000, max: 40000 });
 
 // 万 with no period word is read as written, like a bare "80-90k".
 expect('60-80 万人民币', { min: 600000, max: 800000 });
@@ -58,6 +62,8 @@ expect('月薪 35k', null);
 expect('base 月薪 35k 起', null);
 expect('3万/月', null);
 expect('每月 2-3 万', null);
+expect('30K/月', null);
+expect('25-40K CNY（月薪）', null);
 
 // Not a salary figure, or not one figure.
 expect('15薪', null);
@@ -70,6 +76,8 @@ expect('年薪 50 万起', null);
 expect('税后年薪 50 万', null);
 expect('25-40K·13薪或15薪', null);
 expect('25-40K·3薪', null);
+expect('25-40K·0薪', null);
+expect('年薪 50 万（月薪约 4 万）', null);
 expect('年薪 50 万，月薪 35k', null);
 expect('年薪 10-15 万美元', null);
 expect('年薪 50 万（12 薪，另有 option）；年薪 50 万为 package 上限，base 月薪 35k 起', null);
@@ -103,6 +111,8 @@ assert(obs('年薪 60-80 万元').currency === 'UNKNOWN', 'report: a bare 元 ->
 assert(obs('年薪 60-80 万人民币').currency === 'CNY', 'report: 人民币 -> CNY');
 assert(obs('年薪 60-80 万 RMB').currency === 'CNY', 'report: RMB -> CNY');
 assert(obs('年薪 60-80 万 CNY').currency === 'CNY', 'report: CNY -> CNY');
+assert(obs('USD 60-80 万人民币').currency === 'UNKNOWN', 'report: a code that contradicts 人民币 -> UNKNOWN');
+assert(obs('CNY 60-80 万人民币').currency === 'CNY', 'report: CNY beside 人民币 -> CNY');
 assert(obs('80-90k USD').currency === 'USD' && obs('80-90k').currency === 'UNKNOWN', 'report: other currencies unchanged');
 
 const folded = fold([obs('25-40K·15薪 CNY')], { 1: { company: 'Acme', role: 'Engineer' } },
