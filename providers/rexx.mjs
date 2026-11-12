@@ -40,8 +40,9 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // and pages with `?start={offset}`. The page size is the portal's own setting
 // (10, 42 and 100 observed), so the walk advances by the number of cards the
 // page actually carried and ends on an empty or short page. Newer skins also
-// state the total (`data-all-count` on #joboffer_table_container), which ends
-// the walk one request earlier; a "load more" button on those skins is a
+// state the total (`data-all-count` on #joboffer_table_container). It is
+// reported in warnings and truncation markers, but never ends the walk and
+// never proves a board complete; a "load more" button on those skins is a
 // script over the same `?start=` list, which answers without it.
 //
 // Dates: the cards carry none. Most portals advertise an Atom feed in the
@@ -233,7 +234,9 @@ export function assertListPage(page, url) {
 
 /**
  * The Atom/RSS feed the list page advertises, when it is an https URL on the
- * portal's own host. Anything else is ignored and never fetched.
+ * portal's own host and default port (the list URL is rebuilt without a port,
+ * so the feed must match that origin). Anything else is ignored and never
+ * fetched.
  * @param {string} html @param {string} baseUrl @param {string} host
  * @returns {string | null}
  */
@@ -250,7 +253,7 @@ export function findFeedUrl(html, baseUrl, host) {
     } catch {
       continue;
     }
-    if (u.protocol !== 'https:' || u.hostname.toLowerCase() !== host) continue;
+    if (u.protocol !== 'https:' || u.hostname.toLowerCase() !== host || u.port !== '') continue;
     u.hash = '';
     return u.href;
   }
@@ -260,8 +263,11 @@ export function findFeedUrl(html, baseUrl, host) {
 /**
  * Map rexx job id → posting date from the portal's Atom feed (<entry> with
  * <link href> and <updated>/<published>); RSS 2.0 <item> with <link> and
- * <pubDate> is read the same way. Entries without a posting link or a
- * parseable date are skipped.
+ * <pubDate> is read the same way. The first of an entry's links that is a
+ * posting link counts (an Atom rel="self" link before it is skipped), and
+ * <updated> wins over <published> whatever their order, because <updated> is
+ * the value that matches the detail page's datePosted. Entries without a
+ * posting link or a parseable date are skipped.
  * @param {string} xml @param {string} baseUrl @param {string} host
  * @returns {Map<string, number>}
  */
@@ -270,12 +276,18 @@ export function parseFeedDates(xml, baseUrl, host) {
   const text = typeof xml === 'string' ? xml : '';
   const blocks = text.match(/<(entry|item)\b[^>]*>[\s\S]*?<\/\1>/gi) || [];
   for (const block of blocks) {
-    const hrefAttr = block.match(/<link\b[^>]*\bhref=["']([^"']+)["']/i);
-    const linkText = block.match(/<link\b[^>]*>([^<]+)<\/link>/i);
-    const link = postingLink((hrefAttr || linkText || [])[1] || '', baseUrl, host);
+    const candidates = [
+      ...[...block.matchAll(/<link\b[^>]*\bhref=["']([^"']+)["']/gi)].map((m) => m[1]),
+      ...[...block.matchAll(/<link\b[^>]*>([^<]+)<\/link>/gi)].map((m) => m[1]),
+    ];
+    let link = null;
+    for (const href of candidates) {
+      link = postingLink(href, baseUrl, host);
+      if (link) break;
+    }
     if (!link) continue;
-    const dateM = block.match(/<(published|updated|pubDate)\b[^>]*>([^<]+)<\/\1>/i);
-    const postedAt = toEpochMs(dateM ? dateM[2].trim() : undefined);
+    const dateText = (tag) => block.match(new RegExp(`<${tag}\\b[^>]*>([^<]+)</${tag}>`, 'i'))?.[1].trim();
+    const postedAt = toEpochMs(dateText('updated') ?? dateText('published') ?? dateText('pubDate'));
     if (postedAt === undefined || dates.has(link.id)) continue;
     dates.set(link.id, postedAt);
   }
@@ -308,7 +320,7 @@ export default {
     let total = null;
     let offset = 0;
     // Why the walk stopped; drives both the warning and the truncation marker.
-    /** @type {'complete' | 'cap' | 'probe-cap' | 'fetch-error'} */
+    /** @type {'complete' | 'cap' | 'probe-cap' | 'fetch-error' | 'repeat-page'} */
     let stopReason = 'complete';
     let walkEnded = false;
 
@@ -347,21 +359,32 @@ export default {
       offset += parsed.rawCount;
 
       // Natural end, judged on the cards the SOURCE rendered: an empty or
-      // short page, or a page that brought nothing new (the portal ignored
-      // ?start=). The stated total never ends the walk on its own.
-      if (parsed.rawCount === 0 || parsed.rawCount < pageSize || fresh === 0) {
+      // short page. The stated total never ends the walk on its own.
+      if (parsed.rawCount === 0 || parsed.rawCount < pageSize) {
         walkEnded = true;
+        break;
+      }
+      // A full page that brought nothing new: the portal ignored ?start=.
+      // Stop, since another request would repeat it, but this is not a
+      // natural end. When the portal states more postings than were read,
+      // the board is marked incomplete.
+      if (fresh === 0) {
+        walkEnded = true;
+        if (total !== null && total > jobs.length) stopReason = 'repeat-page';
         break;
       }
     }
 
-    // Out of page budget with the last page full: truncated, unless the
-    // portal's stated total shows the boundary page was the last one.
-    if (!walkEnded && !(total !== null && offset >= total)) {
+    // Out of page budget with the last page full: truncated. Only an empty
+    // or short page proves the end; a stated total that the boundary page
+    // reaches is not proof, because the count can be wrong.
+    if (!walkEnded) {
       stopReason = probing && pagesToFetch < entryMaxPages ? 'probe-cap' : 'cap';
     }
     if (stopReason === 'cap') {
       console.error(`⚠️  rexx: ${entry.name} truncated at max_pages=${entryMaxPages} (${jobs.length}${total !== null ? ` of ${total}` : ''} jobs) — raise max_pages on this entry for more`);
+    } else if (stopReason === 'repeat-page') {
+      console.error(`⚠️  rexx: ${entry.name} repeated a page at ?start=${offset - pageSize} (${jobs.length} of ${total} jobs read) — the portal may not page this list`);
     }
 
     // Posting dates from the advertised feed: one request, real scans only.
@@ -386,6 +409,8 @@ export default {
       markTruncated(jobs, 'page-cap', total !== null ? { fetched: jobs.length, total } : { fetched: jobs.length });
     } else if (stopReason === 'fetch-error') {
       markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    } else if (stopReason === 'repeat-page') {
+      markTruncated(jobs, 'repeat-page', { fetched: jobs.length, total: /** @type {number} */ (total) });
     }
     return jobs;
   },

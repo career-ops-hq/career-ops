@@ -169,9 +169,9 @@ try {
     const rel = findFeedUrl(feedLink('rss_generator-rss0.php?unit=acme'), 'https://karriere.exampleco.example/stellenmarkt/stellenangebote.html', 'karriere.exampleco.example');
     if (rel === 'https://karriere.exampleco.example/stellenmarkt/rss_generator-rss0.php?unit=acme') pass('rexx.findFeedUrl() resolves a relative feed href against the list page');
     else fail(`rexx.findFeedUrl() relative wrong: ${rel}`);
-    const offHost = [feedLink('https://169.254.169.254/latest/meta-data'), feedLink(`http://${HOST}/feed.xml`), feedLink('https://jobs.acme.example.evil.example/feed'),
+    const offHost = [feedLink('https://169.254.169.254/latest/meta-data'), feedLink(`http://${HOST}/feed.xml`), feedLink('https://jobs.acme.example.evil.example/feed'), feedLink(`https://${HOST}:8443/feed.xml`),
       '<link rel="stylesheet" type="text/css" href="https://jobs.acme.example/a.css">'];
-    if (offHost.every((h) => findFeedUrl(h, LIST, HOST) === null)) pass('rexx.findFeedUrl() ignores off-host, non-https and non-feed <link> tags');
+    if (offHost.every((h) => findFeedUrl(h, LIST, HOST) === null)) pass('rexx.findFeedUrl() ignores off-host, other-port, non-https and non-feed <link> tags');
     else fail('rexx.findFeedUrl() accepted a feed it must never fetch');
 
     const dates = parseFeedDates(atom([['101', '2026-11-10T00:00:00+01:00'], ['102', 'not a date'], ['103', '1970-01-01T00:00:00Z']])
@@ -184,6 +184,17 @@ try {
     const rss = parseFeedDates(`<rss><channel><item><title>A</title><link>https://${HOST}/A-de-j7.html</link><pubDate>Tue, 10 Nov 2026 08:00:00 GMT</pubDate></item></channel></rss>`, LIST, HOST);
     if (rss.get('7') === Date.parse('Tue, 10 Nov 2026 08:00:00 GMT')) pass('rexx.parseFeedDates() also reads an RSS 2.0 <item>');
     else fail(`rexx.parseFeedDates() RSS wrong: ${JSON.stringify([...rss])}`);
+    const selfFirst = parseFeedDates(`<feed><entry><link rel="self" href="https://${HOST}/feed/entry-8"/><link rel="alternate" href="https://${HOST}/H-de-j8.html"/>`
+      + '<published>2026-10-01T00:00:00Z</published><updated>2026-11-01T00:00:00Z</updated></entry></feed>', LIST, HOST);
+    if (selfFirst.get('8') === Date.parse('2026-11-01T00:00:00Z')) pass('rexx.parseFeedDates() skips a rel="self" link to the posting link and prefers <updated> over an earlier <published>');
+    else fail(`rexx.parseFeedDates() link/date selection wrong: ${JSON.stringify([...selfFirst])}`);
+    const postingFirst = parseFeedDates(`<feed><entry><link href="https://${HOST}/Q-de-j10.html"/><link rel="related" href="https://evil.example/x"/>`
+      + '<updated>2026-11-02T00:00:00Z</updated></entry></feed>', LIST, HOST);
+    if (postingFirst.get('10') === Date.parse('2026-11-02T00:00:00Z')) pass('rexx.parseFeedDates() keeps the first posting link when later links are not postings');
+    else fail(`rexx.parseFeedDates() lost a posting link to a later non-posting link: ${JSON.stringify([...postingFirst])}`);
+    const pubOnly = parseFeedDates(`<feed><entry><link href="https://${HOST}/P-de-j9.html"/><published>2026-10-05T00:00:00Z</published></entry></feed>`, LIST, HOST);
+    if (pubOnly.get('9') === Date.parse('2026-10-05T00:00:00Z')) pass('rexx.parseFeedDates() falls back to <published> when an entry has no <updated>');
+    else fail(`rexx.parseFeedDates() published fallback wrong: ${JSON.stringify([...pubOnly])}`);
     if (parseFeedDates(undefined, LIST, HOST).size === 0 && parseFeedDates('<html>404</html>', LIST, HOST).size === 0) pass('rexx.parseFeedDates() returns an empty map for a non-feed body');
     else fail('rexx.parseFeedDates() should tolerate a non-feed body');
   }
@@ -192,7 +203,7 @@ try {
   {
     const FEED = `https://${HOST}/rss_generator-rss0.php?unit=acme&lang=de`;
     const ctx = makeCtx({
-      [LIST]: listPage([newCard(1, 'Security Analyst', 'Essen'), oldCard(2, 'SOC Engineer', ['Defence', 'Festangestellte', 'Berlin'])], { head: feedLink(FEED.replace('&', '&amp;')) }),
+      [LIST]: listPage([newCard(1, 'Security Analyst', 'Essen'), oldCard(2, 'SOC Engineer', ['Defence', 'Festangestellte', 'Berlin'])], { head: feedLink(FEED.replaceAll('&', '&amp;')) }),
       [`${LIST}?start=2`]: listPage([]),
       [FEED]: atom([['1', '2026-11-03T00:00:00+01:00']]),
     });
@@ -241,10 +252,26 @@ try {
     const jobs = await rexx.fetch({ name: 'Acme', careers_url: LIST }, ctx);
     if (jobs.length === 2 && ctx.calls.length === 2 && jobs.truncated === undefined) pass('rexx.fetch() stops when a page brings nothing new (portal ignored ?start=)');
     else fail(`rexx.fetch() repeat-page handling wrong: ${jobs.length} jobs / ${ctx.calls.length} calls`);
+
+    // A repeated page whose stated total equals what was read is complete.
+    const sameEq = listPage([newCard(1, 'A', 'X'), newCard(2, 'B', 'X')], { allCount: 2 });
+    const eqCtx = makeCtx({ [LIST]: sameEq, [`${LIST}?start=2`]: sameEq });
+    const eq = await captureConsoleErrors(() => rexx.fetch({ name: 'Acme', careers_url: LIST }, eqCtx));
+    if (eq.result.length === 2 && eq.result.truncated === undefined && eq.errors.length === 0) pass('rexx.fetch() leaves a repeated page unmarked when data-all-count equals what was read');
+    else fail(`rexx.fetch() marked a repeated page whose total was reached: ${JSON.stringify(eq.result.truncated)}`);
+
+    // The same, on a portal that states more postings than were read: incomplete.
+    const sameTot = listPage([newCard(1, 'A', 'X'), newCard(2, 'B', 'X')], { allCount: 30 });
+    const totCtx = makeCtx({ [LIST]: sameTot, [`${LIST}?start=2`]: sameTot });
+    const rep = await captureConsoleErrors(() => rexx.fetch({ name: 'Acme', careers_url: LIST }, totCtx));
+    if (rep.result.length === 2 && totCtx.calls.length === 2 && rep.result.truncated?.reason === 'repeat-page' && rep.result.truncated.total === 30
+      && rep.errors.some((e) => /repeated a page/.test(e))) pass('rexx.fetch() marks a repeated page as truncated (repeat-page) when data-all-count exceeds what was read');
+    else fail(`rexx.fetch() repeat-page with a larger total wrong: ${JSON.stringify(rep.result.truncated)} ${JSON.stringify(rep.errors)}`);
   }
 
   // ── SSRF: the URL guard runs before any request ───────────────────
-  for (const careers_url of [`http://${HOST}/stellenangebote.html`, 'https//broken', undefined]) {
+  for (const careers_url of [`http://${HOST}/stellenangebote.html`, 'https//broken', undefined, 'https://169.254.169.254/latest/meta-data/',
+    'https://127.1/stellenangebote.html', 'https://0x7f000001/', 'https://[::1]/', 'https://localhost/', 'https://jobs.corp.internal/', 'https://intranet/']) {
     let entered = 0;
     const ctx = { sleep: async () => {}, fetchText: async () => { entered++; return ''; }, fetchJson: async () => { entered++; return {}; } };
     let threw = null;
@@ -327,14 +354,17 @@ try {
     if (short.errors.length === 0 && short.result.truncated === undefined && short.result.length === 3) pass('rexx.fetch() treats a short page at the cap boundary as complete (no warning, no marker)');
     else fail(`rexx.fetch() short boundary page misread as cap: ${JSON.stringify(short.errors)}`);
 
-    // A full boundary page whose stated total is reached is complete too.
+    // A full boundary page stays truncated even when data-all-count says it
+    // was the last one: the count can be wrong, and here a third page exists.
     const totalCtx = makeCtx({
       [LIST]: listPage([newCard(1, 'A', 'X'), newCard(2, 'B', 'X')], { allCount: 4 }),
       [`${LIST}?start=2`]: listPage([newCard(3, 'C', 'X'), newCard(4, 'D', 'X')], { allCount: 4 }),
+      [`${LIST}?start=4`]: listPage([newCard(5, 'E', 'X'), newCard(6, 'F', 'X')], { allCount: 4 }),
     });
     const tot = await captureConsoleErrors(() => rexx.fetch({ name: 'Acme', careers_url: LIST, max_pages: 2 }, totalCtx));
-    if (tot.errors.length === 0 && tot.result.truncated === undefined && tot.result.length === 4) pass('rexx.fetch() reads a full boundary page as complete when data-all-count is reached');
-    else fail(`rexx.fetch() total disambiguation wrong: ${JSON.stringify(tot.errors)}`);
+    if (tot.result.length === 4 && totalCtx.calls.length === 2 && tot.result.truncated?.reason === 'page-cap' && tot.errors.some((e) => /raise max_pages/.test(e))) {
+      pass('rexx.fetch() keeps a full boundary page truncated (page-cap) even when data-all-count is reached');
+    } else fail(`rexx.fetch() trusted data-all-count as proof of completion: ${JSON.stringify(tot.result.truncated)} ${JSON.stringify(tot.errors)}`);
   }
 
   // ── later-page fetch error: keep partial, never blame max_pages ───
