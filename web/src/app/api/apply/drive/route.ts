@@ -3,6 +3,7 @@ import { driveSession } from "@/lib/apply/drive";
 import { classifyEmpty, verifyFill } from "@/lib/apply/diagnose";
 import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
 import { answersByFieldId, handoffDecision } from "@/lib/apply/handoff-gate.mjs";
+import { readbackIssues } from "@/lib/apply/prefilled-banner.mjs";
 import { resolveCliOrFallback } from "@/lib/clis";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -79,9 +80,10 @@ export async function POST(req: Request) {
             unmetLabels,
           });
           if (decision.handoff) await handoffSession(s.id).catch(() => {});
+          const readback = readbackIssues(attached.issues);
           const gaps = cvResolveError
-            ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }, ...decision.gaps]
-            : decision.gaps;
+            ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }, ...decision.gaps, ...readback]
+            : [...decision.gaps, ...readback];
           emit({
             t: "done",
             filled: decision.handoff,

@@ -13,3 +13,8 @@ export function showPrefilledBanner(status, issues) {
   if (status !== "done") return false;
   return !(issues || []).some((issue) => READBACK_ISSUE_CODES.has(issue?.code));
 }
+
+/** Read-back issues the green banner treats as a failed fill. */
+export function readbackIssues(issues) {
+  return (issues || []).filter((issue) => READBACK_ISSUE_CODES.has(issue?.code));
+}

@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { showPrefilledBanner } from "../../src/lib/apply/prefilled-banner.mjs";
+import { readbackIssues, showPrefilledBanner } from "../../src/lib/apply/prefilled-banner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureHtml = readFileSync(join(here, "../fixtures/apply-readback.html"), "utf8");
@@ -33,6 +33,21 @@ test("the green banner stays off unless read-back passed", () => {
   assert.equal(showPrefilledBanner("done", [{ code: "required-empty" }]), false);
   assert.equal(showPrefilledBanner("done", [{ code: "fill-unverified" }]), false);
   assert.equal(showPrefilledBanner("done", [{ code: "captcha-present" }]), true);
+  assert.deepEqual(
+    readbackIssues([{ code: "fill-mismatch" }, { code: "captcha-present" }, { code: "fill-unverified" }]).map((issue) => issue.code),
+    ["fill-mismatch", "fill-unverified"],
+  );
+});
+
+test("a failed read-back names the fields it could not see", async () => {
+  const { verifyFill } = await import("../../src/lib/apply/diagnose.ts");
+  const frame = { evaluate() { return Promise.reject(new Error("read-back failed")); } };
+  const issues = await verifyFill(frame, [
+    { id: "name", type: "text", label: "First name", required: true },
+  ], { name: "Fixture" });
+  assert.deepEqual(codes(issues), ["fill-unverified"]);
+  assert.match(issues[0].message, /First name/);
+  assert.equal(showPrefilledBanner("done", issues), false);
 });
 
 test("a wrong radio and an unread combobox are not a successful read-back", async (t) => {
@@ -75,6 +90,27 @@ test("a wrong radio and an unread combobox are not a successful read-back", asyn
   });
   assert.deepEqual(codes(right).filter((code) => code !== "validation"), []);
   assert.equal(showPrefilledBanner("done", right.filter((issue) => issue.code !== "validation")), true);
+
+  await page.locator("#right").evaluate((form) => { form.remove(); });
+  await page.locator("#gaps").evaluate((form) => { form.hidden = false; });
+  const gaps = await verifyFill(page.mainFrame(), [
+    { id: "nickname", type: "text", label: "Nickname", required: false },
+    { id: "cv", type: "file", label: "Resume", required: false },
+    { id: "terms", type: "checkbox", label: "Terms", required: true },
+    { id: "site", type: "select", label: "Site", required: true },
+  ], {
+    nickname: "Fixture",
+    cv: "ignored.pdf",
+    terms: "false",
+    site: "",
+  });
+  assert.ok(codes(gaps).includes("fill-unverified"), JSON.stringify(gaps));
+  assert.match(gaps.find((issue) => issue.code === "fill-unverified").message, /Nickname/);
+  assert.equal(gaps.find((issue) => issue.code === "fill-unverified").message.includes("Resume"), false);
+  assert.ok(codes(gaps).includes("required-empty"), JSON.stringify(gaps));
+  assert.match(gaps.find((issue) => issue.code === "required-empty").message, /Terms/);
+  assert.match(gaps.find((issue) => issue.code === "required-empty").message, /Site/);
+  assert.equal(showPrefilledBanner("done", gaps), false);
 });
 
 async function documentUnhide(page) {

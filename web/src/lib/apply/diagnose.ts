@@ -332,7 +332,11 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
           const intended = answers[f.id];
           const el = document.querySelector(`[data-co-field="${f.id}"]`) as HTMLElement | null;
           if (!el) {
-            if (f.required) unverified.push(f.label);
+            // A file field is filled from the CV path, not from the answer map.
+            // Any other field we meant to fill, and every required field, has
+            // to be read back. A missing element is unverified either way.
+            const answered = f.type !== "file" && typeof intended === "string" && intended.trim();
+            if (f.required || answered) unverified.push(f.label);
             continue;
           }
           if (f.type === "file") {
@@ -345,9 +349,10 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
           }
           if (f.type === "checkbox") {
             const on = (el as HTMLInputElement).checked;
-            if (intended && intended.trim()) {
-              if (checkedWord(intended) !== on) mismatches.push(f.label);
-            } else if (f.required && !on) requiredEmpty.push(f.label);
+            if (intended && intended.trim() && checkedWord(intended) !== on) mismatches.push(f.label);
+            // An intended "false" matches an unchecked box, so the mismatch
+            // branch stays quiet. A required box still has to be checked.
+            if (f.required && !on) requiredEmpty.push(f.label);
             continue;
           }
           if (f.type === "radio") {
@@ -376,9 +381,12 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
           if ((el as HTMLSelectElement).tagName === "SELECT") {
             const sel = el as HTMLSelectElement;
             const opt = sel.selectedOptions?.[0];
+            // "Choose…" uses an ellipsis, not three ASCII periods. An empty
+            // value with that label used to count as a filled select.
+            const blankish = (part: string) => !part || /^(select|choose)(?:\.{3}|…)?$|^--$/i.test(part);
             const texts = [sel.value, opt?.textContent, opt?.value]
               .map((part) => (part || "").replace(/\s+/g, " ").trim())
-              .filter((part) => part && !/^(select\.\.\.|select|choose|--)$/i.test(part));
+              .filter((part) => !blankish(part));
             if (intended && intended.trim()) {
               if (!texts.some((part) => norm(part) === norm(intended))) mismatches.push(f.label);
             } else if (f.required && texts.length === 0) requiredEmpty.push(f.label);
@@ -396,7 +404,7 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
       },
       { meta, answers },
     )
-    .catch(() => ({ mismatches: [], requiredEmpty: [], unverified: [], valErrors: [] }) as R);
+    .catch(() => ({ mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [] }) as R);
 
   const out: ApplyIssue[] = [];
   if (res.mismatches.length) out.push({ level: "warn", code: "fill-mismatch", message: `These answers didn't seem to land on the real form — check them: ${res.mismatches.slice(0, 4).join(", ")}${res.mismatches.length > 4 ? "…" : ""}.` });

@@ -629,7 +629,9 @@ export async function fillSession(
   })();
   // Read the real form back: did every answer actually land? any validation
   // error? — so we warn the user about silent divergence before the handoff.
-  const issues = await verifyFill(s.frame, fieldsMeta, answers).catch(() => [] as ApplyIssue[]);
+  const issues = await verifyFill(s.frame, fieldsMeta, answers).catch(() => [
+    { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." },
+  ] as ApplyIssue[]);
   return { steps, navigated: endPath !== startPath, issues };
 }
 
