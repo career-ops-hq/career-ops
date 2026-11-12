@@ -34,6 +34,8 @@ const CASES = [
   ['3年（含）以上相关经验', 'stated', 3, null, true, '3+'],
   ['不少于5年开发经验', 'stated', 5, null, true, '5+'],
   ['十年以上经验', 'stated', 10, null, true, '10+'],
+  ['任职要求：五年以上经验', 'stated', 5, null, true, '5+'],
+  ['团队希望候选人拥有10年经验', 'stated', 10, null, true, '10+'],
   ['十五年以上从业经验', 'stated', 15, null, true, '15+'],
   ['两年以上工作经验', 'stated', 2, null, true, '2+'],
   ['2.5年以上工作经验', 'stated', 2.5, null, true, '2.5+'],
@@ -52,6 +54,9 @@ const CASES = [
   ['有3年以上工作经验者优先', 'preferred-only', null, null, false, 'pref 3+'],
   ['有3年以上工作经验的，优先考虑', 'preferred-only', null, null, false, 'pref 3+'],
   ['加分项：5年以上大厂经验', 'preferred-only', null, null, false, 'pref 5+'],
+  // Years instead of a degree bind only candidates without it
+  ['本科学历或5年以上工作经验', 'none', null, null, false, 'none stated'],
+  ['本科及以上学历，5年以上工作经验', 'stated', 5, null, true, '5+'],
   // Degree-conditional bars: the lowest gates
   ['本科5年以上工作经验，硕士3年以上', 'stated', 3, null, true, '3/5+ by degree'],
   // "including N years" is part of the bar before it
@@ -82,6 +87,7 @@ const NOT_A_BAR = [
   '公司成立10年以上，拥有丰富的行业经验',
   '我们团队拥有10年行业经验',             // the team's experience
   '团队成员平均8年经验',
+  '团队拥有10年以上行业经验',
   '5年内有相关经验',                      // a time window
   '近3年有互联网行业经验',
   '过去五年的项目经验',
@@ -91,6 +97,8 @@ const NOT_A_BAR = [
   '2021年3月起有开发经验',                // a calendar year
   '大学3年级以上，有实习经验',            // a school year
   '合同期3年，经验丰富者优先',            // a contract term
+  '合同期5年以上，要求有相关工作经验。',
+  '服务期不少于3年，有相关经验者优先',
   '3年制大专及以上学历，有相关经验',
   '年薪30万，五险一金，经验不限',
   '35岁以下，有销售经验',

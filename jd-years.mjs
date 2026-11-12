@@ -178,8 +178,15 @@ const ZH_EXPERIENCE = /经验|经历|工作年限|从业|工龄|經驗|經歷|�
 const ZH_CEILING_LEAD = /(?:不超过|不多于|(?<!不)少于|(?<!不)低于|小于|最多|不满|未满|不足)\s*$/;
 const ZH_CEILING_TRAIL = /^\s*(?:及)?(?:以下|以内|之内)/;
 const ZH_WINDOW_LEAD = /(?:近|过去|未来|今后|此前|每|满|過去|未來)\s*$/;
-// The company's own history, or other people's experience.
-const ZH_NOT_CANDIDATE_LEAD = /(?:成立|创立|创办|上市|运营|深耕|沉淀|平均|創立|創辦)(?:已|了|至今|已经|已有|超过|逾)*\s*$|(?:我们|我司|本公司|公司|团队成员|创始人|创始团队|我們)[^，,；;。]{0,8}(?:拥有|具有|积累|有)[^，,；;。]{0,6}$/;
+// The company's own history, or other people's experience. A bare 团队 is the
+// subject only when the verb follows it at once ("团队拥有10年以上行业经验");
+// "团队希望候选人拥有10年经验" is about the candidate.
+const ZH_NOT_CANDIDATE_LEAD = /(?:成立|创立|创办|上市|运营|深耕|沉淀|平均|創立|創辦)(?:已|了|至今|已经|已有|超过|逾)*\s*$|(?:我们|我司|本公司|公司|团队成员|创始人|创始团队|我們)[^，,；;。]{0,8}(?:拥有|具有|积累|有)[^，,；;。]{0,6}$|(?:团队|團隊)(?:已|已经|共|均|都)?(?:拥有|具有|具备|积累了?|有|擁有)[^，,；;。]{0,6}$/;
+// A contract, service or probation term: "合同期5年以上", "服务期不少于3年".
+const ZH_TERM_LEAD = /(?:合同|合约|服务期|任期|聘期|聘用期|签约|试用期|有效期|合約|服務期|簽約|試用期)[^，,；;。]{0,6}$/;
+// "本科学历或5年以上工作经验": the years stand in for the degree, so they bind
+// only a candidate without it.
+const ZH_DEGREE_OR_LEAD = /(?:本科|硕士|博士|大专|专科|学士|研究生|学历|学位|碩士|大專|專科|學士|學歷|學位)[^，,；;。]{0,8}(?:或者?|或是)(?:具有|具备|拥有|有)?(?:同等|相当)?(?:至少|不少于|不低于)?\s*$/;
 const ZH_SUB_LEAD = /(?:其中|包括|包含)[^，,；;。]{0,8}$/;
 const ZH_PREFERRED_CUE = /优先|加分|更佳|尤佳|为佳|優先|為佳/;
 // "有3年以上经验的，优先考虑": the cue opens the next clause.
@@ -258,7 +265,9 @@ function headingKind(line, item) {
   // "任职要求：", "加分项": a section name, alone on its line.
   const bare = line.replace(/\s*[（(][^）)]*[）)]\s*/g, '').replace(/[:：]\s*$/, '').trim();
   const colon = /[:：]\s*$/.test(line);
-  if (bare.length <= 12 && !/\d|[。！？；，,]/.test(bare) && (colon || !item)) {
+  // A line that states a figure is a sentence, whatever opens it:
+  // "任职要求：五年以上经验" has no digit, and is not a heading.
+  if (bare.length <= 12 && !/\d|[。！？；，,:：]/.test(bare) && bare.search(ZH_MENTION_RE) === -1 && (colon || !item)) {
     if (ZH_PREFERRED_HEADING.test(bare)) return 'preferred';
     if (ZH_REQUIRED_HEADING.test(bare)) return 'required';
   }
@@ -447,7 +456,7 @@ function zhMentionsIn(sentence, sectionKind) {
     const lead = sentence.slice(clause.start, at);
     const trail = sentence.slice(end, clause.close);
     if (ZH_CEILING_LEAD.test(lead) || ZH_CEILING_TRAIL.test(trail)) continue;
-    if (ZH_WINDOW_LEAD.test(lead) || ZH_NOT_CANDIDATE_LEAD.test(lead)) continue;
+    if (ZH_WINDOW_LEAD.test(lead) || ZH_NOT_CANDIDATE_LEAD.test(lead) || ZH_TERM_LEAD.test(lead)) continue;
     const floorShaped = Boolean(m[2]) || ceiling !== null || ZH_FLOOR_TRAIL.test(trail) || ZH_FLOOR_LEAD.test(lead);
     if (!ZH_EXPERIENCE.test(clause.text) && !floorShaped) continue;
     /** @type {YearsMention['kind']} */
@@ -458,7 +467,8 @@ function zhMentionsIn(sentence, sectionKind) {
       floor,
       ceiling: ceiling !== null && ceiling > floor ? ceiling : null,
       kind,
-      scope: ZH_SUB_LEAD.test(lead) && found.some(f => f.scope === 'overall') ? 'sub' : 'overall',
+      scope: ZH_DEGREE_OR_LEAD.test(lead) && found.length === 0 ? 'degree-substitute'
+        : ZH_SUB_LEAD.test(lead) && found.some(f => f.scope === 'overall') ? 'sub' : 'overall',
       degreeAlt: false,
       quote: sentence.length > 220 ? `${sentence.slice(0, 217)}...` : sentence,
       at,

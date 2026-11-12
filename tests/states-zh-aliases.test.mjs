@@ -76,7 +76,9 @@ function mergeStatuses(statuses) {
     });
     const run = spawnSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
       encoding: 'utf-8',
-      env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(adds) },
+      // The data root is the fixture too: the merge reads its ledgers for
+      // occupied numbers, and the developer's own would renumber these rows.
+      env: { ...process.env, CAREER_OPS_ROOT: work, CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '', CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(adds) },
     });
     assert.strictEqual(run.status, 0, run.stderr);
     const rows = readFileSync(tracker, 'utf-8').split('\n').filter(l => /^\|\s*\d+\s*\|/.test(l));
