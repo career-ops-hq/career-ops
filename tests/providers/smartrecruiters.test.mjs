@@ -625,6 +625,25 @@ try {
       fail(`unusable rows = ${JSON.stringify(unusable)}`);
     }
 
+    // A numeric payload id is stringified for the detail call and the URL, but
+    // identity ids are never coerced: 1 and '1' must not become one listing.
+    const [numeric] = await fetchWith([{ id: 1, name: 'Numeric id' }]);
+    const [stringOne] = await fetchWith([{ id: '1', name: 'String id' }]);
+    if (numeric && !('listingIdentity' in numeric)
+        && numeric.url === 'https://jobs.smartrecruiters.com/acme/1-numeric-id'
+        && stringOne?.listingIdentity?.posting_id === '1') {
+      pass('a numeric payload id keeps its URL but gets no identity (no numeric coercion)');
+    } else {
+      fail(`numeric = ${JSON.stringify(numeric)}, string = ${JSON.stringify(stringOne?.listingIdentity)}`);
+    }
+
+    // The internal postingId never reaches a Job row.
+    if ([row, numeric, stringOne, ...unusable].every((j) => j && !('postingId' in j) && !('id' in j))) {
+      pass('fetch() strips both the raw id and the internal postingId from Job rows');
+    } else {
+      fail('postingId or id leaked into a Job row');
+    }
+
     if (smartRecruitersListingIdentity('', '1') === undefined
         && smartRecruitersListingIdentity(null, '1') === undefined
         && smartRecruitersListingIdentity('acme', 1) === undefined

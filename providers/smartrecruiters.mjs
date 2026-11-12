@@ -238,11 +238,13 @@ export default {
     }
 
     // The raw posting id drove the detail calls above and stays out of the
-    // pipeline's Job rows (vdab strips its id the same way). It survives only
-    // as the posting half of the ATS-native identity scan.mjs dedups on
-    // (docs/listing-fingerprint.md), next to the configured board slug.
-    const jobs = all.map(({ id, ...job }) => {
-      const listingIdentity = smartRecruitersListingIdentity(slug, id);
+    // pipeline's Job rows (vdab strips its id the same way). The payload's own
+    // string id survives only as the posting half of the ATS-native identity
+    // scan.mjs dedups on (docs/listing-fingerprint.md), next to the configured
+    // board slug; a numeric payload id was coerced for the detail call and
+    // gets no identity.
+    const jobs = all.map(({ id, postingId, ...job }) => {
+      const listingIdentity = smartRecruitersListingIdentity(slug, postingId);
       return listingIdentity ? { ...job, listingIdentity } : job;
     });
     if (truncated) {
@@ -285,7 +287,7 @@ export default {
  * @param {any} json
  * @param {string} companyName
  * @param {string} [companySlug] Already-escaped URL.pathname segment from resolveSlug.
- * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, requisitionId?: string, language?: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, postingId?: string, requisitionId?: string, language?: string}>}
  */
 export function parseSmartRecruitersResponse(json, companyName, companySlug) {
   const items = json?.content;
@@ -333,6 +335,10 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       location,
       company: companyName,
       id: typeof j.id === 'string' || typeof j.id === 'number' ? String(j.id) : undefined,
+      // The id exactly as the payload typed it, for the listing identity only:
+      // a numeric id is stringified above for the detail call, but identity
+      // ids are never coerced (docs/listing-fingerprint.md), so it gets none.
+      ...(typeof j.id === 'string' ? { postingId: j.id } : {}),
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
