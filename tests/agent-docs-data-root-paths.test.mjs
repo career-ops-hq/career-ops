@@ -116,7 +116,7 @@ function pipelinePathsUseDataRoot(_testContext) {
   ]) {
     assert.ok(pipeline.includes(path), `modes/pipeline.md does not root ${path} under DATA_ROOT`);
   }
-  assert.ok(pipeline.includes('Use the exact value printed'));
+  assert.ok(pipeline.includes('Use the exact path printed'));
 }
 
 test('pipeline user-layer paths name their data root', pipelinePathsUseDataRoot);

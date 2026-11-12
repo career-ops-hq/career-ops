@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const MODES = join(ROOT, 'modes');
 const PENDING_SEARCH = "grep -n -m 20 '^- \\[ \\] ' data/pipeline.md";
+const RESOLVED_PENDING_SEARCH = "grep -n -m 20 '^- \\[ \\] ' -- \"{INBOX}\"";
 
 const pipelineModes = [
   'pipeline.md',
@@ -29,7 +30,8 @@ test('the pipeline mode and its translations exist', () => {
 for (const rel of pipelineModes) {
   if (rel === join('sg', 'pipeline.md')) continue;
   test(`modes/${rel} finds pending items with the bounded search`, () => {
-    assert.ok(readFileSync(join(MODES, rel), 'utf-8').includes(PENDING_SEARCH));
+    const source = readFileSync(join(MODES, rel), 'utf-8');
+    assert.ok(source.includes(rel === 'pipeline.md' ? RESOLVED_PENDING_SEARCH : PENDING_SEARCH));
   });
 }
 
