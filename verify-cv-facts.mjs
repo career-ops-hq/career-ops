@@ -2106,7 +2106,15 @@ export function scopeInflationClaims(targetText, sourceText, language = 'en') {
       // candidate did, so it is no evidence that the source is weaker.
       const linked = overlaps.filter(({ shared, source }) => profile.accuses(shared, tokens) && !source.heading);
       if (!linked.length) continue;
-      const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
+            const vouched = overlaps.some(({ shared, source }) => {
+        if (!shared.length || source.tier < opening.tier) return false;
+
+        if (language === 'zh' && source.tier === Infinity && !source.heading) {
+          return profile.accuses(shared, tokens);
+        }
+
+        return true;
+      });
       if (vouched) continue;
 
       const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
@@ -4179,6 +4187,21 @@ function runSelfTest() {
     zhAdoptionOf('服务十万用户。', '支撑了十万用户的访问。'), []);
   equal('zh: an English adoption phrase is not read on the zh path',
     zhAdoptionOf('Used daily across the engineering org.', '开发了内部工具。'), []);
+
+    equal('zh: a generic Skills clause cannot vouch for a scope upgrade',
+    zhScopeOf('主导了计费系统迁移。',
+      '参与了计费系统迁移。\n熟悉分布式系统。'),
+    ['主导了计费系统迁移']);
+
+  equal('zh: one shared bigram is not enough for unranked vouching',
+    zhScopeOf('主导了计费系统迁移。',
+      '参与了计费系统迁移。\n熟悉日志系统。'),
+    ['主导了计费系统迁移']);
+
+  equal('zh: a sufficiently matching unranked clause still vouches',
+    zhScopeOf('主导了计费系统迁移。',
+      '参与了计费系统迁移。\n熟悉计费系统迁移。'),
+    []);
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;
