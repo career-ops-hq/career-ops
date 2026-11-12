@@ -19,7 +19,8 @@
 // larger values return an empty `jobs`), and we page via `offset`.
 
 const PAGE_SIZE = 100; // amazon.jobs caps result_limit at 100
-const MAX_PAGES = 20; // safety cap — at most 2000 postings per entry
+const MAX_PAGES = 20; // cap while the total is unknown — 2000 postings
+const HARD_MAX_PAGES = 100; // absolute ceiling for a hits-bounded walk — 10,000 postings
 const ORIGIN = 'https://www.amazon.jobs';
 
 /** @param {import('./_types.js').PortalEntry & {amazon?: Record<string, unknown>}} entry */
@@ -107,9 +108,23 @@ export default {
   async fetch(entry, ctx) {
     const jobs = [];
     const seen = new Set();
-    for (let page = 0; page < MAX_PAGES; page++) {
+    // MAX_PAGES caps a walk only while the total is unknown. The API reports
+    // `hits` for the filtered query, so once page 0 answers, the walk is bounded
+    // by that total (up to HARD_MAX_PAGES). A whole-region board such as CA+NY
+    // (3,171 postings, 2026-11-07) is then read in full instead of being sliced
+    // by keyword queries that miss titles (a "business operations" query found
+    // 1,239 CA+NY postings the six keyword slices never returned).
+    const probe = Number(ctx?.maxPages);
+    let maxPages = probe > 0 ? Math.min(MAX_PAGES, probe) : MAX_PAGES;
+    let total = null;
+    let page = 0;
+    for (; page < maxPages; page++) {
       const url = buildQuery(entry, page * PAGE_SIZE);
       const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
+      if (total === null && Number.isInteger(json?.hits)) {
+        total = json.hits;
+        if (!(probe > 0)) maxPages = Math.max(maxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+      }
       const postings = Array.isArray(json?.jobs) ? json.jobs : [];
       if (postings.length === 0) break;
 
@@ -131,6 +146,11 @@ export default {
       }
       if (fresh === 0) break; // API ignored offset / looped
       if (postings.length < PAGE_SIZE) break; // last page
+      if (total !== null && (page + 1) * PAGE_SIZE >= total) break;
+    }
+    if (!(probe > 0) && page >= maxPages && (total === null || jobs.length < total)) {
+      console.error(`⚠️  amazon: ${entry.name} stopped at ${maxPages} pages (${jobs.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial`);
+      /** @type {any} */ (jobs).truncated = { reason: 'page-cap', fetched: jobs.length, ...(total === null ? {} : { total }) };
     }
     return jobs;
   },

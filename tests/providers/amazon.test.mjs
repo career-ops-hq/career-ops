@@ -97,6 +97,63 @@ try {
   const j4 = multiJobs[1];
   if (j4 && j4.location === 'US, VA, Arlington · Herndon, Virginia, USA') pass('amazon.fetch dedupes a raw-spelled primary against its normalized entry');
   else fail(`amazon.fetch raw-primary dedupe wrong: ${JSON.stringify(j4 && j4.location)}`);
+
+  // A reported `hits` past the 20-page default is read in full (CA+NY board,
+  // 3,171 postings, 2026-11-07), and the walk stops at the total.
+  const HITS = 3171;
+  let hitCalls = 0;
+  const big = await amazon.fetch({ name: 'Amazon', amazon: { normalized_country_code: ['USA'] } }, {
+    transport: 'http',
+    async fetchJson(url) {
+      hitCalls++;
+      const off = Number(new URL(url).searchParams.get('offset') || 0);
+      const n = Math.max(0, Math.min(100, HITS - off));
+      return { hits: HITS, jobs: Array.from({ length: n }, (_, i) => ({ title: `R${off + i}`, job_path: `/en/jobs/${off + i}/r` })) };
+    },
+    async fetchText() { return ''; },
+  });
+  if (big.length === HITS && hitCalls === Math.ceil(HITS / 100) && !big.truncated) pass('amazon.fetch reads a 3,171-posting board past the 20-page default, untruncated');
+  else fail(`amazon hits-bounded walk: ${big.length} jobs in ${hitCalls} calls, truncated=${JSON.stringify(big.truncated)}`);
+
+  // Shared fake board for the cap cases below.
+  const board = (hits, counter, withHits = true) => ({
+    transport: 'http',
+    async fetchJson(url) {
+      counter.n++;
+      const off = Number(new URL(url).searchParams.get('offset') || 0);
+      const n = Math.max(0, Math.min(100, hits - off));
+      const jobs = Array.from({ length: n }, (_, i) => ({ title: `R${off + i}`, job_path: `/en/jobs/${off + i}/r` }));
+      return withHits ? { hits, jobs } : { jobs };
+    },
+    async fetchText() { return ''; },
+  });
+  const quiet = async (fn) => {
+    const lines = []; const orig = console.error;
+    console.error = (...a) => { lines.push(a.join(' ')); };
+    try { return { result: await fn(), lines }; } finally { console.error = orig; }
+  };
+
+  // Past the 100-page ceiling: stop there and report the board partial.
+  const hugeN = { n: 0 };
+  const huge = await quiet(() => amazon.fetch({ name: 'Huge', amazon: {} }, board(25000, hugeN)));
+  if (hugeN.n === 100 && huge.result.length === 10000 && huge.result.truncated?.reason === 'page-cap'
+      && huge.result.truncated?.total === 25000 && huge.lines.length === 1 && huge.lines[0].includes('10000 of 25000'))
+    pass('amazon.fetch stops at the 100-page ceiling and marks the board truncated');
+  else fail(`amazon ceiling: ${hugeN.n} calls, ${huge.result.length} jobs, ${JSON.stringify(huge.result.truncated)}, ${JSON.stringify(huge.lines)}`);
+
+  // No `hits` in the response: the 20-page default still bounds the walk, and says so.
+  const noHitsN = { n: 0 };
+  const noHits = await quiet(() => amazon.fetch({ name: 'NoHits', amazon: {} }, board(5000, noHitsN, false)));
+  if (noHitsN.n === 20 && noHits.result.length === 2000 && noHits.result.truncated?.reason === 'page-cap' && noHits.lines.length === 1)
+    pass('amazon.fetch keeps the 20-page default when the API reports no hits, and marks the cut');
+  else fail(`amazon no-hits default: ${noHitsN.n} calls, ${noHits.result.length} jobs, ${JSON.stringify(noHits.lines)}`);
+
+  // A health probe (ctx.maxPages = 1) reads one page and is not a truncation.
+  const probeN = { n: 0 };
+  const probe = await quiet(() => amazon.fetch({ name: 'Probe', amazon: {} }, { ...board(3171, probeN), maxPages: 1 }));
+  if (probeN.n === 1 && probe.result.length === 100 && !probe.result.truncated && probe.lines.length === 0)
+    pass('amazon.fetch honours ctx.maxPages for a probe, silently');
+  else fail(`amazon probe: ${probeN.n} calls, ${probe.result.length} jobs, ${JSON.stringify(probe.lines)}`);
 } catch (e) {
   fail(`amazon provider tests crashed: ${e.message}`);
 }
