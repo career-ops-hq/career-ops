@@ -310,17 +310,38 @@ try {
     pass('greenhouse.fetch() preserves a valid epoch-0 first_published as postedAt 0');
   else fail(`greenhouse.fetch() epoch-0 postedAt = ${JSON.stringify(epochZero[0]?.postedAt)}`);
 
-  // Malformed response bodies → empty result, no crash.
-  const emptyCases = [null, {}, { jobs: null }, { jobs: 'nope' }];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await greenhouse.fetch(
-      { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`greenhouse.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other
+  // envelope throws, naming the keys (or the type) it got, so a changed API or
+  // an error served with a 200 cannot read as "no open roles".
+  const ghEntry = { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' };
+  for (const method of ['fetch', 'fetchListing']) {
+    const emptyBoard = await greenhouse[method](ghEntry, { fetchJson: async () => ({ jobs: [] }) });
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass(`greenhouse.${method}() returns [] for { jobs: [] }`);
+    else fail(`greenhouse.${method}() { jobs: [] } → ${JSON.stringify(emptyBoard)}`);
+
+    const brokenCases = [
+      [{}, '[]'],
+      [{ error: 'rate limited' }, '[error]'],
+      [{ jobs: null }, '[jobs]'],
+      [{ jobs: {} }, '[jobs]'],
+      ['oops', '[string]'],
+      [null, '[null]'],
+    ];
+    let brokenOk = true;
+    for (const [body, got] of brokenCases) {
+      let out;
+      let err = null;
+      try { out = await greenhouse[method](ghEntry, { fetchJson: async () => body }); } catch (e) { err = e; }
+      const msg = String(/** @type {any} */ (err)?.message || '');
+      if (!err || !msg.startsWith('greenhouse: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`greenhouse.${method}() body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass(`greenhouse.${method}() throws, naming what it got, for a body that is not { jobs: [...] }`);
   }
-  if (emptyOk) pass('greenhouse.fetch() returns [] for null / {} / non-array jobs response bodies');
 
   // Guard chain runs BEFORE any request: an untrusted api: must throw without
   // ever calling fetchJson.

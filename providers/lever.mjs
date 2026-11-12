@@ -243,7 +243,13 @@ export default {
         json = await readPaged();
       }
     }
-    if (!Array.isArray(json)) return [];
+    // [] is an empty board; any other body is a changed or failing API and must
+    // not read as "no open roles" (ADDING_A_PROVIDER.md, "Defensive parsing").
+    // readPaged() already throws on a non-array page.
+    if (!Array.isArray(json)) {
+      const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+      throw new Error(`lever: unexpected response for ${entry.name} — expected an array of postings, got: [${got}]`);
+    }
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v0\/postings\/([^/]+)\/?$/)?.[1] || '';
     const mapped = json.map(j => ({
       title: j.text || '',

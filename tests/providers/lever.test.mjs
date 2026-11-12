@@ -262,17 +262,34 @@ try {
     pass('lever.fetch() ignores a non-array allLocations and preserves the primary location');
   else fail(`lever.fetch() row 6 location = ${JSON.stringify(fetched[6]?.location)}`);
 
-  // Non-array response bodies → [], no crash.
-  const emptyCases = [null, {}, { postings: [] }, 'nope'];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await lever.fetch(
-      { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`lever.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): a bare
+  // [] is an empty board. Any other body throws on the single-response path,
+  // naming the keys (or the type) it got, as the paged path already does.
+  const leverEntry = { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' };
+  const leverEmpty = await lever.fetch(leverEntry, { fetchJson: async () => [] });
+  if (Array.isArray(leverEmpty) && leverEmpty.length === 0) pass('lever.fetch() returns [] for an empty postings array');
+  else fail(`lever.fetch() [] → ${JSON.stringify(leverEmpty)}`);
+
+  const leverBroken = [
+    [{}, '[]'],
+    [{ error: 'rate limited' }, '[error]'],
+    [{ postings: [] }, '[postings]'],
+    ['oops', '[string]'],
+    [null, '[null]'],
+  ];
+  let leverBrokenOk = true;
+  for (const [body, got] of leverBroken) {
+    let out;
+    let err = null;
+    try { out = await lever.fetch(leverEntry, { fetchJson: async () => body }); } catch (e) { err = e; }
+    const msg = String(/** @type {any} */ (err)?.message || '');
+    if (!err || !msg.startsWith('lever: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+      leverBrokenOk = false;
+      fail(`lever.fetch() body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+      break;
+    }
   }
-  if (emptyOk) pass('lever.fetch() returns [] for non-array response bodies (null / {} / string)');
+  if (leverBrokenOk) pass('lever.fetch() throws, naming what it got, for a body that is not an array of postings');
 
   // fetch() — a pinned api: is used verbatim, bypassing careers_url parsing entirely.
   let pinnedUrl = null;
