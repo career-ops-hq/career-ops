@@ -130,9 +130,16 @@ export function resolveTechjobsUrl(j) {
 }
 
 /**
+ * The feed's `workplace_type` values the workplace policy understands
+ * (`providers/_country.mjs` reads `workplaceType`). Other values the feed
+ * carries ('field', 'rotational-shift', null) are left out rather than mapped.
+ */
+const WORKPLACE_TYPES = new Set(['remote', 'hybrid', 'onsite']);
+
+/**
  * Normalize one feed item into the scanner's Job shape. Exported for tests.
  * @param {any} j
- * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number, workplaceType?: string } | null}
  */
 export function normalizeTechjobsJob(j) {
   if (!j || typeof j !== 'object') return null;
@@ -143,12 +150,16 @@ export function normalizeTechjobsJob(j) {
   const company = typeof j.company === 'string' ? j.company.trim() : '';
   const location = typeof j.location === 'string' ? j.location.trim() : '';
   const postedAt = toEpochMs(j.posted_at);
+  const workplace = typeof j.workplace_type === 'string' ? j.workplace_type.trim().toLowerCase() : '';
   return {
     title,
     url,
     company,
     location,
     ...(postedAt !== undefined ? { postedAt } : {}),
+    // A remote posting that names a city keeps its remote tag, so a
+    // workplace_policy does not read it as on-site in that city.
+    ...(WORKPLACE_TYPES.has(workplace) ? { workplaceType: workplace } : {}),
   };
 }
 
@@ -218,7 +229,14 @@ export default {
 
       // The walk's own end: an empty or short page (raw row count, before
       // malformed rows are dropped), or no `next` link.
-      if (rows.length < PER_PAGE || !json.next) break;
+      if (rows.length < PER_PAGE) break;
+      // A full page must say whether more follow: `next` is required by the
+      // feed schema, null on the last page. Absent or not a string means the
+      // envelope changed, so fail loud instead of returning a silent partial.
+      if (json.next === null) break;
+      if (typeof json.next !== 'string' || !json.next) {
+        throw new Error(`techjobs: page ${page} is full but next is ${'next' in json ? JSON.stringify(json.next) : 'missing'} — expected a URL or null`);
+      }
 
       // Out of page budget on a full page with more to come.
       if (page === maxPages && page === entryMaxPages) stopReason = 'cap';

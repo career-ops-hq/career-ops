@@ -122,6 +122,33 @@ try {
     pass('resolve URL: a fallback page off techjobs.vn is refused');
   } else fail('off-host fallback must be refused');
 
+  // ── workplace_type → workplaceType (read by _country.mjs's workplace policy) ──
+  const remote = normalizeTechjobsJob(item(20, { workplace_type: 'Remote', location: 'Da Nang, Vietnam' }));
+  if (remote?.workplaceType === 'remote' && remote.location === 'Da Nang, Vietnam') {
+    pass('normalize: a remote posting that names a city keeps workplaceType "remote"');
+  } else fail(`remote = ${JSON.stringify(remote)}`);
+  if (normalizeTechjobsJob(item(21))?.workplaceType === 'hybrid'
+      && normalizeTechjobsJob(item(22, { workplace_type: 'onsite' }))?.workplaceType === 'onsite') {
+    pass('normalize: hybrid and onsite pass through as workplaceType');
+  } else fail('hybrid/onsite workplaceType');
+  const unmapped = [null, 'field', 'rotational-shift', 7].map((w) => normalizeTechjobsJob(item(23, { workplace_type: w })));
+  if (unmapped.every((j) => j && !('workplaceType' in j))) pass('normalize: null or values the policy does not know omit workplaceType');
+  else fail(`unmapped = ${JSON.stringify(unmapped)}`);
+
+  {
+    // End to end through the scanner's workplace policy: on-site only in Ho Chi
+    // Minh City, remote from Vietnam. A remote Da Nang posting must stay in;
+    // the same posting without its remote tag reads as on-site in Da Nang.
+    const { buildWorkplacePolicy } = await import(pathToFileURL(join(ROOT, 'providers/_country.mjs')).href);
+    const policy = buildWorkplacePolicy({ onsite_locations: ['Ho Chi Minh City'], remote_countries: ['Vietnam'] });
+    const tagged = normalizeTechjobsJob(item(24, { workplace_type: 'remote', location: 'Da Nang, Vietnam' }));
+    const untagged = normalizeTechjobsJob(item(25, { workplace_type: null, location: 'Da Nang, Vietnam' }));
+    const kept = policy(tagged.location, tagged.title, tagged);
+    const dropped = policy(untagged.location, untagged.title, untagged);
+    if (kept.eligible && !dropped.eligible) pass('workplace_policy: the remote tag keeps a remote Da Nang posting that an untagged one loses');
+    else fail(`workplace_policy: tagged=${JSON.stringify(kept)} untagged=${JSON.stringify(dropped)}`);
+  }
+
   const noDate = normalizeTechjobsJob(item(11, { posted_at: 'yesterday' }));
   if (noDate && !('postedAt' in noDate)) pass('normalize: unparseable posted_at omits postedAt (NaN-safe)');
   else fail(`bad date = ${JSON.stringify(noDate)}`);
@@ -187,6 +214,33 @@ try {
     await techjobs.fetch({ name: 'techjobs.vn', provider: 'techjobs' }, ctx);
     if (calls.length === 1) pass('fetch: next:null stops the walk even on a full page');
     else fail(`next:null made ${calls.length} calls`);
+  }
+
+  // ── a full page must carry `next` (URL or null); absent / wrong type throws ──
+  for (const [label, next] of [['missing', undefined], ['a number', 2], ['an empty string', '']]) {
+    const { ctx, calls } = makeCtx(() => {
+      const env = envelope(1, fullPage(1, 1));
+      if (next === undefined) delete env.next;
+      else env.next = next;
+      return env;
+    });
+    try {
+      await techjobs.fetch({ name: 'techjobs.vn', provider: 'techjobs' }, ctx);
+      fail(`full page with next ${label} must throw`);
+    } catch (e) {
+      if (/is full but next is/.test(e.message) && calls.length === 1) pass(`fetch: a full page with next ${label} throws instead of stopping silently`);
+      else fail(`next ${label}: ${e.message}`);
+    }
+  }
+  {
+    const { ctx } = makeCtx(() => {
+      const env = envelope(1, [item(1), item(2)]);
+      delete env.next;
+      return env;
+    });
+    const out = await techjobs.fetch({ name: 'techjobs.vn', provider: 'techjobs' }, ctx);
+    if (out.length === 2 && !out.truncated) pass('fetch: a short page still ends the walk without needing next');
+    else fail(`short page without next: ${out.length}`);
   }
 
   // ── page ceiling: DEFAULT_MAX_PAGES bounds a feed claiming endless pages ──
