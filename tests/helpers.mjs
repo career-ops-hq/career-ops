@@ -1934,3 +1934,17 @@ export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
   };
   try { return await fn(); } finally { globalThis.fetch = realFetch; }
 }
+
+/**
+ * Copy the committed employer registry (ROOT/employers) into `destDir/employers`,
+ * leaving out `employers/inbox/`. A contribution PR adds its rows to the inbox,
+ * and the fold, import and inbox tests build their own inbox in the copy and
+ * expect it to hold only what they wrote (#6960): copying the PR's own inbox
+ * file along with the registry turned its CI red with nothing wrong in its data.
+ * @param {string} destDir
+ */
+export function copyEmployerRegistry(destDir) {
+  const src = join(ROOT, 'employers');
+  const inbox = join(src, 'inbox');
+  cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
+}

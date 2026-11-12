@@ -12,11 +12,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry } from './helpers.mjs';
 
 import {
   DEFAULT_REGION, DEFAULT_WORKDAY_HOST, INBOX_DIR, INBOX_LINE_KEYS, INBOX_MAX_LINES,
@@ -35,7 +35,7 @@ const TODAY = new Date('2026-11-11T12:00:00Z');
 function withInbox(files, body) {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-inbox-'));
   try {
-    cpSync(join(ROOT, 'employers'), join(dir, 'employers'), { recursive: true });
+    copyEmployerRegistry(dir);
     mkdirSync(join(dir, INBOX_DIR), { recursive: true });
     for (const [name, content] of Object.entries(files)) {
       const text = typeof content === 'string' ? content : `${content.map((l) => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n')}\n`;
