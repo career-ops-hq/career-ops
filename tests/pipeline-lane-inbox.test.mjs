@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipelineRunHint } from '../scan.mjs';
 
@@ -26,8 +26,13 @@ function section(text, start, end) {
 }
 
 test('the scan hint names the lane inbox when CAREER_OPS_PIPELINE is set', () => {
-  const hint = pipelineRunHint('data/pipeline.bridge.md');
-  assert.match(hint, /\/career-ops pipeline data\/pipeline\.bridge\.md /);
+  const hint = pipelineRunHint('data/pipeline.bridge.md', ROOT);
+  assert.ok(hint.includes(`/career-ops pipeline "${resolve(ROOT, 'data/pipeline.bridge.md')}" `));
+});
+
+test('the scan hint preserves an absolute lane inbox path', () => {
+  const absolute = resolve(ROOT, 'data', 'bridge inbox.md');
+  assert.ok(pipelineRunHint(absolute).includes(`/career-ops pipeline "${absolute}" `));
 });
 
 test('the scan hint is unchanged without a lane', () => {
@@ -72,7 +77,7 @@ test('the command the mode runs resolves a lane set only in the data root .env',
     delete env.CAREER_OPS_PIPELINE;
     delete env.CAREER_OPS_ROOT;
     const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: ROOT, env, encoding: 'utf-8' });
-    assert.equal(out.trim(), 'data/pipeline.bridge.md');
+    assert.equal(out.trim(), resolve(dataRoot, 'data/pipeline.bridge.md'));
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
   }

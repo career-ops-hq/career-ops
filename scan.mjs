@@ -134,16 +134,38 @@ const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DA
 // create data/pipeline.md in the cwd, then append the actual results to the
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
-export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+
+/**
+ * Resolves a pipeline override relative to the user's data root.
+ *
+ * @param {string | undefined} lane Optional pipeline path override.
+ * @param {string} dataRoot Root for user data and relative pipeline paths.
+ * @returns {string} Absolute pipeline path, preserving absolute overrides.
+ */
+function resolvePipelinePath(lane, dataRoot = DATA_ROOT) {
+  const file = lane?.trim();
+  if (!file) return path.join(dataRoot, 'data/pipeline.md');
+  if (path.isAbsolute(file) || path.win32.isAbsolute(file)) return file;
+  return path.resolve(dataRoot, file);
+}
+
+export const PIPELINE_PATH = resolvePipelinePath(process.env.CAREER_OPS_PIPELINE);
 
 // The closing hint names the lane's inbox when CAREER_OPS_PIPELINE is set.
 // `/career-ops pipeline` alone reads data/pipeline.md unless the agent's own
 // environment carries the same variable, so a lane run that only says "run
 // pipeline" sends the user to the other lane's inbox (#6379).
-export function pipelineRunHint(lane = process.env.CAREER_OPS_PIPELINE) {
+/**
+ * Builds the suggested pipeline command from the resolved inbox path.
+ *
+ * @param {string | undefined} lane Optional pipeline path override.
+ * @param {string} dataRoot Root for user data and relative pipeline paths.
+ * @returns {string} Suggested command or the default command hint.
+ */
+export function pipelineRunHint(lane = process.env.CAREER_OPS_PIPELINE, dataRoot = DATA_ROOT) {
   const file = lane?.trim();
   return file
-    ? `→ Run /career-ops pipeline ${file} to evaluate new offers (this lane's inbox, not data/pipeline.md).`
+    ? `→ Run /career-ops pipeline "${resolvePipelinePath(file, dataRoot)}" to evaluate new offers (this lane's inbox, not data/pipeline.md).`
     : '→ Run /career-ops pipeline to evaluate new offers.';
 }
 
