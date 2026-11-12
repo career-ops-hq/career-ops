@@ -562,7 +562,14 @@ export default {
         : entry;
       return await fetchFromEmbed(embedEntry, ctx);
     }
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    // { jobs: [] } is an empty board; any other envelope is a changed or failing
+    // API and must not read as "no open roles" (ADDING_A_PROVIDER.md,
+    // "Defensive parsing"). The embed path above draws the same line.
+    if (!json || !Array.isArray(json.jobs)) {
+      const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+      throw new Error(`ashby: unexpected response for ${entry.name} — expected jobs[], got: [${got}]`);
+    }
+    const jobs = json.jobs;
     const boardSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1] || '';
     return jobs.map(/** @param {any} j */ (j) => ({
       title: j.title || '',

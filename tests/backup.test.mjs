@@ -116,6 +116,10 @@ try {
 
   // Copy: whole files, exclusions honoured, unchanged skipped, nothing deleted.
   put(root, 'cv.md', 'cv');
+  const sourceCv = join(root, 'cv.md');
+  const destCv = join(tmp, 'backup', 'career-ops', 'cv.md');
+  const originalMtime = new Date('2026-01-01T00:00:00.000Z');
+  utimesSync(sourceCv, originalMtime, originalMtime);
   put(root, 'data/applications.md', 'tracker');
   put(root, 'data/.env', 'SECRET=1');
   put(root, 'data/Connections.csv', 'connections');
@@ -173,6 +177,13 @@ try {
   const second = b.runBackup({ dataRoot: root, dest });
   assert.equal(second.copied, 0);
   assert.equal(second.unchanged, 6);
+
+  // Same-size edits within the timestamp tolerance must still be backed up.
+  const closeMtime = new Date(originalMtime.getTime() + 500);
+  put(root, 'cv.md', 'CV');
+  utimesSync(sourceCv, closeMtime, closeMtime);
+  assert.equal(b.runBackup({ dataRoot: root, dest }).copied, 1);
+  assert.equal(readFileSync(destCv, 'utf8'), 'CV');
 
   put(root, 'cv.md', 'cv, edited');
   utimesSync(join(root, 'cv.md'), new Date(), new Date(Date.now() + 60_000));

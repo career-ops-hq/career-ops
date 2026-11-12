@@ -307,17 +307,35 @@ try {
     pass('ashby.fetch() tolerates a sparse job (empty strings, null salary, undefined postedAt for a bad date)');
   else fail(`ashby.fetch() row 1 = ${JSON.stringify(fetched[1])}`);
 
-  // Malformed response bodies → [], no crash.
-  const emptyCases = [null, {}, { jobs: null }, { jobs: 'nope' }];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await ashby.fetch(
-      { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`ashby.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only
+  // { jobs: [] } is an empty board. Any other envelope throws, naming the keys
+  // (or the type) it got, instead of reading as "no open roles".
+  const ashbyEntry = { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' };
+  const ashbyEmpty = await ashby.fetch(ashbyEntry, { fetchJson: async () => ({ jobs: [] }) });
+  if (Array.isArray(ashbyEmpty) && ashbyEmpty.length === 0) pass('ashby.fetch() returns [] for { jobs: [] }');
+  else fail(`ashby.fetch() { jobs: [] } → ${JSON.stringify(ashbyEmpty)}`);
+
+  const ashbyBroken = [
+    [{}, '[]'],
+    [{ error: 'rate limited' }, '[error]'],
+    [{ jobs: null }, '[jobs]'],
+    [{ jobs: {} }, '[jobs]'],
+    ['oops', '[string]'],
+    [null, '[null]'],
+  ];
+  let ashbyBrokenOk = true;
+  for (const [body, got] of ashbyBroken) {
+    let out;
+    let err = null;
+    try { out = await ashby.fetch(ashbyEntry, { fetchJson: async () => body }); } catch (e) { err = e; }
+    const msg = String(/** @type {any} */ (err)?.message || '');
+    if (!err || !msg.startsWith('ashby: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+      ashbyBrokenOk = false;
+      fail(`ashby.fetch() body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+      break;
+    }
   }
-  if (emptyOk) pass('ashby.fetch() returns [] for null / {} / non-array jobs response bodies');
+  if (ashbyBrokenOk) pass('ashby.fetch() throws, naming what it got, for a body that is not { jobs: [...] }');
 
   // Retry loop — a transient failure on the first attempt recovers
   // transparently on the second (ASHBY_RETRIES=2 allows up to 3 attempts).
