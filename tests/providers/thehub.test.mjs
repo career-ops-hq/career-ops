@@ -31,8 +31,9 @@ try {
     'Fallback',
   );
   if (full && full.title === 'Staff Engineer' && full.url === 'https://thehub.io/jobs/abc123'
-      && full.company === 'Acme Corp' && full.location === 'London, UK') {
-    pass('normalizeHubJob maps title/id/company.name/location.address');
+      && full.company === 'Acme Corp' && full.location === 'London, UK'
+      && full.externalId === 'abc123') {
+    pass('normalizeHubJob maps title/id/company.name/location.address + id → externalId');
   } else {
     fail(`normalizeHubJob full row = ${JSON.stringify(full)}`);
   }
@@ -147,6 +148,16 @@ try {
 
   if (paged.length === 17) pass('thehub.fetch() aggregates valid jobs across pages (15 + 2, dropping the empty-title row)');
   else fail(`thehub.fetch() returned ${paged.length} jobs (expected 17)`);
+
+  // fetch() carries the feed id through to externalId on every returned row
+  // (the mk() fixtures carry id `x${i}`; rows without an id are dropped by
+  // normalizeHubJob, so a "row without an id comes back without the field"
+  // case cannot arise here — the drops test above pins that instead).
+  if (paged[0].externalId === 'x0' && paged[16].externalId === 'x16') {
+    pass('thehub.fetch() carries the feed id through as externalId');
+  } else {
+    fail(`thehub.fetch() externalId = ${JSON.stringify({ first: paged[0]?.externalId, last: paged[16]?.externalId })}`);
+  }
 
   // Stops at the reported total pages even when every page is full.
   const fullReq = [];
