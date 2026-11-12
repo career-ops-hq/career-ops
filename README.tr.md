@@ -278,7 +278,7 @@ Tam kurulum kılavuzu için [docs/SETUP.md](docs/SETUP.md), career-ops'u özel v
 
 ## Kullanım
 
-Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur. Bir ilan okunamazsa pipeline durur ve metni yapıştırmanı ister.
+Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur. Bir ilan okunamazsa pipeline durur ve metni yapıştırmanı ya da bir ekran görüntüsü paylaşmanı ister.
 
 ### Bir mod istemek
 

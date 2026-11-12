@@ -280,7 +280,7 @@ Veja [docs/SETUP.md](docs/SETUP.md) para o guia completo de configuração, [doc
 
 ## Uso
 
-Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome. Se uma vaga não puder ser lida, o pipeline para e pede que você cole o texto.
+Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome. Se uma vaga não puder ser lida, o pipeline para e pede que você cole o texto ou compartilhe uma captura de tela.
 
 ### Como pedir um modo
 

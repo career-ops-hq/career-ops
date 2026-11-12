@@ -280,7 +280,7 @@ Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/
 
 ## Utilisation
 
-Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte.
+Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte ou de partager une capture d'écran.
 
 ### Demander un mode
 

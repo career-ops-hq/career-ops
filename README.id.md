@@ -281,7 +281,7 @@ Lihat [docs/SETUP.md](docs/SETUP.md) untuk panduan penyiapan lengkap (termasuk [
 
 ## Penggunaan
 
-Tempelkan URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang ditautkan masih aktif (teks yang ditempel tidak memiliki tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan CV Anda (PDF secara bawaan), dan menambahkan satu baris ke tracker Anda. Itu saja sudah mencakup sebagian besar kebutuhan harian Anda. Sisanya adalah mode yang Anda minta dengan menyebut namanya. Jika sebuah lowongan tidak dapat dibaca, pipeline berhenti dan meminta Anda menempelkan teksnya.
+Tempelkan URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang ditautkan masih aktif (teks yang ditempel tidak memiliki tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan CV Anda (PDF secara bawaan), dan menambahkan satu baris ke tracker Anda. Itu saja sudah mencakup sebagian besar kebutuhan harian Anda. Sisanya adalah mode yang Anda minta dengan menyebut namanya. Jika sebuah lowongan tidak dapat dibaca, pipeline berhenti dan meminta Anda menempelkan teksnya atau membagikan tangkapan layar.
 
 ### Cara meminta sebuah mode
 
