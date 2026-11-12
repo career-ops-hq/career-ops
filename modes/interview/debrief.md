@@ -207,7 +207,7 @@ Append to `interview-prep/{company-slug}-{role-slug}.md`:
 **Next steps:** [what the interviewer said happens next and by when]
 
 ### Interview Format and Tone (any round — omit if the candidate skipped it)
-**Interview format and tone:**
+**Interview format and tone:** (list only the fields the candidate answered; drop unanswered bullets entirely, with no placeholders and no inferred values)
 - Format: [recruiter screen / 1:1 / panel / group / take-home review]
 - People on the call: [number]
 - Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
