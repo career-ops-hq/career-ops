@@ -177,6 +177,24 @@ type Catalog struct {
 	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
+
+	// Inbox tab (#5269): the Pending rows of data/pipeline.md, read only
+	TabInbox               string
+	ColRank                string
+	SortRank               string
+	LabelRank              string
+	LabelURL               string
+	InboxEmpty             string
+	InboxNotRanked         string
+	InboxSummary           string
+	InboxNoWebURL          string
+	InboxUnavailable       string
+	InboxStatusQueued      string
+	InboxStatusRunning     string
+	InboxStatusPaused      string
+	InboxStatusNeedsAnswer string
+	InboxStatusFailed      string
+	InboxStatusDone        string
 }
 
 // SortModeLabel returns the localized display label for a sort mode ("score", "date", etc.).
@@ -482,6 +500,24 @@ var En = Catalog{
 	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
+
+	// Inbox tab
+	TabInbox:               "INBOX",
+	ColRank:                "RANK",
+	SortRank:               "rank",
+	LabelRank:              "Rank: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No pending rows in data/pipeline.md",
+	InboxNotRanked:         "not ranked",
+	InboxSummary:           "%d pending · %d not ranked",
+	InboxNoWebURL:          "Not a web address, nothing opened: %s",
+	InboxUnavailable:       "Inbox unavailable; showing previous rows: %s",
+	InboxStatusQueued:      "Queued",
+	InboxStatusRunning:     "Running",
+	InboxStatusPaused:      "Paused",
+	InboxStatusNeedsAnswer: "Needs answer",
+	InboxStatusFailed:      "Failed",
+	InboxStatusDone:        "Done",
 }
 
 // Tr is the static Turkish translation catalog.
@@ -653,6 +689,24 @@ var Tr = Catalog{
 	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
+
+	// Inbox tab
+	TabInbox:               "GELEN",
+	ColRank:                "SIRA",
+	SortRank:               "sıra",
+	LabelRank:              "Sıra: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "data/pipeline.md içinde bekleyen satır yok",
+	InboxNotRanked:         "sıralanmadı",
+	InboxSummary:           "%d bekleyen · %d sıralanmadı",
+	InboxNoWebURL:          "Web adresi değil, hiçbir şey açılmadı: %s",
+	InboxUnavailable:       "Gelen kutusu okunamadı; önceki satırlar gösteriliyor: %s",
+	InboxStatusQueued:      "Sırada",
+	InboxStatusRunning:     "Çalışıyor",
+	InboxStatusPaused:      "Duraklatıldı",
+	InboxStatusNeedsAnswer: "Yanıt bekliyor",
+	InboxStatusFailed:      "Başarısız",
+	InboxStatusDone:        "Tamamlandı",
 }
 
 // Es is the static Spanish translation catalog.
@@ -824,6 +878,24 @@ var Es = Catalog{
 	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
+
+	// Inbox tab
+	TabInbox:               "BANDEJA",
+	ColRank:                "RANGO",
+	SortRank:               "rango",
+	LabelRank:              "Rango: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No hay filas pendientes en data/pipeline.md",
+	InboxNotRanked:         "sin rango",
+	InboxSummary:           "%d pendientes · %d sin rango",
+	InboxNoWebURL:          "No es una dirección web; no se abrió nada: %s",
+	InboxUnavailable:       "Bandeja no disponible; se muestran las filas anteriores: %s",
+	InboxStatusQueued:      "En cola",
+	InboxStatusRunning:     "En curso",
+	InboxStatusPaused:      "En pausa",
+	InboxStatusNeedsAnswer: "Falta respuesta",
+	InboxStatusFailed:      "Fallida",
+	InboxStatusDone:        "Hecha",
 }
 
 // Current points to the active language catalog. Defaults to English (&En).
