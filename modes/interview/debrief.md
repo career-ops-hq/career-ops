@@ -53,6 +53,8 @@ If memory is incomplete, ask targeted prompts:
 
 Set the explicit source marker: **`input_source: recall`**.
 
+**Format and tone (both paths, one short question, skippable).** Ask once: "Quick one on the feel of the round: what was the format (recruiter screen / 1:1 / panel / group / take-home review), how many people were on the call, how would you describe the tone (relaxed-conversational / structured-formal / rapid-fire / adversarial), and how comfortable did you feel (1-5, or a few words of your own)?" If a transcript shows the format, headcount or tone, offer those as a suggestion to confirm. **Never infer or fill in comfort for the candidate**: it is their subjective report, so record it only in their own words, and leave it out if they skip. If they skip the whole question, write none of the four values.
+
 Whichever path produced the question/answer data, Steps 2 onward operate on it identically — honest assessment, gap-closing, and question-bank/story-bank updates don't distinguish between an `input_source: transcript` and an `input_source: recall` debrief. The marker itself is still carried through unchanged so Step 9 can read it.
 
 ---
@@ -203,6 +205,13 @@ Append to `interview-prep/{company-slug}-{role-slug}.md`:
 **Timeline:** [any dates or deadlines mentioned]
 **Other candidates:** [if disclosed]
 **Next steps:** [what the interviewer said happens next and by when]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (list only the fields the candidate answered; drop unanswered bullets entirely, with no placeholders and no inferred values)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [number]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5, or a short phrase, in the candidate's own words]
 ```
 
 **If a compensation number was verbally stated this round** (the candidate gave a figure, not just "comp came up"), append one `stated` line to `data/salary-observations.tsv` (create the file if missing; format per `docs/SCRIPTS.md` → salary-gap) with the tracker#, this round's date, the amount/currency, source `user`, a short note, the round label, and the interviewer's name. This is what lets `interview/plan` remind the candidate of it before the next round — see Inputs #9 there.
@@ -228,6 +237,10 @@ source: debrief
 stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
   - speaker: [name or role, or "unknown"]
     quote: "[short verbatim quote, double-quoted]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [number]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      # optional
 ---
 
 ## Q1
@@ -246,6 +259,7 @@ Rules for the transcript:
 - **Reconstruct the candidate turn faithfully.** Use what the candidate reported saying in Step 1, not an idealized answer. The "correct/complete answer" from Step 2 belongs in the debrief file, never in the transcript — the transcript records what happened.
 - **`source: debrief`.**
 - **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
+- **`format`, `people_on_call`, `tone` and `candidate_comfort` are optional front-matter keys** carrying the Step 1 / Step 8 values, so downstream modes can read them without parsing prose. Write only the keys the candidate answered; omit the rest, and never write `candidate_comfort` unless the candidate gave it. Double-quote `candidate_comfort` (it may be free text); if escaping manually, escape backslashes before inner double quotes, as for `quote`. Practice-session files do not carry them.
 - The session file lands in a gitignored directory (real names/companies never enter version control); write it without redacting.
 
 ---
