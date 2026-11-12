@@ -2333,6 +2333,32 @@ func (m PipelineModel) renderAppLine(app model.CareerApplication, selected bool)
 	return padStyle.MaxWidth(max(1, m.width)).MaxHeight(1).Render(line)
 }
 
+// truncateToCells cuts s to at most width terminal cells, ending in "..."
+// when at least three cells are left. ansi.Truncate and ansi.StringWidth can
+// disagree on a grapheme such as a keycap emoji (1️⃣), so the result is
+// measured again and cut shorter until ansi.StringWidth agrees that it fits.
+// @param s The text to fit.
+// @param width The number of cells available.
+// @returns s, or a prefix of it, at most width cells wide.
+func truncateToCells(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if ansi.StringWidth(s) <= width {
+		return s
+	}
+	tail := "..."
+	if width < ansi.StringWidth(tail) {
+		tail = ""
+	}
+	for limit := width; limit > 0; limit-- {
+		if out := ansi.Truncate(s, limit, tail); ansi.StringWidth(out) <= width {
+			return out
+		}
+	}
+	return ""
+}
+
 // renderPreview renders the selected application's details within the current terminal width.
 // @param None.
 // @returns The newline-separated preview.
@@ -2397,13 +2423,7 @@ func (m PipelineModel) renderPreview() string {
 			label := "TL;DR: "
 			value := summary.tldr
 			valueWidth := max(0, m.width-4-ansi.StringWidth(label))
-			if ansi.StringWidth(value) > valueWidth {
-				if valueWidth <= ansi.StringWidth("...") {
-					value = ansi.Truncate(value, valueWidth, "")
-				} else {
-					value = ansi.Truncate(value, valueWidth, "...")
-				}
-			}
+			value = truncateToCells(value, valueWidth)
 			lines = append(lines, padStyle.Render(
 				labelStyle.Render(label)+valueStyle.Render(value)))
 		}
