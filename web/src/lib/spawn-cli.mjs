@@ -121,6 +121,10 @@ function armCliStop(child, options) {
       }, CLI_STOP_GRACE_MS);
       force.unref?.();
       child.once?.("exit", () => {
+        // A detached Stop signals the group. The leader can die from SIGTERM
+        // while a descendant that ignores it is still in the group. Clearing
+        // the timer here would leave that descendant running.
+        if (options?.detached) return;
         if (force) clearTimeout(force);
         force = null;
       });

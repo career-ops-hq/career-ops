@@ -176,7 +176,13 @@ async function waitDead(pid, ms) {
   return !pidAlive(pid);
 }
 
-test("Stop follows SIGTERM with SIGKILL when the CLI ignores it", { timeout: 20_000 }, async () => {
+// Windows child.kill("SIGTERM") ends the process at once. The handler never
+// runs, so the "still alive after SIGTERM" assertions fail there.
+const skipPosixSignals = process.platform === "win32"
+  ? "Windows kill() ends the process immediately, so a SIGTERM handler never runs"
+  : false;
+
+test("Stop follows SIGTERM with SIGKILL when the CLI ignores it", { timeout: 20_000, skip: skipPosixSignals }, async () => {
   const dir = mkdtempSync(join(tmpdir(), "co-cli-stop-"));
   const termFile = join(dir, "term");
   const kidFile = join(dir, "kid");
@@ -217,6 +223,53 @@ test("Stop follows SIGTERM with SIGKILL when the CLI ignores it", { timeout: 20_
     assert.equal(readFileSync(termFile, "utf8"), "term");
     assert.equal(await waitDead(child.pid, 7000), true, "SIGKILL must follow SIGTERM");
     assert.equal(await waitDead(kidPid, 2000), true, "SIGKILL must reach the CLI's own children");
+  } finally {
+    for (const pid of pids) {
+      if (pid && pidAlive(pid)) {
+        try { process.kill(-pid, "SIGKILL"); } catch { /* not a group */ }
+        try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a detached descendant that ignores SIGTERM still gets the follow-up SIGKILL", { timeout: 20_000, skip: skipPosixSignals }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "co-cli-stop-desc-"));
+  const kidFile = join(dir, "kid");
+  const kidReady = join(dir, "kid-ready");
+  const ignore = [
+    "process.on('SIGTERM', () => {});",
+    `require('node:fs').writeFileSync(${JSON.stringify(kidReady)}, 'ready');`,
+    "setInterval(() => {}, 500);",
+  ].join("");
+  // The CLI itself keeps the default SIGTERM action and dies. Its child does not.
+  const script = [
+    "const fs = require('node:fs');",
+    "const { spawn } = require('node:child_process');",
+    `const kid = spawn(process.execPath, ['-e', ${JSON.stringify(ignore)}], { stdio: 'ignore' });`,
+    `fs.writeFileSync(${JSON.stringify(kidFile)}, String(kid.pid));`,
+    "setInterval(() => {}, 500);",
+  ].join("");
+  const child = spawnHeadlessCli(process.execPath, ["-e", script], {
+    cwd: dir,
+    env: process.env,
+    detached: true,
+  }, PASSTHROUGH);
+  const pids = [child.pid];
+  try {
+    const started = Date.now();
+    while (!pidAlive(child.pid) || !existsSync(kidFile) || !existsSync(kidReady)) {
+      if (Date.now() - started > 3000) break;
+      await sleep(50);
+    }
+    const kidPid = Number(readFileSync(kidFile, "utf8"));
+    pids.push(kidPid);
+    child.kill("SIGTERM");
+    await sleep(1000);
+    assert.equal(pidAlive(child.pid), false, "the CLI should die from SIGTERM");
+    assert.equal(pidAlive(kidPid), true, "a descendant that ignores SIGTERM should still be running");
+    assert.equal(await waitDead(kidPid, 8000), true, "SIGKILL must still reach that descendant");
   } finally {
     for (const pid of pids) {
       if (pid && pidAlive(pid)) {
