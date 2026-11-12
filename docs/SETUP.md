@@ -130,6 +130,8 @@ On macOS releases where Playwright fails to install or launch bundled Chromium (
 export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
 
+The same setting applies to every command that launches a browser (scan, liveness checks, `doctor` and the PDF step), and it can go in your shell or in the `.env` of your data root. To let career-ops find an installed browser instead of naming one, set `CAREER_OPS_BROWSER_AUTODETECT=true`: it uses the first of Brave, Chrome, Edge or Chromium installed at its standard location. Auto-detect is off by default, so a machine where the bundled Chromium works keeps using it, and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` wins when both are set.
+
 ### Scanning through an outbound proxy
 
 Node's ordinary `fetch()` may ignore `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` in a proxy-only sandbox. Provider requests can use those variables with `CAREER_OPS_TRUST_PROXY_EGRESS=1 node scan.mjs`. This uses a request-scoped proxy dispatcher; unrelated requests are unaffected, and `NO_PROXY` destinations still use the local private-address guard.
