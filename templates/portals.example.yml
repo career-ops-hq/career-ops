@@ -2306,11 +2306,16 @@ search_queries:
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
 #   provider: wttj
-#   wttj:
-#     queries: ["ai engineer", "data platform engineer"]  # REQUIRED — the board is global,
-#                                 # so explicit searches must be configured; each query is a
-#                                 # separate Algolia search, results deduped across queries
-#     max_hits: 100        # optional per-query hit cap (default 100, max 200)
+#   wttj:                       # REQUIRED: the board is global; narrow it with
+#                               # `filters`, `queries`, or both
+#     filters: "offices.country_code:FR AND contract_type:full_time"
+#                               # Algolia filter, applied server-side (recommended,
+#                               # max 1000 chars); with it, `queries` is optional
+#     queries: ["ai engineer", "data platform engineer"]
+#                               # each query is a separate Algolia search,
+#                               # results deduped across queries
+#     max_hits: 100             # optional per-query hit cap (default 100;
+#                               # max 200, or 1000 with filters)
 #   enabled: true
 #
 # - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
