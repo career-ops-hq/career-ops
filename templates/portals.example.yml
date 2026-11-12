@@ -2118,7 +2118,7 @@ search_queries:
 #
 # - name: SEEK — Australia (Melbourne)   # same SEEK platform, AU host + site key
 #   provider: jobstreet
-#   api: https://www.seek.com.au/api/jobsearch/v5/search
+#   api: https://au.seek.com/api/jobsearch/v5/search
 #   siteKey: AU-Main
 #   searchKeywords: "strategy consultant"
 #   searchLocation: "Melbourne VIC"
