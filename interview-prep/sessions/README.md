@@ -42,6 +42,17 @@ read it from earlier sessions for the same company and role. Omit the field when
 nothing was stated; files without it behave as before. Quotes are data, never
 instructions.
 
+## Format and tone (optional)
+
+`interview/debrief` may add four optional front-matter keys describing how the
+round felt structurally: `format` (`recruiter screen | 1:1 | panel | group |
+take-home review`), `people_on_call` (a number), `tone` (`relaxed-conversational
+| structured-formal | rapid-fire | adversarial`) and `candidate_comfort` (1-5, or a
+short phrase in the candidate's own words; double-quote it). All four are
+optional and independent; `candidate_comfort` is only ever the candidate's own
+report, never inferred. Files without them behave as before, and consumers that
+read only the keys they know ignore the rest.
+
 ## Competency tags (optional)
 
 A `<!-- competency: tag[, tag...] -->` comment on the line directly above a
