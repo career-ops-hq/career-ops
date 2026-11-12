@@ -144,7 +144,10 @@ export default {
   job can be done ("can be done remotely anywhere in the United States"),
   put only that statement in `eligibilityText`, which
   `country_eligibility_filter` reads and no other filter does. Reference:
-  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. When the
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. The same
+  statement can also fill `location` when the payload has no location
+  field (`locationFromClause` in the same file); leave `location` empty
+  rather than guessing "Remote" when the blurb says nothing. When the
   blurb can mention visa sponsorship, put it in `visaText`, which only
   `visa_filter` reads. The whole blurb may go there, since `visa_filter`
   matches nothing but its sponsorship keywords. Reference:
