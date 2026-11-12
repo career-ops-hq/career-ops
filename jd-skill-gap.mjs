@@ -31,7 +31,7 @@ import { canonicalize, extractSkills, SKILL_PATTERN } from './skill-extract.mjs'
 import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
+import { normalizePandocLine, parseCompanyHeading, toPlainText } from './lib/cv-markdown.mjs';
 import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
@@ -597,16 +597,21 @@ const ANY_HEADING_RE = /^#{1,6}\s/;
 // `skills`, in both scripts: 技能 (also inside 专业技能), 专长, 技术能力 and
 // 技术栈. They sit outside the `\b` group because a word boundary does not
 // exist between two Han characters, so `\b技能\b` never matches 专业技能.
-// 技术栈 is "Tech Stack" and counts on the same levels.
-const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b|技能|专长|專長|技术能力|技術能力/i;
+// 技术栈 is "Tech Stack" and counts on the same levels. Because they match
+// inside a longer name, they are not read from an employer entry heading
+// (`### 技能培训有限公司 — 上海`, the `### Company — Location` shape
+// parseCompanyHeading() reads), so that job's bullets stay resume prose.
+const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b/i;
 const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b|技术栈|技術棧/i;
+const ZH_SKILLS_WORD_RE = /技能|专长|專長|技术能力|技術能力/;
 
 function isSkillsHeading(line) {
   // `\s*` rather than `\s+` keeps the historical `#Skills` (no space) form.
   const m = String(line).match(/^(#{1,6})(?!#)\s*(.+?)\s*$/);
   if (!m) return false;
   const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, ''));
-  return SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text));
+  if (SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text))) return true;
+  return ZH_SKILLS_WORD_RE.test(text) && !parseCompanyHeading(normalizePandocLine(line));
 }
 
 /**

@@ -65,6 +65,15 @@ test('a level-3 employer named with 技术栈 is not a skills section', () => {
   assert.deepEqual(supportedByResume.sort(), ['Go', 'Kafka']);
 });
 
+for (const employer of ['### 技能培训有限公司 — 上海', '### 专长咨询 - 北京', '### 技術能力研究院 – 台北']) {
+  test(`the employer entry "${employer}" is not a skills section`, () => {
+    const cv = ['## 工作经历', '', employer, '', '- 使用 Go 和 Kafka 开发订单服务'].join('\n');
+    const { existing, supportedByResume } = classifySkillGaps(JD_SKILLS, cv);
+    assert.deepEqual(existing, []);
+    assert.deepEqual(supportedByResume.sort(), ['Go', 'Kafka']);
+  });
+}
+
 for (const name of ['工作经历', '工作经验', '专业经历', '工作經歷', '工作經驗', '專業經歷']) {
   test(`"${name}" is an Experience heading`, () => {
     assert.ok(isExperienceHeading(name), `isExperienceHeading(${name})`);
