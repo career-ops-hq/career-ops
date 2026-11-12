@@ -25,11 +25,15 @@ conclusion below as provisional.
 
 Run the standard Block A checks, then:
 
-1. **Work authorization.** Apply `_shared.md` → "Work authorization" inside the
-   canonical work-authorization check. "EU work permit required" or "must be
-   eligible to work in Austria" is a pass for an EU/EEA/Swiss citizen and a
-   permit question for anyone else; an explicit refusal to support a permit is
-   a hard blocker for a third-country national.
+1. **Work authorization.** Classify with the canonical work-authorization
+   check, from `location.authorized_in` and `location.needs_sponsorship`, never
+   from citizenship; `_shared.md` → "Work authorization" says which Austrian
+   permits sit behind those fields. "EU work permit required" or "must be
+   eligible to work in Austria" is ➖ Not needed when Austria, or a region that
+   includes it such as the EU/EEA, is in `authorized_in`, or when
+   `needs_sponsorship` is false; otherwise it is a permit question. An explicit
+   refusal to support a permit is ⛔ No sponsorship, the hard blocker, only when
+   `needs_sponsorship` is true and Austria is outside `authorized_in`.
 2. **German level.** A stated German level (for example "Deutsch C1",
    "fluent German") is a hard filter: compare it with the level in `cv.md` or
    the profile. Never assume German from the candidate's location.
