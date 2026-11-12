@@ -39,7 +39,8 @@ only a label: consumers read the front matter, never the filename. When that pat
 already exists (a second round of the same type on the same day, or a practice
 run next to a debrief), never overwrite it silently. Append a counter before
 `.md` instead: `-2`, then `-3`, and so on. `interview/debrief` first lists the
-existing files for that company, role, round and date and asks whether the new
+existing files for that company, role, round and date (numbered ones included,
+even if the base name is gone) and asks whether the new
 input re-runs one of them; if so, the file the candidate picks is updated in
 place, so one real interview is never stored as two sessions.
 
