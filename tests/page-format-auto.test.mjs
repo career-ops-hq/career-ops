@@ -19,6 +19,7 @@ import {
   LETTER_COUNTRIES,
   PAGE_FORMATS,
   pageFormatForCountry,
+  readProfilePageSetting,
   resolvePageFormat,
 } from '../lib/page-format.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
@@ -72,6 +73,20 @@ test('the Letter table is the CLDR paperSize list, pinned', () => {
     [...LETTER_COUNTRIES].sort(),
     ['BZ', 'CA', 'CL', 'CO', 'CR', 'GT', 'MX', 'NI', 'PA', 'PH', 'PR', 'SV', 'US', 'VE'],
   );
+});
+
+test('readProfilePageSetting keeps auto apart from an unset or unknown value', () => {
+  // The web dashboard reads this before its agent runs, to know whether to ask
+  // the agent for a country. readProfilePageFormat folds auto into null, which
+  // would make auto and "unset" look the same there.
+  assert.equal(readProfilePageSetting(profileOf(workspace('auto'))), 'auto');
+  assert.equal(readProfilePageSetting(profileOf(workspace(' AUTO '))), 'auto');
+  assert.equal(readProfilePageSetting(profileOf(workspace('A4'))), 'a4');
+  assert.equal(readProfilePageSetting(profileOf(workspace('letter'))), 'letter');
+  assert.equal(readProfilePageSetting(profileOf(workspace('legal'))), null);
+  assert.equal(readProfilePageSetting(profileOf(workspace(null))), null);
+  assert.equal(readProfilePageSetting(join(tmpdir(), 'no-such-dir', 'profile.yml')), null);
+  assert.equal(readProfilePageSetting(undefined), null);
 });
 
 test('auto is not a sheet: PAGE_FORMATS still holds only a4 and letter', () => {

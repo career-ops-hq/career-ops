@@ -70,13 +70,20 @@ list — this system optimizes for quality, not quantity.
 
 ## Filters (apply BEFORE showing suggestions)
 
-1. **Dedup against existing coverage.** Mirror the matcher semantics in
-   `scan.mjs` (`buildTitleFilter` / `compileKeyword`): the scanner lowercases
-   both sides and keeps a job when any positive keyword is a
-   case-insensitive substring of the title (2–3 letter keywords match on word
-   boundaries instead). So drop any candidate title that an existing positive
-   keyword already substring-matches — it is already covered, and suggesting
-   it adds zero new recall.
+1. **Dedup against existing coverage.** Mirror the matcher in
+   `title-keywords.mjs` (`buildTitleFilter` / `compileKeyword`, imported by
+   `scan.mjs`). Before comparing, both the keyword and the title are
+   lowercased, stripped of accents, and have runs of whitespace collapsed. A
+   plain keyword matches as a case-insensitive substring of the title. The
+   exception is a 2–3
+   letter keyword made only of letters (`vp`, `cto`), which must match a whole
+   word. A `word:` prefix asks for whole-word matching at any length:
+   `word:intern` matches "Operations Intern" but not "Internal Tools". A
+   `stem:` prefix asks for a word that starts with the keyword: `stem:agent`
+   keeps "Agentic" and drops "Reagents". A positive entry containing ` + `
+   matches only when every term matches. Drop any candidate title that an
+   existing positive keyword already matches under these rules: it is already
+   covered, and suggesting it adds no recall.
 2. **Deal-breaker filter.** Never suggest titles that violate the
    deal-breakers recorded in `modes/_profile.md` (e.g. "no people management"
    rules out Engineering Manager; "no on-site" rules out field roles). Titles
@@ -215,7 +222,7 @@ a `-` at the start of a line.
   unchanged.
 - `config/profile.yml` or `modes/_profile.md` missing → **hard stop**: do not
   generate suggestions. Point at onboarding (`node doctor.mjs --json`) and
-  stop, then re-run this mode once both files exist — the same
-  fix-first-then-re-run behavior as a missing `portals.yml` above.
-  Deal-breakers live in `modes/_profile.md` — suggestions generated without
-  them can propose exactly what the user excluded.
+  stop, then re-run this mode once both files exist. Unlike a missing
+  `portals.yml`, these files cannot be rebuilt from `cv.md`. Deal-breakers
+  live in `modes/_profile.md`, and suggestions generated without them can
+  propose exactly what the user excluded.

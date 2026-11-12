@@ -25,3 +25,11 @@ export const PAGE_FORMATS = new Set(["a4", "letter"]);
  * this only applies when it declares nothing at all.
  */
 export const DEFAULT_PAGE_FORMAT = "letter";
+
+/**
+ * Body width per format, for the `{{PAGE_WIDTH}}` placeholder the pdf agent
+ * fills. The agent lays the body out and generate-pdf.mjs sizes the sheet, so
+ * the prompt has to name the width that matches the sheet the backend will
+ * pass. Same values as the core's PAGE_WIDTHS, pinned by tests/page-format.test.mjs.
+ */
+export const PAGE_WIDTHS = { a4: "210mm", letter: "8.5in" };

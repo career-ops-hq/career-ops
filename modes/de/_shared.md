@@ -141,6 +141,8 @@ In deutschen Stellenanzeigen und Vertragsverhandlungen tauchen Begriffe auf, die
 | **VWL** (Vermögenswirksame Leistungen) | Arbeitgeberzuschuss zum Vermögensaufbau | Kleinbetrag (oft 40 €/Monat), aber als Benefit zählen |
 | **bAV** (Betriebliche Altersvorsorge) | Betriebsrente | Bei Comp-Vergleich beachten — kann mehrere hundert Euro monatlich sein |
 
+> **Österreich:** Diese Tabelle beschreibt Deutschland. Sitzt der Arbeitgeber in Österreich, gelten die Regeln in `modes/at/_shared.md` (14 Gehälter, KV-Mindestgehalt im Inserat, Probemonat höchstens ein Monat).
+
 ### Verhandlungs-Skripte (Negotiation)
 
 <!-- [ANPASSEN] Auf deine Situation zuschneiden -->

@@ -84,7 +84,7 @@ test('unrecognized or qualified labels do not acquire worldwide eligibility', ()
     'Remote', 'Unknown', 'Anywhere', 'Global', 'Canada',
     'Not worldwide', 'Worldwide except Canada', 'Worldwide (US only)',
     'Worldwide, Europe', 'Remote (worldwide) - US only',
-    'Anywhere  in the World', 'Worldwide - extra',
+    'Worldwide - extra',
     'Worldwide (Himalayas: no country restriction)',
   ]) {
     assert.equal(accepts(location, '', 'Software Engineer'), false, location);

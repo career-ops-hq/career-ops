@@ -607,6 +607,8 @@ Le code est distribué sous [Licence MIT](LICENSE). Le nom et la marque
 permissive pour l'usage communautaire, réservée pour la dénomination de
 produits commerciaux et les endossements.
 
+Le code est sous licence MIT ; les données de [`employers/`](employers/) sont sous licence [CC BY 4.0](employers/LICENSE).
+
 ## Historique des étoiles
 
 <p align="center">

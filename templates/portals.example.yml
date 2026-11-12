@@ -132,6 +132,32 @@
 #     daterange: 7
 #     max_pages: 5
 
+# -- TopDev keyword searches (optional, Vietnam) --
+# Read by scan-topdev.mjs (`npm run scan:topdev`), a separate Playwright scanner
+# for TopDev (topdev.vn), a Vietnam-wide job board with no reachable listing
+# API: a bare fetch answers HTTP 200, but the search results are hydrated in the
+# browser, so the postings are not in the HTML. Same architectural pattern as
+# scan-interamt.mjs and scan-dayforce.mjs.
+#
+# `keyword` is required and is submitted to TopDev's own search. `location` is
+# optional and narrows by the board's region id — only Ho Chi Minh, Hanoi and Da
+# Nang have ever been observed, so any other value is rejected rather than
+# guessed into the URL; omit it for a nationwide search. `max_pages` is optional
+# (default 5, cap 50).
+#
+# There is no date filter: a posting older than the last run but never seen
+# before is still new to you, so dedup is decided by scan-history, not by age.
+#
+# Results are still filtered by title_filter/location_filter below, and
+# data/blacklist.md applies.
+#
+# topdev_searches:
+#   - keyword: "backend"
+#     location: "Ho Chi Minh"
+#     max_pages: 5
+#   - keyword: "data engineer"
+#     location: "Hanoi"
+
 # -- Dayforce (Ceridian) Recruiting boards (optional) --
 # Read by scan-dayforce.mjs (`npm run scan:dayforce`), a separate Playwright
 # scanner for Dayforce career sites (jobs.dayforcehcm.com). Dayforce's job
@@ -205,7 +231,9 @@
 #
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography. Keywords match whole words
-# and take no `word:`/`stem:` prefix. Some providers mark remote roles in their
+# and take no `word:`/`stem:` prefix. A Chinese or Japanese keyword matches
+# anywhere in the location (北京 matches "北京市海淀区"), because those scripts
+# put no space between words. Some providers mark remote roles in their
 # own words: arbeitsagentur writes "Deutschlandweit (Homeoffice)", so a German
 # commute filter needs always_allow: ["Deutschlandweit"] (see its entry below).
 
@@ -1290,7 +1318,7 @@ search_queries:
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
-#   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (the company id is required; a bare tenant host is not claimed)
+#   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (or darwinbox.com; the company id is required; a bare tenant host is not claimed)
 #   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
 #   solidjobs       solid.jobs/public-api/offers/<division>
 #   comeet          api: https://www.comeet.co/careers-api/2.0/company/<uid>/positions?token=<token>
@@ -1366,6 +1394,8 @@ search_queries:
 #   hirehive        <tenant>.hirehive.com  (any path, including a posting link; the board is always read from /api/v2/jobs)
 #   trakstar        <client>.hire.trakstar.com or <client>.recruiterbox.com
 #                   (or api: https://jsapi.recruiterbox.com/v1/openings?client_name=<client>)
+#   talentlink      <tenant>.recruitmentplatform.com/[<site path>/][<page>.html]  (Lumesse TalentLink career page; a
+#                   posting's details.html?jobId=<id> link is claimed too and read as its site's board)
 #
 # When the public careers URL is a branded custom domain (e.g.
 # careers.adyen.com), set `provider: smartrecruiters` explicitly to
@@ -1378,6 +1408,11 @@ search_queries:
 # Always set `provider: phenom` + `careers_url` pointed at the branded
 # origin (the /widgets endpoint lives on that same origin, so no separate
 # `api:` is needed).
+#
+# rexx is explicit-only too: a rexx systems job portal runs on the employer's
+# own branded host (a CNAME onto rexx's cloud), so there is no URL pattern to
+# claim. Set `provider: rexx` + `careers_url` pointed at the portal's job list
+# page (e.g. https://jobs.exampleco.com/stellenangebote.html).
 #
 # Eploy is also explicit-only: standard tenants use unrelated branded domains,
 # so a URL cannot be distinguished safely from a non-Eploy careers site. Set
@@ -1450,6 +1485,16 @@ search_queries:
 # - name: Example HireHive Co
 #   careers_url: https://exampleco.hirehive.com/   # any <tenant>.hirehive.com host
 #   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Example TalentLink Co
+#   careers_url: https://exampleco.recruitmentplatform.com/   # keep the site path your link has, e.g. /internal/ or /FO/<code>/components/
+#   max_pages: 20          # optional page cap (100 jobs/page, default 20, max 200)
+#   enabled: true
+#
+# - name: Example TalentLink Branded Co
+#   careers_url: https://careers.exampleco.example/jobsearch.html   # the employer's page that embeds the TalentLink job list
+#   provider: talentlink   # branded domains are never auto-detected
 #   enabled: true
 #
 # - name: Example Collage HR Co
@@ -1693,6 +1738,19 @@ search_queries:
 #     country: global        # widget country scope (default global)
 #     urlPrefix: global/en   # public job-page path prefix (default global/en)
 #     selectedFields: { country: ["Germany"] }   # optional facet filter
+#   enabled: true
+#
+# - name: Example Rexx Co
+#   # rexx systems job portal on the employer's branded host. No
+#   # auto-detection, so provider: rexx must always be set. careers_url is
+#   # the job list page; a bare host or a path ending in "/" reads
+#   # stellenangebote.html there (portals under a path keep it:
+#   # https://karriere.exampleco.com/stellenmarkt/).
+#   careers_url: https://jobs.exampleco.com/stellenangebote.html
+#   provider: rexx
+#   max_pages: 30          # optional page cap (page size is the portal's own,
+#                          # 10-100 observed; default 30, max 200) — a warning
+#                          # is logged if the cap truncates real results
 #   enabled: true
 #
 # - name: Example Avature Co
@@ -2078,7 +2136,7 @@ search_queries:
 #
 # - name: SEEK — Australia (Melbourne)   # same SEEK platform, AU host + site key
 #   provider: jobstreet
-#   api: https://www.seek.com.au/api/jobsearch/v5/search
+#   api: https://au.seek.com/api/jobsearch/v5/search
 #   siteKey: AU-Main
 #   searchKeywords: "strategy consultant"
 #   searchLocation: "Melbourne VIC"
@@ -2936,6 +2994,11 @@ tracked_companies:
     notes: "Berlin DE. Digital freight forwarder, product & data roles, German + English."
     enabled: true
 
+  - name: Mubea
+    careers_url: https://mubeacareers.recruitmentplatform.com/
+    notes: "Attendorn DE. Automotive and aerospace components, engineering and plant roles across DE, CZ, PL, MX, US."
+    enabled: false
+
   # -- DACH IT services / digital transformation consulting --
 
   - name: Nortal
@@ -3097,6 +3160,12 @@ tracked_companies:
     api: https://jobs.bmwgroup.com
     notes: "Munich/Remote DE. Automotive software. SuccessFactors portal."
     enabled: true
+
+  - name: Böllhoff
+    careers_url: https://jobs.boellhoff.com/stellenangebote.html
+    provider: rexx
+    notes: "Bielefeld. Fastening and assembly technology. rexx systems job portal; the list page carries location, an Atom feed adds posting dates."
+    enabled: false
 
   - name: CARIAD (Volkswagen)
     careers_url: https://jobs.volkswagen-group.com/cariad

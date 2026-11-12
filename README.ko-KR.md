@@ -604,6 +604,8 @@ career-ops로 취업하셨나요? [이야기를 공유해 주세요!](https://gi
 브랜드는 [상표 정책](TRADEMARK.md)의 적용을 받으며, 커뮤니티 사용에는
 관대하고, 상업적 제품명과 보증 용도로는 제한됩니다.
 
+코드는 MIT 라이선스이고, [`employers/`](employers/)의 데이터는 [CC BY 4.0](employers/LICENSE)입니다.
+
 ## 스타 히스토리
 
 <p align="center">

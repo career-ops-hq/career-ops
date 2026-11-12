@@ -1,3 +1,4 @@
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function FollowupsDueSectionSkeleton({ rows = 3 }: { rows?: number }) {
@@ -61,7 +62,7 @@ export function PipelineTableRowsSkeleton({ rows = 8, trackerColumn = false }: {
 
 export function PipelinePageSkeleton() {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24" aria-label="Loading pipeline">
+    <div className={`mx-auto px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 ${pageFrameWidthClass.wide}`} aria-label="Loading pipeline">
       <div className="flex items-end justify-between gap-4">
         <div>
           <Skeleton className="h-8 w-36" />
@@ -156,7 +157,7 @@ export function FollowupsPageSkeleton() {
 
 export function AnalyticsPageSkeleton() {
   return (
-    <div className="mx-auto max-w-4xl px-6 py-10" aria-label="Loading analytics">
+    <div className={`mx-auto px-4 py-6 sm:px-6 sm:py-8 max-sm:pb-24 ${pageFrameWidthClass.wide}`} aria-label="Loading analytics">
       <Skeleton className="h-8 w-32" />
       <Skeleton className="mt-2 h-4 w-64" />
 
@@ -189,7 +190,7 @@ export function AnalyticsPageSkeleton() {
 
 export function DocumentsPageSkeleton() {
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className={`mx-auto space-y-6 px-6 py-8 ${pageFrameWidthClass.wide}`}>
       <div>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="mt-2 h-4 w-64" />

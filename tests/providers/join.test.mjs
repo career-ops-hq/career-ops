@@ -517,6 +517,60 @@ try {
   }
   if (slugError && /cannot extract slug/.test(slugError.message)) pass('join.fetch() throws when careers_url is not a join.com URL');
   else fail(`join.fetch() should throw when the slug cannot be extracted, got ${slugError?.message}`);
+
+  // listingIdentity (#6908): the integer job id the payload already carries
+  // becomes the strong ATS-native identity, next to the company slug.
+  {
+    const { joinListingIdentity } = joinModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(joinPath(ROOT, 'scan.mjs')).href);
+    const fetchJobs = (items) => joinProvider.fetch(entry, makeCtx(() => gqlPage(items)));
+
+    const [row] = await fetchJobs([job(16751346, 'Senior AI Engineer', 'Remote')]);
+    const identity = row?.listingIdentity;
+    if (identity?.ats_provider === 'join' && identity?.board_slug === 'acme-corp' && identity?.posting_id === '16751346'
+        && Object.keys(identity).length === 3) {
+      pass('join.fetch() returns the join/<slug>/<job id> listingIdentity');
+    } else {
+      fail(`join identity = ${JSON.stringify(identity)}`);
+    }
+
+    // join.com itself links to `<idParam>` pages (`<number>-<title>`), whose
+    // number changes on every republish. The same posting reached at one of
+    // those is the same listing; URL dedup alone cannot join the two.
+    const sitePage = { ...row, url: 'https://join.com/companies/acme-corp/13900211-senior-ai-engineer' };
+    const seen = new Set();
+    markOfferSeen(row, seen);
+    if (isOfferSeen(sitePage, seen)) {
+      pass('the same join posting under its <idParam> page URL is already seen (one row, not two)');
+    } else {
+      fail('join <idParam> URL was not recognised as the same posting');
+    }
+
+    const [other] = await fetchJobs([job(16751347, 'Senior AI Engineer', 'Remote')]);
+    if (listingIdentityToken(other) && listingIdentityToken(other) !== listingIdentityToken(row) && !isOfferSeen(other, seen)) {
+      pass('a different join job id on the same board is a different listing');
+    } else {
+      fail(`other token = ${listingIdentityToken(other)}`);
+    }
+
+    // A row the provider keeps but whose id cannot be a posting key gets no identity.
+    const [zero] = await fetchJobs([job(0, 'Zero id')]);
+    if (zero && !('listingIdentity' in zero)) pass('a non-positive join job id leaves listingIdentity off');
+    else fail(`zero-id row = ${JSON.stringify(zero)}`);
+
+    if (joinListingIdentity('acme-corp', 7)?.posting_id === '7'
+        && joinListingIdentity('acme-corp', '7') === undefined
+        && joinListingIdentity('acme-corp', 7.5) === undefined
+        && joinListingIdentity('acme-corp', Number.MAX_SAFE_INTEGER + 1) === undefined
+        && joinListingIdentity('acme-corp', -1) === undefined
+        && joinListingIdentity('', 7) === undefined
+        && joinListingIdentity(' acme', 7) === undefined
+        && joinListingIdentity('ac\u0007me', 7) === undefined) {
+      pass('joinListingIdentity() accepts only a clean slug and a positive safe-integer id');
+    } else {
+      fail('joinListingIdentity() accepted an id or slug that cannot form a strong identity');
+    }
+  }
 } catch (e) {
   fail(`join provider tests crashed: ${e.message}`);
 }

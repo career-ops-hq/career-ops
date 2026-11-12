@@ -556,10 +556,21 @@ taking the list to a lawyer before signing.
 
 ## Step 7 — Tracker
 
-Update the existing row (never add a new one): status → `Offer` if not
-already; Notes column links the prep file relative to the tracker
-(`offers/{company-slug}/prep-{date}.md`). Canonical states per
-`templates/states.yml`.
+Record the prep on the existing tracker row with the canonical CLI. Never add
+a row, and never edit `data/applications.md` by hand:
+
+```bash
+node set-status.mjs --report <report#> Offer --note "Offer prep: [prep-{YYYY-MM-DD}](offers/{company-slug}/prep-{YYYY-MM-DD}.md)"
+```
+
+If the row has no report, select it by company:
+`node set-status.mjs "<company>" Offer --role "..." --note "..."`. If the
+offer arrived on an earlier day, add `--on YYYY-MM-DD`. If the row is already
+`Offer`, run the same command: the status stays as it is and only the note is
+added. Running it twice is safe, because the same note is never added twice.
+The link is relative to the tracker, so from `data/applications.md` it
+resolves to `data/offers/...`. If there is no tracker row, skip this step
+(see Error handling).
 
 ## Step 8 — Reply draft (optional, on request)
 

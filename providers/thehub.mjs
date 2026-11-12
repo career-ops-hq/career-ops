@@ -30,6 +30,7 @@
 //
 // Wire in via a `job_boards:` entry with `provider: thehub`.
 
+import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const FEED_BASE = 'https://thehub.io/api/v2/jobsandfeatured';
@@ -73,10 +74,13 @@ export function parseThehubConfig(entry) {
  *               "The Hub".
  *   - location: `location.address`, else assembled from `location.locality` /
  *               `location.country`; "Remote" is appended when `isRemote` is true.
+ *   - externalId: `id`, the feed's own posting id. Every returned row has a
+ *               usable id (rows without one are dropped above), so it is
+ *               always set here.
  *
  * @param {any} j
  * @param {string} [fallbackCompany]
- * @returns {{ title: string, url: string, company: string, location: string } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, externalId?: string } | null}
  */
 export function normalizeHubJob(j, fallbackCompany) {
   if (!j || typeof j !== 'object') return null;
@@ -107,7 +111,8 @@ export function normalizeHubJob(j, fallbackCompany) {
   const base = address || [locality, country].filter(Boolean).join(', ');
   const location = [base, j.isRemote === true ? 'Remote' : ''].filter(Boolean).join(', ');
 
-  return { title, url, company, location };
+  const externalId = coerceId(j.id);
+  return { title, url, company, location, ...(externalId ? { externalId } : {}) };
 }
 
 /**
@@ -127,7 +132,7 @@ export function normalizeHubJob(j, fallbackCompany) {
  * @param {string} query the query string beyond `?`, e.g. `countryCode=EU` or `isRemote=true`
  * @param {number} maxPages
  * @param {string | undefined} fallbackCompany
- * @param {Map<string, {title: string, url: string, company: string, location: string}>} byUrl
+ * @param {Map<string, {title: string, url: string, company: string, location: string, externalId?: string}>} byUrl
  * @param {{ fetchJson: (url: string, opts?: object) => Promise<any> }} ctx
  * @param {{ succeededOnce: boolean }} state
  * @returns {Promise<boolean>}

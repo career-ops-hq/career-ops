@@ -391,20 +391,44 @@ export function buildEvidence({
 // ── gh access ───────────────────────────────────────────────────────
 
 /**
+ * How long one `gh` call may take before the child is killed.
+ *
+ * Every call here is a metadata query (`--version`, `api user`, `search prs`),
+ * so two minutes is far past the slowest honest answer and far short of the
+ * indefinite wait this used to allow. A stalled connection to api.github.com
+ * used to hang the whole run — an `expand` step that prints nothing and never
+ * returns — which contradicted the module's own failure model.
+ */
+export const GH_TIMEOUT_MS = 120_000;
+
+/**
  * The real gh runner. Injectable everywhere it is used, so tests never spawn
- * gh or reach the network.
+ * gh or reach the network. `spawn` is a seam for the same reason: it is the only
+ * way to assert the bound without waiting for one.
  *
  * @param {string[]} args
- * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string, notFound: boolean}}
+ * @param {typeof spawnSync} [spawn]
+ * @returns {{status: number|null, signal: string|null, stdout: string, stderr: string, notFound: boolean, timedOut: boolean}}
  */
-export function defaultGhRunner(args) {
-  const res = spawnSync('gh', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+export function defaultGhRunner(args, spawn = spawnSync) {
+  const res = spawn('gh', args, {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+    timeout: GH_TIMEOUT_MS,
+    // Cosmetic on Windows and free everywhere else: without it a console
+    // program started from a GUI-less parent gets a window of its own.
+    windowsHide: true,
+  });
   return {
     status: res.status,
     signal: res.signal ?? null,
     stdout: res.stdout || '',
     stderr: res.stderr || '',
     notFound: res.error?.code === 'ENOENT',
+    // Distinct from notFound on purpose: a killed child also reports a null
+    // status, and reading that as "gh is not installed" would send the user to
+    // install something they already have.
+    timedOut: res.error?.code === 'ETIMEDOUT',
   };
 }
 
@@ -414,7 +438,7 @@ const AUTH_FAILURE = /auth login|not logged|bad credentials|HTTP 401|authenticat
 const firstLine = (s) => String(s ?? '').trim().split('\n')[0];
 /** Why a gh call failed: its first stderr line, else how the process ended. */
 const failureDetail = (res) => firstLine(res.stderr)
-  || (res.signal ? `killed by ${res.signal}` : `exit ${res.status}`);
+  || (res.timedOut ? 'timed out' : res.signal ? `killed by ${res.signal}` : `exit ${res.status}`);
 
 /**
  * Whether gh can be used: installed, and its active account can call the API.
@@ -434,8 +458,14 @@ const failureDetail = (res) => firstLine(res.stderr)
  */
 export function checkGh(runGh) {
   const version = runGh(['--version']);
-  if (version.notFound || version.status === null) {
+  if (version.notFound) {
     return { ok: false, reason: 'not-installed', detail: 'gh was not found on PATH' };
+  }
+  // A killed child reports a null status too, and this probe used to read every
+  // null as "not installed". A timeout says the opposite — gh ran and did not
+  // answer — so it is a query failure the user can act on.
+  if (version.timedOut || version.status === null) {
+    throw new GhQueryError(`gh --version failed: ${failureDetail(version)}`);
   }
   const viewer = runGh(['api', 'user', '--jq', '.login']);
   if (viewer.status === 0) return { ok: true, login: String(viewer.stdout).trim() };

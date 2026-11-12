@@ -33,6 +33,18 @@ export function pendingAfterReload(pending, templates) {
 }
 
 /**
+ * The template open in the editor, or null once it is gone from the reloaded
+ * list. The editor already hides itself for a missing template; clearing the
+ * name stops it reopening when a template with that name appears again.
+ * @param {string | null} editing
+ * @param {{name: string}[]} templates
+ * @returns {string | null}
+ */
+export function editingAfterReload(editing, templates) {
+  return editing && templates.some((t) => t.name === editing) ? editing : null;
+}
+
+/**
  * Save a chosen default and settle the screen. On success the choice is applied
  * and a newer reload starts, so latestOnly discards an earlier in-flight response
  * that captured the old default. On failure nothing is applied or reloaded.
@@ -66,4 +78,21 @@ export async function settleChoice(save, { applied, reload, failed }) {
  */
 export function loadFailureView(listIsCurrent, hasList) {
   return listIsCurrent && hasList ? "alongside" : "replace";
+}
+
+/**
+ * Which of a card's actions to disable while a template is open in the editor.
+ * The editor holds unsaved text the section cannot see, so whatever would unmount
+ * it waits for Close, which already offers "Discard and close": removing its own
+ * template (rename or delete), or switching the editor to another card. Edit on
+ * its own card is a no-op and stays on; other cards' rename and delete leave the
+ * open template alone.
+ * @param {string | null} editing name of the template open in the editor
+ * @param {string} name the card's template
+ * @returns {{edit: boolean, rename: boolean, remove: boolean}}
+ */
+export function editLocks(editing, name) {
+  const open = editing !== null;
+  const own = open && editing === name;
+  return { edit: open && !own, rename: own, remove: own };
 }

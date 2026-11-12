@@ -124,6 +124,15 @@ function toEpochMs(value) {
 // only worth making for boards that actually exhibit the pattern: boards
 // already reporting real cities pay nothing (Datadog's /offices is 2.8MB).
 
+// /offices gets its own ceiling. It repeats the board's job list once per
+// office in the nested tree, so it outgrows the shared 10 MB / 10 s defaults
+// long before /jobs does: Stripe's was 29.2 MB on 2026-11-09 for a 769-job
+// board, and every run aborted, leaving each Stripe role as a bare "Hybrid"
+// the location filter cannot place. 64 MB / 60 s leaves 2x headroom on the
+// largest board seen while still bounding a hostile endpoint.
+export const OFFICES_MAX_BYTES = 64 * 1024 * 1024;
+export const OFFICES_TIMEOUT_MS = 60_000;
+
 const WORK_MODEL = /^(?:hybrid|in[-\s]?office|on[-\s]?site|distributed|remote|flexible)$/i;
 
 /**
@@ -307,7 +316,7 @@ export default {
       if (officesUrl) {
         try {
           assertGreenhouseUrl(officesUrl);
-          officeMap = buildOfficeMap(await ctx.fetchJson(officesUrl, { redirect: 'error' }));
+          officeMap = buildOfficeMap(await ctx.fetchJson(officesUrl, { redirect: 'error', maxBytes: OFFICES_MAX_BYTES, timeoutMs: OFFICES_TIMEOUT_MS }));
         } catch (err) {
           // No /offices on this board, or it failed — fall back to the bare
           // work-model string. Enrichment is best-effort; a scan must never

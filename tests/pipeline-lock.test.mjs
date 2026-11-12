@@ -24,14 +24,14 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { tryAcquireDirLockSync } from '../lib/dir-lock.mjs';
 import {
   acquirePipelineLock, LockTimeoutError, OWNERLESS_GRACE_MS,
   lockRecoveryVerdict, RECOVER_STALE, RECOVER_VANISHED, RECOVER_LIVE,
   createLockWaitPolicy,
 } from '../pipeline-lock.mjs';
-import { collectMjsFiles } from '../lib/mjs-files.mjs';
+import { trackedFiles } from '../lib/mjs-files.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SELF = fileURLToPath(import.meta.url);
@@ -511,7 +511,16 @@ test('acquirePipelineLock: a lock that keeps changing hands does not time out a 
     // LockTimeoutError even though the lock was healthy and briskly shared —
     // which for agent-inbox.mjs meant its request was silently dropped. The
     // timeout is for a WEDGED holder, not for losing the retry lottery.
-    const lock = await acquirePipelineLock(p, { timeoutMs: EXTENSION_WINDOW_MS, retryMs: 15 });
+    //
+    // maxWaitMs is explicit, not inherited: without it the ceiling comes from
+    // CAREER_OPS_PIPELINE_LOCK_MAX_WAIT_MS, and a shell exporting less than the
+    // churn below (~2.6 windows) fails this case for a reason that has nothing
+    // to do with the code under test. 10 windows is the module's own default.
+    const lock = await acquirePipelineLock(p, {
+      timeoutMs: EXTENSION_WINDOW_MS,
+      retryMs: 15,
+      maxWaitMs: EXTENSION_WINDOW_MS * 10,
+    });
     const elapsed = Date.now() - startedAt;
     lock.release();
     const handoffs = await freeItLater;
@@ -806,6 +815,33 @@ test('createLockWaitPolicy: a hardDeadline that is not a number is refused, not 
   }
 });
 
+// Comments are stripped first: naming the parameter while explaining why it is
+// NOT passed is exactly what the three call sites now do, and a guard that fires
+// on prose gets silenced rather than obeyed.
+const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+
+/**
+ * Every TRACKED `.mjs` under `root` that names hardDeadline in code, as
+ * repo-relative POSIX paths. `exclude` holds absolute paths that are allowed to.
+ *
+ * Tracked, not the working tree (#6836). This walked the tree with
+ * collectMjsFiles and then read every file it listed, so a file another suite
+ * created and removed under the repository root while the scan ran was listed
+ * and then gone: plugins-cli-usage.test.mjs installs a fixture into the
+ * gitignored plugins.local/, and the read threw ENOENT and failed this suite in
+ * a full run. A gitignored plugin is not repository source either, so it was
+ * never this guard's to grade. trackedFiles reads the index, which a parallel
+ * suite does not touch, and skips an indexed path that is missing on disk.
+ */
+function hardDeadlineOffenders(root, exclude = []) {
+  const sources = trackedFiles(root, (rel) => rel.endsWith('.mjs'))
+    .filter((f) => !exclude.includes(f));
+  const offenders = sources
+    .filter((f) => withoutComments(readFileSync(f, 'utf-8')).includes('hardDeadline'))
+    .map((f) => f.slice(root.length + 1).replace(/\\/g, '/'));
+  return { scanned: sources.length, offenders };
+}
+
 test('no lock module re-derives the wait ceiling — the policy holds the only copy (#3895)', () => {
   const policyModule = join(REPO_ROOT, 'lib', 'dir-lock.mjs');
   // The web's copy of the policy module is the policy, not a re-derivation of
@@ -813,23 +849,17 @@ test('no lock module re-derives the wait ceiling — the policy holds the only c
   // scanned like any other file.
   const webMirror = join(REPO_ROOT, 'web', 'src', 'lib', 'core', 'dir-lock.mjs');
   const mirrorIsPolicy = existsSync(webMirror) && readFileSync(webMirror).equals(readFileSync(policyModule));
-  const sources = collectMjsFiles(REPO_ROOT)
-    .filter((f) => f !== SELF && f !== policyModule && !(mirrorIsPolicy && f === webMirror));
+  const { scanned, offenders } = hardDeadlineOffenders(
+    REPO_ROOT,
+    [SELF, policyModule, ...(mirrorIsPolicy ? [webMirror] : [])],
+  );
 
   // A guard that cannot look must never pass: an empty or tiny scan means the
   // walk failed, not that the repository is clean.
   assert.ok(
-    sources.length > 100,
-    `only ${sources.length} .mjs files scanned — this guard could not inspect the tree`,
+    scanned > 100,
+    `only ${scanned} .mjs files scanned — this guard could not inspect the tree`,
   );
-
-  // Comments are stripped first: naming the parameter while explaining why it
-  // is NOT passed is exactly what the three call sites now do, and a guard that
-  // fires on prose gets silenced rather than obeyed.
-  const withoutComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
-  const offenders = sources
-    .filter((f) => withoutComments(readFileSync(f, 'utf-8')).includes('hardDeadline'))
-    .map((f) => f.slice(REPO_ROOT.length + 1).replace(/\\/g, '/'));
 
   assert.deepEqual(
     offenders, [],
@@ -837,6 +867,34 @@ test('no lock module re-derives the wait ceiling — the policy holds the only c
     + 'instead of letting createLockWaitPolicy do it — the duplicated invariant #3895 removed. '
     + 'A ceiling belongs to the policy; a copy of it stays correct only until someone edits one side',
   );
+});
+
+test('the wait-ceiling guard grades tracked files only, not a plugin in plugins.local/ (#6836)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'co-ceiling-tracked-'));
+  try {
+    const git = (...args) => execFileSync('git', ['-C', dir, ...args], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    git('init', '-q');
+    const rederives = 'export const policy = { hardDeadline: Date.now() + 1000 };\n';
+    writeFileSync(join(dir, '.gitignore'), 'plugins.local/\n');
+    mkdirSync(join(dir, 'plugins.local', 'probe'), { recursive: true });
+    writeFileSync(join(dir, 'plugins.local', 'probe', 'index.mjs'), rederives);
+    writeFileSync(join(dir, 'shipped.mjs'), rederives);
+    writeFileSync(join(dir, 'vanished.mjs'), 'export {};\n');
+    git('add', '-A');
+    // Indexed but gone from disk: the shape of a file a parallel suite removed
+    // mid-scan. It must be skipped, not read.
+    rmSync(join(dir, 'vanished.mjs'));
+
+    // The tracked copy of the same source IS reported, so the empty result for
+    // plugins.local/ is the enumeration excluding it, not the fixture failing to
+    // look like an offender.
+    assert.deepEqual(hardDeadlineOffenders(dir), { scanned: 1, offenders: ['shipped.mjs'] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

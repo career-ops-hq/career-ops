@@ -235,7 +235,7 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 ## Score Evidence
 (fem dimensioner, evidensstatus, åbne spørgsmål, Evidence confidence, prioriteter)
 
-## H) Udkast til svar til ansøgningen
+## H) Udkast til svar til ansøgningen (draft)
 (kun ved score >= 4.5 -- udkast til svar til ansøgningsformularen)
 
 ---

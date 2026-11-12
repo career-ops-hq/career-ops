@@ -363,6 +363,9 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
     url: postingUrl,
     title: compactText(str(job.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    // isListed:false is NOT closure: Ashby serves an unlisted posting by direct
+    // link and it can still take applications. The note in the text is the only
+    // carrier; closure needs independent evidence.
   };
 }
 
@@ -1156,7 +1159,7 @@ function emitJd(result, maxChars) {
   }
   // bodyText exists only for jdFailure(); drop it so the documented success
   // shape `{ url, title, text }` is unchanged.
-  const { bodyText: _bodyText, ...emitted } = result;
+  const { bodyText: _bodyText, closed: _closed, evidence: _evidence, ...emitted } = result;
   process.stdout.write(JSON.stringify(emitted));
 }
 

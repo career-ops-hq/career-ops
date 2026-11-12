@@ -134,7 +134,7 @@ Keep feedback tight. One or two things to sharpen per answer — not a full rewr
 
 ### Write Session Transcript
 
-After the summary, write a machine-readable session transcript to `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (use `practice` for the company/role slug if this wasn't a company-specific session). This is a structured record of the round for downstream analysis modes; the speaker-labelled turns let a consumer read either side without re-inferring who spoke. The full contract lives in `interview-prep/sessions/README.md`.
+After the summary, write a machine-readable session transcript to `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (use `practice` for the company/role slug if this wasn't a company-specific session). If that file already exists, do not overwrite it: add the next free counter (`-2`, `-3`, ...) before `.md`, as described in the README's "File names" section. This is a structured record of the round for downstream analysis modes; the speaker-labelled turns let a consumer read either side without re-inferring who spoke. The full contract lives in `interview-prep/sessions/README.md`.
 
 Format:
 

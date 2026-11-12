@@ -278,7 +278,7 @@ Cover:
 
 #### Block D — Compensation and Demand
 
-Use WebSearch for salary bands, company compensation reputation, funding/hiring signals, and market demand. Cite sources when available. If data is missing, say so.
+Use WebSearch for salary bands, company compensation reputation, funding/hiring signals, and market demand. Cite sources when available. If the posting states no figure and search finds none, mark compensation unknown. Do not invent a salary. Unknown compensation does not move the score.
 
 Before interpreting any salary, classify the **company type / hiring entity**. A public salary figure is a signal, not a contractual promise.
 
@@ -545,7 +545,7 @@ risk_summary:
 Rules:
 - Populate `confidence_gaps` with up to three non-empty strings naming the verification priorities; the examples show the empty form, `confidence_gaps: []`.
 - Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, `discard_reasons`, `requirement_importance`, or `confidence_gaps` when empty.
-- `discard_reasons` items are canonical ids from `templates/discard-reasons.yml`: `salary_too_low`, `hybrid_required`, `tech_stack_mismatch`, `seniority_mismatch`, `geo_restriction`, `size_mismatch`, `company_culture`. Read that file for when each applies. When no id fits, write a short free-text reason instead of forcing the nearest id: `analyze-patterns.mjs` lists it as `other`, apart from the canonical shares, and a reason that keeps recurring there is how the vocabulary grows.
+- `discard_reasons` items are canonical ids from `templates/discard-reasons.yml`: `salary_too_low`, `hybrid_required`, `tech_stack_mismatch`, `seniority_mismatch`, `geo_restriction`, `size_mismatch`, `company_culture`. Read that file for when each applies. Write the id alone, with no explanation after it (`geo_restriction`, not `geo_restriction: relocation required`); the explanation belongs in `hard_stops` or `soft_gaps`. When no id fits, write a short free-text reason instead of forcing the nearest id: `analyze-patterns.mjs` lists it as `other`, apart from the canonical shares, and a reason that keeps recurring there is how the vocabulary grows.
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
@@ -752,7 +752,7 @@ Translate these human-facing headings according to `language.output` when it is 
 
 ### Step 4 — Generate PDF (configurable)
 
-Read `config/profile.yml` and resolve `auto_pdf_score_threshold`. If absent, default to `3.0`.
+Read `config/profile.yml` and resolve `auto_pdf_score_threshold`. If absent, default to `3.0` (`PDF_GATE_DEFAULT` in `lib/score-action.mjs`, the floor of the Maybe band).
 
 Only generate the PDF when the score from Step 2 is greater than or equal to the threshold. If the score is below the threshold:
 
