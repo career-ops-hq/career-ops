@@ -1,0 +1,89 @@
+// A sign-in page with an email box used to count as the application, and the
+// password input was stored as text. A later fill would type into it.
+//
+// Run from web/: node --test tests/lib/apply-login-wall.test.mjs
+
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { register } from "node:module";
+import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const here = dirname(fileURLToPath(import.meta.url));
+const src = join(here, "../../src");
+register(`data:text/javascript,${encodeURIComponent(`
+  import { existsSync } from 'node:fs';
+  import { pathToFileURL, fileURLToPath } from 'node:url';
+  import path from 'node:path';
+  export async function resolve(specifier, context, nextResolve) {
+    const base = specifier.startsWith('@/')
+      ? path.join(${JSON.stringify(src)}, specifier.slice(2))
+      : specifier.startsWith('.') ? fileURLToPath(new URL(specifier, context.parentURL)) : null;
+    if (base) {
+      for (const ext of ['', '.ts', '.mjs', '.js']) {
+        if (existsSync(base + ext)) return { url: pathToFileURL(base + ext).href, shortCircuit: true };
+      }
+    }
+    return nextResolve(specifier, context);
+  }
+`)}`, pathToFileURL(src + "/"));
+
+const loginHtml = readFileSync(join(here, "../fixtures/apply-login-wall.html"), "utf8");
+const applicationHtml = readFileSync(join(here, "../fixtures/apply-login-wall-application.html"), "utf8");
+
+test("a password box is a login wall and stays blank", async (t) => {
+  const server = createServer((req, res) => {
+    const body = (req.url || "").includes("application") ? applicationHtml : loginHtml;
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(body);
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const port = server.address().port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const { chromium } = await import("playwright-core");
+  const { extractForm } = await import("../../src/lib/apply/extract.ts");
+  const { fillSession, isApplicationFormFn } = await import("../../src/lib/apply/session.ts");
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage();
+
+  await page.goto(`http://127.0.0.1:${port}/apply-login-wall.html`);
+  const login = await extractForm(page.mainFrame());
+  const password = login.fields.find((field) => field.label === "Password");
+  assert.equal(password?.type, "password");
+  assert.equal(isApplicationFormFn(login), false);
+
+  const answers = Object.fromEntries(login.fields.map((field) => [field.id, "not-a-secret"]));
+  const id = `fixture-${crypto.randomUUID()}`;
+  globalThis.__coApplySessions.set(id, { id, frame: page.mainFrame(), page, title: login.title, url: page.url() });
+  try {
+    const filled = await fillSession(id, answers, login.fields);
+    assert.equal(filled.issues.some((issue) => issue.code === "login-wall"), true);
+    assert.equal(filled.steps.length, 0);
+  } finally {
+    globalThis.__coApplySessions.delete(id);
+  }
+  const values = await page.locator("input").evaluateAll((els) => els.map((el) => el.value));
+  assert.deepEqual(values, ["", "", ""]);
+
+  const secret = login.fields.find((field) => field.label === "Secret");
+  const secretId = `fixture-${crypto.randomUUID()}`;
+  globalThis.__coApplySessions.set(secretId, { id: secretId, frame: page.mainFrame(), page, title: login.title, url: page.url() });
+  try {
+    await fillSession(secretId, { [secret.id]: "not-a-secret" }, [{ ...secret, type: "text", label: "Secret" }]);
+  } finally {
+    globalThis.__coApplySessions.delete(secretId);
+  }
+  assert.equal(await page.locator("input[name=secret]").inputValue(), "");
+
+  await page.goto(`http://127.0.0.1:${port}/application.html`);
+  const application = await extractForm(page.mainFrame());
+  assert.equal(isApplicationFormFn(application), true);
+  assert.equal(application.fields.some((field) => field.type === "password"), false);
+});
