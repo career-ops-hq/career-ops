@@ -148,6 +148,24 @@ try {
     pass('amazon.fetch keeps the 20-page default when the API reports no hits, and marks the cut');
   else fail(`amazon no-hits default: ${noHitsN.n} calls, ${noHits.result.length} jobs, ${JSON.stringify(noHits.lines)}`);
 
+  // `hits` understates the board (2,000 reported, 2,500 real): the budget is
+  // one page past hits, the walk ends on a full page, and that is partial.
+  const underN = { n: 0 };
+  const underCtx = board(2500, underN);
+  const realFetch = underCtx.fetchJson;
+  underCtx.fetchJson = async (url) => ({ ...(await realFetch(url)), hits: 2000 });
+  const under = await quiet(() => amazon.fetch({ name: 'Under', amazon: {} }, underCtx));
+  if (underN.n === 21 && under.result.length === 2100 && under.result.truncated?.reason === 'page-cap' && under.lines.length === 1)
+    pass('amazon.fetch never treats an understated hits as the end: reads one page past it and marks the cut');
+  else fail(`amazon understated hits: ${underN.n} calls, ${under.result.length} jobs, ${JSON.stringify(under.result.truncated)}, ${JSON.stringify(under.lines)}`);
+
+  // A board that is an exact multiple of the page size ends on an observed empty page, untruncated.
+  const exactN = { n: 0 };
+  const exact = await quiet(() => amazon.fetch({ name: 'Exact', amazon: {} }, board(3000, exactN)));
+  if (exactN.n === 31 && exact.result.length === 3000 && !exact.result.truncated && exact.lines.length === 0)
+    pass('amazon.fetch reads an exact-multiple board to its empty page, untruncated');
+  else fail(`amazon exact multiple: ${exactN.n} calls, ${exact.result.length} jobs, ${JSON.stringify(exact.lines)}`);
+
   // A health probe (ctx.maxPages = 1) reads one page and is not a truncation.
   const probeN = { n: 0 };
   const probe = await quiet(() => amazon.fetch({ name: 'Probe', amazon: {} }, { ...board(3171, probeN), maxPages: 1 }));

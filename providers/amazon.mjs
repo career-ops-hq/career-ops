@@ -109,24 +109,27 @@ export default {
     const jobs = [];
     const seen = new Set();
     // MAX_PAGES caps a walk only while the total is unknown. The API reports
-    // `hits` for the filtered query, so once page 0 answers, the walk is bounded
-    // by that total (up to HARD_MAX_PAGES). A whole-region board such as CA+NY
+    // `hits` for the filtered query, and once page 0 answers, that total sizes
+    // the page budget (one page past it, up to HARD_MAX_PAGES). It never proves
+    // the walk complete (ADDING_A_PROVIDER.md): only an empty page, a short page
+    // or a page with no new ids ends the board, so a `hits` that understates the
+    // result set leaves a full last page, which is reported partial. A whole-region board such as CA+NY
     // (3,171 postings, 2026-11-07) is then read in full instead of being sliced
     // by keyword queries that miss titles (a "business operations" query found
     // 1,239 CA+NY postings the six keyword slices never returned).
     const probe = Number(ctx?.maxPages);
     let maxPages = probe > 0 ? Math.min(MAX_PAGES, probe) : MAX_PAGES;
     let total = null;
-    let page = 0;
-    for (; page < maxPages; page++) {
+    let ended = false; // set only by a natural end of the board
+    for (let page = 0; page < maxPages; page++) {
       const url = buildQuery(entry, page * PAGE_SIZE);
       const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
       if (total === null && Number.isInteger(json?.hits)) {
         total = json.hits;
-        if (!(probe > 0)) maxPages = Math.max(maxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+        if (!(probe > 0)) maxPages = Math.max(maxPages, Math.min(Math.ceil(total / PAGE_SIZE) + 1, HARD_MAX_PAGES));
       }
       const postings = Array.isArray(json?.jobs) ? json.jobs : [];
-      if (postings.length === 0) break;
+      if (postings.length === 0) { ended = true; break; }
 
       let fresh = 0;
       for (const j of postings) {
@@ -144,11 +147,10 @@ export default {
           postedAt: toEpochMs(j),
         });
       }
-      if (fresh === 0) break; // API ignored offset / looped
-      if (postings.length < PAGE_SIZE) break; // last page
-      if (total !== null && (page + 1) * PAGE_SIZE >= total) break;
+      if (fresh === 0) { ended = true; break; } // API ignored offset / looped
+      if (postings.length < PAGE_SIZE) { ended = true; break; } // last page
     }
-    if (!(probe > 0) && page >= maxPages && (total === null || jobs.length < total)) {
+    if (!(probe > 0) && !ended) {
       console.error(`⚠️  amazon: ${entry.name} stopped at ${maxPages} pages (${jobs.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial`);
       /** @type {any} */ (jobs).truncated = { reason: 'page-cap', fetched: jobs.length, ...(total === null ? {} : { total }) };
     }
