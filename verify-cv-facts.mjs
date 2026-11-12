@@ -2106,15 +2106,17 @@ export function scopeInflationClaims(targetText, sourceText, language = 'en') {
       // candidate did, so it is no evidence that the source is weaker.
       const linked = overlaps.filter(({ shared, source }) => profile.accuses(shared, tokens) && !source.heading);
       if (!linked.length) continue;
-      const vouched = overlaps.some(({ shared, source }) => {
-          if (!shared.length || source.tier < opening.tier) return false;
+            const vouched = overlaps.some(({ shared, source }) => {
+        if (!shared.length || source.tier < opening.tier) return false;
 
-          if (language === 'zh' && source.tier === Infinity && !source.heading) {
-            return profile.accuses(shared, tokens);
-          }
+        if (language === 'zh' && source.tier === Infinity && !source.heading) {
+          return profile.accuses(shared, tokens);
+        }
 
-          return true;
-        });
+        return true;
+      });
+      if (vouched) continue;
+
       const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
       claims.push({
         kind: 'scope',
