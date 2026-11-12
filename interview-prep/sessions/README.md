@@ -38,9 +38,10 @@ Files are named `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. The name i
 only a label: consumers read the front matter, never the filename. When that path
 already exists (a second round of the same type on the same day, or a practice
 run next to a debrief), never overwrite it silently. Append a counter before
-`.md` instead: `-2`, then `-3`, and so on. `interview/debrief` first asks whether
-the new input is a re-run of the same round, in which case the existing file is
-updated in place, so one real interview is never stored as two sessions.
+`.md` instead: `-2`, then `-3`, and so on. `interview/debrief` first lists the
+existing files for that company, role, round and date and asks whether the new
+input re-runs one of them; if so, the file the candidate picks is updated in
+place, so one real interview is never stored as two sessions.
 
 ## Stated priorities (optional)
 
