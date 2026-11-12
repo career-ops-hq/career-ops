@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ExternalLink, FileText, File, Calendar, Loader2 } from "lucide-react";
 import { pageFrameWidthClass } from "@/components/page-frame";
 import { documentDisplayTitle } from "@/lib/document-title.mjs";
+import { createLatestRequest } from "@/lib/latest-request.mjs";
 
 type DocumentItem = {
   id: string;
@@ -24,31 +25,49 @@ export default function DocumentsPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Only the newest request applies its result: a slower, older response that
+  // lands after a newer one is ignored instead of putting the older list back.
+  const requests = useRef(createLatestRequest());
   const refetch = useCallback(() => {
+    const ticket = requests.current.start();
     fetch("/api/documents")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load documents");
         return res.json();
       })
       .then((data) => {
+        if (!requests.current.isLatest(ticket)) return;
         setDocuments(data);
         setError(null);
       })
       .catch((err) => {
+        if (!requests.current.isLatest(ticket)) return;
         setError(err.message || "Something went wrong");
       })
       .finally(() => {
+        if (!requests.current.isLatest(ticket)) return;
         setLoading(false);
       });
   }, []);
 
   useEffect(() => {
+    const latest = requests.current;
     refetch();
 
+    // co-job-done only reaches the tab that ran the job. Another open tab
+    // refetches when it becomes visible again, so it does not keep showing a
+    // list from before the job finished.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refetch();
+    };
+
     window.addEventListener("co-job-done", refetch);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
       window.removeEventListener("co-job-done", refetch);
+      document.removeEventListener("visibilitychange", onVisible);
+      latest.cancel();
     };
   }, [refetch]);
 
