@@ -349,7 +349,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > OPENAI_API_KEY=your_uberllm_key \
 > node openai-eval.mjs --file ./jds/job.txt
 > ```
-> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+> As with other hosted providers, this sends your CV and job description to the configured endpoint. UberLLM then routes each request to one of the third-party model providers it works with, so your CV and job description also reach that provider.
 >
 > Standard Compute (`https://api.stdcmpt.com/v1`) is another OpenAI-compatible endpoint that works the same way. The `StandardCompute` model id sends each request to the cheapest enabled model that can handle it, with automatic fallback; pinned model ids are listed at `https://api.stdcmpt.com/v1/models`:
 > ```bash
