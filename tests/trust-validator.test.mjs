@@ -355,6 +355,12 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
 
 {
   const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://acme.recruitmentplatform.com/details.html?jobId=4001', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'recruitmentplatform.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
   const r = v({ url: 'https://join.com/companies/acme/15402839', company: 'Acme' });
   assert(!r.flags.includes('company_domain_mismatch'), 'join.com → ATS allowlist, no mismatch');
 }

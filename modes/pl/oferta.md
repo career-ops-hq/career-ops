@@ -235,7 +235,7 @@ Nazwy pól w nagłówku (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF
 ## Score Evidence
 (pięć wymiarów, status dowodu, otwarte pytania, Evidence confidence, priorytety)
 
-## H) Szkice odpowiedzi do aplikacji
+## H) Szkice odpowiedzi do aplikacji (draft)
 (tylko jeśli score >= 4.5 -- szkice odpowiedzi do formularza aplikacyjnego)
 
 ---
@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Format trackera:**
 
 ```markdown
-| # | Data | Firma | Rola | Score | Status | PDF | Report |
+| # | Data | Firma | Rola | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Obserwacje wynagrodzeń (tylko oczekiwana kwota)

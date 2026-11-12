@@ -23,6 +23,20 @@ const MAX_PAGES_CAP = 500;
 // observed so far.
 const DEFAULT_PAGE_SIZE = 10;
 
+// Opt-in per entry: `page_size: N` sends `limit=N` so each request returns up to N
+// postings (measured on careers.petsmart.com: limit=100 returns 100 and `page` then
+// counts in those units). Fewer, larger requests reach more of a big board for the
+// same politeness (robots.txt there is `Allow: /`, crawl-delay 5). Default is
+// unchanged: no `limit` is sent unless the entry sets it.
+const MAX_PAGE_SIZE = 100;
+
+/** Resolve an explicit page size: a positive integer `page_size`, capped; null = not set. */
+function resolvePageSize(entry) {
+  const v = entry?.page_size;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGE_SIZE);
+  return null;
+}
+
 /** Resolve the page cap: a positive integer `max_pages` on the entry, capped. */
 function resolveMaxPages(entry) {
   const v = entry?.max_pages;
@@ -103,7 +117,14 @@ export default {
     const apiUrl = (typeof entry.api === 'string' && validateExplicitApi(entry.api))
       || toApiUrl(url);
     if (!apiUrl) throw new Error(`jibeapply: cannot derive API URL for ${entry.name}`);
-    const first = await ctx.fetchJson(apiUrl, { redirect: 'error' });
+    const requestedSize = resolvePageSize(entry);
+    let firstUrl = apiUrl;
+    if (requestedSize) {
+      const u1 = new URL(apiUrl);
+      u1.searchParams.set('limit', String(requestedSize));
+      firstUrl = u1.toString();
+    }
+    const first = await ctx.fetchJson(firstUrl, { redirect: 'error' });
     const total = first.totalCount ?? 0;
     // Use the actual number of items returned as page size — some implementations
     // set `count` to the total rather than the per-page count.
@@ -112,9 +133,12 @@ export default {
     // Set when the board is cut short (page cap or a failed page), so a caller can tell a
     // partial board from a complete one without reading stderr (the workdayTruncated convention).
     let truncated = false;
+    let pageFailed = false;
 
     if (total > pageSize && pageSize > 0) {
-      const maxPages = resolveMaxPages(entry);
+      // A health probe (verify-portals passes ctx.maxPages) caps the walk too.
+      const probeMax = Number(ctx.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+      const maxPages = Math.min(resolveMaxPages(entry), probeMax);
       const pages = Math.min(Math.ceil(total / pageSize), maxPages);
       // Sequential, not concurrent (mirrors providers/4dayweek.mjs, thehub.mjs,
       // arbeitnow.mjs, workday.mjs) — a single tenant's API has no reason to
@@ -122,12 +146,15 @@ export default {
       // cleanly with whatever pages were already gathered instead of
       // discarding them (Promise.all would fail the whole batch on one error).
       for (let page = 2; page <= pages; page++) {
-        const u2 = new URL(apiUrl);
+        const u2 = new URL(firstUrl);
         u2.searchParams.set('page', String(page));
         let json;
         try {
           json = await ctx.fetchJson(u2.toString(), { redirect: 'error' });
         } catch (err) {
+          // A health probe (ctx.maxPages set) must see the failure, not first-page jobs as success.
+          if (ctx.maxPages != null) throw err;
+          pageFailed = true;
           console.error(`⚠️  jibeapply: ${entry.name} page ${page} fetch failed — ${err.message} (returning ${allJobs.length} jobs fetched so far)`);
           truncated = true;
           break;
@@ -139,13 +166,26 @@ export default {
       // but a tenant that actually exceeds it needs to be surfaced —
       // otherwise the user has no way to notice postings are missing from
       // their scan.
-      if (Math.ceil(total / pageSize) > maxPages) {
+      // Not when a page failed: the scan stopped on the fetch error, already reported above.
+      if (!pageFailed && probeMax === Infinity && Math.ceil(total / pageSize) > maxPages) {
         truncated = true;
-        console.error(
-          `⚠️  jibeapply: ${entry.name} has more postings than max_pages allows ` +
-          `(fetched ${allJobs.length} of ${total}) — ` +
-          `set max_pages on this portal entry to raise the cap (current: ${maxPages})`,
-        );
+        const atCap = maxPages >= MAX_PAGES_CAP;
+        if (atCap) {
+          // Raising max_pages cannot help here: the provider ceiling is the limit.
+          const hint = pageSize < MAX_PAGE_SIZE
+            ? ` — set page_size (up to ${MAX_PAGE_SIZE}) on this portal entry to read more postings per request`
+            : ` — narrow the board with a filter in the entry's api URL (e.g. a location query)`;
+          console.error(
+            `⚠️  jibeapply: ${entry.name} is still cut short at the provider ceiling of ${MAX_PAGES_CAP} pages ` +
+            `(fetched ${allJobs.length} of ${total}); max_pages is already at its cap, so raising it changes nothing${hint}`,
+          );
+        } else {
+          console.error(
+            `⚠️  jibeapply: ${entry.name} has more postings than max_pages allows ` +
+            `(fetched ${allJobs.length} of ${total}) — ` +
+            `set max_pages on this portal entry to raise the cap (current: ${maxPages})`,
+          );
+        }
       }
     }
 

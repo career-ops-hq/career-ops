@@ -55,28 +55,67 @@ test("parseCvEnvelope: normalizes format case", () => {
   assert.deepEqual(result.warnings, []);
 });
 
-test("parseCvEnvelope: missing format falls back to letter with a warning", () => {
+test("parseCvEnvelope: a missing format is reported as none declared", () => {
   // Given an envelope with no format attribute
   const result = parseCvEnvelope(envelope(DOC, null));
 
-  // Then it still renders, defaulting to letter — the value modes/pdf.md:191
-  // documents for an absent page_format — but says so out loud
+  // Then it parses, with no format and no country. Whether that means the
+  // profile's sheet or the project default is core/page-format.mjs's call: the
+  // parser does not read the profile, so it neither defaults nor warns here.
   assert.equal(result.ok, true);
   assert.equal(result.html, DOC);
-  assert.equal(result.format, "letter");
-  assert.equal(result.warnings.length, 1);
-  assert.match(result.warnings[0], /format/i);
+  assert.equal(result.format, null);
+  assert.equal(result.country, null);
+  assert.deepEqual(result.warnings, []);
 });
 
-test("parseCvEnvelope: unrecognized format falls back to letter with a warning", () => {
+test("parseCvEnvelope: an unrecognized format is dropped with a warning", () => {
   // Given an envelope naming a page size generate-pdf.mjs does not support
   const result = parseCvEnvelope(envelope(DOC, "legal"));
 
-  // Then it degrades to the documented default rather than passing junk on
+  // Then junk is never passed on as a format, and the user is told
   assert.equal(result.ok, true);
-  assert.equal(result.format, "letter");
+  assert.equal(result.format, null);
   assert.equal(result.warnings.length, 1);
   assert.match(result.warnings[0], /legal/);
+});
+
+test("parseCvEnvelope: reads the country an auto run declares", () => {
+  // Given the marker the prompt asks for under page_format: auto
+  const result = parseCvEnvelope(`<<cv-html country="DE">>\n${DOC}\n<</cv-html>>`);
+
+  // Then the country is passed on as written, for the core to map and validate
+  assert.equal(result.ok, true);
+  assert.equal(result.html, DOC);
+  assert.equal(result.format, null);
+  assert.equal(result.country, "DE");
+  assert.deepEqual(result.warnings, []);
+});
+
+test("parseCvEnvelope: a format and a country can both be declared", () => {
+  const result = parseCvEnvelope(`<<cv-html format="a4" country=" us ">>\n${DOC}\n<</cv-html>>`);
+  assert.equal(result.ok, true);
+  assert.equal(result.format, "a4");
+  assert.equal(result.country, "us");
+});
+
+test("parseCvEnvelope: an empty country counts as none", () => {
+  const result = parseCvEnvelope(`<<cv-html country="">>\n${DOC}\n<</cv-html>>`);
+  assert.equal(result.ok, true);
+  assert.equal(result.country, null);
+});
+
+test("createCvEnvelopeFilter: a country marker is kept out of the run log", () => {
+  // Given the auto marker streamed in pieces
+  const filter = createCvEnvelopeFilter();
+  const shown = ["Done.\n<<cv-html coun", `try="FR">>\n${DOC}\n<</cv-html>>\nVERDICT: 5/5\n`].map((c) => filter.push(c)).join("") + filter.flush();
+
+  // Then neither the marker nor the body reaches the log, and the CV parses
+  assert.ok(!shown.includes("cv-html"), shown);
+  assert.ok(!shown.includes("<h1>"), shown);
+  const result = filter.result();
+  assert.equal(result.ok, true);
+  assert.equal(result.country, "FR");
 });
 
 test("parseCvEnvelope: no envelope at all is a failure", () => {

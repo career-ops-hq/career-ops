@@ -9,7 +9,12 @@ import {
   slugify, decodeHtml,
   createLocalGate, writeRunLog,
 } from '../scan-local-lib.mjs';
-import { buildSeekUrl, parseSeekPage, extractReduxJson, loadSearches as seekSearches } from '../scan-seek.mjs';
+import { companyRoleDedupKey } from '../scan.mjs';
+import { normalizeCompanyName } from '../invite-match.mjs';
+import {
+  buildSeekUrl, parseSeekPage, extractReduxJson,
+  scanSeekSearch, loadSearches as seekSearches,
+} from '../scan-seek.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -61,6 +66,63 @@ test('local gate: title, seen URL, same-role dedup within and across runs', () =
   assert.strictEqual(known.check({ ...a, url: 'https://y.test/1' }), 'duplicate-role');
 });
 
+test('a locationless seen role still blocks a located local offer, and another city does not', () => {
+  const open = {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    blacklist: new Map(),
+    seen: new Set(),
+  };
+  const config = { location_filter: { workplace_policy: { onsite_locations: ['Harbor Bay'] } } };
+  const bare = companyRoleDedupKey('Lumenfield', 'Automation Analyst', normalizeCompanyName);
+  const blocked = createLocalGate({
+    config,
+    gateOptions: open,
+    seenRoles: new Set([bare]),
+  });
+  assert.strictEqual(
+    blocked.check({ url: 'https://boards.example/jobs/1', company: 'Lumenfield', title: 'Automation Analyst', location: 'Harbor Bay' }),
+    'duplicate-role',
+  );
+
+  const pebble = companyRoleDedupKey('Lumenfield', 'Automation Analyst', normalizeCompanyName, 'Pebbleford, TX');
+  const otherCity = createLocalGate({
+    config,
+    gateOptions: { ...open, seen: new Set() },
+    seenRoles: new Set([pebble]),
+  });
+  assert.strictEqual(
+    otherCity.check({ url: 'https://boards.example/jobs/2', company: 'Lumenfield', title: 'Automation Analyst', location: 'Harbor Bay' }),
+    null,
+  );
+});
+
+test('a located role blocks a later offer with no city, and a different city still comes through', () => {
+  const open = {
+    titleFilter: () => true,
+    locationFilter: () => true,
+    blacklist: new Map(),
+    seen: new Set(),
+  };
+  const config = { location_filter: { workplace_policy: { onsite_locations: ['Harbor Bay'] } } };
+  const harbor = { url: 'https://boards.example/jobs/1', company: 'Lumenfield', title: 'Automation Analyst', location: 'Harbor Bay' };
+  const noCity = { url: 'https://boards.example/jobs/2', company: 'Lumenfield', title: 'Automation Analyst' };
+  const pebble = { url: 'https://boards.example/jobs/3', company: 'Lumenfield', title: 'Automation Analyst', location: 'Pebbleford, TX' };
+
+  const locatedFirst = createLocalGate({ config, gateOptions: open, seenRoles: new Set() });
+  assert.strictEqual(locatedFirst.check(harbor), null);
+  assert.strictEqual(locatedFirst.check(noCity), 'duplicate-role');
+  assert.strictEqual(locatedFirst.check(pebble), null);
+
+  const bareFirst = createLocalGate({
+    config,
+    gateOptions: { ...open, seen: new Set() },
+    seenRoles: new Set(),
+  });
+  assert.strictEqual(bareFirst.check(noCity), null);
+  assert.strictEqual(bareFirst.check({ ...harbor, url: 'https://boards.example/jobs/4' }), 'duplicate-role');
+});
+
 test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'local-scan-'));
   try {
@@ -89,7 +151,7 @@ test('writeRunLog appends a scan-runs.tsv row stats.mjs can read by header name'
 
 // ── scan-seek ────────────────────────────────────────────────────────
 
-test('seek URL resolves known NZ locations and canonical in- paths, rejects unknown plain locations, and never has a query string', () => {
+test('seek URL resolves known NZ locations and canonical in- paths, rejects unknown plain locations, and omits query string on page 1 without daterange', () => {
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'Wellington' }),
     'https://nz.seek.com/data-analyst-jobs/in-All-Wellington');
   assert.strictEqual(buildSeekUrl({ keyword: 'Data Analyst', location: 'Masterton' }),
@@ -100,6 +162,107 @@ test('seek URL resolves known NZ locations and canonical in- paths, rejects unkn
   assert.ok(!buildSeekUrl({ keyword: 'a', location: 'Wellington' }).includes('?'));
   assert.throws(() => buildSeekUrl({ keyword: '!!!', location: '' }));
   assert.throws(() => buildSeekUrl({ keyword: 'devops', location: 'UnknownTown' }), /Unknown SEEK NZ location/);
+});
+
+test('seek URL appends daterange and page query parameters when requested', () => {
+  assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }, 7),
+    'https://nz.seek.com/devops-jobs?daterange=7');
+  assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }, null, 1),
+    'https://nz.seek.com/devops-jobs');
+  assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '' }, null, 2),
+    'https://nz.seek.com/devops-jobs?page=2');
+  assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: 'Wellington' }, 7, 3),
+    'https://nz.seek.com/devops-jobs/in-All-Wellington?daterange=7&page=3');
+  assert.strictEqual(buildSeekUrl({ keyword: 'devops', location: '', daterange: 14 }, { page: 2 }),
+    'https://nz.seek.com/devops-jobs?daterange=14&page=2');
+  assert.throws(() => buildSeekUrl({ keyword: 'devops', location: '' }, 0), /Invalid daterange/);
+  assert.throws(() => buildSeekUrl({ keyword: 'devops', location: '' }, null, 0), /Invalid page/);
+});
+
+test('seek pagination walks pages with daterange and stops on an empty or repeated page or at maxPages', async () => {
+  const pageHtml = (ids) => `<html><script>window.SEEK_REDUX_DATA = ${JSON.stringify({
+    results: { results: { jobs: ids.map((id) => ({ id, title: `Role ${id}`, advertiser: { description: 'Acme' }, location: 'Auckland' })) } },
+  })};</script></html>`;
+
+  const requested = [];
+  const waits = [];
+  const pages = {
+    'https://nz.seek.com/devops-jobs?daterange=7': pageHtml(['101', '102']),
+    'https://nz.seek.com/devops-jobs?daterange=7&page=2': pageHtml(['102', '103']),
+    'https://nz.seek.com/devops-jobs?daterange=7&page=3': pageHtml([]),
+  };
+  const offers = await scanSeekSearch(
+    { keyword: 'devops', location: '' },
+    {
+      daterange: 7,
+      maxPages: 5,
+      delayMs: 50,
+      sleepImpl: async (ms) => waits.push(ms),
+      fetchText: async (url) => { requested.push(url); return pages[url] ?? pageHtml([]); },
+    },
+  );
+  assert.deepStrictEqual(offers.map((o) => o.id), ['101', '102', '103']);
+  assert.deepStrictEqual(requested, [
+    'https://nz.seek.com/devops-jobs?daterange=7',
+    'https://nz.seek.com/devops-jobs?daterange=7&page=2',
+    'https://nz.seek.com/devops-jobs?daterange=7&page=3',
+  ]);
+  assert.deepStrictEqual(waits, [50, 50]);
+
+  const repeatedCalls = [];
+  const repeatedOffers = await scanSeekSearch(
+    { keyword: 'devops', location: '' },
+    {
+      maxPages: 5,
+      fetchText: async (url) => {
+        repeatedCalls.push(url);
+        return pageHtml(['101', '102']);
+      },
+    },
+  );
+  assert.strictEqual(repeatedCalls.length, 2);
+  assert.deepStrictEqual(repeatedOffers.map((o) => o.id), ['101', '102']);
+
+  // Respects max_pages on the search entry when CLI maxPages is not set.
+  const cappedCalls = [];
+  const cappedOffers = await scanSeekSearch(
+    { keyword: 'devops', location: '', max_pages: 2 },
+    {
+      fetchText: async (url) => {
+        cappedCalls.push(url);
+        return pageHtml([String(cappedCalls.length)]);
+      },
+    },
+  );
+  assert.strictEqual(cappedCalls.length, 2);
+  assert.deepStrictEqual(cappedOffers.map((o) => o.id), ['1', '2']);
+
+  // Retains earlier-page offers and marks the search incomplete when a later
+  // page fails, while still rejecting when page 1 fails.
+  const partialCalls = [];
+  const partialOffers = await scanSeekSearch(
+    { keyword: 'devops', location: '' },
+    {
+      maxPages: 4,
+      fetchText: async (url) => {
+        partialCalls.push(url);
+        if (partialCalls.length === 1) return pageHtml(['201', '202']);
+        throw new Error('HTTP 503');
+      },
+    },
+  );
+  assert.strictEqual(partialCalls.length, 2);
+  assert.deepStrictEqual(partialOffers.map((o) => o.id), ['201', '202']);
+  assert.strictEqual(partialOffers.incomplete, true);
+  assert.strictEqual(partialOffers.error?.seekUrl, 'https://nz.seek.com/devops-jobs?page=2');
+
+  await assert.rejects(
+    scanSeekSearch(
+      { keyword: 'devops', location: '' },
+      { fetchText: async () => { throw new Error('HTTP 503'); } },
+    ),
+    (err) => err.message === 'HTTP 503' && err.seekUrl === 'https://nz.seek.com/devops-jobs',
+  );
 });
 
 test('seek page parsing reads SEEK_REDUX_DATA, dedups ids, decodes text', () => {
@@ -132,24 +295,40 @@ test('seek page parsing throws descriptively for blocked/malformed pages', () =>
   );
 });
 
-test('seek searches config: minimal { keyword, location? } schema', () => {
+test('seek searches config: minimal { keyword, location? } schema plus optional daterange and max_pages', () => {
   assert.deepStrictEqual(
-    seekSearches({ seek_searches: [{ keyword: ' qa ', location: 'Auckland' }, 'sre', { location: 'x' }, null] }),
-    [{ keyword: 'qa', location: 'Auckland' }, { keyword: 'sre', location: '' }],
+    seekSearches({
+      seek_searches: [
+        { keyword: ' qa ', location: 'Auckland' },
+        { keyword: 'data', location: 'Wellington', daterange: 7, max_pages: 3 },
+        'sre',
+        { location: 'x' },
+        null,
+      ],
+    }),
+    [
+      { keyword: 'qa', location: 'Auckland' },
+      { keyword: 'data', location: 'Wellington', daterange: 7, max_pages: 3 },
+      { keyword: 'sre', location: '' },
+    ],
   );
   assert.deepStrictEqual(seekSearches({}), []);
 });
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
-test('scan-seek.mjs: --help exits 0 without scanning; unknown flag (incl. removed --daterange) and missing operand exit 1', () => {
+test('scan-seek.mjs: --help exits 0 without scanning; unknown flag, missing operand and invalid --daterange/--pages exit 1', () => {
   const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'scan-seek.mjs'), ...args], { cwd: ROOT, encoding: 'utf-8', timeout: 30000 });
   const help = run('--help');
   assert.strictEqual(help.status, 0, help.stderr);
   assert.match(help.stdout, /Usage:/);
-  assert.ok(!help.stdout.includes('daterange'));
+  assert.match(help.stdout, /--daterange/);
+  assert.match(help.stdout, /--pages/);
   assert.strictEqual(run('--dryrun').status, 1);
   assert.strictEqual(run('--delay-ms').status, 1);
-  assert.strictEqual(run('--daterange', '7').status, 1);
+  assert.strictEqual(run('--daterange').status, 1);
+  assert.strictEqual(run('--pages').status, 1);
+  assert.strictEqual(run('--daterange', '0').status, 1);
+  assert.strictEqual(run('--pages', '0').status, 1);
 });
 

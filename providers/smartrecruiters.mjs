@@ -17,17 +17,47 @@
 // Detail enrichment answers "what does this job say", not "is this endpoint
 // alive" — it is skipped entirely while verify-portals is probing, and runs
 // in small batches so a 400-posting board cannot hammer the shared API host.
+//
+// The walk reads 100 postings a page and stops at 50 pages (5,000 postings).
+// A board past that is reported as cut short, on stderr and in the canonical
+// `truncated` tag scan.mjs reads, and an entry can raise the cap, up to
+// SR_HARD_MAX_PAGES:
+//
+//   max_pages: 60        # a 6,000-posting walk
 
 import { intInRange } from './_config-utils.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 
 const ALLOWED_SMARTRECRUITERS_HOSTS = new Set(['api.smartrecruiters.com']);
 const SR_CAREERS_HOSTS = new Set(['careers.smartrecruiters.com', 'jobs.smartrecruiters.com']);
 const SR_PAGE_SIZE = 100;
-const SR_MAX_PAGES = 50;  // safety cap (5000 postings @ 100/page)
+const SR_MAX_PAGES = 50;  // default cap (5000 postings @ 100/page) when the entry sets no max_pages
+// Upper bound an entry may opt in to with `max_pages` (10,000 postings). Bosch
+// alone listed 5,104 on 2026-11-10, past the default; the bound stays finite so
+// a typo can't walk a board forever.
+export const SR_HARD_MAX_PAGES = 100;
 const SR_DETAIL_BATCH = 5;
+// A raised max_pages can mean 100 list requests to one public API host, so the
+// walk spaces its pages and retries a transient failure (429, 5xx, a dropped
+// connection) a bounded number of times, as oraclecloud.mjs does. A page that
+// still fails ends the board with that error, never as a page-cap truncation.
+const SR_INTER_PAGE_DELAY_MS = 250;
+const SR_RETRY_POLICY = { retries: 3 };
+
+/**
+ * Page cap for an entry: a positive integer `max_pages` up to
+ * SR_HARD_MAX_PAGES, else the default. Exported for unit tests.
+ * @param {{max_pages?: unknown}} entry
+ */
+export function resolveMaxPages(entry) {
+  const v = entry?.max_pages;
+  return Number.isInteger(v) && /** @type {number} */ (v) > 0
+    ? Math.min(/** @type {number} */ (v), SR_HARD_MAX_PAGES)
+    : SR_MAX_PAGES;
+}
 
 // NaN-safe Date.parse, as in greenhouse.mjs and ashby.mjs, but strings only:
 // Date.parse on an object whose toString is not callable throws, and one bad
@@ -134,22 +164,37 @@ export default {
     const slug = resolveSlug(entry);
     if (!slug) throw new Error(`smartrecruiters: cannot derive API URL for ${entry.name}`);
 
-    // Honor the ctx.maxPages pagination hint (the portal health probe passes 1);
-    // a real sweep keeps the SR_MAX_PAGES safety cap.
-    const pageLimit = Math.min(
-      SR_MAX_PAGES,
-      Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity,
-    );
+    // Honor the ctx.maxPages pagination hint (the portal health probe passes 1)
+    // as a ceiling, and don't call that deliberate stop a truncation.
+    const entryMaxPages = resolveMaxPages(entry);
+    const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
+    const pageLimit = Math.min(entryMaxPages, ctxCap);
 
     const all = [];
+    let total = null; // the API's totalFound, when it reports one
+    let ended = false; // a short or empty page ended the walk before the cap
     for (let page = 0; page < pageLimit; page++) {
+      if (page > 0) await sleep(SR_INTER_PAGE_DELAY_MS, ctx);
       const apiUrl = buildPostingsUrl(slug, page * SR_PAGE_SIZE);
       assertSmartRecruitersUrl(apiUrl);
-      const json = await ctx.fetchJson(apiUrl, { redirect: 'error' });
+      const json = await fetchJsonWithRetry(ctx, apiUrl, { redirect: 'error' }, SR_RETRY_POLICY);
+      if (total === null && Number.isSafeInteger(json?.totalFound) && json.totalFound >= 0) total = json.totalFound;
       const parsed = parseSmartRecruitersResponse(json, entry.name, slug);
       all.push(...parsed);
       // A dropped malformed ID must not hide postings on subsequent pages.
-      if (!Array.isArray(json?.content) || json.content.length < SR_PAGE_SIZE) break;
+      if (!Array.isArray(json?.content) || json.content.length < SR_PAGE_SIZE) { ended = true; break; }
+    }
+    // The cap ended the walk with postings still unread, or with no sign the
+    // board ended when the API reports no total. Said out loud: a silently
+    // short board reads as a complete one.
+    const truncated = !ended && entryMaxPages < ctxCap
+      && (total === null || pageLimit * SR_PAGE_SIZE < total);
+    if (truncated) {
+      const counts = total === null ? `${all.length} jobs fetched, total unknown` : `${all.length} of ${total} jobs`;
+      const advice = pageLimit < SR_HARD_MAX_PAGES
+        ? `raise max_pages on this entry for more (up to ${SR_HARD_MAX_PAGES})`
+        : `max_pages is already at the ${SR_HARD_MAX_PAGES}-page ceiling`;
+      console.error(`⚠️  smartrecruiters: ${entry.name} truncated at max_pages=${pageLimit} (${counts}) — ${advice}`);
     }
 
     // Detail enrichment answers "what does this job say", not "is this
@@ -178,7 +223,13 @@ export default {
     // The numeric posting id drove the detail calls above; it is internal
     // plumbing and must not leak into the pipeline's Job rows (vdab strips
     // its id the same way).
-    return all.map(({ id, ...job }) => job);
+    const jobs = all.map(({ id, ...job }) => job);
+    if (truncated) {
+      // Canonical shape read by lib/board-truncation.mjs, so scan.mjs logs the
+      // board as `partial` instead of `reachable`.
+      /** @type {any} */ (jobs).truncated = { reason: 'page-cap', fetched: jobs.length, ...(total === null ? {} : { total }) };
+    }
+    return jobs;
   },
 };
 

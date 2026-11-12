@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { instrumentSerif } from "@/lib/fonts";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
+import { shouldStartScanOnLoad } from "@/lib/scan-on-load.mjs";
 import { FilterBuilder } from "./filter-builder";
 import { DiscoveringState } from "./discovering-state";
 import { AiHuntView } from "./ai-hunt-view";
@@ -80,9 +82,8 @@ export function ExplorerView({
       void loadFresh();
     } else {
       initFilters(sp.toString() ? paramsToFilters(sp) : seed.filters);
-      // Onboarding hand-off: ?run=1 auto-fires the free scan + flags the first-run
-      // banner (the "matches found from your CV, free" reveal).
-      if (sp.get("run") === "1" && sp.get("preset") !== CHINA_PRESET) {
+      // Onboarding hand-off: ?run=1 on Explore starts the scan. Pipeline never does.
+      if (shouldStartScanOnLoad(window.location.pathname, window.location.search)) {
         setFirstRun(true);
         void discover();
       }
@@ -116,7 +117,7 @@ export function ExplorerView({
   if (running && isAi) return <AiHuntView cliName={cli.name} />;
 
   return (
-    <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
+    <div className={scanRunning ? undefined : cn("mx-auto px-5 py-8 md:px-8", pageFrameWidthClass.wide)}>
       <p role="status" aria-live="polite" aria-atomic="true" className="mb-4 text-sm text-muted">{!isAi && (employerOutcome?.message || (employer && running ? "Scanning selected employers…" : ""))}</p>
       {scanRunning && <DiscoveringState />}
       {!scanRunning && (
@@ -215,7 +216,7 @@ export function ExplorerView({
       )}
 
       {showScanList && (
-        <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
+        <div className={scanRunning ? cn("relative z-[1] mx-auto px-5 pb-10 md:px-8", pageFrameWidthClass.wide) : undefined}>
           <ResultsList offers={enriched} />
         </div>
       )}

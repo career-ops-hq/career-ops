@@ -108,6 +108,17 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.darwinbox.in/ms/candidatev2/main/careers/jobDetails/a5',
   );
 
+  // turbohire.parseTurbohireResponse — for…of over the Result array.
+  const { parseTurbohireResponse } = await load('turbohire.mjs');
+  check(
+    'turbohire.parseTurbohireResponse',
+    () => parseTurbohireResponse(
+      { Total: 2, Result: [{ JobIdObfuscated: `${LONE}bad`, JobTitle: 'Bad Id' }, { JobIdObfuscated: 'a5', JobTitle: 'Good Id' }] },
+      'X', { tenant: 'x', origin: 'https://x.turbohire.co' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.turbohire.co/job/publicjobs/a5',
+  );
+
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
   const { parseJibeapplyResponse } = await load('jibeapply.mjs');
   const jibeEntry = { name: 'Acme', careers_url: 'https://acme.jibeapply.com/jobs' };
@@ -392,6 +403,17 @@ try {
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.aldi-nord.de/karriere/detail/good-id-101.html',
   );
+
+  // talentlink.parseJobsResponse — for…of over the FO jobs[]; id feeds the posting URL.
+  const { parseJobsResponse: parseTalentlinkJobs, parseCriteria: parseTalentlinkCriteria } = await load('talentlink.mjs');
+  check(
+    'talentlink.parseJobsResponse',
+    () => parseTalentlinkJobs(
+      { globals: { jobsCount: 2 }, jobs: [{ id: `${LONE}bad`, jobFields: { jobTitle: 'Bad Id' } }, { id: 101, jobFields: { jobTitle: 'Good Id' } }] },
+      { detailPage: 'https://acme.recruitmentplatform.com/details.html', company: 'Acme', locations: parseTalentlinkCriteria(null) },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.recruitmentplatform.com/details.html?jobId=101',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -443,10 +465,12 @@ try {
     'platsbanken.mjs',
     'polymer.mjs',
     'remote-com.mjs',
+    'talentlink.mjs',
     'techinasia.mjs',
     'thehub.mjs',
     'tkms.mjs',
     'trakstar.mjs',
+    'turbohire.mjs',
     'vdab.mjs',
     'zoho-recruit.mjs',
   ];

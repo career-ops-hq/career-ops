@@ -131,15 +131,17 @@ test('the owner pins its own values', () => {
 });
 
 test('the web agrees with the CLI about the sheet', async (t) => {
-  // web/src/lib/page-formats.mjs keeps its own copy of these two constants, and
+  // web/src/lib/page-formats.mjs keeps its own copy of these constants, and
   // wiring it to this module means loading it at runtime, so it stays out of
   // scope here. The two agree today and nothing says they still will, which is
-  // the drift this file exists to stop, one boundary out. It costs two lines.
+  // the drift this file exists to stop, one boundary out. It costs three lines.
   const webOwner = join(ROOT, 'web', 'src', 'lib', 'page-formats.mjs');
   if (!existsSync(webOwner)) return t.skip('this checkout carries no web/');
   const web = await import(pathToFileURL(webOwner).href);
   assert.equal(web.DEFAULT_PAGE_FORMAT, DEFAULT_PAGE_FORMAT);
   assert.deepEqual([...web.PAGE_FORMATS].sort(), [...PAGE_FORMATS].sort());
+  // The width the web's pdf prompt tells its agent to lay the body out at.
+  assert.deepEqual(web.PAGE_WIDTHS, PAGE_WIDTHS);
 });
 
 // --- the four consumers -------------------------------------------------
@@ -260,12 +262,14 @@ function coverSandbox() {
     copyFileSync(join(ROOT, f), join(dir, f));
   }
   copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
+  copyFileSync(join(ROOT, 'lib', 'cv-markdown.mjs'), join(dir, 'lib', 'cv-markdown.mjs'));
   copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(dir, 'lib', 'yaml-document.mjs'));
   // cv-templates.mjs decodes HTML entities when it reads a template's meta
   // block, so the sandbox needs this too. Without it the copied script dies at
   // module load with ERR_MODULE_NOT_FOUND and the format assertion below never
-  // runs. The module imports nothing, so it closes the graph on its own.
+  // runs. The module imports only the entity table, which is copied next.
   copyFileSync(join(ROOT, 'providers', '_html-entities.mjs'), join(dir, 'providers', '_html-entities.mjs'));
+  copyFileSync(join(ROOT, 'providers', '_html-entity-table.mjs'), join(dir, 'providers', '_html-entity-table.mjs'));
   // Same reason: cv-templates.mjs reads the template manifest block and the
   // section vocabulary from here, so the sandbox dies at module load without it.
   copyFileSync(join(ROOT, 'lib', 'template-manifest.mjs'), join(dir, 'lib', 'template-manifest.mjs'));

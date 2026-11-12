@@ -318,11 +318,11 @@ function createTracker(path, withUrl) {
 
 // The re-run must reach the same tracker and batch state as this import, from any
 // working directory, so it carries the path overrides and the script's full path.
-// The root overrides already resolve against the code root, but the tracker and
-// batch-state overrides resolve against the working directory, so those two are
-// made absolute here.
+// Root and tracker overrides resolve against the code root; batch-state
+// resolves against the working directory. Pin the tracker and batch-state
+// paths here so the printed command preserves each override's target.
 const RETRY_ENV = ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE'];
-const RETRY_CWD_PATHS = new Set(['CAREER_OPS_TRACKER', 'CAREER_OPS_BATCH_STATE']);
+const RETRY_CWD_PATHS = new Set(['CAREER_OPS_BATCH_STATE']);
 const shellQuote = (value) => (/^[A-Za-z0-9._@+/:=-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`);
 
 function retryCommand(additionsDir, env = process.env) {
@@ -330,7 +330,9 @@ function retryCommand(additionsDir, env = process.env) {
     .filter((name) => env[name]?.trim())
     .map((name) => {
       const value = env[name].trim();
-      return `${name}=${shellQuote(RETRY_CWD_PATHS.has(name) ? resolve(value) : value)} `;
+      const target = name === 'CAREER_OPS_TRACKER' ? resolve(CODE_ROOT, value)
+        : RETRY_CWD_PATHS.has(name) ? resolve(value) : value;
+      return `${name}=${shellQuote(target)} `;
     })
     .join('');
   return `${overrides}CAREER_OPS_ADDITIONS=${shellQuote(additionsDir)} node ${shellQuote(join(CODE_ROOT, 'merge-tracker.mjs'))}`;

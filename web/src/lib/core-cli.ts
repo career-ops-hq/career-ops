@@ -28,7 +28,7 @@ function boundedLockWait(): Record<string, string> {
 
 export type CliResult = { code: number; stdout: string; stderr: string; spawnFailed: boolean; timedOut: boolean };
 
-export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
+export function runCoreCli(script: string, args: string[], opts?: { signal?: AbortSignal }): Promise<CliResult> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
@@ -36,6 +36,7 @@ export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
       {
         cwd: resolveCodeRoot(process.cwd(), process.env),
         timeout: CORE_CLI_TIMEOUT_MS,
+        signal: opts?.signal,
         env: { ...process.env, ...boundedLockWait() },
         // windowsHide: see api/doctor/route.ts — a stale inherited console
         // kills every child with 0xC0000142 on Windows; never inherit one.
