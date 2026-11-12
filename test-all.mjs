@@ -4080,8 +4080,9 @@ if (
         /New York State|not\s+NYC|not\s+sufficient/i.test(nyRow.candidate_residency_condition);
 
       // CodeRabbit finding 2 (#2896): the EU AI Act's high-risk obligations
-      // for stand-alone Annex III systems were provisionally deferred (May
-      // 2026 Digital Omnibus agreement) from 2026-08-02 to 2027-12-02, and
+      // for stand-alone Annex III systems were deferred (Regulation (EU)
+      // 2026/1744, the Digital Omnibus on AI, final law) from 2026-08-02 to
+      // 2027-12-02, and
       // official_source.url must point at an actual EU institutional source
       // (EUR-Lex or a *.europa.eu page) — not a third-party summary site.
       const euRow = j['EU'];
@@ -4092,16 +4093,17 @@ if (
         /europa\.eu/i.test(euRow.official_source.url) &&
         /Digital Omnibus/i.test(euRow.enforcement_notes || '') &&
         /2026-08-02/.test(euRow.enforcement_notes || '') &&
-        /provisional/i.test(euRow.enforcement_notes || '');
+        /2026\/1744/.test(euRow.enforcement_notes || '') &&
+        !/provisional/i.test(euRow.enforcement_notes || '');
 
       if (
         nyRowCityKeyed &&
         rowComplete(j['US-IL']) && j['US-IL'].law_name.includes('820 ILCS 42') &&
         euRowCorrected
       ) {
-        pass('jurisdiction-ai-screening-disclosure.yml parses and all three seeds carry corrected facts: US-NY-NYC (Local Law 144, city-keyed with explicit job_location_condition + candidate_residency_condition, no leftover state-wide US-NY key), US-IL (820 ILCS 42), EU AI Act 2024/1689 (effective 2027-12-02 per the provisional Digital Omnibus deferral, official_source on a europa.eu domain) (#2896 CodeRabbit findings 1+2)');
+        pass('jurisdiction-ai-screening-disclosure.yml parses and all three seeds carry corrected facts: US-NY-NYC (Local Law 144, city-keyed with explicit job_location_condition + candidate_residency_condition, no leftover state-wide US-NY key), US-IL (820 ILCS 42), EU AI Act 2024/1689 (effective 2027-12-02 per the final-law Digital Omnibus deferral, Regulation (EU) 2026/1744, official_source on a europa.eu domain) (#2896 CodeRabbit findings 1+2)');
       } else {
-        fail('jurisdiction-ai-screening-disclosure.yml seeds incomplete/incorrect — needs US-NY-NYC (not state-wide US-NY) with job_location_condition + candidate_residency_condition (five-boroughs, explicitly excluding a generic New York State match), US-IL (820 ILCS 42), and EU (AI Act 2024/1689, effective 2027-12-02, official_source.url on a europa.eu domain, enforcement_notes documenting the provisional Digital Omnibus deferral from the original 2026-08-02 date) (#2896)');
+        fail('jurisdiction-ai-screening-disclosure.yml seeds incomplete/incorrect — needs US-NY-NYC (not state-wide US-NY) with job_location_condition + candidate_residency_condition (five-boroughs, explicitly excluding a generic New York State match), US-IL (820 ILCS 42), and EU (AI Act 2024/1689, effective 2027-12-02, official_source.url on a europa.eu domain, enforcement_notes documenting the final-law Digital Omnibus deferral (Regulation (EU) 2026/1744) from the original 2026-08-02 date) (#2896)');
       }
 
       if (
