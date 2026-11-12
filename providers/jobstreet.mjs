@@ -92,6 +92,10 @@ const ALLOWED_JOBSTREET_HOSTS = new Set([
   "www.seek.co.nz",
 ]);
 
+// Configs that still name the old AU API host are sent to the new one: the
+// old host answers 308 and requests refuse redirects.
+const API_ORIGIN_ALIASES = new Map([["https://www.seek.com.au", "https://au.seek.com"]]);
+
 // Job-detail links stay on the legacy host so scan-history and tracker URLs
 // keep deduplicating against listings recorded before the move.
 const JOB_URL_ORIGIN = new Map([["https://au.seek.com", "https://www.seek.com.au"]]);
@@ -282,7 +286,8 @@ export default {
   async fetch(entry, ctx) {
     const apiUrl = entry.api || DEFAULT_API;
     assertJobstreetUrl(apiUrl);
-    const origin = deriveOrigin(apiUrl);
+    const configuredOrigin = deriveOrigin(apiUrl);
+    const origin = API_ORIGIN_ALIASES.get(configuredOrigin) || configuredOrigin;
 
     const siteKey = entry.siteKey || DEFAULT_SITE_KEY;
     const keywords = entry.searchKeywords || "";
