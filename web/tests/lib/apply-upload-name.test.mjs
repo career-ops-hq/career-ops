@@ -19,7 +19,7 @@ test("a form title loses its company", () => {
 });
 
 test("an all-caps surname is recased, acronyms stay, accents drop", () => {
-  assert.equal(fileWords("Jane DOEMAN"), "Jane-Doeman");
+  assert.equal(fileWords("Jane DOEMAN", { recaseCaps: true }), "Jane-Doeman");
   assert.equal(fileWords("Senior BI Developer"), "Senior-BI-Developer");
   assert.equal(fileWords("HRIS Analyst"), "HRIS-Analyst");
   assert.equal(fileWords("José Müller-Ibáñez"), "Jose-Muller-Ibanez");
@@ -35,4 +35,17 @@ test("the name stays well under the 64-character portal limit for a long title (
   const name = cvUploadName({ fullName: "Jane Doe", role: "Senior Staff Analytics Engineer, Revenue & Billing Data Platform (Remote, EMEA)" });
   assert.equal(name, "Jane-Doe-Senior-Staff-Analytics-Engineer-CV.pdf");
   assert.ok(name.length <= 64);
+});
+
+test("a short all-caps surname is recased in the name, a role acronym is not", () => {
+  assert.equal(cvUploadName({ fullName: "Jane DOE", role: "COBOL Developer" }), "Jane-Doe-COBOL-Developer-CV.pdf");
+  assert.equal(fileWords("COBOL Developer"), "COBOL-Developer");
+});
+
+test("names in non-Latin scripts keep their letters", () => {
+  assert.equal(cvUploadName({ fullName: "Иван ПЕТРОВ", role: "Data Engineer" }), "Иван-Петров-Data-Engineer-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "张伟", role: "Data Engineer" }), "张伟-Data-Engineer-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "김민준", role: "" }), "김민준-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "राहुल शर्मा", role: "" }), "राहुल-शर्मा-CV.pdf");
+  assert.equal(cvUploadName({ fullName: "محمد علي", role: "" }), "محمد-علي-CV.pdf");
 });

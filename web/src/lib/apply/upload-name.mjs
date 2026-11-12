@@ -16,19 +16,27 @@
 import fs from 'node:fs';
 
 /**
- * "Jane DOE" -> "Jane-Doe": accents dropped, any other non-alphanumeric run
- * becomes "-". An all-caps word of 5+ letters (a surname typed in capitals) is
- * recased; shorter all-caps words are acronyms (BI, SQL, HRIS) and stay.
+ * "José Müller" -> "Jose-Muller": Latin accents dropped, any run that is not a
+ * letter, mark or digit becomes "-". Letters of every script stay, so
+ * "Иван Петров" -> "Иван-Петров" and "张伟" -> "张伟" (#6478 follow-up).
+ * With recaseCaps (the candidate's name), an all-caps word of 2+ letters is a
+ * surname typed in capitals and is recased: "Jane DOE" -> "Jane-Doe". Without
+ * it (the role), words keep their casing, so acronyms such as BI, HRIS or
+ * COBOL stay as written.
  * @param {string} s
+ * @param {{ recaseCaps?: boolean }} [opts]
  * @returns {string}
  */
-export function fileWords(s) {
+export function fileWords(s, { recaseCaps = false } = {}) {
   return String(s ?? '')
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .split(/[^A-Za-z0-9]+/)
+    .replace(/[\u0300-\u036f]/g, '')
+    .normalize('NFC')
+    .split(/[^\p{L}\p{M}\p{N}]+/u)
     .filter(Boolean)
-    .map((w) => (w.length >= 5 && w === w.toUpperCase() && /[A-Z]/.test(w) ? w[0] + w.slice(1).toLowerCase() : w))
+    .map((w) => (recaseCaps && w.length >= 2 && /\p{Lu}/u.test(w) && !/\p{Ll}/u.test(w)
+      ? w[0] + w.slice(1).toLowerCase()
+      : w))
     .join('-');
 }
 
@@ -52,7 +60,7 @@ export function shortRole(role) {
  * @returns {string}
  */
 export function cvUploadName({ fullName, role } = {}) {
-  return [fileWords(fullName ?? ''), fileWords(shortRole(role ?? '')), 'CV'].filter(Boolean).join('-') + '.pdf';
+  return [fileWords(fullName ?? '', { recaseCaps: true }), fileWords(shortRole(role ?? '')), 'CV'].filter(Boolean).join('-') + '.pdf';
 }
 
 /**
