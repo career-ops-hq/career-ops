@@ -220,7 +220,7 @@ Append to `interview-prep/{company-slug}-{role-slug}.md`:
 
 ## Step 9 — Write Session Transcript
 
-After the debrief, also write a machine-readable session transcript to `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. This is a structured record of the round for downstream analysis modes; the speaker-labelled turns let a consumer read either side without re-inferring who spoke. The full contract lives in `interview-prep/sessions/README.md`.
+After the debrief, also write a machine-readable session transcript to `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Before writing, list every existing file for this company, role, round and date (the base name and any `-2`, `-3`, ... variants, even when the base name itself is missing). If there is none, write the base name. Otherwise never overwrite silently: show the files with each one's `interviewer_role` and first question, and ask the candidate whether this debrief re-runs one of them (update the file they pick in place) or is a separate round (write the next free counter, `-2`, `-3`, ..., before `.md`). See the README's "File names" section. This is a structured record of the round for downstream analysis modes; the speaker-labelled turns let a consumer read either side without re-inferring who spoke. The full contract lives in `interview-prep/sessions/README.md`.
 
 **Check the `input_source` marker set in Step 1.** If `input_source: transcript`, skip reconstruction: don't regenerate the transcript from Step 1/Step 2 output — that would be a lossier copy of the real source it came from. Instead, save the original transcript directly, lightly normalized to match the schema below (speaker labels, front-matter, competency tags from the Step 2 assessment). If `input_source: recall`, reconstruct the transcript from Step 1/Step 2 output as before — recall never has a verbatim original to preserve.
 
@@ -235,7 +235,7 @@ date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
 stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
-  - speaker: [name or role, or "unknown"]
+  - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
 format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
 people_on_call: [number]                                              # optional
@@ -258,7 +258,7 @@ Rules for the transcript:
 - **Tag each answer.** On the line directly above each `**Candidate:**` line, emit `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case, comma-separated for multi-competency answers (e.g. `system-design`, `people-leadership`, `incident-response`). You already assessed each answer in Step 2, so tag from that assessment rather than re-reading. Tags are free-form; pick the competency the question actually tested.
 - **Reconstruct the candidate turn faithfully.** Use what the candidate reported saying in Step 1, not an idealized answer. The "correct/complete answer" from Step 2 belongs in the debrief file, never in the transcript — the transcript records what happened.
 - **`source: debrief`.**
-- **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
+- **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Double-quote every `speaker` too: a value such as `Hiring Manager: Jane` contains a colon and is invalid YAML unquoted. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
 - **`format`, `people_on_call`, `tone` and `candidate_comfort` are optional front-matter keys** carrying the Step 1 / Step 8 values, so downstream modes can read them without parsing prose. Write only the keys the candidate answered; omit the rest, and never write `candidate_comfort` unless the candidate gave it. Double-quote `candidate_comfort` (it may be free text); if escaping manually, escape backslashes before inner double quotes, as for `quote`. Practice-session files do not carry them.
 - The session file lands in a gitignored directory (real names/companies never enter version control); write it without redacting.
 
