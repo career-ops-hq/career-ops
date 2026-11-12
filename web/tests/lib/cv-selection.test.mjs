@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parsePdfManifestRows, pdfIndexEntryForReport, pdfPathForReport, reportNumberFromCell } from "../../src/lib/apply/cv-selection.mjs";
+import { parsePdfManifestRows, pdfIndexEntriesByReport, pdfIndexEntryForReport, pdfPathForReport, reportNumberFromCell } from "../../src/lib/apply/cv-selection.mjs";
 
 test("reportNumberFromCell only accepts markdown report links", () => {
   assert.equal(reportNumberFromCell("[010]"), null);
@@ -137,4 +137,32 @@ test("parsePdfManifestRows extracts structured entries and defaults missing kind
   assert.equal(rows[2].kind, "cv");
   assert.equal(rows[3].kind, "cv");
   assert.equal(rows[4].kind, "unknown");
+});
+
+// The Pipeline list asks for every tracker row's CV at once, so the whole
+// manifest is read into one map. Per kind: the first row of that kind wins, an
+// empty path stays null, an untagged row named as a cover letter is a cover,
+// and partial ids and unknown kinds are left out.
+test("pdfIndexEntriesByReport maps each report to its first row of the wanted kind", () => {
+  const index = [
+    "# report\tpdf\thtml\tformat\tdate\tkind",
+    "010\toutput/cover-010-acme.pdf\t\thtml\t2026-08-01\tcover",
+    "010\toutput/cv-010-acme.pdf\toutput/cv-010-acme.html\thtml\t2026-08-01\tcv",
+    "010\toutput/cv-010-acme-v2.pdf\t\thtml\t2026-08-02\tcv",
+    "011\t",
+    "012-stale\toutput/wrong.pdf",
+    "013\toutput/cover-013-acme.pdf",
+    "014\toutput/thing.pdf\t\t\t\tportfolio",
+  ].join("\n");
+
+  assert.deepEqual(Object.fromEntries(pdfIndexEntriesByReport(index)), {
+    10: { path: "output/cv-010-acme.pdf", html: "output/cv-010-acme.html" },
+    11: { path: null, html: null },
+  });
+  assert.deepEqual(Object.fromEntries(pdfIndexEntriesByReport(index, "cover")), {
+    10: { path: "output/cover-010-acme.pdf", html: null },
+    13: { path: "output/cover-013-acme.pdf", html: null },
+  });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf", html: "output/cv-010-acme.html" });
+  assert.deepEqual(pdfIndexEntryForReport(index, 13), { found: false, path: null, html: null });
 });

@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { pdfReadyForReport, pipelineSummary, readTrackerShape, withCloseDates, type InboxJob } from "@/lib/career-ops";
+import { pdfReadyReportNumbers, pipelineSummary, readTrackerShape, withCloseDates, type InboxJob } from "@/lib/career-ops";
 import { reportNumberFromCell } from "@/lib/apply/cv-selection.mjs";
 import { pendingInbox } from "@/lib/inbox-pending.mjs";
 import { PipelineView } from "@/components/pipeline-view";
@@ -25,16 +25,17 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   // Rows are keyed the way /api/cv-pdf?application= resolves them: through the
   // report cell, so a row with no resolvable report never gets a dead link.
   // Skipped on the inbox tab, which has no table.
-  const cvRows = onInbox
-    ? []
-    : (
-        await Promise.all(
-          applications.map(async (a) => {
-            const report = reportNumberFromCell(a.report);
-            return report && (await pdfReadyForReport(String(report))) ? a.n : null;
-          }),
-        )
-      ).filter((n): n is string => n !== null);
+  // One manifest read for the whole table, not one per row (see
+  // pdfReadyReportNumbers: per-row lookups took 10-20 s on ~1,000 rows).
+  const pdfReady = onInbox ? null : await pdfReadyReportNumbers();
+  const cvRows = pdfReady
+    ? applications
+        .filter((a) => {
+          const report = reportNumberFromCell(a.report);
+          return report !== null && report > 0 && pdfReady.has(report);
+        })
+        .map((a) => a.n)
+    : [];
   return (
     <Suspense>
       <PipelineView
