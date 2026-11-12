@@ -153,3 +153,27 @@ wait "$successor"; successor=""
 [[ -f "$fixture/initializer-entered" ]]
 [[ ! -d "$STATE_LOCK_DIR" ]]
 `));
+
+test('a waiter whose mkdir loses to a release retries instead of failing', () => run(`
+acquire_state_lock
+(
+  mkdir() {
+    if command mkdir "$@"; then return 0; fi
+    if [[ ! -f "$fixture/lost-race" ]]; then
+      touch "$fixture/lost-race"
+      wait_for "$fixture/holder-released"
+    fi
+    return 1
+  }
+  acquire_state_lock
+  touch "$fixture/waiter-entered"
+  release_state_lock
+) & waiter=$!
+wait_for "$fixture/lost-race"
+# The holder releases between the waiter's failed mkdir and its existence check.
+release_state_lock
+touch "$fixture/holder-released"
+wait "$waiter"; waiter=""
+[[ -f "$fixture/waiter-entered" ]]
+[[ ! -d "$STATE_LOCK_DIR" ]]
+`));

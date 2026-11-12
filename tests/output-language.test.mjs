@@ -268,6 +268,7 @@ check(
 // directory is added or removed without updating them.
 const MARKET_EVAL_FILES = {
   ar: 'fursah.md',
+  at: 'offer.md',
   da: 'oferta.md',
   de: 'angebot.md',
   es: 'oferta.md',
