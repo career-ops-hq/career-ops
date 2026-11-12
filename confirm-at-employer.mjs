@@ -201,10 +201,15 @@ export function makeBoardLister(httpCtx = makeHttpCtx()) {
 const liveOf = (v) => (v?.result === 'active' ? 'open' : v?.result === 'expired' ? 'closed' : 'unknown');
 // Built In runs one platform on several market hosts (builtinseattle.com, builtinchicago.org, ...);
 // the shared list names builtin.com only, so the allowlist in providers/builtin.mjs covers the rest.
+// AGENTS.md (Aggregator Listings) also names boards the shared list lacks. They are
+// added here only: the shared list also drives dedup in merge-tracker and scan.
+const EXTRA_AGGREGATORS = ['instahyre.com', 'cutshort.io', 'internshala.com', 'naukri.com'];
 const isAggregator = (u) => {
   try { if (isAggregatorUrl(u)) return true; } catch { /* fall through */ }
-  const h = hostOf(u);
-  return !!h && builtinHost(h) !== null;
+  const h = hostOf(u).replace(/\.$/, '');
+  if (!h) return false;
+  if (EXTRA_AGGREGATORS.some((d) => h === d || h.endsWith(`.${d}`))) return true;
+  return builtinHost(h) !== null;
 };
 const unknownEmployer = (c) => !c || c === '?' || /^(confidential|undisclosed|unknown|vertraulich|anonym)/i.test(c);
 

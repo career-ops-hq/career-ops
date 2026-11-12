@@ -182,6 +182,20 @@ test('step 1: a Built In market host is an aggregator, not the employer', async 
   assert.equal(r.verdict, 'unidentified');
 });
 
+test('step 1: aggregators AGENTS.md names but the shared list lacks are not the employer', async () => {
+  for (const url of [
+    'https://www.instahyre.com/job-123456-product-manager-at-acme-bangalore/',
+    'https://cutshort.io/job/Product-Manager-Bengaluru-Acme-AbCdEf',
+    'https://internshala.com/job/detail/product-manager-job-in-delhi-at-acme1234',
+    'https://www.naukri.com/job-listings-product-manager-acme-bengaluru-3-to-6-years-123456',
+  ]) {
+    const r = await confirmAtEmployer({ url, company: '', title: 'Product Manager' }, { checkLiveness: noLiveness });
+    assert.equal(r.verdict, 'unidentified', url);
+  }
+  const lookalike = await confirmAtEmployer({ url: 'https://jobs.notnaukri.com/pm/1', company: '', title: 'Product Manager' }, { checkLiveness: noLiveness });
+  assert.equal(lookalike.verdict, 'employer_url', 'label boundary, not a substring');
+});
+
 test('every verdict the function returns is a declared one', () => {
   assert.deepEqual([...VERDICTS].sort(), ['board_without_role', 'employer_url', 'found', 'no_board', 'unidentified']);
 });
