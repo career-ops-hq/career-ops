@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { ROOT, NODE, pass, fail, ownRootEnv, rmSync } from './helpers.mjs';
 import {
-  CHECKPOINT_EVERY, MAX_COMPANIES, boardFromUrl, dedupeBoards, extractAtsBoards,
+  CHECKPOINT_EVERY, MAX_COMPANIES, boardFromUrl, decodeEntities, dedupeBoards, extractAtsBoards,
   extractCompanyName, harvest, loadTrackedEntries, oneLine, readCheckpoint,
   renderPortalsYaml, renderSummary, yamlString,
 } from '../harvest-buildlist.mjs';
@@ -103,6 +103,16 @@ try {
   check('a <title> newline and terminal escapes collapse to one printable line', () => {
     const name = extractCompanyName(page('Globex\n  - name: Forged\u001b[2J\u001b]0;x\u0007\u009b31m', ''), 'globex');
     return CONTROL.test(name) || name.includes('\n') ? `got ${JSON.stringify(name)}` : null;
+  });
+
+  check('HTML entities are decoded once, never twice', () => {
+    const got = [
+      decodeEntities('&amp;quot;x&amp;quot; &amp;lt;b&amp;gt; &amp;amp;'),
+      extractCompanyName(page('Globex &amp;quot;Labs&amp;quot; | BuildList', ''), 'globex'),
+      decodeEntities('Initech &amp; Co &quot;R&amp;D&quot; &#39;x&#x27; &lt;&gt;&nbsp;!'),
+    ];
+    const want = ['&quot;x&quot; &lt;b&gt; &amp;', 'Globex &quot;Labs&quot;', 'Initech & Co "R&D" \'x\' <> !'];
+    return JSON.stringify(got) === JSON.stringify(want) ? null : `got ${JSON.stringify(got)}`;
   });
 
   check('oneLine strips C0, C1 and Unicode line separators', () => {

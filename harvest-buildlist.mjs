@@ -285,11 +285,23 @@ export function parseCompanySitemap(xml) {
  * @returns {string}
  */
 function unescapePayload(html) {
-  return html
-    .replace(/\\u0026/gi, '&')
-    .replace(/\\u002F/gi, '/')
-    .replace(/&amp;/g, '&')
-    .replace(/\\\//g, '/');
+  // One pass, so a `&` this produces is never decoded again (`&amp;`
+  // stays `&amp;`, not `&`).
+  return html.replace(/\\u0026|\\u002F|&amp;|\\\//gi, (m) => (m.toLowerCase() === '\\u002f' || m === '\\/' ? '/' : '&'));
+}
+
+/** The HTML entities BuildList pages use in text, and what they stand for. */
+const ENTITIES = { amp: '&', quot: '"', '#x27': "'", '#39': "'", nbsp: ' ', lt: '<', gt: '>' };
+
+/**
+ * Decode those entities in one pass. Decoding them one after another, `&amp;`
+ * first, turned `&amp;quot;` into `"` instead of the `&quot;` it encodes.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function decodeEntities(text) {
+  return String(text).replace(/&(amp|quot|#x27|#39|nbsp|lt|gt);/g, (_, e) => ENTITIES[e]);
 }
 
 /**
@@ -424,9 +436,7 @@ const TITLE_BOILERPLATE = /\s+(?:Company\s+Profile\s*&\s*Careers|Careers\s*&\s*J
 export function extractCompanyName(html, slug) {
   const m = typeof html === 'string' ? html.match(/<title[^>]*>([^<]{1,200})<\/title>/i) : null;
   if (m) {
-    const raw = m[1]
-      .replace(/&amp;/g, '&').replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"')
-      .trim();
+    const raw = decodeEntities(m[1]).trim();
     // Drop the "| BuildList" site suffix, then the "— 15 Open Roles" tail.
     const head = raw.split(/\s*[|·]\s*/)[0];
     let name = head.split(/\s+[—–]\s+/)[0].trim();
@@ -448,11 +458,9 @@ export function extractCompanyName(html, slug) {
  */
 export function flattenHtml(html) {
   if (typeof html !== 'string') return '';
-  return html
+  return decodeEntities(html
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&amp;/g, '&').replace(/&#x27;|&#39;/g, "'").replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/<[^>]+>/g, ' '))
     .replace(CONTROL_CHARS, ' ')
     .replace(/\s+/g, ' ')
     .trim();
