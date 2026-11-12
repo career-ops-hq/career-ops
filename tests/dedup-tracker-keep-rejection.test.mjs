@@ -68,3 +68,30 @@ ok('the same report still collapses, and Evaluated does not replace Rejected', (
   assert.strictEqual(statusOf(rows[0]), 'Rejected');
   assert.strictEqual(scoreOf(rows[0]), '4.9/5');
 });
+
+ok('a higher-scored Evaluated row does not replace a same-report rejection', () => {
+  const rows = run([
+    `| 1 | 2026-06-01 | Fixture Co | Engineer | 3.1/5 | Rejected | ❌ | [1](reports/1-fixture.md) | they said no | ${URL} |`,
+    `| 2 | 2026-06-02 | Fixture Co | Engineer | 4.9/5 | Evaluated | ❌ | [1](reports/1-fixture.md) | duplicate | ${URL} |`,
+  ]);
+  assert.strictEqual(rows.length, 1, `same report is one row, got ${rows.length}`);
+  assert.strictEqual(statusOf(rows[0]), 'Rejected');
+  assert.strictEqual(scoreOf(rows[0]), '4.9/5');
+  assert.match(rows[0], /they said no/);
+});
+
+ok('a different report does not join a cluster that already holds a rejection', () => {
+  const rows = run([
+    `| 1 | 2026-06-01 | Fixture Co | Engineer | 3.1/5 | Evaluated | ❌ | [1](reports/1-fixture.md) | fresh look | ${URL} |`,
+    `| 2 | 2026-06-02 | Fixture Co | Engineer | 3.0/5 | Rejected | ❌ | [1](reports/1-fixture.md) | they said no | ${URL} |`,
+    `| 3 | 2026-06-03 | Fixture Co | Engineer | 4.9/5 | Evaluated | ❌ | [3](reports/3-fixture.md) | other opening | ${URL} |`,
+  ]);
+  assert.strictEqual(rows.length, 2, `the other report stays, got ${rows.length}: ${rows.join(' || ')}`);
+  const rejected = rows.find(r => statusOf(r) === 'Rejected');
+  assert.ok(rejected, 'the rejection survives');
+  assert.match(rejected, /they said no/);
+  const other = rows.find(r => numOf(r) === '3');
+  assert.ok(other, 'the other report stays');
+  assert.strictEqual(statusOf(other), 'Evaluated');
+  assert.strictEqual(scoreOf(other), '4.9/5');
+});

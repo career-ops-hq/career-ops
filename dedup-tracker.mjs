@@ -567,8 +567,13 @@ for (const [company, companyEntries] of groups) {
       // would admit two rows naming different postings and one would be
       // deleted. Check the candidate's URL and requisition id against every
       // member already in.
+      // roleMatch against the seed is not enough. A Rejected row can join on
+      // shared report identity, and a later exact-title row would then join
+      // through the seed alone and delete the rejection.
       if (companyOk && roleMatch(companyEntries[i], companyEntries[j])
-          && !cluster.some(member => urlsConflict(member, companyEntries[j]) || reqNumsConflict(member, companyEntries[j]))) {
+          && !cluster.some(member => urlsConflict(member, companyEntries[j])
+            || reqNumsConflict(member, companyEntries[j])
+            || !roleMatch(member, companyEntries[j]))) {
         cluster.push(companyEntries[j]);
         processed.add(j);
       }
@@ -585,7 +590,12 @@ for (const [company, companyEntries] of groups) {
     let bestStatus = keeper.status;
     for (let k = 1; k < cluster.length; k++) {
       const rank = statusRank(cluster[k].status);
-      if (rank > bestStatusRank) {
+      // Rejected and Evaluated share a rank. The higher score must not leave
+      // the surviving same-report row as Evaluated.
+      const rejectionWins = rank === bestStatusRank
+        && isRejectedStatus(cluster[k].status)
+        && !isRejectedStatus(bestStatus);
+      if (rank > bestStatusRank || rejectionWins) {
         bestStatusRank = rank;
         bestStatus = cluster[k].status;
       }
