@@ -111,6 +111,18 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// The documented envelope is { jobs: [...] }. Only that container, present and
+// empty, is an empty board; anything else ({}, { error }, { jobs: null }, a bare
+// string) is an API change or an error served with a 200, and returning [] for
+// it would read as "no open roles" on every scan (ADDING_A_PROVIDER.md,
+// "Defensive parsing").
+/** @param {any} json @param {{ name: string }} entry @returns {any[]} */
+function boardJobs(json, entry) {
+  if (json && Array.isArray(json.jobs)) return json.jobs;
+  const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+  throw new Error(`greenhouse: unexpected response for ${entry.name} — expected jobs[], got: [${got}]`);
+}
+
 // ── Office enrichment ───────────────────────────────────────────────
 // Some Greenhouse boards put the *work model* ("Hybrid", "In-Office",
 // "Distributed") in location.name and keep the actual city in the separate
@@ -233,7 +245,7 @@ export default {
     const listUrl = new URL(apiUrl);
     listUrl.searchParams.delete('content');
     const json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(listUrl.href), { redirect: 'error' }));
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const jobs = boardJobs(json, entry);
     return jobs
       .filter(/** @param {any} j */ j => j.absolute_url)
       .map(/** @param {any} j */ j => ({ title: j.title || '', url: j.absolute_url, postedAt: toEpochMs(j.first_published) }));
@@ -269,7 +281,7 @@ export default {
       json = await ctx.fetchJson(assertGreenhouseUrl(bare.href), { redirect: 'error' });
       bodiesInline = false;
     }
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const jobs = boardJobs(json, entry);
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';
 
