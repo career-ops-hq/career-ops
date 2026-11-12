@@ -131,6 +131,18 @@ try {
     assert.deepStrictEqual(facts(zh), ['tool: elasticsearch']);
   });
 
+  ok('a tool list written without spaces is found in a source written the same way', () => {
+    const src = join(work, 'zh-unspaced.md');
+    writeFileSync(src, ZH_SOURCE.replace('使用 Go 和 Kafka 搭建消息管道。', '使用Go和Kafka搭建消息管道。'));
+    const bullets = same => [...ZH_BULLETS.slice(0, 3), same];
+    assert.strictEqual(check(zhCv({ bullets: bullets('使用Go和Kafka搭建消息管道。') }), src).verdict, 'pass');
+    assert.strictEqual(check(zhCv({ bullets: bullets('基于Kafka与Go搭建消息管道。') }), src).verdict, 'pass');
+    assert.deepStrictEqual(facts(check(zhCv({ bullets: bullets('使用Go、Kafka和Elasticsearch搭建消息管道。') }), src)), ['tool: elasticsearch']);
+    // A longer name in the source does not vouch for a shorter one.
+    writeFileSync(src, ZH_SOURCE.replace('使用 Go 和 Kafka 搭建消息管道。', '使用Golang和Kafka搭建消息管道。'));
+    assert.deepStrictEqual(facts(check(zhCv({ bullets: bullets('使用Go和Kafka搭建消息管道。') }), src)), ['tool: go']);
+  });
+
   console.log('\nverify-cv-facts — Chinese counts');
 
   const counts = text => [...metricClaims(text)].sort();
@@ -201,6 +213,8 @@ try {
   ok('spaced Chinese counts are checked, so they are no longer reported as unread', () => {
     assert.strictEqual(diagnoseCoverage('拥有 8 年后端开发经验，带领 30 人团队。'), null);
     assert.deepStrictEqual(counts('拥有 8 年后端开发经验，带领 30 人团队。'), ['30人', '8年']);
+    // A plan horizon was read, so it is not reported as unread either.
+    assert.strictEqual(diagnoseCoverage('未来 3 个月计划完成迁移。未来 6 年希望深耕支付领域。'), null);
     // Counts in a language with no lexicon are still reported.
     assert.strictEqual(diagnoseCoverage('Gestioné 45 empleados en 3 instalaciones.')?.reason, 'no-count-claims-recognized');
   });

@@ -1057,14 +1057,31 @@ const ZH_TOOL_TRIGGER_RE = /(?:使用|基于|基於|采用|採用|技术栈\s*[:
 const ZH_TOOL_NAME = String.raw`[A-Za-z.][A-Za-z0-9+#./-]*(?: [A-Za-z0-9][A-Za-z0-9+#./-]*){0,3}`;
 const ZH_TOOL_ITEM_RE = new RegExp(String.raw`^\s*(${ZH_TOOL_NAME})\s*(?:等)?\s*(?:(?:、|,|，|/|以及|和|与|與|及)\s*(?=[A-Za-z.]))?`, 'u');
 
-function zhToolClaims(clean) {
+// Chinese puts a name flush against the words around it ("使用Go和Kafka搭建"),
+// and a Han character is a letter, so the word-boundary lookup every other fact
+// uses (`sourceSpellsFact`) does not find "go" there. For a name read from a
+// Chinese list, a Han character beside it is a boundary too.
+function sourceNamesZhTool(sourceNormalized, name) {
+  if (sourceContainsFact(sourceNormalized, name)) return true;
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-]|(?<=\\p{Script=Han}))${escaped}(?=$|[^\\p{L}\\p{N}+#/-]|\\p{Script=Han})`, 'iu').test(sourceNormalized);
+}
+
+/**
+ * Tool names in Chinese tool lists that the sources do not name.
+ *
+ * @param {string} clean - text with markup already stripped
+ * @param {string|null} sourceNormalized - the source lookup text; null reads every name
+ * @returns {string[]}
+ */
+function zhToolClaims(clean, sourceNormalized = null) {
   if (!HAN_RE.test(clean)) return [];
   const names = [];
   for (const trigger of clean.matchAll(ZH_TOOL_TRIGGER_RE)) {
     let rest = clean.slice(trigger.index + trigger[0].length, trigger.index + trigger[0].length + MAX_SOURCE_LOOKUP_LENGTH);
     for (let item = ZH_TOOL_ITEM_RE.exec(rest); item; item = ZH_TOOL_ITEM_RE.exec(rest)) {
       const name = normalizeFact(item[1].replace(/[./-]+$/, ''));
-      if (name && LETTER_RE.test(name)) names.push(name);
+      if (name && LETTER_RE.test(name) && !(sourceNormalized != null && sourceNamesZhTool(sourceNormalized, name))) names.push(name);
       rest = rest.slice(item[0].length);
     }
   }
@@ -1179,7 +1196,7 @@ export function factClaims(text, sourceNormalized = null) {
       }
     }
   }
-  for (const value of zhToolClaims(clean)) claims.push({ kind: 'tool', value });
+  for (const value of zhToolClaims(clean, sourceNormalized)) claims.push({ kind: 'tool', value });
   // Pushed one at a time, like the tool names: spread into push(), a page of
   // 150,000 statements overflows the call stack.
   for (const claim of atEmployerClaims(text)) claims.push(claim);
@@ -2945,7 +2962,8 @@ export function diagnoseCoverage(targetText) {
   const plain = stripMarkup(String(targetText ?? ''));
   const recognized = [...plain.matchAll(COUNT_CLAIM_RE)];
   // A Chinese count the extractor read ("8 年", "30 人团队") was checked.
-  if (recognized.length > 0 || zhCountClaims(plain).length > 0) return null;
+  // Raw here too: a plan horizon ("未来 3 个月") was read, not missed.
+  if (recognized.length > 0 || zhCountClaims(plain, { keepPlanHorizons: true }).length > 0) return null;
   return {
     reason: 'no-count-claims-recognized',
     message:
