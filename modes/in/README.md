@@ -14,7 +14,7 @@ set. Two things make a separate English layer worth having:
 | Language | Hindi prose, Hindi output conventions | English, like most Indian tech postings |
 | Structure | Hindi modes layered on the English canon | English modes with only an Indian market layer on top, like `modes/sg/` and `modes/at/` |
 | Freshers | Not covered | Batch eligibility, joining date vs final exams, hidden experience lines, CGPA and backlog cut-offs |
-| Experienced candidates | Notice period and buyout | Adds the experience band, titles and grades, current-CTC privacy and the clauses to quote |
+| Experienced candidates | Notice period and buyout, probation, moonlighting, relieving letters | Adds the experience band, titles and grades, current-CTC privacy and the clauses to quote |
 | Figures | Some rates and ranges are written into the file | None: the agent verifies rates and rules at runtime from official sources |
 
 The language of what you get back is set separately by `language.output`.
@@ -24,7 +24,7 @@ The language of what you get back is set separately by `language.output`.
 Use `modes/in/` when any of these hold:
 
 - The hiring entity is in India: an Indian company, the Indian subsidiary or
-  branch of a foreign company (including a global capability centre), or a
+  branch of a foreign company (including a global capability center), or a
   contract under Indian law
 - You are a fresher and want batch, joining-date and cut-off checks on every
   posting
@@ -72,7 +72,8 @@ the Indian market rules, and `offer.md`, `apply.md` and `pipeline.md` add
 Indian overrides to the English mode files they name. English workflow rules
 win on a contradiction; the Indian files change market facts (CTC, contract
 terms, eligibility checks), never the workflow. An eligibility check becomes a
-Block B row with an HR question, so the score band still sets the decision.
+Block B row with an HR question, banded by the posting's own wording; whether
+it is a hard stop, and the decision, follow the canonical rules.
 `_shared.md` still says to read `modes/_shared.md` first, for any entry point
 that loads a market file on its own.
 
@@ -105,7 +106,7 @@ The remaining modes (`scan`, `batch`, `pdf`, `tracker`, `deep`, `contacto`,
 | CGPA / backlogs | Grade average on a 10-point scale; papers not yet cleared |
 | Circuital branches | The engineering branches close to computing, usually CS, IT, ECE and EE; many tech postings for freshers accept only these |
 | Campus / off-campus drive | Hiring through the college, or open hiring for recent graduates |
-| GCC | Global capability centre: a foreign company's own Indian unit |
+| GCC | Global capability center: a foreign company's own Indian unit |
 | OCI | Overseas Citizen of India card |
 
 ## Contributing

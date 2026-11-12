@@ -17,7 +17,7 @@ the rules they cite are in `modes/in/_shared.md`.
 
 ## India-specific fields
 
-- **Expected CTC:** the annual CTC target from `profile.yml`, labelled as CTC.
+- **Expected CTC:** the annual CTC target from `profile.yml`, labeled as CTC.
   When the field asks for lakh per annum, enter the figure in lakh. Never enter
   an in-hand figure unless the field asks for in-hand pay.
 - **Current CTC:** the candidate's choice. Default to "Ask candidate: ..." and

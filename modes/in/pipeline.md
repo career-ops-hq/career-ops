@@ -25,7 +25,7 @@ move to Processed → summary table. The notes below are India-specific.
   Prefer them over any board copy of the same role.
 - **Naukri, Foundit, Instahyre, Cutshort, Wellfound, Internshala:** job boards
   where many listings also sit on the employer's own page; confirm there before
-  evaluating (AGENTS.md → "Aggregator Listings — Confirm at the Employer").
+  evaluating (AGENTS.md → "Aggregator Listings -- Confirm at the Employer").
   Listings posted by a consultancy, or that hide the employer, go through the
   agency-confirmation guardrail.
 - **LinkedIn, Indeed:** aggregator-style listings; same rule. A LinkedIn page

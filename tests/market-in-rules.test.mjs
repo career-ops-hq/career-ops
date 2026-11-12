@@ -6,9 +6,9 @@
 //
 //   - Indian postings quote CTC. Read as take-home pay, it overstates every
 //     offer and makes a cross-market comparison wrong.
-//   - Fresher postings name eligible batches. A batch outside the list is a
-//     hard eligibility gap, carried as a critical Block B row with an HR
-//     question, so the score band still sets the decision.
+//   - Fresher postings name eligible batches. A batch outside a required list
+//     is a critical Block B row with an HR question; whether it is a hard stop
+//     stays with the canonical rules in modes/oferta.md.
 //   - The layer runs on top of modes/_shared.md and changes no workflow rule.
 //     The router layers market files on the English canon (#6728); the rule
 //     covers entry points that load a market file on its own.
@@ -39,8 +39,9 @@ test('CTC is never presented as take-home pay', () => {
   assert.match(shared, /Never estimate in-hand pay from memory/);
 });
 
-test('a batch outside the posting\'s list is a critical Block B gap with an HR question', () => {
-  assert.match(shared, /A year outside the list is a `critical` row in Block B and a hard-blocker gap/);
+test('a batch outside the posting\'s required list is a critical Block B row with an HR question', () => {
+  assert.match(shared, /A year outside a list the posting makes a requirement \("only", "eligible batches"\) is a `critical` row in Block B/);
+  assert.match(shared, /Whether it is a hard stop follows the canonical rules in `modes\/oferta\.md`, not this file/);
   assert.match(shared, /Is the \{year\} batch eligible for this role\?/);
 });
 

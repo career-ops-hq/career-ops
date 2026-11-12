@@ -45,12 +45,12 @@ Add these rows to the standard table, with the canonical importance bands and
 the gate unchanged:
 
 - **Fresher:** batch eligibility (rule 8), joining date (rule 9), the
-  strictest experience line (rule 10), and each academic cut-off (rule 11). A
-  batch outside the posting's list, or a joining date the candidate cannot
-  meet, is `critical`; each gets its HR question in Gaps.
-- **Experienced:** experience band (rule 12) and notice period (rule 13). A
-  notice period longer than the posting accepts is `high`, with the buyout
-  question in Gaps.
+  strictest experience line (rule 10), and each academic cut-off (rule 11),
+  each at the band the posting's own wording supports, with its HR question in
+  Gaps.
+- **Experienced:** experience band (rule 12) and notice period (rule 13), at
+  the band the posting's own wording supports, with the buyout question in
+  Gaps when the candidate's notice is longer.
 - **Either stage:** a college-tier line (rule 11), quoted, at the band the
   posting's own wording supports.
 
@@ -79,15 +79,15 @@ Add to the standard Block G checks. Each is a corroborating observation, never
 a standalone verdict, and follows the canonical phrasing discipline (state the
 fact; never "fraud" or "scam").
 
-1. **A request to pay** anything (`_shared.md` rule 4): name it in Block G and
-   in the Verdict.
+1. **A request to pay** anything (`_shared.md` rule 4): report it under
+   Signal 21 (Candidate-Paid Fees), as that signal says.
 2. **The scam signals** in `_shared.md` rule 6, each quoted with the posting
    line or message it comes from.
 3. **Bonds and service agreements** (rule 4): quote them; a bond on a senior
    role is unusual and worth a note.
 4. **Aggregator copies** (Naukri, Foundit, Instahyre, LinkedIn, Indeed):
    confirm the role at the employer's own careers page or ATS before calling it
-   live (AGENTS.md → "Aggregator Listings — Confirm at the Employer").
+   live (AGENTS.md → "Aggregator Listings -- Confirm at the Employer").
 
 ### Block H — Application Answers (Indian additions)
 
