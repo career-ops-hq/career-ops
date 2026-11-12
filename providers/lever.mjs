@@ -108,6 +108,61 @@ export function leverDescription(j) {
   return [intro, ...lists, str(j?.additionalPlain)].filter(Boolean).join('\n\n');
 }
 
+// Annualization multipliers for Lever's salaryRange.interval values
+// (lever/postings-api: salaryRange is { currency, interval, min, max }).
+// Observed live on real boards: 'per-year-salary', 'per-hour-wage'. The
+// rest follow Lever's per-{period}-{salary|wage} naming; an interval not
+// in this table leaves salary off rather than guessing (same rule as
+// ashby.mjs's INTERVAL_MULTIPLIERS lookup). Same annualization basis as
+// Ashby: 40 h/week, 52 weeks/year, 5 days/week.
+const LEVER_INTERVAL_MULTIPLIERS = {
+  'per-hour-wage': 2080,
+  'per-day-wage': 260,
+  'per-week-wage': 52,
+  'per-month-salary': 12,
+  'per-year-salary': 1,
+};
+
+/**
+ * Map a Lever posting's salaryRange to the Job.salary shape
+ * ({ min, max, currency }, annualized), or undefined when the posting
+ * carries no usable range. Follows parseCompensation() in ashby.mjs:
+ * only a real number counts, a one-sided range fills the missing bound
+ * from the other, bounds are ordered, and an unrecognised interval
+ * leaves salary off.
+ *
+ * Exported for tests.
+ *
+ * @param {any} j - one posting from the v0 postings list
+ * @returns {{min: number, max: number, currency: string} | undefined}
+ */
+export function leverSalary(j) {
+  const range = j?.salaryRange;
+  if (!range || typeof range !== 'object') return undefined;
+  // An interval naming an inherited Object property (e.g. 'constructor')
+  // resolves to a truthy non-number, which would annualize to NaN in
+  // Job.salary. Require a string interval that is an own property of the
+  // table, the way ashby.mjs guards its INTERVAL_MULTIPLIERS lookup.
+  if (typeof range.interval !== 'string' || !Object.hasOwn(LEVER_INTERVAL_MULTIPLIERS, range.interval)) return undefined;
+  const multiplier = LEVER_INTERVAL_MULTIPLIERS[/** @type {keyof typeof LEVER_INTERVAL_MULTIPLIERS} */ (range.interval)];
+  if (!multiplier) return undefined;
+  /** @param {unknown} v */
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  const minValue = num(range.min);
+  const maxValue = num(range.max);
+  if (minValue === undefined && maxValue === undefined) return undefined;
+  const annualizedMin = minValue !== undefined ? minValue * multiplier : undefined;
+  const annualizedMax = maxValue !== undefined ? maxValue * multiplier : undefined;
+  const resolvedMin = /** @type {number} */ (annualizedMin ?? annualizedMax);
+  const resolvedMax = /** @type {number} */ (annualizedMax ?? annualizedMin);
+  const currency = typeof range.currency === 'string' ? range.currency.trim().toUpperCase() : '';
+  return {
+    min: Math.min(resolvedMin, resolvedMax),
+    max: Math.max(resolvedMin, resolvedMax),
+    currency,
+  };
+}
+
 /** @type {Provider} */
 export default {
   id: 'lever',
@@ -257,6 +312,10 @@ export default {
       // payload, no per-job request) — enables scan.mjs content_filter.
       description: leverDescription(j),
       postedAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
+      // Lever's salaryRange ({ currency, interval, min, max }) maps to
+      // Job.salary annualized; an unknown interval or no usable number
+      // leaves salary off rather than guessing (#6907).
+      salary: leverSalary(j),
       // Lever's posting uuid; the v0 board API exposes no employer requisition
       // field, so requisitionId stays unset rather than being inferred.
       externalId: coerceId(j.id),

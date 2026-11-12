@@ -2538,6 +2538,98 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
       }
     }
 
+    // Files an update delivered that still differ from what it delivered. The
+    // content is upstream's when upstream published it AFTER the delivered
+    // version: the install took a newer upstream file ahead of a release, in a
+    // commit of its own. Reporting it preserves it, the next update commit then
+    // does not change it, and the delivered version stays the reference on
+    // every later update, so the file never updates again. The direction
+    // matters: content upstream published BEFORE the delivered version is a
+    // revert the user chose, and stays reported (#3129).
+    const deliveredDiffers = [...changedLocally].filter((file) => deliveredBy.has(file));
+    if (deliveredDiffers.length > 0) {
+      try {
+        // Mode and blob each update commit installed, per file. A version is
+        // matched on both, so upstream's content with a mode upstream never
+        // shipped (a local chmod) stays the user's (#6891 review).
+        const deliveredVersion = new Map();
+        for (const [commit, files] of byCommit) {
+          const pending = files.filter((file) => changedLocally.has(file));
+          for (const batch of argvBatches(pending)) {
+            for (const line of runGit('ls-tree', '-r', '--full-tree', commit, '--', ...batch).split('\n')) {
+              const tab = line.indexOf('\t');
+              if (tab < 0) continue;
+              const [mode, , sha] = line.slice(0, tab).split(' ');
+              deliveredVersion.set(line.slice(tab + 1), `${mode} ${sha}`);
+            }
+          }
+        }
+        // `mode sha` of the new side of a `--raw` line, or null for a zero sha:
+        // a deletion, or a worktree file git did not hash, which stays reported.
+        const rawVersion = (line) => {
+          const parts = line.slice(0, line.indexOf('\t')).split(' ');
+          return parts[3] && !/^0+$/.test(parts[3]) ? `${parts[1]} ${parts[3]}` : null;
+        };
+        const worktreeVersion = new Map();
+        for (const batch of argvBatches(deliveredDiffers)) {
+          for (const line of runGit('diff', '--raw', '--no-abbrev', '--no-renames', upstreamRef, '--', ...batch).split('\n')) {
+            if (!line.startsWith(':')) continue;
+            const version = rawVersion(line);
+            if (version) worktreeVersion.set(line.slice(line.indexOf('\t') + 1), version);
+          }
+        }
+        // The commits that published each version of each path upstream. A
+        // merge is diffed against its first parent, so a version that exists
+        // only as a merge's resolution is attributed to that merge. Git older
+        // than 2.31 has no --diff-merges, and the throw keeps the candidates.
+        const publishedRange = mergeBase ? `${mergeBase}..${upstreamRef}` : upstreamRef;
+        const publishedBy = new Map();
+        for (const batch of argvBatches(deliveredDiffers)) {
+          const log = runGit('log', '--diff-merges=first-parent', '--raw', '--no-abbrev', '--no-renames', '--format=%x1e%H', publishedRange, '--', ...batch);
+          let commit = null;
+          for (const line of log.split('\n')) {
+            if (line.startsWith('\x1e')) {
+              commit = line.slice(1).trim();
+              continue;
+            }
+            if (!commit || !line.startsWith(':')) continue;
+            const version = rawVersion(line);
+            if (!version) continue;
+            const path = line.slice(line.indexOf('\t') + 1);
+            if (!publishedBy.has(path)) publishedBy.set(path, new Map());
+            const byVersion = publishedBy.get(path);
+            if (!byVersion.has(version)) byVersion.set(version, new Set());
+            byVersion.get(version).add(commit);
+          }
+        }
+        const isAncestor = (older, newer) => {
+          try {
+            runGit('merge-base', '--is-ancestor', older, newer);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        for (const file of deliveredDiffers) {
+          // Both versions must be found upstream: without the delivered one,
+          // newer and older cannot be told apart, and over-reporting is the
+          // safe side.
+          const versions = publishedBy.get(file);
+          const delivered = versions?.get(deliveredVersion.get(file));
+          const taken = versions?.get(worktreeVersion.get(file));
+          if (!delivered || !taken) continue;
+          // Newer means published on history that already held the delivered
+          // version: a commit that published it is an ancestor of one that
+          // published the worktree's. Position in a log listing cannot say
+          // this once a merge joins two lines of history (#6891 review).
+          const newer = [...taken].some((t) => [...delivered].some((d) => d !== t && isAncestor(d, t)));
+          if (newer) changedLocally.delete(file);
+        }
+      } catch {
+        // Unreadable history keeps the candidates: over-report.
+      }
+    }
+
     // Files no update commit ever changed. Upstream's own history decides
     // whether the current content is still attributable to the user: content
     // that upstream published for the path since the merge-base is upstream's

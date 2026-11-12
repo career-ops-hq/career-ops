@@ -134,6 +134,37 @@ try {
     fail(`normalizeGupyApiJob unflagged confidential = ${JSON.stringify({ unflagged, namedLikeIt })}`);
   }
 
+  // A confidential career page can carry any name. The placeholder logo Gupy
+  // gives such a page marks it, on either host it is served from; a company
+  // logo on an ordinary page does not.
+  const byLogo = [
+    'https://career-page-prod.gupy.io/default-creation-images/confidencial_logo.png',
+    'https://gupy5.s3.amazonaws.com/images/public-pages/confidencial_logo.png',
+  ].map((careerPageLogo, i) => normalizeGupyApiJob({
+    name: 'Analista', jobUrl: `https://acme.gupy.io/job/l${i}`, careerPageName: 'Vagas Confidenciais', careerPageLogo,
+  }));
+  const companyLogo = normalizeGupyApiJob({
+    name: 'Analista', jobUrl: 'https://acme.gupy.io/job/l9', careerPageName: 'Acme',
+    careerPageLogo: 'https://career-page-prod.gupy.io/acme/logo.png',
+  });
+  if (byLogo.every((r) => r === null) && companyLogo?.company === 'Acme') {
+    pass('normalizeGupyApiJob drops a page with the confidential placeholder logo and keeps a company logo');
+  } else {
+    fail(`normalizeGupyApiJob confidential logo = ${JSON.stringify({ byLogo, companyLogo })}`);
+  }
+
+  // A confidential page that kept a company logo still says so in its tenant
+  // subdomain. Only the subdomain is read, so the "Confidencial Seguros" row
+  // above, on acme.gupy.io, stays.
+  const byTenant = ['vagasconfidenciaisexemplo', 'confidencialempresa1', 'vagaconfidencial2'].map((tenant, i) => normalizeGupyApiJob({
+    name: 'Analista', jobUrl: `https://${tenant}.gupy.io/job/t${i}`, careerPageName: 'Acme',
+  }));
+  if (byTenant.every((r) => r === null)) {
+    pass('normalizeGupyApiJob drops a posting on a tenant whose subdomain says "confidencial"');
+  } else {
+    fail(`normalizeGupyApiJob confidential tenant = ${JSON.stringify(byTenant)}`);
+  }
+
   // ── extractGupyRows: empty vs broken ─────────────────────────────────────
   const emptyRows = extractGupyRows({ data: [], pagination: { total: 0 } }, 'X', 0);
   if (Array.isArray(emptyRows) && emptyRows.length === 0) pass('extractGupyRows returns [] for a present-and-empty data array');
