@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5, rep 2, profile ai-engineer.
+# Report: 001-lumenfield-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 4.5
+ARCHETYPE: AI Platform / LLMOps
+ARCHETYPE_RAW: AI Platform / LLMOps
+LEGITIMACY: High Confidence
+DECISION: null
+WORK_AUTH: ✅ Not needed (US citizen, role in US)
+COST_USD: 0.2288967
+TURNS: 13
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key seniority; extra key remote; extra key compensation_reliability; extra key cultural_fit; extra key flags; missing company; missing role; missing legitimacy_tier; missing final_decision; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; work_auth "✅ Not needed (US citizen, role in US)" not in enum; missing discard_reasons; missing via; missing company_confidential; missing reports_to; missing requirement_importance; missing risk_summary
+EXPECT_FAILURES: none
+---END_SUMMARY---
