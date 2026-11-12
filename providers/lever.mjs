@@ -139,6 +139,11 @@ const LEVER_INTERVAL_MULTIPLIERS = {
 export function leverSalary(j) {
   const range = j?.salaryRange;
   if (!range || typeof range !== 'object') return undefined;
+  // An interval naming an inherited Object property (e.g. 'constructor')
+  // resolves to a truthy non-number, which would annualize to NaN in
+  // Job.salary. Require a string interval that is an own property of the
+  // table, the way ashby.mjs guards its INTERVAL_MULTIPLIERS lookup.
+  if (typeof range.interval !== 'string' || !Object.hasOwn(LEVER_INTERVAL_MULTIPLIERS, range.interval)) return undefined;
   const multiplier = LEVER_INTERVAL_MULTIPLIERS[/** @type {keyof typeof LEVER_INTERVAL_MULTIPLIERS} */ (range.interval)];
   if (!multiplier) return undefined;
   /** @param {unknown} v */

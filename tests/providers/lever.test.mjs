@@ -367,6 +367,8 @@ try {
       { text: 'No interval', hostedUrl: 'https://jobs.lever.co/acme/ni1', salaryRange: { currency: 'USD', min: 1, max: 2 } },
       { text: 'Lowercase currency', hostedUrl: 'https://jobs.lever.co/acme/lc1', salaryRange: { currency: 'usd', interval: 'per-year-salary', min: 100000, max: 120000 } },
       { text: 'Inverted', hostedUrl: 'https://jobs.lever.co/acme/i1', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: 200000, max: 150000 } },
+      { text: 'Inherited name', hostedUrl: 'https://jobs.lever.co/acme/hn1', salaryRange: { currency: 'USD', interval: 'constructor', min: 100000, max: 120000 } },
+      { text: 'Inherited name 2', hostedUrl: 'https://jobs.lever.co/acme/hn2', salaryRange: { currency: 'USD', interval: 'toString', min: 100000, max: 120000 } },
     ] },
   );
   const salaryEq = (a, b) => a?.min === b?.min && a?.max === b?.max && a?.currency === b?.currency;
@@ -402,6 +404,16 @@ try {
     pass('lever.fetch() upper-cases the salary currency and orders an inverted range');
   } else {
     fail(`lever.fetch() currency/inverted salaries = ${JSON.stringify([salaryRows[9]?.salary, salaryRows[10]?.salary])}`);
+  }
+
+  // An interval naming an inherited Object property ('constructor',
+  // 'toString') resolves to a truthy non-number on a plain lookup, which
+  // would annualize to NaN in Job.salary. The lookup must only accept own
+  // properties of the multiplier table.
+  if (salaryRows[11]?.salary === undefined && salaryRows[12]?.salary === undefined) {
+    pass('lever.fetch() leaves salary off for an interval naming an inherited Object property');
+  } else {
+    fail(`lever.fetch() inherited-name salaries = ${JSON.stringify([salaryRows[11]?.salary, salaryRows[12]?.salary])}`);
   }
 
 } catch (e) {
