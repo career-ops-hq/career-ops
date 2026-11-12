@@ -130,7 +130,7 @@ On macOS releases where Playwright fails to install or launch bundled Chromium (
 export PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 ```
 
-The same setting applies to every command that launches a browser (scan, liveness checks, `doctor` and the PDF step), and it can go in your shell or in the `.env` of your data root. To let career-ops find an installed browser instead of naming one, set `CAREER_OPS_BROWSER_AUTODETECT=true`: it uses the first of Brave, Chrome, Edge or Chromium installed at its standard location. Auto-detect is off by default, so a machine where the bundled Chromium works keeps using it, and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` wins when both are set.
+The same setting applies to every command that launches a browser (scan, liveness checks, `doctor` and the PDF step), and it can go in your shell or in the `.env` of your data root. To let career-ops find an installed browser instead of naming one, set `CAREER_OPS_BROWSER_AUTODETECT=true`: it uses the first browser it finds at its standard install location, in this order: Brave, Chrome, Edge, Chromium on macOS; Brave, Chrome, Chromium, Edge on Linux; Brave, Chrome, Edge on Windows (it does not look for Chromium there, so name it with `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`). Auto-detect is off by default, so a machine where the bundled Chromium works keeps using it, and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` wins when both are set.
 
 ### Scanning through an outbound proxy
 
