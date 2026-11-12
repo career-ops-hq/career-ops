@@ -597,21 +597,27 @@ const ANY_HEADING_RE = /^#{1,6}\s/;
 // `skills`, in both scripts: 技能 (also inside 专业技能), 专长, 技术能力 and
 // 技术栈. They sit outside the `\b` group because a word boundary does not
 // exist between two Han characters, so `\b技能\b` never matches 专业技能.
-// 技术栈 is "Tech Stack" and counts on the same levels. Because they match
-// inside a longer name, they are not read from an employer entry heading
-// (`### 技能培训有限公司 — 上海`, the `### Company — Location` shape
-// parseCompanyHeading() reads), so that job's bullets stay resume prose.
+// Because they match inside a longer name, they count at any level except on
+// an entry heading (`### 技能培训有限公司 — 上海`, the `### Company — Location`
+// shape parseCompanyHeading() reads), so that job's bullets stay resume prose.
+// Under a level-2 skills section the same shape is a sub-heading
+// (`### 专业技能 — 后端`) and still counts.
 const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b/i;
-const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b|技术栈|技術棧/i;
-const ZH_SKILLS_WORD_RE = /技能|专长|專長|技术能力|技術能力/;
+const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b/i;
+const ZH_SKILLS_WORD_RE = /技能|专长|專長|技术能力|技術能力|技术栈|技術棧/;
+const TOP_HEADING_RE = /^#{1,2}(?!#)\s*\S/;
 
-function isSkillsHeading(line) {
+/**
+ * @param {string} line
+ * @param {boolean} [underSkillsSection] the enclosing level-1/2 heading is a skills heading
+ */
+function isSkillsHeading(line, underSkillsSection = false) {
   // `\s*` rather than `\s+` keeps the historical `#Skills` (no space) form.
   const m = String(line).match(/^(#{1,6})(?!#)\s*(.+?)\s*$/);
   if (!m) return false;
   const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, ''));
   if (SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text))) return true;
-  return ZH_SKILLS_WORD_RE.test(text) && !parseCompanyHeading(normalizePandocLine(line));
+  return ZH_SKILLS_WORD_RE.test(text) && (underSkillsSection || !parseCompanyHeading(normalizePandocLine(line)));
 }
 
 /**
@@ -627,8 +633,10 @@ function splitSkillsSection(cvText) {
   const named = [];
   const prose = [];
   let inSkills = false;
+  let underSkillsSection = false;
   for (const line of cvText.split('\n')) {
-    const skillsHeading = isSkillsHeading(line);
+    const skillsHeading = isSkillsHeading(line, underSkillsSection);
+    if (TOP_HEADING_RE.test(line)) underSkillsSection = skillsHeading;
     if (skillsHeading || ANY_HEADING_RE.test(line)) {
       inSkills = skillsHeading;
       // A skills heading itself belongs to neither side.

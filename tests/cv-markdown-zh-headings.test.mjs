@@ -43,6 +43,7 @@ function cvWithSkillsHeading(heading) {
 for (const heading of [
   '## 技能', '## 专业技能', '## 技术技能', '## 专长', '## 技术能力', '## 技术栈',
   '## 專業技能', '## 專長', '## 技術能力', '## 技術棧', '### 技能清单', '## **技能**',
+  '### 技术栈', '### 技術棧',
 ]) {
   test(`"${heading}" opens a named skills section`, () => {
     const { existing, supportedByResume, gap } = classifySkillGaps(JD_SKILLS, cvWithSkillsHeading(heading));
@@ -73,6 +74,16 @@ for (const employer of ['### 技能培训有限公司 — 上海', '### 专长�
     assert.deepEqual(supportedByResume.sort(), ['Go', 'Kafka']);
   });
 }
+
+test('a dashed sub-heading inside a skills section is still a skills section', () => {
+  const cv = [
+    '## 工作经历', '', '### 示例科技 — 上海', '**后端工程师**', '', '- 使用 Python 开发内部工具', '',
+    '## 专业技能', '', '- 编程语言：Python', '', '### 专业技能 — 后端', '', '- 中间件：Go、Kafka',
+  ].join('\n');
+  const { existing, supportedByResume } = classifySkillGaps(JD_SKILLS, cv);
+  assert.deepEqual(existing.sort(), ['Go', 'Kafka']);
+  assert.deepEqual(supportedByResume, []);
+});
 
 for (const name of ['工作经历', '工作经验', '专业经历', '工作經歷', '工作經驗', '專業經歷']) {
   test(`"${name}" is an Experience heading`, () => {
