@@ -644,6 +644,59 @@ try {
       : fail(`verify-portals embed board: ${JSON.stringify(rows)} apiCalls=${JSON.stringify(apiCalls)}`);
   }
 
+  // Oversized posting-API body → embed listing, never a lost board.
+  {
+    const { ASHBY_MAX_BYTES } = ashbyModule;
+    const embedHtml = '<script>window.__appData = ' + JSON.stringify({ jobBoard: { jobPostings: [
+      { id: 'p1', title: 'Strategy Lead', locationName: 'San Francisco' },
+    ] } }) + ';</script>';
+    let apiOpts = null;
+    const rows = await ashby.fetch(
+      { name: 'Big', careers_url: 'https://jobs.ashbyhq.com/big' },
+      {
+        fetchJson: async (url, opts) => { apiOpts = opts; throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async () => embedHtml,
+      },
+    );
+    if (apiOpts?.maxBytes === ASHBY_MAX_BYTES && rows.length === 1 && rows[0].title === 'Strategy Lead') {
+      pass('ashby.fetch() asks for the posting API with its own body ceiling and falls back to the embed listing past it');
+    } else {
+      fail(`ashby oversized fallback opts=${JSON.stringify(apiOpts)} rows=${JSON.stringify(rows)}`);
+    }
+
+    // api: pins the board while careers_url is a corporate site: the
+    // fallback takes its slug from the api URL.
+    let embedUrl = null;
+    const pinnedRows = await ashby.fetch(
+      { name: 'Pinned', careers_url: 'https://www.example.com/careers', api: 'https://api.ashbyhq.com/posting-api/job-board/big?includeCompensation=true' },
+      {
+        fetchJson: async () => { throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async (url) => { embedUrl = url; return embedHtml; },
+      },
+    );
+    if (pinnedRows.length === 1 && /^https:\/\/jobs\.ashbyhq\.com\/big\?/.test(String(embedUrl))) {
+      pass('ashby.fetch() falls back to the embed listing of an api:-pinned board');
+    } else {
+      fail(`ashby api-pinned fallback embedUrl=${embedUrl} rows=${JSON.stringify(pinnedRows)}`);
+    }
+
+    // api: and careers_url name DIFFERENT Ashby boards: the fallback reads the
+    // board the posting API was asked for, never the careers_url one.
+    let twoBoardUrl = null;
+    await ashby.fetch(
+      { name: 'Two boards', careers_url: 'https://jobs.ashbyhq.com/other', api: 'https://api.ashbyhq.com/posting-api/job-board/big?includeCompensation=true' },
+      {
+        fetchJson: async () => { throw Object.assign(new Error('HTTP body exceeded maxBytes'), { code: 'response_too_large', maxBytes: ASHBY_MAX_BYTES }); },
+        fetchText: async (url) => { twoBoardUrl = url; return embedHtml; },
+      },
+    );
+    if (/^https:\/\/jobs\.ashbyhq\.com\/big\?/.test(String(twoBoardUrl))) {
+      pass('ashby.fetch() falls back to the api: board, not a different careers_url board');
+    } else {
+      fail(`ashby two-board fallback read ${twoBoardUrl}`);
+    }
+  }
+
 } catch (e) {
   fail(`ashby provider tests crashed: ${e.message}`);
 }
