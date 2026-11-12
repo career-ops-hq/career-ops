@@ -206,7 +206,8 @@ Append to `interview-prep/{company-slug}-{role-slug}.md`:
 **Other candidates:** [if disclosed]
 **Next steps:** [what the interviewer said happens next and by when]
 
-**Interview format and tone:** (omit this block if not applicable or the candidate skipped it)
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:**
 - Format: [recruiter screen / 1:1 / panel / group / take-home review]
 - People on the call: [number]
 - Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
@@ -258,7 +259,7 @@ Rules for the transcript:
 - **Reconstruct the candidate turn faithfully.** Use what the candidate reported saying in Step 1, not an idealized answer. The "correct/complete answer" from Step 2 belongs in the debrief file, never in the transcript — the transcript records what happened.
 - **`source: debrief`.**
 - **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
-- **`format`, `people_on_call`, `tone` and `candidate_comfort` are optional front-matter keys** carrying the Step 1 / Step 8 values, so downstream modes can read them without parsing prose. Write only the keys the candidate answered; omit the rest, and never write `candidate_comfort` unless the candidate gave it. Double-quote `candidate_comfort` (it may be free text). Practice-session files do not carry them.
+- **`format`, `people_on_call`, `tone` and `candidate_comfort` are optional front-matter keys** carrying the Step 1 / Step 8 values, so downstream modes can read them without parsing prose. Write only the keys the candidate answered; omit the rest, and never write `candidate_comfort` unless the candidate gave it. Double-quote `candidate_comfort` (it may be free text); if escaping manually, escape backslashes before inner double quotes, as for `quote`. Practice-session files do not carry them.
 - The session file lands in a gitignored directory (real names/companies never enter version control); write it without redacting.
 
 ---
