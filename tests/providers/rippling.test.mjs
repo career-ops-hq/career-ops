@@ -349,6 +349,70 @@ try {
     fail(`rippling fetch-error stop should carry ripplingTruncated, got ${laterFail.ripplingTruncated}`);
   }
 
+  // listingIdentity (#6908): the posting id the payload already carries
+  // becomes the strong ATS-native identity, next to the board slug.
+  {
+    const { ripplingListingIdentity } = ripplingModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const postingId = '4f9a2c1e-7b3d-4e8a-9c6f-1a2b3c4d5e6f';
+    const fetchItems = (slug, items) => rippling.fetch(
+      { name: 'Acme', careers_url: `https://ats.rippling.com/${slug}/jobs` },
+      { fetchJson: async () => ({ page: 0, pageSize: 1000, totalItems: items.length, totalPages: 1, items }) },
+    );
+    const item = (id, slug = 'acme-corp') => ({ id, name: 'Staff Engineer', url: `https://ats.rippling.com/${slug}/jobs/${id}`, locations: [] });
+
+    const [row] = await fetchItems('acme-corp', [item(postingId)]);
+    const identity = row?.listingIdentity;
+    if (identity?.ats_provider === 'rippling' && identity?.board_slug === 'acme-corp' && identity?.posting_id === postingId
+        && Object.keys(identity).length === 3) {
+      pass('rippling.fetch() returns the rippling/<slug>/<posting id> listingIdentity');
+    } else {
+      fail(`rippling identity = ${JSON.stringify(identity)}`);
+    }
+
+    // The same posting reached through a second URL (an employer's branded
+    // careers page linking it, or the posting URL with tracking query
+    // parameters) is one listing, not two. URL dedup alone cannot join these.
+    const branded = { ...row, url: `https://careers.acme.example/jobs/${postingId}?source=linkedin` };
+    const seen = new Set();
+    markOfferSeen(row, seen);
+    if (isOfferSeen(branded, seen)) {
+      pass('the same Rippling posting under another URL is already seen (one row, not two)');
+    } else {
+      fail('Rippling posting under another URL was not recognised as the same posting');
+    }
+
+    const [otherBoard] = await fetchItems('other-co', [item(postingId, 'other-co')]);
+    if (listingIdentityToken(otherBoard) && listingIdentityToken(otherBoard) !== listingIdentityToken(row) && !isOfferSeen(otherBoard, seen)) {
+      pass('the same Rippling posting id on another board is a different listing');
+    } else {
+      fail(`other-board token = ${listingIdentityToken(otherBoard)}`);
+    }
+
+    // A row the provider keeps but whose id cannot be a posting key gets no identity.
+    const [numeric, padded, missing] = await fetchItems('acme-corp', [
+      { ...item('n'), id: 42 },
+      { ...item('p'), id: ` ${postingId} ` },
+      { ...item('m'), id: undefined },
+    ]);
+    if (numeric && padded && missing && !('listingIdentity' in numeric) && !('listingIdentity' in padded) && !('listingIdentity' in missing)) {
+      pass('a numeric, padded or missing Rippling id keeps the row but leaves listingIdentity off');
+    } else {
+      fail(`no-identity rows = ${JSON.stringify([numeric, padded, missing])}`);
+    }
+
+    if (ripplingListingIdentity('acme-corp', postingId)?.posting_id === postingId
+        && ripplingListingIdentity('acme-corp', '') === undefined
+        && ripplingListingIdentity('acme-corp', 'a\u0007b') === undefined
+        && ripplingListingIdentity('acme-corp', 7) === undefined
+        && ripplingListingIdentity('', postingId) === undefined
+        && ripplingListingIdentity(undefined, postingId) === undefined) {
+      pass('ripplingListingIdentity() accepts only a clean slug and a clean string id');
+    } else {
+      fail('ripplingListingIdentity() accepted an id or slug that cannot form a strong identity');
+    }
+  }
+
 } catch (e) {
   fail(`rippling provider tests crashed: ${e.message}`);
 }
