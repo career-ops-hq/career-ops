@@ -85,7 +85,9 @@ test('a cross-probe of other slugs does not take the entry keys', async () => {
   assert.ok(others.length > 0, 'expected alternate probes');
   for (const c of others) {
     assert.notEqual(c.opts?.timeoutMs, 60_000, c.url);
-    assert.equal(c.opts?.maxBytes, undefined, c.url);
+    // An alternate may carry its own provider ceiling (Ashby's posting API
+    // has one); what must not reach it is this entry's own 80 MB.
+    assert.notEqual(c.opts?.maxBytes, 80 * MB, c.url);
   }
 });
 

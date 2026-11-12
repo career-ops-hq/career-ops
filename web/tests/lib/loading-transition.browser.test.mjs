@@ -99,7 +99,7 @@ test("loading transitions keep context and only latest requests settle Today", {
     });
     await page.getByRole("button", { name: /^Company/ }).click();
     await until(() => held);
-    assert.equal(await heading.innerText(), "Follow-up Tracker");
+    assert.equal(await heading.innerText(), "Follow-ups");
     assert.equal(await page.getByPlaceholder("Search company or role…").isVisible(), true);
     assert.equal(await tab("ALL").isVisible(), true);
     assert.equal(await page.locator('tbody[aria-busy="true"]').count(), 1);

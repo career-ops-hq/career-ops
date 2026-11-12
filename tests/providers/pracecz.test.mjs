@@ -234,6 +234,14 @@ try {
     else fail(`pracecz.fetch() requested pages ${JSON.stringify(pages)}`);
   }
 
+  {
+    // A configured max_pages below the cap still truncates, and says so.
+    const { calls, ctx } = stub(fullPage(400));
+    const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx));
+    if (calls.length === 2 && text.includes('truncated at max_pages=2')) pass('pracecz.fetch() stops at max_pages and warns that the search was truncated');
+    else fail(`max_pages=2: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+  }
+
     {
       const { calls, ctx } = stub(fullPage(999999));
       await pracecz.fetch({

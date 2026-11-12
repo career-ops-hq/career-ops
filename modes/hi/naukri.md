@@ -239,7 +239,7 @@ Header के field names (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `P
 ## Score Evidence
 (पाँच dimensions, evidence status, open questions, Evidence confidence, priorities)
 
-## H) Application के लिए Draft Responses
+## H) Application के लिए Draft Responses (draft)
 (केवल यदि score >= 4.5 -- application form के लिए draft responses)
 
 ---

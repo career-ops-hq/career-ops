@@ -611,6 +611,11 @@ func TestPreviewTruncatesTldrToTerminalCells(t *testing.T) {
 		{name: "wide runes at 80 columns", width: 80, tldr: strings.Repeat("界", 117) + "...", wantSuffix: "..."},
 		{name: "wide runes at 120 columns", width: 120, tldr: strings.Repeat("界", 117) + "...", wantSuffix: "..."},
 		{name: "wide runes at 160 columns", width: 160, tldr: strings.Repeat("界", 117) + "...", wantSuffix: "..."},
+		// 14 columns leave exactly three cells for the value: the ellipsis still fits.
+		{name: "exactly three cells left", width: 14, tldr: strings.Repeat("a", 20), wantSuffix: "..."},
+		// ansi.Truncate counts a keycap as one cell where ansi.StringWidth counts two.
+		{name: "keycap emoji at 15 columns", width: 15, tldr: "1️⃣ 2️⃣ 3️⃣ ok", wantSuffix: "..."},
+		{name: "keycap emoji at 24 columns", width: 24, tldr: strings.Repeat("1️⃣ ", 20), wantSuffix: "..."},
 	}
 
 	for _, tt := range tests {

@@ -607,6 +607,8 @@ O código é licenciado sob [MIT](LICENSE). O nome e a marca
 para uso da comunidade, reservada para nomes de produtos comerciais e
 endossos.
 
+O código é MIT; os dados em [`employers/`](employers/) são [CC BY 4.0](employers/LICENSE).
+
 ## Histórico de estrelas
 
 <p align="center">

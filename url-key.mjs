@@ -528,6 +528,33 @@ function greenhouseJobId(url) {
   return pathId || queryId;
 }
 
+/**
+ * SmartRecruiters' posting id with its company, or null when this URL is not a
+ * SmartRecruiters posting.
+ *
+ * A public posting page is `jobs.smartrecruiters.com/{company}/{id}-{title-slug}`.
+ * The title slug is cosmetic and is not spelled one way: the scanner rebuilds
+ * it from the posting title (providers/smartrecruiters.mjs strips a trailing
+ * hyphen), while the page SmartRecruiters links to can keep one after a title
+ * that ends in punctuation, e.g. `...-analyst-m-f-d-` for "Analyst (m/f/d)".
+ * Keyed on the full URL, the one posting came back as new on every scan. The
+ * numeric id is the posting. The company stays in the key because the API
+ * addresses a posting under its company (`/v1/companies/{company}/postings/{id}`),
+ * so the id is not shown to be global the way Greenhouse's is.
+ *
+ * @param {URL} url - Hostname already folded.
+ * @returns {string|null}
+ */
+function smartRecruitersJobId(url) {
+  let match = null;
+  if (url.hostname === 'jobs.smartrecruiters.com') {
+    match = url.pathname.match(/^\/([^/]+)\/(\d+)(?:-[^/]*)?\/?$/);
+  } else if (url.hostname === 'api.smartrecruiters.com') {
+    match = url.pathname.match(/^\/v1\/companies\/([^/]+)\/postings\/(\d+)\/?$/);
+  }
+  return match ? `${match[1].toLowerCase()}/${match[2]}` : null;
+}
+
 function indeedJobId(url) {
   if (!/(^|\.)indeed\.com$/.test(url.hostname)) return null;
   const jk = url.searchParams.get('jk') ?? url.searchParams.get('vjk');
@@ -552,6 +579,9 @@ export function canonicalJobKey(raw) {
 
   const greenhouse = greenhouseJobId(u);
   if (greenhouse) return `greenhouse:${greenhouse}`;
+
+  const smartRecruiters = smartRecruitersJobId(u);
+  if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();

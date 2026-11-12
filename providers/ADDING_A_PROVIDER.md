@@ -36,7 +36,7 @@ In short:
 - **Complete inventory, no paid placement (rule 3).** The provider must
   traverse the source's full inventory, not a promoted or default-filtered
   view.
-- **Read like a visitor (rule 6).** A provider reads only what any visitor
+- **Read what is public, and say who is reading (rule 6).** A provider reads only what any visitor
   sees without signing in, with a bounded number of requests per host,
   honouring a `Crawl-delay` the source states. A login, a user account or a
   CAPTCHA in the way is a stop, and so is a source whose operator has asked

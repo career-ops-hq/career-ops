@@ -2,7 +2,7 @@
 // (#1837): token parsing, style-block building/sanitizing, HTML injection, and a
 // guard that the shipped templates actually read the variables with defaults.
 import { pass, fail, ROOT } from './helpers.mjs';
-import { join, relative } from 'path';
+import { join, relative, isAbsolute } from 'path';
 import { pathToFileURL } from 'url';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
@@ -257,6 +257,63 @@ try {
       },
     ];
 
+    const resolveTemplateContract = (tpl, targetTok) => {
+      if (tpl in targetTok.expected) return targetTok.expected[tpl];
+      try {
+        const filePath = isAbsolute(tpl) ? tpl : join(ROOT, tpl);
+        const rules = cssRules(readFileSync(filePath, 'utf-8'));
+        const tokenDecls = rules.flatMap((r) => declValues(r.body, targetTok.cssVar).map((v) => `${r.selector} => ${v}`));
+        const rootMatch = tokenDecls.find((d) => d.startsWith(':root => '));
+        const owned = rules.filter((r) => targets(r.selector, targetTok.cls));
+        const varMatch = owned.flatMap((r) => declValues(r.body, 'break-inside'))
+          .map((v) => v.match(new RegExp(`var\\(${targetTok.cssVar},\\s*([^)]+)\\)`)))
+          .find(Boolean);
+
+        if (rootMatch && varMatch) {
+          const rootVal = rootMatch.replace(':root => ', '').trim();
+          const varVal = varMatch[1].trim();
+          if (rootVal === varVal) {
+            return [varVal, true];
+          }
+          return null; // :root and fallback disagree (#6520)
+        } else if (rootMatch) {
+          const rootVal = rootMatch.replace(':root => ', '').trim();
+          return [rootVal, true];
+        } else if (varMatch) {
+          const varVal = varMatch[1].trim();
+          return [varVal, false];
+        }
+      } catch {
+        // unreadable or invalid file
+      }
+      return null;
+    };
+
+    const checkTemplateContract = (tpl, contract, targetTok) => {
+      const [value, declaresRoot] = contract;
+      const filePath = isAbsolute(tpl) ? tpl : join(ROOT, tpl);
+      const rules = cssRules(readFileSync(filePath, 'utf-8'));
+      const owned = rules.filter((r) => targets(r.selector, targetTok.cls));
+      const want = `var(${targetTok.cssVar}, ${value})`;
+      const modern = owned.flatMap((r) => declValues(r.body, 'break-inside'));
+      const legacy = owned.flatMap((r) => declValues(r.body, 'page-break-inside'));
+      const aliases = owned.flatMap((r) => [...declValues(r.body, '-webkit-column-break-inside'), ...declValues(r.body, 'all')]);
+      const legacyFirst = owned.every((r) => {
+        const legacyAt = declIndex(r.body, 'page-break-inside');
+        const modernAt = declIndex(r.body, 'break-inside');
+        return legacyAt === -1 || modernAt === -1 || legacyAt < modernAt;
+      });
+      const tokenDecls = rules.flatMap((r) => declValues(r.body, targetTok.cssVar).map((v) => `${r.selector} => ${v}`));
+      const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
+      // Exact rather than `every`: a :root block the parse lost must fail, not pass on an empty list.
+      const rootDefaultOk = JSON.stringify(tokenDecls) === JSON.stringify(declaresRoot ? [`:root => ${value}`] : []);
+      if (readsToken(modern) && readsToken(legacy) && !aliases.length && legacyFirst && rootDefaultOk) {
+        pass(`${tpl}: .${targetTok.cls} page-break-inside then break-inside read ${targetTok.cssVar} with its own default (${value})${declaresRoot ? ', matching its :root default' : ''}`);
+      } else {
+        fail(`${tpl}: ${targetTok.label} contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
+      }
+    };
+
     for (const tok of TOKENS) {
       for (const v of ['avoid', 'auto']) {
         const block = buildThemeStyleBlock(styleTokensFrom({ [tok.key]: v }));
@@ -264,35 +321,49 @@ try {
         else fail(`${tok.key}: ${v} => ${block}`);
       }
 
-      // A new template must declare its default here, or the opt-in would ship
+      // A new shipped template must declare its default here, or the opt-in would ship
       // dead in it (template-page-breaks.test.mjs discovers templates the same way).
+      // User-authored template variants (DATA_CONTRACT.md) are supported when they
+      // declare their token default on :root or in .job / .project rules (#6514).
       const discovered = listTemplates('cv', { dir: DEFAULT_TEMPLATES_DIR }).filter((t) => t.format === 'html')
         .map((t) => relative(ROOT, t.path).replace(/\\/g, '/'));
-      const unlisted = discovered.filter((t) => !(t in tok.expected));
+      const contracts = new Map(Object.entries(tok.expected));
+      for (const t of discovered) contracts.set(t, resolveTemplateContract(t, tok));
+      const unlisted = discovered.filter((t) => !contracts.get(t));
       if (discovered.length && !unlisted.length) pass(`all ${discovered.length} discovered HTML CV templates have a declared ${tok.key} default`);
       else fail(`templates with no declared ${tok.key} default: ${unlisted.join(', ') || '(none discovered)'}`);
 
-      for (const [tpl, [value, declaresRoot]] of Object.entries(tok.expected)) {
-        const rules = cssRules(readFileSync(join(ROOT, tpl), 'utf-8'));
-        const owned = rules.filter((r) => targets(r.selector, tok.cls));
-        const want = `var(${tok.cssVar}, ${value})`;
-        const modern = owned.flatMap((r) => declValues(r.body, 'break-inside'));
-        const legacy = owned.flatMap((r) => declValues(r.body, 'page-break-inside'));
-        const aliases = owned.flatMap((r) => [...declValues(r.body, '-webkit-column-break-inside'), ...declValues(r.body, 'all')]);
-        const legacyFirst = owned.every((r) => {
-          const legacyAt = declIndex(r.body, 'page-break-inside');
-          const modernAt = declIndex(r.body, 'break-inside');
-          return legacyAt === -1 || modernAt === -1 || legacyAt < modernAt;
-        });
-        const tokenDecls = rules.flatMap((r) => declValues(r.body, tok.cssVar).map((v) => `${r.selector} => ${v}`));
-        const readsToken = (vals) => vals.length > 0 && vals.every((v) => v.replace(/\s/g, '') === want.replace(/\s/g, ''));
-        // Exact rather than `every`: a :root block the parse lost must fail, not pass on an empty list.
-        const rootDefaultOk = JSON.stringify(tokenDecls) === JSON.stringify(declaresRoot ? [`:root => ${value}`] : []);
-        if (readsToken(modern) && readsToken(legacy) && !aliases.length && legacyFirst && rootDefaultOk) {
-          pass(`${tpl}: .${tok.cls} page-break-inside then break-inside read ${tok.cssVar} with its own default (${value})${declaresRoot ? ', matching its :root default' : ''}`);
+      for (const [tpl, contract] of contracts.entries()) {
+        if (!contract) continue;
+        checkTemplateContract(tpl, contract, tok);
+      }
+    }
+
+    // Regression (#6514): a user-authored named template variant documented in
+    // DATA_CONTRACT.md must not fail the theme-style test suite when it declares
+    // token defaults.
+    {
+      const fixtureDir = mkdtempSync(join(tmpdir(), 'career-ops-variant-'));
+      const sampleVariantPath = join(fixtureDir, 'cv-template.test-user-variant.html');
+      try {
+        const baseContent = readFileSync(join(ROOT, 'templates/cv-template.html'), 'utf-8');
+        writeFileSync(sampleVariantPath, baseContent, 'utf-8');
+        const discovered = listTemplates('cv', { dir: fixtureDir }).filter((t) => t.format === 'html');
+        if (discovered.some((t) => t.path === sampleVariantPath)) {
+          for (const tok of TOKENS) {
+            const contract = resolveTemplateContract(sampleVariantPath, tok);
+            if (contract) {
+              checkTemplateContract(sampleVariantPath, contract, tok);
+            } else {
+              fail(`user-authored template variant: no declared ${tok.key} default resolved (#6514)`);
+            }
+          }
+          pass('user-authored template variant recognized and tested without hardcoded entry (#6514)');
         } else {
-          fail(`${tpl}: ${tok.label} contract broken (want ${want}, legacy alias first, token on :root only as ${value}) => break-inside=${JSON.stringify(modern)} page-break-inside=${JSON.stringify(legacy)} aliases=${JSON.stringify(aliases)} legacyFirst=${legacyFirst} token=${JSON.stringify(tokenDecls)}`);
+          fail('user-authored template variant was not discovered (#6514)');
         }
+      } finally {
+        rmSync(fixtureDir, { recursive: true, force: true });
       }
     }
   }

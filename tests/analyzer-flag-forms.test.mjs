@@ -44,9 +44,9 @@ try {
   ].join('\n'));
   const log = join(dir, 'discard.log');
   writeFileSync(log, [
-    '2026-08-25T10:00:00Z\thttps://example.com/job1\ttitle_mismatch: a',
-    '2026-08-25T11:00:00Z\thttps://example.com/job2\tnot_tech: b',
-    '2026-08-26T09:00:00Z\thttps://example.com/job3\tlocation_mismatch: c',
+    '2026-08-25T10:00:00Z\thttps://example.com/job1\tbelow-min-score',
+    '2026-08-25T11:00:00Z\thttps://example.com/job2\tdealbreaker: "no on-site"',
+    '2026-08-26T09:00:00Z\thttps://example.com/job3\twrong seniority band',
     '',
   ].join('\n'));
 
@@ -102,7 +102,7 @@ try {
   });
 
   ok('the `=` form applies --reason and --top', () => {
-    const r = run('discard-analytics.mjs', `--log=${log}`, '--reason=not_tech', '--top=1');
+    const r = run('discard-analytics.mjs', `--log=${log}`, '--reason=dealbreaker', '--top=1');
     assert.match(r.out, /Total discards: 1\b/, r.out);
     assert.match(r.out, /By domain \(top 1\)/, r.out);
   });

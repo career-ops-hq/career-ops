@@ -180,6 +180,94 @@ function writeJobPortals(root, job) {
   return tempPath;
 }
 
+function readFullCheckpoint(root) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, "data", "cache", "ats-full-checkpoint.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function checkpointCurrentResumable(current) {
+  if (current === null) return true;
+  if (!current || typeof current !== "object" || Array.isArray(current)) return false;
+  if (typeof current.name !== "string") return false;
+  if (!Number.isInteger(current.resumeAt) || current.resumeAt < 0) return false;
+  if (!Number.isInteger(current.datasetLen) || current.datasetLen < 0) return false;
+  if (current.deferred === undefined) return true;
+  return Array.isArray(current.deferred)
+    && current.deferred.every((index) => Number.isInteger(index) && index >= 0);
+}
+
+function hasResumableCheckpointShape(root) {
+  const checkpoint = readFullCheckpoint(root);
+  if (!checkpoint || checkpoint.version !== 1) return false;
+  return checkpointCurrentResumable(checkpoint.current);
+}
+
+function parseFullScanResult(stdout) {
+  try {
+    const result = JSON.parse(stdout);
+    if (!result || typeof result !== "object" || Array.isArray(result)) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+function stoppedSweepMessage(saved, postingsKept, checkpointAvailable) {
+  const count = Number(postingsKept);
+  const known = Number.isFinite(count);
+  const resume = checkpointAvailable === true ? " The next run continues this sweep." : "";
+  if (saved === true && known) {
+    return `Sweep stopped before it finished. Saved ${count} matching role${count === 1 ? "" : "s"}.${resume}`;
+  }
+  if (saved === false && known && count > 0) {
+    return `Sweep stopped before it finished. ${count} matching role${count === 1 ? "" : "s"} were not saved.`;
+  }
+  return `Sweep stopped before it finished.${resume}`;
+}
+
+function stoppedSweepResult(startedAt, attempt, saved, postingsKept, checkpointAvailable) {
+  const count = Number(postingsKept);
+  return {
+    state: "failed",
+    attempt,
+    rolesFound: saved === true && Number.isFinite(count) ? count : 0,
+    durationMs: Date.now() - startedAt,
+    message: stoppedSweepMessage(saved, postingsKept, checkpointAvailable),
+  };
+}
+
+function outageStoppedMessage(parsed) {
+  const count = Number(parsed.postingsKept);
+  const known = Number.isFinite(count);
+  const saved = parsed.saved === true;
+  let message;
+  if (saved && known) {
+    message = `Resolver stopped the sweep. Saved ${count} matching role${count === 1 ? "" : "s"}.`;
+  } else if (saved !== true && known && count > 0) {
+    message = `Resolver stopped the sweep. ${count} matching role${count === 1 ? "" : "s"} were not saved.`;
+  } else {
+    message = "Resolver stopped the sweep.";
+  }
+  if (parsed.outageCheckpointWritten === true) {
+    message += " The next run continues this sweep.";
+  }
+  return message;
+}
+
+function outageStoppedResult(startedAt, attempt, parsed) {
+  const count = Number(parsed.postingsKept);
+  return {
+    state: "failed",
+    attempt,
+    rolesFound: parsed.saved === true && Number.isFinite(count) ? count : 0,
+    durationMs: Date.now() - startedAt,
+    message: outageStoppedMessage(parsed),
+  };
+}
+
 /*
  * Keep the temporary portal overlay scoped to each retry. A thrown setup or
  * spawn error is retryable just like a non-zero scanner exit, while cleanup
@@ -198,15 +286,22 @@ export function executeJob(root, job, options = {}) {
     try {
       tempPortals = writeJobPortals(root, job);
       const command = buildScanCommand(job);
+      const args = [...command.args];
+      if (command.script === "scan-ats-full.mjs" && hasResumableCheckpointShape(root)) args.push("--resume-if-compatible");
+      const scanRunId = `${startedAt}-${attempt}-${randomUUID()}`;
       const result = spawnFn(
         process.execPath,
-        [command.script, ...command.args],
+        [command.script, ...args],
         {
           cwd: CODE_ROOT,
           env: {
             ...process.env,
             CAREER_OPS_ROOT: root,
             CAREER_OPS_PORTALS: tempPortals,
+            // The scanner stamps this on partialSave. A timeout drops stdout,
+            // and a fallback checkpoint write keeps the previous savedAt, so
+            // the timestamp cannot say which attempt saved the roles.
+            CAREER_OPS_SCAN_RUN: scanRunId,
             // The scanner runs with cwd = the checkout; a relative override is
             // resolved here, the way the web resolves it, so both read one file.
             ...(process.env.CAREER_OPS_PROFILE?.trim() ? { CAREER_OPS_PROFILE: getProfilePath(root) } : {}),
@@ -219,7 +314,50 @@ export function executeJob(root, job, options = {}) {
       );
 
       if (result.status === 0) {
-        const rolesFound = extractRolesFound(job.engine || "full", result.stdout || "");
+        const engine = job.engine || "full";
+        if (engine === "full") {
+          const parsed = parseFullScanResult(result.stdout || "");
+          if (parsed?.stoppedByOutage === true) {
+            return outageStoppedResult(startedAt, attempt, parsed);
+          }
+          if (parsed && parsed.stoppedEarly !== true) {
+            const rolesFound = extractRolesFound(engine, result.stdout || "");
+            return {
+              state: "success",
+              attempt,
+              rolesFound,
+              durationMs: Date.now() - startedAt,
+              message: `Scan finished with ${rolesFound} matching role${rolesFound === 1 ? "" : "s"}.`,
+            };
+          }
+          if (parsed?.stoppedEarly === true) {
+            return stoppedSweepResult(startedAt, attempt, parsed.saved, parsed.postingsKept, parsed.checkpointAvailable === true);
+          }
+          // spawnSync with a timeout drops the handler's stdout and still reports status 0.
+          // partialSave counts only when this attempt stamped it. An older
+          // count stays in the checkpoint and is not reported as this run's.
+          if (result.error?.code === "ETIMEDOUT") {
+            const checkpoint = readFullCheckpoint(root);
+            const partial = checkpoint?.partialSave;
+            const thisRun = partial?.runId === scanRunId;
+            const available = Boolean(checkpoint?.current) && hasResumableCheckpointShape(root);
+            return stoppedSweepResult(
+              startedAt,
+              attempt,
+              thisRun ? partial.saved : undefined,
+              thisRun ? partial.postingsKept : undefined,
+              available,
+            );
+          }
+          return {
+            state: "failed",
+            attempt,
+            rolesFound: 0,
+            durationMs: Date.now() - startedAt,
+            message: "Scanner exited 0 without a readable result.",
+          };
+        }
+        const rolesFound = extractRolesFound(engine, result.stdout || "");
         return {
           state: "success",
           attempt,

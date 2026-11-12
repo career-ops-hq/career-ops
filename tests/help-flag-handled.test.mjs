@@ -178,7 +178,6 @@ test('-h is accepted wherever --help is, and suppresses the same work', () => {
 const KNOWN_WITHOUT_HELP = new Set([
   'cv-templates.mjs',
   'generate-cover-letter.mjs', 'generate-pdf.mjs',
-  'validate-plugin-registry.mjs', 'validate-untrusted-content-coverage.mjs',
   // generate-latex.mjs and verify-portals.mjs were here and have since been
   // fixed upstream; the ratchet's other end caught that on the rebase and
   // required their removal, which is the half of it that keeps the list from
@@ -197,7 +196,6 @@ const KNOWN_WITHOUT_HELP = new Set([
   //
   // keyword-match.mjs left once --help printed usage and exited 0
   // before it looked for a report.
-  'batch/aggregate-tokens.mjs',
   'plugins/h1b-sponsor/install-h1b-index.mjs',
   'plugins/h1b-sponsor/token.mjs',
 

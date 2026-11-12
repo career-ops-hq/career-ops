@@ -156,7 +156,7 @@ export function formatBreakdown(accumulator, model, provider) {
     const data = accumulator.steps[step] || { isZeroToken: true };
     const label = (step + ':').padEnd(15);
     
-    if (data.isZeroToken || (!data.prompt_tokens && !data.completion_tokens)) {
+    if (data.isZeroToken) {
       lines.push(`  ${label}(zero-token by design)`);
     } else {
       const pK = formatK(data.prompt_tokens);

@@ -152,6 +152,23 @@ test("applyCvSource answers with the manifest's readable rendering of that exact
   });
 });
 
+test("prefill uses the delivered CV while the same report regenerates", async () => {
+  const scratch = ".career-ops-web/pdf-tmp/cv-web-012.html";
+  for (const html of [true, false]) {
+    await withWorkspace(async (root) => {
+      // The previous render indexed this scratch path. The next render has
+      // written a different draft there but has not replaced the attached PDF.
+      mkdirSync(dirname(join(root, scratch)), { recursive: true });
+      writeFileSync(join(root, scratch), "<html>new, undelivered work history</html>");
+      writeFileSync(join(root, "data", "pdf-index.tsv"),
+        MANIFEST_HEADER + `12\t${PDF_REL}\t${scratch}\tletter\t2026-01-10\n`);
+      const attached = await resolveSessionCv({ company: "Acme Corp" });
+      assert.equal(attached, join(root, PDF_REL));
+      assert.equal(applyCvSource(root, attached), html ? HTML_REL : PDF_REL);
+    }, { html });
+  }
+});
+
 test("applyCvSource falls back to the PDF when no rendering survives", async () => {
   // A CV built through the latex path never gets an html sibling. "No readable
   // rendering" is not "no tailored CV", and treating them alike puts the

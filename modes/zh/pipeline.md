@@ -41,7 +41,7 @@
 - **`economy` 档位：** 没有关卡。这个档位本身已经是最便宜的，所有通过存活检查的待处理 URL 直接进入完整评估。
 - 这个关卡只适用于 pipeline/批量处理，从不用于单次交互式评估。
 
-**丢弃日志（可审计）：** 关卡筛掉的每个岗位都**必须**记录一行原因，确保预筛选不是一个静默的黑盒。在 `data/discard.log` 末尾追加一行（文件不存在则创建），格式为 `{ISO8601 timestamp}\t{url}\t{reason}`（三个以 tab 分隔的字段。交互式 pipeline 模式没有批处理任务 ID，所以这里省略 `id` 字段；批处理模式的 `batch/batch-runner.sh` 使用单独的 `batch/logs/discard.log`，格式为包含任务 ID 的四个字段），同时保留上文已写入 "Processed" 的 `skipped` 条目。这份日志是关卡丢弃了哪些岗位、为什么丢弃的可见、可审计记录。定期查看它，如果关卡过严或过松，据此调整 North Star 画像。`node discard-analytics.mjs` 可以汇总这份日志：按原因、域名和日期计数，并列出最常见的 `title_mismatch` URL 供人工复核。
+**丢弃日志（可审计）：** 关卡筛掉的每个岗位都**必须**记录一行原因，确保预筛选不是一个静默的黑盒。在 `data/discard.log` 末尾追加一行（文件不存在则创建），格式为 `{ISO8601 timestamp}\t{url}\t{reason}`（三个以 tab 分隔的字段。交互式 pipeline 模式没有批处理任务 ID，所以这里省略 `id` 字段；批处理模式的 `batch/batch-runner.sh` 使用单独的 `batch/logs/discard.log`，格式为包含任务 ID 的四个字段），同时保留上文已写入 "Processed" 的 `skipped` 条目。这份日志是关卡丢弃了哪些岗位、为什么丢弃的可见、可审计记录。定期查看它，如果关卡过严或过松，据此调整 North Star 画像。`node discard-analytics.mjs` 可以汇总这份日志：按原因、域名和日期计数，并列出被丢弃次数最多的 URL 及其最近一次原因，供人工复核。调整标题关键词请用 `node filter-audit.mjs`：扫描器的标题过滤记录在 `data/scan-history.tsv`，而不是这份日志。
 
 ## 工作流
 

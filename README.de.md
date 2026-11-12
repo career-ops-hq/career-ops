@@ -607,6 +607,8 @@ Der Code steht unter der [MIT](LICENSE)-Lizenz. Der Name und die Marke
 für die Community-Nutzung, reserviert für kommerzielle Produktnamen und
 Endorsements.
 
+Der Code steht unter MIT; die Daten in [`employers/`](employers/) stehen unter [CC BY 4.0](employers/LICENSE).
+
 ## Sternenverlauf
 
 <p align="center">
