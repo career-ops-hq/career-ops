@@ -229,3 +229,29 @@ test("setInboxSkip refuses an unmatched URL and leaves the file untouched", asyn
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("Inbox Skip and undo update a shared pipeline without replacing its symlink", {
+  skip: process.platform === "win32" || !HAS_LOCK,
+}, async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inbox-skip-link-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const target = path.join(dir, "shared-pipeline.md");
+  const file = path.join(dir, "pipeline.md");
+  fs.writeFileSync(target, FIXTURE);
+  fs.symlinkSync(path.basename(target), file);
+  const options = { lockModule: LOCK, timeoutMs: 5_000 };
+
+  const skipped = await setInboxSkip(file, BETA, true, options);
+  assert.equal(skipped.ok, true);
+  assert.equal(skipped.changed, 1);
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), "Skip replaced the shared pipeline link");
+  assert.equal(fs.readFileSync(target, "utf8"), SKIPPED_FIXTURE);
+
+  const appended = "- [ ] https://example.org/jobs/2 | AnotherCo | New posting\n";
+  fs.appendFileSync(target, appended);
+  const undone = await setInboxSkip(file, BETA, false, options);
+  assert.equal(undone.ok, true);
+  assert.equal(undone.changed, 1);
+  assert.ok(fs.lstatSync(file).isSymbolicLink(), "Undo replaced the shared pipeline link");
+  assert.equal(fs.readFileSync(target, "utf8"), FIXTURE + appended);
+});
