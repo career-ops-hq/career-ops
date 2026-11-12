@@ -222,6 +222,7 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'preferred_languages',
   'interamt_searches',
   'topdev_searches',
+  'seek_searches',
   'dayforce_boards',
   'location_filter',
   'country_eligibility_filter',
