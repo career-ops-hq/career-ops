@@ -143,6 +143,23 @@ const uspsStateCodesBeatingIso = (text) => {
   }
   return ignore;
 };
+// Two- and three-letter pieces of a "City, ST" name are the city, not a
+// country. "St Louis, MO" is Missouri. "Remote Germany, DE" still names
+// Germany through the country word, which the name matcher still records.
+const cityHeadIsoTokens = (segment) => {
+  const place = segment.replace(/\s*\(hybrid\)\s*$/, '').trim();
+  const parts = place.split(',').map(part => part.trim()).filter(Boolean);
+  const last = parts.at(-1) || '';
+  if (parts.length !== 2 || !USPS_STATE_CODES.has(last)) return new Set();
+  if (!cityWords(parts[0]).length || regionLabel(parts[0])) return new Set();
+  const headCode = trailingUspsCode(parts[0]);
+  if (headCode && headCode === parts[0]) return new Set();
+  const tokens = new Set();
+  for (const token of parts[0].split(/[,;/|()\s-]+/)) {
+    if (/^[a-z]{2,3}$/.test(token)) tokens.add(token);
+  }
+  return tokens;
+};
 const countries = (text, codes = false) => {
   const found = new Set([...COUNTRY_NAMES, ...COUNTRY_ALIASES].filter(c => c.match.test(text)).map(c => c.code));
   if (codes) {
@@ -150,8 +167,9 @@ const countries = (text, codes = false) => {
       const segment = raw.trim();
       if (!segment) continue;
       const stateCodes = uspsStateCodesBeatingIso(withoutTrailingHybrid(segment));
+      const cityTokens = cityHeadIsoTokens(segment);
       for (const token of segment.split(/[,;/|()\s-]+/)) {
-        if (stateCodes.has(token)) continue;
+        if (stateCodes.has(token) || cityTokens.has(token)) continue;
         if (/^[a-z]{2,3}$/.test(token) && !PROSE_WORD_CODES.has(token)) {
           const name = fold(countryNameFromIso(token));
           const c = COUNTRY_NAMES.find(c => c.name === name);
@@ -177,15 +195,20 @@ const recognizedStateCodes = (text) => {
 };
 // A state code is a US place when the policy's country does not use those
 // letters. France rejects "Paris, ID". Germany still accepts "Bremen, DE".
+// Each place is judged on its own. Austin, TX does not erase Bremen, DE.
 const stateOutsideAllowedCountries = (text, allowed, found) => {
   if (allowed.has('US')) return false;
   if ([...found].some(code => allowed.has(code))) return false;
-  for (const code of recognizedStateCodes(text)) {
-    const iso = isoCountryCode(code);
-    if (iso && allowed.has(iso)) continue;
-    return true;
+  let sawOutside = false;
+  for (const segment of placeSegments(text)) {
+    const codes = [...recognizedStateCodes(segment)];
+    if (!codes.length) continue;
+    const named = countries(segment, true);
+    if ([...named].some(code => allowed.has(code))) return false;
+    if (codes.some(code => allowed.has(isoCountryCode(code)))) return false;
+    sawOutside = true;
   }
-  return false;
+  return sawOutside;
 };
 const stateMatchesAllowedCountry = (text, allowed) => {
   const codes = [...recognizedStateCodes(text)];
