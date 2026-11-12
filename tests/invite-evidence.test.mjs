@@ -151,6 +151,13 @@ test('classifyReply: an interview still to be booked stays Need Action', () => {
   assert.equal(r.suggestedTrackerUpdate, 'Interview');
 });
 
+test('classifyReply: a confirmed invite that also asks for information keeps the Interview update', () => {
+  const r = classifyReply({ from: 'Tom Weiss <tom.weiss@initech.example>', subject: 'Interview invitation',
+    body_snippet: 'We would like to invite you to an interview with our product team. Please provide information about your notice period before the call.' });
+  assert.equal(r.type, 'Need Action');
+  assert.equal(r.suggestedTrackerUpdate, 'Interview');
+});
+
 test('analyzeInvite reads the Subject header of a pasted email', () => {
   const r = analyzeInvite('From: Lena Berg <lena.berg@globex.example>\nSubject: Invitation to a first interview at Globex\n\nThank you for your application. Lena will be in touch with the details.', [], { clarificationDraft: false });
   assert.ok(r.inviteEvidence.reasons.some((x) => /invite in the subject/.test(x)), r.inviteEvidence.reasons.join('; '));

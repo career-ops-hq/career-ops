@@ -747,7 +747,8 @@ export function classifyReply(cand) {
     return {
       type: 'Need Action',
       evidence: Array.from(new Set(evidence)),
-      suggestedTrackerUpdate: hasSchedulingWording ? 'Interview' : 'Responded'
+      // A confirmed invite that also asks for something ("please provide ...") stays an Interview.
+      suggestedTrackerUpdate: (invite.invite || hasSchedulingWording) ? 'Interview' : 'Responded'
     };
   }
 
