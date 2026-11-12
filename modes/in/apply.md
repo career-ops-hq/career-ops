@@ -28,13 +28,15 @@ the rules they cite are in `modes/in/_shared.md`.
   date they can join, from them or the profile. A student's joining date comes
   after final exams unless the candidate says otherwise. Never fill in a
   default.
-- **Total and relevant experience:** counted from the dates in `cv.md`, in the
-  units the form asks for (years and months). Internships count only when the
-  field asks for them. Never round up.
-- **Graduation year / batch:** exactly as `cv.md` states it.
-- **CGPA or percentage, 10th and 12th marks:** exactly as `cv.md` states them.
-  Never convert a CGPA to a percentage unless the candidate supplies the
-  university's formula. When the CV does not state a figure, ask.
+- **Total and relevant experience:** counted from the dates in the Step 4b
+  sources, at the Step 4b precedence (the tailored CV for anything it covers,
+  `cv.md` only for a whole section it omits), in the units the form asks for
+  (years and months). Internships count only when the field asks for them.
+  Never round up.
+- **Graduation year / batch:** exactly as the Step 4b sources state it.
+- **CGPA or percentage, 10th and 12th marks:** exactly as the Step 4b sources
+  state them. Never convert a CGPA to a percentage unless the candidate
+  supplies the university's formula. When neither CV states a figure, ask.
 - **Active backlogs / gap years:** from the candidate only. Default to "Ask
   candidate: ...".
 - **Preferred location / willing to relocate:** the cities and relocation
