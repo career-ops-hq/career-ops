@@ -2232,6 +2232,11 @@ search_queries:
 #   searchLocation: Ho Chi Minh           # optional — only Ho Chi Minh's city code is verified live
 #   enabled: true                         # ~50 postings/page; 750ms pacing between pages
 #
+# - name: techjobs.vn                     # VN tech jobs from employers' own careers pages / ATS boards
+#   provider: techjobs                    # public JSON feed; URLs are the employer's apply links
+#   # max_pages: 40         # optional page cap (500 postings/page, default 40, max 200)
+#   enabled: true                         # ~12 pages; 2s pacing (robots.txt Crawl-delay)
+#
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
 #   enabled: true
