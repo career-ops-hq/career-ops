@@ -11,11 +11,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry } from './helpers.mjs';
 import { listTree } from '../lib/walk-tree.mjs';
 
 import { applyFold, formatManifest, looseManifest, planFold } from '../seeds/employers-fold.mjs';
@@ -43,7 +43,7 @@ function snapshot(dir) {
 function withInbox(files, body) {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-fold-'));
   try {
-    cpSync(join(ROOT, 'employers'), join(dir, 'employers'), { recursive: true });
+    copyEmployerRegistry(dir);
     mkdirSync(join(dir, INBOX_DIR), { recursive: true });
     for (const [name, content] of Object.entries(files)) {
       writeFileSync(join(dir, INBOX_DIR, name), typeof content === 'string' ? content : `${content.map((l) => JSON.stringify(l)).join('\n')}\n`);
@@ -207,7 +207,7 @@ test('CLI: dry run by default, --apply writes, an empty inbox is a no-op, unknow
 test('end to end: the 53 committed boards plus new ones, imported, validated, folded in a copy and validated again', () => {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-e2e-'));
   try {
-    cpSync(join(ROOT, 'employers'), join(dir, 'employers'), { recursive: true });
+    copyEmployerRegistry(dir);
     const urls = [];
     for (const ats of readdirSync(join(dir, 'employers/boards'))) {
       for (const f of readdirSync(join(dir, 'employers/boards', ats))) {
