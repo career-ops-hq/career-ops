@@ -85,6 +85,48 @@ test("a combobox display matches the answer the fill step would click", async ()
   assert.match(missed.find((issue) => issue.code === "required-empty").message, /Site/);
 });
 
+test("a required select with a blank value is empty whatever its label says", async () => {
+  const { verifyFill } = await import("../../src/lib/apply/diagnose.ts");
+  const option = { value: "", textContent: "Please select" };
+  const select = {
+    tagName: "SELECT",
+    value: "",
+    selectedOptions: [option],
+  };
+  const frame = {
+    evaluate(fn, arg) {
+      const previous = globalThis.document;
+      globalThis.document = {
+        querySelector(selector) {
+          return selector.includes('data-co-field="region"') ? select : null;
+        },
+        querySelectorAll() {
+          return [];
+        },
+      };
+      return Promise.resolve(fn(arg)).finally(() => {
+        globalThis.document = previous;
+      });
+    },
+  };
+  const fields = [{ id: "region", type: "select", label: "Region", required: true }];
+  const blank = await verifyFill(frame, fields, {});
+  assert.ok(codes(blank).includes("required-empty"), JSON.stringify(blank));
+  assert.match(blank.find((issue) => issue.code === "required-empty").message, /Region/);
+
+  select.value = "--";
+  option.value = "--";
+  option.textContent = "--";
+  const dashes = await verifyFill(frame, fields, {});
+  assert.ok(codes(dashes).includes("required-empty"), JSON.stringify(dashes));
+
+  select.value = "mw";
+  option.value = "mw";
+  option.textContent = "Midwest";
+  const chosen = await verifyFill(frame, fields, {});
+  assert.equal(codes(chosen).includes("required-empty"), false, JSON.stringify(chosen));
+});
+
 test("a failed read-back names the fields it could not see", async () => {
   const { verifyFill } = await import("../../src/lib/apply/diagnose.ts");
   const frame = { evaluate() { return Promise.reject(new Error("read-back failed")); } };
@@ -93,6 +135,15 @@ test("a failed read-back names the fields it could not see", async () => {
   ], { name: "Fixture" });
   assert.deepEqual(codes(issues), ["fill-unverified"]);
   assert.match(issues[0].message, /First name/);
+  assert.equal(showPrefilledBanner("done", issues), false);
+});
+
+test("a failed read-back with no fields is still unverified", async () => {
+  const { verifyFill } = await import("../../src/lib/apply/diagnose.ts");
+  const frame = { evaluate() { return Promise.reject(new Error("read-back failed")); } };
+  const issues = await verifyFill(frame, [], {});
+  assert.deepEqual(codes(issues), ["fill-unverified"]);
+  assert.match(issues[0].message, /not counted as pre-filled/);
   assert.equal(showPrefilledBanner("done", issues), false);
 });
 
@@ -167,6 +218,7 @@ test("a wrong radio and an unread combobox are not a successful read-back", { sk
     { id: "cv", type: "file", label: "Resume", required: false },
     { id: "terms", type: "checkbox", label: "Terms", required: true },
     { id: "site", type: "select", label: "Site", required: true },
+    { id: "region", type: "select", label: "Region", required: true },
   ], {
     nickname: "Fixture",
     cv: "ignored.pdf",
@@ -179,6 +231,7 @@ test("a wrong radio and an unread combobox are not a successful read-back", { sk
   assert.ok(codes(gaps).includes("required-empty"), JSON.stringify(gaps));
   assert.match(gaps.find((issue) => issue.code === "required-empty").message, /Terms/);
   assert.match(gaps.find((issue) => issue.code === "required-empty").message, /Site/);
+  assert.match(gaps.find((issue) => issue.code === "required-empty").message, /Region/);
   assert.equal(showPrefilledBanner("done", gaps), false);
 });
 

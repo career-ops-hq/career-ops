@@ -323,6 +323,7 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
   const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
   type Combo = { label: string; intended: string; actual: string; required: boolean };
   type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[]; comboboxes: Combo[] };
+  let readFailed = false;
   const res = await frame
     .evaluate(
       ({ meta, answers }): R => {
@@ -404,7 +405,7 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
               .filter((part) => !blankish(part));
             if (intended && intended.trim()) {
               if (!texts.some((part) => norm(part) === norm(intended))) mismatches.push(f.label);
-            } else if (f.required && texts.length === 0) requiredEmpty.push(f.label);
+            } else if (f.required && (!(sel.value || "").trim() || texts.length === 0)) requiredEmpty.push(f.label);
             continue;
           }
           note(f.label, intended, (el as HTMLInputElement).value || "", f.required);
@@ -419,7 +420,10 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
       },
       { meta, answers },
     )
-    .catch(() => ({ mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [], comboboxes: [] }) as R);
+    .catch(() => {
+      readFailed = true;
+      return { mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [], comboboxes: [] } as R;
+    });
 
   for (const box of res.comboboxes ?? []) {
     const intended = box.intended.trim();
@@ -434,6 +438,7 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
   if (res.mismatches.length) out.push({ level: "warn", code: "fill-mismatch", message: `These answers didn't seem to land on the real form — check them: ${res.mismatches.slice(0, 4).join(", ")}${res.mismatches.length > 4 ? "…" : ""}.` });
   if (res.requiredEmpty.length) out.push({ level: "warn", code: "required-empty", labels: res.requiredEmpty, message: `Required and still empty — you'll need to fill ${res.requiredEmpty.length > 1 ? "these" : "this"}: ${res.requiredEmpty.slice(0, 4).join(", ")}${res.requiredEmpty.length > 4 ? "…" : ""}.` });
   if (res.unverified.length) out.push({ level: "warn", code: "fill-unverified", message: `Couldn't read these back, so they are not counted as pre-filled: ${res.unverified.slice(0, 4).join(", ")}${res.unverified.length > 4 ? "…" : ""}.` });
+  else if (readFailed) out.push({ level: "warn", code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." });
   for (const v of res.valErrors) out.push({ level: "warn", code: "validation", message: `The form flagged: “${v}”.` });
   return out;
 }
