@@ -82,6 +82,17 @@ test('remote_fit: drop removes only a stated mismatch', () => {
   assert.equal(gate({ title: 'AI Engineer' }), null);
 });
 
+test('remote_fit: drop keeps far-time-zone roles when the profile is timezone_flexible', () => {
+  const pacific = { title: 'AI Engineer', location: 'Remote', description: 'You must work Pacific Time business hours.' };
+  const flexible = normalizeTracks({ ...PROFILE, tracks: { ...PROFILE.tracks, remote: { preference: 'remote_first', timezone_flexible: true } } });
+  assert.equal(flexible.remote.timezoneFlexible, true);
+  assert.equal(normalizeTracks(PROFILE).remote.timezoneFlexible, false);
+  const gate = buildTracksGate(flexible, { remote_fit: 'drop' });
+  assert.equal(gate(pacific), null);
+  assert.equal(gate(US_ONLY), 'remote_fit', 'a residency restriction still drops');
+  assert.equal(buildTracksGate(normalizeTracks(PROFILE), { remote_fit: 'drop' })(pacific), 'remote_fit');
+});
+
 test('remote_fit: drop does nothing without a remote preference in the profile', () => {
   const gate = buildTracksGate(normalizeTracks({ tracks: { europe: { enabled: true } } }), { remote_fit: 'drop' });
   assert.equal(gate(US_ONLY), null);

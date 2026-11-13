@@ -83,6 +83,7 @@ export function tracksBlock({ enable, remote, country, timezone, workAuthorizati
       '  remote:',
       '    preference: ' + remote + '          # ' + REMOTE_PREFERENCES.join(' | '),
       '    timezone: ' + q(timezone || 'Europe/Berlin'),
+      '    timezone_flexible: false            # true: required working hours in a far time zone are shown, never a mismatch',
       '    hybrid_cities: []                   # cities where hybrid or on-site is acceptable',
       '    max_onsite_days_per_month: null',
     );

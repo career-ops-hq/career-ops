@@ -65,6 +65,7 @@ tracks:
   remote:
     preference: remote_first           # remote_only | remote_first | hybrid_ok | any
     timezone: "Europe/Berlin"
+    timezone_flexible: false
     hybrid_cities: []
     max_onsite_days_per_month: null
 ```
@@ -80,6 +81,7 @@ tracks:
 | `freelance.fx_to_base` | Your own conversion rates into the day-rate currency. Without one, a rate in another currency is shown unconverted and not compared. |
 | `remote.preference` | `remote_only`: hybrid and on-site are mismatches. `remote_first`: hybrid is a compromise, on-site a mismatch. `hybrid_ok`: hybrid is fine. |
 | `remote.timezone` | Required working hours are compared with it. "Pacific hours" from Central European Time is a mismatch; "4 hours of overlap with Eastern" is a caution. |
+| `remote.timezone_flexible` | `true`: you accept working hours in far time zones. A required overlap is then never a mismatch, never drops a posting in `tracks_filter` and never caps a score; the evaluation still states the hours. Residency and work-authorization limits ("US residents only", "must be authorized to work in the US") stay mismatches. Default `false`. |
 
 ## In the scanner
 

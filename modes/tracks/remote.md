@@ -38,6 +38,12 @@ inside 09:00-18:00 at home is a match; one that needs work until about 20:00 is
 a caution; one that needs regular work after 20:00 or before 07:00, or the
 other region's full business hours, is a mismatch.
 
+With `timezone_flexible: true` the candidate accepts far time zones: state the
+required hours in Block A as local time at home (for example "18:00-23:00
+Berlin"), and treat them as information. They are not a mismatch, not a
+caution, and never cap or lower the score. This covers working hours only:
+a residency or work-authorization restriction is still a mismatch.
+
 ## Verdicts
 
 | Verdict | Meaning | In the report |

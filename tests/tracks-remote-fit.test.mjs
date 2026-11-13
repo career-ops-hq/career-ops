@@ -89,6 +89,24 @@ test('a location line in the body and an overlap rule with an abbreviated zone',
   assert.deepEqual([r.arrangement, r.timezone.requiredOverlapHours, r.verdict], ['remote', 5, 'mismatch']);
 });
 
+test('timezone_flexible: required far hours are information, residency limits still block', () => {
+  const flexible = { ...HOME, timezoneFlexible: true };
+  const pacific = { title: 'AI Engineer', location: 'Remote (Europe)', description: 'Must overlap at least 5 hours with U.S. Pacific time.' };
+  assert.equal(verdict(pacific), 'mismatch', 'the default is unchanged');
+  const r = classifyRemoteFit(pacific, flexible);
+  assert.equal(r.verdict, 'match');
+  assert.deepEqual([r.timezone.verdict, r.timezone.flexible, r.timezone.requiredOverlapHours], ['mismatch', true, 5], 'the hours are still reported');
+  assert.ok(r.reasons.some(x => /information only/.test(x)));
+  const eastern = { title: 'ML Engineer', location: 'Remote', description: 'Fully remote. We need at least 4 hours overlap with EST.' };
+  assert.equal(verdict(eastern), 'partial');
+  assert.notEqual(verdict(eastern, flexible), 'partial');
+  for (const posting of [
+    { title: 'AI Engineer', location: 'Remote (US only)' },
+    { title: 'AI Engineer', location: 'Remote', description: 'US-based candidates only. Pacific hours.' },
+    { title: 'AI Engineer', location: 'Remote', description: 'Authorized to work in the US without sponsorship is required.' },
+  ]) assert.equal(verdict(posting, flexible), 'mismatch', JSON.stringify(posting));
+});
+
 test('helpers', () => {
   assert.equal(utcOffsetHours('Europe/Berlin') >= 1, true);
   assert.equal(utcOffsetHours('Not/AZone'), null);

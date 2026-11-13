@@ -465,6 +465,7 @@ cover_letter:
 #   remote:
 #     preference: remote_first           # remote_only | remote_first | hybrid_ok | any
 #     timezone: "Europe/Berlin"
+#     timezone_flexible: false           # true: required hours in a far time zone are shown, never a mismatch
 #     hybrid_cities: []                  # cities you would commute to
 #     max_onsite_days_per_month: null
 
