@@ -5,30 +5,13 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { register } from "node:module";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import "../helpers/web-ts-alias-loader.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const src = join(here, "../../src");
-register(`data:text/javascript,${encodeURIComponent(`
-  import { existsSync } from 'node:fs';
-  import { pathToFileURL, fileURLToPath } from 'node:url';
-  import path from 'node:path';
-  export async function resolve(specifier, context, nextResolve) {
-    const base = specifier.startsWith('@/')
-      ? path.join(${JSON.stringify(src)}, specifier.slice(2))
-      : specifier.startsWith('.') ? fileURLToPath(new URL(specifier, context.parentURL)) : null;
-    if (base) {
-      for (const ext of ['', '.ts', '.mjs', '.js']) {
-        if (existsSync(base + ext)) return { url: pathToFileURL(base + ext).href, shortCircuit: true };
-      }
-    }
-    return nextResolve(specifier, context);
-  }
-`)}`, pathToFileURL(src + "/"));
 
 const loginHtml = readFileSync(join(here, "../fixtures/apply-login-wall.html"), "utf8");
 const applicationHtml = readFileSync(join(here, "../fixtures/apply-login-wall-application.html"), "utf8");
@@ -49,7 +32,14 @@ test("a password box is a login wall and stays blank", async (t) => {
   const { chromium } = await import("playwright-core");
   const { extractForm } = await import("../../src/lib/apply/extract.ts");
   const { fillSession, isApplicationFormFn } = await import("../../src/lib/apply/session.ts");
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  let browser;
+  try {
+    browser = await chromium.launch({ channel: "chrome", headless: true });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    t.skip(`system Chrome did not launch (${reason})`);
+    return;
+  }
   t.after(() => browser.close());
   const page = await browser.newPage();
 
