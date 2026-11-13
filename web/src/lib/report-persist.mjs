@@ -18,6 +18,7 @@ import { setInboxSkip } from "./inbox-skip.mjs";
 import { parseEvaluationOptions } from "./evaluation-options.mjs";
 import { machineSummarySection } from "./machine-summary-section.mjs";
 import { classifyEvaluationGate, evaluationGateConflictsWithReport } from "./evaluation-gate.mjs";
+import { APPLY_LINE } from "./report-sections.mjs";
 
 const ISO_DATE_RE = /^20\d{2}-\d{2}-\d{2}$/;
 const YAML_FENCE = /^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i;
@@ -97,7 +98,22 @@ export function formatScore(raw) {
   if (!m) return null;
   const n = Number(m[1]);
   if (!Number.isFinite(n) || n < 0 || n > 5) return null;
-  return `${n.toFixed(1)}/5`;
+  return `${oneDecimalScore(n)}/5`;
+}
+
+/**
+ * One decimal for the tracker cell. `toFixed(1)` rounds 3.95 to 4.0, which
+ * is the apply line, so a below-line score would be stored as Recommended.
+ * Floor that case to the previous tenth. Other scores keep ordinary rounding.
+ * @param {number} n
+ * @returns {string}
+ */
+function oneDecimalScore(n) {
+  const rounded = n.toFixed(1);
+  if (n < APPLY_LINE && Number(rounded) >= APPLY_LINE) {
+    return (Math.floor(n * 10) / 10).toFixed(1);
+  }
+  return rounded;
 }
 
 /**
