@@ -180,4 +180,19 @@ async function main() {
   for (const l of lines) console.log(l);
 }
 
-if (isMainModule(import.meta.url)) await main();
+const USAGE = `Usage:
+  node check-output-names.mjs [--json] [--summary] [--self-test]
+
+  --json        machine-readable findings
+  --summary     counts only, no per-file lines
+  --self-test   run the built-in checks
+  --help, -h    print this and exit`;
+
+if (isMainModule(import.meta.url)) {
+  // Before any work: an unhandled --help would run the audit instead.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
+  await main();
+}
