@@ -16,6 +16,12 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { extractCellUrl } from '../tracker-parse.mjs';
+
+function postingHref(row) {
+  const cells = row.split('|').map(s => s.trim());
+  return extractCellUrl(cells[cells.length - 2] ?? '');
+}
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -110,10 +116,11 @@ test('an Applied row keeps its posting when templates/states.yml is missing', (t
     const rows = readFileSync(tracker, 'utf-8').split('\n').filter(l => l.startsWith('|') && !l.includes('---') && !/\|\s*#\s*\|/.test(l));
     assert.equal(rows.length, 2, `the Evaluated row is updated, not a new row:\n${rows.join('\n')}\n${out}`);
     const applied = rows.find(l => l.includes('**Applied**'));
-    assert.ok(applied && applied.includes(appliedUrl) && !applied.includes('9001'),
-      `the Applied row was retargeted: ${applied}`);
-    const evaluated = rows.find(l => l.includes('| 3 |') || /\|\s*3\s*\|/.test(l));
-    assert.ok(evaluated && evaluated.includes(incomingUrl), `the Evaluated row was not updated: ${evaluated}`);
+    assert.ok(applied, `no Applied row:\n${rows.join('\n')}`);
+    assert.equal(postingHref(applied), appliedUrl, `the Applied row was retargeted: ${applied}`);
+    const evaluated = rows.find(l => /\|\s*3\s*\|/.test(l));
+    assert.ok(evaluated, `no Evaluated row:\n${rows.join('\n')}`);
+    assert.equal(postingHref(evaluated), incomingUrl, `the Evaluated row was not updated: ${evaluated}`);
   } finally {
     rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
