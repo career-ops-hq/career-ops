@@ -99,7 +99,7 @@ Carry the list into Step 6 and Step 8, and into Step 9 for transcript input only
 
 Before anything is saved (Step 8 and Step 9 both depend on the answer), check whether this debrief re-runs one already on disk. Once the company, role, round type and date are known (ask if they are not), list every existing session file for them in `interview-prep/sessions/`: the base name `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` and any `-2`, `-3`, ... variants, even when the base name itself is missing.
 
-- **No file:** this is a new round. Step 8 appends and Step 9 writes the base name.
+- **No file:** check `interview-prep/{company-slug}-{role-slug}.md` for a `## Round [N] Debrief — [YYYY-MM-DD]` entry for this round and date, which an earlier run leaves behind when it stopped after Step 8. If there is one, ask whether this debrief re-runs it; on yes, Step 8 replaces that entry. Otherwise this is a new round and Step 8 appends. Either way, Step 9 writes the base name.
 - **One or more files:** never overwrite silently. Show the files with each one's `interviewer_role` and first question, and ask the candidate whether this debrief re-runs one of them or is a separate round.
   - **Re-run:** note the file the candidate picks. Step 8 replaces that round's entry in the prep file instead of appending a second one, and Step 9 updates the picked file in place under its re-run rule.
   - **Separate round:** Step 8 appends as usual, and Step 9 writes the next free counter (`-2`, `-3`, ...) before `.md`.

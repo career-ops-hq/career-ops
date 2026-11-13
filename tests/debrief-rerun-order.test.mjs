@@ -49,6 +49,9 @@ const step1d = section(CHECK_HEADING);
 check('Step 1d lists the base name and numbered variants', step1d.includes('`-2`') && /base name itself is missing/.test(step1d), 'variant listing lost');
 check('Step 1d asks re-run vs separate round', /re-runs one of them or is a separate round/.test(step1d), 'question lost');
 check('Step 1d never overwrites silently', /never overwrite silently/.test(step1d), 'no silent-overwrite guard');
+check('Step 1d checks the prep file when no session file exists (run stopped after Step 8)',
+  /\*\*No file:\*\* check `interview-prep\/\{company-slug\}-\{role-slug\}\.md`/.test(step1d) && /stopped after Step 8/.test(step1d),
+  'no prep-file check on the no-file path');
 
 const step8 = section('## Step 8 — Save Debrief');
 check('Step 8 replaces the round entry on a confirmed re-run',
