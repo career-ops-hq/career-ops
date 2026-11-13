@@ -43,6 +43,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
   const [layout, setLayout] = useState<Layout>("grid");
   const [sortOpen, setSortOpen] = useState(false);
   const sortRef = useRef<HTMLDivElement>(null);
+  const sortTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Fit bands are free title-vs-profile estimates on scan offers only; the fit
   // controls stay out of the way when nothing in this result set carries one.
@@ -63,7 +64,10 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
       if (!sortRef.current?.contains(e.target as Node)) setSortOpen(false);
     };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSortOpen(false);
+      if (e.key !== "Escape") return;
+      setSortOpen(false);
+      // Closing the menu from the keyboard puts focus back on the button that opened it.
+      sortTriggerRef.current?.focus();
     };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -123,6 +127,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
 
           <div ref={sortRef} className="relative">
             <button
+              ref={sortTriggerRef}
               type="button"
               aria-haspopup="true"
               aria-expanded={sortOpen}
