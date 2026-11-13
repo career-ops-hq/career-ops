@@ -323,6 +323,22 @@
 #   max: 0
 #   currency: "USD"
 
+# -- Workplace filter (optional) --
+# Filter scanned jobs by workplace model (remote | hybrid | onsite).
+# Set only from the provider's dedicated field (Ashby, Lever).
+#
+# Semantics:
+#   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')
+#   - include_unknown: whether jobs with no workplaceType pass (default: true)
+#   - If this entire block is absent, workplace type is not filtered (default behavior)
+#
+# Example: target remote or hybrid roles, dropping postings that don't state workplace type
+# workplace_filter:
+#   allow:
+#     - remote
+#     - hybrid
+#   include_unknown: false
+
 # Read-only portal housekeeping: `node stats.mjs --prune --summary`.
 # Uses exact-lowercase company names, scan history and recent health evidence.
 # First health observation is a lower bound, not the date config was added.

@@ -21,6 +21,14 @@
  * @property {string} company  May be empty when the source can't expose it
  *                             at the list-page level; populated downstream.
  * @property {string} location May be empty.
+ * @property {'remote' | 'hybrid' | 'onsite'} [workplaceType]
+ *                               Workplace model, populated ONLY when the source
+ *                               exposes a dedicated field (`ashby.mjs` and
+ *                               `lever.mjs` are producers; most providers omit it).
+ *                               Normalized to lowercase: 'remote' | 'hybrid' | 'onsite'.
+ *                               Never inferred from location text, title, or
+ *                               `isRemote`. Omitted when unknown or unspecified.
+ *                               Consumed by scan.mjs's opt-in `workplace_filter`.
  * @property {string} [description] Job description text, populated ONLY when the
  *                               provider's list payload carries it for free (no
  *                               extra per-job request — the scanner is zero-token),
