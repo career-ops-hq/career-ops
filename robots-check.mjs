@@ -301,6 +301,44 @@ export function isPathAllowed(text, agent, path) {
   return bestLength < 0 ? true : bestAllow;
 }
 
+/**
+ * The Crawl-delay, in seconds, that robots.txt states for `agent`: its own
+ * group's value, else the `*` group's, else null. Crawl-delay is not part of
+ * RFC 9309, but the Source Indexing Policy (CONTRIBUTING.md, rule 6) asks a
+ * reader to honour one a source states. Groups are formed the way
+ * parseRobotsGroups forms them; the first value a group states wins, and a
+ * value that is not a non-negative number is ignored.
+ *
+ * @param {string} text - The robots.txt body.
+ * @param {string} agent - Product token, e.g. ROBOTS_PRODUCT_TOKEN.
+ * @returns {number|null}
+ */
+export function crawlDelaySeconds(text, agent) {
+  const delays = new Map();
+  let agents = [];
+  let expectingAgents = true;
+  for (const raw of lines(text)) {
+    const line = uncomment(raw).trim();
+    const colon = line.indexOf(':');
+    if (!line || colon === -1) continue;
+    const field = line.slice(0, colon).trim().toLowerCase();
+    const value = line.slice(colon + 1).trim();
+    if (field === 'user-agent') {
+      if (!expectingAgents) {
+        agents = [];
+        expectingAgents = true;
+      }
+      agents.push(agentKey(value));
+    } else if ((field === 'allow' || field === 'disallow') && agents.length > 0) {
+      expectingAgents = false;
+    } else if (field === 'crawl-delay' && agents.length > 0 && /^\d+(?:\.\d+)?$/.test(value)) {
+      for (const a of agents) if (!delays.has(a)) delays.set(a, Number(value));
+    }
+  }
+  const own = delays.get(agentKey(agent));
+  return own !== undefined ? own : (delays.get('*') ?? null);
+}
+
 /** The path a URL's rules are matched against: decoded pathname plus `?query`. */
 function requestPath(parsed) {
   const path = percentDecode(parsed.pathname) || '/';
@@ -468,8 +506,10 @@ export function clearRobotsCache() {
  * @param {string} [opts.userAgent] - Sent on the robots.txt request.
  * @param {string} [opts.productToken] - The robots.txt group to obey.
  * @param {number} [opts.maxRedirects]
- * @returns {Promise<{allowed: boolean, code: string, reason: string}>}
- *   `reason` reads after "robots.txt ", e.g. "answered HTTP 503".
+ * @returns {Promise<{allowed: boolean, code: string, reason: string, crawlDelay?: number|null}>}
+ *   `reason` reads after "robots.txt ", e.g. "answered HTTP 503". When a
+ *   published robots.txt permits the path, `crawlDelay` is the Crawl-delay it
+ *   states for the product token (crawlDelaySeconds), or null.
  */
 export async function robotsAllows(url, opts = {}) {
   const {
@@ -508,6 +548,6 @@ export async function robotsAllows(url, opts = {}) {
 
   const path = requestPath(parsed);
   return isPathAllowed(policy.body, productToken, path)
-    ? verdict(true, 'robots_allowed', `permits ${path} for ${productToken}`)
+    ? { ...verdict(true, 'robots_allowed', `permits ${path} for ${productToken}`), crawlDelay: crawlDelaySeconds(policy.body, productToken) }
     : deny('robots_disallowed', `disallows ${path} for ${productToken}`);
 }

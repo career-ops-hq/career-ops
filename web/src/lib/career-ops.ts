@@ -22,7 +22,7 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // Pure parser, no I/O — shared with the apply flow's CV resolver so the two
 // don't drift into two different definitions of "which report does this
 // index row belong to" (#2599, #2008 review).
-import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
+import { pdfIndexEntriesByReport, readyReportNumbers } from "@/lib/apply/cv-selection.mjs";
 // The managed-block markers and the profile read live together in one plain
 // module, so rememberFact() (the block's only WRITER) and readMemory() (its
 // reader) cannot drift apart, and so the read rule is testable from web/tests.
@@ -311,46 +311,74 @@ export type PdfPathForReportResult =
  *  The manifest path comes from the core's resolvePdfIndexPath (ACL, honors
  *  CAREER_OPS_PDF_INDEX) rather than a hardcoded "data/pdf-index.tsv" literal
  *  — the exact class of bug that #2471 fixed in the core, once, for every
- *  reader. The parsing itself is pdfIndexEntryForReport, a pure function
+ *  reader. The parsing itself is pdfIndexEntriesByReport, a pure function
  *  shared with the apply flow's own CV resolver (cv-selection.mjs) so there
  *  is one definition of "which row matches this report", not two. */
 export async function pdfPathStatusForReport(n: string, kind: "cv" | "cover" = "cv"): Promise<PdfPathForReportResult> {
   const target = pdfIndexTarget(n);
   if (target === null) return { status: "invalid" };
-  const indexPath = await resolvePdfIndexPath();
-  if (!indexPath) return { status: "not-found" };
-  let tsv: string;
-  try {
-    tsv = fs.readFileSync(indexPath, "utf8");
-  } catch {
-    return { status: "not-found" };
-  }
+  const entries = await indexedPdfEntries(kind);
+  if (!entries) return { status: "not-found" };
+  const entry = entries.get(target);
+  if (!entry) return { status: "not-found" };
   const root = careerOpsRoot();
-  const entry = pdfIndexEntryForReport(tsv, target, kind);
-  if (!entry.found) return { status: "not-found" };
-  // The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
-  // stops a hand edit) turned into a filesystem read that this route then
-  // serves — the path must be contained BY CONSTRUCTION, not by trusting the
-  // writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
-  // not to the manifest's own data/ directory — same base the pre-ACL version
-  // of this function used — and must stay under the project's output/ tree.
   const outputDir = path.resolve(root, "output");
   // Studio can still open the recorded HTML when the PDF is unavailable.
-  let html: string | null = null;
-  if (entry.html) {
-    const htmlAbs = path.resolve(root, entry.html);
-    if (htmlAbs.startsWith(outputDir + path.sep) && isRegularContainedFile(htmlAbs, outputDir)) html = htmlAbs;
-  }
+  const html = entry.html ? containedOutputFile(root, outputDir, entry.html) : null;
   if (!entry.path) return { status: "rejected", html };
-  const abs = path.resolve(root, entry.path);
-  if (!abs.startsWith(outputDir + path.sep)) return { status: "rejected", html };
-  // Scoped to outputDir, not the broader root: the lexical startsWith check
-  // above only rejects an unresolved path outside output/, but a symlink
-  // PLACED under output/ can still resolve to somewhere else inside root
-  // (e.g. reports/) and pass a root-scoped realpath check — serving a file
-  // this route was never meant to expose.
-  if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected", html };
+  const abs = containedOutputFile(root, outputDir, entry.path);
+  if (!abs) return { status: "rejected", html };
   return { status: "found", path: abs, html };
+}
+
+/** The members of `reports` whose indexed CV PDF exists under output/ right
+ *  now, i.e. every n in `reports` for which pdfPathStatusForReport(n) is
+ *  "found". The pipeline list needs this for every tracker row: asking
+ *  pdfPathStatusForReport once per row re-resolved the data root and re-read
+ *  the manifest once per row, which took 8 s on a 5,000-row tracker (#6974).
+ *  Here the manifest is read once, and only rows for the asked-about reports
+ *  are stat'ed: manifest rows for reports no longer in the tracker cost
+ *  nothing, and an empty tracker checks no files at all. */
+export async function pdfReadyReportNumbers(reports: ReadonlySet<number>): Promise<Set<number>> {
+  if (reports.size === 0) return new Set();
+  const entries = await indexedPdfEntries("cv");
+  if (!entries) return new Set();
+  const root = careerOpsRoot();
+  const outputDir = path.resolve(root, "output");
+  return readyReportNumbers(entries, reports, (rel: string) => containedOutputFile(root, outputDir, rel) !== null);
+}
+
+/** Parsed manifest, report number -> first entry of that kind. Reused until
+ *  the manifest's mtime or size changes; the entries are only read, never
+ *  mutated, so callers share the cached Map. null when there is no manifest
+ *  or it cannot be read (same answer the per-call read gave: "not found"). */
+async function indexedPdfEntries(kind: "cv" | "cover"): Promise<Map<number, { path: string | null; html: string | null }> | null> {
+  const indexPath = await resolvePdfIndexPath();
+  if (!indexPath) return null;
+  try {
+    return cachedFileValue(indexPath, `pdf-index-${kind}`, (tsv) => pdfIndexEntriesByReport(tsv, kind));
+  } catch {
+    return null;
+  }
+}
+
+/** Absolute path of a manifest-relative file, or null unless it is a regular
+ *  file contained in output/.
+ *
+ *  The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
+ *  stops a hand edit) turned into a filesystem read that the viewer route then
+ *  serves — the path must be contained BY CONSTRUCTION, not by trusting the
+ *  writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
+ *  not to the manifest's own data/ directory — same base the pre-ACL version
+ *  of this lookup used — and must stay under the project's output/ tree.
+ *  The realpath check is scoped to outputDir, not the broader root: the
+ *  lexical startsWith check only rejects an unresolved path outside output/,
+ *  but a symlink PLACED under output/ can still resolve to somewhere else
+ *  inside root (e.g. reports/) and pass a root-scoped realpath check. */
+function containedOutputFile(root: string, outputDir: string, rel: string): string | null {
+  const abs = path.resolve(root, rel);
+  if (!abs.startsWith(outputDir + path.sep)) return null;
+  return isRegularContainedFile(abs, outputDir) ? abs : null;
 }
 
 export async function pdfPathForReport(n: string): Promise<string | null> {

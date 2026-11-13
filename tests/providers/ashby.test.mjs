@@ -143,6 +143,48 @@ try {
     fail(`parseCompensation(swapped) = ${JSON.stringify(swapped)}`);
   }
 
+  // Issue #6912: keep pay period and posted bounds next to annualized salary
+  const hourlyWithPeriod = parseCompensation({ compensation: { interval: '1 HOUR', minValue: 50, maxValue: 65, currency: 'USD' } });
+  if (
+    hourlyWithPeriod &&
+    hourlyWithPeriod.min === 104000 &&
+    hourlyWithPeriod.max === 135200 &&
+    hourlyWithPeriod.period === 'hour' &&
+    hourlyWithPeriod.posted?.min === 50 &&
+    hourlyWithPeriod.posted?.max === 65
+  ) {
+    pass('parseCompensation() keeps period "hour" and posted {min:50, max:65} for 1 HOUR');
+  } else {
+    fail(`parseCompensation(1 HOUR with period/posted) = ${JSON.stringify(hourlyWithPeriod)}`);
+  }
+
+  const oneSidedAnnual = parseCompensation({ compensation: { interval: '1 YEAR', minValue: 120000, maxValue: null, currency: 'EUR' } });
+  if (
+    oneSidedAnnual &&
+    oneSidedAnnual.min === 120000 &&
+    oneSidedAnnual.max === 120000 &&
+    oneSidedAnnual.period === 'year' &&
+    oneSidedAnnual.posted?.min === 120000 &&
+    !('max' in (oneSidedAnnual.posted ?? {}))
+  ) {
+    pass('parseCompensation() keeps period "year" and posted {min:120000} with no max key for one-sided min');
+  } else {
+    fail(`parseCompensation(1 YEAR min-only) = ${JSON.stringify(oneSidedAnnual)}`);
+  }
+
+  const biweekly = parseCompensation({ compensation: { interval: '2 WEEK', minValue: 4000, maxValue: 5000, currency: 'USD' } });
+  if (
+    biweekly &&
+    biweekly.min === 4000 * 26 &&
+    biweekly.max === 5000 * 26 &&
+    biweekly.period === undefined &&
+    biweekly.posted === undefined
+  ) {
+    pass('parseCompensation() omits period and posted for multi-unit interval (2 WEEK)');
+  } else {
+    fail(`parseCompensation(2 WEEK) = ${JSON.stringify(biweekly)}`);
+  }
+
   // fetch() — request shape and normalization from the real posting-api
   // payload: { jobs: [{ title, jobUrl, location, secondaryLocations, publishedAt, compensation }] }.
   const sample = {
