@@ -266,6 +266,32 @@ test("same-label controls keep their answers when the DOM id is unchanged", () =
   assert.deepEqual(mapped.dropped, []);
 });
 
+test("same-label controls that share a DOM name stay unverified", () => {
+  const fields = [
+    { id: "co0", label: "Phone", nativeName: "phones[]" },
+    { id: "co1", label: "Phone", nativeName: "phones[]" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields.map((field) => ({ ...field })), [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
+});
+
+test("a unique DOM name still keeps a shared label on its control", () => {
+  const fields = [
+    { id: "co0", label: "Phone", nativeName: "home" },
+    { id: "co1", label: "Phone", nativeName: "mobile" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields.map((field) => ({ ...field })), [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, { co0: "111", co1: "222" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
 test("same-label controls with no DOM id stay unverified", () => {
   const fields = [
     { id: "co0", label: "Phone" },

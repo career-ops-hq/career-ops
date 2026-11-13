@@ -255,20 +255,41 @@ function fieldLabel(field) {
 }
 
 /**
- * DOM id, or the control's name when it has no id.
+ * Names that belong to exactly one control. A shared name is not an identity.
+ *
+ * @param {{ nativeName?: string }[]} fields
+ */
+function uniqueNativeNames(fields) {
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const field of fields) {
+    const name = field?.nativeName || "";
+    if (!name) continue;
+    counts.set(name, (counts.get(name) || 0) + 1);
+  }
+  return new Set([...counts].filter(([, count]) => count === 1).map(([name]) => name));
+}
+
+/**
+ * DOM id, or a name that identifies one control in this list.
+ * A shared name such as phones[] is ignored: two controls can swap and
+ * the keys still match.
  *
  * @param {{ nativeId?: string, nativeName?: string } | null | undefined} field
+ * @param {Set<string>} uniqueNames
  */
-function stableKey(field) {
+function stableKey(field, uniqueNames) {
   if (field?.nativeId) return `id:${field.nativeId}`;
-  if (field?.nativeName) return `name:${field.nativeName}`;
+  const name = field?.nativeName || "";
+  if (name && uniqueNames.has(name)) return `name:${name}`;
   return "";
 }
 
 /**
  * True when each positional id still points at the same control.
- * A shared label with no DOM id is ambiguous: two controls can swap and
- * the ids and labels still match, so that list is not safe to reuse.
+ * A shared label is ambiguous unless a DOM id, or a name that appears
+ * once, still matches. Two controls can swap and the positional ids still
+ * line up, so that list is not safe to reuse.
  *
  * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} before
  * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} after
@@ -277,11 +298,13 @@ function sameFieldList(before, after) {
   if (before.length !== after.length) return false;
   const labels = before.map((field) => fieldLabel(field));
   const shared = labels.some((label, index) => label && labels.indexOf(label) !== index);
+  const beforeNames = uniqueNativeNames(before);
+  const afterNames = uniqueNativeNames(after);
   return before.every((field, index) => {
     const next = after[index];
     if (!field?.id || field.id !== next?.id || fieldLabel(field) !== fieldLabel(next)) return false;
-    const left = stableKey(field);
-    const right = stableKey(next);
+    const left = stableKey(field, beforeNames);
+    const right = stableKey(next, afterNames);
     if (left || right) return left === right;
     return !shared;
   });
