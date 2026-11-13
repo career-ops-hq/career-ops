@@ -101,13 +101,6 @@ export function formatScore(raw) {
   return `${oneDecimalScore(n)}/5`;
 }
 
-/**
- * One decimal for the tracker cell. `toFixed(1)` rounds 3.95 to 4.0, which
- * is the apply line, so a below-line score would be stored as Recommended.
- * Floor that case to the previous tenth. Other scores keep ordinary rounding.
- * @param {number} n
- * @returns {string}
- */
 function oneDecimalScore(n) {
   const rounded = n.toFixed(1);
   if (n < APPLY_LINE && Number(rounded) >= APPLY_LINE) {
