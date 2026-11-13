@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -118,6 +118,33 @@ test('a checkout refuses a data root inside a plugin copy too', (t) => {
   copyFileSync(join(ROOT, 'path-resolver.mjs'), join(checkout, 'path-resolver.mjs'));
   const inside = join(base, 'plugins', 'cache', 'mk', 'career-ops', '1.0.0', 'userdata');
   assert.equal(rootErrorFrom(checkout, childEnv(base, { CAREER_OPS_ROOT: inside })).code, 'CAREER_OPS_UNSAFE_DATA_ROOT');
+});
+
+// #7026: realpath fails on a folder that does not exist yet, and the check
+// used to fall back to the path as written, so a symlink into a plugin copy
+// was refused while a new folder under that same symlink was accepted.
+test('a data root under a symlink into a plugin copy is refused before it exists', (t) => {
+  const base = sandbox(t);
+  const checkout = join(base, 'career-ops');
+  mkdirSync(checkout, { recursive: true });
+  copyFileSync(join(ROOT, 'path-resolver.mjs'), join(checkout, 'path-resolver.mjs'));
+  const copy = join(base, 'plugins', 'cache', 'mk', 'career-ops', '1.0.0');
+  mkdirSync(copy, { recursive: true });
+  const link = join(base, 'link-to-copy');
+  try {
+    symlinkSync(copy, link, 'dir');
+  } catch (err) {
+    return t.skip(`cannot create a symlink here: ${err.code}`);
+  }
+
+  for (const target of [link, join(link, 'new-data'), join(link, 'new', 'nested')]) {
+    const err = rootErrorFrom(checkout, childEnv(base, { CAREER_OPS_ROOT: target }));
+    assert.equal(err.code, 'CAREER_OPS_UNSAFE_DATA_ROOT', target);
+    assert.equal(err.root, target);
+  }
+  writeFileSync(join(checkout, '.career-ops-data'), `${join(link, 'new-data')}\n`);
+  assert.equal(rootErrorFrom(checkout, childEnv(base)).source, 'The .career-ops-data marker');
+  assert.equal(existsSync(join(copy, 'new-data')), false);
 });
 
 function fakePlugin(base, dependencies = { 'js-yaml': '^5.3.0' }) {
