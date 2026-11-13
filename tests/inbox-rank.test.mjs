@@ -50,3 +50,18 @@ test("a dot or a space between thousands is read as grouping in pay and floor", 
   const below = scorePosting({ title: "Data Engineer", location: "Berlin", pay: "50.000 €" }, euro);
   assert.equal(below.reason.endsWith("pay above your floor"), false);
 });
+
+test("a decimal point in an amount with no grouping stays a decimal point", () => {
+  const euroFloor = (minimum) => fitTargetsFromProfile({
+    target_roles: { primary: ["Data Engineer"] },
+    compensation: { minimum, currency: "EUR" },
+  });
+  assert.equal(euroFloor("1234.567").payFloor, 1234.567);
+  assert.equal(euroFloor("1.234.567 €").payFloor, 1234567);
+  const decimal = euroFloor(60000.125);
+  assert.equal(decimal.payFloor, 60000.125);
+  const above = scorePosting({ title: "Data Engineer", location: "Berlin", pay: "€70000" }, decimal);
+  assert.equal(above.reason.endsWith("pay above your floor"), true);
+  const below = scorePosting({ title: "Data Engineer", location: "Berlin", pay: "1234.567 €" }, euroFloor("60.000 €"));
+  assert.equal(below.reason.endsWith("pay above your floor"), false);
+});
