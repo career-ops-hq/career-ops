@@ -627,12 +627,15 @@ try {
     }
 
     const off = await run({ name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' });
-    if (off.rows.length === 3 && details(off.calls).length === 0) pass('greenhouse.fetch() fetches no detail without the fetchDetails opt-in');
-    else fail(`greenhouse detail without opt-in: ${JSON.stringify(off.calls.map((c) => c.url))}`);
+    if (off.rows.length === 3 && details(off.calls).length === 0 && off.rows.truncated?.reason === 'descriptions-omitted' && off.rows.truncated.fetched === 0 && off.rows.truncated.total === 3) {
+      pass('greenhouse.fetch() marks an oversized board partial when it returns no descriptions');
+    } else {
+      fail(`greenhouse detail without opt-in: ${JSON.stringify(off.calls.map((c) => c.url))} truncated=${JSON.stringify(off.rows.truncated)}`);
+    }
 
     const probe = await run(optIn, { ctx: { maxPages: 1 } });
-    if (details(probe.calls).length === 0) pass('greenhouse.fetch() fetches no detail during a health probe');
-    else fail(`greenhouse detail during probe: ${JSON.stringify(probe.calls.map((c) => c.url))}`);
+    if (details(probe.calls).length === 0 && probe.rows.truncated === undefined) pass('greenhouse.fetch() fetches no detail during a health probe and does not mark the probe partial');
+    else fail(`greenhouse detail during probe: ${JSON.stringify(probe.calls.map((c) => c.url))} truncated=${JSON.stringify(probe.rows.truncated)}`);
 
     const capped = await run({ ...optIn, greenhouse: { fetchDetails: true, detailLimit: 1 } });
     if (details(capped.calls).length === 1) pass('greenhouse.fetch() caps detail requests at detailLimit');
