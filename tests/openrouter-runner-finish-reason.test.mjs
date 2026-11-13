@@ -86,15 +86,18 @@ const choice = (content, extra) => ({ index: 0, message: { role: 'assistant', co
  * is resolved at import time; the query string gives each call its own module
  * instance (own rotation index and model list).
  */
+// Every CAREER_OPS_* variable is cleared for the run, not only the root: an
+// inherited CAREER_OPS_TRACKER outranks the temporary root, so the report-number
+// reservation would read and lock the developer's own tracker.
+const isRunnerEnv = (n) => n.startsWith('CAREER_OPS_') || n === 'OPENROUTER_API_KEY';
+
 async function withRunner(label, { pinned = null, fetchImpl }, body) {
   const dataRoot = mkdtempSync(join(tmpdir(), 'career-ops-or-finish-'));
-  const names = ['CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_MODEL', 'OPENROUTER_API_KEY'];
-  const previous = Object.fromEntries(names.map((n) => [n, process.env[n]]));
+  const inherited = Object.fromEntries(Object.keys(process.env).filter(isRunnerEnv).map((n) => [n, process.env[n]]));
   const realFetch = globalThis.fetch;
   try {
+    for (const n of Object.keys(inherited)) delete process.env[n];
     process.env.CAREER_OPS_ROOT = dataRoot;
-    delete process.env.CAREER_OPS_DATA_DIR;
-    delete process.env.CAREER_OPS_MODEL;
     process.env.OPENROUTER_API_KEY = 'test-key';
     const runner = await import(`${pathToFileURL(join(ROOT, 'openrouter-runner.mjs')).href}?finish-reason=${label}`);
     if (pinned) process.env.CAREER_OPS_MODEL = pinned;
@@ -102,10 +105,8 @@ async function withRunner(label, { pinned = null, fetchImpl }, body) {
     await body(runner, dataRoot);
   } finally {
     globalThis.fetch = realFetch;
-    for (const n of names) {
-      if (previous[n] === undefined) delete process.env[n];
-      else process.env[n] = previous[n];
-    }
+    for (const n of Object.keys(process.env).filter(isRunnerEnv)) delete process.env[n];
+    Object.assign(process.env, inherited);
     rmSync(dataRoot, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
@@ -149,7 +150,10 @@ for (const [label, extra] of [['finish_reason "stop"', { finish_reason: 'stop' }
     await withRunner(`pinned-ok-${label.replace(/\W+/g, '-')}`, { pinned: MODEL_A, fetchImpl }, async (runner, dataRoot) => {
       const res = await runner.cmdEvaluate(JD, CTX);
       assert.equal(res?.success, true, `a finished reply (${label}) was not saved`);
-      assert.equal(saved(dataRoot, 'reports').length, 1, 'expected exactly one report');
+      const reports = saved(dataRoot, 'reports');
+      assert.equal(reports.length, 1, 'expected exactly one report');
+      // Numbered from the temporary data root alone: an inherited tracker would push it past 001.
+      assert.match(reports[0], /^001-/, `report numbered from a tracker outside the data root: ${reports[0]}`);
     });
   });
 }
