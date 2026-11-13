@@ -23,7 +23,7 @@
  *   --backfill-urls  fill empty URL cells from each row's linked report
  */
 
-import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync, copyFileSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -35,7 +35,7 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnset
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken, resolveCanonicalStateId } from './tracker-utils.mjs';
 // Canonical posting-URL key and URL comparison, shared with the other tracker
 // scripts and scan.mjs so the definitions cannot drift apart.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
@@ -407,6 +407,13 @@ export async function mergeTracker(options = {}) {
   const _aliasMap = Object.fromEntries(
     _canonicalStates.flatMap(s => s.aliases.map(a => [a.toLowerCase(), s.label]))
   );
+  // Applied and everything after it in the funnel. Rejected, Discarded, and
+  // SKIP are not in this set: this guard is about a posting already submitted.
+  const SUBMITTED_STATUS_IDS = new Set(['applied', 'responded', 'assessment', 'interview', 'offer', 'hired']);
+  const submittedStatus = (status) => {
+    const id = resolveCanonicalStateId(status, _canonicalStates);
+    return id !== null && SUBMITTED_STATUS_IDS.has(id);
+  };
 
   /**
    * Convert raw addition status text into one canonical tracker state.
@@ -2191,6 +2198,35 @@ export async function mergeTracker(options = {}) {
           || existingApps.find(app => fuzzyTierMatch(app, true));
       }
 
+      // True when this match would point a submitted row at a posting the URLs
+      // do not show is the same one. Exact URL, same report, same aggregator
+      // id, and an aggregator sighting of an employer URL are not retargets.
+      const wouldRetargetSubmittedRow = (row) => {
+        if (dupReason === 'url' || dupReason === 'report-file' || reportNumMatched) return false;
+        if (!addUrl) return false;
+        const rowUrl = postingUrl(row);
+        if (normalizeUrl(rowUrl) === addUrl) return false;
+        if (isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) {
+          const rowId = aggregatorPostingId(rowUrl);
+          const addId = aggregatorPostingId(addition.url);
+          if (rowId && addId && rowId.domain === addId.domain && rowId.id === addId.id) return false;
+        }
+        if (normalizeUrl(rowUrl) && !isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) return false;
+        if (!isAggregatorUrl(rowUrl) && !isAggregatorUrl(addition.url)
+            && postingUrlRelation(rowUrl, addition.url) === 'same') return false;
+        return true;
+      };
+
+      // Applied and later rows keep the posting that was submitted. A title
+      // match that cannot prove the incoming URL is that posting must not
+      // replace the URL, the score, or the report. The addition is a new row.
+      if (duplicate && submittedStatus(duplicate.status) && wouldRetargetSubmittedRow(duplicate)) {
+        console.warn(
+          `⚠️  ${file}: #${duplicate.num} is ${duplicate.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
+        );
+        duplicate = null;
+      }
+
       if (duplicate) {
         // An unscoreable re-eval (N/A/—/-) carries no score to write through. Its
         // score parses to 0, so the downgrade path below would read it as a genuine
@@ -2437,7 +2473,14 @@ export async function mergeTracker(options = {}) {
     if (!DRY_RUN) {
       const moved = sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      writeFileAtomic(APPS_FILE, appLines.join('\n'));
+      const nextText = appLines.join('\n');
+      // The tracker is gitignored. Keep the bytes from before this rewrite
+      // when the text actually changes, so the previous rows can be put back.
+      if (existsSync(APPS_FILE)) {
+        const prevText = readFileSync(APPS_FILE, 'utf-8');
+        if (prevText !== nextText) copyFileSync(APPS_FILE, `${APPS_FILE}.bak`);
+      }
+      writeFileAtomic(APPS_FILE, nextText);
 
       // Move processed files to merged/ — but only the ones actually applied.
       // Archiving a TSV whose row never reached the tracker is what turns a bug

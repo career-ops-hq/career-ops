@@ -7,7 +7,7 @@
 // tests/url-key.test.mjs.
 import { pass, fail, isolatedBatchStatePath } from './helpers.mjs';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -765,4 +765,67 @@ ok('the merge ignores a batch-state inherited from the environment', () => {
     rmSync(canary, { force: true });
     cleanup(env);
   }
+});
+
+ok('an Applied row is not retargeted onto an unmapped second listing', () => {
+  const env = makeEnv();
+  try {
+    const appliedUrl = 'https://www.glassdoor.com/job-listing/director-of-marketing-fixture-co-JV_1.htm';
+    const otherUrl = 'https://www.glassdoor.com/job-listing/director-of-marketing-fixture-co-JV_2.htm';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.5/5 | Applied | ❌ | [1](reports/1-fixture.md) | n | ${appliedUrl} |`,
+    ]);
+    addTsv(env, '2-fixture.tsv', ['2', '2026-06-03', 'Fixture Co', 'Director of Marketing', 'Evaluated', '3.2/5', '❌',
+      '[2](reports/2-fixture.md)', 'n', otherUrl]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, `the second listing must get its own row, got ${rows.length}`);
+    const applied = rows.find(r => r.split('|')[1].trim() === '1');
+    assert.equal(urlHref(applied), appliedUrl, 'the Applied row keeps the URL that was submitted');
+    assert.ok(applied.includes('4.5/5') && applied.includes('Applied') && applied.includes('1-fixture.md'),
+      'the Applied score and report stay');
+    const bak = readFileSync(`${env.tracker}.bak`, 'utf-8');
+    assert.ok(bak.includes('JV_1') && bak.includes('4.5/5') && !bak.includes('JV_2'),
+      'the backup is the tracker from before the rewrite');
+  } finally { cleanup(env); }
+});
+
+ok('an Applied aggregator row is not retargeted onto another board', () => {
+  const env = makeEnv();
+  try {
+    const appliedUrl = 'https://www.linkedin.com/jobs/view/4001';
+    const otherUrl = 'https://boards.greenhouse.io/fixtureco/jobs/9001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.6/5 | Applied | ❌ | [1](reports/1-fixture.md) | n | ${appliedUrl} |`,
+    ]);
+    addTsv(env, '2-fixture.tsv', ['2', '2026-06-03', 'Fixture Co', 'Director of Marketing', 'Evaluated', '3.4/5', '❌',
+      '[2](reports/2-fixture.md)', 'n', otherUrl]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, `the other board must get its own row, got ${rows.length}`);
+    const applied = rows.find(r => r.split('|')[1].trim() === '1');
+    assert.equal(urlHref(applied), appliedUrl, 'the Applied row keeps the LinkedIn URL');
+    assert.ok(applied.includes('4.6/5') && applied.includes('1-fixture.md') && !applied.includes('3.4/5'),
+      'the Applied score and report are not replaced');
+    assert.ok(existsSync(`${env.tracker}.bak`), 'a rewrite leaves a backup');
+  } finally { cleanup(env); }
+});
+
+ok('a same-URL re-eval of an Applied row still updates, and keeps a backup', () => {
+  const env = makeEnv();
+  try {
+    const url = 'https://boards.greenhouse.io/fixtureco/jobs/7001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.0/5 | Applied | ❌ | [1](reports/1-fixture.md) | n | ${url} |`,
+    ]);
+    addTsv(env, '1-fixture.tsv', ['1', '2026-06-03', 'Fixture Co', 'Director of Marketing', 'Evaluated', '4.4/5', '❌',
+      '[1](reports/1-fixture.md)', 're-eval', url]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, `same posting updates in place, got ${rows.length}`);
+    assert.ok(rows[0].includes('4.4/5') && rows[0].includes('Applied'), 'score updates, status stays Applied');
+    assert.equal(urlHref(rows[0]), url, 'the URL stays');
+    const bak = readFileSync(`${env.tracker}.bak`, 'utf-8');
+    assert.ok(bak.includes('4.0/5') && !bak.includes('4.4/5'), 'the backup is the row from before the update');
+  } finally { cleanup(env); }
 });
