@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parsePdfManifestRows, pdfIndexEntryForReport, pdfPathForReport, reportNumberFromCell } from "../../src/lib/apply/cv-selection.mjs";
+import { parsePdfManifestRows, pdfIndexEntriesByReport, pdfIndexEntryForReport, pdfPathForReport, readyReportNumbers, reportNumberFromCell } from "../../src/lib/apply/cv-selection.mjs";
 
 test("reportNumberFromCell only accepts markdown report links", () => {
   assert.equal(reportNumberFromCell("[010]"), null);
@@ -137,4 +137,72 @@ test("parsePdfManifestRows extracts structured entries and defaults missing kind
   assert.equal(rows[2].kind, "cv");
   assert.equal(rows[3].kind, "cv");
   assert.equal(rows[4].kind, "unknown");
+});
+
+// The Pipeline list asks for every tracker row's CV at once, so the whole
+// manifest is read into one map. Per kind: the first row of that kind wins, an
+// empty path stays null, an untagged row named as a cover letter is a cover,
+// and partial ids and unknown kinds are left out.
+const MIXED_INDEX = [
+  "# report\tpdf\thtml\tformat\tdate\tkind",
+  "010\toutput/cover-010-acme.pdf\t\thtml\t2026-08-01\tcover",
+  "010\toutput/cv-010-acme.pdf\toutput/cv-010-acme.html\thtml\t2026-08-01\tcv",
+  "010\toutput/cv-010-acme-v2.pdf\t\thtml\t2026-08-02\tcv",
+  "011\t",
+  "012-stale\toutput/wrong.pdf",
+  "013\toutput/cover-013-acme.pdf",
+  "014\toutput/thing.pdf\t\t\t\tportfolio",
+].join("\n");
+
+test("pdfIndexEntriesByReport maps each report to its first row of the wanted kind", () => {
+  const index = MIXED_INDEX;
+  assert.deepEqual(Object.fromEntries(pdfIndexEntriesByReport(index)), {
+    10: { path: "output/cv-010-acme.pdf", html: "output/cv-010-acme.html" },
+    11: { path: null, html: null },
+  });
+  assert.deepEqual(Object.fromEntries(pdfIndexEntriesByReport(index, "cover")), {
+    10: { path: "output/cover-010-acme.pdf", html: null },
+    13: { path: "output/cover-013-acme.pdf", html: null },
+  });
+  assert.deepEqual(pdfIndexEntryForReport(index, 10), { found: true, path: "output/cv-010-acme.pdf", html: "output/cv-010-acme.html" });
+  assert.deepEqual(pdfIndexEntryForReport(index, 13), { found: false, path: null, html: null });
+});
+
+// #6974: the viewer asks pdfIndexEntryForReport about one report, the Pipeline
+// list reads the whole map. They must never disagree on which file is a CV.
+test("pdfIndexEntryForReport answers every report as the one-pass map does, for both kinds", () => {
+  for (const kind of ["cv", "cover"]) {
+    const entries = pdfIndexEntriesByReport(MIXED_INDEX, kind);
+    for (const n of [10, 11, 12, 13, 14, 15]) {
+      const entry = entries.get(n);
+      assert.deepEqual(
+        pdfIndexEntryForReport(MIXED_INDEX, n, kind),
+        entry ? { found: true, ...entry } : { found: false, path: null, html: null },
+        `${kind} report ${n}`,
+      );
+    }
+  }
+});
+
+// The Pipeline marks a row as having a CV only through this rule (#6974).
+test("readyReportNumbers keeps a requested report only when its path passes containment, and checks nothing else", () => {
+  const entries = new Map([
+    [1, { path: "output/cv-1.pdf", html: null }],
+    [2, { path: "output/cv-2.pdf", html: null }],
+    [3, { path: null, html: null }],
+    [4, { path: "reports/escaped.pdf", html: null }],
+  ]);
+  const checked = [];
+  const isContained = (p) => {
+    checked.push(p);
+    return p.startsWith("output/");
+  };
+
+  // 2 is indexed but not requested, 3 has no path, 4 fails containment, 5 is not indexed.
+  assert.deepEqual([...readyReportNumbers(entries, new Set([1, 3, 4, 5]), isContained)], [1]);
+  assert.deepEqual(checked, ["output/cv-1.pdf", "reports/escaped.pdf"]);
+
+  checked.length = 0;
+  assert.deepEqual([...readyReportNumbers(entries, new Set(), isContained)], []);
+  assert.deepEqual(checked, []);
 });

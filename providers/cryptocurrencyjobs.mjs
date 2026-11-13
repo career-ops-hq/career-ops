@@ -3,7 +3,9 @@
 /** @typedef {import('./_types.js').Job} Job */
 //
 // CryptocurrencyJobs — curated Web3/crypto job board. RSS 2.0, no auth.
-// Feed: https://cryptocurrencyjobs.co/index.xml (listings are 100% remote).
+// Feed: https://cryptocurrencyjobs.co/index.xml. Most listings are remote with
+// no restriction; others are limited to a region or based in a city, as the
+// <description> teaser states (see locationFromClause).
 // Title format: "Role at Company" — split on the last " at " to extract company.
 //
 // The feed URL is a hardcoded constant (never user-supplied), so there is no
@@ -70,6 +72,68 @@ export function teaserLocationClause(teaser) {
   return m ? m[1].replace(/\s+/g, ' ').trim() : '';
 }
 
+// "the United States, or Canada" → ['United States', 'Canada'];
+// "APAC, Asia, EMEA or the United Kingdom" → four entries.
+const splitPlaces = (s) => s
+  .split(/\s*,\s*(?:or\s+)?|\s+or\s+/i)
+  .map(p => p.trim().replace(/^the\s+/i, ''))
+  .filter(Boolean);
+
+// The teaser writes a US state or Canadian province without a comma ("New
+// York NY", "Montreal QC"). location_filter reads the US state code in its
+// comma form (", NY"), so add the comma.
+const cityRegion = (place) => place.replace(/^(.*\S)\s+([A-Z]{2})$/, '$1, $2');
+
+/**
+ * Map a teaser location clause (from teaserLocationClause) to a `location`
+ * in the shapes scan.mjs's location_filter and workplace_policy read:
+ *
+ *   is 100% remote with no geographical restrictions  → "Remote (worldwide)"
+ *   is based in New York NY                            → "New York, NY"
+ *   can be based in London, or New York NY             → "London; New York, NY"
+ *   is remote or can be based in Palo Alto CA          → "Remote; Palo Alto, CA"
+ *   can be done remotely anywhere in the United States, or Canada
+ *                                                      → "Remote (United States, Canada)"
+ *   can be done remotely anywhere in North America or on-site in Chicago
+ *                                                      → "Remote (North America); Chicago"
+ *
+ * "Remote (worldwide)" is one of the labels a country-only allow-list
+ * accepts as worldwide, and Himalayas uses it too. "Remote ({region})" is
+ * the form clearcompany, dover, join and trakstar use. Places are joined
+ * with "; ", the separator location_filter's US state check splits on, so
+ * "London; New York, NY" still reads as New York. The output never contains
+ * "on-site": workplace_policy reads that word as an office role, which
+ * would hide the remote option of a mixed listing.
+ *
+ * Returns '' for an empty or unrecognised clause. Job.location may be
+ * empty, and location_filter passes an empty location unless `strict` is
+ * set. 'Remote' would be a guess: one clause-less live item (2026-11-09) is
+ * titled "Product Designer (New York only)".
+ * @param {string} clause
+ * @returns {string}
+ */
+export function locationFromClause(clause) {
+  const c = String(clause ?? '').replace(/\.\s*Work remotely from anywhere\.?$/i, '').trim();
+  if (/^is 100% remote with no geographical restrictions$/i.test(c)) return 'Remote (worldwide)';
+
+  // "is remote or can be based in Palo Alto CA" (2026-11-12): remote with no
+  // region named, or one of the cities.
+  const based = c.match(/^(is remote or )?(?:is |can be )?based in (.+)$/i);
+  if (based) {
+    const places = splitPlaces(based[2]).map(cityRegion);
+    return (based[1] ? ['Remote', ...places] : places).join('; ');
+  }
+
+  const remote = c.match(/^can be done remotely anywhere in (.+?)(?: or on-site in (.+))?$/i);
+  if (remote) {
+    const regions = splitPlaces(remote[1]);
+    if (regions.length === 0) return '';
+    const onsite = remote[2] ? splitPlaces(remote[2]).map(cityRegion) : [];
+    return [`Remote (${regions.join(', ')})`, ...onsite].join('; ');
+  }
+  return '';
+}
+
 /**
  * Parse a CryptocurrencyJobs RSS document into normalized Job objects.
  * Exported for unit testing; fetch() wraps it around an HTTP fetch.
@@ -121,14 +185,13 @@ export function parseCryptocurrencyJobsRss(xml) {
       //   rescue it allowed would be an accident (a `protocol` keyword
       //   matching the company "Acme Protocol").
       //
-      // Location stays 'Remote' as before, although some teasers name an
-      // on-site city ("is based in New York NY").
+      // The same clause also gives `location`, through locationFromClause.
       const eligibilityText = teaserLocationClause(decodeFeedText(extractTag(block, 'description')));
       results.push({
         title,
         url: link,
         company,
-        location: 'Remote',
+        location: locationFromClause(eligibilityText),
         ...(postedAt && Number.isFinite(postedAt) ? { postedAt } : {}),
         ...(eligibilityText ? { eligibilityText } : {}),
       });
