@@ -41,8 +41,9 @@
  *
  * Input stdin/file decoded as UTF-8 with replacement. Output: verdict line,
  * `--- findings ---` (JSON with --json), then `--- text ---` and the cleaned
- * text (or `saved=<path>` when --out is given). Exit 0 when the input could be
- * read; 2 when --in cannot.
+ * text (or `saved=<path>` when --out is given). With --json, stdout carries the
+ * JSON document and nothing else. Exit 0 when the input could be read and the
+ * --out file written; 2 when either fails.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -62,8 +63,10 @@ const FORMAT = '\u00AD\u2028\u2029'; // soft hyphen, line/paragraph separators
 const BOM = '\uFEFF';
 const INVISIBLE = ZERO_WIDTH + BIDI + FORMAT + BOM + TAG_CHARS;
 
-// The one legitimate use of tag characters: black flag + gbeng/gbsct/gbwls + cancel.
-const FLAG_EMOJI_RE = /\u{1F3F4}[\u{E0000}-\u{E007F}]+\u{E007F}/gu;
+// The one legitimate use of tag characters: black flag + gb(eng|sct|wls) + cancel.
+// Matching "black flag + any tag characters" would park — and restore — an arbitrary
+// tag-encoded payload, which is the exact trick this guard exists to report.
+const FLAG_EMOJI_RE = /\u{1F3F4}\u{E0067}\u{E0062}(?:\u{E0065}\u{E006E}\u{E0067}|\u{E0073}\u{E0063}\u{E0074}|\u{E0077}\u{E006C}\u{E0073})\u{E007F}/gu;
 
 // ---------------------------------------------------------------------------
 // Hidden-HTML detection
@@ -112,8 +115,11 @@ function attrsHidden(attrs) {
     return 'hidden attribute';
   }
   if (/aria-hidden\s*=\s*["']?true/.test(a)) return 'aria-hidden=true';
-  const m = a.match(/style\s*=\s*(?:["'])(.*?)["']/) ?? a.match(/style\s*=\s*([^\s>]+)/);
-  if (m) return styleHidden(m[1]);
+  // A quoted value may legitimately contain the other quote character, so the
+  // closing quote is the one that opened it — a lazy "[\"']" would stop early.
+  const quoted = a.match(/style\s*=\s*(["'])([\s\S]*?)\1/);
+  const m = quoted ? quoted[2] : a.match(/style\s*=\s*([^\s>]+)/)?.[1];
+  if (m) return styleHidden(m);
   return null;
 }
 
@@ -181,12 +187,17 @@ function scanText(text, findings) {
   // 1. invisible characters
   let removed = { zero_width: 0, bidi: 0, format: 0, bom: 0, tag: 0 };
   let tampering = [];
+  // `at` is the UTF-16 offset, which is what excerptAt slices with; the array
+  // index would be a code-point position and drift past any astral character.
+  let offset = 0;
   const clean = [...text].map((ch) => {
+    const at = offset;
+    offset += ch.length;
     const code = ch.codePointAt(0);
     if (TAG_CHARS.includes(ch)) { removed.tag++; return ' '; }
     if (BIDI_TAMPER.includes(ch)) {
       removed.bidi++;
-      tampering.push({ kind: `bidi-control U+${code.toString(16).toUpperCase().padStart(4, '0')}`, context: excerptAt(text, ch) });
+      tampering.push({ kind: `bidi-control U+${code.toString(16).toUpperCase().padStart(4, '0')}`, context: excerptAt(text, at) });
       return '';
     }
     if (ZERO_WIDTH.includes(ch)) { removed.zero_width++; return ''; }
@@ -353,7 +364,7 @@ function parseArgs(argv) {
 
 export function guard(raw, mode = null) {
   const findings = { hidden_blocks: [], hiddenUrls: [] };
-  const resolved = mode ?? (/<\s*[a-z][a-z0-9-]*[^\s>]*>/.test(raw.slice(0, 2000)) ? 'html' : 'text');
+  const resolved = mode ?? (/<\s*\/?\s*[a-z][a-z0-9-]*(?:\s[^>]*)?>/i.test(raw.slice(0, 2000)) ? 'html' : 'text');
   const visibleText = resolved === 'html' ? cleanHtml(raw, findings) : raw;
   const { clean, findings: f } = scanText(visibleText, findings);
   f.mode = resolved;
@@ -379,16 +390,24 @@ export function main(argv = process.argv.slice(2)) {
 
   const { clean, findings: f } = guard(raw, args.mode);
 
+  if (args.out) {
+    try {
+      writeFileSync(args.out, clean, 'utf8');
+    } catch (err) {
+      process.stderr.write(`❌ cannot write ${args.out}: ${err.message}\n`);
+      return 2;
+    }
+  }
+
+  // --json owns stdout: a trailing `saved=` line would break JSON.parse.
   if (args.json) {
     process.stdout.write(JSON.stringify(f, null, 2) + '\n');
   } else {
     process.stdout.write(`${f.verdict}\n--- findings ---\n${JSON.stringify(f, null, 2)}\n`);
   }
-  if (args.out) {
-    writeFileSync(args.out, clean, 'utf8');
-    process.stdout.write(`saved=${args.out}\n`);
-  } else if (!args.json) {
-    process.stdout.write(`--- text ---\n${clean}\n`);
+  if (!args.json) {
+    if (args.out) process.stdout.write(`saved=${args.out}\n`);
+    else process.stdout.write(`--- text ---\n${clean}\n`);
   }
   return 0;
 }

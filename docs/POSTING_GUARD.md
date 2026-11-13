@@ -48,11 +48,14 @@ full and preserved.
 Run it between extraction and evaluation:
 
 ```bash
-node posting-guard.mjs --in jds/acme.md --json    # then evaluate the cleaned text
+node posting-guard.mjs --in jds/acme.md --out jds/acme.clean.md   # then evaluate jds/acme.clean.md
 ```
 
+`--json` prints findings only and writes no body, so it is the wrong flag for this step: it is for a
+gate or a report. `--out` is what produces the text the evaluation step reads.
+
 Record the verdict in the report's Block G as `**Integrity:** clean` or `**Integrity:** flagged` so the
-judgment is citable later instead of implicit. `--out` produces the body to hand to the evaluation step.
+judgment is citable later instead of implicit.
 
 ## Non-goals
 
