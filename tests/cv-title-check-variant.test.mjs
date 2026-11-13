@@ -37,3 +37,9 @@ test('a clean variant prints the no-drift line', () => {
 test('a missing variant exits 1', () => {
   assert.equal(run(['--variant', 'nope']).status, 1);
 });
+
+test('--variant=<name> selects the variant too', () => {
+  const r = run(['--variant=a', '--summary'], { 'a.md': CV.replace('**Engineer**', '**CTO**') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /"CTO"/);
+});

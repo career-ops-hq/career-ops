@@ -61,6 +61,7 @@ import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
 // Cyclic with lib/cv-variants.mjs (which imports this module); safe, both use the other's exports only when called.
 import { resolveVariant } from './lib/cv-variants.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -711,12 +712,14 @@ function runSelfTest() {
 const args = process.argv.slice(2);
 const USAGE = `Usage:
   node cv-title-check.mjs <tailored-cv-payload.json> [--summary]
+  node cv-title-check.mjs --variant <name> [--summary]
   node cv-title-check.mjs --self-test
 
 Pairs each tailored-CV {company, dates} entry against cv.md's canonical entry
 and flags an exact-string job-title mismatch (case and whitespace normalized,
 never fuzzy). Warn-only: it edits neither file.
 
+  --variant     check data/cv-variants/<name>.md instead of a payload (#6792)
   --summary     human-readable table instead of JSON
   --self-test   run the built-in cases against no payload
   --help, -h    show this message
@@ -724,8 +727,8 @@ never fuzzy). Warn-only: it edits neither file.
 
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
+const variantName = flagValue(args, '--variant');
 const variantIdx = args.indexOf('--variant');
-const variantName = variantIdx >= 0 ? args[variantIdx + 1] : undefined;
 const payloadPathArg = args.find((a, i) => !a.startsWith('--') && !(variantIdx >= 0 && i === variantIdx + 1));
 
 if (isMainModule(import.meta.url)) {
