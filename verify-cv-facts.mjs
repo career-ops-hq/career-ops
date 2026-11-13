@@ -1518,8 +1518,12 @@ function factStatements(text) {
     .filter(Boolean);
 }
 
-/** A line that opens its own block: list item, ordered item, heading, table row, quote or HTML tag. */
-const BLOCK_START_RE = /^\s*(?:[-*+]\s|\d+[.)]\s|#|\||>|<)/u;
+/**
+ * A line that opens its own block: list item, ordered item, heading, table row,
+ * quote or HTML tag. The bullet markers mirror LIST_MARKER_RE so a Unicode-
+ * bulleted list keeps each item a separate statement.
+ */
+const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)/u;
 /** A line that closes its block: heading, table row, bold-only label, or an explicit hard break. */
 const BLOCK_END_RE = /^\s*(?:#|\|)|^\s*\*\*[^*]+\*\*\s*$|(?:\\|\s{2}|>)$/u;
 

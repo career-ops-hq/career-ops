@@ -150,6 +150,15 @@ check('-ing list nouns in later clauses are not read as verbs',
   check('a new list item after a wrapped bullet stays its own statement',
     bulletDriftClaims(ul('Led the 2024 repricing analysis'), wrappedThenEntry).some(claim => claim.added.includes('led')),
     bulletDriftClaims(ul('Led the 2024 repricing analysis'), wrappedThenEntry));
+
+  // Unicode bullet markers (LIST_MARKER_RE recognises • ‣ ◦ ⁃ ∙) also open a
+  // block, so consecutive •-items are not merged and a later item's verb does
+  // not vouch across the boundary.
+  const unicodeBullets = '• Supported the pricing team on the 2024 repricing analysis\n'
+    + '• Led the migration of reporting to Snowflake\n';
+  check('a Unicode-bulleted list item stays its own statement',
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), unicodeBullets).some(claim => claim.added.includes('led')),
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), unicodeBullets));
 }
 // Review on #6630: an opening modifier from the JD is not a verb, so it warns.
 {
