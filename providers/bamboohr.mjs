@@ -239,8 +239,15 @@ export function bamboohrListingIdentity(tenant, id) {
  * @returns {Array<{title: string, url: string, company: string, location: string, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>}
  */
 export function parseBambooHRResponse(json, companyName, origin) {
-  const rows = json?.result;
-  if (!Array.isArray(rows)) return [];
+  // { result: [] } is an empty board (a live tenant with no openings answers
+  // { meta, result: [] }). Any other envelope ({}, { error }, a bare string)
+  // is a changed or failing API and must not read as a board with no open
+  // roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const rows = json && Array.isArray(json.result) ? json.result : null;
+  if (!rows) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`bamboohr: unexpected response for ${companyName} — expected result[], got: [${got}]`);
+  }
   let tenant = null;
   try { tenant = new URL(origin).hostname.replace(/\.bamboohr\.com$/, ''); } catch { /* no identity */ }
   return rows
