@@ -46,6 +46,7 @@
     "scan:topdev": "node scan-topdev.mjs",
     "scan:seek": "node scan-seek.mjs",
     "company:funded": "node company-funded.mjs",
+    "harvest:buildlist": "node harvest-buildlist.mjs",
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
