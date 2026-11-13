@@ -11,6 +11,8 @@
 - आपको **natural Hindi tech language** में responses और cover letters चाहिए — machine translation नहीं
 - आपको **India-specific contractual terms** handle करने हैं: CTC vs. In-hand salary, PF/EPF, Gratuity, Notice period/buyout, Bond clause, ESOPs, HRA/LTA
 
+> **English में:** यही भारतीय market rules English में, freshers के लिए batch, joining date और CGPA/backlog checks के साथ, `modes/in/` में हैं। देखें `modes/in/README.md`।
+
 यदि आपकी ज़्यादातर listings English में हैं, तो standard `modes/` folder use करते रहें।
 
 ## कैसे Enable करें?

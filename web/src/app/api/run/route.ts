@@ -11,21 +11,29 @@ import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsFo
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { materializeTailoredCv, withSharedPdfPath } from "@/lib/cv-from-json.mjs";
+import { saveBuiltCv } from "@/lib/pdf-run-save.mjs";
+import { createCvEnvelopeFilter } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
+import { isTruncatedJd, prefetchJd } from "@/lib/jd-prefetch.mjs";
+import { runCoreCli } from "@/lib/core-cli";
 import { parseCoverRequest } from "@/lib/cover-brief.mjs";
 import { capabilitiesFor } from "@/lib/worker-capabilities.mjs";
 import { fencingReport, isCliAllowedForCapabilities } from "@/lib/cli-fencing.mjs";
 import { claudeCliArgs } from "@/lib/claude-invocation.mjs";
 import { resolveCvTemplate, resolveUserTemplatesDir } from "@/lib/core/cv-template.mjs";
-import { profileRef } from "@/lib/core/profile-path.mjs";
+import { getProfilePath, profileRef } from "@/lib/core/profile-path.mjs";
+import { readPageFormatSetting, resolveRenderPageFormat, type PageFormatSetting } from "@/lib/core/page-format.mjs";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { createRunFinalizer } from "@/lib/run-finalizer.mjs";
 import { readJsonObject } from "@/lib/json-body";
+import { writeEvaluationInstructions } from "@/lib/evaluation-instructions-file.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { parseEvaluationOptions, selectedEvaluationInstructions } from "@/lib/evaluation-options.mjs";
 
 export const runtime = "nodejs";
@@ -33,13 +41,30 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; ats?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
   const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
   if (evaluation && !evaluation.ok) return Response.json({ error: evaluation.error }, { status: 400 });
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
+  }
+  let userData: string;
+  try {
+    userData = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return new Response(JSON.stringify({ error: unsafe }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  if (!fs.existsSync(userData)) {
+    return new Response(JSON.stringify({ error: dataFolderMissingMessage(userData) }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
   const resolved = resolveCliOrFallback(requestedCliId);
   if (!resolved) {
@@ -179,62 +204,101 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
-  const prompt = buildPrompt({
-    kind,
-    input,
-    memory: readMemory(),
-    today,
-    postedAt,
-    lang,
-    cvTemplate,
-    userTemplatesDir,
-    // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
-    codeRoot,
-    reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
-    coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
-    profile: profileRef(careerOpsRoot()),
-    evaluationInstructions,
-  });
-
-  const isClaude = cliId === "claude";
-  // Which tools each kind gets, and the whole claude argv, live in
-  // claude-invocation.mjs — see its header for the policy and for why it is asserted on
-  // built values rather than on this file's source. NEVER auto-submits; that
-  // remains a prompt-level guarantee.
-  // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
-  // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
-  // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
-  // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
-  // verified mechanism. Those report level "none" and the run says so
-  // below, rather than looking identical to a fenced one (#2507).
-  // A CLI with its own structured stream gets the argv that turns it on, so its
-  // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
-  // envelope-parsing routes rely on.
-  const args = isClaude ? claudeCliArgs({ kind, prompt }) : (spec.streamArgs ?? spec.args)(prompt);
-
-  // Tracker-mutating runs hold a write token so a row delete can't race their
-  // merge (tracker.mjs delete doesn't yet share a lock with merge-tracker,
-  // see run-registry). evaluate's agent no longer writes; the backend persist
-  // path below still merges the tracker, so the token stays.
+  // The profile's page_format, read once HERE: the prompt names the marker
+  // before the run, and the render below reuses this stance instead of reading
+  // the profile again.
+  // The web used to let the agent pick, which overrode a4/letter and never
+  // reached auto.
+  const pageFormat: PageFormatSetting | undefined = dataRoot
+    ? await readPageFormatSetting(codeRoot, getProfilePath(dataRoot))
+    : undefined;
+  // Hold the tracker guard through evaluation persistence / PDF marking. Build
+  // the prompt inside the same try so preparation failures release it too. It is
+  // taken before the JD prefetch, so a row delete cannot land in that window.
   const writeToken = kind === "evaluate" || kind === "pdf" ? acquireTrackerWrite() : null;
-
-  // stdin must reach EOF or the CLI waits on piped input that never comes: Codex's
-  // `exec` blocks reading stdin for additional context, hangs until the kill timer,
-  // and then reports a generic "installed and authenticated?" error that reads as an
-  // auth failure even though the CLI is fully signed in. #1973 fixed that here with
-  // an inline `stdio: ["ignore", …]`; spawnHeadlessCli generalizes the same fix to
-  // every CLI-invoking route (assistant, explore/ai, cv/ingest, the apply planners),
-  // which had the identical bug, and puts it behind one tested helper so it cannot
-  // drift back in on any single call site.
   let child;
+  let instructionFile: ReturnType<typeof writeEvaluationInstructions> | undefined;
+  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // Read the JD here, not in the worker: WebFetch drops script content, so a
+    // board that renders its JD from script data looks like an empty shell to the
+    // worker and the run ends as "Needs review" on a live posting. null (plain
+    // boards, any miss) leaves the worker on its WebFetch path.
+    const prefetch = kind === "evaluate" ? await prefetchJd(input, runCoreCli, req.signal) : null;
+    // The caller went away while the JD was being read: do not start a worker for nobody.
+    if (req.signal.aborted) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return new Response(null, { status: 499 });
+    }
+    // A partial JD must not reach a worker that could score and save it as the
+    // whole posting, so refuse here instead of trusting the prompt to stop it.
+    if (isTruncatedJd(prefetch?.text)) {
+      if (writeToken !== null) releaseTrackerWrite(writeToken);
+      return Response.json({ error: "This posting is longer than the platform can read in full, so it was not scored. Evaluate it from your agent CLI with the job text pasted in (for example /career-ops, then paste the posting). No AI run was started." }, { status: 422 });
+    }
+    const prefetchedJd = prefetch?.text ?? null;
+    const closedEvidence = prefetch?.closedEvidence ?? null;
+    if (evaluationInstructions) {
+      instructionFile = writeEvaluationInstructions(careerOpsRoot(), evaluationInstructions);
+    }
+    const prompt = buildPrompt({
+      kind,
+      input,
+      memory: readMemory(),
+      today,
+      postedAt,
+      lang,
+      cvTemplate,
+      userTemplatesDir,
+      pageFormat,
+      // The worker's cwd is the data root; modes, templates and scripts live in the checkout.
+      codeRoot,
+      reportFile: pdfPaths?.reportFile ?? (coverRequest?.ok ? coverRequest.reportFile : undefined),
+      coverBrief: coverRequest?.ok ? coverRequest.brief : undefined,
+      profile: profileRef(careerOpsRoot()),
+      evaluationInstructions: instructionFile?.reference,
+      prefetchedJd,
+      closedEvidence,
+    });
+
+    const isClaude = cliId === "claude";
+    // Which tools each kind gets, and the whole claude argv, live in
+    // claude-invocation.mjs — see its header for the policy and for why it is asserted on
+    // built values rather than on this file's source. NEVER auto-submits; that
+    // remains a prompt-level guarantee.
+    // Non-Claude CLIs get no tool flags from spec.args(), so permission for them is
+    // applied at the spawn boundary instead: spawnHeadlessCli takes what this kind
+    // needs (capabilitiesFor) and cli-fencing.mjs translates it for the chosen
+    // runtime — an OS sandbox on Codex, nothing yet on the runtimes with no
+    // verified mechanism. Those report level "none" and the run says so
+    // below, rather than looking identical to a fenced one (#2507).
+    // A CLI with its own structured stream gets the argv that turns it on, so its
+    // stdout matches spec.parseEvent below; spec.args stays the plain-text argv the
+    // envelope-parsing routes rely on.
+    const buildArgs = (p: string) =>
+      isClaude ? claudeCliArgs({ kind, prompt: p }) : (spec.streamArgs ?? spec.args)(p);
+    // The prompt inlines the whole _profile.md (#4003), so it can outgrow the OS
+    // command-line limit (ENAMETOOLONG on Windows). Every kind that reaches here
+    // can Read (see TOOL_SCOPES), so an oversized prompt goes to a file under the
+    // data root and argv carries a pointer to it. Prompts that fit are untouched.
+    spill = spillOversizedPrompt({
+      prompt,
+      buildArgs,
+      binPath,
+      fencing: { cliId, capabilities },
+      root: careerOpsRoot(),
+    });
     child = spawnHeadlessCli(
       binPath,
-      args,
+      spill.args,
       { cwd: careerOpsRoot(), env: process.env },
       { cliId, capabilities },
     );
+    if (instructionFile) child.once("close", instructionFile.cleanup);
+    if (spill.cleanup) child.once("close", spill.cleanup);
   } catch (e) {
+    instructionFile?.cleanup();
+    spill?.cleanup?.();
     // Fencing refuses an argv that contradicts the capability record, so nothing
     // spawned and the stream below — which owns finishRun — is never
     // constructed. Release the tracker guard HERE or it is held for the lifetime
@@ -400,8 +464,8 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
       /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
+      const saveCv = (paths: PdfPaths, cv: { html: string }) => {
+        const written = writeCvHtml({ pdfPaths: paths, html: cv.html });
         if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
         return written.ok;
       };
@@ -490,7 +554,7 @@ export async function POST(req: Request) {
             evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
           });
           if (!result.ok) {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           sendWarnings(result.warnings);
@@ -506,24 +570,21 @@ export async function POST(req: Request) {
           close();
         }
       };
-      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4") => {
+      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4", ats?: { html: string; finalPdf: string } | null) => {
         send({ type: "status", label: "Rendering PDF…" });
-        // renderAndMarkPdf is designed to resolve, never throw — but this is
-        // the one place nothing else awaits or catches this promise (cancel()
-        // only attaches a .finally for the write-token release), so an
-        // unexpected exception here must still close the stream instead of
-        // leaving it — and the write-token — open until process shutdown.
         try {
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
             coreRoot: resolveCodeRoot(process.cwd(), process.env),
+            dataRoot: careerOpsRoot(),
             pdfPaths: paths,
             format,
             reportNum: paths.reportNum,
+            ats,
           });
           if (result.kind === "render-failed") {
-            send({ type: "error", msg: result.error.slice(0, 200) });
+            send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           // Non-fatal issues (a defaulted page format, a tracker row not marked) still
@@ -601,13 +662,59 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
             sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope.format);
-              return;
-            }
-            // saveCv already streamed the specific reason.
+            // Tracked so cancel() can defer releasing writeToken until this
+            // settles. close() happens once rendering finishes, not here.
+            pdfRenderPromise = withSharedPdfPath(pdfPaths.html, async () => {
+              let scratchDir = "";
+              try {
+                // The profile outranks the agent's pick, and auto maps the
+                // country it named, both through the core (core/page-format.mjs).
+                // The builder copies this sheet onto the JSON payload so the
+                // HTML width and the PDF page are the same size.
+                const sheet = await resolveRenderPageFormat(codeRoot, {
+                  setting: pageFormat?.setting ?? null,
+                  declared: envelope.format,
+                  country: envelope.country,
+                });
+                sendWarnings(sheet.warnings);
+                await saveBuiltCv({
+                  build: async () => {
+                    const built = await materializeTailoredCv({
+                      envelope: { ...envelope, format: sheet.format },
+                      coreRoot: resolveCodeRoot(process.cwd(), process.env),
+                      dataRoot: careerOpsRoot(),
+                      cvTemplate,
+                      userTemplatesDir,
+                      reportFile: pdfPaths.reportFile,
+                      htmlPath: pdfPaths.html,
+                      finalPdf: pdfPaths.finalPdf,
+                      ats: body.ats === true,
+                    });
+                    if (built.ok && built.scratchDir) scratchDir = built.scratchDir;
+                    return built;
+                  },
+                  isClosed: () => closed,
+                  onError: (error) => send({ type: "error", msg: error.slice(0, 200) }),
+                  onWarnings: sendWarnings,
+                  save: (built) => saveCv(pdfPaths, { html: built.html }),
+                  render: (built) => renderPdf(pdfPaths, sheet.format, built.ats),
+                });
+              } catch (e) {
+                send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+              } finally {
+                // force:true only skips a missing dir. EPERM and EBUSY still throw,
+                // and a throw here used to skip close(), which holds the stream
+                // and the tracker-write guard after the PDF is already done.
+                try {
+                  if (scratchDir) fs.rmSync(scratchDir, { recursive: true, force: true });
+                } catch {
+                  // The run already reported its outcome. A leftover scratch dir is the smaller failure.
+                } finally {
+                  close();
+                }
+              }
+            });
+            return;
           }
           return close();
         }

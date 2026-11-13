@@ -1,52 +1,49 @@
 import { ChevronDown, ExternalLink } from "lucide-react";
+import { ignoredByScore, scoreBandSummary, scoringDimensions } from "@/lib/score-claims.mjs";
 
-// Transparency = our differentiator ("why it's a 4.0 for YOU"). The wording is
-// the CANONICAL public text from career-ops.org/methodology + /docs — rendered
-// verbatim, NOT a web reinterpretation of the rubric (whose weights live in the
-// core, modes/_shared.md). Native <details> → no client JS.
-
-const DIMENSIONS: [string, string][] = [
-  ["Match", "how well your CV maps to the role's requirements"],
-  ["North-star alignment", "how far the role moves you toward your stated career goal"],
-  ["Compensation", "the offer vs market rates (says “insufficient data” when comp is missing — never invents numbers)"],
-  ["Cultural signals", "team, values and ways-of-working signals from the posting"],
-  ["Red flags", "ghost-job, scam or mismatch warnings"],
-  ["Overall", "the single judgment that rolls the above into the score"],
-];
+// Native <details>, no client JS. The dimension list is the rubric in
+// modes/_shared.md. Bands come from lib/score-action.mjs.
 
 const BLOCKS: [string, string][] = [
   ["A", "Plain-English summary of the role"],
-  ["B", "A table of how your CV matches each requirement, how much each requirement matters for this posting, and the gaps"],
-  ["C", "Strategy — how to position yourself for this role"],
-  ["D", "Compensation research, comparing the offer to market rates"],
+  ["B", "A table of how your CV matches each requirement, how much each requirement matters for this posting, and the gaps. Importance does not change the 1 to 5 score."],
+  ["C", "Strategy. How to position yourself for this role."],
+  ["D", "Compensation. Unknown when the posting states no pay."],
   ["E", "Personalization notes for your application"],
-  ["F", "Interview prep — STAR stories tailored to this job"],
-  ["G", "Posting legitimacy — a check that the listing is real, not a scam or ghost job"],
+  ["F", "Interview prep. STAR stories tailored to this job."],
+  ["G", "Posting legitimacy. A check that the listing is real. It does not change the 1 to 5 score."],
 ];
 
 export function ScoreMethodology() {
   return (
     <details className="group mt-10 overflow-hidden rounded-2xl border border-border bg-surface/30">
       <summary className="flex cursor-pointer list-none items-center gap-2 px-5 py-3.5 text-sm font-medium transition-colors hover:bg-surface-hover">
-        How career-ops scored this — and why it&apos;s for <span className="text-landing">you</span>
+        How career-ops scored this, and why it is for <span className="text-landing">you</span>
         <ChevronDown className="ml-auto size-4 text-faint transition-transform group-open:rotate-180" />
       </summary>
       <div className="space-y-5 border-t border-border px-5 py-4 text-sm">
         <p className="text-muted">
-          Every role is scored <strong className="text-foreground">1.0–5.0</strong> across six dimensions.{" "}
-          <strong className="text-brand-text">4.0</strong> is the apply / don&apos;t-apply line — below it, career-ops
-          recommends against applying.
+          Every role is scored <strong className="text-foreground">1.0 to 5.0</strong> from five dimensions.
+          The global score is that judgment. It is not a sixth input.
         </p>
+        <ul className="space-y-1 text-muted">
+          {scoreBandSummary().map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
         <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">The six dimensions</div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">The five dimensions</div>
           <ul className="space-y-1.5">
-            {DIMENSIONS.map(([k, v]) => (
-              <li key={k}>
-                <span className="font-medium text-foreground">{k}</span> <span className="text-muted">— {v}</span>
+            {scoringDimensions().map((row) => (
+              <li key={row.name}>
+                <span className="font-medium text-foreground">{row.name}.</span> <span className="text-muted">{row.detail}</span>
               </li>
             ))}
           </ul>
         </div>
+        <p className="text-muted">
+          These do not move the score: {ignoredByScore().join(", ")}.
+        </p>
         <div>
           <div className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-faint">What each report block means</div>
           <ul className="space-y-2">

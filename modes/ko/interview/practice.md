@@ -134,7 +134,7 @@ question bank와 역할별 준비 파일이 둘 다 없다면 후보자에게 �
 
 ### Write Session Transcript
 
-요약이 끝나면, 기계가 읽을 수 있는 세션 트랜스크립트를 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`에 씁니다(특정 회사를 위한 세션이 아니었다면 company/role slug 자리에 `practice`를 씁니다). 이것은 이후 분석 모드를 위한 라운드의 구조화된 기록입니다. 발화자가 표시된 턴 덕분에, 이 파일을 읽는 쪽은 누가 말했는지 다시 추론하지 않고 어느 쪽 발화든 읽을 수 있습니다. 전체 규약은 `interview-prep/sessions/README.md`에 있습니다.
+요약이 끝나면, 기계가 읽을 수 있는 세션 트랜스크립트를 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`에 씁니다(특정 회사를 위한 세션이 아니었다면 company/role slug 자리에 `practice`를 씁니다). 그 파일이 이미 있으면 덮어쓰지 말고, README의 "File names" 섹션에 설명된 대로 다음 빈 번호(`-2`, `-3`, ...)를 `.md` 앞에 붙입니다. 이것은 이후 분석 모드를 위한 라운드의 구조화된 기록입니다. 발화자가 표시된 턴 덕분에, 이 파일을 읽는 쪽은 누가 말했는지 다시 추론하지 않고 어느 쪽 발화든 읽을 수 있습니다. 전체 규약은 `interview-prep/sessions/README.md`에 있습니다.
 
 형식:
 

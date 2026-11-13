@@ -1,11 +1,16 @@
 "use client";
 
 import { Loader2, Wand2, Asterisk, Paperclip, Sparkles, ArrowUpRight, ShieldCheck, RotateCcw, FileCheck2, AlertTriangle, Terminal, Check, ScanLine, PenLine, CheckCircle2, Info, ExternalLink, MousePointerClick, ArrowLeft, ClipboardCheck } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
-import { isResumeLabel } from "@/lib/apply/resume-label.mjs";
+import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
+import { showPrefilledBanner } from "@/lib/apply/prefilled-banner.mjs";
+import { reopenApplyOptions } from "@/lib/apply/reopen-options.mjs";
+import { checklistHrefFor } from "@/lib/apply/checklist-href.mjs";
+import { resumeFieldNotice } from "@/lib/apply/handoff-gate.mjs";
 import type { ApplyField } from "@/lib/apply/extract";
 import { cn } from "@/lib/cn";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
@@ -41,32 +46,60 @@ export function ApplyView() {
           <input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && a.open(input.trim())}
+            onKeyDown={(e) => e.key === "Enter" && a.open(input.trim(), reopenApplyOptions(input.trim(), a))}
             placeholder="Paste an application form URL (Ashby, Lever, Greenhouse…)"
             className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-faint"
           />
           <button
-            onClick={() => a.open(input.trim())}
+            onClick={() => a.open(input.trim(), reopenApplyOptions(input.trim(), a))}
             className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-brand px-4 py-1.5 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
           >
             <Wand2 className="size-4" /> Read form
           </button>
         </div>
-        {a.error && (
+        {a.blockedAts ? (
+          <div className="mt-4 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
+            <div className="flex items-start gap-2.5">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
+              <div className="min-w-0">
+                <p className="text-sm text-amber-800 dark:text-amber-300">{a.blockedAts.message}</p>
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {a.blockedAts.postingUrl ? (
+                    <a href={a.blockedAts.postingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
+                      Open the posting <ExternalLink className="size-3" />
+                    </a>
+                  ) : null}
+                  {a.blockedAts.checklistHref ? (
+                    <Link href={a.blockedAts.checklistHref} className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
+                      CV path and answers
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : a.error ? (
           <div className="mt-4 max-w-2xl rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3.5">
             <div className="flex items-start gap-2.5">
               <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" />
               <div className="min-w-0">
                 <p className="text-sm text-amber-800 dark:text-amber-300">{a.error}</p>
-                {a.url && /^https?:\/\//.test(a.url) && (
-                  <a href={a.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
-                    Open the form directly <ExternalLink className="size-3" />
-                  </a>
-                )}
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+                  {a.url && /^https?:\/\//.test(a.url) && (
+                    <a href={a.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
+                      Open the form directly <ExternalLink className="size-3" />
+                    </a>
+                  )}
+                  {checklistHrefFor(a.n) && (
+                    <Link href={checklistHrefFor(a.n) ?? ""} className="inline-flex items-center gap-1 text-xs font-medium text-brand-text hover:underline">
+                      CV path and answers
+                    </Link>
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        )}
+        ) : null}
         {/* A session that failed still has a row and an origin behind it, so the
             way back and the way to record it must survive the failure. */}
         {a.status === "error" && <ApplyExitBar />}
@@ -79,6 +112,7 @@ export function ApplyView() {
   const prefilling = a.status === "prefilling";
   const filling = a.status === "filling";
   const done = a.status === "done";
+  const prefilled = showPrefilledBanner(a.status, a.issues);
   const busy = opening || driving;
   const phase = busy ? 0 : prefilling ? 1 : 2;
 
@@ -176,6 +210,7 @@ export function ApplyView() {
                   needs={!!a.meta[f.id]?.needsConfirmation}
                   index={i}
                   drafting={prefilling}
+                  cvAttached={a.cvAttached}
                   onChange={(v) => a.setAnswer(f.id, v)}
                 />
               </div>
@@ -225,7 +260,7 @@ export function ApplyView() {
               </div>
             </div>
           )}
-          {done && (
+          {prefilled && (
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>
@@ -287,6 +322,7 @@ function ApplyExitBar() {
   }
 
   async function markApplied() {
+    if (!markAppliedEnabled({ status: a.status, issues: a.issues }).enabled) return;
     setMarking(true);
     setError("");
     try {
@@ -336,6 +372,7 @@ function ApplyExitBar() {
     );
   }
 
+  const appliedGate = markAppliedEnabled({ status: a.status, issues: a.issues });
   return (
     <div className="mt-8 border-t border-border/70 pt-5">
       <div className="flex flex-wrap items-center gap-3">
@@ -348,15 +385,15 @@ function ApplyExitBar() {
         {a.n && (
           <button
             onClick={markApplied}
-            disabled={marking}
-            title={`Set tracker row #${a.n} to Applied and go back`}
+            disabled={!appliedGate.enabled || marking}
+            title={appliedGate.hint}
             className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 px-4 py-2 text-sm font-medium text-emerald-800 transition-colors hover:bg-emerald-500/20 disabled:opacity-50 dark:text-emerald-400 max-sm:min-h-[44px]"
           >
             {marking ? <Loader2 className="size-4 animate-spin" /> : <ClipboardCheck className="size-4" />}
             {marking ? "Updating your tracker…" : "Mark applied"}
           </button>
         )}
-        {a.n && <span className="text-xs text-muted">Click this once you have submitted the real form yourself.</span>}
+        {a.n && <span className="text-xs text-muted">{appliedGate.hint}</span>}
       </div>
       {error && <p className="mt-2 text-xs text-red-500">{error}</p>}
     </div>
@@ -530,12 +567,29 @@ function FieldSkeleton() {
   );
 }
 
+function FileNotice({ label, cvAttached }: { label: string; cvAttached: boolean }) {
+  const notice = resumeFieldNotice({ label, cvAttached });
+  if (notice.claim) {
+    return (
+      <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-400">
+        <FileCheck2 className="size-4 shrink-0" /> {notice.text}
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
+      <Paperclip className="size-4 shrink-0" /> {notice.text}
+    </div>
+  );
+}
+
 function FieldRow({
   field: f,
   value,
   needs,
   index,
   drafting,
+  cvAttached,
   onChange,
 }: {
   field: ApplyField;
@@ -543,6 +597,7 @@ function FieldRow({
   needs: boolean;
   index: number;
   drafting: boolean;
+  cvAttached: boolean;
   onChange: (v: string) => void;
 }) {
   const controlId = useId();
@@ -606,15 +661,7 @@ function FieldRow({
           <input {...controlProps} type="checkbox" checked={value === "true" || value === "yes"} onChange={(e) => onChange(e.target.checked ? "true" : "")} className="size-4 accent-brand" /> {f.label || "Yes"}
         </label>
       ) : f.type === "file" ? (
-        isResumeLabel(f.label) ? (
-          <div className="flex items-center gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-800 dark:text-emerald-400">
-            <FileCheck2 className="size-4 shrink-0" /> Your tailored CV (PDF) will be attached automatically — you can swap it on the real form.
-          </div>
-        ) : (
-          <div className="flex items-center gap-2 rounded-lg border border-dashed border-border px-3 py-2 text-sm text-muted">
-            <Paperclip className="size-4 shrink-0" /> Attach this file yourself on the real form at the handoff.
-          </div>
-        )
+        <FileNotice label={f.label} cvAttached={cvAttached} />
       ) : (
         <input {...controlProps} type={["email", "tel", "url", "number", "date"].includes(f.type) ? f.type : "text"} maxLength={f.maxLength} value={value} onChange={(e) => onChange(e.target.value)} placeholder={needs ? "You fill this one." : "…"} className={base} />
       )}

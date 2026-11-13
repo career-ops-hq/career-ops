@@ -1,26 +1,30 @@
 import fs from "node:fs";
 import path from "node:path";
 import * as yaml from "js-yaml";
-import { careerOpsRoot, findApplication, pdfPathStatusForReport } from "@/lib/career-ops";
+import { careerOpsRoot, findApplication, pdfPathStatusForReport, readReport } from "@/lib/career-ops";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
+import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
-import { reportNumberFromCell } from "./cv-selection.mjs";
+import { styledCvNames } from "./ats-pdf.mjs";
 import { cvUploadName } from "./upload-name.mjs";
 
 /**
  * Locate the tailored CV PDF for an application. When the tracker application
- * number is known, the report -> PDF manifest (via pdfPathStatusForReport, the
- * same resolver /api/cv-pdf uses for its own "n" lookups) is authoritative, so
- * an older role cannot accidentally receive the company's newest CV. Company
+ * number is known, the report number is reportNumberFor, the same helper the
+ * report page uses, and the report -> PDF manifest (via pdfPathStatusForReport,
+ * the same resolver /api/cv-pdf uses for its own "n" lookups) is authoritative,
+ * so an older role cannot accidentally receive the company's newest CV. Company
  * matching remains as a fallback for manually pasted URLs. Returns an absolute
  * path or null.
  */
 export async function resolveTailoredCv(company?: string, applicationNumber?: string): Promise<string | null> {
   const root = careerOpsRoot();
   if (applicationNumber?.trim()) {
-    const app = findApplication(applicationNumber.trim());
-    const reportNumber = reportNumberFromCell(app?.report);
+    const id = applicationNumber.trim();
+    const app = findApplication(id);
+    const report = readReport(id);
+    const reportNumber = reportNumberFor(id, app, report?.file ?? null);
     if (!reportNumber) return null;
     const result = await pdfPathStatusForReport(String(reportNumber));
     return result.status === "found" ? result.path : null;
@@ -44,7 +48,7 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
   // `key.first` is deliberately NOT used as a fallback: matching a company by
   // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
   // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
-  const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
+  const matches = styledCvNames(files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug)));
   if (!matches.length) return null;
   const sorted = sortNewestFirst(dir, matches);
   if (!sorted.length) return null;

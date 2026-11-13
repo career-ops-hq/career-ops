@@ -28,6 +28,8 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run career-profile` | `career-profile.mjs` | Import CV facts into `data/career-profile.yml` (preview by default; `--review` to save) |
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
+| `node clean-markers.mjs` | `clean-markers.mjs` | Audit or strip invisible Unicode from generated text files (see [CLEAN_MARKERS.md](CLEAN_MARKERS.md)) |
+| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, never with `--provider` or a `--dest` inside a provider folder at its default location; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder; `--include-claude-memory` also copies Claude Code's auto-memory for the checkout into `claude-memory/`, or from a folder you name with `--claude-memory-dir <dir>`) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
@@ -41,13 +43,17 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 | `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
 | `npm run scan:hn` | `scan-hn.mjs` | Hacker News "Who is hiring?" scanner, filtered by `hn_hiring.keywords` |
-| `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing |
-| `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing; `--tenant NAME` scans one board |
+| `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing to the pipeline or scan history |
+| `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing to the pipeline or scan history; `--tenant NAME` scans one board |
+| `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing to the pipeline or scan history; `--keyword TEXT` scans one keyword |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
 | `sh web/scripts/uninstall-scan-schedule.sh` | `web/scripts/uninstall-scan-schedule.sh` | Remove the macOS launchd agent or Linux cron line for the scheduled-jobs queue worker |
+| `node web/scripts/web-service.mjs install` | `web/scripts/web-service.mjs` | Install the web dashboard as a login service for the current user (macOS launchd, Linux `systemd --user`, Windows Task Scheduler). It installs dependencies and builds only when the lockfile, Node version or checkout changed. `--dry-run` prints the definition and changes nothing |
+| `node web/scripts/web-service.mjs uninstall` | `web/scripts/web-service.mjs` | Stop and remove the web dashboard service (keeps the log). `restart` rebuilds first when the code changed, and `status` shows the service's state |
 | `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
+| `npm run harvest:buildlist` | `harvest-buildlist.mjs` | Resolve BuildList's company roster to scannable ATS boards |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 | `npm run tracker` | `tracker.mjs` | SQLite derived index over applications.md — sync/query/history/export |
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
@@ -82,6 +88,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run prepare:application` | `prepare-application.mjs` | Print an ATS prefill summary (read-only, never POSTs) |
 | `npm run build:dashboard` | `build-dashboard.mjs` | Build the Go TUI dashboard binary cross-platform |
 | `npm run manifesto` | `manifesto.mjs` | Print the manifesto couplet and open the signing page in a browser |
+| `node community-asks.mjs next` | `community-asks.mjs` | The one-time community asks (star, then manifesto): prints at most one line, never in CI or headless runs; `off` turns them off |
 | `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
 | `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
 
@@ -384,7 +391,15 @@ npm run cv:verify-facts -- output/cv.html --source cv.md --source article-digest
 npm run cv:verify-facts -- --self-test
 ```
 
-PDF generation calls the same check, so a document that fails here fails there too.
+PDF generation runs the same check: a `block` verdict stops the PDF, and a `warn` stops it only with `--strict-fact-check`. With `--skip-fact-check`, or with no `cv.md` in the data root, the PDF path runs no check at all.
+
+Besides metrics, it blocks a bullet whose verb drifted from the source bullet it restates (#1411). Each rendered bullet (HTML `<li>`, markdown list item, LaTeX `\item` / `\resumeItem`) is anchored to the source statement that shares the most content words with it, and the two are compared word by word. Deleting words, reordering, changing a word's inflection, adding function words and adding JD keywords are allowed. A word that opens a clause, where a bullet says what the candidate did, must appear in that anchor in some inflection, so "Used Kafka for event ingestion" rendered as "Led a Kafka migration" blocks, while "Built a Python ETL pipeline" rendered as "Building Python ETL pipelines for FP&A reporting" passes. A true verb change is declared in `config/cv-facts.json`:
+
+```json
+{ "allow_swaps": ["evaluated -> conducted", "used -> led"] }
+```
+
+A swap is pairwise: `"used -> led"` allows "led" only in a bullet whose source says "used". A later clause that opens with an "-ed" word or an irregular participle that no determiner or object pronoun follows ("…and automated reporting", "…and related to billing", "…and written communication") is ambiguous between verb and adjective, so it warns instead of blocking; simple-past irregular forms ("…and wrote …", unless a passive preposition follows: "…, built on AWS" warns) and words before a determiner ("…and managed the vendors") still block. The same holds for the bullet's first word: one that does not read as a verb ("Scalable ETL pipeline built in Python") warns. Bullets with no source anchor, and documents not in English, are left to the other checks.
 
 ---
 
@@ -668,18 +683,21 @@ tracker row, so a contact cannot be attached across companies.
 Optional GitHub evidence step of the `expand` mode (#5295). Reads the pull
 requests you authored through your existing `gh auth` (no new token) and checks
 what `cv.md` claims against them. Read-only: PR title, state, repository,
-stars, visibility, and commit counts/dates. README reading is separately
-opt-in through `github_evidence.read_readmes: true`; it never reads
-source code and never writes `cv.md`. Candidates reach `cv.md` only through `expand`'s confirm gate and
+stars, visibility, commit counts/dates, and document file names. README reading
+is separately opt-in through `github_evidence.read_readmes: true`; it never
+reads source code or file contents and never writes `cv.md`. Candidates reach
+`cv.md` only through `expand`'s confirm gate and
 `add-entry.mjs`.
 
 ```bash
 node github-evidence.mjs          # writes output/github-evidence-{date}.{md,json}
 node github-evidence.mjs --json   # same, and prints the JSON on stdout
+node github-evidence.mjs --skip-document-listing # omit document names and tree queries
 ```
 
-- Only PRs and commits you authored count. Your own repos (owning is not
-  authorship) and forks are listed by name and counts only, never as evidence.
+- Only PRs and commits you authored count as contribution evidence. Your own
+  repos (owning is not authorship) and forks are listed by name and counts only
+  for PR authorship; confirmed document names can still inform `expand` proposals.
 - A private repo is evidence only when listed in `config/profile.yml`:
   `github_evidence.private_allowlist: ["owner/repo"]` (empty by default). Any
   other private repo, or one whose visibility could not be read, appears by
@@ -732,6 +750,37 @@ counts as not logged in: a login check that fails any other way (no stderr,
 `gh` crashed or was killed) is a `2` naming the exit status. On exit `2` or
 `3`, `expand` continues with its zero-key behaviour; on exit `1` it asks the
 user to fix `candidate.github` (its Input steps 2–4).
+
+**Document names (`documents`, #5728).** PRDs, requirement-change notes, data
+contracts and acceptance baselines kept under `docs/` are invisible to a README
+read and to PR evidence. The report therefore also lists document file names on
+the default branch of your own non-fork repos (the 30 most recently pushed, via
+one GraphQL query) and of each allowlisted repo that is not a fork: one
+`repos/<owner>/<repo>/git/trees/<branch>?recursive=1` call per repo, plus one
+metadata call per allowlisted repo the own-repo query did not return. A document
+is a file under `docs/`, `doc/` or `documentation/` (`.md`, `.mdx`, `.rst`,
+`.adoc`, `.txt`, `.docx`, `.pdf`, `.pptx`, `.xlsx` and similar), or a top-level
+document other than README, CHANGELOG, LICENSE, CONTRIBUTING and the like.
+Names matching a product or requirement keyword in English or Chinese (`prd`,
+`requirement`, `spec`, `acceptance`, `contract`, `design`, 需求, 契约, 口径,
+验收, …) carry them in `keywords`, and flagged names are listed first, at most
+40 per repo (`filesCapped`). Names only: no file is opened and no source code is
+read. Names are listed for public repos and allowlisted private ones; any other
+private repo or repo with unknown visibility shows counts only, with names
+hidden (`namesShown: false`). This visibility rule applies only to the
+`documents` section; the existing PR metadata section continues to show
+non-allowlisted private repositories by name and count. Hidden document rows
+also omit repository names, branch names and raw GitHub error paths from JSON,
+Markdown and stderr while retaining safe error types and HTTP status codes. A truncated tree sets
+`treeTruncated`. A failed call is a gap in `documents.gaps` (`status` `partial`
+or `failed`) and changes neither the rest of the report nor the exit code. The
+Markdown report adds the same list as its last section. `expand` asks you which
+of these documents are your own work before reading any of them.
+
+Pass `--skip-document-listing` for one run, or set
+`github_evidence.skip_document_listing: true` in `config/profile.yml` to skip
+document tree queries by default. PR and commit evidence still runs, and the
+report marks the document listing as skipped.
 
 ---
 
@@ -815,6 +864,20 @@ node check-jd-archive.mjs --help
 ```
 
 **Exit codes:** `1` if any `missing-jd-archive` finding, `0` otherwise: with only `jd-archive-review-due` findings, and in the empty-repo case (`reports/*.md` is gitignored, so a fresh checkout has nothing to scan). Wired into `test-all.mjs`'s `--self-test` invocation; backfilling JD text for pre-existing reports that predate this validator is explicitly out of scope (#2789) — this only prevents the gap going forward.
+
+---
+
+## clean-markers
+
+Audits or cleans generated text files (CVs, cover letters, application answers) for invisible Unicode that untrusted job text can smuggle in: zero-width marks, bidi controls, tag characters, variation selectors, soft hyphens. Dependency-free; full usage and the `--keep-script-joiners` rules are in [CLEAN_MARKERS.md](CLEAN_MARKERS.md).
+
+```bash
+node clean-markers.mjs audit output/acme-cv.html              # report only, never modifies
+node clean-markers.mjs clean output/acme-cover-letter.md
+node clean-markers.mjs clean --ascii output/cover-letter.txt  # also normalize smart quotes / dashes
+```
+
+**Exit codes:** `audit` exits `1` if any file fails, so it works as a pre-send gate.
 
 ---
 
@@ -973,8 +1036,8 @@ Possible JSON responses:
 | `up-to-date` | Local version matches remote |
 | `update-available` | Newer version exists (includes `local`, `remote`, `changelog`) |
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
-| `offline` | Could not reach GitHub |
-| `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release |
+| `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
+| `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
@@ -1088,9 +1151,9 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 
 `--rediscover-404` also recognizes authoritative API 404/410 verdicts: for a tracked company with a careers domain, it searches that domain and requires a confirmed live replacement before migrating the URL. Soft closure signals do not trigger rediscovery.
 
-`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Permanent invalid statuses such as blocked host and malformed URL remain permanent.
+`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Under the window a `skipped_dup` row lasts while any other scan-history row for the URL still pins it, whatever its own date, so a repeat sighting neither pins the URL nor restarts the clock. A `skipped_dup` row with no such row in scan-history ages out by its own `first_seen`, and a tracker or pipeline entry for that URL still pins it. Permanent invalid statuses such as blocked host and malformed URL remain permanent. The other writers of the pipeline apply the same window to the same history: `scan-ats-full.mjs`, `scan-dayforce.mjs`, and everything admitted through `lib/admission-gate.mjs` (`scan-interamt.mjs`, `scan-hn.mjs`, `openrouter-runner.mjs`, plugin ingest). Plugin ingest drops a posting `pipeline.md` already lists only while the gate still holds it, so a checked-off entry the window released comes back there as it does in a scan.
 
-`scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
+`scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. A configured `location_filter.workplace_policy` turns the same split on unless `dedup_include_location` is false. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
 
 The location component is the canonical **set** of the places a posting names, not the provider's display string. That field is free text and is often not one place: live Greenhouse boards pack several into one value with `;`, `|`, `/` or the word `or`, sometimes mixing two separators in the same value, and several providers here (greenhouse, ashby, eightfold, gem, ibm, echojobs) fold a multi-site role's extra cities into the string themselves in whatever order the upstream array arrived. Keying that string verbatim is stable only while the order holds, so a re-ordered list would read as a new posting and re-enter the pipeline. Splitting on those separators, normalizing each place, deduplicating and sorting makes the key depend on which places a posting names rather than the order it names them in. `,` is not a separator - it delimits city from region inside one place.
 
@@ -1152,9 +1215,11 @@ Defaults are unchanged, so a single-lane setup needs none of this. Note that the
 
 ## scan:full
 
-Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours. The join.com directory is join.com's own company sitemap (`https://join.com/companies/sitemap.xml`), cached the same way.
+Reverse ATS discovery scanner. Where `scan.mjs` scans the companies you track in `portals.yml`, this inverts the direction: it walks public directories of companies per ATS (Greenhouse, Lever, Ashby, Workday, iCIMS, BambooHR, Paylocity, join.com, Workable) and surfaces fresh postings matching your `portals.yml` `title_filter` / `location_filter` — no manual company curation. Company directories come from the public [job-board-aggregator](https://github.com/Feashliaa/job-board-aggregator) dataset, cached in `data/cache/` for 24 hours. The join.com directory is join.com's own company sitemap (`https://join.com/companies/sitemap.xml`), cached the same way.
 
 join.com reads each board's jobs by a numeric company id that only the company's careers page shows. The provider keeps the ids it finds in `data/cache/provider-ids/join.json` (the same file `scan.mjs` uses for the join entries in `portals.yml`), so a sweep reads a careers page only for a company it has not seen, or whose id it last checked more than 30 days ago. The join endpoint is rate-limited for all tenants together, so the join source runs two boards at a time.
+
+Workable has no company directory: the workable source reads Workable's public XML job feed (`https://www.workable.com/boards/workable.xml`), which holds every tenant's postings. The first run downloads it, about 140 MB, and keeps a gzipped copy in `data/cache/ats-companies/` with the feed's `Last-Modified` date. Every later run sends that date in `If-Modified-Since`: while the feed is unchanged Workable answers 304 and the copy is read; when it changed (about once an hour) the new feed is downloaded and kept. Workable refuses a second full download inside an hour (HTTP 429); when a request is refused, the copy is read and the source is reported as stale. `title_filter_overrides` match the employer name for this source, and a `--resume` that stops inside it runs the source again from the start.
 
 Pass `--history-seeds` to derive board seeds locally from posting URLs already
 in the user's tracker and `data/scan-history.tsv`. A normal run does not read
@@ -1241,9 +1306,13 @@ the checkpoint was written (`title_filter` / `title_filter_full`,
 `domain_filter`). The error names the filter that changed; restore it to finish
 the sweep, or delete the checkpoint to start fresh.
 
+`--resume-if-compatible` continues the same way when the checkpoint matches.
+When it does not, the command warns and starts a fresh sweep. A scheduled full
+scan passes this flag so a leftover checkpoint cannot exit 1 on every later run.
+
 ### DNS pacing
 
-A full sweep resolves one hostname per Workday, iCIMS and BambooHR tenant — 25,205 distinct hostnames across the current datasets (3,781 Workday + 10,108 iCIMS + 11,316 BambooHR). Greenhouse, Lever, Ashby, Paylocity and join.com serve every board from a single hostname each, so they add only 5 more. Those per-tenant lookups are irreducible (nothing to cache: every hostname is distinct), and issued unpaced they trip the per-client rate limit on a resolver like Pi-hole, which then refuses queries for the whole machine — the scan reports thousands of misleading `fetch failed` lines while the boards themselves are fine (#2229).
+A full sweep resolves one hostname per Workday, iCIMS and BambooHR tenant — 25,205 distinct hostnames across the current datasets (3,781 Workday + 10,108 iCIMS + 11,316 BambooHR). Greenhouse, Lever, Ashby, Paylocity, join.com and Workable serve every board from a single hostname each, so they add only 6 more. Those per-tenant lookups are irreducible (nothing to cache: every hostname is distinct), and issued unpaced they trip the per-client rate limit on a resolver like Pi-hole, which then refuses queries for the whole machine — the scan reports thousands of misleading `fetch failed` lines while the boards themselves are fine (#2229).
 
 Uncached, non-coalesced lookups are therefore paced at **400 per minute** by default. The token is spent *before* `dns.lookup()` runs, so a name answered locally — from `/etc/hosts`, say — still costs one; the ceiling meters what the process asks to resolve, not what leaves the machine.
 
@@ -1259,7 +1328,7 @@ CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pac
 
 The cost is real: a full Workday + iCIMS + BambooHR sweep becomes DNS-bound at roughly 63 minutes (25,205 hostnames ÷ 400/min default pacing). Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
 
-**Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
+**Exit codes:** `0` scan completed, or a `--json` stop whose result has `stoppedEarly: true` (read that flag before treating 0 as finished). `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
 
 ---
 
@@ -1301,7 +1370,7 @@ Scans Dayforce (Ceridian) Recruiting boards listed under `dayforce_boards` in `p
 ```bash
 npm run scan:dayforce
 npm run scan:dayforce -- --dry-run
-npm run scan:dayforce -- --tenant gnghcm            # one configured tenant; the `--tenant=name` form is ignored
+npm run scan:dayforce -- --tenant gnghcm            # one configured tenant; `--tenant=name` is rejected as an unrecognized flag
 npm run scan:dayforce -- --debug                    # keep the browser visible
 ```
 
@@ -1328,6 +1397,38 @@ Runs without `--dry-run` write JSON under `output/` and a Markdown report under 
 Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
 
 **Exit codes:** `0` discovery completed, `1` invalid arguments or fatal runtime error.
+
+---
+
+## harvest:buildlist
+
+Turns [BuildList](https://buildlist.xyz)'s company roster into companies `scan.mjs` can read. BuildList indexes ~820 hard-tech startups (AI, robotics, aerospace, defense, energy), and every "Apply" link on it points at the company's own ATS — so its value here is the **company list**, not the job feed. Harvest once and the companies are yours; scanning never touches BuildList again.
+
+It reads the public sitemap and public company pages only (`robots.txt` disallows `/api/` for every agent), and **never writes `portals.yml`**: it writes a file for you to review and paste. It runs on your machine but reads a whole site, so it keeps to the pace rule 6 of the Source Indexing Policy (`CONTRIBUTING.md`) sets for the project's own indexing layer: one request at a time, at least a second apart, longer when `robots.txt` states a `Crawl-delay`, and a `Retry-After` is honoured. Every request is also checked against the live `robots.txt` first (`robots-check.mjs`, read once per run, fail-closed), so a changed policy stops the harvest instead of being ignored. A run fetches at most 2,000 company pages, whatever the sitemap lists; a full harvest of today's roster takes about 15 minutes.
+
+```bash
+npm run harvest:buildlist -- --out buildlist-portals.yml
+npm run harvest:buildlist -- --limit 25 --summary     # quick sample
+npm run harvest:buildlist -- --out buildlist-portals.yml --resume   # continue
+npm run harvest:buildlist -- --json                   # machine-readable
+npm run harvest:buildlist -- --self-test
+```
+
+**The output is `tracked_companies:` entries for every resolved board**, with no job-count test. That test (`discover-ats.mjs` admits a board only if it lists a job today) is right when a slug was *guessed*: an empty board is then indistinguishable from a wrong guess. Here the board is read off the page, so it is known-good and the job count is only today's weather. `tracked_companies` is a standing watch whose purpose is catching a role the day it opens, and `title_filter` still does the per-scan filtering on live postings. The list is not handed to `discover-ats.mjs`, because it probes a slug on every vendor in turn and keeps the first that answers: a Lever board named `initech` could come back as another company's Greenhouse board of the same name.
+
+**Why it reads the page instead of guessing the slug.** BuildList's URL slug is frequently not the ATS board id: `altos-labs` is Greenhouse `altoslabs`, `altana` is `altanaai`, `agility-robotics` is a Greenhouse embed. Feeding guessed slugs to `discover-ats.mjs` resolved 6 of 20 in testing. Each Apply link is read back to its board by `parseBoardUrl` (`seeds/employers-import.mjs`), the reverse of the `lib/ats-board-url.mjs` builders that `discover-ats.mjs` and the employer registry use, so a board comes out in the same canonical form: EU Greenhouse and Lever boards keep their region, Ashby ids keep their case, Workday boards keep their three coordinates, and a vendor's own pages (`www.greenhouse.io/…`, `jobs.ashbyhq.com/api/…`) are not boards. One exception to that shared rule: an Ashby board whose id holds a space (`jobs.ashbyhq.com/Hippocratic%20AI`) is live and answers only in that spelling, so it is kept, with the space encoded; the shared slug rule has no space in it.
+
+Boards it emits: Greenhouse (including links to the `boards-api` host and `?for=` embeds), Ashby, Lever, Rippling, Workable, SmartRecruiters, Join, Recruitee, Breezy, BambooHR, Pinpoint and Workday, plus Gem, iCIMS, Personio and Teamtailor, which `scan.mjs` reads but the registry does not cover. Comeet is listed as **manual follow-up**: its provider needs a careers-api URL carrying a secret `?token=` the public page never exposes.
+
+It skips companies `portals.yml` already tracks, by name **or** by board (`dedupeAgainstPortals` from `discover-ats.mjs`, with each existing `careers_url` read back to its canonical board, so an entry on a legacy host still matches), because a duplicate entry silently double-scans. A `portals.yml` that does not parse is reported on screen and in the output, not treated as empty. `--include-tracked` turns the skip off; `--portals-file` points at a different file (default: `portals.yml` in the data root, so a `CAREER_OPS_ROOT` override is honoured); `--disabled` stages entries as `enabled: false` so you can widen the scan gradually. When two BuildList companies link the same board (a parent and a subsidiary), it is emitted once and the other name is listed in a comment.
+
+**Interrupted runs.** With `--out`, progress is saved to `<file>.progress.json` every 25 companies, and kept while anything is left to do (pages that failed, or companies `--limit` did not reach). Run the same command with `--resume` to continue; a progress file that does not check out is ignored entry by entry, never trusted.
+
+**Guards.** `--out` refuses any file named `portals.yml` in any letter case, the file `--portals-file` names (followed through symlinks and hard links), and an `--out` whose progress file would land on it. An unrecognized flag or a malformed number (`--limit abc`) is an error, not a silent fallback to the default. `--summary` and `--json` print instead of writing, so they cannot be combined with `--out`.
+
+Company profile text (sector, description, HQ, headcount, funding) is BuildList's own editorial content, carried into the `notes:` field as context only. It is never a scoring input and never reaches generated user-facing content. Page text is untrusted: a board is emitted only when its link reads back to a valid board, names are quoted unless they are plainly a string, and control characters and line breaks are stripped from anything printed or written to a comment, so nothing read off a page can add or change an entry in the file you paste.
+
+**Exit codes:** `0` harvest completed, `1` invalid arguments or fatal runtime error.
 
 ---
 
@@ -1505,7 +1606,14 @@ same Playwright pipeline as CVs.
 ```bash
 npm run cover-letter -- payload.json
 node generate-cover-letter.mjs --payload payload.json --out output/slug-cover.pdf
+node generate-cover-letter.mjs --payload payload.json --report 42 --max-pages 1 --strict-pages
 ```
+
+Flags are parsed strictly: an unknown flag, a stray argument, or a flag with
+no value (`--report --out x.pdf`) exits 1 with the usage text instead of being
+ignored. `--report` takes a numeric report number. The page budget defaults to
+1 page and only warns when the letter runs longer; `--max-pages N` changes the
+budget and `--strict-pages` makes overflow an error.
 
 ---
 
@@ -1568,8 +1676,11 @@ it, and proposes the one `portals.yml` change that would have caught it. The
 verdict is one of: already surfaced, seen and dropped by a filter, tracked
 but disabled, tracked with no provider, tracked but dropped by the title or
 location filter, tracked but not seen yet, company not tracked, or company not
-tracked and its job site read by no provider. Zero-network: it reads `portals.yml`,
-`data/scan-history.tsv`, `data/pipeline.md` and the cached reverse-sweep
+tracked and its job site read by no provider. When no provider reads the
+posting's site, it also counts the other postings on that host, and when they
+name other companies, the fix leads with a provider for the site, keeping the
+per-company change as the fallback. Zero-network: it reads `portals.yml`,
+`data/scan-history.tsv`, `data/pipeline.md`, the tracker and the cached reverse-sweep
 company lists. It never edits `portals.yml`.
 
 ```bash
@@ -1767,6 +1878,7 @@ These have no `npm run` binding — modes and agents call them with
 | `node install-latex-engine.mjs [--check] [--force] [--json] [--help]` | Opt-in local LaTeX engine: downloads a pinned tectonic release for this platform, verifies its SHA-256 before extracting, and places it in the repo root (gitignored) where `generate-latex.mjs` looks first. Downloads are bounded by a timeout and a size cap. No-op when tectonic is already available (a pdflatex-only host still gets tectonic, which the CJK template needs); `--check` never downloads |
 | `node classify-tier.mjs` | Classify a job title into intern / entry / mid / senior |
 | `node ats-payload.mjs <payload.json> [--summary]` | ATS payload transform: folds `competencies[]` into `skills[]` (one safe, idempotent transform) and reports three judgement calls it deliberately does not apply. Payload on stdout, findings on stderr |
+| `node evidence-freshness.mjs` | Opt-in. Before Block A in `oferta` and `auto-pipeline`, once per run in batch: says whether the GitHub evidence behind `cv.md` is stale (age of the newest `output/github-evidence-*.json`, plus PRs authored and merged since in repos the user does not own, from one metadata-only `gh search prs`). Read-only, always exit 0, JSON on stdout. See [evidence-freshness.mjs](#evidence-freshnessmjs) |
 | `node plugins.mjs list\|run <id> [hook]` | CLI host for non-provider plugin hooks (see [PLUGINS.md](PLUGINS.md)) |
 | `node plugin-install.mjs [--help]` | Clone/scaffold/validate community plugins (allowlisted URLs, pinned SHA); the engine behind the `plugins.mjs` new/add commands, which `--help` points at |
 | `node plugin-audit.mjs` | Static safety scan for community/registry plugins |
@@ -1866,6 +1978,61 @@ Reachable from a mode as the payload stage of `ats` — see [`modes/ats.md`](../
 workflow, including the rule that the three lints are relayed to the user and never applied by the agent.
 
 Self-test: `node ats-payload.mjs --self-test`.
+
+---
+
+## evidence-freshness.mjs
+
+Says whether the GitHub evidence an evaluation scores against is stale.
+`oferta`, `auto-pipeline` and batch workers read `cv.md`, `article-digest.md`
+and the profile, and GitHub work reaches those only when the user runs
+`expand`, whose optional step (`github-evidence.mjs`) writes
+`output/github-evidence-{date}.{md,json}`. The modes run this once, after their
+gates and before Block A. `batch-runner.sh` runs it once per batch run, before
+the first offer, and appends the JSON to every worker's prompt, so a batch
+makes one `gh` call however many offers it has.
+
+The check is opt-in: it does nothing (status `disabled`, no `gh` call) unless
+`config/profile.yml` sets `evidence_freshness.enabled: true`.
+
+```bash
+node evidence-freshness.mjs   # JSON on stdout, always exit 0
+```
+
+- Finds the newest `output/github-evidence-{YYYY-MM-DD}.json` (a file that does
+  not parse, or that records another `user`, is skipped) and reads
+  `candidate.github` from the profile, normalized the way `expand` does it.
+- Makes one metadata-only call through the user's existing `gh auth`:
+  `gh search prs --author <user> --merged --merged-at ">=<scan time>" --limit 100 --json repository -- -user:<user>`.
+  Only the count is kept, no repo names or titles. The lower bound is the scan
+  file's modification time when it falls on the file's date, otherwise the start
+  of that day, so PRs merged earlier on the scan day are not counted again. PRs
+  in the user's own repos are left out, since `github-evidence.mjs` never counts
+  them as evidence. One search page, so a count of 100 is reported as `100+`
+  (`newMergedPrsTruncated`).
+- `stale` is true when `newMergedPrs` reaches `min_new_merged_prs` (default 5)
+  or the scan is more than `max_age_days` old (default 30), from
+  `config/profile.yml` → `evidence_freshness`. With no scan on record it is true
+  once there is at least one merged PR to find. Invalid values keep their
+  default and are reported on stderr.
+- Output: `status`, `stale`, `reason`, `notice` (the one line the modes show
+  when stale), `user`, `lastScan`, `scanFile`, `daysSince`, `newMergedPrs`,
+  `newMergedPrsTruncated`, `thresholds`.
+- `status` is `ok`, or one of `no-github` (`candidate.github` unset or not a
+  username, or the profile is missing or unreadable), `disabled` (the default:
+  `enabled` is not `true`),
+  `gh-unavailable` (`gh` not installed or not logged in) and `gh-query-failed`,
+  each with `stale: false` and a `reason`. It never blocks: the exit code is
+  always `0`.
+
+It writes nothing and never runs `expand` or `github-evidence.mjs`. The modes
+show the notice and continue, never change a score because of it, and record it
+in the report as Machine Summary `evidence_freshness` (`fresh` / `stale` /
+`not_evaluated`, schema in `batch/batch-prompt.md`) plus a
+`**GitHub evidence:**` header line when stale. A `--mode match` batch gets the
+same run-wide result: its report has no Machine Summary, so the worker puts the
+value in the final JSON (`evidence_freshness`, see `batch/batch-prompt-match.md`)
+and adds the same header line when stale. Unattended runs ask nothing.
 
 ---
 
@@ -1979,6 +2146,36 @@ Exit status: `0` success, `1` invalid option or write error, `2` missing tracker
 
 ---
 
+## backup.mjs
+
+Copies the User Layer to a backup folder. The file list is `USER_PATHS` in `update-system.mjs` (the updater's own list of what is yours: CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, the web app's `.career-ops-web/` stores and more), plus any paths a fork declares in `config/local-paths.txt`, plus the files under `templates/` that are yours (generated per-application CVs and cover letters, and the template variant `config/profile.yml` selects; the shipped templates are not copied). It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
+
+Never copied: `.env` files, `data/cache/`, lock and temp files (except `plugins.lock`, which is yours), editor swap and autosave files of any file (vim `.name.swp`/`.swo`/`.swn`, emacs `#name#` and `.#name`, and `name~`), `.git/` and `node_modules/` folders inside nested checkouts, symlinks and anything under a symlinked folder, and anything outside the User Layer. `data/Connections.csv` (a LinkedIn export), `data/contacts.tsv` and `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) and their `.bak`/`.orig`/`.old`/`.save` copies such as `contacts.tsv.bak` (other people's contact details), are copied only with `--include-contacts` (their editor swap, autosave and lock files stay excluded even then), which cannot be combined with `--provider` or with a `--dest` inside a provider folder at its default location. A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder.
+
+Claude Code's auto-memory for the checkout is outside the data root, in `<config dir>/projects/<slug>/memory/`: the config dir is `CLAUDE_CONFIG_DIR` or `~/.claude`, and the slug is the checkout path with every non-alphanumeric character replaced by `-`. `--include-claude-memory` copies it to `claude-memory/` at the destination by the same rules as every other file (unchanged files skipped, nothing deleted, `.env` files, editor leftovers and symlinks left out). It works with `--provider` and with a synced `--dest`. Memory files are compared byte for byte before being skipped as unchanged (the size and time check alone is not enough for them). When the folder does not exist the run says so and carries on; a folder that exists but cannot be read is a failure. An empty `--claude-memory-dir` value is a usage error (exit `2`). From a linked git worktree the main checkout's folder is used, because Claude Code shares one memory folder per repository. If Claude Code keeps the memory somewhere else (a session started in another folder, a plugin install, or a Claude Code setting that moves it), name the folder with `--claude-memory-dir <dir>`: it implies the copy, and a folder that does not exist is then a failure (exit `1`). A destination that holds the memory folder, or sits inside it, is refused. If a fork declares its own `claude-memory` path in `config/local-paths.txt`, that path is backed up as usual and the memory copy is reported as failed instead of writing over it. The `--json` result reports the number of memory files as `claudeMemory`; they do not count towards the "nothing to back up" check on the data root.
+
+Nothing is chosen for you: pass `--dest` or `--provider`, or set `CAREER_OPS_BACKUP_DIR`.
+
+```bash
+node backup.mjs --dest ~/Backups/career-ops
+node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; also dropbox | onedrive | icloud
+node backup.mjs --provider google-drive --account work@example.com   # when several accounts are signed in
+node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
+node backup.mjs --dest ~/Backups/career-ops --include-contacts # also copy the four contact files
+node backup.mjs --dest ~/Backups/career-ops --include-claude-memory  # also copy Claude Code's auto-memory into claude-memory/
+node backup.mjs --dest ~/Backups/career-ops --claude-memory-dir ~/notes/claude-memory  # the same, from a memory folder you name
+node backup.mjs --dest ~/Backups/career-ops --dry-run             # print the counts and bytes that would be copied, copy nothing
+node backup.mjs --dest ~/Backups/career-ops --json                # machine-readable result
+```
+
+Where it goes, first match wins: `--dest`, then `CAREER_OPS_BACKUP_DIR`, then the drive folder `--provider` names. With more than one drive found it stops and asks for `--account` or `--dest` instead of guessing. The destination's parent folder must already exist (so an unmounted drive never gets a stray local folder; for `--provider` that is the drive folder itself, and `Backups/career-ops` is created under it). Agent-tool settings (`.claude/`, `opencode.json`, `plugins.local/`) are left out when the destination is in a recognized sync folder, and the run says so, and a destination inside your career-ops files is refused.
+
+A file that cannot be read or copied is listed and the run carries on with the rest. A run that finds no files at all (a mistyped `CAREER_OPS_ROOT`, say) says so and exits `1` instead of reporting success.
+
+Exit status: `0` success, `1` one or more files failed to copy or nothing was found to copy, `2` no usable destination, invalid option or an unsafe data root (an unreadable one is a failed file, exit `1`).
+
+---
+
 ## stats.mjs
 
 Aggregates lifetime pipeline stats into one JSON report. Stats include tracker, scanner, portals, follow-ups and runs. Reads from data/applications.md, data/scan-history.tsv, portals.yml, data/follow-ups.md and data/scan-runs.tsv. If a file doesn't exist yet, the section turns into null.
@@ -2024,6 +2221,19 @@ Runs:       — no data (data/scan-runs.tsv missing; created by the next scan)
 ```
 
 ---
+
+## community-asks.mjs
+
+The one-time community asks. career-ops never phones home, so it asks for support in words, rarely, and at the right moment: a GitHub star after the first saved evaluation report, then the manifesto after five reports and at least seven days after the star. The star ask comes with a small drawing in a fenced block of its own, which the agent copies exactly, and names the user's evaluation count from five reports on. The Hired Wall ask lives in `hired-share.mjs`. Each ask is shown at most once, never two in one run, and never in CI, batch workers (`CAREER_OPS_HEADLESS`, `CAREER_OPS_BATCH_STATE`) or headless Claude Code (`sdk-*` entrypoints).
+
+```bash
+node community-asks.mjs next            # prints the one ask that is due, or nothing; always exits 0
+node community-asks.mjs open star       # opens the page after the user said yes (or: open manifesto)
+node community-asks.mjs status          # the state as JSON
+node community-asks.mjs off             # never ask again; CAREER_OPS_NO_ASKS=1 does the same without writing
+```
+
+`next` claims `data/.community-asks/<ask>` with an exclusive create before it prints, so an ask comes once even with two sessions open, and a data folder it cannot write means no ask at all. The script makes no request of its own: `open` hands one fixed URL to the system's browser opener, and starring or signing is always the user's own click.
 
 ## data/scan-runs.tsv
 

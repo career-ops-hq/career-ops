@@ -1,0 +1,86 @@
+name: 'Employer registry validate'
+
+# Runs on PRs that touch the employer registry (employers/) or its gate.
+# Uses `pull_request` (NOT pull_request_target), read-only permissions, and NO
+# secrets: the validator is static. It parses the registry files, makes no
+# network request and has no dependencies to install.
+on:
+  pull_request:
+    paths:
+      - 'employers/**'
+      - 'seeds/employers-validate.mjs'
+      - 'seeds/employers-inbox.mjs'
+      - 'lib/ats-board-url.mjs'
+
+permissions:
+  contents: read
+
+# Cancel superseded runs when the same PR is pushed again.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate employer registry
+    runs-on: ubuntu-latest
+    # Whether the PR only adds files to employers/inbox/ (true/false), for a
+    # later job to read. Nothing in this workflow acts on it.
+    outputs:
+      inbox_only: ${{ steps.inbox_only.outputs.inbox_only || steps.inbox_only_bootstrap.outputs.inbox_only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The job only reads a public repository, and the PR controls the
+          # data read here, so the checkout should not leave a token behind.
+          persist-credentials: false
+          # The merge commit and its first parent (the base branch tip), so the
+          # inbox-only check below can diff HEAD^1...HEAD.
+          fetch-depth: 2
+
+      # The validator that judges a registry PR must not be one the PR can edit.
+      # Check the BASE branch out next to the PR and run its copy of the
+      # validator against the PR's files: it reads the registry from the
+      # working directory and loads its rules (lib/ats-board-url.mjs,
+      # data-static/aggregator-domains.txt) relative to itself, so the base copy
+      # of every rule comes with it. base/ is also what --base compares against
+      # (no row deleted, provenance unchanged, new rows only with a new
+      # manifest). Keep this step after the PR checkout: checkout cleans the
+      # workspace, and would delete base/.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Validate registry (validator from the base branch)
+        if: hashFiles('base/seeds/employers-validate.mjs') != ''
+        run: node base/seeds/employers-validate.mjs --base base
+
+      # Bootstrap: the base branch has no validator only in the PR that adds it
+      # (or in a PR against a branch older than that). There is no base copy to
+      # trust yet, so the PR's own validator runs; that PR is written and
+      # reviewed by maintainers. Every later PR takes the step above.
+      - name: Validate registry (bootstrap, validator from this PR)
+        if: hashFiles('base/seeds/employers-validate.mjs') == ''
+        run: node seeds/employers-validate.mjs --base base
+
+      # Inbox-only check: does the PR do nothing but add new, validly named
+      # files to employers/inbox/? Reported in the job summary and as the
+      # step's outputs (inbox_only, inbox_files, inbox_logins); it labels and
+      # merges nothing. It runs after the validation, whatever its result, and
+      # never fails the job on a "no". Like the validation, the base branch's
+      # copy decides, and this PR's copy only when the base has none yet.
+      - name: Inbox-only check (from the base branch)
+        id: inbox_only
+        if: ${{ !cancelled() && hashFiles('base/seeds/employers-inbox.mjs') != '' }}
+        run: node base/seeds/employers-validate.mjs --inbox-only --base HEAD^1
+
+      - name: Inbox-only check (bootstrap, from this PR)
+        id: inbox_only_bootstrap
+        if: ${{ !cancelled() && hashFiles('base/seeds/employers-inbox.mjs') == '' }}
+        run: node seeds/employers-validate.mjs --inbox-only --base HEAD^1

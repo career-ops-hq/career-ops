@@ -198,6 +198,43 @@ test('supervisor: present only with a named department; incomplete text is not e
   assert.deepEqual(incomplete.points.find((p) => p.id === 'supervisor').evidence, []);
 });
 
+test('supervisor: a "Reports to:" label line names the reporting line', () => {
+  for (const line of [
+    'Reports to: Head of ML Platform',
+    'Reporting to: Head of ML Platform',
+    'Reports to - Head of ML Platform',
+    'Reports to – Head of ML Platform',
+    '**Reports to:** Director of Engineering',
+    '**Reports to**: Director of Engineering',
+    'Reports to: **Director of Engineering**',
+    '__Reporting to:__ Director of Engineering',
+  ]) {
+    const p = analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor');
+    assert.equal(p.status, 'partial', line);
+    assert.deepEqual(p.evidence, [line]);
+  }
+  assert.equal(status(analyzeRoleClarity('Reports to: Head of ML Platform in the Engineering Department.'), 'supervisor'), 'present');
+  // The label form keeps the article guard, and a bare label is not evidence.
+  for (const line of ['Reports to: the.', 'Reports to - the.', 'Reports to:', 'Reports toward the goal.',
+    'Reports to: N/A', 'Reports to: TBD', 'Reports to - TBC', 'Reports to the TBD.', 'Reporting to: None',
+    '**Reports to:** TBD', 'Reports to: **N/A**', '**Reports to:**', 'Reports to: _the_.', 'Reports to: __the__', 'Reports to: _TBD_']) {
+    assert.deepEqual(analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor').evidence, [], line);
+  }
+});
+
+test('supervisor: a name that starts with a non-ASCII letter names the reporting line', () => {
+    // "Aïcha" starts like the article "a", and 'A\u0301lvaro' is "Álvaro" typed as A plus a combining accent.
+  for (const line of ['Reports to: Élodie Martin', 'Reports to: Øystein Berg', 'Reporting to: Łukasz Nowak',
+    'Reports to: Aïcha Diallo', 'Reports to: A\u0301lvaro Gómez'])  {
+    const p = analyzeRoleClarity(line).points.find((x) => x.id === 'supervisor');
+    assert.equal(p.status, 'partial', line);
+    assert.deepEqual(p.evidence, [line], line);
+  }
+  for (const line of ['Reports to: TBD', 'Reports to: TBD¹']) {
+    assert.equal(status(analyzeRoleClarity(line), 'supervisor'), 'missing', line);
+  }
+});
+
 test('success: a measure and a horizon in unrelated sentences are only partial', () => {
   const unrelated = analyzeRoleClarity('The first 90 days are onboarding. Annual KPIs determine bonuses.');
   assert.equal(status(unrelated, 'success'), 'partial');

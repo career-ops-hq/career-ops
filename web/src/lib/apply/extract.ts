@@ -2,7 +2,7 @@ import type { Page, Frame } from "playwright-core";
 
 export type ApplyField = {
   id: string; // our stable handle, also set as data-co-field on the live element
-  type: "text" | "email" | "tel" | "url" | "number" | "date" | "textarea" | "select" | "checkbox" | "radio" | "file";
+  type: "text" | "email" | "tel" | "url" | "number" | "date" | "textarea" | "select" | "checkbox" | "radio" | "file" | "password";
   label: string;
   required: boolean;
   options?: string[];
@@ -49,6 +49,44 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       );
     }
 
+    // Same skips as the extract loop. A hidden honeypot or an autofill helper
+    // is not a second question, so it must not knock out the wrapper title.
+    function isEligibleControl(node: Element): boolean {
+      const tag = node.tagName.toLowerCase();
+      const type = ((node as HTMLInputElement).type || "").toLowerCase();
+      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(type)) return false;
+      if ((node as HTMLElement).offsetParent === null && type !== "radio" && type !== "checkbox") return false;
+      if (node.closest('[class*="autofill" i]')) return false;
+      return true;
+    }
+
+    // A shared box whose class contains "field" is not one question. Another
+    // control in that box means its first label belongs to someone else.
+    function hasOtherControl(container: Element, el: Element): boolean {
+      const ownName = (el as HTMLInputElement).name;
+      for (const node of Array.from(container.querySelectorAll("input, textarea, select"))) {
+        if (node === el || !isEligibleControl(node)) continue;
+        const type = ((node as HTMLInputElement).type || "").toLowerCase();
+        if (type === "radio" && ownName && (node as HTMLInputElement).name === ownName) continue;
+        const dummy = node.closest('[class*="select__"], .select-shell') && node.getAttribute("role") !== "combobox";
+        if (dummy && el.getAttribute("role") === "combobox") continue;
+        return true;
+      }
+      return false;
+    }
+
+    // A display:none honeypot has no box. display:contents also has no box,
+    // but its text stays on screen, so walk up until an ancestor has one.
+    function isVisibleNode(node: Element): boolean {
+      let current: HTMLElement | null = node as HTMLElement;
+      while (current && current !== document.body) {
+        if (current.offsetParent !== null) return true;
+        if (getComputedStyle(current).display !== "contents") return false;
+        current = current.parentElement;
+      }
+      return current === document.body;
+    }
+
     function labelFor(el: Element): string {
       const aria = el.getAttribute("aria-label");
       if (ok(aria)) return aria!;
@@ -67,16 +105,17 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       // the question title inside the field wrapper (handles Ashby's
       // `ashby-application-form-question-title`, Greenhouse `select__label`, etc.)
       const grp = fieldGroup(el);
-      if (grp) {
-        const lab = grp.querySelector(
+      if (grp && !hasOtherControl(grp, el)) {
+        const lab = Array.from(grp.querySelectorAll(
           'label, legend, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i]',
-        );
+        )).find((node) => isVisibleNode(node));
         if (lab && ok(pure(lab))) return pure(lab);
       }
-      // walk up a few ancestors for a nearby label/heading
       let c: Element | null = el.parentElement;
       for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
-        const lab = c.querySelector('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5');
+        if (hasOtherControl(c, el)) break;
+        const lab = Array.from(c.querySelectorAll('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5'))
+          .find((node) => isVisibleNode(node));
         if (lab && ok(pure(lab))) return pure(lab);
       }
       const ph = (el as HTMLInputElement).placeholder;
@@ -103,11 +142,12 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       }
       const optSet = new Set(options.map((o) => o.toLowerCase()));
       const container = fieldGroup(firstRadio) || firstRadio.parentElement?.parentElement || firstRadio.parentElement;
-      if (container) {
+      if (container && !hasOtherControl(container, firstRadio)) {
         const cands = container.querySelectorAll(
           'label, legend, h1, h2, h3, h4, h5, h6, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i], [class*="question" i]',
         );
         for (const c of Array.from(cands)) {
+          if (!isVisibleNode(c)) continue;
           const t = pure(c);
           if (t && t.length > 2 && t.length < 160 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }
@@ -123,11 +163,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
     for (const el of els) {
       const tag = el.tagName.toLowerCase();
       const itype = ((el as HTMLInputElement).type || "").toLowerCase();
-      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(itype)) continue;
-      if ((el as HTMLElement).offsetParent === null && itype !== "radio" && itype !== "checkbox") continue;
-      // skip ATS "autofill from resume / parse my CV" helper widgets (Ashby) — these
-      // are convenience uploaders, not real application fields.
-      if ((el as Element).closest('[class*="autofill" i]')) continue;
+      if (!isEligibleControl(el)) continue;
 
       // react-select widgets render an extra internal/autosize <input> next to the
       // real role=combobox input. Keep ONLY the combobox; drop the dummy (it's the
@@ -171,7 +207,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         fields.push({ id: fid, type: "select", label: clean(labelFor(el)), required, options, nativeId, nativeName });
         continue;
       }
-      const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file"].includes(itype) ? itype : "text";
+      const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file", "password"].includes(itype) ? itype : "text";
       const ml = (el as HTMLInputElement).maxLength;
       fields.push({
         id: fid,

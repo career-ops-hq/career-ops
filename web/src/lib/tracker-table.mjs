@@ -42,7 +42,7 @@ const WEB_FIELD = {
  */
 export const WEB_FIELD_NAMES = Object.values(WEB_FIELD);
 
-/** @type {Map<string, {mtimeMs: number, size: number, aliases: Record<string, string>}>} */
+/** @type {Map<string, {mtimeNs: bigint, ctimeNs: bigint, size: bigint, aliases: Record<string, string>}>} */
 const aliasCache = new Map();
 
 /** Canonical fields detectColumnMap needs to recognize a header row. */
@@ -54,8 +54,8 @@ const REQUIRED_FIELDS = ["num", "company", "role", "score", "status"];
  * `rootDir` is normally the data root so a complete external checkout keeps
  * using its own matching system files. A data-only root has no alias table;
  * `fallbackRootDir` then points at the checkout that runs the web app. Cache
- * entries remain keyed by the resolved file's mtime+size, and failures are
- * never cached so a recovered primary file is picked up immediately.
+ * entries remain keyed by the resolved file's nanosecond mtime/ctime and size.
+ * Failures are never cached so a recovered primary file is picked up immediately.
  * @param {string} rootDir - primary career-ops root.
  * @param {string} [fallbackRootDir] - running system checkout.
  * @returns {Record<string, string>}
@@ -65,11 +65,11 @@ export function loadHeaderAliases(rootDir, fallbackRootDir) {
   for (const [i, root] of roots.entries()) {
     const file = path.resolve(root, "tracker-aliases.json");
     try {
-      const { mtimeMs, size } = fs.statSync(file);
+      const { mtimeNs, ctimeNs, size } = fs.statSync(file, { bigint: true });
       const cached = aliasCache.get(file);
       /** @type {Record<string, string>} */
       let aliases;
-      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+      if (cached && cached.mtimeNs === mtimeNs && cached.ctimeNs === ctimeNs && cached.size === size) {
         aliases = cached.aliases;
       } else {
         const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -78,7 +78,7 @@ export function loadHeaderAliases(rootDir, fallbackRootDir) {
           continue;
         }
         aliases = parsed;
-        aliasCache.set(file, { mtimeMs, size, aliases });
+        aliasCache.set(file, { mtimeNs, ctimeNs, size, aliases });
       }
       // A table that cannot map the required columns (e.g. `{}`) would push
       // detectColumnMap onto the legacy positions and misread Via-style

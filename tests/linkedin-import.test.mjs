@@ -13,6 +13,8 @@ import {
   LINKEDIN_DOCTOR_LABEL,
   linkedInPluginFix,
 } from '../lib/linkedin-import.mjs';
+import { parseScanHistoryLine } from '../lib/scan-history-columns.mjs';
+import { buildWorkplacePolicy } from '../providers/_country.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -147,6 +149,90 @@ test('a Remote title stays a title, and Remote US or Remote Europe stays a place
   assert.equal(placedOffers[1].company, 'Sundial Pharmacy');
   assert.equal(placedOffers[2].title, 'Counter lead');
   assert.equal(placedOffers[2].company, 'Northwind Market');
+});
+
+const HOME_POLICY = {
+  onsite_locations: ['Austin'],
+  onsite_countries: ['United States'],
+  remote_countries: ['United States'],
+  remote_regions: ['United States'],
+};
+
+test('a home city or a remote country on the alert stays on the row and stays eligible', () => {
+  const policy = buildWorkplacePolicy(HOME_POLICY);
+  const text = [
+    'Subject: Business Analyst roles this week',
+    'Customer Success Lead',
+    'Quillfeather Labs',
+    'Austin, TX',
+    `https://www.linkedin.com/jobs/view/${A}`,
+    'Floor lead',
+    'Northwind Market',
+    'Remote, US',
+    `https://www.linkedin.com/jobs/view/${B}`,
+    'Counter lead',
+    'Northwind Market',
+    'Remote',
+    `https://www.linkedin.com/jobs/view/${C}`,
+  ].join('\n');
+  const offers = linkedInOffers(linkedInJobsFromText(text), text);
+  assert.equal(offers[0].title, 'Customer Success Lead');
+  assert.equal(offers[0].company, 'Quillfeather Labs');
+  assert.equal(offers[0].location, 'Austin, TX');
+  assert.equal(policy(offers[0].location, offers[0].title).eligible, true);
+  assert.equal(offers[1].title, 'Floor lead');
+  assert.equal(offers[1].company, 'Northwind Market');
+  assert.equal(offers[1].location, 'Remote, US');
+  assert.equal(policy(offers[1].location, offers[1].title).eligible, true);
+  assert.equal(offers[2].title, 'Counter lead');
+  assert.equal(offers[2].company, 'Northwind Market');
+  assert.equal(offers[2].location, 'Remote');
+  assert.equal(policy(offers[2].location, offers[2].title).reason, 'remote_eligibility_unconfirmed');
+});
+
+test('a subject that names a city is not stored as the place', () => {
+  const text = [
+    'Subject: Business Analyst in Denver',
+    'Customer Success Lead',
+    'Quillfeather Labs',
+    `https://www.linkedin.com/jobs/view/${A}`,
+  ].join('\n');
+  const [offer] = linkedInOffers(linkedInJobsFromText(text), text);
+  assert.equal(offer.title, 'Customer Success Lead');
+  assert.equal(offer.company, 'Quillfeather Labs');
+  assert.equal(offer.location, '');
+});
+
+test('the CLI keeps the place on the pipeline row and in scan history', () => {
+  const root = sandbox();
+  try {
+    const text = [
+      'Customer Success Lead',
+      'Quillfeather Labs',
+      'Austin, TX',
+      `https://www.linkedin.com/jobs/view/${A}`,
+      'Floor lead',
+      'Northwind Market',
+      'Remote, US',
+      `https://www.linkedin.com/jobs/view/${B}`,
+    ].join('\n');
+    const result = runCli(root, ['--json'], text);
+    assert.equal(result.status, 0, result.stderr);
+    const pipeline = readFileSync(join(root, 'data', 'pipeline.md'), 'utf8');
+    assert.match(pipeline, new RegExp(`https://www.linkedin.com/jobs/view/${A} \\| Quillfeather Labs \\| Customer Success Lead \\| Austin, TX`));
+    assert.match(pipeline, new RegExp(`https://www.linkedin.com/jobs/view/${B} \\| Northwind Market \\| Floor lead \\| Remote, US`));
+    const history = readFileSync(join(root, 'data', 'scan-history.tsv'), 'utf8');
+    const rows = history.split('\n').filter((line) => line.startsWith('http')).map(parseScanHistoryLine);
+    const policy = buildWorkplacePolicy(HOME_POLICY);
+    const austin = rows.find((row) => row.url.endsWith(A));
+    const remote = rows.find((row) => row.url.endsWith(B));
+    assert.equal(austin.location, 'Austin, TX');
+    assert.equal(remote.location, 'Remote, US');
+    assert.equal(policy(austin.location, austin.title).eligible, true);
+    assert.equal(policy(remote.location, remote.title).eligible, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('the CLI writes the title from the line above the link', () => {
@@ -328,6 +414,11 @@ test('doctor output includes the paste path', () => {
   const dir = mkdtempSync(join(tmpdir(), 'doctor-linkedin-'));
   try {
     writeFileSync(join(dir, 'package.json'), '{"name":"fixture","version":"0.0.0"}\n');
+    // cv.md and profile.yml are required for a passing doctor. This check is
+    // about the paste line, so the fixture supplies both and the exit stays 0.
+    mkdirSync(join(dir, 'config'));
+    writeFileSync(join(dir, 'cv.md'), '# Jane Doe\n\n## Experience\n\nAnalyst at Example Co.\n');
+    writeFileSync(join(dir, 'config', 'profile.yml'), 'candidate:\n  full_name: "Jane Doe"\n  email: "jane@example.com"\n');
     const result = spawnSync(process.execPath, ['--import', pathToFileURL(PLAYWRIGHT_STUB).href, DOCTOR, '--target', dir], {
       cwd: dir,
       encoding: 'utf8',

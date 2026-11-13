@@ -42,14 +42,16 @@ if (process.platform === 'win32') {
  * `modelName` below and the `--model` examples accordingly.
  */
 
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
+import { createHash } from 'crypto';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
 import { TokenAccumulator, formatBreakdown } from './utils/token-tracker.mjs';
 import { redactIfEnabled } from './utils/privacy-filter.mjs';
 import {
-  isPostingUrl, normalizedTrackerScore, slugifyCompany, tsvSafe,
+  isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+import { NO_INVENTED_PAY_RULE, normalizeEvaluationText } from './lib/eval-evidence.mjs';
 
 const tracker = new TokenAccumulator();
 tracker.recordZeroToken('scan');
@@ -67,7 +69,10 @@ import { loadYaml } from './lib/yaml-document.mjs';
 // ---------------------------------------------------------------------------
 try {
   const { config } = await import('dotenv');
-  config();
+  // The data root's .env first: doctor.mjs, remember-cli.mjs, scan.mjs and the
+  // plugin engine all read it there. The working directory's .env, the only one
+  // read before, still supplies what the data root's leaves unset.
+  config({ path: [join(getCareerOpsRoot(), '.env'), join(process.cwd(), '.env')] });
 } catch {
   // dotenv is optional — fall back to process.env if not installed
 }
@@ -139,6 +144,32 @@ function resolveModesDirCandidate(customModesDir) {
   return customModesDir;
 }
 
+// Same recognition as resolveEvalModeFile in web/src/lib/career-ops.ts: the
+// evaluation mode is the markdown file whose title states the block range it
+// produces (A-F, A-G, or A-H; the dash may be ASCII or typographic). A
+// filename allow-list goes stale whenever a market ships under a new name
+// (#6398: annuncio, vacature, gonggo, lowongan, offer, tuyen-dung).
+const EVAL_MODE_TITLE_RE = /A[-\u2010-\u2015][F-H]/;
+
+function findEvaluationModeFile(dir) {
+  let names;
+  try {
+    names = readdirSync(join(CODE_ROOT, dir));
+  } catch {
+    return null;
+  }
+  for (const name of names.sort()) {
+    if (!name.endsWith('.md') || name.startsWith('_') || name === 'README.md') continue;
+    try {
+      const first = readFileSync(join(CODE_ROOT, dir, name), 'utf8').split('\n', 1)[0] ?? '';
+      if (EVAL_MODE_TITLE_RE.test(first)) return name;
+    } catch {
+      // Unreadable file — keep looking.
+    }
+  }
+  return null;
+}
+
 if (existsSync(PATHS.profileYml)) {
   try {
     const yamlContent = stripBom(readFileSync(PATHS.profileYml, 'utf-8'));
@@ -154,8 +185,7 @@ if (existsSync(PATHS.profileYml)) {
       // anyone asking for it).
       const primaryRaw = candidates[0];
       const primaryDir = resolveModesDirCandidate(primaryRaw);
-      const candidateFiles = ['oferta.md', 'angebot.md', 'offre.md', 'fursah.md', 'kyujin.md', 'is-ilani.md', 'naukri.md'];
-      const primaryEvalFile = primaryDir && candidateFiles.find((file) => existsSync(join(CODE_ROOT, primaryDir, file)));
+      const primaryEvalFile = primaryDir && findEvaluationModeFile(primaryDir);
       const extras = candidates.slice(1).map(resolveModesDirCandidate).filter(Boolean);
       if (primaryDir && primaryEvalFile) {
         // Primary resolved. Any further declared markets only need to exist —
@@ -323,20 +353,22 @@ function validateEvaluationShape(text) {
     if (!pattern.test(text)) issues.push(`missing Block ${label}`);
   }
 
-  const summary = text.match(/---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/);
+  // Read the way the other evaluators read it (#6332): parseScoreSummary()
+  // drops the bold and bullet marks a model puts on the keys
+  // (`**COMPANY:** Acme`, `- **SCORE**: 4.2/5`). Matched with `^KEY:`, a
+  // bolded summary failed this check, and the evaluation was thrown away.
+  const summary = parseScoreSummary(text);
   if (!summary) {
     issues.push('missing SCORE_SUMMARY block');
   } else {
-    const summaryBlock = summary[1];
-    for (const key of ['COMPANY', 'ROLE', 'ARCHETYPE', 'LEGITIMACY']) {
-      const field = summaryBlock.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, 'mi'));
-      const value = field?.[1]?.trim() ?? '';
-      if (!value || (key !== 'COMPANY' && value.toLowerCase() === 'unknown')) {
-        issues.push(`SCORE_SUMMARY ${key} is required`);
+    for (const key of ['company', 'role', 'archetype', 'legitimacy']) {
+      const value = summary[key].trim();
+      if (!value || (key !== 'company' && value.toLowerCase() === 'unknown')) {
+        issues.push(`SCORE_SUMMARY ${key.toUpperCase()} is required`);
       }
     }
 
-    const score = summaryBlock.match(/^\s*SCORE:\s*([0-9]+(?:\.[0-9]+)?)/mi);
+    const score = summary.score.match(/^([0-9]+(?:\.[0-9]+)?)/);
     const scoreValue = score ? Number(score[1]) : NaN;
     if (!Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > 5) {
       issues.push('SCORE_SUMMARY score must be a number between 0 and 5');
@@ -348,16 +380,6 @@ function validateEvaluationShape(text) {
   }
 }
 
-// Lazy import — only used when saving
-let readdirSync;
-try {
-  ({ readdirSync } = await import('fs'));
-} catch { /* already imported above via named exports */ }
-// Use named import fallback
-if (!readdirSync) {
-  readdirSync = (await import('fs')).readdirSync;
-}
-
 // ---------------------------------------------------------------------------
 // Load context files
 // ---------------------------------------------------------------------------
@@ -367,6 +389,18 @@ const sharedLabel = join(modesDir, '_shared.md').replace(/\\/g, '/');
 const ofertaLabel = join(modesDir, evalFilename).replace(/\\/g, '/');
 let sharedContext    = readFile(PATHS.shared,      sharedLabel);
 const ofertaLogic    = readFile(PATHS.oferta,      ofertaLabel);
+// Market evaluation files are a layer over the canonical procedure: they cite
+// its gates, provenance rule and scoring bands, then add local vocabulary.
+// The web focused-evaluation path keeps those canonical rules and appends
+// market text as context that does not replace them (evaluation-options.mjs,
+// "MARKET CONTEXT (canonical scoring rules still apply)"). Gemini inlines
+// both, in that order. modes/oferta.md itself is not included twice.
+const CANONICAL_OFERTA_REL = 'modes/oferta.md';
+const MARKET_CONTEXT_MARK = '\n\n--- MARKET CONTEXT (canonical scoring rules still apply) ---\n';
+const resolvedOfertaRel = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
+const ofertaPrompt = resolvedOfertaRel === CANONICAL_OFERTA_REL
+  ? ofertaLogic
+  : `${readFile(join(CODE_ROOT, CANONICAL_OFERTA_REL), CANONICAL_OFERTA_REL)}${MARKET_CONTEXT_MARK}${ofertaLogic}`;
 
 // Multi-market (#3793): fold in every OTHER declared market's _shared.md so the
 // agent has all declared candidates' vocabulary/legal-concept context, not just
@@ -393,12 +427,16 @@ const languageInstruction = outputLanguageInstruction(parseOutputLanguage(profil
 // ---------------------------------------------------------------------------
 const { contextBody, budgetReport } = buildBudgetedPrompt({
   sharedContent: sharedContext,
-  ofertaContent: ofertaLogic,
+  ofertaContent: ofertaPrompt,
   cvContent,
   profileYml,
   profileContent,
   customContent,
   jdText,
+  // The user turn below carries the JD. Left in the context too, it went to
+  // Gemini twice, inside systemInstruction and again as the user turn; it is
+  // still counted toward the budget once (#3950, as in openai-eval.mjs).
+  jdInContext: false,
   noCompress,
   maxTokens: 1_048_576, // gemini-2.5-flash context window
 });
@@ -406,6 +444,18 @@ const { contextBody, budgetReport } = buildBudgetedPrompt({
 if (contextOnly) {
   const resolvedEvalMode = relative(CODE_ROOT, PATHS.oferta).replaceAll('\\', '/');
   console.log(`🧭  Evaluation mode: ${resolvedEvalMode}`);
+  // Fingerprints of the strings actually concatenated into the prompt, so a
+  // test can check order without printing the mode files (they name _custom.md,
+  // and an absent _custom.md must stay silent on stdout).
+  const evaluationFingerprint = (text) => createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (resolvedEvalMode === CANONICAL_OFERTA_REL) {
+    console.log(`🧭  Evaluation stack: ${CANONICAL_OFERTA_REL} ${evaluationFingerprint(ofertaPrompt)}`);
+  } else {
+    const splitAt = ofertaPrompt.indexOf(MARKET_CONTEXT_MARK);
+    const prefix = splitAt === -1 ? '' : ofertaPrompt.slice(0, splitAt);
+    const suffix = splitAt === -1 ? '' : ofertaPrompt.slice(splitAt + MARKET_CONTEXT_MARK.length);
+    console.log(`🧭  Evaluation stack: ${CANONICAL_OFERTA_REL} ${evaluationFingerprint(prefix)} -> ${resolvedEvalMode} ${evaluationFingerprint(suffix)}`);
+  }
 }
 
 // Log token budget info
@@ -432,7 +482,7 @@ ${contextBody}
 IMPORTANT OPERATING RULES FOR THIS CLI SESSION
 ═══════════════════════════════════════════════════════
 1. You do NOT have access to WebSearch, Playwright, or file writing tools.
-   - For Block D (Comp research): provide salary estimates based on your training data, clearly noted as estimates.
+   - ${NO_INVENTED_PAY_RULE}
    - For Block G (Legitimacy): analyze the JD text only; skip URL/page freshness checks.
    - Post-evaluation file saving is handled by the script, not by you.
 2. ${languageInstruction}
@@ -506,6 +556,8 @@ try {
   process.exit(1);
 }
 
+evaluationText = normalizeEvaluationText(evaluationText, jdText);
+
 try {
   validateEvaluationShape(evaluationText);
 } catch (err) {
@@ -525,35 +577,13 @@ console.log(evaluationText);
 // ---------------------------------------------------------------------------
 // Parse score summary
 // ---------------------------------------------------------------------------
-const summaryMatch = evaluationText.match(
-  /---SCORE_SUMMARY---\s*([\s\S]*?)---END_SUMMARY---/
-);
-
-let company    = 'unknown';
-let role       = 'unknown';
-let score      = '?';
-let archetype  = 'unknown';
-let legitimacy = 'unknown';
-
-if (summaryMatch) {
-  const block = summaryMatch[1];
-  const extract = (key) => {
-    const prefix = `${key}:`;
-    const lines = block.split('\n');
-    for (const line of lines) {
-      const trimmed = line.trimStart();
-      if (trimmed.startsWith(prefix)) {
-        return trimmed.slice(prefix.length).trim();
-      }
-    }
-    return 'unknown';
-  };
-  company    = extract('COMPANY');
-  role       = extract('ROLE');
-  score      = extract('SCORE');
-  archetype  = extract('ARCHETYPE');
-  legitimacy = extract('LEGITIMACY');
-}
+// The same reading the validator above passed (parseScoreSummary, #6332).
+const summary    = parseScoreSummary(evaluationText);
+const company    = summary?.company    || 'unknown';
+const role       = summary?.role       || 'unknown';
+const score      = summary?.score      || '?';
+const archetype  = summary?.archetype  || 'unknown';
+const legitimacy = summary?.legitimacy || 'unknown';
 
 // ---------------------------------------------------------------------------
 // Save report

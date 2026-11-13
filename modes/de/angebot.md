@@ -234,7 +234,7 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 ## Score Evidence
 (fünf Dimensionen, Evidenzstatus, offene Fragen, Evidence confidence, Prioritäten)
 
-## H) Draft-Antworten für die Bewerbung
+## H) Draft-Antworten für die Bewerbung (draft)
 (nur bei Score >= 4.5 — Entwürfe für die Antwortfelder im Bewerbungsformular)
 
 ---
@@ -312,7 +312,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Tracker-Format:**
 
 ```markdown
-| # | Datum | Firma | Rolle | Score | Status | PDF | Report |
+| # | Datum | Firma | Rolle | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Gehaltsbeobachtungen (nur gewünschte Zahl)

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Check, FileText, Loader2, RotateCcw, Undo2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { BackLink } from "@/components/back-link";
+import { CvPdfFileActions } from "@/components/cv-pdf-file-actions";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
 import { applyRecordedEdit, emptyEdits, isStudioUndoKey, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
@@ -247,6 +248,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   }, [undo]);
 
   const changed = doc.sections.flatMap((s) => s.items.flatMap((i) => i.bullets)).filter((b) => b.change !== "same").length;
+  const pdfHref = `/api/cv-pdf?n=${encodeURIComponent(data.reportNum)}`;
 
   return (
     <>
@@ -285,9 +287,10 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
           {save.indexed ? (
             <>
               Saved. Apply now uploads this version.{" "}
-              <a href={`/api/cv-pdf?n=${encodeURIComponent(data.reportNum)}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline">
+              <a href={pdfHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium underline">
                 <FileText className="size-3.5" /> Open {save.pdf}
-              </a>
+              </a>{" "}
+              <CvPdfFileActions viewHref={pdfHref} className="inline-flex items-center gap-1 font-medium underline" />
             </>
           ) : (
             <>Saved {save.pdf}, but data/pdf-index.tsv was not updated, so Apply still uploads the earlier PDF.</>

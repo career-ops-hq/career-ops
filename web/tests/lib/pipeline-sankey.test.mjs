@@ -217,9 +217,12 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sankey-tracker-"));
   const priorRoot = process.env.CAREER_OPS_ROOT;
   const priorTracker = process.env.CAREER_OPS_TRACKER;
+  const priorCodeRoot = process.env.CAREER_OPS_CODE_ROOT;
+  const codeRoot = path.resolve(import.meta.dirname, "../../..");
   const ledger = (num) => `${num}\t2026-08-26\tOffer\tRejected\tset-status\t\n`;
   try {
     process.env.CAREER_OPS_ROOT = root;
+    process.env.CAREER_OPS_CODE_ROOT = codeRoot;
     delete process.env.CAREER_OPS_TRACKER;
     for (const [dir, num] of [["", 1], ["data", 2], ["custom", 3]]) {
       fs.mkdirSync(path.join(root, dir), { recursive: true });
@@ -236,7 +239,7 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
     const custom = path.join(root, "custom/applications.md");
     process.env.CAREER_OPS_TRACKER = custom;
     check(3);
-    process.env.CAREER_OPS_TRACKER = path.relative(process.cwd(), custom);
+    process.env.CAREER_OPS_TRACKER = path.relative(codeRoot, custom);
     check(3);
     // A FILE symlink needs a privilege a non-elevated Windows shell lacks, and
     // a junction only links directories, so this one leg has no stand-in there.
@@ -258,6 +261,8 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
     else process.env.CAREER_OPS_ROOT = priorRoot;
     if (priorTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
     else process.env.CAREER_OPS_TRACKER = priorTracker;
+    if (priorCodeRoot === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = priorCodeRoot;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

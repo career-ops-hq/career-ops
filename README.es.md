@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">700+ contribuidores</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">800+ contribuidores</a></p>
 
 <p align="center">
 <strong>Meses mandando CVs al&nbsp;silencio.</strong><br>
@@ -66,7 +66,7 @@ Adapta tu CV y redacta tus&nbsp;respuestas. <strong>Tú&nbsp;pulsas&nbsp;Enviar.
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">Los que vinieron después de mí dejaron escrito cómo consiguieron el trabajo.</p>
 
@@ -133,7 +133,7 @@ La contratación no va a arreglarse sola. La gente que la sufre sí puede, y ya 
 
 [Aquí es donde se escribe el arreglo](CONTRIBUTING.md). Una sala, no un club. **Construyámoslo juntos.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: recuento en vivo de miembros del servidor de career-ops"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: recuento en vivo de miembros del servidor de career-ops"></a></p>
 
 ## Patrocinadores
 
@@ -280,7 +280,7 @@ Consulta [docs/SETUP.md](docs/SETUP.md) para la guía de instalación completa, 
 
 ## Uso
 
-Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto.
+Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto o compartas una captura de pantalla.
 
 ### Cómo pedir un modo
 
@@ -510,7 +510,7 @@ El dashboard TUI en Go, los scripts de Node.js y los modos del agente de IA resp
 - **Datos**: tablas Markdown + configuración YAML + ficheros TSV de lote
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -591,7 +591,7 @@ Consulta [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) para todos los detalles. Est
 ## Contribuidores
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Todas las personas que han aportado código, documentación, traducciones o tests están en
@@ -606,6 +606,8 @@ El código se distribuye bajo licencia [MIT](LICENSE). El nombre y la marca
 "career-ops" se rigen por la [política de marca](TRADEMARK.md), permisiva
 para el uso comunitario y reservada para nombrar productos comerciales y
 para el respaldo de los mismos.
+
+El código es MIT; los datos de [`employers/`](employers/) son [CC BY 4.0](employers/LICENSE).
 
 ## Historial de estrellas
 

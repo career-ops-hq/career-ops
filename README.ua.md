@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Створено <a href="https://github.com/santifer"><strong>@santifer</strong></a> за участі&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ua.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ua.md#builders">700+ контриб'юторів</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Створено <a href="https://github.com/santifer"><strong>@santifer</strong></a> за участі&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ua.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ua.md#builders">800+ контриб'юторів</a></p>
 
 <p align="center">
 <strong>Місяці надсилання резюме в&nbsp;тишу.</strong><br>
@@ -64,7 +64,7 @@
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">Люди, які прийшли після мене, записали, як їх найняли.</p>
 
@@ -131,7 +131,7 @@ npx @santifer/career-ops init
 
 [Саме тут пишеться виправлення](CONTRIBUTING.md). Кімната, а не клуб. **Будуймо разом.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: кількість учасників сервера career-ops наживо"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: кількість учасників сервера career-ops наживо"></a></p>
 
 ## Спонсори
 
@@ -278,7 +278,7 @@ npm i -g @santifer/career-ops
 
 ## Використання
 
-Вставте URL або опис вакансії у ваш ШІ-CLI. career-ops перевіряє, що вакансія за посиланням ще відкрита (у вставленого тексту немає посилання для перевірки), оцінює її за вашим резюме, пише звіт, адаптує ваше резюме (за замовчуванням у PDF) і додає рядок до трекера. Цього вистачає на більшість днів. Усе інше — режими, які ви викликаєте за назвою. Якщо вакансію не вдається прочитати, пайплайн зупиняється і просить вставити текст.
+Вставте URL або опис вакансії у ваш ШІ-CLI. career-ops перевіряє, що вакансія за посиланням ще відкрита (у вставленого тексту немає посилання для перевірки), оцінює її за вашим резюме, пише звіт, адаптує ваше резюме (за замовчуванням у PDF) і додає рядок до трекера. Цього вистачає на більшість днів. Усе інше — режими, які ви викликаєте за назвою. Якщо вакансію не вдається прочитати, пайплайн зупиняється і просить вставити текст або поділитися скриншотом.
 
 ### Як викликати режим
 
@@ -508,7 +508,7 @@ career-ops/
 - **Дані**: таблиці Markdown + конфігурація YAML + пакетні файли TSV
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -589,7 +589,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 ## Контриб'ютори
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Усі, хто зробив внесок кодом, документацією, перекладами чи тестами, перелічені в
@@ -604,6 +604,8 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 "career-ops" регулюються [Політикою торгової марки](TRADEMARK.md): дозвільною
 для використання спільнотою, зарезервованою для назв комерційних продуктів
 і схвалень.
+
+Код ліцензовано за MIT; дані в [`employers/`](employers/) ліцензовано за [CC BY 4.0](employers/LICENSE).
 
 ## Історія зірок
 

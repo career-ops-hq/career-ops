@@ -104,3 +104,32 @@ test('page_format on a tex payload is recognized, not reported as an unread key'
   assert.equal(run.status, 0, run.stderr);
   assert.doesNotMatch(run.stderr, /page_format/);
 });
+
+// Follow-up to #6345: the CJK template still hardcoded letterpaper, so a
+// candidate who picked it kept a Letter sheet whatever page_format said.
+test('the CJK template honors page_format too', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cv-paper-cjk-'));
+  const input = join(dir, 'p.json');
+  const out = join(dir, 'out.tex');
+  writeFileSync(input, JSON.stringify({ ...BASE, page_format: 'a4' }));
+  execFileSync(process.execPath, [join(ROOT, 'build-cv-latex.mjs'), input, out, '--template=cjk'], {
+    cwd: ROOT, encoding: 'utf-8',
+    // An empty root too: with the user's real cv.md the fact gate would run
+    // against unrelated data and could fail this synthetic payload.
+    env: { ...process.env, CAREER_OPS_PROFILE: join(dir, 'absent.yml'), CAREER_OPS_ROOT: dir },
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const tex = readFileSync(out, 'utf-8');
+  assert.match(tex, /xeCJK/, 'the CJK template was the one rendered');
+  assert.equal(sheetOf(tex), 'a4paper');
+});
+
+// Follow-up to #6345: --test substituted every placeholder but PAPER, so the
+// self-test stopped on "unresolved placeholders: {{PAPER}}".
+test('build-cv-latex --test resolves the PAPER placeholder', () => {
+  const run = spawnSync(process.execPath, [join(ROOT, 'build-cv-latex.mjs'), '--test'], {
+    cwd: ROOT, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024,
+  });
+  assert.doesNotMatch(run.stderr, /PAPER/, run.stderr);
+  assert.equal(run.status, 0, run.stderr);
+});

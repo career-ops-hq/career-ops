@@ -162,7 +162,7 @@ check('injection text in the invite cannot change the draft structure or add rec
 
 check('analyzeInvite keeps every existing key in order and appends clarificationDraft last', () => {
   const r = analyzeInvite(INVITE, [row()], { readReport: noReport });
-  assert.deepEqual(Object.keys(r), ['signals', 'classification', 'matchedPhrases', 'phraseStrength', 'candidates', 'constraints', 'clarificationDraft']);
+  assert.deepEqual(Object.keys(r), ['signals', 'classification', 'matchedPhrases', 'phraseStrength', 'candidates', 'constraints', 'clarificationDraft', 'inviteEvidence']);
   assert.deepEqual(Object.keys(r.clarificationDraft), ['subject', 'body', 'skipped', 'skipReason']);
 });
 

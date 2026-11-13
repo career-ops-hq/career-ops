@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 建立，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders">700+ 位貢獻者</a>參與</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 建立，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders">800+ 位貢獻者</a>參與</p>
 
 <p align="center">
 <strong>幾個月投出去的履歷，全都石&#8288;沉&#8288;大&#8288;海。</strong><br>
@@ -66,7 +66,7 @@
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">在我之後來的人，寫下了他們是怎麼拿到 offer 的。</p>
 
@@ -133,7 +133,7 @@ npx @santifer/career-ops init
 
 [修復就是在這裡寫出來的](CONTRIBUTING.md)。是房間，不是俱樂部。**一起來建。**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord：career-ops 伺服器的即時成員數"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord：career-ops 伺服器的即時成員數"></a></p>
 
 ## 贊助商
 
@@ -280,7 +280,7 @@ npm i -g @santifer/career-ops
 
 ## 使用方式
 
-把職缺連結或職缺描述貼到你的 AI CLI 中。career-ops 會檢查附有連結的職缺是否仍在徵才（貼上的文字沒有可檢查的連結），對照你的履歷評分，撰寫報告，客製化你的履歷（預設為 PDF），並在你的追蹤表中新增一列。大多數日子這樣就夠了。其餘一切都是依名稱呼叫的模式。如果無法讀取某則職缺，流程會停下並請你貼上文字。
+把職缺連結或職缺描述貼到你的 AI CLI 中。career-ops 會檢查附有連結的職缺是否仍在徵才（貼上的文字沒有可檢查的連結），對照你的履歷評分，撰寫報告，客製化你的履歷（預設為 PDF），並在你的追蹤表中新增一列。大多數日子這樣就夠了。其餘一切都是依名稱呼叫的模式。如果無法讀取某則職缺，流程會停下並請你貼上文字或分享螢幕截圖。
 
 ### 如何呼叫模式
 
@@ -510,7 +510,7 @@ Go 版儀表板 TUI、Node.js 腳本和 AI 代理模式都會自動遵循這個�
 - **資料**：Markdown 表格 + YAML 設定 + TSV 批次檔案
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -591,7 +591,7 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 ## 貢獻者
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 每一位貢獻過程式碼、文件、翻譯或測試的人都列在
@@ -605,6 +605,8 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 程式碼以 [MIT](LICENSE) 授權發布。「career-ops」的名稱和
 品牌受[商標政策](TRADEMARK.md)約束：對社群使用寬鬆，
 對商業產品命名和背書保留權利。
+
+程式碼採用 MIT 授權；[`employers/`](employers/) 中的資料採用 [CC BY 4.0](employers/LICENSE) 授權。
 
 ## Star 歷史
 

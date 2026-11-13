@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 创建，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders">700+ 位贡献者</a>参与</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 创建，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders">800+ 位贡献者</a>参与</p>
 
 <p align="center">
 <strong>几个月投出的简历，全都石&#8288;沉&#8288;大&#8288;海。</strong><br>
@@ -66,7 +66,7 @@
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">在我之后来的人，写下了他们是怎么拿到 offer 的。</p>
 
@@ -133,7 +133,7 @@ npx @santifer/career-ops init
 
 [修复就是在这里写出来的](CONTRIBUTING.md)。是房间，不是俱乐部。**一起来建。**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord：career-ops 服务器的实时成员数"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord：career-ops 服务器的实时成员数"></a></p>
 
 ## 赞助商
 
@@ -280,7 +280,7 @@ npm i -g @santifer/career-ops
 
 ## 用法
 
-把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。如果无法读取某个职位，流水线会停下并请你粘贴文本。
+把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。如果无法读取某个职位，流水线会停下并请你粘贴文本或分享截图。
 
 ### 如何调用模式
 
@@ -510,7 +510,7 @@ Go 版仪表板 TUI、Node.js 脚本和 AI 代理模式都会自动遵循这一�
 - **数据**：Markdown 表格 + YAML 配置 + TSV 批处理文件
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -591,7 +591,7 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 ## 贡献者
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 每一位贡献过代码、文档、翻译或测试的人都列在
@@ -605,6 +605,8 @@ Wikidata：[Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org
 代码以 [MIT](LICENSE) 许可证发布。"career-ops" 的名称和
 品牌受[商标政策](TRADEMARK.md)约束：对社区使用宽松，
 对商业产品命名和背书保留权利。
+
+代码采用 MIT 许可证；[`employers/`](employers/) 中的数据采用 [CC BY 4.0](employers/LICENSE) 许可。
 
 ## Star 历史
 

@@ -363,6 +363,120 @@ regulates a topic at all — "is that at or above the statutory minimum" and
 questions precisely because only a lawyer (or the current government
 source) can answer them.
 
+### Contract-stage jurisdiction passes (#3641)
+
+Three jurisdiction signals already exist at JD time (Block G in
+`modes/oferta.md`): agency licensing (Signal 10), employment classification
+(Signal 6) and benefits/employment terminology from the wrong country
+(Signal 8). A contract is where the vocabularies of those signals first
+appear side by side, so this subsection runs the same three checks once more
+on the contract's own text. It adds no table, no tag and no data: each pass
+reuses the existing signal definition and its existing table, unchanged.
+
+**Common rules (apply to all three passes):**
+
+- **When it runs:** inside the Step 2 walk, after the Step 1 jurisdiction is
+  fixed. A work location named in the contract wins over the profile, as in
+  Step 1.
+- **Output shape:** a finding is an ordinary clause-walk observation: the
+  contract's own words quoted verbatim, the clause location, the pattern's
+  name and its source (the signal and table it comes from). It carries only
+  the existing tags: `[ask your lawyer]`, `[differs from what you were
+  told]` or `[standard]`. No new tag, no new section that reads like a
+  verdict, no severity, no ordering.
+- **Existing tables only:** `templates/agency-licensing.yml` for the agency
+  pass, the Signal 6 term table for the classification pass, the Signal 8
+  term table for the terminology pass. A jurisdiction with no row in the
+  table a pass needs means that pass is skipped silently ("no row" means "no
+  verified data", never "no regime").
+- **No research:** nothing is fetched or searched. A resource link from a
+  table row is printed for the candidate to click, as Signal 10 does at JD
+  time.
+- **Wording:** never say "this is misclassification", "this licence is
+  missing", or "this contract is for the wrong country" (or any equivalent
+  verdict). Every finding ends in a question for the lawyer list.
+- **Silence:** an absent marker produces no output. The classification and
+  terminology passes are tripped only by text actually in the contract. The
+  agency pass may also be tripped by the candidate's own statement or the
+  tracker `via=` field (see Pass 1), since an agency can sit behind a
+  contract that never names one; nothing is ever inferred beyond that.
+
+**Pass 1 — Agency licensing (Signal 10, `templates/agency-licensing.yml`).**
+Trips only when **both** hold: (a) the offer letter or contract is issued by,
+or signed through, an intermediary rather than the entity whose work the
+candidate would do (wording such as "on behalf of our client", "assignment",
+"placement", "client site", or a staffing or recruiting brand named as the
+employer with an end client named separately; or the candidate states, or the
+tracker `via=` field shows, that the offer came through an agency), and (b)
+the Step 1 jurisdiction has a row in the table. The row is the gate and the
+source of the resource link; the finding states no regime facts, because the
+hard guard names `templates/restrictive-covenants.yml` as the sole source of
+statutory facts. The finding states the entity named as employer, the end
+client if one is named, and the row's resource link, and says plainly that
+licence status cannot be read from the contract. It never asserts that any
+agency is unlicensed. The intermediary is identified separately from the named
+employer: it is the agency that issued or signed the offer, or, when the
+contract does not make that clear, the candidate is asked to name it. Lawyer-list
+entries: "Is {named entity} the employer of record, and who is liable for
+wages, deductions and termination notice, the agency or the client?" and
+"Which agency-licensing rules apply to {the intermediary agency} in
+{jurisdiction}?" The second question adds "and is it listed on the official
+registry?" only when the jurisdiction row describes an official agency registry
+lookup; where the row's link is guidance or rules rather than a registry, the
+licensing-rules question stands alone and no registry is asserted. Not
+tripped: a direct employer's letter, even if a recruiter introduced the
+candidate.
+
+**Pass 2 — Employment classification (Signal 6 term table).** Two cases:
+
+- **Case A (same logic as the JD):** explicit contractor-status wording from
+  the Signal 6 table or its structural check appears in the contract
+  ("invoice for services" or an instruction for the candidate to invoice,
+  "independent contractor", "consultant", "T4A", "1099", "labour contract")
+  **and** at least one corroborating omission from the Signal 6 set (no
+  benefits, no vacation or PTO, no defined end date, no standard
+  employment-standards phrasing, no mention of statutory deductions or
+  withholding). A bare "invoice" in an expense-reimbursement or billing clause
+  is not contractor-status wording.
+- **Case B (new at the contract stage):** the same document contains both
+  contractor-style wording from the Signal 6 table and employee-style wording
+  (a reporting line, an ongoing role, set hours, "employee", "salary"). The
+  contradiction inside one document is the signal; no omission is required.
+  Case B is a change of **trigger**, not only of input: at JD time Signal 6
+  needs contractor wording plus an omission, and the contract stage is where
+  both vocabularies can finally be seen together.
+
+For Case A without Case B, the finding quotes the contractor wording with its
+clause location and identifies the corroborating omission. For Case B, the
+finding quotes both phrase sets side by side with their clause locations and
+adds one neutral line: the document uses terms associated with both statuses.
+Lawyer-list entry: "Does this document create an employment or a
+services relationship under {jurisdiction} law, and what follows for tax
+withholding, benefits and termination?" When `notes.md` records that the
+candidate was told the role is employment and the contract text points the
+other way, the finding also carries `[differs from what you were told]`.
+Not tripped (near-misses, same rule as Signal 6): "contract position" or
+"fixed term" on its own, and a fixed-term employee contract that uses
+employee wording throughout.
+
+**Pass 3 — Benefits/employment terminology from the wrong country (Signal 8
+term table).** Trips when the contract's work location is in jurisdiction A
+and the contract uses a strong marker exclusive to jurisdiction B (for
+example "401(k)" or "W-2 employment" in a Canadian contract, "RRSP" or "T4"
+in a US one), or a corroborating-only marker that co-occurs with a strong
+marker from jurisdiction B. Bare "PTO" and bare "ESA" never trip it, exactly
+as at JD time. The finding quotes the term and where it appears, notes that
+this is often a template carried over from another country's contract, and
+states that it does not say which country's terms govern. Lawyer-list entry:
+"Which country's employment and benefits terms govern this contract?" If the
+evaluation report carried the JD-time version of this flag, the entry also
+says whether the contract repeats or corrects it (the working-terms re-check
+in the walk already asks for that).
+
+**Boundary:** this subsection adds no category-regulation flags table and
+states no live figure, so the #2280 boundary above is untouched. The two
+pre-hire signals and any new legal-fact table stay out of scope.
+
 ## Step 3 — Consistency check
 
 Compare contract terms against:
@@ -442,10 +556,21 @@ taking the list to a lawyer before signing.
 
 ## Step 7 — Tracker
 
-Update the existing row (never add a new one): status → `Offer` if not
-already; Notes column links the prep file relative to the tracker
-(`offers/{company-slug}/prep-{date}.md`). Canonical states per
-`templates/states.yml`.
+Record the prep on the existing tracker row with the canonical CLI. Never add
+a row, and never edit `data/applications.md` by hand:
+
+```bash
+node set-status.mjs --report <report#> Offer --note "Offer prep: [prep-{YYYY-MM-DD}](offers/{company-slug}/prep-{YYYY-MM-DD}.md)"
+```
+
+If the row has no report, select it by company:
+`node set-status.mjs "<company>" Offer --role "..." --note "..."`. If the
+offer arrived on an earlier day, add `--on YYYY-MM-DD`. If the row is already
+`Offer`, run the same command: the status stays as it is and only the note is
+added. Running it twice is safe, because the same note is never added twice.
+The link is relative to the tracker, so from `data/applications.md` it
+resolves to `data/offers/...`. If there is no tracker row, skip this step
+(see Error handling).
 
 ## Step 8 — Reply draft (optional, on request)
 

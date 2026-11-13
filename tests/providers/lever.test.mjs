@@ -262,17 +262,34 @@ try {
     pass('lever.fetch() ignores a non-array allLocations and preserves the primary location');
   else fail(`lever.fetch() row 6 location = ${JSON.stringify(fetched[6]?.location)}`);
 
-  // Non-array response bodies → [], no crash.
-  const emptyCases = [null, {}, { postings: [] }, 'nope'];
-  let emptyOk = true;
-  for (const body of emptyCases) {
-    const out = await lever.fetch(
-      { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
-      { fetchJson: async () => body },
-    );
-    if (!Array.isArray(out) || out.length !== 0) { emptyOk = false; fail(`lever.fetch() body=${JSON.stringify(body)} → ${JSON.stringify(out)}`); break; }
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): a bare
+  // [] is an empty board. Any other body throws on the single-response path,
+  // naming the keys (or the type) it got, as the paged path already does.
+  const leverEntry = { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' };
+  const leverEmpty = await lever.fetch(leverEntry, { fetchJson: async () => [] });
+  if (Array.isArray(leverEmpty) && leverEmpty.length === 0) pass('lever.fetch() returns [] for an empty postings array');
+  else fail(`lever.fetch() [] → ${JSON.stringify(leverEmpty)}`);
+
+  const leverBroken = [
+    [{}, '[]'],
+    [{ error: 'rate limited' }, '[error]'],
+    [{ postings: [] }, '[postings]'],
+    ['oops', '[string]'],
+    [null, '[null]'],
+  ];
+  let leverBrokenOk = true;
+  for (const [body, got] of leverBroken) {
+    let out;
+    let err = null;
+    try { out = await lever.fetch(leverEntry, { fetchJson: async () => body }); } catch (e) { err = e; }
+    const msg = String(/** @type {any} */ (err)?.message || '');
+    if (!err || !msg.startsWith('lever: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+      leverBrokenOk = false;
+      fail(`lever.fetch() body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+      break;
+    }
   }
-  if (emptyOk) pass('lever.fetch() returns [] for non-array response bodies (null / {} / string)');
+  if (leverBrokenOk) pass('lever.fetch() throws, naming what it got, for a body that is not an array of postings');
 
   // fetch() — a pinned api: is used verbatim, bypassing careers_url parsing entirely.
   let pinnedUrl = null;
@@ -346,6 +363,108 @@ try {
     pass('lever.fetch() appends Remote when workplaceType is remote and the location does not already say so');
   } else {
     fail(`lever.fetch() workplaceType locations = ${JSON.stringify(workplaceLocs)}`);
+  }
+
+  // workplaceType (#6909): dedicated field mapped to 'remote' | 'hybrid' | 'onsite'.
+  // Case/whitespace trimmed and folded, 'on-site' mapped to 'onsite'. Blank/unspecified/unknown omitted.
+  const leverWtJobs = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    {
+      fetchJson: async () => [
+        { text: 'Remote', hostedUrl: 'https://jobs.lever.co/acme/w1', workplaceType: 'remote' },
+        { text: 'Remote caps', hostedUrl: 'https://jobs.lever.co/acme/w2', workplaceType: '  Remote  ' },
+        { text: 'Hybrid', hostedUrl: 'https://jobs.lever.co/acme/w3', workplaceType: 'hybrid' },
+        { text: 'Onsite', hostedUrl: 'https://jobs.lever.co/acme/w4', workplaceType: 'onsite' },
+        { text: 'On-site hyphen', hostedUrl: 'https://jobs.lever.co/acme/w5', workplaceType: 'on-site' },
+        { text: 'Blank', hostedUrl: 'https://jobs.lever.co/acme/w6', workplaceType: '   ' },
+        { text: 'Unspecified', hostedUrl: 'https://jobs.lever.co/acme/w7', workplaceType: 'unspecified' },
+        { text: 'Unknown', hostedUrl: 'https://jobs.lever.co/acme/w8', workplaceType: 'flexible' },
+        { text: 'None', hostedUrl: 'https://jobs.lever.co/acme/w9' },
+      ],
+    },
+  );
+  if (
+    leverWtJobs[0]?.workplaceType === 'remote'
+    && leverWtJobs[1]?.workplaceType === 'remote'
+    && leverWtJobs[2]?.workplaceType === 'hybrid'
+    && leverWtJobs[3]?.workplaceType === 'onsite'
+    && leverWtJobs[4]?.workplaceType === 'onsite'
+    && !('workplaceType' in leverWtJobs[5])
+    && !('workplaceType' in leverWtJobs[6])
+    && !('workplaceType' in leverWtJobs[7])
+    && !('workplaceType' in leverWtJobs[8])
+  ) {
+    pass('lever.fetch() maps workplaceType (remote/hybrid/onsite), trims/lowercases, normalizes on-site, and omits unknown/blank');
+  } else {
+    fail(`lever.fetch() workplaceType = ${JSON.stringify(leverWtJobs.map(j => [j.title, j.workplaceType]))}`);
+  }
+
+  // salaryRange (#6907) — Lever's public postings API documents an optional
+  // salaryRange ({ currency, interval, min, max }) on each posting. It maps
+  // to Job.salary annualized, the way parseCompensation() in ashby.mjs does:
+  // only a real number counts, an unrecognised interval leaves salary off
+  // rather than guessing, and no extra request is made.
+  const salaryRows = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    { fetchJson: async () => [
+      { text: 'Yearly', hostedUrl: 'https://jobs.lever.co/acme/y1', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: 80000, max: 165000 } },
+      { text: 'Hourly', hostedUrl: 'https://jobs.lever.co/acme/h1', salaryRange: { currency: 'USD', interval: 'per-hour-wage', min: 47, max: 47 } },
+      { text: 'Monthly', hostedUrl: 'https://jobs.lever.co/acme/m1', salaryRange: { currency: 'EUR', interval: 'per-month-salary', min: 5000, max: 6000 } },
+      { text: 'Unknown interval', hostedUrl: 'https://jobs.lever.co/acme/u1', salaryRange: { currency: 'USD', interval: 'per-fortnight-wage', min: 1000, max: 2000 } },
+      { text: 'No range', hostedUrl: 'https://jobs.lever.co/acme/n1' },
+      { text: 'Min only', hostedUrl: 'https://jobs.lever.co/acme/mo1', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: 120000 } },
+      { text: 'Max only', hostedUrl: 'https://jobs.lever.co/acme/ma1', salaryRange: { currency: 'USD', interval: 'per-year-salary', max: 90000 } },
+      { text: 'Non-numeric', hostedUrl: 'https://jobs.lever.co/acme/nn1', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: '100000', max: null } },
+      { text: 'No interval', hostedUrl: 'https://jobs.lever.co/acme/ni1', salaryRange: { currency: 'USD', min: 1, max: 2 } },
+      { text: 'Lowercase currency', hostedUrl: 'https://jobs.lever.co/acme/lc1', salaryRange: { currency: 'usd', interval: 'per-year-salary', min: 100000, max: 120000 } },
+      { text: 'Inverted', hostedUrl: 'https://jobs.lever.co/acme/i1', salaryRange: { currency: 'USD', interval: 'per-year-salary', min: 200000, max: 150000 } },
+      { text: 'Inherited name', hostedUrl: 'https://jobs.lever.co/acme/hn1', salaryRange: { currency: 'USD', interval: 'constructor', min: 100000, max: 120000 } },
+      { text: 'Inherited name 2', hostedUrl: 'https://jobs.lever.co/acme/hn2', salaryRange: { currency: 'USD', interval: 'toString', min: 100000, max: 120000 } },
+    ] },
+  );
+  const salaryEq = (a, b) => a?.min === b?.min && a?.max === b?.max && a?.currency === b?.currency;
+  if (salaryEq(salaryRows[0]?.salary, { min: 80000, max: 165000, currency: 'USD' })
+      && salaryEq(salaryRows[1]?.salary, { min: 97760, max: 97760, currency: 'USD' })
+      && salaryEq(salaryRows[2]?.salary, { min: 60000, max: 72000, currency: 'EUR' })) {
+    pass('lever.fetch() maps salaryRange to annualized Job.salary (yearly as-is, hourly x2080, monthly x12)');
+  } else {
+    fail(`lever.fetch() salary rows 0-2 = ${JSON.stringify(salaryRows.slice(0, 3).map(r => r.salary))}`);
+  }
+
+  if (salaryRows[3]?.salary === undefined && salaryRows[4]?.salary === undefined) {
+    pass('lever.fetch() leaves salary off for an unrecognised interval and for a posting with no salaryRange');
+  } else {
+    fail(`lever.fetch() unknown-interval salary = ${JSON.stringify(salaryRows[3]?.salary)}, no-range salary = ${JSON.stringify(salaryRows[4]?.salary)}`);
+  }
+
+  if (salaryEq(salaryRows[5]?.salary, { min: 120000, max: 120000, currency: 'USD' })
+      && salaryEq(salaryRows[6]?.salary, { min: 90000, max: 90000, currency: 'USD' })) {
+    pass('lever.fetch() fills the missing bound of a one-sided salaryRange from the other (Ashby pattern)');
+  } else {
+    fail(`lever.fetch() one-sided salaries = ${JSON.stringify([salaryRows[5]?.salary, salaryRows[6]?.salary])}`);
+  }
+
+  if (salaryRows[7]?.salary === undefined && salaryRows[8]?.salary === undefined) {
+    pass('lever.fetch() leaves salary off when min/max are not real numbers and when the interval is missing');
+  } else {
+    fail(`lever.fetch() non-numeric salary = ${JSON.stringify(salaryRows[7]?.salary)}, no-interval salary = ${JSON.stringify(salaryRows[8]?.salary)}`);
+  }
+
+  if (salaryEq(salaryRows[9]?.salary, { min: 100000, max: 120000, currency: 'USD' })
+      && salaryEq(salaryRows[10]?.salary, { min: 150000, max: 200000, currency: 'USD' })) {
+    pass('lever.fetch() upper-cases the salary currency and orders an inverted range');
+  } else {
+    fail(`lever.fetch() currency/inverted salaries = ${JSON.stringify([salaryRows[9]?.salary, salaryRows[10]?.salary])}`);
+  }
+
+  // An interval naming an inherited Object property ('constructor',
+  // 'toString') resolves to a truthy non-number on a plain lookup, which
+  // would annualize to NaN in Job.salary. The lookup must only accept own
+  // properties of the multiplier table.
+  if (salaryRows[11]?.salary === undefined && salaryRows[12]?.salary === undefined) {
+    pass('lever.fetch() leaves salary off for an interval naming an inherited Object property');
+  } else {
+    fail(`lever.fetch() inherited-name salaries = ${JSON.stringify([salaryRows[11]?.salary, salaryRows[12]?.salary])}`);
   }
 
 } catch (e) {

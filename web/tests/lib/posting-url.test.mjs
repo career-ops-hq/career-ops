@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { firstMarkdownLinkTarget, postingHref, postingLabel, readTrackerUrl, resolvePostingUrl, soleMarkdownLinkTarget } from "../../src/lib/posting-url.mjs";
+import { applyPostingUrl, firstMarkdownLinkTarget, postingHref, postingLabel, readTrackerUrl, resolvePostingUrl, soleMarkdownLinkTarget } from "../../src/lib/posting-url.mjs";
 import { extractCellUrl, firstLinkTarget, soleMarkdownLink } from "../../../tracker-parse.mjs";
 
 test("readTrackerUrl returns the href and leaves a non-link cell unchanged", () => {
@@ -32,6 +32,48 @@ test("resolvePostingUrl prefers the tracker cell", () => {
   );
   assert.equal(resolvePostingUrl("—", "https://jobs.example.com/report"), "https://jobs.example.com/report");
   assert.equal(resolvePostingUrl("", ""), "");
+});
+
+test("applyPostingUrl prefers the tracker cell, then the report", () => {
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://jobs.example.com/tracker"),
+    "https://jobs.example.com/tracker",
+  );
+  assert.equal(applyPostingUrl("", "https://jobs.example.com/tracker"), "https://jobs.example.com/tracker");
+  assert.equal(applyPostingUrl("not a link", ""), "");
+  assert.equal(applyPostingUrl("", "—", "https://jobs.example.com/apply"), "https://jobs.example.com/apply");
+  assert.equal(
+    applyPostingUrl("", "https://jobs.example.com/tracker", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/tracker",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "—", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/report",
+  );
+});
+
+test("applyPostingUrl skips a tracker URL with no host", () => {
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "[board](https://)"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("", "https://", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/apply",
+  );
+  assert.equal(applyPostingUrl("not a link", "https://", "https://"), "");
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://user:pass@jobs.example.com/secret"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "[job](https://jobs.example.com/Software\\ Engineer)"),
+    "https://jobs.example.com/Software Engineer",
+  );
 });
 
 test("readTrackerUrl keeps a value that is already a URL", () => {
