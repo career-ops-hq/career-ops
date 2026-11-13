@@ -75,6 +75,12 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       return false;
     }
 
+    // A display:none honeypot label can sit ahead of the real question title.
+    // offsetParent is the same visibility check the extract loop uses.
+    function isVisibleNode(node: Element): boolean {
+      return (node as HTMLElement).offsetParent !== null;
+    }
+
     function labelFor(el: Element): string {
       const aria = el.getAttribute("aria-label");
       if (ok(aria)) return aria!;
@@ -94,15 +100,16 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       // `ashby-application-form-question-title`, Greenhouse `select__label`, etc.)
       const grp = fieldGroup(el);
       if (grp && !hasOtherControl(grp, el)) {
-        const lab = grp.querySelector(
+        const lab = Array.from(grp.querySelectorAll(
           'label, legend, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i]',
-        );
+        )).find((node) => isVisibleNode(node));
         if (lab && ok(pure(lab))) return pure(lab);
       }
       let c: Element | null = el.parentElement;
       for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
         if (hasOtherControl(c, el)) break;
-        const lab = c.querySelector('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5');
+        const lab = Array.from(c.querySelectorAll('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5'))
+          .find((node) => isVisibleNode(node));
         if (lab && ok(pure(lab))) return pure(lab);
       }
       const ph = (el as HTMLInputElement).placeholder;
@@ -134,6 +141,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           'label, legend, h1, h2, h3, h4, h5, h6, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i], [class*="question" i]',
         );
         for (const c of Array.from(cands)) {
+          if (!isVisibleNode(c)) continue;
           const t = pure(c);
           if (t && t.length > 2 && t.length < 160 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }

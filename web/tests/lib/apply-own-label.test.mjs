@@ -35,5 +35,5 @@ test("each input in a shared wrapper keeps its own name", async (t) => {
   const { extractForm } = await import("../../src/lib/apply/extract.ts");
   const form = await extractForm(page.mainFrame());
   const labels = form.fields.map((field) => field.label);
-  assert.deepEqual(labels, ["given", "family", "contact", "resume", "City", "Department", "Role"]);
+  assert.deepEqual(labels, ["given", "family", "contact", "resume", "City", "Department", "Office", "Role"]);
 });
