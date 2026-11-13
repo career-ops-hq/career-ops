@@ -89,7 +89,6 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         );
         if (lab && ok(pure(lab))) return pure(lab);
       }
-      // A nearby label is this control's only when the ancestor holds no other control.
       let c: Element | null = el.parentElement;
       for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
         if (hasOtherControl(c, el)) break;

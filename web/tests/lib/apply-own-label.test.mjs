@@ -1,9 +1,3 @@
-// Inputs in one shared fields box used to inherit the first label.
-// A resume then looked like First name and the CV went to the wrong control.
-// Served on 127.0.0.1, any free port.
-//
-// Run from web/: node --experimental-strip-types --test tests/lib/apply-own-label.test.mjs
-
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
