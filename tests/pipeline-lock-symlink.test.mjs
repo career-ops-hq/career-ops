@@ -32,6 +32,29 @@ test('a symlink to the file shares the pipeline lock with the real path', async 
   }
 });
 
+test('a chain of 16 symlinks resolves and a longer chain throws', () => {
+  const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-chain-'));
+  const real = join(root, 'pipeline.md');
+  try {
+    let prev = 'pipeline.md';
+    for (let i = 1; i <= 16; i++) {
+      const name = `link-${i}.md`;
+      symlinkSync(prev, join(root, name));
+      prev = name;
+    }
+    const sixteen = join(root, 'link-16.md');
+    assert.equal(lockDirFor(sixteen), lockDirFor(real));
+    const seventeen = join(root, 'link-17.md');
+    symlinkSync('link-16.md', seventeen);
+    assert.throws(() => lockDirFor(seventeen), /more than 16 symbolic links/);
+    writeFileSync(real, '# Pipeline\n');
+    assert.equal(lockDirFor(sixteen), lockDirFor(real));
+    assert.equal(lockDirFor(seventeen), lockDirFor(real));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('a dangling symlink keeps one lock after the target file is created', async () => {
   const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-dangling-'));
   const real = join(root, 'pipeline.md');

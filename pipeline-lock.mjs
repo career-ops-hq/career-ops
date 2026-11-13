@@ -61,7 +61,7 @@ export class LockTimeoutError extends Error {
 function followSymlinks(start) {
   let current = start;
   const seen = new Set();
-  for (let hop = 0; hop < 16; hop++) {
+  for (let hop = 0; hop <= 16; hop++) {
     if (seen.has(current)) return current;
     seen.add(current);
     let stat;
@@ -72,9 +72,11 @@ function followSymlinks(start) {
       throw err;
     }
     if (!stat.isSymbolicLink()) return current;
+    if (hop === 16) {
+      throw new Error(`pipeline path has more than 16 symbolic links: ${start}`);
+    }
     current = resolve(dirname(current), readlinkSync(current));
   }
-  return current;
 }
 
 function canonicalPipelinePath(pipelinePath) {
