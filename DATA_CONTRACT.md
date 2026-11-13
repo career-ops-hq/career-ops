@@ -11,7 +11,7 @@ These files contain your personal data, customizations, and work product. Update
 | `.career-ops-web/chats/*.json` | Local assistant conversation history (gitignored, not verified profile facts); only the chat API writes these files |
 | `.career-ops-web/cv-studio/*.json` | Your CV Studio edits to a tailored CV, one file per report number (gitignored); only the CV Studio API writes these files |
 | `cv.md` | Your CV in markdown |
-| `data/cv-variants/<name>.md` | Your opt-in CV content variants (#6792): the same history weighted for a role family, in `cv.md`'s shape. A variant may reorder, condense or omit what `cv.md` says and never adds a claim; `cv.md` stays the only fact source. Selected per run with `pdf --variant=<name>`; with none named, `cv.md` is used. `doctor.mjs` warns about one that fails to parse or has drifted from `cv.md`. Updates never touch this directory |
+| `data/cv-variants/<name>.md` | Your opt-in CV content variants (#6792): the same history weighted for a role family, in `cv.md`'s shape. A variant may reorder, condense or omit what `cv.md` says and never adds a claim; `cv.md` stays the only fact source. Selected per run with `pdf --variant=<name>`; with none named, `cv.md` is used. `doctor.mjs` warns about one that fails to parse or has drifted from `cv.md` (a changed title, an entry or date range `cv.md` lacks, or a fact-check finding). Updates never touch this directory |
 | `config/profile.yml` | Your identity, targets, comp range |
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |
 | `config/benchmarks.yml` | Your market calibration benchmark overrides (optional; copy `templates/benchmarks.yml` here and edit — read by `funnel-velocity.mjs`) |

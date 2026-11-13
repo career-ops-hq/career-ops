@@ -106,3 +106,29 @@ test('a file name --variant cannot select is a name problem, and the audit still
   assert.deepEqual(findings.map((f) => f.problems[0].type), ['name', 'parse']);
   assert.match(findings[0].problems[0].detail, /back-end\.md/);
 });
+
+test('a job cv.md does not have is an added problem', () => {
+  const root = workspace({ 'a.md': `${OMIT_AND_REORDER}
+### Gamma Inc -- Perth
+
+**Director**
+2024-2025
+
+- Ran a 40 person org
+` });
+  const added = checkVariant('a', { root }).problems.filter((p) => p.type === 'added');
+  assert.equal(added.length, 1, JSON.stringify(added));
+  assert.match(added[0].detail, /Gamma Inc/);
+});
+
+test('a date range rewritten from cv.md is an added problem', () => {
+  const root = workspace({ 'a.md': OMIT_AND_REORDER.replace('2018-2020', '2017-2020') });
+  const added = checkVariant('a', { root }).problems.filter((p) => p.type === 'added');
+  assert.equal(added.length, 1, JSON.stringify(added));
+  assert.match(added[0].detail, /2017-2020/);
+});
+
+test('a condensed variant (fewer bullets, one job) is clean', () => {
+  const root = workspace({ 'a.md': '## Work Experience\n\n### Acme Corp -- Sydney\n\n**Senior Engineer**\n2020-2024\n\n- Led a team of 3 engineers\n' });
+  assert.deepEqual(checkVariant('a', { root }).problems, []);
+});
