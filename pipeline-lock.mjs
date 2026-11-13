@@ -14,6 +14,8 @@
 // timing defaults and their env overrides, and the timeout error. The
 // protocol's helpers are re-exported so existing importers keep working.
 
+import { realpathSync } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 
 export {
@@ -41,8 +43,38 @@ export class LockTimeoutError extends Error {
   }
 }
 
+/**
+ * The real file a pipeline path names, so two spellings of one file share a lock.
+ *
+ * A symlink to the file used to lock beside the link (`alias.md.lock`) while
+ * the real path locked beside the file (`pipeline.md.lock`). Those are
+ * different directories, so two scans both wrote and one offer disappeared.
+ * A symlink in a parent directory already shared one inode; resolving the
+ * file makes the file-symlink case do the same. A file that is not there yet
+ * resolves the parent that does exist and keeps its own name.
+ *
+ * @param {string} pipelinePath
+ * @returns {string}
+ */
+function canonicalPipelinePath(pipelinePath) {
+  const absolute = resolve(pipelinePath);
+  try {
+    return realpathSync(absolute);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  const parent = dirname(absolute);
+  const name = basename(absolute);
+  try {
+    return join(realpathSync(parent), name);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+    return absolute;
+  }
+}
+
 export function lockDirFor(pipelinePath) {
-  return `${pipelinePath}.lock`;
+  return `${canonicalPipelinePath(pipelinePath)}.lock`;
 }
 
 /**
