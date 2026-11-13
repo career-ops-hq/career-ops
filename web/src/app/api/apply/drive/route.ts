@@ -82,7 +82,8 @@ export async function POST(req: Request) {
             return;
           }
           const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
-          const supplied = answersForRefreshedFields(beforeFields, s.fields, body.answers);
+          const refreshed = answersForRefreshedFields(beforeFields, s.fields, body.answers);
+          const supplied = refreshed.answers;
           // The agent already typed these answers. An empty fill map attaches
           // the résumé only. `supplied` is what read-back compares.
           const attached = cvPath
@@ -100,11 +101,20 @@ export async function POST(req: Request) {
           });
           if (decision.handoff) await handoffSession(s.id).catch(() => {});
           const readback = readbackIssues(attached.issues);
+          const dropped = Array.isArray(refreshed.dropped) ? refreshed.dropped : [];
+          const unmatched = dropped.length
+            ? [{
+              level: "warn" as const,
+              code: "fill-unverified",
+              message: `Couldn't match these answers to the form, so they are not counted as pre-filled: ${dropped.slice(0, 4).join(", ")}${dropped.length > 4 ? "…" : ""}.`,
+            }]
+            : [];
           const gaps = [
             ...(cvResolveError ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }] : []),
             ...(Array.isArray(fin.issues) ? fin.issues : []),
             ...decision.gaps,
             ...readback,
+            ...unmatched,
           ];
           emit({
             t: "done",

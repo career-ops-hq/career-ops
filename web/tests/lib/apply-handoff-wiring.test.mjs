@@ -300,6 +300,29 @@ test("drive read-back does not reuse a positional id after the form changes", as
   assert.equal(done.filled, true);
 });
 
+test("a dropped answer is unverified on the drive result", async () => {
+  resetFixture({
+    finalFields: [
+      { id: "co0", type: "text", label: "Team" },
+      { id: "co1", type: "text", label: "Phone" },
+      { id: "co2", type: "text", label: "Phone" },
+    ],
+  });
+  globalThis.__applyFixture.session.fields = [
+    { id: "co0", type: "text", label: "Phone" },
+    { id: "co1", type: "text", label: "Phone" },
+  ];
+  const done = (await postDrive({
+    answers: [
+      { id: "co0", label: "Phone", value: "111" },
+      { id: "co1", label: "Phone", value: "222" },
+    ],
+  })).find((event) => event.t === "done");
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, {});
+  assert.equal(done.filled, true);
+  assert.ok(done.gaps.some((gap) => gap.code === "fill-unverified" && gap.message.includes("Phone")));
+});
+
 test("a full drive keeps the fencing warning from finalization", async () => {
   resetFixture({
     finalizeIssues: [{ level: "warn", code: "cli-unfenced", message: "This CLI read the form without verified fencing." }],

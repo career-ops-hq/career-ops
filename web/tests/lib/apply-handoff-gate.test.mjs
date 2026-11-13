@@ -214,7 +214,8 @@ test("a refreshed field list does not keep an answer on a reused positional id",
     { id: "co0", label: "Name", value: "Ada" },
     { id: "co1", label: "Office", value: "Springfield" },
   ]);
-  assert.deepEqual(mapped, { co1: "Ada", co2: "Springfield" });
+  assert.deepEqual(mapped.answers, { co1: "Ada", co2: "Springfield" });
+  assert.deepEqual(mapped.dropped, []);
 });
 
 test("a shared label with no DOM id stays unmatched after the field list changes", () => {
@@ -231,7 +232,8 @@ test("a shared label with no DOM id stays unmatched after the field list changes
     { id: "co0", label: "Phone", value: "111" },
     { id: "co1", label: "Phone", value: "222" },
   ]);
-  assert.deepEqual(mapped, {});
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
 });
 
 test("an unchanged field list still maps two answers that share a label", () => {
@@ -243,7 +245,29 @@ test("an unchanged field list still maps two answers that share a label", () => 
     { id: "phone-a", label: "Phone", value: "111" },
     { id: "phone-b", label: "Phone", value: "" },
   ]);
-  assert.deepEqual(mapped, { "phone-a": "111", "phone-b": "" });
+  assert.deepEqual(mapped.answers, { "phone-a": "111", "phone-b": "" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("two answers that land on one field are both left unverified", () => {
+  const before = [{ id: "co0", label: "Name", nativeId: "name" }];
+  const after = [{ id: "co1", label: "Name", nativeId: "name" }];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Name", value: "Ada" },
+    { id: "extra", label: "Name", value: "Bea" },
+  ]);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Name", "Name"]);
+});
+
+test("an answer whose field is gone is named instead of dropped quietly", () => {
+  const fields = [{ id: "name", label: "Name" }];
+  const mapped = answersForRefreshedFields(fields, fields, [
+    { id: "name", label: "Name", value: "Ada" },
+    { id: "gone", label: "Nickname", value: "A" },
+  ]);
+  assert.deepEqual(mapped.answers, { name: "Ada" });
+  assert.deepEqual(mapped.dropped, ["Nickname"]);
 });
 
 test("two fields that share a label keep the answer stored on each id", () => {

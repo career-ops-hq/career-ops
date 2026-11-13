@@ -295,28 +295,57 @@ function uniqueIndex(fields, keyOf) {
 }
 
 /**
+ * @param {{ id?: string, label?: string } | null | undefined} item
+ * @param {{ label?: string } | null | undefined} [source]
+ */
+function suppliedLabel(item, source) {
+  return fieldLabel(source) || fieldLabel(item) || String(item?.id || "").trim() || "A field";
+}
+
+/**
  * Map drive answers onto the fields extracted after the agent moved the page.
  * A positional id is reused only when that id still labels the same question.
  * Otherwise the answer follows the control's DOM id, or a label that appears
  * once. A shared label with no DOM id stays unmatched, so it cannot land on
- * a different question. A blank value stays blank.
+ * a different question. A blank value stays blank. Each supplied answer that
+ * is not placed is listed in `dropped`, by label, so the drive can keep the
+ * banner off instead of treating it as checked.
  *
  * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} before
  * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} after
  * @param {{ id?: string, label?: string, value?: string }[]} [labeled]
+ * @returns {{ answers: Record<string, string>, dropped: string[] }}
  */
 export function answersForRefreshedFields(before, after, labeled = []) {
   const prior = Array.isArray(before) ? before : [];
   const next = Array.isArray(after) ? after : [];
   const items = Array.isArray(labeled) ? labeled : [];
-  if (sameFieldList(prior, next)) return answersByFieldId(next, items);
+  if (sameFieldList(prior, next)) {
+    const answers = answersByFieldId(next, items);
+    /** @type {Set<object>} */
+    const used = new Set();
+    for (const field of next) {
+      if (!field?.id || !Object.prototype.hasOwnProperty.call(answers, field.id)) continue;
+      const hit = items.find((item) => item && item.id === field.id)
+        ?? items.find((item) => item && !item.id && item.label && item.label === field.label);
+      if (hit) used.add(hit);
+    }
+    return {
+      answers,
+      dropped: items
+        .filter((item) => item && item.value != null && !used.has(item))
+        .map((item) => suppliedLabel(item)),
+    };
+  }
 
   const beforeById = new Map(prior.filter((field) => field?.id).map((field) => [field.id, field]));
   const afterByNativeId = uniqueIndex(next, (field) => field?.nativeId || "");
   const afterByNativeName = uniqueIndex(next, (field) => field?.nativeName || "");
   const afterByLabel = uniqueIndex(next, (field) => fieldLabel(field));
-  /** @type {[string, string][]} */
+  /** @type {{ id: string, value: string, label: string }[]} */
   const picks = [];
+  /** @type {string[]} */
+  const dropped = [];
   for (const item of items) {
     if (!item || item.value == null) continue;
     const source = item.id ? beforeById.get(item.id) : undefined;
@@ -328,16 +357,20 @@ export function answersForRefreshedFields(before, after, labeled = []) {
       if (named && fieldLabel(named) === label) target = named;
     }
     if (!target && label) target = afterByLabel.get(label);
-    if (!target?.id) continue;
-    picks.push([target.id, String(item.value)]);
+    if (!target?.id) {
+      dropped.push(suppliedLabel(item, source));
+      continue;
+    }
+    picks.push({ id: target.id, value: String(item.value), label: suppliedLabel(item, source) });
   }
   /** @type {Map<string, number>} */
   const counts = new Map();
-  for (const [id] of picks) counts.set(id, (counts.get(id) || 0) + 1);
+  for (const pick of picks) counts.set(pick.id, (counts.get(pick.id) || 0) + 1);
   /** @type {Record<string, string>} */
   const answers = {};
-  for (const [id, value] of picks) {
-    if (counts.get(id) === 1) answers[id] = value;
+  for (const pick of picks) {
+    if (counts.get(pick.id) === 1) answers[pick.id] = pick.value;
+    else dropped.push(pick.label);
   }
-  return answers;
+  return { answers, dropped };
 }
