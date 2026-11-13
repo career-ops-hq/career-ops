@@ -4,12 +4,14 @@
 // Every changed tracker write also keeps the previous bytes in a .bak.
 import { pass, fail, isolatedBatchStatePath } from './helpers.mjs';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { extractCellUrl } from '../tracker-parse.mjs';
+import { syncTrackerPdfFlags } from '../sync-pdf-flags.mjs';
+import { backupFileAtomically } from '../tracker-utils.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MERGE = join(HERE, '..', 'merge-tracker.mjs');
@@ -290,5 +292,81 @@ ok('an unchanged migration does not create a backup', () => {
     ]);
     runMerge(env, ['--migrate']);
     assert.equal(existsSync(`${env.tracker}.bak`), false, 'identical bytes are not copied to .bak');
+  } finally { cleanup(env); }
+});
+
+ok('a backup replaces .bak only after the copy finishes', () => {
+  const env = makeEnv();
+  try {
+    writeFileSync(env.tracker, 'CURRENT\n');
+    writeFileSync(`${env.tracker}.bak`, 'OLD BACKUP\n');
+    backupFileAtomically(env.tracker);
+    assert.equal(readFileSync(`${env.tracker}.bak`, 'utf-8'), 'CURRENT\n');
+    assert.deepEqual(readdirSync(env.dataDir).filter(name => name.includes('.tmp')), []);
+  } finally { cleanup(env); }
+});
+
+ok('a failed backup leaves the previous .bak in place', () => {
+  const env = makeEnv();
+  try {
+    writeFileSync(env.tracker, 'CURRENT\n');
+    writeFileSync(`${env.tracker}.bak`, 'OLD BACKUP\n');
+    rmSync(env.tracker);
+    assert.throws(() => backupFileAtomically(env.tracker));
+    assert.equal(readFileSync(`${env.tracker}.bak`, 'utf-8'), 'OLD BACKUP\n');
+    assert.deepEqual(readdirSync(env.dataDir).filter(name => name.includes('.tmp')), []);
+  } finally { cleanup(env); }
+});
+
+const okAsync = async (name, fn) => {
+  try { await fn(); pass(name); }
+  catch (e) { fail(`${name} — ${e.message}`); }
+};
+
+await okAsync('PDF sync backs up again when the tracker changed after the merge released the lock', async () => {
+  const env = makeEnv();
+  try {
+    const url = 'https://boards.greenhouse.io/fixtureco/jobs/7001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.0/5 | Evaluated | — | [1](reports/1-fixture.md) | n | ${url} |`,
+    ]);
+    writeLivePdf(env, 1);
+    const before = readFileSync(env.tracker, 'utf-8');
+    writeFileSync(`${env.tracker}.bak`, 'STALE BACKUP\n');
+    const code = await syncTrackerPdfFlags({
+      appsFile: env.tracker,
+      pdfManifest: join(env.dataDir, 'pdf-index.tsv'),
+      dataRoot: env.base,
+      keepExistingBackup: true,
+      expectedText: 'not the tracker the merge wrote\n',
+    });
+    assert.equal(code, 0);
+    assert.equal(readFileSync(`${env.tracker}.bak`, 'utf-8'), before,
+      'the backup is the tracker this sync is about to change');
+    assert.ok(trackerRows(env)[0].includes('✅'), 'the PDF flag still updates');
+  } finally { cleanup(env); }
+});
+
+await okAsync('PDF sync keeps the merge backup when the locked tracker still matches', async () => {
+  const env = makeEnv();
+  try {
+    const url = 'https://boards.greenhouse.io/fixtureco/jobs/7001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.0/5 | Evaluated | — | [1](reports/1-fixture.md) | n | ${url} |`,
+    ]);
+    writeLivePdf(env, 1);
+    const before = readFileSync(env.tracker, 'utf-8');
+    writeFileSync(`${env.tracker}.bak`, 'PRE-MERGE\n');
+    const code = await syncTrackerPdfFlags({
+      appsFile: env.tracker,
+      pdfManifest: join(env.dataDir, 'pdf-index.tsv'),
+      dataRoot: env.base,
+      keepExistingBackup: true,
+      expectedText: before,
+    });
+    assert.equal(code, 0);
+    assert.equal(readFileSync(`${env.tracker}.bak`, 'utf-8'), 'PRE-MERGE\n',
+      'a matching tracker leaves the merge backup alone');
+    assert.ok(trackerRows(env)[0].includes('✅'), 'the PDF flag still updates');
   } finally { cleanup(env); }
 });

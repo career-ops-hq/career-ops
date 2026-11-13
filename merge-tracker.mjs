@@ -23,7 +23,7 @@
  *   --backfill-urls  fill empty URL cells from each row's linked report
  */
 
-import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync, copyFileSync } from 'fs';
+import { readFileSync, readdirSync, mkdirSync, renameSync, existsSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
@@ -35,7 +35,7 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnset
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken, resolveCanonicalStateId } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, backupFileAtomically, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken, resolveCanonicalStateId } from './tracker-utils.mjs';
 // Canonical posting-URL key and URL comparison, shared with the other tracker
 // scripts and scan.mjs so the definitions cannot drift apart.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
@@ -67,7 +67,7 @@ function writeTrackerReplacing(file, nextText) {
   if (existsSync(file)) {
     const prev = readFileSync(file, 'utf-8');
     if (prev !== nextText) {
-      copyFileSync(file, `${file}.bak`);
+      backupFileAtomically(file);
       backedUp = true;
     }
   }
@@ -2511,13 +2511,16 @@ export async function mergeTracker(options = {}) {
     }
 
     // Write back. keptEarlierBackup tells the PDF sync below not to replace
-    // a backup this write just saved: restoring that file undoes the merge
-    // and the flag update together.
+    // a backup this write just saved, but only while the locked tracker still
+    // matches postMergeText. Another merge can replace both between the
+    // unlock here and the sync's own lock.
     let keptEarlierBackup = false;
+    let postMergeText = null;
     if (!DRY_RUN) {
       const moved = sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      keptEarlierBackup = writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
+      postMergeText = appLines.join('\n');
+      keptEarlierBackup = writeTrackerReplacing(APPS_FILE, postMergeText);
 
       // Move processed files to merged/ — but only the ones actually applied.
       // Archiving a TSV whose row never reached the tracker is what turns a bug
@@ -2557,6 +2560,7 @@ export async function mergeTracker(options = {}) {
           lock: options.lock,
           logger: console,
           keepExistingBackup: keptEarlierBackup,
+          expectedText: postMergeText,
         });
         if (code !== 0) console.warn(`⚠️  Failed to sync PDF flags: sync-pdf-flags exited with ${code}`);
       } catch (e) {
