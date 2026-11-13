@@ -153,6 +153,52 @@ ok('an earlier Applied title match does not hide a later Evaluated row', () => {
   } finally { cleanup(env); }
 });
 
+ok('an Applied entry-number match does not hide a later Evaluated row', () => {
+  const env = makeEnv();
+  try {
+    const appliedUrl = 'https://www.linkedin.com/jobs/view/4001';
+    const incomingUrl = 'https://boards.greenhouse.io/fixtureco/jobs/9002';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.6/5 | Applied | ❌ | [1](reports/1-fixture.md) | n | ${appliedUrl} |`,
+      '| 3 | 2026-06-02 | Fixture Co | Director of Marketing | 3.0/5 | Evaluated | ❌ | [3](reports/3-fixture.md) | n | — |',
+    ]);
+    addTsv(env, '1-fixture.tsv', ['1', '2026-06-03', 'Fixture Co', 'Director of Marketing', 'Evaluated', '3.9/5', '❌',
+      '[2](reports/2-fixture.md)', 'n', incomingUrl]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, `the Evaluated row is updated, not a new row, got ${rows.length}`);
+    assert.ok(!rows.some(r => rowNum(r) === '4'), 'no fourth row was added');
+    const applied = rows.find(r => rowNum(r) === '1');
+    assert.equal(urlHref(applied), appliedUrl, 'the Applied row keeps the LinkedIn URL');
+    assert.ok(applied.includes('4.6/5') && applied.includes('1-fixture.md'),
+      'the Applied score and report stay');
+    const evaluated = rows.find(r => rowNum(r) === '3');
+    assert.equal(urlHref(evaluated), incomingUrl, 'the Evaluated row takes the incoming URL');
+    assert.ok(evaluated.includes('3.9/5') && evaluated.includes('2-fixture.md'),
+      'the Evaluated score and report update');
+  } finally { cleanup(env); }
+});
+
+ok('a matching entry number still leaves a lone Applied row unchanged', () => {
+  const env = makeEnv();
+  try {
+    const appliedUrl = 'https://www.linkedin.com/jobs/view/4001';
+    const incomingUrl = 'https://boards.greenhouse.io/fixtureco/jobs/9002';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.6/5 | Applied | ❌ | [1](reports/1-fixture.md) | n | ${appliedUrl} |`,
+    ]);
+    addTsv(env, '1-fixture.tsv', ['1', '2026-06-03', 'Fixture Co', 'Director of Marketing', 'Evaluated', '3.4/5', '❌',
+      '[2](reports/2-fixture.md)', 'n', incomingUrl]);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, `the other posting gets its own row, got ${rows.length}`);
+    const applied = rows.find(r => rowNum(r) === '1');
+    assert.equal(urlHref(applied), appliedUrl, 'the Applied row keeps the LinkedIn URL');
+    assert.ok(applied.includes('4.6/5') && applied.includes('1-fixture.md') && !applied.includes('3.4/5'),
+      'the Applied score and report are not replaced');
+  } finally { cleanup(env); }
+});
+
 ok('a sort with no pending additions leaves a backup of the previous tracker', () => {
   const env = makeEnv();
   try {

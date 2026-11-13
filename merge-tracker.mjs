@@ -2091,28 +2091,6 @@ export async function mergeTracker(options = {}) {
         if (duplicate) reportNumMatched = true;
       }
 
-      if (!duplicate) {
-        // Exact entry number match — but only when the company also matches.
-        // The TSV `num` doubles as the tracker row id, yet report-file numbering
-        // and tracker-row numbering can drift out of sync (e.g. reports maxed at
-        // 067 while the tracker was already at #69). A bare num collision across
-        // *different* companies is that drift, not a duplicate — matching on num
-        // alone silently merges a brand-new role into an unrelated existing row.
-        duplicate = existingApps.find(app =>
-          app.num === addition.num && companiesMatch(app.company, addition.company)
-          && !urlBlocksHeuristic(app) && !reqNumDiffers(app)
-          // Same-run num collisions are reservation races, not row-id references:
-          // two TSVs that both claimed num=5 for DIFFERENT roles at one company
-          // are two distinct evaluations, and folding them keeps the first title
-          // with the second score (main renumbers and keeps both via the
-          // #1704/#1733 path). For a row queued THIS run, only accept the num
-          // match when the roles also fuzzy-match — consistent with tier-3's
-          // cross-run semantics. For rows already on disk, num remains the
-          // tracker row id and behavior is unchanged.
-          && (!app.addedThisRun || roleFuzzyMatch(addition.role, app.role))
-        );
-      }
-
       // True when this match would point a submitted row at a posting the URLs
       // do not show is the same one. Exact URL, same report, same aggregator
       // id, and an aggregator sighting of an employer URL are not retargets.
@@ -2134,6 +2112,39 @@ export async function mergeTracker(options = {}) {
             && postingUrlRelation(rowUrl, addition.url) === 'same') return false;
         return true;
       };
+
+      // Remember the first submitted row this posting must not retarget.
+      // Entry number and the fuzzy title search both skip it, then the search
+      // continues. Warn once, after those tiers, and only when nothing else matched.
+      let protectedSubmitted = null;
+      const skipProtectedSubmitted = (app) => {
+        if (!(submittedStatus(app.status) && wouldRetargetSubmittedRow(app))) return false;
+        if (!protectedSubmitted) protectedSubmitted = app;
+        return true;
+      };
+
+      if (!duplicate) {
+        // Exact entry number match — but only when the company also matches.
+        // The TSV `num` doubles as the tracker row id, yet report-file numbering
+        // and tracker-row numbering can drift out of sync (e.g. reports maxed at
+        // 067 while the tracker was already at #69). A bare num collision across
+        // *different* companies is that drift, not a duplicate — matching on num
+        // alone silently merges a brand-new role into an unrelated existing row.
+        duplicate = existingApps.find(app =>
+          app.num === addition.num && companiesMatch(app.company, addition.company)
+          && !urlBlocksHeuristic(app) && !reqNumDiffers(app)
+          // Same-run num collisions are reservation races, not row-id references:
+          // two TSVs that both claimed num=5 for DIFFERENT roles at one company
+          // are two distinct evaluations, and folding them keeps the first title
+          // with the second score (main renumbers and keeps both via the
+          // #1704/#1733 path). For a row queued THIS run, only accept the num
+          // match when the roles also fuzzy-match — consistent with tier-3's
+          // cross-run semantics. For rows already on disk, num remains the
+          // tracker row id and behavior is unchanged.
+          && (!app.addedThisRun || roleFuzzyMatch(addition.role, app.role))
+          && !skipProtectedSubmitted(app)
+        );
+      }
 
       if (!duplicate) {
         // Company + role fuzzy match
@@ -2227,31 +2238,24 @@ export async function mergeTracker(options = {}) {
           if (additionReqNum && !appReqNum) return false;
           return true;
         };
-        // find() stops at the first title match. An Applied row this posting
-        // must not retarget used to win that race, the guard below cleared it,
-        // and a later Evaluated row with the same title was never checked.
-        // Skip those submitted rows and keep looking. Warn only when nothing
-        // later qualifies, so a real update of the later row stays quiet.
-        let protectedSubmitted = null;
+        // Skip a submitted row this posting must not retarget and keep looking,
+        // same as the entry-number tier above.
         const fuzzyCandidate = (app, widenToCorporateForm) => {
           if (!fuzzyTierMatch(app, widenToCorporateForm)) return false;
-          if (submittedStatus(app.status) && wouldRetargetSubmittedRow(app)) {
-            if (!protectedSubmitted) protectedSubmitted = app;
-            return false;
-          }
-          return true;
+          return !skipProtectedSubmitted(app);
         };
         duplicate = existingApps.find(app => fuzzyCandidate(app, false))
           || existingApps.find(app => fuzzyCandidate(app, true));
-        if (!duplicate && protectedSubmitted) {
-          console.warn(
-            `⚠️  ${file}: #${protectedSubmitted.num} is ${protectedSubmitted.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
-          );
-        }
       }
 
-      // Entry-number matches still land here. The fuzzy tier already skipped
-      // a submitted row it would retarget, so this does not warn twice.
+      if (!duplicate && protectedSubmitted) {
+        console.warn(
+          `⚠️  ${file}: #${protectedSubmitted.num} is ${protectedSubmitted.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
+        );
+      }
+
+      // A protected match that still got selected is cleared here. The tiers
+      // above already skipped those rows, so this does not warn twice.
       if (duplicate && submittedStatus(duplicate.status) && wouldRetargetSubmittedRow(duplicate)) {
         console.warn(
           `⚠️  ${file}: #${duplicate.num} is ${duplicate.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
