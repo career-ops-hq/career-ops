@@ -43,6 +43,9 @@ BS Computer Science, State University
 
 ## Certifications
 AWS Certified Developer – Associate
+
+## Skills
+Python, Go
 `;
 const source = join(tmp, 'cv.md');
 writeFileSync(source, CV);
@@ -143,12 +146,14 @@ test('the \\resumeSubheading definition in a preamble is not a claim', () => {
   assert.deepEqual(structuredFieldClaims(tex), []);
 });
 
-test('skills lists are not structured claims', () => {
+test('a tool on the skills line blocks when the source never names it', () => {
   const html = build('build-cv-html.mjs', {
     ...htmlPayload(TRUE),
     skills: [{ category: 'Platforms', items: 'Kubernetes, Terraform' }],
   }, 'html');
-  assert.equal(verifyFacts(html, options()).verdict, 'pass', 'rewording a skill is the tailoring the gate allows');
+  const result = verifyFacts(html, options());
+  assert.equal(result.verdict, 'block');
+  assert.deepEqual(kinds(result.unsupportedFacts), ['tool=kubernetes', 'tool=terraform']);
 });
 
 test('a nowrap span inside a title keeps its hyphenated word (#5632)', () => {

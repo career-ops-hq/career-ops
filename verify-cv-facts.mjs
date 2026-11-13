@@ -1088,6 +1088,10 @@ function zhToolClaims(clean, sourceNormalized = null) {
   return names;
 }
 
+// A prize named in a sentence. Requires a capitalised name ("Nobel Prize",
+// "Example Industry Award") so a lowercase "award" in ordinary prose is not a claim.
+const PROSE_AWARD_RE = /\b((?:[Nn]obel|[Pp]ulitzer)\s+[Pp]rize|(?:[\p{Lu}][\p{L}\p{N}&.'’-]*\s+){1,6}(?:Prize|Award|Medal|Fellowship))\b/gu;
+
 export function factClaims(text, sourceNormalized = null) {
   const clean = stripMarkup(text);
   const claims = [];
@@ -1200,6 +1204,10 @@ export function factClaims(text, sourceNormalized = null) {
   // Pushed one at a time, like the tool names: spread into push(), a page of
   // 150,000 statements overflows the call stack.
   for (const claim of atEmployerClaims(text)) claims.push(claim);
+  // A prize in a sentence is the same claim as an award-title field. The
+  // pattern keeps a lowercase "award" in ordinary prose, and reads a name
+  // such as "Nobel Prize" or "Example Industry Award".
+  for (const match of clean.matchAll(PROSE_AWARD_RE)) claims.push({ kind: 'award', value: normalizeFact(match[1]) });
   // Report each claim once. Both tool patterns read most names, so without
   // this every tool would be listed twice. Repeated employer and title claims
   // collapse too, as they already did in verifyFacts.
@@ -1218,8 +1226,9 @@ export function factClaims(text, sourceNormalized = null) {
 // them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
 // about titles, because reframing one is sometimes the candidate's call, and a
 // second check that blocked on the same field would overrule that choice.
-// Skills lists are not read here. Rewording a skill into the posting's
-// vocabulary is the reformulation the tailoring is allowed to do.
+// A skills line is not one claim. skillToolClaims reads each token, and only
+// a tool-shaped token the sources do not contain blocks. Lowercase wording
+// stays unchecked so a skill can be reworded into the posting's vocabulary.
 //
 // Templates with section partials (#2183) may use other class names, and a
 // markdown CV has no markup to read, so neither is covered.
@@ -1344,6 +1353,40 @@ export function structuredFieldClaims(text) {
   }
   const seen = new Set();
   return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+/**
+ * Tool-shaped tokens on a skills line or a competency tag.
+ *
+ * The whole line is not a claim: "status notes, agendas, Kubernetes" may
+ * reword the first items and still invent the last. A token blocks only when
+ * it looks like a product name (Title Case, or a digit such as "n8n") and no
+ * source contains that name. Lowercase items are left alone.
+ *
+ * @param {string} text generated HTML or LaTeX
+ * @returns {{kind: string, value: string}[]}
+ */
+export function skillToolClaims(text) {
+  const raw = latexBody(text ?? '');
+  const claims = [];
+  const seen = new Set();
+  for (const cls of ['skill-item', 'competency-tag']) {
+    for (const inner of extractStructuredFieldInners(raw, cls)) {
+      const withoutCategory = removeBalancedElements(
+        inner,
+        /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])skill-category(?![\w-])[^"]*"[^>]*>/gi,
+      );
+      for (const token of stripMarkup(withoutCategory).split(/[,;|•·]/)) {
+        const trimmed = token.trim();
+        if (!trimmed || !looksToolShaped(trimmed)) continue;
+        const value = normalizeFact(trimmed);
+        if (!value || seen.has(value)) continue;
+        seen.add(value);
+        claims.push({ kind: 'tool', value });
+      }
+    }
+  }
+  return claims;
 }
 
 // Association checks compare bounded records, never the joined source bag.
@@ -3373,6 +3416,7 @@ export function verifyFacts(targetText, {
   const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const namedFacts = [
     ...factClaims(targetText, sourceLookup),
+    ...skillToolClaims(targetText),
     ...delegatedAuthorshipClaims(targetText, sourceText),
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);

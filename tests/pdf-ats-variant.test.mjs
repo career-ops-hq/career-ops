@@ -40,6 +40,7 @@ const CV_MD = `# Jane Smith
 
 ## Skills
 - Languages: Python, Go
+- Distributed Systems, Latency Tuning
 `;
 
 const PAYLOAD = {
