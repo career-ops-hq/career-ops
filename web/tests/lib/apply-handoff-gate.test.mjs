@@ -236,17 +236,47 @@ test("a shared label with no DOM id stays unmatched after the field list changes
   assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
 });
 
-test("an unchanged field list still maps two answers that share a label", () => {
+test("same-label controls that swap follow their DOM id", () => {
+  const before = [
+    { id: "co0", label: "Phone", nativeId: "home" },
+    { id: "co1", label: "Phone", nativeId: "mobile" },
+  ];
+  const after = [
+    { id: "co0", label: "Phone", nativeId: "mobile" },
+    { id: "co1", label: "Phone", nativeId: "home" },
+  ];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, { co0: "222", co1: "111" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("same-label controls keep their answers when the DOM id is unchanged", () => {
   const fields = [
-    { id: "phone-a", label: "Phone" },
-    { id: "phone-b", label: "Phone" },
+    { id: "co0", label: "Phone", nativeId: "home" },
+    { id: "co1", label: "Phone", nativeId: "mobile" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields.map((field) => ({ ...field })), [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "" },
+  ]);
+  assert.deepEqual(mapped.answers, { co0: "111", co1: "" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("same-label controls with no DOM id stay unverified", () => {
+  const fields = [
+    { id: "co0", label: "Phone" },
+    { id: "co1", label: "Phone" },
   ];
   const mapped = answersForRefreshedFields(fields, fields, [
-    { id: "phone-a", label: "Phone", value: "111" },
-    { id: "phone-b", label: "Phone", value: "" },
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
   ]);
-  assert.deepEqual(mapped.answers, { "phone-a": "111", "phone-b": "" });
-  assert.deepEqual(mapped.dropped, []);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
 });
 
 test("two answers that land on one field are both left unverified", () => {

@@ -323,6 +323,26 @@ test("a dropped answer is unverified on the drive result", async () => {
   assert.ok(done.gaps.some((gap) => gap.code === "fill-unverified" && gap.message.includes("Phone")));
 });
 
+test("drive read-back follows a swapped control by its DOM id", async () => {
+  resetFixture({
+    finalFields: [
+      { id: "co0", type: "tel", label: "Phone", nativeId: "mobile" },
+      { id: "co1", type: "tel", label: "Phone", nativeId: "home" },
+    ],
+  });
+  globalThis.__applyFixture.session.fields = [
+    { id: "co0", type: "tel", label: "Phone", nativeId: "home" },
+    { id: "co1", type: "tel", label: "Phone", nativeId: "mobile" },
+  ];
+  await postDrive({
+    answers: [
+      { id: "co0", label: "Phone", value: "111" },
+      { id: "co1", label: "Phone", value: "222" },
+    ],
+  });
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { co0: "222", co1: "111" });
+});
+
 test("every dropped answer is named on the drive result", async () => {
   const names = ["City", "State", "Country", "Postal", "Street"];
   resetFixture({ finalFields: [{ id: "co0", type: "text", label: "Team" }] });

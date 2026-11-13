@@ -255,17 +255,35 @@ function fieldLabel(field) {
 }
 
 /**
- * True when a fresh extract assigned the same ids to the same labels.
- * Positional ids are only safe to reuse in that case.
+ * DOM id, or the control's name when it has no id.
  *
- * @param {{ id?: string, label?: string }[]} before
- * @param {{ id?: string, label?: string }[]} after
+ * @param {{ nativeId?: string, nativeName?: string } | null | undefined} field
+ */
+function stableKey(field) {
+  if (field?.nativeId) return `id:${field.nativeId}`;
+  if (field?.nativeName) return `name:${field.nativeName}`;
+  return "";
+}
+
+/**
+ * True when each positional id still points at the same control.
+ * A shared label with no DOM id is ambiguous: two controls can swap and
+ * the ids and labels still match, so that list is not safe to reuse.
+ *
+ * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} before
+ * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} after
  */
 function sameFieldList(before, after) {
   if (before.length !== after.length) return false;
+  const labels = before.map((field) => fieldLabel(field));
+  const shared = labels.some((label, index) => label && labels.indexOf(label) !== index);
   return before.every((field, index) => {
     const next = after[index];
-    return !!field?.id && field.id === next?.id && fieldLabel(field) === fieldLabel(next);
+    if (!field?.id || field.id !== next?.id || fieldLabel(field) !== fieldLabel(next)) return false;
+    const left = stableKey(field);
+    const right = stableKey(next);
+    if (left || right) return left === right;
+    return !shared;
   });
 }
 
@@ -304,10 +322,10 @@ function suppliedLabel(item, source) {
 
 /**
  * Map drive answers onto the fields extracted after the agent moved the page.
- * A positional id is reused only when that id still labels the same question.
- * Otherwise the answer follows the control's DOM id, or a label that appears
- * once. A shared label with no DOM id stays unmatched, so it cannot land on
- * a different question. A blank value stays blank. Each supplied answer that
+ * A positional id is reused only when it still points at the same control.
+ * A shared label needs a DOM id that still matches. Otherwise the answer
+ * follows the control's DOM id, or a label that appears once. A shared label
+ * with no DOM id stays unmatched, so it cannot land on a different question. A blank value stays blank. Each supplied answer that
  * is not placed is listed in `dropped`, by label, so the drive can keep the
  * banner off instead of treating it as checked.
  *
