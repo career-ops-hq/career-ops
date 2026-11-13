@@ -396,8 +396,8 @@ export async function mergeTracker(options = {}) {
     ? join(_CODE_ROOT, 'templates/states.yml')
     : join(_CODE_ROOT, 'states.yml');
   // A missing or unreadable states file is a broken install, not a reason to abort
-  // the merge on a raw ENOENT. Say so once, then merge each status as written:
-  // validateStatus() only rewrites to "Evaluated" when it has states to check.
+  // the merge on a raw ENOENT. Say so once, then merge each status as written.
+  // When the state list did load, an unknown status is refused, not stored as Evaluated.
   let _canonicalStates = [];
   try {
     _canonicalStates = loadCanonicalStates(_STATES_FILE);
@@ -417,7 +417,8 @@ export async function mergeTracker(options = {}) {
    * templates/states.yml.
    *
    * @param {string} status - Raw status string from a TSV or pipe-delimited row.
-   * @returns {string} Canonical tracker status.
+   * @returns {string|null} Canonical tracker status, or null when the list is
+   *   loaded and this text is not on it. Callers leave that addition pending.
    */
   function validateStatus(status) {
     const clean = status.replace(/\*\*/g, '').replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '').trim();
@@ -438,8 +439,17 @@ export async function mergeTracker(options = {}) {
     // an "Evaluated" it never claimed.
     if (!_canonicalStates.length && clean) return clean;
 
-    console.warn(`⚠️  Non-canonical status "${status}" → defaulting to "Evaluated"`);
-    return 'Evaluated';
+    // A dash is the Discarded sentinel. states.yml does not list it, and it is
+    // also the empty score. An unknown word such as "Phone screen" still
+    // stays pending.
+    if (clean === '—' || clean === '–' || clean === '-') return 'Discarded';
+
+    return null;
+  }
+
+  function refuseUnknownStatus(filename, status) {
+    console.warn(`⚠️  Skipping ${filename}: status "${status}" is not a tracker state. The addition was left pending.`);
+    return null;
   }
 
   // normalizeVia (Unicode-aware Via/agency key, #1596/#1603) lives in
@@ -1146,8 +1156,7 @@ export async function mergeTracker(options = {}) {
     // the value, and blank is never the way to say "none" here: every required
     // field has a documented value, and the "no data" cases have sentinels
     // (`—` / `N/A` for score, `—` for report, `❌` for pdf). Left unchecked, an
-    // empty status reaches validateStatus(''), which warns and returns
-    // "Evaluated" — recording a real evaluation state the row never claimed.
+    // empty status is not a state. Refuse it here rather than storing Evaluated.
     const blankRequiredCells = TSV_REQUIRED_FIELDS.filter(k => at(k) === '');
     if (blankRequiredCells.length) {
       console.warn(`⚠️  Skipping ${filename}: required cell(s) present but empty: ${blankRequiredCells.join(', ')} — use the documented sentinel (— / N/A) rather than a blank cell`);
@@ -1187,12 +1196,15 @@ export async function mergeTracker(options = {}) {
       return null;
     }
 
+    const status = validateStatus(at('status'));
+    if (status == null) return refuseUnknownStatus(filename, at('status'));
+
     return {
       num: parseTrackerNum(at('num')),
       date: at('date'),
       company: at('company'),
       role: at('role'),
-      status: validateStatus(at('status')),
+      status,
       score,
       pdf: at('pdf'),
       report: at('report'),
@@ -1287,6 +1299,8 @@ export async function mergeTracker(options = {}) {
         console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4]}" | "${parts[5]}") — refusing to merge a possible column swap`);
         return null;
       }
+      const status = validateStatus(resolved.status);
+      if (status == null) return refuseUnknownStatus(filename, resolved.status);
       addition = {
         num: parseTrackerNum(parts[0]),
         date: parts[1],
@@ -1295,7 +1309,7 @@ export async function mergeTracker(options = {}) {
         // Write-canonical: the tracker stores scores unbolded (verify-pipeline
         // rejects bold scores), so strip any markdown bold from the incoming cell.
         score: resolved.score.replace(/\*\*/g, '').trim(),
-        status: validateStatus(resolved.status),
+        status,
         pdf: parts[6],
         report: parts[7],
         notes: parts[8] || '',
@@ -1320,13 +1334,15 @@ export async function mergeTracker(options = {}) {
         console.warn(`⚠️  Skipping ${filename}: cannot tell score from status in columns 5–6 ("${parts[4].trim()}" | "${parts[5].trim()}") — refusing to merge a possible column swap`);
         return null;
       }
+      const status = validateStatus(resolved.status);
+      if (status == null) return refuseUnknownStatus(filename, resolved.status);
 
       addition = {
         num: parseTrackerNum(parts[0]),
         date: parts[1],
         company: parts[2],
         role: parts[3],
-        status: validateStatus(resolved.status),
+        status,
         // Write-canonical: strip any markdown bold so the stored score stays
         // unbolded (verify-pipeline rejects bold scores).
         score: resolved.score.replace(/\*\*/g, '').trim(),

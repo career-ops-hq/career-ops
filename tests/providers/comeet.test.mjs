@@ -112,10 +112,26 @@ try {
     fail(`row 1 = ${JSON.stringify(jobs[1])}`);
   }
 
-  if (parseComeetResponse(null, 'X').length === 0 && parseComeetResponse({}, 'X').length === 0) {
-    pass('non-array payload → empty result (no crash)');
-  } else {
-    fail('non-array payload should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parseComeetResponse([], 'X');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parseComeetResponse returns [] for []');
+    else fail(`parseComeetResponse [] → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parseComeetResponse(body, 'X'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('comeet: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parseComeetResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parseComeetResponse throws, naming what it got, for a body that is not a board');
   }
 
   // a location already containing "Remote" must not get a duplicate suffix

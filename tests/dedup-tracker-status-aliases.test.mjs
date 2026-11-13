@@ -111,14 +111,17 @@ ok('a bold alias with a trailing date ("**Entrevista** 2026-06-01") is still rea
 // ── Every spelling states.yml declares ──────────────────────────────────────
 // One company per spelling, each holding a higher-scored Evaluated row and a
 // lower-scored row under that spelling, with the same role title and no report
-// identity in common. If the spelling is read as Applied or later, both rows
-// survive; if not, the pair merges into the Evaluated row. One run of the CLI
-// covers all of them.
+// identity in common. Applied or later, and Rejected, keep both rows. Any
+// other spelling merges into the Evaluated row. One run of the CLI covers
+// all of them.
 //
 // Which states count as "in motion" is the script's policy, restated here on
 // purpose: a new state in states.yml fails the first check below until someone
 // decides which side of the line it is on.
+// Rejected is not in motion, and a title match still keeps it. Evaluated must
+// not delete that row or replace the rejection.
 const IN_MOTION = ['applied', 'responded', 'assessment', 'interview', 'offer', 'hired'];
+const KEPT_ON_TITLE = ['rejected'];
 const NOT_IN_MOTION = ['evaluated', 'rejected', 'discarded', 'skip'];
 
 const { loadCanonicalStates } = await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
@@ -146,9 +149,9 @@ ok(`all ${spellings.length} labels and aliases in states.yml are ranked as the s
     for (const p of pairs) {
       if (!left.has(p.keeperNum)) wrong.push(`"${p.text}": the Evaluated keeper was removed`);
       const survived = left.has(p.otherNum);
-      const inMotion = IN_MOTION.includes(p.id);
-      if (inMotion && !survived) wrong.push(`"${p.text}" (${p.id}): the in-flight row was deleted`);
-      if (!inMotion && survived) wrong.push(`"${p.text}" (${p.id}): the duplicate was not merged`);
+      const kept = IN_MOTION.includes(p.id) || KEPT_ON_TITLE.includes(p.id);
+      if (kept && !survived) wrong.push(`"${p.text}" (${p.id}): the row that must stay was deleted`);
+      if (!kept && survived) wrong.push(`"${p.text}" (${p.id}): the duplicate was not merged`);
     }
     assert.deepEqual(wrong, [], wrong.join('; '));
   });

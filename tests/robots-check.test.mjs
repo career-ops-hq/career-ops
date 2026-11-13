@@ -25,6 +25,7 @@ import {
   matchLength,
   percentDecode,
   clearRobotsCache,
+  crawlDelaySeconds,
   ROBOTS_PRODUCT_TOKEN,
   ROBOTS_MAX_BYTES,
 } from '../robots-check.mjs';
@@ -466,4 +467,30 @@ test('the default cache is per process and can be cleared', async () => {
   await robotsAllows('https://example.com/c', opts);
   assert.equal(calls.length, 2);
   clearRobotsCache();
+});
+
+// ── Crawl-delay ──────────────────────────────────────────────────────────
+// Not part of RFC 9309, but the Source Indexing Policy (CONTRIBUTING.md,
+// rule 6) asks a reader to honour a Crawl-delay the source states.
+
+test('Crawl-delay: the own group wins over *, and * applies when there is none', () => {
+  const text = 'User-agent: *\nCrawl-delay: 5\nDisallow: /api/\n\nUser-agent: career-ops\nCrawl-delay: 2\nAllow: /\n';
+  assert.equal(crawlDelaySeconds(text, ROBOTS_PRODUCT_TOKEN), 2);
+  assert.equal(crawlDelaySeconds(text, 'otherbot'), 5);
+});
+
+test('Crawl-delay: absent, malformed or negative reads as none', () => {
+  assert.equal(crawlDelaySeconds('User-agent: *\nDisallow: /api/\n', ROBOTS_PRODUCT_TOKEN), null);
+  assert.equal(crawlDelaySeconds('User-agent: *\nCrawl-delay: soon\nCrawl-delay: -3\n', ROBOTS_PRODUCT_TOKEN), null);
+  assert.equal(crawlDelaySeconds('Crawl-delay: 9\nUser-agent: *\nAllow: /\n', ROBOTS_PRODUCT_TOKEN), null);
+  assert.equal(crawlDelaySeconds('User-agent: *\nCrawl-delay: 1.5 # polite\n', ROBOTS_PRODUCT_TOKEN), 1.5);
+});
+
+test('an allowed verdict carries the Crawl-delay; a denied one does not', async () => {
+  const allowed = await gate('https://example.com/c', 'User-agent: *\nCrawl-delay: 3\nDisallow: /api/\n');
+  assert.deepEqual([allowed.allowed, allowed.crawlDelay], [true, 3]);
+  const none = await gate('https://example.com/c', 'User-agent: *\nDisallow: /api/\n');
+  assert.deepEqual([none.allowed, none.crawlDelay], [true, null]);
+  const denied = await gate('https://example.com/api/x', 'User-agent: *\nCrawl-delay: 3\nDisallow: /api/\n');
+  assert.deepEqual([denied.allowed, 'crawlDelay' in denied], [false, false]);
 });

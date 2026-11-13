@@ -16,13 +16,12 @@
  * 2. WHICH APPLICATION A COVER BELONGS TO. #2599 established that resolving a
  *    tailored artifact by company ALONE is a bug: two applications at the same
  *    company get the newest file, not their own. resolveTailoredCv fixed that
- *    for CVs via data/pdf-index.tsv. That manifest cannot carry a cover — its
- *    header is `# report\tpdf\thtml\tformat\tdate` with no kind column, and
- *    updatePDFManifest drops any existing row for a report number, so a cover
- *    generated with --report N EVICTS that report's CV row (#3887). Resolving a
- *    cover through it would sometimes hand back the CV. So the application path
- *    scopes on the tracker row's own company AND role instead, and returns null
- *    rather than guessing.
+ *    for CVs via data/pdf-index.tsv. Since #3959 that manifest keys each row on
+ *    report number AND artifact kind, so a tracker row's cover is looked up
+ *    there first, by report number and kind "cover": the recorded file wins
+ *    whatever it is called, and the report's CV row is never returned as its
+ *    cover. Without a cover row, the application path scopes on the tracker
+ *    row's own company AND role, and returns null rather than guessing.
  *
  * Lives under web/tests/ so the web CI collects it and the core runner never
  * has to know it exists — no test-all.mjs hook, no update-system.mjs
@@ -85,8 +84,15 @@ const { matchesTailoredCover } = await import('../../src/lib/apply/cv-match.mjs'
  * `rows` (optional) are written as data/applications.md in the legacy fixed
  * column order parseApplications falls back to, so the applicationNumber path
  * has a real tracker to join against.
+ *
+ * `manifest` (optional) is a list of data/pdf-index.tsv lines. With it, a stub
+ * tracker-utils.mjs stands in for the code checkout pdf-index.ts loads the
+ * manifest path from (web CI installs web dependencies alone, so the real core
+ * module is not importable); the temp dir is both roots. Without it the code
+ * root still points at the temp dir, where no tracker-utils.mjs exists, so the
+ * manifest lookup finds nothing and the filename match decides.
  */
-async function withFixture(files, fn, rows) {
+async function withFixture(files, fn, rows, manifest) {
   const root = mkdtempSync(join(tmpdir(), 'cover-resolver-'));
   const outputDir = join(root, 'output');
   mkdirSync(outputDir, { recursive: true });
@@ -115,13 +121,29 @@ async function withFixture(files, fn, rows) {
       ].join('\n')
     );
   }
+  if (manifest) {
+    mkdirSync(join(root, 'data'), { recursive: true });
+    // Static source: both paths derive from the arguments pdf-index.ts passes
+    // (the data root, then the tracker path), so no fixture value is spliced
+    // into the module text.
+    writeFileSync(join(root, 'tracker-utils.mjs'), [
+      "import path from 'node:path';",
+      "export const resolveTrackerPath = (rootDir) => path.join(rootDir, 'data', 'applications.md');",
+      "export const resolvePdfIndexPath = (trackerPath) => path.join(path.dirname(trackerPath), 'pdf-index.tsv');",
+    ].join('\n'));
+    writeFileSync(join(root, 'data', 'pdf-index.tsv'), manifest.join('\n') + '\n');
+  }
   const prev = process.env.CAREER_OPS_ROOT;
+  const prevCode = process.env.CAREER_OPS_CODE_ROOT;
   process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_CODE_ROOT = root;
   try {
     return await fn(outputDir);
   } finally {
     if (prev === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev;
+    if (prevCode === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = prevCode;
   }
 }
 
@@ -235,6 +257,64 @@ test('resolveTailoredCover: matches the role slug generate-cover-letter.mjs trun
       assert.equal(result, join(outputDir, 'acme-senior-director-of-product-mar-cover.pdf'));
     },
     [{ n: '12', company: 'Acme', role: 'Senior Director of Product Marketing' }]
+  );
+});
+
+// --- the report -> PDF manifest (#3959: one row per report AND kind) --------
+
+const MANIFEST_HEADER = '# report\tpdf\thtml\tformat\tdate\tkind - written by generate-pdf.mjs, do not edit';
+
+test('resolveTailoredCover: with an application number, the manifest\'s cover row wins even when its filename carries no role slug', async () => {
+  // A cover written with --out to a name of the user's choosing: the filename
+  // match alone finds nothing here, since "letter" is not the role slug.
+  await withFixture(
+    [['acme-letter-cover.pdf', -60000], ['acme-vp-marketing-cover.pdf', 0]],
+    async (outputDir) => {
+      const result = await resolveTailoredCover(undefined, '12');
+      assert.equal(result, join(outputDir, 'acme-letter-cover.pdf'));
+    },
+    [{ n: '12', company: 'Acme', role: 'VP Marketing' }],
+    [
+      MANIFEST_HEADER,
+      '12\toutput/cv-jane-doe-acme-2026-01-01.pdf\t\tletter\t2026-01-01\tcv',
+      '12\toutput/acme-letter-cover.pdf\t\tletter\t2026-01-01\tcover',
+    ]
+  );
+});
+
+test('resolveTailoredCover: the same report\'s CV row is never returned as its cover', async () => {
+  await withFixture(
+    [['cv-jane-doe-acme-2026-01-01.pdf']],
+    async () => {
+      const result = await resolveTailoredCover(undefined, '12');
+      assert.equal(result, null);
+    },
+    [{ n: '12', company: 'Acme', role: 'VP Marketing' }],
+    [MANIFEST_HEADER, '12\toutput/cv-jane-doe-acme-2026-01-01.pdf\t\tletter\t2026-01-01\tcv']
+  );
+});
+
+test('resolveTailoredCover: with no cover row in the manifest, the filename match still resolves this row\'s cover', async () => {
+  await withFixture(
+    [['cv-jane-doe-acme-2026-01-01.pdf'], ['acme-vp-marketing-cover.pdf']],
+    async (outputDir) => {
+      const result = await resolveTailoredCover(undefined, '12');
+      assert.equal(result, join(outputDir, 'acme-vp-marketing-cover.pdf'));
+    },
+    [{ n: '12', company: 'Acme', role: 'VP Marketing' }],
+    [MANIFEST_HEADER, '12\toutput/cv-jane-doe-acme-2026-01-01.pdf\t\tletter\t2026-01-01\tcv']
+  );
+});
+
+test('resolveTailoredCover: a cover row pointing outside output/ resolves nothing rather than widening to the filename match', async () => {
+  await withFixture(
+    [['acme-vp-marketing-cover.pdf']],
+    async () => {
+      const result = await resolveTailoredCover(undefined, '12');
+      assert.equal(result, null);
+    },
+    [{ n: '12', company: 'Acme', role: 'VP Marketing' }],
+    [MANIFEST_HEADER, '12\treports/012-acme-2026-01-01.md\t\tletter\t2026-01-01\tcover']
   );
 });
 
