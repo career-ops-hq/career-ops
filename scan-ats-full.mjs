@@ -1690,6 +1690,10 @@ function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
   return true;
 }
 
+// Set when main() settles (see exitWhenDrained at the end of this file). From
+// then on, the --json SIGTERM handler in main() leaves the result as it is.
+let mainSettled = false;
+
 async function main() {
   const opts = parseArgs(process.argv);
   if (!existsSync(PORTALS_PATH)) {
@@ -1939,7 +1943,14 @@ async function main() {
   if (opts.json) {
     let flushed = false;
     process.on('SIGTERM', () => {
-      if (flushed) return;
+      // Once main() has settled, its complete result or its error is already
+      // out, the exit code is set, and the process is only waiting for its
+      // event loop to drain. A partial result then would be a second JSON
+      // document after the complete one and, without --dry-run, would save the
+      // same roles again. The handler returns instead of being removed: with no
+      // listener, the signal would kill the process, and the web's scheduled
+      // runner counts only exit 0 as a finished sweep.
+      if (flushed || mainSettled) return;
       flushed = true;
       void (async () => {
         let saved = false;
@@ -2603,11 +2614,12 @@ async function main() {
 if (isMainModule(import.meta.url)) {
   // Once main() settles, set the exit code and let the process end on its own
   // when the event loop drains. On Windows, calling process.exit() right away
-  // made the run abort: Node 24 asserts in libuv when process.exit() runs right
-  // after a request (nodejs/node#56645), and the run ends with a crash code
-  // instead of 0 or 1. Measured 2026-11-13 on Node 24.14.1 with --limit 3
-  // --dry-run: a Greenhouse sweep aborted 4 times out of 4, and so did one that
-  // failed after the sweep; an Ashby sweep aborted 3 times out of 4.
+  // made the run abort: Node 23 and later assert in libuv when process.exit()
+  // runs right after a request, until the fix in 24.20.0 and 26.7.0
+  // (nodejs/node#56645), and the run ends with a crash code instead of 0 or 1.
+  // Measured 2026-11-13 on Node 24.14.1 with --limit 3 --dry-run: a Greenhouse
+  // sweep aborted 4 times out of 4, and so did one that failed after the sweep;
+  // an Ashby sweep aborted 3 times out of 4.
   //
   // The timer keeps #5570's guarantee: if something still holds the loop open
   // after the summary (a keep-alive socket, or a request aborting just as the
@@ -2616,6 +2628,7 @@ if (isMainModule(import.meta.url)) {
   // drains never waits for it.
   const EXIT_BACKSTOP_MS = 5_000;
   const exitWhenDrained = (code) => {
+    mainSettled = true;
     process.exitCode = code;
     setTimeout(() => {
       // Exit from a write-completion callback, queued after whatever is already
