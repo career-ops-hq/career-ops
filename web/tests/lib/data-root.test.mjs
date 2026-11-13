@@ -211,6 +211,18 @@ test("a data root under a symlink into a plugin copy is refused before it exists
   assert.equal(fs.existsSync(path.join(core, "new-data")), false);
 });
 
+test("a folder named ..something inside the plugins cache is refused; a .. segment is not", () => {
+  const home = tmpdir();
+  const cache = path.join(home, ".claude", "plugins", "cache");
+  const inside = path.join(cache, "..local", "data");
+  assert.throws(
+    () => resolve(tmpdir(), { HOME: home, CAREER_OPS_ROOT: inside }),
+    (err) => err instanceof UnsafeDataRootError && err.root === inside,
+  );
+  const outside = path.join(home, ".claude", "plugins", "data");
+  assert.equal(resolve(tmpdir(), { HOME: home, CAREER_OPS_ROOT: `${cache}${path.sep}..${path.sep}data` }), outside);
+});
+
 test("a relative marker in a plugin copy resolves inside it and is refused", () => {
   const { home, core } = pluginLayout();
   fs.writeFileSync(path.join(core, ".career-ops-data"), "./data");
@@ -273,6 +285,8 @@ test("AGREES with the core's path-resolver.mjs on every branch", async (t) => {
     // "LINK_MISSING" is a not-yet-created folder under a symlink to the copy (#7026).
     { name: "checkout, CAREER_OPS_ROOT under a symlink into a plugin copy", plugin: "elsewhere", marker: null, env: { CAREER_OPS_ROOT: "LINK_MISSING" } },
     { name: "checkout, marker under a symlink into a plugin copy", plugin: "elsewhere", marker: "LINK_MISSING", env: {} },
+    // "DOTDOT_NAME" is a folder named "..local" inside the copy: a name, not a parent step.
+    { name: "checkout, CAREER_OPS_ROOT under a ..-prefixed folder in a plugin copy", plugin: "elsewhere", marker: null, env: { CAREER_OPS_ROOT: "DOTDOT_NAME" } },
   ];
 
   // Every variable either resolver reads. Cleared before each case so the real
@@ -316,7 +330,7 @@ test("AGREES with the core's path-resolver.mjs on every branch", async (t) => {
       if (!link) continue; // no symlink privilege here: nothing to compare
       linkMissing = path.join(link, "new-data");
     }
-    const subst = (v) => (v === "ABS" ? abs : v === "INSIDE" ? inside : v === "LINK_MISSING" ? linkMissing : v);
+    const subst = (v) => (v === "ABS" ? abs : v === "INSIDE" ? inside : v === "LINK_MISSING" ? linkMissing : v === "DOTDOT_NAME" ? path.join(copy, "..local", "data") : v);
 
     fs.copyFileSync(src, path.join(core, "path-resolver.mjs"));
     if (c.marker !== null) fs.writeFileSync(path.join(core, ".career-ops-data"), subst(c.marker));

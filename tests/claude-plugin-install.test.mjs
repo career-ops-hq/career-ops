@@ -66,6 +66,10 @@ test('isPluginInstallCopy matches only the copies Claude Code owns', (t) => {
   assert.equal(isPluginInstallCopy(join(base, 'cfg', 'plugins', 'cache', 'x'), { CLAUDE_CONFIG_DIR: join(base, 'cfg') }), true);
   // This checkout is loaded in place, never a copy.
   assert.equal(isPluginInstallCopy(ROOT, env), false);
+  // A folder whose name starts with two dots is still inside the copy; only a
+  // '..' segment leaves it.
+  assert.equal(isPluginInstallCopy(join(plugins, 'cache', '..local', 'data'), env), true);
+  assert.equal(isPluginInstallCopy(join(plugins, 'cache', '..', 'data'), env), false);
 });
 
 test('a plugin copy defaults its data root to ~/career-ops-data', (t) => {

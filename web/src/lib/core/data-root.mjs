@@ -147,7 +147,8 @@ function spellings(p, host) {
 
 function isWithin(child, parent) {
   const rel = path.relative(parent, child);
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  // A ".." segment leaves the parent; a name like "..local" stays inside it.
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel);
 }
 
 /**
