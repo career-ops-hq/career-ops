@@ -208,6 +208,10 @@ export default {
         }
         jobs.push({ title: card.title, url: card.url, company: card.company, location: card.location });
       }
+      // A full page that brought the walk to max_jobs is a cap stop even when its
+      // last cards repeat ids already seen (featured postings recur): the inner
+      // loop only sees the cap when another new id follows. As in magneto.mjs.
+      if (!probing && stopReason === 'complete' && cards.length >= OBSERVED_PAGE_SIZE && jobs.length >= maxJobs) stopReason = 'cap';
       if (stopReason === 'cap' || fresh === 0 || jobs.length >= maxJobs) break;
       if (page === maxPages && !probing && cards.length >= OBSERVED_PAGE_SIZE) stopReason = 'cap';
     }

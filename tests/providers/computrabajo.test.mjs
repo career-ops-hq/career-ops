@@ -136,6 +136,26 @@ test('fetch() enforces the 3-page / 15-posting crawl caps and paces with the sha
   }
 });
 
+test('a full page that reaches max_jobs is a cap stop even when its last cards repeat earlier ids', async () => {
+  // 15 new ids, then 5 that repeat them (featured postings recur): the 15th new
+  // posting is the last one the page adds, and the board has more pages.
+  const ids = Array.from({ length: 15 }, (_, i) => `R${i}`);
+  const full = page(...ids.map((id) => card(id)), ...ids.slice(0, 5).map((id) => card(id)));
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (m) => warnings.push(m);
+  try {
+    const capped = makeCtx({ 1: full, 2: page(card('NEXT')) });
+    const jobs = await provider.fetch({ name: 'X', careers_url: BASE }, capped.ctx);
+    assert.equal(jobs.length, 15);
+    assert.equal(capped.calls.length, 1);
+    assert.match(warnings.join('\n'), /crawl limit/);
+    assert.deepEqual(jobs.truncated, { fetched: 15, reason: 'page-cap' });
+  } finally {
+    console.warn = warn;
+  }
+});
+
 test('fetch() stops when a page brings no new ids (ignored page parameter)', async () => {
   const same = page(card('S1'), card('S2'));
   const { ctx, calls } = makeCtx({ 1: same, 2: same, 3: same });
