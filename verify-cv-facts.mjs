@@ -3345,7 +3345,10 @@ export function verifyFacts(targetText, {
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
   const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
-  const sourceText = sourceTexts.join('\n');
+  // Separate files with a blank line, not a bare newline: a file with no
+  // trailing newline would otherwise soft-wrap into the next file's opening
+  // line when the drift and authorship checks join soft wraps.
+  const sourceText = sourceTexts.join('\n\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);

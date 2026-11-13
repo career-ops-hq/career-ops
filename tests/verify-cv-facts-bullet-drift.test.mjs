@@ -248,6 +248,21 @@ try {
   check('verifyFacts passes the source bullet verbatim',
     run(ul('Used Kafka for event ingestion in the billing service')).verdict === 'pass', null);
 
+  // Source files are joined before the drift check reads them. A file with no
+  // trailing newline must not soft-wrap into the next file's opening line, or a
+  // verb from the second file would vouch for a bullet anchored in the first.
+  // fileA deliberately has no trailing newline.
+  {
+    const fileA = join(tmp, 'a.md');
+    const fileB = join(tmp, 'b.md');
+    writeFileSync(fileA, '- Supported the pricing team on the 2024 repricing analysis');
+    writeFileSync(fileB, 'Presented the migration of reporting to Snowflake\n');
+    write();
+    const across = verifyFacts(ul('Presented the 2024 repricing analysis'), { sourcePaths: [fileA, fileB], configPath: config });
+    check('a verb in a second source file does not vouch across the file boundary',
+      across.unsupportedFacts.some(claim => claim.kind === 'drift' && claim.added.includes('presented')), across);
+  }
+
   write({ allow_swaps: ['used -> led'] });
   check('allow_swaps in cv-facts.json clears the block',
     run(ul('Led a Kafka migration for the billing service')).verdict === 'pass', null);
