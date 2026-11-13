@@ -63,6 +63,8 @@ for (const [loc, text] of locales) {
   check(`${loc} Step 1d offers an interrupted prep entry when session files exist`,
     bullets.length === 2 && /`## (?:Round \[N\] Debrief|Debriefing del Round \[N\]) — \[YYYY-MM-DD\]`/.test(bullets[1]),
     bullets[1] ? bullets[1].slice(0, 100) : 'no second bullet');
+  check(`${loc} Step 1d shows that entry's round type`,
+    /`\*\*(?:Round type|Tipo di round|Type de round) ?:\*\*`/.test(bullets[1] || ''), 'no round-type label in the offer');
 
   const s8first =section(text, 8).split('\n').slice(1).find((l) => l.trim()) || '';
   check(`${loc} Step 8 opening names Step 1d`, /(?:Step|Passo) 1d/.test(s8first), s8first.slice(0, 100));
