@@ -1518,6 +1518,40 @@ function factStatements(text) {
     .filter(Boolean);
 }
 
+/** A line that opens its own block: list item, ordered item, heading, table row, quote or HTML tag. */
+const BLOCK_START_RE = /^\s*(?:[-*+]\s|\d+[.)]\s|#|\||>|<)/u;
+/** A line that closes its block: heading, table row, bold-only label, or an explicit hard break. */
+const BLOCK_END_RE = /^\s*(?:#|\|)|^\s*\*\*[^*]+\*\*\s*$|(?:\\|\s{2}|>)$/u;
+
+/**
+ * Join soft-wrapped continuation lines in Markdown source so a bullet or
+ * paragraph that spans several physical lines reads as one statement. A line
+ * continues the previous one unless it opens its own block, the previous line
+ * closes one, or either line is blank.
+ *
+ * This runs on source text only. In generated text a newline separates
+ * elements, so factStatements keeps splitting on every newline there; joining
+ * soft wraps in generated text regresses the "a phrase spanning two statements
+ * is not a claim" self-test.
+ */
+function joinSoftWraps(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  return lines
+    .map((line, i) => {
+      if (i === 0) return line;
+      const prev = lines[i - 1];
+      const soft = line.trim() && prev.trim()
+        && !BLOCK_START_RE.test(line) && !BLOCK_END_RE.test(prev);
+      return soft ? ` ${line.trim()}` : `\n${line}`;
+    })
+    .join('');
+}
+
+/** factStatements for source documents: soft-wrapped lines are one statement. */
+function sourceStatementsOf(text) {
+  return factStatements(joinSoftWraps(text));
+}
+
 /** Return conservative content tokens used only to link a rewrite to its source statement. */
 function attributionTokens(text) {
   return normalizeFact(text)
@@ -1538,7 +1572,7 @@ function attributionTokens(text) {
  * third-party execution evidence rather than candidate direct-work evidence.
  */
 export function delegatedAuthorshipClaims(targetText, sourceText) {
-  const sourceStatements = factStatements(sourceText);
+  const sourceStatements = sourceStatementsOf(sourceText);
   const directSources = sourceStatements
     .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
     .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
@@ -2506,7 +2540,7 @@ function parseSwaps(entries = []) {
 export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], allowFacts = [] } = {}) {
   const swaps = parseSwaps(allowSwaps);
   const declared = driftKeySet(allowFacts.map(fact => String(fact).trim()).filter(fact => !/\s/u.test(fact)));
-  const sources = factStatements(sourceText)
+  const sources = sourceStatementsOf(sourceText)
     .map(stripListMarker)
     .filter(statement => !HEADING_RE.test(statement))
     .map((statement) => {

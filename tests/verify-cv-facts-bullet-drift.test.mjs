@@ -114,6 +114,43 @@ check('-ing list nouns in later clauses are not read as verbs',
   check('one shared non-verb word is still not an anchor',
     bulletDriftClaims(ul('Built it using a 3CX'), '- Ran it on 3CX.\n').length === 0, null);
 }
+// #6889: a soft-wrapped bullet or paragraph in cv.md is one statement on the
+// source side, so a verbatim or reworded CV bullet does not read a continuation
+// line's verb as drift. A new block (next list item, heading) still breaks.
+{
+  const wrappedBullet = '### Acme Corp\n\n'
+    + '- Migrated the previous service desk tool for the operations team across the\n'
+    + '  organization, established the CMDB through Discovery and its business services\n';
+  const verbatim = ul('Migrated the previous service desk tool for the operations team across the organization, established the CMDB through Discovery and its business services');
+  check('a verbatim copy of a wrapped source bullet does not flag "established"',
+    bulletDriftClaims(verbatim, wrappedBullet).length === 0, bulletDriftClaims(verbatim, wrappedBullet));
+
+  const wrappedParagraph = 'Joined the platform team as its sole engineer for the operations group the day the vendor\n'
+    + 'contract was signed, built the initial foundation.\n';
+  const paraCopy = ul('Joined the platform team as its sole engineer for the operations group the day the vendor contract was signed, built the initial foundation.');
+  check('a verbatim copy of a wrapped source paragraph does not flag "built"',
+    bulletDriftClaims(paraCopy, wrappedParagraph).length === 0, bulletDriftClaims(paraCopy, wrappedParagraph));
+
+  // jwwoody's variant: a reworded bullet must not anchor to the continuation
+  // line and flag its own opening verb, which the source bullet also uses.
+  const wrappedReworded = '### Acme Corp\n**Software Engineer**\n\n'
+    + '- Contributed across the wider backend service layer: signed-URL generation, livestream access\n'
+    + '  rules and HLS asset endpoints in the media service.\n';
+  const reworded = ul('Contributed endpoints for signed URLs, livestream access rules and video assets to our backend media services.');
+  check('a reworded CV bullet does not flag the source bullet\'s own opening verb',
+    !bulletDriftClaims(reworded, wrappedReworded).some(claim => claim.added.includes('contributed')),
+    bulletDriftClaims(reworded, wrappedReworded));
+
+  // Guard: a new list item after a wrapped bullet stays its own statement, so a
+  // later bullet's verb cannot vouch for an unrelated CV bullet. If the wrap
+  // swallowed the next item, "led" below would be vouched and the drift lost.
+  const wrappedThenEntry = '- Supported the pricing team on the 2024\n'
+    + '  repricing analysis end to end\n'
+    + '- Led the migration of reporting to Snowflake\n';
+  check('a new list item after a wrapped bullet stays its own statement',
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), wrappedThenEntry).some(claim => claim.added.includes('led')),
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), wrappedThenEntry));
+}
 // Review on #6630: an opening modifier from the JD is not a verb, so it warns.
 {
   const [modifier] = drift(ul('Scalable ETL pipeline built in Python for finance reporting'));
