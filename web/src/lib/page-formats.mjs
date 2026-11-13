@@ -27,6 +27,21 @@ export const PAGE_FORMATS = new Set(["a4", "letter"]);
 export const DEFAULT_PAGE_FORMAT = "letter";
 
 /**
+ * Canonicalize one candidate format value, or reject it.
+ *
+ * Case and surrounding whitespace are forgiven ("A4", " Letter ") matching
+ * the core helper in lib/page-format.mjs. Returns "a4", "letter", or null.
+ *
+ * @param {unknown} value
+ * @returns {"a4"|"letter"|null}
+ */
+export function normalizePageFormat(value) {
+  if (typeof value !== "string") return null;
+  const lower = value.trim().toLowerCase();
+  return PAGE_FORMATS.has(lower) ? lower : null;
+}
+
+/**
  * Body width per format, for the `{{PAGE_WIDTH}}` placeholder the pdf agent
  * fills. The agent lays the body out and generate-pdf.mjs sizes the sheet, so
  * the prompt has to name the width that matches the sheet the backend will
