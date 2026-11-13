@@ -123,9 +123,13 @@ async function withFixture(files, fn, rows, manifest) {
   }
   if (manifest) {
     mkdirSync(join(root, 'data'), { recursive: true });
+    // Static source: both paths derive from the arguments pdf-index.ts passes
+    // (the data root, then the tracker path), so no fixture value is spliced
+    // into the module text.
     writeFileSync(join(root, 'tracker-utils.mjs'), [
-      `export const resolveTrackerPath = () => ${JSON.stringify(join(root, 'data', 'applications.md'))};`,
-      `export const resolvePdfIndexPath = () => ${JSON.stringify(join(root, 'data', 'pdf-index.tsv'))};`,
+      "import path from 'node:path';",
+      "export const resolveTrackerPath = (rootDir) => path.join(rootDir, 'data', 'applications.md');",
+      "export const resolvePdfIndexPath = (trackerPath) => path.join(path.dirname(trackerPath), 'pdf-index.tsv');",
     ].join('\n'));
     writeFileSync(join(root, 'data', 'pdf-index.tsv'), manifest.join('\n') + '\n');
   }
