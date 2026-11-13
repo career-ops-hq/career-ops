@@ -47,15 +47,6 @@ export function createJobsPersister({ write, isActive, delayMs = 1000, setTimer 
   };
 }
 
-/**
- * A worker still marked running when the page opens did not finish. Keep the
- * row and say the reload cut it off. Other rows stay as stored.
- *
- * @template {{ status?: string, steps?: { kind: string, label: string, ts: number }[] }} T
- * @param {T[] | null | undefined} stored
- * @param {number} now
- * @returns {T[]}
- */
 export function restoreStoredJobs(stored, now) {
   if (!Array.isArray(stored)) return [];
   return stored.map((job) => {
@@ -69,15 +60,6 @@ export function restoreStoredJobs(stored, now) {
   });
 }
 
-/**
- * The first render's job list is empty, before restore. Writing that list
- * replaces the saved history. Save only once restore has been rendered.
- *
- * @template T
- * @param {{ save: (jobs: T[]) => void } | null | undefined} persister
- * @param {boolean} ready
- * @param {T[]} jobs
- */
 export function saveJobsAfterOpen(persister, ready, jobs) {
   if (!ready || !persister) return;
   persister.save(jobs);
