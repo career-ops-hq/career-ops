@@ -30,6 +30,9 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `text.md` | `text` | Tailored markdown CV (no PDF) |
 | `cover.md` | `cover` | Cover letter generator |
 | `email.md` | `email` | Application email drafts (draft-only) |
+| `pitch.md` | `pitch` | Proposal draft for a freelance or contract gig (draft-only) |
+| `rate.md` | `rate` | Rate position for a freelance or contract gig |
+| `gig.md` | `gig` | Expert profile for AI-training and AI-evaluation platforms (draft-only) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
 | `interview.md` | `interview` | Interactive profile & CV onboarding |

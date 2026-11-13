@@ -188,6 +188,10 @@ Do this after Step 1.6 and before Step 2. It never stops the worker.
 
 The check is opt-in (`config/profile.yml` → `evidence_freshness.enabled: true`) and runs once per batch run, not once per worker: before the first offer, `batch-runner.sh` runs `node evidence-freshness.mjs` and, when the check is on, appends its JSON to this prompt under **Runtime: GitHub evidence freshness**. Do not run the script yourself; read `status`, `stale`, `reason` and the one-line `notice` from that section. They say how old the newest `output/github-evidence-*.json` from `expand` is, and how many PRs the candidate authored and merged since then in repos they do not own. This worker is unattended, so ask nothing, never run `expand` or `github-evidence.mjs`, and never change the score or decision because of it. Record it in the report instead: Machine Summary `evidence_freshness`, and, only when `stale` is true, the header line `**GitHub evidence:** {notice}` with the notice (printed in English) translated into `language.output`. With no such section (the check is off, which is the default, or it could not run), record `not_evaluated` and continue.
 
+### Step 1.8 — Search tracks (optional)
+
+If `config/profile.yml` has a `tracks:` block, read `modes/tracks/README.md` and the mode file of each enabled track, save the JD text to `jds/` and run `node track-signals.mjs` on it as that file describes. Use its findings as evidence to check in Blocks A, B and D. A worker never drafts a pitch and never contacts anyone. With no `tracks:` block, skip this step.
+
 ### Step 2 — Evaluate A-G
 
 Before deriving public facts, follow **Local job-facts cache (#1025)** below when a strong identity and current verified liveness are available. A cache miss continues with normal evaluation. All personal fit and judgments are recomputed.

@@ -508,6 +508,41 @@ npm run career-profile -- verify-cv --payload base.json --selection selection.js
 
 ---
 
+## track-signals
+
+Reads one posting against the search tracks enabled in `config/profile.yml` → `tracks:` (`docs/TRACKS.md`). Zero-LLM and offline. Per enabled track it reports what the posting states, the sentence each finding came from, and a `flags` list with a level (`blocker`, `caution`, `info`). Tracks that are off are left out; a profile with no `tracks:` block yields no track sections. The evaluation modes run it before Block A and treat it as evidence to check.
+
+```bash
+node track-signals.mjs jds/acme.md --title "AI Engineer" --location "Remote (EMEA)"   # JSON
+node track-signals.mjs - --summary < posting.txt     # text, from stdin
+node track-signals.mjs --self-test
+```
+
+---
+
+## tracks-setup
+
+Turns search tracks on. Writes the `tracks:` block into `config/profile.yml` and merges the boards, search queries and title keywords of the chosen tracks from `templates/tracks/portals.tracks.yml` into `portals.yml`. Both files are edited line by line: it only adds, and switches on boards that were present but disabled. Prints one JSON object describing the changes.
+
+```bash
+node tracks-setup.mjs --enable europe,ai_gigs,freelance --remote remote_first --dry-run
+node tracks-setup.mjs --enable freelance --freelance-only
+```
+
+---
+
+## gigs
+
+Lists the freelance and contract rows of the tracker: rows whose Notes start with `gig: {rate}, {length}, {direct | via agency}`. Shows the rate as a day rate, the contract value the stated length implies (from `tracks.freelance.billable_days_per_year`), and the rate against `tracks.freelance.day_rate`. Read-only; a figure the segment does not state stays empty.
+
+```bash
+node gigs.mjs             # JSON
+node gigs.mjs --summary   # table
+node gigs.mjs --self-test
+```
+
+---
+
 ## salary-gap
 
 Folds compensation observations into per-application desired/advertised/actual values and gap aggregates. Sources: `reports/*.md` Machine Summary `advertised_comp` (advertised, source `jd` — historical reports backfill automatically), `data/salary-observations.tsv` (desired/actual/stated, append-only), and `config/profile.yml` `compensation.target_range` (desired default). Fold precedence: highest trust tier wins, then latest date (`actual`: contract > offer-letter > recruiter-verbal > user). Aggregates group by (company, role) and per currency — no FX conversion. Unparseable amounts, orphaned tracker numbers, mislabeled report links, sample sizes, and staleness are always reported.

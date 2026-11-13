@@ -98,6 +98,10 @@ Hard limits for Blocks D and G combined:
 
 If deeper company research is useful, recommend running `/career-ops deep` separately after the evaluation.
 
+## Search tracks (optional)
+
+If `config/profile.yml` has a `tracks:` block, read `modes/tracks/README.md` now and follow it: it loads the mode file of each enabled track (Europe, AI gigs, freelance, remote) and runs `node track-signals.mjs` on the posting. The tracks add rows to Block A, flag lines to Block B and a rate analysis to Block D; they add no blocks and no scoring dimensions. With no `tracks:` block, skip this section.
+
 ## Step 0 — Archetype Detection
 
 Classify the job against the archetypes in `_shared.md` — which means the user's

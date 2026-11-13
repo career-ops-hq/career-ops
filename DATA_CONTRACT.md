@@ -118,6 +118,10 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/auto-pipeline.md` | Auto-pipeline instructions |
 | `modes/contacto.md` | LinkedIn outreach instructions |
 | `modes/email.md` | Formal application email draft instructions |
+| `modes/pitch.md` | Freelance proposal draft instructions |
+| `modes/rate.md` | Freelance rate and negotiation position instructions |
+| `modes/gig.md` | AI-training and AI-evaluation platform profile instructions |
+| `modes/tracks/*` | Search-track evaluation add-ons: Europe, AI gigs, freelance, remote (`docs/TRACKS.md`) |
 | `modes/deep.md` | Research prompt instructions |
 | `modes/regional/*` | Regional market calibration modes |
 | `modes/ofertas.md` | Comparison instructions |

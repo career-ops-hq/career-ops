@@ -1,0 +1,128 @@
+# Search-track presets for portals.yml (docs/TRACKS.md).
+#
+# Read by tracks-setup.mjs, which merges the tracks you enable into YOUR
+# portals.yml: it adds the boards and search queries below that you do not
+# have yet (matched by name), turns on the ones you have switched off, adds
+# missing title keywords, and writes the tracks_filter block. It never removes
+# or rewrites anything of yours. The scanner does not read this file.
+#
+# Every board here is a public API, feed or page read without logging in.
+# Sources that forbid automated access, sit behind a bot wall or need a paid
+# key are left out on purpose; docs/TRACKS.md lists them so you can check
+# them by hand.
+
+europe:
+  job_boards:
+    - name: Arbeitnow
+      provider: arbeitnow
+      max_pages: 3
+      notes: "EU/DACH-heavy board, public API, newest first"
+    - name: "Arbeitsagentur: AI and software"
+      provider: arbeitsagentur
+      arbeitsagentur:
+        keywords: ["KI Entwickler", "AI Engineer", "Machine Learning", "LLM"]
+        days: 30
+        angebotsart: [1]
+      notes: "German federal employment agency, official public API. Edit keywords to your roles."
+    - name: GermanTechJobs
+      provider: germantechjobs
+      notes: "German IT jobs with a salary on every posting (public RSS feed)"
+    - name: Landing.jobs
+      provider: landingjobs
+      notes: "Europe-focused tech board, public API"
+    - name: The Hub
+      provider: thehub
+      max_pages: 3
+      thehub:
+        countryCode: EU
+        includeRemote: true
+      notes: "Nordic and EU startup board"
+  search_queries:
+    - name: "Europe: AI roles on ATS boards, remote EMEA"
+      query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co "AI Engineer" OR "LLM Engineer" OR "Applied AI" "Remote" ("Europe" OR "EMEA" OR "Germany")'
+      enabled: true
+    - name: "DACH: KI and software roles on Personio and JOIN"
+      query: 'site:jobs.personio.de OR site:join.com "KI" OR "AI Engineer" OR "Machine Learning" ("remote" OR "Homeoffice")'
+      enabled: true
+
+ai_gigs:
+  title_positive:
+    - "Machine Learning"
+    - "Applied Scientist"
+    - "Prompt"
+    - "RAG"
+    - "Evals"
+    - "Evaluation"
+    - "AI Trainer"
+    - "Copilot"
+  job_boards:
+    - name: Agentic Engineering Jobs
+      provider: agentic-jobs
+      notes: "AI-agent engineering roles, public API"
+    - name: 'Hacker News "Who is hiring?"'
+      provider: hackernews
+      notes: "Monthly thread; many remote AI roles state their region in the first line"
+    - name: Welcome to the Jungle
+      provider: wttj
+      wttj:
+        queries: ["ai engineer", "llm engineer", "machine learning engineer", "applied ai"]
+        max_hits: 100
+      notes: "European startup board via its public search index"
+  search_queries:
+    - name: "AI gigs: agent and LLM engineering"
+      query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co "Agent Engineer" OR "LLM Engineer" OR "AI Automation" OR "Forward Deployed" remote'
+      enabled: true
+    - name: "AI gigs: evaluation and AI quality"
+      query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co "AI Evaluation" OR "LLM Evaluation" OR "Evals Engineer" OR "Red Team" remote'
+      enabled: true
+
+freelance:
+  job_boards:
+    - name: freelancermap
+      provider: freelancermap
+      notes: "Largest DACH freelance project board; the public page shows the newest projects only"
+    - name: Braintrust
+      provider: braintrust
+      braintrust:
+        job_types: [freelance]
+      notes: "Freelance talent network, public API; rates in USD"
+    - name: "Arbeitsagentur: freelance and self-employed"
+      provider: arbeitsagentur
+      arbeitsagentur:
+        keywords: ["KI", "Softwareentwicklung", "IT Berater"]
+        days: 30
+        angebotsart: [2]
+      notes: "Self-employment offers (Selbstaendigkeit) on the federal agency's API. Edit keywords to your services."
+    - name: 'Hacker News "Freelancer?"'
+      provider: hackernews
+      hackernews:
+        thread: freelancer
+      notes: "Clients seeking freelancers; the thread has been quiet since late 2025"
+  search_queries:
+    - name: "Freelance: AI projects in DACH"
+      query: '"Freelancer" OR "freiberuflich" OR "Projektanfrage" "KI" OR "LLM" OR "GenAI" remote Tagessatz'
+      enabled: true
+    - name: "Freelance: AI contracts in English"
+      query: '"contract" OR "freelance" "AI Engineer" OR "LLM" OR "AI automation" "day rate" OR "outside IR35" OR "B2B" remote Europe'
+      enabled: true
+
+remote:
+  job_boards:
+    - name: Remotive
+      provider: remotive
+    - name: RemoteOK
+      provider: remoteok
+    - name: We Work Remotely
+      provider: weworkremotely
+    - name: Working Nomads
+      provider: workingnomads
+    - name: Himalayas
+      provider: himalayas
+    - name: NoDesk
+      provider: nodesk
+    - name: "Jobicy: Europe"
+      provider: jobicy
+      geo: europe
+      notes: "Remote-only board, filtered server-side to roles open to Europe"
+  tracks_filter:
+    remote_fit: drop

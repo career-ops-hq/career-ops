@@ -433,6 +433,41 @@ cover_letter:
 #   triage_threshold: 3.5
 #   triage_min_urls: 5
 
+# ── Search tracks (optional) ───────────────────────────────────────────────
+#
+# Four optional tracks on top of the normal search: Europe, AI gigs,
+# freelance, remote. Absent (the default), nothing changes. Turn them on with
+#   node tracks-setup.mjs --enable europe,ai_gigs,freelance --remote remote_first
+# or by uncommenting what you want. docs/TRACKS.md explains every field.
+#
+# tracks:
+#   europe:
+#     enabled: true
+#     base_country: "Germany"            # where you live
+#     work_authorization: eu_citizen     # eu_citizen | uk_citizen | blue_card | residence_permit | needs_sponsorship
+#     target_countries: []               # empty = any country
+#     languages: { en: C1, de: native }  # CEFR level or native, per language you work in
+#     contract_types: []                 # empty = any; employment | fixed_term | eor | temp_agency | freelance
+#   ai_gigs:
+#     enabled: true
+#     focus: []                          # empty = all; llm_engineer | agent_engineer | applied_ai | ml_engineer | llmops | evals | ai_automation | ai_consulting | ai_product
+#     include_crowd_work: false          # per-task labelling and rating platforms
+#   freelance:
+#     enabled: true
+#     mode: alongside                    # alongside (next to employment) | only
+#     day_rate: { target: null, minimum: null, currency: EUR }   # null = pay is shown, never counted against a gig
+#     hours_per_day: 8
+#     billable_days_per_year: 200
+#     min_contract_months: null
+#     max_payment_terms_days: 45
+#     accept_agencies: true
+#     fx_to_base: {}                     # your own rates, e.g. { USD: 0.92, GBP: 1.17 }; no rate = no conversion
+#   remote:
+#     preference: remote_first           # remote_only | remote_first | hybrid_ok | any
+#     timezone: "Europe/Berlin"
+#     hybrid_cities: []                  # cities you would commute to
+#     max_onsite_days_per_month: null
+
 # ── Re-apply Cooldown Windows ──────────────────────────────────────────────
 #
 # Define cooldown windows for companies where you've recently applied.

@@ -174,6 +174,9 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 | `reeval-candidates.mjs` | Read-only, zero-LLM re-evaluation finder — lists tracker rows (`--status`, default `Evaluated`) whose last evaluation (latest of the Date column, `Re-eval YYYY-MM-DD` Notes markers and linked report header dates) predates the last change to `cv.md`, `article-digest.md`, `config/profile.yml` or `modes/_profile.md` (last commit date when the file is committed in git, file mtime otherwise, labelled approximate); never re-evaluates, never writes (JSON or `--summary`) |
 | `tracker-sync-check.mjs` | Status-drift checker between `data/applications.md` and `data/active-interviews.md` — matches rows via a `#N in tracker` Notes reference or fuzzy Company+Role, then two-tier resolves mismatches (auto-tier1 via canonical lifecycle order, needs-review-tier2 via `git blame` timestamps). Read-only/reporting in this version — does not write status fixes. Wired into `verify-pipeline.mjs`'s health check. |
 | `salary-gap.mjs` | Desired/advertised/actual comp gap analyzer — folds report `advertised_comp` + `data/salary-observations.tsv` (JSON or `--summary`) |
+| `track-signals.mjs` | Zero-LLM reader of one posting against the search tracks in `config/profile.yml` → `tracks:` (remote scope and time zone, work authorization, languages, engagement type, rate, contract terms, AI archetype); JSON or `--summary`. Evidence for the evaluation, never a verdict (`docs/TRACKS.md`) |
+| `tracks-setup.mjs` | Turns search tracks on: writes the `tracks:` block into `config/profile.yml` and merges the matching boards from `templates/tracks/portals.tracks.yml` into `portals.yml` without removing anything (`--dry-run` previews) |
+| `gigs.mjs` | Read-only list of tracker rows whose Notes start with a `gig:` segment: day rate, length, implied contract value, agency, and the rate against `tracks.freelance.day_rate` (JSON or `--summary`) |
 | `negotiation-roi.mjs` | Salary-negotiation talking-point generator — anchors an ask in a quantified `interview-prep/story-bank.md` achievement, kept only if the same number also appears verbatim in `cv.md` (v1 safety gate), converted to an estimated annualized dollar value from an explicit wage/frequency input (never guessed); read-only, draft-only (JSON or `--summary`) |
 | `assessment-log.mjs` | Skills-assessment logger — `add` appends platform/subject/threshold/score + staleness note to `data/assessments.tsv` (JSON or `--summary`); `--kind take-home` tracks take-home/demo assignments (deadline with offset, deliverable, proof), `submit` records a submission as a new row, `open [--tz]` lists unsubmitted ones by deadline in your timezone with a 48h warning (records and reminds only, never submits) |
 | `ats-payload.mjs` | ATS payload transform for `build-cv-html.mjs` payloads — one safe transform (fold `competencies[]` into `skills[]`, idempotent, so the same facts ship comma-delimited under a header parsers recognise) plus three lints it reports and deliberately never applies (`employer-in-role`, `parenthetical-in-company`, `multiple-date-ranges`). Payload on stdout, findings on stderr; read-only (never writes `cv.md` / `config/profile.yml`) |
@@ -324,6 +327,22 @@ location_filter:
 max_posting_age_days: 45
 ```
 
+#### Step 3b: Search tracks (optional)
+After the two files exist, ask once:
+> "Four optional search tracks can widen or sharpen the search. Want any of them?
+> - **Europe** — European boards, plus checks for work authorization, required languages and contract type
+> - **AI gigs** — AI engineering, agent, evaluation and consulting work, including expert AI-training platforms
+> - **Freelance** — contract projects priced by the hour or day, next to permanent roles or instead of them
+> - **Remote** — remote only, remote first, or hybrid is fine; the scanner can then drop roles that are remote for another region only"
+
+For a yes, run the writer with their choices. It only adds: every board and keyword they already have stays.
+
+```bash
+node tracks-setup.mjs --enable europe,ai_gigs,freelance --remote remote_first --country Germany --timezone Europe/Berlin
+```
+
+Then ask only what the enabled tracks need and write it under `tracks:` in `config/profile.yml`: work authorization and languages with levels (Europe), a day-rate target and minimum if they have one (freelance). Leave a field empty when they have no answer: an empty rate means pay is shown and never counted against a role. Never guess a language level or a rate. `docs/TRACKS.md` explains every field. A no leaves both files untouched, and nothing in the scan or the evaluation changes.
+
 #### Step 4: Tracker
 If `data/applications.md` doesn't exist, create it:
 ```markdown
@@ -468,6 +487,9 @@ A single-string `modes_dir` (today's default, ~90% of users) layers the market f
 | Asks to compare offers | `ofertas` |
 | Wants LinkedIn outreach | `contacto` — identifies hiring manager, recruiter, or team peers via web search; drafts a message tailored to the contact type (recruiter / hiring manager / peer / interviewer), within LinkedIn's connection-request character limit for the account's tier (200 free, 300 Premium/Sales Navigator) |
 | Wants a formal application email | `email` — draft-only subject, body, attachment checklist, and contact block from a report or JD; never sends, submits, or clicks anything |
+| Wants a proposal for a freelance or contract gig | `pitch` — draft-only short proposal from a report or posting, with the rate line taken from `tracks.freelance` or left open; never sends or submits |
+| Asks what to charge for a freelance or contract gig | `rate` — opening number, target and walk-away line from the listing, `tracks.freelance` and market sources; draft-only |
+| Wants a profile for an AI-training or AI-evaluation platform | `gig` — expert profile and screening answers from `cv.md`, structured by `templates/blueprints/ai-eval-expert-en.md`; never signs up or submits |
 | Asks for company research | `deep` — structured 6-axis research prompt (AI strategy, recent moves, engineering culture, likely challenges, competitors, candidate's angle) |
 | Preps for interview at specific company | `interview-prep` |
 | Wants a time-blocked prep plan for an upcoming interview | `interview/plan` |

@@ -21,6 +21,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { barePrefixDomainKeywords, compileContentTraits } from './title-keywords.mjs';
 import { nearestKey } from './validate-profile.mjs';
+import { tracksFilterProblems } from './lib/tracks-gate.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PROVIDERS_DIR = join(ROOT, 'providers');
@@ -233,6 +234,7 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'trust_filter',
   'content_filter',
   'visa_filter',
+  'tracks_filter',
   'skip_tiers',
   'domain_filter',
   'field_filters',
@@ -493,6 +495,8 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       validateKeywordList(config.visa_filter.negative, 'visa_filter.negative', errors);
     }
   }
+
+  for (const problem of tracksFilterProblems(config.tracks_filter)) add(errors, 'tracks_filter', problem);
 
   if (config.experience_filter !== undefined) {
     const ef = config.experience_filter;

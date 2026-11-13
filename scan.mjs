@@ -88,6 +88,8 @@ import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-res
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
+import { loadTracks } from './lib/tracks.mjs';
+import { buildTracksGate, tracksFilterProblems } from './lib/tracks-gate.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_ROOT = getCareerOpsRoot();
@@ -4797,6 +4799,11 @@ async function main() {
   const countryEligibilityFilter = buildCountryEligibilityFilter(config.country_eligibility_filter, candidateCountry);
   const visaFilter = buildVisaFilter(config.visa_filter);
   const visaEnabled = Boolean(config.visa_filter) && config.visa_filter.enabled !== false;
+  // Search tracks (docs/TRACKS.md). Opt-in through tracks_filter: absent, the
+  // gate passes every posting and its counter never prints.
+  for (const problem of tracksFilterProblems(config.tracks_filter)) console.warn(`⚠️  ${problem}; tracks_filter is off for this run`);
+  const tracksGate = buildTracksGate(loadTracks(PROFILE_PATH), config.tracks_filter);
+  const trackDrops = { remote_fit: 0, engagement: 0 };
   // Stated years of experience (jd-years.mjs). Runs on the new offers only,
   // after every other cut, so it costs at most one JD request per posting
   // that would otherwise reach pipeline.md. Independent of skip_tiers: that
@@ -5336,6 +5343,11 @@ async function main() {
           totalFilteredVisa++;
           continue;
         }
+        const trackReason = tracksGate(job);
+        if (trackReason) {
+          trackDrops[trackReason]++;
+          continue;
+        }
         const dedupUrl = seenJobKey(job.url);
         const language = languageFormsForDedup(job.language);
         // A seen URL key passes only as a language version of that posting no
@@ -5712,6 +5724,9 @@ async function main() {
   if (visaEnabled) {
     console.log(`Filtered by visa:      ${totalFilteredVisa} removed`);
   }
+  if (config.tracks_filter) {
+    console.log(`Filtered by tracks:    ${trackDrops.remote_fit + trackDrops.engagement} removed (remote fit ${trackDrops.remote_fit}, engagement ${trackDrops.engagement})`);
+  }
   if (Object.keys(windows).length > 0 || totalFilteredCooldown > 0) {
     console.log(`Filtered by cooldown:  ${totalFilteredCooldown} removed`);
   }
@@ -5984,7 +5999,7 @@ async function main() {
     const filtered = totalFilteredTitle + totalFilteredDeclaredField + totalFilteredTier + totalFilteredLocation
       + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary
       + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
-      + totalFilteredVisa + totalFilteredCooldown;
+      + totalFilteredVisa + totalFilteredCooldown + trackDrops.remote_fit + trackDrops.engagement;
     emitJsonReceipt({
       version: 'careerops.scan.receipt@1',
       date,
