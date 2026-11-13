@@ -49,14 +49,24 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       );
     }
 
+    // Same skips as the extract loop. A hidden honeypot or an autofill helper
+    // is not a second question, so it must not knock out the wrapper title.
+    function isEligibleControl(node: Element): boolean {
+      const tag = node.tagName.toLowerCase();
+      const type = ((node as HTMLInputElement).type || "").toLowerCase();
+      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(type)) return false;
+      if ((node as HTMLElement).offsetParent === null && type !== "radio" && type !== "checkbox") return false;
+      if (node.closest('[class*="autofill" i]')) return false;
+      return true;
+    }
+
     // A shared box whose class contains "field" is not one question. Another
     // control in that box means its first label belongs to someone else.
     function hasOtherControl(container: Element, el: Element): boolean {
       const ownName = (el as HTMLInputElement).name;
       for (const node of Array.from(container.querySelectorAll("input, textarea, select"))) {
-        if (node === el) continue;
+        if (node === el || !isEligibleControl(node)) continue;
         const type = ((node as HTMLInputElement).type || "").toLowerCase();
-        if (["hidden", "submit", "button", "image", "reset"].includes(type)) continue;
         if (type === "radio" && ownName && (node as HTMLInputElement).name === ownName) continue;
         const dummy = node.closest('[class*="select__"], .select-shell') && node.getAttribute("role") !== "combobox";
         if (dummy && el.getAttribute("role") === "combobox") continue;
@@ -139,11 +149,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
     for (const el of els) {
       const tag = el.tagName.toLowerCase();
       const itype = ((el as HTMLInputElement).type || "").toLowerCase();
-      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(itype)) continue;
-      if ((el as HTMLElement).offsetParent === null && itype !== "radio" && itype !== "checkbox") continue;
-      // skip ATS "autofill from resume / parse my CV" helper widgets (Ashby) — these
-      // are convenience uploaders, not real application fields.
-      if ((el as Element).closest('[class*="autofill" i]')) continue;
+      if (!isEligibleControl(el)) continue;
 
       // react-select widgets render an extra internal/autosize <input> next to the
       // real role=combobox input. Keep ONLY the combobox; drop the dummy (it's the
