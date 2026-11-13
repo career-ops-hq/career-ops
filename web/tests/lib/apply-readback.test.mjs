@@ -39,6 +39,52 @@ test("the green banner stays off unless read-back passed", () => {
   );
 });
 
+test("a combobox display matches the answer the fill step would click", async () => {
+  const { comboboxDisplayMatches, verifyFill } = await import("../../src/lib/apply/diagnose.ts");
+  assert.equal(comboboxDisplayMatches("Springfield, IL", "Springfield"), true);
+  assert.equal(comboboxDisplayMatches("Springfield, IL", "Springfield, IL"), true);
+  assert.equal(comboboxDisplayMatches("Springfield, IL", "Chicago"), false);
+  assert.equal(comboboxDisplayMatches("Female", "Male"), false);
+  assert.equal(comboboxDisplayMatches("Australia", "US"), false);
+
+  const frame = {
+    evaluate() {
+      return Promise.resolve({
+        mismatches: [],
+        requiredEmpty: [],
+        unverified: [],
+        valErrors: [],
+        comboboxes: [
+          { label: "Office", intended: "Springfield", actual: "Springfield, IL", required: true },
+        ],
+      });
+    },
+  };
+  const matched = await verifyFill(frame, [
+    { id: "office", type: "select", label: "Office", required: true, combobox: true },
+  ], { office: "Springfield" });
+  assert.deepEqual(codes(matched), []);
+
+  frame.evaluate = () => Promise.resolve({
+    mismatches: [],
+    requiredEmpty: [],
+    unverified: [],
+    valErrors: [],
+    comboboxes: [
+      { label: "Office", intended: "Springfield", actual: "Chicago, IL", required: true },
+      { label: "Site", intended: "", actual: "", required: true },
+    ],
+  });
+  const missed = await verifyFill(frame, [
+    { id: "office", type: "select", label: "Office", required: true, combobox: true },
+    { id: "site", type: "select", label: "Site", required: true, combobox: true },
+  ], { office: "Springfield" });
+  assert.ok(codes(missed).includes("fill-mismatch"), JSON.stringify(missed));
+  assert.match(missed.find((issue) => issue.code === "fill-mismatch").message, /Office/);
+  assert.ok(codes(missed).includes("required-empty"), JSON.stringify(missed));
+  assert.match(missed.find((issue) => issue.code === "required-empty").message, /Site/);
+});
+
 test("a failed read-back names the fields it could not see", async () => {
   const { verifyFill } = await import("../../src/lib/apply/diagnose.ts");
   const frame = { evaluate() { return Promise.reject(new Error("read-back failed")); } };
@@ -50,7 +96,7 @@ test("a failed read-back names the fields it could not see", async () => {
   assert.equal(showPrefilledBanner("done", issues), false);
 });
 
-test("a wrong radio and an unread combobox are not a successful read-back", async (t) => {
+test("a wrong radio and an unread combobox are not a successful read-back", { skip: !process.env.APPLY_UPLOAD_BROWSER_TEST }, async (t) => {
   const server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(fixtureHtml);
@@ -92,6 +138,29 @@ test("a wrong radio and an unread combobox are not a successful read-back", asyn
   assert.equal(showPrefilledBanner("done", right.filter((issue) => issue.code !== "validation")), true);
 
   await page.locator("#right").evaluate((form) => { form.remove(); });
+  await page.locator("#word").evaluate((form) => { form.hidden = false; });
+  const wordFields = [
+    ...fields.filter((field) => field.id !== "agree"),
+    { id: "pref", type: "select", label: "Preferred site", required: false, combobox: true },
+  ];
+  const word = await verifyFill(page.mainFrame(), wordFields, {
+    name: "Fixture",
+    visa: "No",
+    office: "Springfield",
+  });
+  assert.deepEqual(codes(word).filter((code) => code !== "validation"), [], JSON.stringify(word));
+
+  await page.locator("#word .select__single-value").evaluate((el) => { el.textContent = "Chicago, IL"; });
+  const otherCity = await verifyFill(page.mainFrame(), wordFields, {
+    name: "Fixture",
+    visa: "No",
+    office: "Springfield",
+  });
+  assert.ok(codes(otherCity).includes("fill-mismatch"), JSON.stringify(otherCity));
+  assert.match(otherCity.find((issue) => issue.code === "fill-mismatch").message, /Office/);
+  assert.equal(otherCity.find((issue) => issue.code === "fill-unverified")?.message.includes("Preferred site") ?? false, false);
+
+  await page.locator("#word").evaluate((form) => { form.remove(); });
   await page.locator("#gaps").evaluate((form) => { form.hidden = false; });
   const gaps = await verifyFill(page.mainFrame(), [
     { id: "nickname", type: "text", label: "Nickname", required: false },

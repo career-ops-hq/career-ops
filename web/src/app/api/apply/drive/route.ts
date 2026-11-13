@@ -66,15 +66,18 @@ export async function POST(req: Request) {
             cvResolveError = error instanceof Error ? error.message.slice(0, 160) : "Could not resolve the résumé.";
           }
           const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
+          const supplied = answersByFieldId(s.fields, body.answers);
+          // The agent already typed these answers. An empty fill map attaches
+          // the résumé only. `supplied` is what read-back compares.
           const attached = cvPath
-            ? await fillSession(s.id, {}, s.fields, cvPath, cvUploadName)
-            : { steps: [], issues: await verifyFill(s.frame, s.fields, {}) };
+            ? await fillSession(s.id, {}, s.fields, cvPath, cvUploadName, supplied)
+            : { steps: [], issues: await verifyFill(s.frame, s.fields, supplied) };
           const unmetLabels = (attached.issues ?? []).flatMap((issue) =>
             issue.code === "required-empty" && Array.isArray(issue.labels) ? issue.labels : [],
           );
           const decision = handoffDecision({
             fields: s.fields,
-            answers: answersByFieldId(s.fields, body.answers),
+            answers: supplied,
             cvAttached: !!cvPath,
             steps: attached.steps,
             unmetLabels,

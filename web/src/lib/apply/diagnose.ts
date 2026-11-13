@@ -1,6 +1,7 @@
 import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
+import { pickComboboxOption } from "./option-match.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 export type { ApplyIssue };
@@ -310,12 +311,18 @@ export async function multiStepInfo(page: Page): Promise<ApplyIssue | null> {
   return ms ? { level: "info", code: "multi-step", message: "This form has more than one step — after this page, you'll continue on the real form." } : null;
 }
 
+/** True when the displayed combobox text is the option fill would click. */
+export function comboboxDisplayMatches(actual: string, intended: string): boolean {
+  return pickComboboxOption([actual], intended) === 0;
+}
+
 /** READ THE REAL FORM BACK after filling: did every answer land? required fields
  *  still empty? any validation error visible? — the self-verification a blind
  *  selector script can't do. Returns warnings to show BEFORE the human submits. */
 export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Record<string, string>): Promise<ApplyIssue[]> {
   const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
-  type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[] };
+  type Combo = { label: string; intended: string; actual: string; required: boolean };
+  type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[]; comboboxes: Combo[] };
   const res = await frame
     .evaluate(
       ({ meta, answers }): R => {
@@ -324,6 +331,7 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
         const mismatches: string[] = [];
         const requiredEmpty: string[] = [];
         const unverified: string[] = [];
+        const comboboxes: { label: string; intended: string; actual: string; required: boolean }[] = [];
         const note = (label: string, intended: string | undefined, actual: string, required: boolean) => {
           if (intended && intended.trim()) {
             if (norm(actual) !== norm(intended)) mismatches.push(label);
@@ -372,13 +380,17 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             // react-select keeps the chosen value in a sibling .select__single-value.
             // The tagged input stays empty. A visible placeholder means empty.
             // No value and no placeholder means we cannot see the choice.
+            // Whole-word comparison happens in Node: this callback cannot import
+            // the fill matcher, and exact equality flags "Springfield, IL" when
+            // the answer was "Springfield".
             const shell = el.closest('[class*="select-shell" i], [class*="select__container" i], [class*="select__control" i], [class*="value-container" i]') || el.parentElement?.parentElement || el.parentElement;
             const sv = shell?.querySelector('.select__single-value, [class*="single-value" i], [class*="singleValue" i], [class*="multi-value" i]');
             const ph = shell?.querySelector('.select__placeholder, [class*="placeholder" i]');
             const svText = (sv?.textContent || "").trim();
-            if (svText) note(f.label, intended, svText, f.required);
-            else if (ph && (ph as HTMLElement).offsetParent !== null) note(f.label, intended, "", f.required);
-            else unverified.push(f.label);
+            const intendedText = typeof intended === "string" ? intended : "";
+            if (svText) comboboxes.push({ label: f.label, intended: intendedText, actual: svText, required: f.required });
+            else if (ph && (ph as HTMLElement).offsetParent !== null) comboboxes.push({ label: f.label, intended: intendedText, actual: "", required: f.required });
+            else if (f.required || intendedText.trim()) unverified.push(f.label);
             continue;
           }
           if ((el as HTMLSelectElement).tagName === "SELECT") {
@@ -403,11 +415,20 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
           const txt = (e.textContent || "").replace(/\s+/g, " ").trim();
           if (txt && txt.length > 2 && txt.length < 160 && e.offsetParent !== null) valErrors.push(txt);
         }
-        return { mismatches, requiredEmpty, unverified, valErrors: Array.from(new Set(valErrors)).slice(0, 5) };
+        return { mismatches, requiredEmpty, unverified, valErrors: Array.from(new Set(valErrors)).slice(0, 5), comboboxes };
       },
       { meta, answers },
     )
-    .catch(() => ({ mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [] }) as R);
+    .catch(() => ({ mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [], comboboxes: [] }) as R);
+
+  for (const box of res.comboboxes ?? []) {
+    const intended = box.intended.trim();
+    if (intended) {
+      if (!comboboxDisplayMatches(box.actual, intended)) res.mismatches.push(box.label);
+    } else if (box.required && !box.actual.trim()) {
+      res.requiredEmpty.push(box.label);
+    }
+  }
 
   const out: ApplyIssue[] = [];
   if (res.mismatches.length) out.push({ level: "warn", code: "fill-mismatch", message: `These answers didn't seem to land on the real form — check them: ${res.mismatches.slice(0, 4).join(", ")}${res.mismatches.length > 4 ? "…" : ""}.` });

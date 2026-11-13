@@ -33,8 +33,10 @@ test("a finished fill is not marked pre-filled unless the server handed the wind
 
 const sessionStub = `
 export function getSession() { return globalThis.__applyFixture.session; }
-export async function fillSession() {
+export async function fillSession(id, answers, fields, cvPath, cvUploadName, readbackAnswers) {
   globalThis.__applyFixture.fillCalls += 1;
+  globalThis.__applyFixture.fillAnswers = answers;
+  globalThis.__applyFixture.readbackAnswers = readbackAnswers;
   return globalThis.__applyFixture.fillResult;
 }
 export async function handoffSession(id) {
@@ -55,7 +57,10 @@ const driveStub = `
 export async function driveSession() { return globalThis.__applyFixture.driveResult; }
 `;
 const diagnoseStub = `
-export async function verifyFill() { return globalThis.__applyFixture.verifyIssues; }
+export async function verifyFill(frame, fields, answers) {
+  globalThis.__applyFixture.verifyAnswers = answers;
+  return globalThis.__applyFixture.verifyIssues;
+}
 export async function classifyEmpty() { return { message: "fixture" }; }
 `;
 const cliStub = `
@@ -191,4 +196,29 @@ test("a resolved résumé that did not attach still blocks the handoff", async (
   assert.equal(done.filled, false);
   assert.equal(globalThis.__applyFixture.handoffCalls.length, 0);
   assert.equal(globalThis.__applyFixture.fillCalls, 1);
+});
+
+test("drive read-back compares the agent's answers and does not type them again", async () => {
+  resetFixture({ cvPath: "/tmp/fixture-cv.pdf" });
+  globalThis.__applyFixture.session.fields = [
+    { id: "visa", type: "radio", label: "Will you require visa sponsorship?", required: true },
+  ];
+  await postDrive({
+    answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+  });
+  assert.equal(globalThis.__applyFixture.fillCalls, 1);
+  assert.deepEqual(globalThis.__applyFixture.fillAnswers, {});
+  assert.deepEqual(globalThis.__applyFixture.readbackAnswers, { visa: "No" });
+});
+
+test("drive read-back uses the agent's answers when no résumé is attached", async () => {
+  resetFixture();
+  globalThis.__applyFixture.session.fields = [
+    { id: "visa", type: "radio", label: "Will you require visa sponsorship?", required: true },
+  ];
+  await postDrive({
+    answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+  });
+  assert.equal(globalThis.__applyFixture.fillCalls, 0);
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { visa: "No" });
 });
