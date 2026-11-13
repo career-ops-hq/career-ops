@@ -28,8 +28,8 @@
 // jobs, and anything past the cap never reaches the scanner's own title/location
 // filters (those run afterwards, on what already came back). `filters` narrows
 // the board server-side on structured fields such as country and contract type
-// instead of on wording, which is what makes a scan exhaustive rather than a
-// sample.
+// instead of on wording. The cap still applies with `filters` (1000 per query),
+// so a scan returns every match up to `max_hits` and none past it.
 //
 // Useful faceted attributes on this index: offices.country_code, offices.state,
 // offices.city, contract_type, remote, experience_level_minimum,

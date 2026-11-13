@@ -266,7 +266,7 @@ try {
   // a matching role worded another way, and the scanner's own title/location
   // filters only run on what already arrived. `filters` narrows the board
   // server-side on structured fields such as country and contract type instead
-  // of on wording, which is what makes a scan exhaustive.
+  // of on wording. The scan still returns no match past the max_hits cap.
   const FILTER = 'offices.country_code:FR AND contract_type:full_time';
 
   const filtered = mkCtx(ENV_OK, () => ({ hits: [mkHit('job-f', 'Product Manager')] }));
