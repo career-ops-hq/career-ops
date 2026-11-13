@@ -49,6 +49,22 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       );
     }
 
+    // A shared box whose class contains "field" is not one question. Another
+    // control in that box means its first label belongs to someone else.
+    function hasOtherControl(container: Element, el: Element): boolean {
+      const ownName = (el as HTMLInputElement).name;
+      for (const node of Array.from(container.querySelectorAll("input, textarea, select"))) {
+        if (node === el) continue;
+        const type = ((node as HTMLInputElement).type || "").toLowerCase();
+        if (["hidden", "submit", "button", "image", "reset"].includes(type)) continue;
+        if (type === "radio" && ownName && (node as HTMLInputElement).name === ownName) continue;
+        const dummy = node.closest('[class*="select__"], .select-shell') && node.getAttribute("role") !== "combobox";
+        if (dummy && el.getAttribute("role") === "combobox") continue;
+        return true;
+      }
+      return false;
+    }
+
     function labelFor(el: Element): string {
       const aria = el.getAttribute("aria-label");
       if (ok(aria)) return aria!;
@@ -67,15 +83,16 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       // the question title inside the field wrapper (handles Ashby's
       // `ashby-application-form-question-title`, Greenhouse `select__label`, etc.)
       const grp = fieldGroup(el);
-      if (grp) {
+      if (grp && !hasOtherControl(grp, el)) {
         const lab = grp.querySelector(
           'label, legend, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i]',
         );
         if (lab && ok(pure(lab))) return pure(lab);
       }
-      // walk up a few ancestors for a nearby label/heading
+      // A nearby label is this control's only when the ancestor holds no other control.
       let c: Element | null = el.parentElement;
       for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
+        if (hasOtherControl(c, el)) break;
         const lab = c.querySelector('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5');
         if (lab && ok(pure(lab))) return pure(lab);
       }
@@ -103,7 +120,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       }
       const optSet = new Set(options.map((o) => o.toLowerCase()));
       const container = fieldGroup(firstRadio) || firstRadio.parentElement?.parentElement || firstRadio.parentElement;
-      if (container) {
+      if (container && !hasOtherControl(container, firstRadio)) {
         const cands = container.querySelectorAll(
           'label, legend, h1, h2, h3, h4, h5, h6, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i], [class*="question" i]',
         );
