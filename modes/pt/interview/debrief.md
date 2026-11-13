@@ -100,7 +100,7 @@ Leve a lista para o Step 6 e o Step 8, e para o Step 9 apenas para entrada de tr
 Antes de salvar qualquer coisa (o Step 8 e o Step 9 dependem da resposta), verifique se este debrief refaz um já salvo. Assim que empresa, vaga, tipo de rodada e data forem conhecidos (pergunte, se não forem), liste todos os arquivos de sessão existentes para eles em `interview-prep/sessions/`: o nome base `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` e quaisquer variantes `-2`, `-3`, ..., mesmo quando o próprio nome base estiver ausente.
 
 - **Nenhum arquivo:** procure em `interview-prep/{company-slug}-{role-slug}.md` uma entrada `## Round [N] Debrief — [YYYY-MM-DD]` para esta rodada e data, que uma execução anterior deixa quando parou depois do Step 8. Se houver, pergunte se este debrief a refaz; se sim, o Step 8 substitui essa entrada. Caso contrário, é uma rodada nova e o Step 8 acrescenta. Em ambos os casos, o Step 9 escreve o nome base.
-- **Um ou mais arquivos:** nunca sobrescreva em silêncio. Mostre os arquivos com o `interviewer_role` e a primeira pergunta de cada um, e pergunte ao candidato se este debrief refaz um deles ou é uma rodada separada.
+- **Um ou mais arquivos:** nunca sobrescreva em silêncio. Mostre os arquivos com o `interviewer_role` e a primeira pergunta de cada um, e pergunte ao candidato se este debrief refaz um deles ou é uma rodada separada. Liste também como opção adicional qualquer entrada `## Round [N] Debrief — [YYYY-MM-DD]` desta data no arquivo de preparação que não corresponda a nenhum dos arquivos (uma execução que parou depois do Step 8 deixa uma): se o candidato a escolher, o Step 8 substitui essa entrada e o Step 9 escreve o próximo contador livre.
   - **Refazer:** anote o arquivo que o candidato escolher. O Step 8 substitui a entrada dessa rodada no arquivo de preparação em vez de acrescentar uma segunda, e o Step 9 atualiza no lugar o arquivo escolhido segundo sua regra de refazer.
   - **Rodada separada:** o Step 8 acrescenta como de costume, e o Step 9 escreve o próximo contador livre (`-2`, `-3`, ...) antes de `.md`.
 
@@ -225,7 +225,7 @@ Acrescente a `interview-prep/{company-slug}-{role-slug}.md`. **Se o Step 1d conf
 - Candidate comfort: [1-5, ou uma frase curta, nas palavras do próprio candidato]
 ```
 
-**Se um valor de remuneração foi declarado verbalmente nesta rodada** (o candidato forneceu um número, não apenas "o assunto remuneração surgiu"), acrescente uma linha `stated` a `data/salary-observations.tsv` (crie o arquivo se estiver ausente; formate conforme `docs/SCRIPTS.md` → salary-gap) com o tracker#, a data desta rodada, o valor/moeda, fonte `user`, uma nota curta, o rótulo da rodada e o nome do entrevistador. É isso que permite que o `interview/plan` lembre o candidato disso antes da próxima rodada — veja o Input #9 lá. Ao refazer, pule a linha se o arquivo já tiver o mesmo valor para esta rodada e data.
+**Se um valor de remuneração foi declarado verbalmente nesta rodada** (o candidato forneceu um número, não apenas "o assunto remuneração surgiu"), acrescente uma linha `stated` a `data/salary-observations.tsv` (crie o arquivo se estiver ausente; formate conforme `docs/SCRIPTS.md` → salary-gap) com o tracker#, a data desta rodada, o valor/moeda, fonte `user`, uma nota curta, o rótulo da rodada e o nome do entrevistador. É isso que permite que o `interview/plan` lembre o candidato disso antes da próxima rodada — veja o Input #9 lá. Ao refazer, pule a linha se o arquivo já tiver uma linha com o mesmo tracker#, rodada, data, valor e moeda.
 
 ---
 

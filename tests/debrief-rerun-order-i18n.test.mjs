@@ -59,7 +59,12 @@ for (const [loc, text] of locales) {
   check(`${loc} Step 1d checks the prep file when no session file exists`,
     s1d.includes('`interview-prep/{company-slug}-{role-slug}.md`'), 'prep file not named');
 
-  const s8first = section(text, 8).split('\n').slice(1).find((l) => l.trim()) || '';
+  const bullets = s1d.split('\n').filter((l) => l.startsWith('- **'));
+  check(`${loc} Step 1d offers an interrupted prep entry when session files exist`,
+    bullets.length === 2 && /`## (?:Round \[N\] Debrief|Debriefing del Round \[N\]) — \[YYYY-MM-DD\]`/.test(bullets[1]),
+    bullets[1] ? bullets[1].slice(0, 100) : 'no second bullet');
+
+  const s8first =section(text, 8).split('\n').slice(1).find((l) => l.trim()) || '';
   check(`${loc} Step 8 opening names Step 1d`, /(?:Step|Passo) 1d/.test(s8first), s8first.slice(0, 100));
   check(`${loc} Step 8 opening names the round entry it replaces`, /`## (?:Round \[N\] Debrief|Debriefing del Round \[N\]) — \[YYYY-MM-DD\]`/.test(s8first), s8first.slice(0, 100));
 
