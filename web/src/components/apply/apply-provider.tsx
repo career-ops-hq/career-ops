@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ApplyField } from "@/lib/apply/extract";
 import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { resolveLateSession } from "@/lib/apply/exit.mjs";
+import { withoutReadbackIssues } from "@/lib/apply/prefilled-banner.mjs";
 import { readFillResult, screenForFill } from "@/lib/apply/fill-stream.mjs";
 import { issuesAfterAgent, issuesAfterFill } from "@/lib/apply/handoff-gate.mjs";
 import { sessionFollowUp } from "@/lib/apply/session-result.mjs";
@@ -355,8 +356,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       }
       setSteps(d.steps ?? []);
       if (typeof d.cvAttached === "boolean") setCvAttached(d.cvAttached);
-      // Gaps stay up while the request runs. This body is what replaces them.
-      setIssues((prev) => issuesAfterFill(prev, Array.isArray(d.issues) ? d.issues as ApplyIssue[] : []));
+      // A later fill replaces the last read-back and the last handoff gaps.
+      const incoming = Array.isArray(d.issues) ? (d.issues as ApplyIssue[]) : [];
+      setIssues((prev) => issuesAfterFill(withoutReadbackIssues(prev), incoming));
       if (d.navigated) setError("Heads up: the form's page changed during fill — review it carefully before submitting (career-ops never submits for you).");
       if (d.handedOff) {
         setStatus("done");
@@ -401,7 +403,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       const outcome = screenForFill(result);
       const gaps = "gaps" in outcome && outcome.gaps?.length ? outcome.gaps : [];
       if (gaps.length || outcome.status === "done") {
-        setIssues((prev) => issuesAfterAgent(prev, {
+        setIssues((prev) => issuesAfterAgent(withoutReadbackIssues(prev), {
           gaps,
           note: outcome.status === "done" ? outcome.issue : "",
         }));

@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersByFieldId, handoffDecision, issuesAfterAgent, issuesAfterFill, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
+import { answersByFieldId, answersForRefreshedFields, handoffDecision, issuesAfterAgent, issuesAfterFill, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
 
 const sponsorship = { id: "visa", type: "select", label: "Will you require visa sponsorship?", required: true };
 const salary = { id: "pay", type: "text", label: "Desired salary", required: true };
@@ -198,6 +198,132 @@ test("labeled answers land on field ids, and a blank stays blank", () => {
   ]);
   assert.deepEqual(mapped, { visa: "No", pay: "  " });
   assert.equal(handoffDecision({ fields, answers: mapped }).handoff, false);
+});
+
+test("a refreshed field list does not keep an answer on a reused positional id", () => {
+  const before = [
+    { id: "co0", label: "Name", nativeId: "name" },
+    { id: "co1", label: "Office", nativeId: "office" },
+  ];
+  const after = [
+    { id: "co0", label: "Department", nativeId: "dept" },
+    { id: "co1", label: "Name", nativeId: "name" },
+    { id: "co2", label: "Office", nativeId: "office" },
+  ];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Name", value: "Ada" },
+    { id: "co1", label: "Office", value: "Springfield" },
+  ]);
+  assert.deepEqual(mapped.answers, { co1: "Ada", co2: "Springfield" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("a shared label with no DOM id stays unmatched after the field list changes", () => {
+  const before = [
+    { id: "co0", label: "Phone" },
+    { id: "co1", label: "Phone" },
+  ];
+  const after = [
+    { id: "co0", label: "Team" },
+    { id: "co1", label: "Phone" },
+    { id: "co2", label: "Phone" },
+  ];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
+});
+
+test("same-label controls that swap follow their DOM id", () => {
+  const before = [
+    { id: "co0", label: "Phone", nativeId: "home" },
+    { id: "co1", label: "Phone", nativeId: "mobile" },
+  ];
+  const after = [
+    { id: "co0", label: "Phone", nativeId: "mobile" },
+    { id: "co1", label: "Phone", nativeId: "home" },
+  ];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, { co0: "222", co1: "111" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("same-label controls keep their answers when the DOM id is unchanged", () => {
+  const fields = [
+    { id: "co0", label: "Phone", nativeId: "home" },
+    { id: "co1", label: "Phone", nativeId: "mobile" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields.map((field) => ({ ...field })), [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "" },
+  ]);
+  assert.deepEqual(mapped.answers, { co0: "111", co1: "" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("same-label controls that share a DOM name stay unverified", () => {
+  const fields = [
+    { id: "co0", label: "Phone", nativeName: "phones[]" },
+    { id: "co1", label: "Phone", nativeName: "phones[]" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields.map((field) => ({ ...field })), [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
+});
+
+test("a unique DOM name still keeps a shared label on its control", () => {
+  const fields = [
+    { id: "co0", label: "Phone", nativeName: "home" },
+    { id: "co1", label: "Phone", nativeName: "mobile" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields.map((field) => ({ ...field })), [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, { co0: "111", co1: "222" });
+  assert.deepEqual(mapped.dropped, []);
+});
+
+test("same-label controls with no DOM id stay unverified", () => {
+  const fields = [
+    { id: "co0", label: "Phone" },
+    { id: "co1", label: "Phone" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields, [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Phone", "Phone"]);
+});
+
+test("two answers that land on one field are both left unverified", () => {
+  const before = [{ id: "co0", label: "Name", nativeId: "name" }];
+  const after = [{ id: "co1", label: "Name", nativeId: "name" }];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Name", value: "Ada" },
+    { id: "extra", label: "Name", value: "Bea" },
+  ]);
+  assert.deepEqual(mapped.answers, {});
+  assert.deepEqual(mapped.dropped, ["Name", "Name"]);
+});
+
+test("an answer whose field is gone is named instead of dropped quietly", () => {
+  const fields = [{ id: "name", label: "Name" }];
+  const mapped = answersForRefreshedFields(fields, fields, [
+    { id: "name", label: "Name", value: "Ada" },
+    { id: "gone", label: "Nickname", value: "A" },
+  ]);
+  assert.deepEqual(mapped.answers, { name: "Ada" });
+  assert.deepEqual(mapped.dropped, ["Nickname"]);
 });
 
 test("two fields that share a label keep the answer stored on each id", () => {
