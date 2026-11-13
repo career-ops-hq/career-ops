@@ -126,14 +126,11 @@ function boardJobs(json, entry) {
 // ── Office enrichment ───────────────────────────────────────────────
 // Some Greenhouse boards put the *work model* ("Hybrid", "In-Office",
 // "Distributed") in location.name and keep the actual city in the separate
-// offices[] array — which the /jobs list endpoint does not return. For those
-// boards scan.mjs's location_filter never sees a city, so every role is
-// evaluated against the string "Hybrid" and silently dropped. Same bug class
-// as #1073 (Ashby dropping secondaryLocations), different provider.
-//
-// The city is recoverable from /v1/boards/{slug}/offices, which nests
-// offices → departments → jobs and costs one extra request. That request is
-// only worth making for boards that actually exhibit the pattern: boards
+// offices[] array. The /jobs?content=true payload embeds offices[] per job (#6911),
+// while the plain /jobs endpoint without content=true does not. For the latter
+// (oversized-board fallback), the city is recoverable from /v1/boards/{slug}/offices,
+// which nests offices → departments → jobs and costs one extra request. That request
+// is only worth making for boards that actually exhibit the pattern: boards
 // already reporting real cities pay nothing (Datadog's /offices is 2.8MB).
 
 // /offices gets its own ceiling. It repeats the board's job list once per
@@ -172,6 +169,33 @@ export function officesUrlFor(apiUrl) {
 }
 
 /**
+ * Extract clean office name if non-empty string, or '' otherwise.
+ * @param {any} office
+ * @returns {string}
+ */
+function officeName(office) {
+  return typeof office === 'string' ? office.trim() : (typeof office?.name === 'string' ? office.name.trim() : '');
+}
+
+/**
+ * Trim, skip unnamed, dedupe in a Set, and sort office names.
+ * Accepts an array of office objects (from j.offices) or an iterable of office names.
+ * Exported for tests.
+ * @param {unknown} offices
+ * @returns {string[]}
+ */
+export function extractSortedOfficeNames(offices) {
+  if (!offices) return [];
+  const set = new Set();
+  const iter = offices instanceof Set || Array.isArray(offices) ? offices : [];
+  for (const item of iter) {
+    const name = officeName(item);
+    if (name) set.add(name);
+  }
+  return [...set].sort();
+}
+
+/**
  * Build jobId → Set(office names) by walking offices → departments → jobs.
  * A job listed under several offices collects all of them, which is how a
  * genuinely multi-site role keeps every city it is open to.
@@ -185,7 +209,7 @@ export function buildOfficeMap(json) {
     if (!Array.isArray(offices)) return;
     for (const office of offices) {
       if (!office || typeof office !== 'object') continue;
-      const name = typeof office.name === 'string' ? office.name.trim() : '';
+      const name = officeName(office);
       if (name) {
         for (const dept of Array.isArray(office.departments) ? office.departments : []) {
           for (const job of Array.isArray(dept?.jobs) ? dept.jobs : []) {
@@ -232,10 +256,10 @@ export default {
     }
   },
 
-  // Titles, URLs and dates only: the same list without content=true, and no
-  // /offices lookup. A fraction of fetch()'s bytes (5 live boards sampled
-  // 2026-10-07: 99 KB against 1.67 MB). scan-ats-full.mjs uses it to rule a
-  // board out before paying for fetch(); nothing here is filtered on.
+  // Titles, URLs and dates only: the same list without content=true. A fraction
+  // of fetch()'s bytes (5 live boards sampled 2026-10-07: 99 KB against 1.67 MB).
+  // scan-ats-full.mjs uses it to rule a board out before paying for fetch();
+  // nothing here is filtered on.
   async fetchListing(entry, ctx) {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
@@ -255,9 +279,10 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
     assertGreenhouseUrl(apiUrl);
-    // content=true embeds each posting's body in the list response (one
-    // request, no per-job detail fetches). searchParams.set is idempotent, so
-    // an entry.api that already pins the param can't end up with a duplicate.
+    // content=true embeds each posting's body and offices[] in the list response
+    // (one request, no per-job detail fetches or /offices lookup). searchParams.set
+    // is idempotent, so an entry.api that already pins the param can't end up
+    // with a duplicate.
     const listUrl = new URL(apiUrl);
     listUrl.searchParams.set('content', 'true');
     // Re-validate the final href: the guard chain runs on the exact string
@@ -321,9 +346,12 @@ export default {
       }
     }
 
-    // Only pay for /offices when this board actually hides its cities there.
+    // /offices is only needed when bodiesInline is false (oversized-board
+    // fallback without content=true), because the content=true payload already
+    // embeds offices[] per job (#6911). Even then, only pay for /offices when
+    // this board actually hides its cities there.
     let officeMap = null;
-    if (usable.some(/** @param {any} j */ j => isWorkModelOnly(j.location?.name))) {
+    if (!bodiesInline && usable.some(/** @param {any} j */ j => isWorkModelOnly(j.location?.name))) {
       const officesUrl = officesUrlFor(apiUrl);
       if (officesUrl) {
         try {
@@ -347,16 +375,13 @@ export default {
 
     return usable.map(/** @param {any} j */ (j) => {
       let location = j.location?.name || '';
-      if (officeMap && isWorkModelOnly(location)) {
-        const offices = officeMap.get(j.id);
-        // Sorted, not in /offices traversal order. The set is built by walking
-        // the office tree, so the order is Greenhouse's, and it is not promised
-        // to be stable between responses. Unsorted, a board that re-orders its
-        // offices rewrites this string, which changes the posting's location
-        // dedupe key (scan.mjs `normalizeLocationForDedup`) and the row already
-        // written to scan-history.tsv — so a posting nothing changed about
-        // reads as new. Sorting costs nothing and removes the dependency.
-        if (offices && offices.size > 0) location = [location, ...[...offices].sort()].join(' · ');
+      if (isWorkModelOnly(location)) {
+        // Sorted, not in /offices traversal order or payload order. The set
+        // deduplicates and sorts so re-ordered offices cannot rewrite the
+        // location string or the dedupe key (scan.mjs `normalizeLocationForDedup`).
+        const offices = bodiesInline ? j.offices : officeMap?.get(j.id);
+        const officeList = extractSortedOfficeNames(offices);
+        if (officeList.length > 0) location = [location, ...officeList].join(' · ');
       }
       const description = contentToText(j.content);
       return {
