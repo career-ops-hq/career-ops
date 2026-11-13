@@ -75,10 +75,16 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       return false;
     }
 
-    // A display:none honeypot label can sit ahead of the real question title.
-    // offsetParent is the same visibility check the extract loop uses.
+    // A display:none honeypot has no box. display:contents also has no box,
+    // but its text stays on screen, so walk up until an ancestor has one.
     function isVisibleNode(node: Element): boolean {
-      return (node as HTMLElement).offsetParent !== null;
+      let current: HTMLElement | null = node as HTMLElement;
+      while (current && current !== document.body) {
+        if (current.offsetParent !== null) return true;
+        if (getComputedStyle(current).display !== "contents") return false;
+        current = current.parentElement;
+      }
+      return current === document.body;
     }
 
     function labelFor(el: Element): string {
