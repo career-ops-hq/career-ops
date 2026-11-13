@@ -53,6 +53,8 @@
 
 设置明确的来源标记：**`input_source: recall`**。
 
+**形式与氛围（两条路径通用，一个简短问题，可跳过）。** 只问一次："简单问一下这一轮的感受：是什么形式（recruiter screen / 1:1 / panel / group / take-home review），通话里有几个人，你会怎么形容氛围（relaxed-conversational / structured-formal / rapid-fire / adversarial），你自己感觉有多自在（1-5，或用你自己的几个词）？"如果转录能看出形式、人数或氛围，就作为建议提出、请候选人确认。**绝不替候选人推断或填写自在程度**：这是候选人的主观感受，只用其本人的原话记录；若跳过就不写。若整道题都跳过，四个值一个都不写。
+
 无论问答数据来自哪条路径，Step 2 及之后的处理完全相同——诚实评估、补齐短板、题库/故事库更新都不区分 `input_source: transcript` 与 `input_source: recall` 的复盘。标记本身仍原样带下去，供 Step 9 读取。
 
 ---
@@ -203,6 +205,13 @@
 **Timeline:** [提到的任何日期或截止日期]
 **Other candidates:** [若有披露]
 **Next steps:** [面试官说的下一步是什么、何时完成]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** （只列出候选人回答过的字段；未回答的条目整行删掉，不留占位符，也不填推断值）
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [人数]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5，或一句简短描述，用候选人自己的话]
 ```
 
 **若本轮口头报出了薪酬数字**（候选人给了具体数字，而不只是"提到了薪酬"），且本轮对应的 tracker# **已知**：向 `data/salary-observations.tsv` 追加一行 `stated`（文件不存在则创建；格式见 `docs/SCRIPTS.md` → salary-gap），写入该 tracker#、本轮日期、金额/币种、来源 `user`、简短备注、轮次标签与面试官姓名。这能让 `interview/plan` 在下一轮前提醒候选人——见该模式 Inputs #9。若 tracker# 尚不可用，**跳过追加**——不要写入不完整或可能错绑的行；等 tracker# 明确后再补记。
@@ -211,7 +220,7 @@
 
 ## Step 9 — Write Session Transcript
 
-复盘之后，再把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
+复盘之后，再把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。写之前，列出该公司、岗位、轮次和日期下已有的所有文件（基础文件名以及任何 `-2`、`-3`、... 变体，即使基础文件名本身已不存在）。一个都没有就写基础文件名。否则绝不静默覆盖：列出这些文件，附上各自的 `interviewer_role` 和第一道题，问候选人这次复盘是重跑其中某一场（就地更新其选中的文件），还是另一轮（在 `.md` 前写下一个空闲编号 `-2`、`-3`、...）。见 README 的 "File names" 一节。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
 
 **检查 Step 1 设置的 `input_source` 标记。** 若为 `input_source: transcript`，跳过重建：不要从 Step 1/Step 2 的输出重新生成记录——那只会是它所来自的真实来源的一份更有损的副本。改为直接保存原始记录稿，并轻度规范化以符合下方 schema（说话人标签、front matter、按 Step 2 评估打的 competency 标签）。若为 `input_source: recall`，照旧从 Step 1/Step 2 的输出重建记录——回忆从来没有可保留的逐字原稿。
 
@@ -226,8 +235,12 @@ date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
 stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
-  - speaker: [name or role, or "unknown"]
+  - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [number]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      # optional
 ---
 
 ## Q1
@@ -245,24 +258,32 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **给每次作答打标签。** 在每行 `**Candidate:**` 正上方输出 `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case，多能力用逗号分隔（例如 `system-design`、`people-leadership`、`incident-response`）。你在 Step 2 已评估过每次作答，按那次评估打标签，而不是重读。标签是自由形式；选该题实际考察的能力。
 - **忠实重建候选人回合。** 用候选人在 Step 1 报告说过的内容，而不是理想化答案。Step 2 的"correct/complete answer"属于复盘文件，绝不要进记录——记录记的是发生了什么。
 - **`source: debrief`。**
-- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。每个 `speaker` 也用双引号包裹，并按 `quote` 的方式转义（先转义反斜杠、再转义内部双引号）：像 `Hiring Manager: Jane` 这样的值含冒号，不加引号就是非法 YAML。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`format`、`people_on_call`、`tone`、`candidate_comfort` 是可选的 front matter 键**，承载 Step 1 / Step 8 的值，让下游模式不必解析正文就能读取。只写候选人回答过的键，其余省略；候选人没给出时绝不写 `candidate_comfort`。`candidate_comfort` 用双引号包裹（可能是自由文本）；手工转义时与 `quote` 一样，先转义反斜杠、再转义内部双引号。练习场次文件不带这些键。
 - 场次文件落在 gitignore 目录（真实姓名/公司永不进版本库）；写入时不要脱敏。
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。`debrief-sync.mjs` 会拒绝含有分号（`;`）、制表符或换行的 `--dealbreaker` 值，整次调用随之中止。若那句话含有这类字符，告诉用户是哪个字符，并请用户给出不含该字符、意思不变的单行版本。不要自行删除字符或改写句子。用户给出的版本也要检查这三种字符，只要还含有其中任何一个，就再次请用户修改。然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话（或用户给出的单行版本）作为 `--dealbreaker` 传入。若回答否，就省略。
+复盘保存后，把已确认的事实记录到这条申请上。把每个新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。每一处对应都单独询问，并展示该事实与画像中的那句话。`debrief-sync.mjs` 会拒绝含有分号（`;`）、制表符或换行的 `--dealbreaker` 值，整次调用随之中止。若那句话含有这类字符，告诉用户是哪个字符，并请用户给出不含该字符、意思不变的单行版本。不要自行删除字符或改写句子。用户给出的版本也要检查这三种字符，只要还含有其中任何一个，就再次请用户修改。然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。保留用户确认的每一句（或用户给出的单行版本），舍弃用户拒绝的每一句。
 
-对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。
+对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。`--contact-type` 只接受小写的 `recruiter`、`hiring-manager`、`peer`、`interviewer`、`internal-referral` 或 `other`。无论用户用哪种语言，都把对方的说法对应到它所指的值（"talent partner" 是 `recruiter`，"我未来的上司" 是 `hiring-manager`）。如果这个词明显对不上任何一个值，就不传 `--contact-type`，但仍然保存联系人。`debrief-sync.mjs` 会拒绝其他任何值，那会让整次调用停下，dealbreaker 和 `--next` 也一并失败。
 
 若下一步指明了唯一明确的日历日，直接传 `--next YYYY-MM-DD`，不再追问。星期几按本地日历日换算，今天也算。若说法里没有具体日期，省略 `--next`。若有歧义（`next week`、两个日期），先请用户给出一个日期，再传入。
 
-带着这些参数运行 `node debrief-sync.mjs`。之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+带着这些参数运行 `node debrief-sync.mjs --app <tracker#>`，其中 `<tracker#>` 是该申请在 tracker 中的 `#`（不是报告编号）。`--dealbreaker` 只接受一句话，且每次调用只能出现一次，所以每条已确认的句子各运行一条命令。不要把两句话合并成一个值：脚本会拒绝分号。联系人参数和 `--next` 只放在第一条命令里。之后的每条命令只传 `--app <tracker#>` 和一个 `--dealbreaker`，别的都不传。每个值都用单引号括起来，这样 shell 会原样传递 `$` 和反引号。值里的单引号在 Git Bash 等 POSIX shell 中写成 `'\''`。在 PowerShell 中写成 `''`；PowerShell 也把弯引号（`‘`、`’`、`‚` 或 `‛`）当作引号，所以弯引号同样要写两次：
 
-除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在本命令之前执行。
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-同一命令再跑一次是安全的。
+逐条运行这些命令，每条都检查退出状态。若某条命令失败，先停下修正，再从第一条命令起重新运行整个列表。若没有要传的 dealbreaker、联系人或 `--next` 日期，就不运行命令：脚本会拒绝没有内容可记录的调用。最后一条命令之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+
+除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在这些命令之前执行。
+
+同样的命令再跑一次是安全的：已经记录的句子、联系人或日期不会重复写入。
 
 ---
 

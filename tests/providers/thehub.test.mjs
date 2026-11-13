@@ -31,8 +31,9 @@ try {
     'Fallback',
   );
   if (full && full.title === 'Staff Engineer' && full.url === 'https://thehub.io/jobs/abc123'
-      && full.company === 'Acme Corp' && full.location === 'London, UK') {
-    pass('normalizeHubJob maps title/id/company.name/location.address');
+      && full.company === 'Acme Corp' && full.location === 'London, UK'
+      && full.externalId === 'abc123') {
+    pass('normalizeHubJob maps title/id/company.name/location.address + id → externalId');
   } else {
     fail(`normalizeHubJob full row = ${JSON.stringify(full)}`);
   }
@@ -144,9 +145,21 @@ try {
   } else {
     fail(`thehub.fetch() includeRemote requested = ${JSON.stringify(remoteReq)}, returned ${withRemote.length} jobs (expected 3)`);
   }
+  if (withRemote.truncated === undefined) pass('thehub.fetch() leaves the board unmarked when both passes answer');
+  else fail(`thehub.fetch() complete two-pass read was marked: ${JSON.stringify(withRemote.truncated)}`);
 
   if (paged.length === 17) pass('thehub.fetch() aggregates valid jobs across pages (15 + 2, dropping the empty-title row)');
   else fail(`thehub.fetch() returned ${paged.length} jobs (expected 17)`);
+
+  // fetch() carries the feed id through to externalId on every returned row
+  // (the mk() fixtures carry id `x${i}`; rows without an id are dropped by
+  // normalizeHubJob, so a "row without an id comes back without the field"
+  // case cannot arise here — the drops test above pins that instead).
+  if (paged[0].externalId === 'x0' && paged[16].externalId === 'x16') {
+    pass('thehub.fetch() carries the feed id through as externalId');
+  } else {
+    fail(`thehub.fetch() externalId = ${JSON.stringify({ first: paged[0]?.externalId, last: paged[16]?.externalId })}`);
+  }
 
   // Stops at the reported total pages even when every page is full.
   const fullReq = [];
@@ -242,6 +255,13 @@ try {
   } else {
     fail(`thehub.fetch() region-pass partial failure: requested ${blipReq.length}, returned ${blipJobs.length} jobs (expected 2 requests, 15 jobs)`);
   }
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 15) {
+    pass('thehub.fetch() marks the board partial when a later region page fails');
+  } else {
+    fail(`thehub.fetch() region-pass partial failure: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
 
   // The remote pass failing after the region pass already succeeded must not
   // discard the region-pass results (the "one bad pass shouldn't sink the
@@ -261,6 +281,11 @@ try {
     pass('thehub.fetch() keeps region-pass jobs when the remote pass fails after the region pass already succeeded');
   } else {
     fail(`thehub.fetch() remote-pass failure: requested ${remoteFailReq.length}, returned ${remoteFailJobs.length} jobs (expected 2 requests, 1 job)`);
+  }
+  if (remoteFailJobs.truncated?.reason === 'fetch-error' && remoteFailJobs.truncated.fetched === 1) {
+    pass('thehub.fetch() marks the board partial when the remote pass fails');
+  } else {
+    fail(`thehub.fetch() remote-pass failure: truncated = ${JSON.stringify(remoteFailJobs.truncated)}`);
   }
 
 } catch (e) {

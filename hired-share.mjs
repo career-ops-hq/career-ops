@@ -316,10 +316,53 @@ export function buildIssueUrl({ role, companyType, story, feature, timeToHire, a
   return `${REPO_URL}/issues/new?${q.toString()}`;
 }
 
-function openInBrowser(url) {
+/**
+ * How long the OS opener may take before it is killed.
+ *
+ * The opener is fire-and-forget: its only jobs are "start the handler" and
+ * report whether it started. `cmd /c start` on Windows returns immediately for
+ * a URL whose handler exists, and blocks while the shell resolves one that does
+ * not; an unbounded wait there is a CLI that appears to freeze after it has
+ * already printed everything the user needs.
+ */
+export const OPENER_TIMEOUT_MS = 15_000;
+
+/**
+ * Escape a URL for `cmd /c start`.
+ *
+ * cmd reads its whole command line before `start` runs, and an unescaped `&`
+ * ends the command there: the prefilled issue URL joins its fields with `&`,
+ * so `start` got only the template and cmd ran `title=…`, `role=…` as
+ * commands of their own. A caret makes cmd take the next character literally.
+ * Node passes the argument unquoted (a serialized URL has no space or `"`),
+ * so the carets reach cmd and none of them reach the browser.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function escapeForCmd(url) {
+  return url.replace(/[&|<>^()]/g, '^$&');
+}
+
+/**
+ * Hand a URL to the platform's opener.
+ *
+ * `exec` is a seam so a test can assert the bound without opening a browser.
+ * Failure is `false`, never a throw: every caller prints the URL as a fallback.
+ *
+ * @param {string} url
+ * @param {typeof execFileSync} [exec]
+ * @returns {boolean} whether the opener was started
+ */
+export function openInBrowser(url, exec = execFileSync) {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
-  try { execFileSync(cmd, args, { stdio: 'ignore' }); return true; } catch { return false; }
+  const args = process.platform === 'win32' ? ['/c', 'start', '', escapeForCmd(url)] : [url];
+  try {
+    // windowsHide: `cmd /c start` otherwise flashes a console window over
+    // whatever the user is looking at.
+    exec(cmd, args, { stdio: 'ignore', timeout: OPENER_TIMEOUT_MS, windowsHide: true });
+    return true;
+  } catch { return false; }
 }
 
 async function main() {

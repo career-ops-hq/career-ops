@@ -12,6 +12,8 @@ Process multiple job offers via headless workers. By default (`--mode full`) eac
    2	https://greenhouse.io/company/role-b	Greenhouse	priority
    ```
 
+   Or fill it from the Pending section of `data/pipeline.md`: `node sync-batch-input.mjs` adds every Pending row, and `node sync-batch-input.mjs --url <url>` adds only that one (the dashboard's Inbox `e` key runs this). Both skip URLs already in `batch-input.tsv` or `batch-state.tsv`. With `--url`, exit status 3 means there was nothing to queue and 4 means the URL is not an unchecked Pending row the script can read (the URL must be the first cell after `- [ ] `).
+
 2. **Dry run** to preview what will be processed:
 
    ```bash

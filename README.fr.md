@@ -28,7 +28,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Créé par <a href="https://github.com/santifer"><strong>@santifer</strong></a>, avec&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders">700+ contributeurs</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Créé par <a href="https://github.com/santifer"><strong>@santifer</strong></a>, avec&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders">800+ contributeurs</a></p>
 
 <p align="center">
 <strong>Des mois à envoyer des CV dans le&nbsp;silence.</strong><br>
@@ -66,7 +66,7 @@ Il adapte votre CV et rédige vos&nbsp;réponses. <strong>Vous&nbsp;cliquez&nbsp
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">Ceux qui sont venus après moi ont écrit comment ils ont été embauchés.</p>
 
@@ -133,7 +133,7 @@ Le recrutement ne se réparera pas tout seul. Les gens qui le subissent, eux, le
 
 [C'est ici que le correctif s'écrit](CONTRIBUTING.md). Une salle, pas un club. **Construisons ensemble.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord : nombre de membres du serveur career-ops en direct"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord : nombre de membres du serveur career-ops en direct"></a></p>
 
 ## Sponsors
 
@@ -280,7 +280,7 @@ Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/
 
 ## Utilisation
 
-Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte.
+Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte ou de partager une capture d'écran.
 
 ### Demander un mode
 
@@ -510,7 +510,7 @@ Le dashboard TUI en Go, les scripts Node.js et les modes d'agent IA respectent t
 - **Données** : tableaux Markdown + configuration YAML + fichiers TSV de lot
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -591,7 +591,7 @@ Voir [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) pour tous les détails. Ce logic
 ## Contributeurs
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Toutes les personnes qui ont livré du code, de la documentation, des traductions ou des tests sont listées dans
@@ -606,6 +606,8 @@ Le code est distribué sous [Licence MIT](LICENSE). Le nom et la marque
 « career-ops » sont régis par la [Politique de marques déposées](TRADEMARK.md),
 permissive pour l'usage communautaire, réservée pour la dénomination de
 produits commerciaux et les endossements.
+
+Le code est sous licence MIT ; les données de [`employers/`](employers/) sont sous licence [CC BY 4.0](employers/LICENSE).
 
 ## Historique des étoiles
 

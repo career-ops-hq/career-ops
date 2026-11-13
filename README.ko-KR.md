@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a>,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders">700+명의 기여자</a>와 함께</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a>,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders">800+명의 기여자</a>와 함께</p>
 
 <p align="center">
 <strong>몇 달 동안 이력서를 보내도 답&#8288;이&nbsp;없&#8288;었&#8288;습&#8288;니&#8288;다.</strong><br>
@@ -64,7 +64,7 @@
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">내 뒤에 온 사람들이 어떻게 채용됐는지 직접 적어 두었습니다.</p>
 
@@ -131,7 +131,7 @@ npx @santifer/career-ops init
 
 [고치는 코드는 여기서 쓰입니다](CONTRIBUTING.md). 클럽이 아니라 방입니다. **함께 만들어 갑시다.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops 서버의 실시간 멤버 수"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: career-ops 서버의 실시간 멤버 수"></a></p>
 
 ## 스폰서
 
@@ -278,7 +278,7 @@ npm i -g @santifer/career-ops
 
 ## 사용법
 
-채용 공고 URL이나 설명을 AI CLI에 붙여 넣으세요. career-ops는 링크가 있는 공고가 아직 열려 있는지 확인하고(붙여 넣은 텍스트에는 확인할 링크가 없습니다), 이력서와 비교해 점수를 매기고, 리포트를 작성하고, 이력서를 맞춤 제작하고(기본은 PDF), 트래커에 한 줄을 추가합니다. 대부분의 날은 이것으로 충분합니다. 나머지는 모두 이름으로 요청하는 모드입니다. 공고를 읽을 수 없으면 파이프라인이 멈추고 텍스트를 붙여 넣어 달라고 요청합니다.
+채용 공고 URL이나 설명을 AI CLI에 붙여 넣으세요. career-ops는 링크가 있는 공고가 아직 열려 있는지 확인하고(붙여 넣은 텍스트에는 확인할 링크가 없습니다), 이력서와 비교해 점수를 매기고, 리포트를 작성하고, 이력서를 맞춤 제작하고(기본은 PDF), 트래커에 한 줄을 추가합니다. 대부분의 날은 이것으로 충분합니다. 나머지는 모두 이름으로 요청하는 모드입니다. 공고를 읽을 수 없으면 파이프라인이 멈추고 텍스트를 붙여 넣거나 스크린샷을 공유해 달라고 요청합니다.
 
 ### 모드 요청하는 방법
 
@@ -508,7 +508,7 @@ Go 대시보드 TUI, Node.js 스크립트, AI 에이전트 모드 모두 이 결
 - **데이터**: 마크다운 표 + YAML 설정 + TSV 일괄 처리 파일
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -589,7 +589,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 ## 기여자
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 코드, 문서, 번역, 테스트를 기여한 모든 분은
@@ -603,6 +603,8 @@ career-ops로 취업하셨나요? [이야기를 공유해 주세요!](https://gi
 코드는 [MIT](LICENSE) 라이선스를 따릅니다. "career-ops"라는 이름과
 브랜드는 [상표 정책](TRADEMARK.md)의 적용을 받으며, 커뮤니티 사용에는
 관대하고, 상업적 제품명과 보증 용도로는 제한됩니다.
+
+코드는 MIT 라이선스이고, [`employers/`](employers/)의 데이터는 [CC BY 4.0](employers/LICENSE)입니다.
 
 ## 스타 히스토리
 

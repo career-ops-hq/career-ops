@@ -1,0 +1,15 @@
+{
+  "id": "junior-agentic-underlevel",
+  "synthetic": true,
+  "profile": "ai-engineer",
+  "jd": "Junior AI Automation Engineer\nBrightpath Logistics · Remote (US) · Full-time\n\nBrightpath is a 90-person logistics software company. We are hiring a Junior AI Automation Engineer to join our 4-person internal automation team and help us adopt AI agents across operations.\n\nWhat you'll do\n- Build and maintain internal automations using no-code/low-code tools (Zapier, n8n) and simple Python scripts.\n- Help configure LLM-powered agents for customer-support triage and document extraction, under the guidance of a senior engineer.\n- Write documentation and run small training sessions for operations staff.\n- Monitor workflows and fix broken automations.\n\nWhat we're looking for\n- 0–2 years of experience (new grads and bootcamp graduates welcome).\n- Some Python experience.\n- Curiosity about AI agents and workflow automation.\n- Strong communication skills.\n\nCompensation: $85,000–$100,000 base. Remote within the US. Reports to the Automation Team Lead.\n",
+  "label": {
+    "archetype": "Agentic / Automation",
+    "score": 2.8,
+    "provenance": "author-prior-v2"
+  },
+  "expect": {
+    "score_max": 3.4
+  },
+  "edge_note": "0-2 years, no-code heavy, $85-100K: seniority and comp mismatch for a senior candidate."
+}

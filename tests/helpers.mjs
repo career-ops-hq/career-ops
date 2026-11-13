@@ -435,6 +435,116 @@ const WINDOWS_BASH_CANDIDATES = [
   ]),
 ];
 
+/**
+ * Bash candidates for the Git install that `git --exec-path` names.
+ *
+ * The literals above only cover the two installers whose locations are fixed.
+ * Anywhere else (D:\Git, a portable Git, an MSYS2 root) the probe misses and the
+ * PATH fallback takes over, which is a different shell from a different install.
+ * Asking the `git` on PATH where it lives answers the same question for every
+ * installer at once, and derives the bash that belongs to it.
+ *
+ * `usr/bin/bash.exe` comes first because it is the shell itself; `bin/bash.exe`
+ * on Git for Windows is a small launcher that sets up the MSYS environment and
+ * then starts it (43 KB against 2.4 MB measured on a current install). Both work
+ * from an interactive prompt, and the launcher is the one PATH usually exposes,
+ * but spawning the launcher from the harness is measurably worse: a suite that
+ * spawns `bin/bash.exe` with a PATH-injected stub binary hit its own 30 s
+ * spawnSync timeout on the machine this was written on, and passed again on
+ * `usr/bin/bash.exe`. Preferring the real shell keeps this function's answer
+ * close to what the PATH fallback would have produced.
+ *
+ * Pure string logic on purpose — no filesystem, no spawning — so the rule is
+ * assertable and the caller decides whether the answer is worth probing. Only a
+ * drive-letter path is accepted: `/usr/lib/git-core` is a POSIX git, where this
+ * function has nothing to say, and a relative path is not an install.
+ *
+ * @param {string|undefined|null} execPath - Output of `git --exec-path`.
+ * @returns {string[]} Candidate bash paths, the real shell before the launcher.
+ *   Empty when the input is not a Windows git install.
+ */
+export function bashCandidatesFromGitExecPath(execPath) {
+  if (typeof execPath !== 'string') return [];
+  const path = execPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!/^[a-z]:\//i.test(path)) return [];
+  // <root>/<environment>/libexec/git-core, or the older <root>/libexec/git-core.
+  // The environment directory is not always mingw64: Git for Windows ARM64 ships
+  // clangarm64, MSYS2 packages git under ucrt64 or clang64, and a git running
+  // from MSYS2's own environment sits under usr. Leaving any of those in place
+  // would build `<root>/<environment>/usr/bin/bash.exe`, one level too deep.
+  const stripped = path.replace(/\/libexec\/git-core$/i, '');
+  if (stripped === path) return [];
+  const segments = stripped.split('/');
+  const ENV_DIR = /^(?:mingw(?:32|64)|ucrt64|clang(?:32|64|arm64)|msys2?|usr)$/i;
+  const root = ENV_DIR.test(segments[segments.length - 1]) ? segments.slice(0, -1).join('/') : stripped;
+  if (!/^[a-z]:\/+[^/]/i.test(root)) return [];
+  return [`${root}/usr/bin/bash.exe`, `${root}/bin/bash.exe`];
+}
+
+/**
+ * `git --exec-path` for the git on PATH, or '' when git is missing or silent.
+ *
+ * Separated from the caller so a test can supply the answer instead of
+ * depending on which git the machine happens to have.
+ *
+ * @returns {string}
+ */
+export function readGitExecPath() {
+  try {
+    return execFileSync('git', ['--exec-path'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Memo for the real (non-injected) chain; see windowsBashCandidates(). */
+let derivedBashCandidatesCache = null;
+
+/**
+ * The fixed literals plus whatever the local git install adds to them.
+ *
+ * Both inputs are injectable so the appending can be asserted on any machine:
+ * a test supplies a fake exec-path and a short fixed list, and checks what the
+ * chain looks like without touching the local Git at all. The injected form
+ * never writes the memo, so a test cannot poison the answer the harness uses.
+ *
+ * Lazy and memoized for the real call: probing git costs one child process, and
+ * every getBash() caller on a machine that found a literal above should not pay
+ * for it.
+ *
+ * @param {object} [options]
+ * @param {string[]} [options.fixed] - Literal candidates, tried first.
+ * @param {() => string} [options.gitExecPath] - Source of `git --exec-path`.
+ * @returns {string[]}
+ */
+export function windowsBashCandidates({ fixed = WINDOWS_BASH_CANDIDATES, gitExecPath = readGitExecPath } = {}) {
+  const isDefault = fixed === WINDOWS_BASH_CANDIDATES && gitExecPath === readGitExecPath;
+  if (isDefault && derivedBashCandidatesCache !== null) return derivedBashCandidatesCache;
+  const derived = bashCandidatesFromGitExecPath(gitExecPath());
+  const list = [...fixed, ...derived.filter((candidate) => !fixed.includes(candidate))];
+  if (isDefault) derivedBashCandidatesCache = list;
+  return list;
+}
+
+/**
+ * The first candidate whose probe succeeds, or null.
+ *
+ * Pure apart from the probe, so the selection rule — first match wins, a throw
+ * counts as "not this one" — is assertable without spawning anything.
+ *
+ * @param {string[]} candidates
+ * @param {(candidate: string) => boolean} probe
+ * @returns {string|null}
+ */
+export function firstProbeable(candidates, probe) {
+  for (const candidate of candidates) {
+    try {
+      if (probe(candidate)) return candidate;
+    } catch {}
+  }
+  return null;
+}
+
 // Same discovery problem, same fix: cygpath must come from the SAME Git
 // install as the bash above. Mixing them is #1409 in reverse -- cygpath emits
 // /c/... while WSL bash expects /mnt/c/..., so the path silently fails to
@@ -443,6 +553,61 @@ const WINDOWS_CYGPATH_CANDIDATES = [
   'C:\\Program Files\\Git\\usr\\bin\\cygpath.exe',
   ...SCOOP_ROOTS.map((root) => join(root, 'apps', 'git', 'current', 'usr', 'bin', 'cygpath.exe')),
 ];
+
+/**
+ * The Git install a bash.exe belongs to, or null when the path is not one.
+ *
+ * `<root>/bin/bash.exe`, `<root>/usr/bin/bash.exe` and the Scoop
+ * `<root>/apps/git/current/bin/bash.exe` all name the same install two levels
+ * below. Forward-slashed output on purpose: it is what both `existsSync` and
+ * `execFileSync` accept on Windows, and it keeps this function pure so the
+ * pairing can be asserted without touching the filesystem.
+ *
+ * @param {string|undefined|null} bashPath
+ * @returns {string|null} The install root, e.g. `D:/Git`, or null.
+ */
+export function gitRootOfBash(bashPath) {
+  if (typeof bashPath !== 'string') return null;
+  const path = bashPath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const match = path.match(/^(.*?)\/(?:usr\/bin\/|bin\/)bash(?:\.exe)?$/i);
+  if (!match) return null;
+  const root = match[1];
+  return root && (root.includes('/') || /^[a-z]:$/i.test(root)) ? root : null;
+}
+
+/**
+ * cygpath candidates inside one Git install.
+ *
+ * `usr/bin/cygpath.exe` is where Git for Windows and MSYS2 put it; `bin/` is
+ * included because a stripped-down distribution may only expose the wrapper
+ * there. Empty for a null root, so an unresolved bash adds nothing.
+ *
+ * @param {string|null} root
+ * @returns {string[]}
+ */
+export function cygpathCandidatesForGitRoot(root) {
+  if (!root) return [];
+  return [`${root}/usr/bin/cygpath.exe`, `${root}/bin/cygpath.exe`];
+}
+
+/**
+ * Every cygpath worth trying, the bash install's own first.
+ *
+ * The fixed list alone answered "is a cygpath present on this machine", not
+ * "is it the one that belongs to this shell": on a Git outside Program Files
+ * and Scoop, a machine that also has either of those installed would hand Git
+ * Bash a cygpath from the other install, which is the mismatch the comment
+ * above warns about. Asking getBash() first is what keeps the pair together,
+ * and it costs nothing because that answer is memoized.
+ *
+ * Exported so a test can assert the pairing on the machine it runs on, rather
+ * than trusting that toBashPath() still calls it.
+ *
+ * @returns {string[]}
+ */
+export function cygpathCandidates() {
+  return [...cygpathCandidatesForGitRoot(gitRootOfBash(getBash())), ...WINDOWS_CYGPATH_CANDIDATES];
+}
 
 /**
  * Map a requested executable onto the harness allowlist, returning the
@@ -1368,12 +1533,13 @@ function resolveOnPath(name) {
 export function getBash() {
   if (bashCache !== null) return bashCache;
   if (process.platform !== 'win32') { bashSourceCache = 'posix'; return (bashCache = 'bash'); }
-  for (const cmd of WINDOWS_BASH_CANDIDATES) {
-    try {
-      execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
-      bashSourceCache = 'git-bash';
-      return (bashCache = cmd);
-    } catch {}
+  const pickedFromGit = firstProbeable(windowsBashCandidates(), (cmd) => {
+    execFileSync(cmd, ['-c', 'true'], { stdio: 'ignore' });
+    return true;
+  });
+  if (pickedFromGit) {
+    bashSourceCache = 'git-bash';
+    return (bashCache = pickedFromGit);
   }
   try {
     // Probe via argv vector — no shell string, nothing to interpolate.
@@ -1409,7 +1575,7 @@ export function toBashPath(wpath) {
   try {
     // execFileSync: the path is passed as an argv element, never interpolated
     // into a shell string, so quotes/spaces in it can't be re-parsed.
-    const cygpathCmd = WINDOWS_CYGPATH_CANDIDATES.find((p) => existsSync(p)) || 'cygpath';
+    const cygpathCmd = cygpathCandidates().find((p) => existsSync(p)) || 'cygpath';
     const out = execFileSync(cygpathCmd, ['-u', forwardSlashed], { stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
     if (out) return out;
   } catch {}
@@ -1767,4 +1933,18 @@ export async function withLocalServerAs(publicOrigin, localOrigin, fn) {
     return realFetch(url.startsWith(publicOrigin) ? localOrigin + url.slice(publicOrigin.length) : input, init);
   };
   try { return await fn(); } finally { globalThis.fetch = realFetch; }
+}
+
+/**
+ * Copy the committed employer registry (ROOT/employers) into `destDir/employers`,
+ * leaving out `employers/inbox/`. A contribution PR adds its rows to the inbox,
+ * and the fold, import and inbox tests build their own inbox in the copy and
+ * expect it to hold only what they wrote (#6960): copying the PR's own inbox
+ * file along with the registry turned its CI red with nothing wrong in its data.
+ * @param {string} destDir
+ */
+export function copyEmployerRegistry(destDir) {
+  const src = join(ROOT, 'employers');
+  const inbox = join(src, 'inbox');
+  cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
 }

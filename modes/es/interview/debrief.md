@@ -53,6 +53,8 @@ Si la memoria está incompleta, haz preguntas dirigidas:
 
 Establece el marcador de fuente explícito: **`input_source: recall`**.
 
+**Formato y tono (ambas rutas, una pregunta corta, opcional).** Pregunta una sola vez: "Una rápida sobre cómo se sintió la ronda: ¿qué formato tuvo (recruiter screen / 1:1 / panel / group / take-home review), cuántas personas había en la llamada, cómo describirías el tono (relaxed-conversational / structured-formal / rapid-fire / adversarial) y qué tan cómodo te sentiste (1-5, o unas pocas palabras tuyas)?" Si una transcripción muestra el formato, el número de personas o el tono, ofrécelos como sugerencia para que los confirme. **Nunca infieras ni rellenes la comodidad por el candidato**: es su valoración subjetiva, así que regístrala solo con sus propias palabras y omítela si la salta. Si salta toda la pregunta, no escribas ninguno de los cuatro valores.
+
 Sea cual sea la ruta que produjo los datos de pregunta/respuesta, los Steps 2 en adelante operan sobre ellos de forma idéntica — el análisis honesto, el cierre de carencias y las actualizaciones del banco de preguntas/banco de historias no distinguen entre un análisis con `input_source: transcript` y uno con `input_source: recall`. El marcador en sí se sigue llevando sin cambios para que el Step 9 pueda leerlo.
 
 ---
@@ -203,6 +205,13 @@ Agrega a `interview-prep/{company-slug}-{role-slug}.md`:
 **Timeline:** [cualquier fecha o plazo mencionado]
 **Other candidates:** [si se revelaron]
 **Next steps:** [lo que el entrevistador dijo que sucede a continuación y para cuándo]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (solo los campos que el candidato respondió; elimina por completo las viñetas sin respuesta, sin marcadores de posición ni valores inferidos)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [número]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5, o una frase corta, con las propias palabras del candidato]
 ```
 
 **Si se declaró verbalmente una cifra de compensación en esta ronda** (el candidato dio una cifra concreta, no solo "se habló de compensación"), añade una línea `stated` a `data/salary-observations.tsv` (crea el archivo si no existe; formato según `docs/SCRIPTS.md` → salary-gap) con el tracker#, la fecha de esta ronda, el monto/moneda, fuente `user`, una nota breve, la etiqueta de la ronda y el nombre del entrevistador. Esto es lo que permite que `interview/plan` se lo recuerde al candidato antes de la siguiente ronda — ver Inputs #9 ahí.
@@ -211,7 +220,7 @@ Agrega a `interview-prep/{company-slug}-{role-slug}.md`:
 
 ## Step 9 — Write Session Transcript
 
-Después del análisis, escribe también una transcripción de la sesión legible por máquina en `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Este es un registro estructurado de la ronda para modos de análisis posteriores; los turnos etiquetados por hablante permiten a un consumidor leer cualquier lado sin tener que volver a inferir quién habló. El contrato completo vive en `interview-prep/sessions/README.md`.
+Después del análisis, escribe también una transcripción de la sesión legible por máquina en `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Antes de escribir, lista todos los archivos existentes para esta empresa, rol, ronda y fecha (el nombre base y cualquier variante `-2`, `-3`, ..., incluso cuando falte el propio nombre base). Si no hay ninguno, escribe el nombre base. Si no, nunca sobrescribas en silencio: muestra los archivos con el `interviewer_role` y la primera pregunta de cada uno, y pregunta al candidato si este análisis vuelve a ejecutar uno de ellos (actualiza en su sitio el archivo que elija) o es una ronda distinta (escribe el siguiente contador libre, `-2`, `-3`, ..., antes de `.md`). Consulta la sección "File names" del README. Este es un registro estructurado de la ronda para modos de análisis posteriores; los turnos etiquetados por hablante permiten a un consumidor leer cualquier lado sin tener que volver a inferir quién habló. El contrato completo vive en `interview-prep/sessions/README.md`.
 
 **Comprueba el marcador `input_source` establecido en el Step 1.** Si es `input_source: transcript`, omite la reconstrucción: no regeneres la transcripción a partir de la salida del Step 1/Step 2 — eso sería una copia con más pérdida de la fuente real de la que proviene. En su lugar, guarda la transcripción original directamente, ligeramente normalizada para ajustarse al esquema de abajo (etiquetas de hablante, front-matter, etiquetas de competencia de la evaluación del Step 2). Si es `input_source: recall`, reconstruye la transcripción a partir de la salida del Step 1/Step 2 como antes — el recuerdo nunca tiene un original verbatim que preservar.
 
@@ -226,8 +235,12 @@ date: YYYY-MM-DD
 interviewer_role: [rol, si se conoce]
 source: debrief
 stated_priorities:        # solo entrada de transcripción; omitir si no se declaró ninguna o para entrada de recuerdo (Step 1c)
-  - speaker: [nombre o rol, o "unknown"]
+  - speaker: "[nombre o rol, o unknown]"
     quote: "[cita textual breve, entre comillas dobles]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # opcional (Step 1)
+people_on_call: [número]                                              # opcional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # opcional
+candidate_comfort: "[1-5, o una frase corta con las propias palabras del candidato]"      # opcional
 ---
 
 ## Q1
@@ -245,24 +258,32 @@ Reglas para la transcripción:
 - **Etiqueta cada respuesta.** En la línea directamente arriba de cada línea `**Candidate:**`, emite `<!-- competency: tag[, tag...] -->` — en minúsculas (lowercase-kebab-case), separado por comas para respuestas con múltiples competencias (ej. `system-design`, `people-leadership`, `incident-response`). Ya evaluaste cada respuesta en el Step 2, así que etiqueta a partir de esa evaluación en lugar de volver a leer. Las etiquetas son de formato libre; elige la competencia que la pregunta realmente evaluó.
 - **Reconstruye el turno del candidato fielmente.** Usa lo que el candidato informó haber dicho en el Step 1, no una respuesta idealizada. La "respuesta correcta/completa" del Step 2 pertenece al archivo de análisis, nunca a la transcripción — la transcripción registra lo que sucedió.
 - **`source: debrief`.**
-- **`stated_priorities` va en el front matter** (Step 1c), como una lista YAML de elementos `speaker` + `quote`, para que los scripts e `interview/plan` puedan leerlo sin analizar el cuerpo. Pon cada `quote` entre comillas dobles para que el front matter siga siendo YAML válido y vuelva a parsearse exactamente como se dijo: al escapar manualmente, escapa las barras invertidas antes que las comillas dobles internas, de modo que un `\n` literal en la cita quede como dos caracteres en lugar de convertirse en un salto de línea. La ronda y la fecha de cada elemento son los propios `round` y `date` del archivo. Omite el campo cuando no se declaró nada y siempre que `input_source: recall`. Nunca pongas prioridades en un archivo de sesión de práctica, ya que esos no tienen un entrevistador real.
+- **`stated_priorities` va en el front matter** (Step 1c), como una lista YAML de elementos `speaker` + `quote`, para que los scripts e `interview/plan` puedan leerlo sin analizar el cuerpo. Pon cada `quote` entre comillas dobles para que el front matter siga siendo YAML válido y vuelva a parsearse exactamente como se dijo: al escapar manualmente, escapa las barras invertidas antes que las comillas dobles internas, de modo que un `\n` literal en la cita quede como dos caracteres en lugar de convertirse en un salto de línea. La ronda y la fecha de cada elemento son los propios `round` y `date` del archivo. Pon también cada `speaker` entre comillas dobles y escápalo igual que `quote` (primero las barras invertidas, luego las comillas dobles internas): un valor como `Hiring Manager: Jane` contiene dos puntos y sin comillas es YAML inválido. Omite el campo cuando no se declaró nada y siempre que `input_source: recall`. Nunca pongas prioridades en un archivo de sesión de práctica, ya que esos no tienen un entrevistador real.
+- **`format`, `people_on_call`, `tone` y `candidate_comfort` son claves opcionales del front matter** que llevan los valores del Step 1 / Step 8, para que los modos posteriores puedan leerlos sin analizar prosa. Escribe solo las claves que el candidato respondió; omite el resto y nunca escribas `candidate_comfort` si el candidato no lo dio. Pon `candidate_comfort` entre comillas dobles (puede ser texto libre); al escapar manualmente, escapa las barras invertidas antes que las comillas dobles internas, como con `quote`. Los archivos de sesión de práctica no las llevan.
 - El archivo de sesión aterriza en un directorio ignorado por git (los nombres/empresas reales nunca entran en el control de versiones); escríbelo sin censurar.
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona un hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Muestra el hecho y la frase del perfil. `debrief-sync.mjs` rechaza un valor de `--dealbreaker` que contenga un punto y coma (`;`), un tabulador o un salto de línea, y eso detiene toda la llamada. Si la frase contiene uno, dile al usuario qué carácter es y pídele una versión en una sola línea, sin ese carácter, que conserve el sentido. No quites el carácter ni reformules la frase por tu cuenta. Revisa la versión del usuario en busca de los tres caracteres y vuelve a pedirla hasta que no contenga ninguno. Después pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Si responde que sí, pasa la frase, o la versión en una línea del usuario, como `--dealbreaker`. Si responde que no, omítelo.
+Después de guardar el análisis, registra los hechos confirmados en la candidatura. Relaciona cada hecho nuevo con un factor decisivo (dealbreaker) que el usuario ya haya escrito en `modes/_profile.md` o `config/profile.yml`. Pregunta por cada coincidencia por separado y muestra el hecho y la frase del perfil. `debrief-sync.mjs` rechaza un valor de `--dealbreaker` que contenga un punto y coma (`;`), un tabulador o un salto de línea, y eso detiene toda la llamada. Si la frase contiene uno, dile al usuario qué carácter es y pídele una versión en una sola línea, sin ese carácter, que conserve el sentido. No quites el carácter ni reformules la frase por tu cuenta. Revisa la versión del usuario en busca de los tres caracteres y vuelve a pedirla hasta que no contenga ninguno. Después pregunta `Record this dealbreaker on the report and the tracker? [y/N]`. Conserva cada frase que el usuario confirme, o su versión en una línea. Descarta cada frase que el usuario rechace.
 
-Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y/N]`. Si responde que sí, pasa el nombre, el correo electrónico si se dio uno, y el tipo si el usuario nombró uno.
+Para cada persona nombrada, pregunta `Save this contact to data/contacts.tsv? [y/N]`. Si responde que sí, pasa el nombre, el correo electrónico si se dio uno, y el tipo si el usuario nombró uno. `--contact-type` solo admite `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral` u `other`, en minúsculas. Asigna la palabra del usuario al valor que significa, en cualquier idioma (una «talent partner» es `recruiter`, «mi futura jefa» es `hiring-manager`). Si la palabra no coincide claramente con un valor, omite `--contact-type` y guarda el contacto de todos modos. `debrief-sync.mjs` rechaza cualquier otro valor, y eso detiene toda la llamada, incluidos el dealbreaker y `--next`.
 
 Si el siguiente paso nombra un único día claro del calendario, pasa `--next YYYY-MM-DD` sin una segunda pregunta. Resuelve un día de la semana a partir del día del calendario local, y hoy cuenta. Si la frase no tiene día, omite `--next`. Si es ambigua (`next week`, dos días), pide una sola fecha y luego pásala.
 
-Ejecuta `node debrief-sync.mjs` con esos flags. Después, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
+Ejecuta `node debrief-sync.mjs --app <tracker#>` con esos flags, donde `<tracker#>` es el `#` de la candidatura en el tracker (no su número de informe). `--dealbreaker` admite una sola frase y solo puede aparecer una vez por llamada, así que ejecuta un comando por cada frase confirmada. Nunca unas dos frases en un solo valor: el script rechaza el punto y coma. Pon los flags de contacto y `--next` solo en el primer comando. Cada comando siguiente pasa `--app <tracker#>` y un único `--dealbreaker`, nada más. Pon cada valor entre comillas simples para que la shell pase `$` y las comillas invertidas sin cambios. Escribe una comilla simple dentro de un valor como `'\''` en Git Bash u otra shell POSIX. En PowerShell, escríbela como `''`, y duplica igual una comilla tipográfica (`‘`, `’`, `‚` o `‛`), porque PowerShell también la lee como comilla:
 
-No cambies el estado a menos que el usuario nombre un nuevo estado. Eso es una llamada aparte a `set-status.mjs`, antes de este comando.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-Una segunda ejecución del mismo comando es segura.
+Ejecuta los comandos de uno en uno y comprueba el código de salida de cada uno. Si un comando falla, detente, corrígelo y vuelve a ejecutar la lista desde el primer comando. Si no hay dealbreaker, contacto ni día `--next` que pasar, omite el comando: el script rechaza una llamada sin nada que registrar. Después del último comando, si se guardó un contacto, ejecuta `node contacts.mjs --summary`. Si se fijó un día, ejecuta `node followup-cadence.mjs --summary`.
+
+No cambies el estado a menos que el usuario nombre un nuevo estado. Eso es una llamada aparte a `set-status.mjs`, antes de estos comandos.
+
+Una segunda ejecución de los mismos comandos es segura: una frase, un contacto o una fecha ya registrados no se vuelven a escribir.
 
 ---
 

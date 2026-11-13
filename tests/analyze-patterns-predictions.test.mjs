@@ -73,6 +73,28 @@ check('labels outside the vocabulary are listed as other with their spelling and
   assert.equal(other.reasons.find(row => row.reason === 'salary_too_low_unconfirmed').frequency, 1);
 });
 
+check('a canonical id followed by a colon and a note counts as that id', () => {
+  const input = [
+    entry(['geo_restriction: 需迁居新加坡，每周 3 天到岗', 'seniority_mismatch: 6 年经验 vs 要求 8+ 年']),
+    entry(['Geo restriction：需迁居', 'geo_restriction']),
+    entry(['visa: no sponsorship', 'salary_too_low_unconfirmed: asked HR', ': geo_restriction', 'note about geo_restriction: x']),
+  ];
+  const result = buildPredictedDiscardReasonSignals(input);
+  assert.deepEqual(result.predictedDiscardReasonStats, [
+    { reason: 'geo_restriction', frequency: 2, percentage: 67 },
+    { reason: 'seniority_mismatch', frequency: 1, percentage: 33 },
+  ]);
+  const other = result.predictedDiscardReasonOther;
+  assert.equal(other.entries, 1);
+  assert.deepEqual(other.reasons.map(row => row.reason).sort(), [
+    ': geo_restriction', 'note about geo_restriction: x', 'salary_too_low_unconfirmed: asked hr', 'visa: no sponsorship',
+  ]);
+  // Without a vocabulary nothing is cut: the whole label is listed as written.
+  const blind = buildPredictedDiscardReasonSignals([input[0]], null);
+  assert.deepEqual(blind.predictedDiscardReasonStats, []);
+  assert.equal(blind.predictedDiscardReasonOther.reasons.length, 2);
+});
+
 check('an unreadable vocabulary reports every label as other instead of guessing one', () => {
   const result = buildPredictedDiscardReasonSignals([entry(['salary_too_low', 'visa'])], null);
   assert.deepEqual(result.predictedDiscardReasonStats, []);

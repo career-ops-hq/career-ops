@@ -31,6 +31,7 @@ import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { captureSlug, reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { cloudflareInterstitial } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -55,6 +56,13 @@ const VALUE_FLAGS = ['--company', '--role', '--report'];
 // page IS essentially the wall, not when a real posting merely mentions one
 // nearby.
 const NON_CONTENT_PAGE_MAX_CHARS = 600;
+
+// A Cloudflare interstitial is recognised by its title instead
+// (cloudflareInterstitial, liveness-core.mjs): a site-branded challenge body
+// can run past NON_CONTENT_PAGE_MAX_CHARS and use none of the phrases
+// detectNonContentMarker knows ("Humans only", "Ray ID:"), so the body check
+// never fires on it (#6713). A challenge the browser passes reloads the real
+// posting under its own title, and that capture is kept.
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
@@ -202,7 +210,12 @@ function today() {
  */
 function captureFilename(company, role, url) {
   const identity = createHash('sha256').update(url).digest('hex').slice(0, 16);
-  const base = `${today()}_${captureSlug(company)}_${captureSlug(role)}_${identity}.pdf`;
+  // A company with no letter or digit, such as the `?` placeholder for an
+  // unknown employer, has no slug. It is filed as `unknown`, the name a posting
+  // gets when no company was detected at all: an empty field (`015-…__role_…`)
+  // matched no lookup, so outcome.mjs reported the posting missing after
+  // archiving it, and archived it again on every run.
+  const base = `${today()}_${captureSlug(company) || 'unknown'}_${captureSlug(role)}_${identity}.pdf`;
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
@@ -406,6 +419,10 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     console.log(`   Role:    ${role}`);
     if (httpStatus === 404) {
       throw new Error('refusing to archive: HTTP 404');
+    }
+    const interstitial = httpStatus >= 400 ? cloudflareInterstitial(pageTitle) : null;
+    if (interstitial) {
+      throw new Error(`refusing to archive: HTTP ${httpStatus} Cloudflare ${interstitial} ("${pageTitle.trim()}"), not a posting`);
     }
     if (httpStatus && httpStatus >= 400) {
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);

@@ -235,7 +235,7 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 ## Score Evidence
 (lima dimensi, status bukti, pertanyaan terbuka, Evidence confidence, prioritas)
 
-## H) Draft jawaban untuk lamaran
+## H) Draft jawaban untuk lamaran (draft)
 (hanya jika score >= 4.5 -- draft jawaban untuk formulir lamaran)
 
 ---
@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Format tracker:**
 
 ```markdown
-| # | Tanggal | Perusahaan | Role | Score | Status | PDF | Report |
+| # | Tanggal | Perusahaan | Role | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Observasi gaji (hanya angka yang diinginkan)

@@ -1,0 +1,138 @@
+[
+  {
+    "url": "https://jobs.example.com/acme/101",
+    "company": "Acme",
+    "role": "Product Manager",
+    "location": "Remote",
+    "posted": "2026-10-01",
+    "rank": 4.2
+  },
+  {
+    "url": "https://jobs.example.com/acme/102",
+    "company": "Acme",
+    "role": "Data Analyst",
+    "location": "",
+    "posted": "2026-10-02",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/103",
+    "company": "Acme",
+    "role": "Designer",
+    "location": "Berlin, Germany",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "local:jds/acme-writer.md",
+    "company": "Acme",
+    "role": "Technical Writer",
+    "location": "",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/104",
+    "company": "note: Acme Labs",
+    "role": "rank: not a label here",
+    "location": "Lisbon",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/105",
+    "company": "",
+    "role": "",
+    "location": "",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/106",
+    "company": "Acme",
+    "role": "Support Lead",
+    "location": "Remote",
+    "posted": "",
+    "rank": 4.3
+  },
+  {
+    "url": "https://jobs.example.com/acme/107",
+    "company": "Acme",
+    "role": "Engineer",
+    "location": "",
+    "posted": "2026-09-30",
+    "rank": 3
+  },
+  {
+    "url": "https://jobs.example.com/acme/108",
+    "company": "Acme",
+    "role": "Analyst",
+    "location": "Madrid",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/109",
+    "company": "Acme",
+    "role": "Indented",
+    "location": "Paris",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/110",
+    "company": "Acme",
+    "role": "No spaces",
+    "location": "",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/111",
+    "company": "Acme",
+    "role": "",
+    "location": "Toronto",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/112",
+    "company": "Acme",
+    "role": "Lead",
+    "location": "Remote",
+    "posted": "",
+    "rank": 2
+  },
+  {
+    "url": "HTTPS://jobs.example.com/acme/113",
+    "company": "Acme",
+    "role": "Upper scheme",
+    "location": "",
+    "posted": "",
+    "rank": null
+  },
+  {
+    "url": "https://jobs.example.com/acme/114",
+    "company": "Acme",
+    "role": "Zero",
+    "location": "Remote",
+    "posted": "",
+    "rank": 0
+  },
+  {
+    "url": "https://jobs.example.com/acme/115",
+    "company": "Acme",
+    "role": "Non-breaking space",
+    "location": "",
+    "posted": "2026-10-03",
+    "rank": 3.5
+  },
+  {
+    "url": "https://jobs.example.com/acme/116",
+    "company": "Acme",
+    "role": "Indented with NBSP",
+    "location": "Oslo",
+    "posted": "",
+    "rank": null
+  }
+]

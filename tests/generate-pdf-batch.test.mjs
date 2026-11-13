@@ -350,6 +350,32 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
   }
 
+  // --- Test 3b' (#6377): a warn-only overflow in a batch is still ok, but the
+  // entry's PDF is the sibling draft and nothing lands at its output path.
+  const warnProfile = join(sandbox, 'warn-profile.yml');
+  writeFileSync(warnProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n', 'utf-8');
+  const warnManifest = join(sandbox, 'warn-batch.json');
+  writeFileSync(warnManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/warn-cv.pdf', kind: 'cv' },
+  ]), 'utf-8');
+  const warnBatch = run([`--batch=${warnManifest}`], { env: { CAREER_OPS_PROFILE: warnProfile } });
+  let warnResults = null;
+  try { warnResults = JSON.parse(readFileSync(`${warnManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  const warnDraft = join(sandbox, 'out', 'warn-cv.overflow.pdf');
+  if (
+    warnBatch.status === 0 &&
+    Array.isArray(warnResults) && warnResults.length === 1 &&
+    warnResults[0].ok === true &&
+    warnResults[0].draftPath === warnDraft &&
+    !existsSync(join(sandbox, 'out', 'warn-cv.pdf')) &&
+    existsSync(warnDraft) &&
+    warnBatch.output.includes('1 ok, 0 failed')
+  ) {
+    pass('a batch CV entry over a warn-only budget is ok with its PDF at the draft, never at the output path');
+  } else {
+    fail(`a warn-only batch overflow did not stay off the output path: status=${warnBatch.status}\n${JSON.stringify(warnResults)}\n${warnBatch.output.trim()}`);
+  }
+
   // --- Test 3c (#6325): an unusable profile budget fails only the CV entries;
   // the cover letter in the same batch, which never reads cv.*, still renders.
   const badBudgetProfile = join(sandbox, 'bad-budget-profile.yml');

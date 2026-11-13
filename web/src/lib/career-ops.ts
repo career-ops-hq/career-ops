@@ -1,5 +1,7 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { resolveDataRoot } from "@/lib/core/data-root.mjs";
@@ -16,12 +18,12 @@ import { reconcileInbox } from "@/lib/inbox-pending.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
 import { isReservedReportFile } from "@/lib/report-files.mjs";
-import { firstMarkdownLinkTarget, soleMarkdownLinkTarget } from "@/lib/posting-url.mjs";
+import { firstMarkdownLinkTarget, postingHref, soleMarkdownLinkTarget } from "@/lib/posting-url.mjs";
 import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 // Pure parser, no I/O — shared with the apply flow's CV resolver so the two
 // don't drift into two different definitions of "which report does this
 // index row belong to" (#2599, #2008 review).
-import { pdfIndexEntryForReport } from "@/lib/apply/cv-selection.mjs";
+import { pdfIndexEntriesByReport, readyReportNumbers } from "@/lib/apply/cv-selection.mjs";
 // The managed-block markers and the profile read live together in one plain
 // module, so rememberFact() (the block's only WRITER) and readMemory() (its
 // reader) cannot drift apart, and so the read rule is testable from web/tests.
@@ -31,8 +33,14 @@ import { normalizeMemoryFact } from "@/lib/memory-fact.mjs";
 /**
  * Resolve the career-ops DATA root — the directory holding the user's files
  * (cv.md, data/, reports/). Same precedence as the core: CAREER_OPS_ROOT →
- * CAREER_OPS_DATA_DIR → `.career-ops-data` marker → the checkout itself. For
+ * CAREER_OPS_DATA_DIR → `.career-ops-data` marker → `~/career-ops-data` when the
+ * checkout is a Claude Code plugin install copy → the checkout itself. For
  * scripts, system modes and templates use resolveCodeRoot() (core/code-root.mjs).
+ *
+ * Throws UnsafeDataRootError (core/data-root.mjs) when an environment variable or
+ * the marker names a folder inside a plugin install copy, as the core does: that
+ * folder is deleted on the next plugin update. The error message is one line that
+ * names the setting to change; callers that report a bad data root surface it.
  */
 export function careerOpsRoot(): string {
   // `process.cwd()` is `<core>/web` for `next dev`/`next start`, so its parent is
@@ -59,6 +67,7 @@ export function careerOpsRoot(): string {
     process.env,
     path.resolve,
     path.join,
+    { homedir: os.homedir, realpath: fs.realpathSync, platform: process.platform },
   );
 }
 
@@ -95,12 +104,14 @@ export function trackerCanDelete(): boolean {
 function read(rel: string): string | null {
   try {
     return fs.readFileSync(path.join(careerOpsRoot(), rel), "utf8");
-  } catch {
-    return null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw err;
   }
 }
 
-export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string };
+export type InboxFit = { score: number; reason: string };
+export type InboxJob = { url: string; company: string; role: string; location?: string; compensation?: string; done: boolean; postedAt?: string; rankStamp?: string; fit?: InboxFit | null };
 
 /** Parse data/pipeline.md. The row grammar and its labeled-segment handling
  *  live in pipeline-table.mjs — see there for the column rules (#1015, #1017). */
@@ -152,6 +163,48 @@ export function readScanHistoryLines(): string[] | null {
   return cachedFileValue(file, "scan-lines", (text) => text.split("\n"));
 }
 
+type CloseDateModule = {
+  closeDatesByUrl: (text: string) => Map<string, string>;
+  closeDateForUrl: (index: Map<string, string>, url: string) => string;
+};
+
+let closeDateModule: CloseDateModule | null = null;
+
+async function loadCloseDateModule(): Promise<CloseDateModule | null> {
+  if (closeDateModule) return closeDateModule;
+  const file = path.join(
+    /* turbopackIgnore: true */ resolveCodeRoot(process.cwd(), process.env),
+    "lib",
+    "posting-close.mjs",
+  );
+  try {
+    const mod = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as Partial<CloseDateModule>;
+    if (typeof mod.closeDatesByUrl !== "function" || typeof mod.closeDateForUrl !== "function") return null;
+    closeDateModule = mod as CloseDateModule;
+    return closeDateModule;
+  } catch {
+    return null;
+  }
+}
+
+/** Join scan-history `closes_at` onto tracker rows by posting URL.
+ *  Exact URL first, then the URL with the query string removed. A missing
+ *  file or module leaves the rows unchanged. Any other read error is thrown.
+ *  Success is cached. A failed import is not. */
+export async function withCloseDates(applications: Application[]): Promise<Application[]> {
+  const text = read("data/scan-history.tsv");
+  if (!text) return applications;
+  const mod = await loadCloseDateModule();
+  if (!mod) return applications;
+  const index = mod.closeDatesByUrl(text);
+  return applications.map((app) => {
+    const href = postingHref(app.url);
+    if (!href) return app;
+    const day = mod.closeDateForUrl(index, href);
+    return day ? { ...app, closesAt: day } : app;
+  });
+}
+
 export type Application = {
   n: string;
   date: string;
@@ -172,6 +225,8 @@ export type Application = {
   notes: string;
   /** Tracker's `URL` column. A raw URL or a markdown link. "" when the column is absent. */
   url: string;
+  /** Calendar day the posting closes, from scan history. Absent when that file has no day for this URL. */
+  closesAt?: string;
 };
 
 /**
@@ -185,7 +240,7 @@ export type Application = {
 export function readApplications(): Application[] {
   const root = careerOpsRoot();
   const file = resolveTrackerPath(root);
-  const codeRoot = path.resolve(process.cwd(), "..");
+  const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   // Parsed rows follow tracker-aliases.json as well as the tracker. A header
   // rename in that file must not keep serving the old columns.
   const aliasFiles = [...new Set([
@@ -209,7 +264,7 @@ export type TrackerShape = "missing" | "empty" | "malformed" | "rows";
  *  so the pipeline does not tell every zero-row case to clear the search. */
 export function readTrackerShape(): TrackerShape {
   const md = readTrackerFile(careerOpsRoot());
-  return classifyTracker(md, careerOpsRoot(), path.resolve(process.cwd(), ".."));
+  return classifyTracker(md, careerOpsRoot(), resolveCodeRoot(process.cwd(), process.env));
 }
 
 export type StatusLogRow = {
@@ -253,7 +308,7 @@ export type PdfPathForReportResult =
   | { status: "found"; path: string; html: string | null }
   | { status: "not-found" }
   | { status: "invalid" }
-  | { status: "rejected" };
+  | { status: "rejected"; html: string | null };
 
 /** The exact PDF path indexed for this report number, or null if none exists
  *  (malformed id, no index row, the indexed file is missing on disk, or the
@@ -264,45 +319,74 @@ export type PdfPathForReportResult =
  *  The manifest path comes from the core's resolvePdfIndexPath (ACL, honors
  *  CAREER_OPS_PDF_INDEX) rather than a hardcoded "data/pdf-index.tsv" literal
  *  — the exact class of bug that #2471 fixed in the core, once, for every
- *  reader. The parsing itself is pdfIndexEntryForReport, a pure function
+ *  reader. The parsing itself is pdfIndexEntriesByReport, a pure function
  *  shared with the apply flow's own CV resolver (cv-selection.mjs) so there
  *  is one definition of "which row matches this report", not two. */
 export async function pdfPathStatusForReport(n: string, kind: "cv" | "cover" = "cv"): Promise<PdfPathForReportResult> {
   const target = pdfIndexTarget(n);
   if (target === null) return { status: "invalid" };
-  const indexPath = await resolvePdfIndexPath();
-  if (!indexPath) return { status: "not-found" };
-  let tsv: string;
-  try {
-    tsv = fs.readFileSync(indexPath, "utf8");
-  } catch {
-    return { status: "not-found" };
-  }
+  const entries = await indexedPdfEntries(kind);
+  if (!entries) return { status: "not-found" };
+  const entry = entries.get(target);
+  if (!entry) return { status: "not-found" };
   const root = careerOpsRoot();
-  const entry = pdfIndexEntryForReport(tsv, target, kind);
-  if (!entry.found) return { status: "not-found" };
-  if (!entry.path) return { status: "rejected" };
-  // The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
-  // stops a hand edit) turned into a filesystem read that this route then
-  // serves — the path must be contained BY CONSTRUCTION, not by trusting the
-  // writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
-  // not to the manifest's own data/ directory — same base the pre-ACL version
-  // of this function used — and must stay under the project's output/ tree.
-  const abs = path.resolve(root, entry.path);
   const outputDir = path.resolve(root, "output");
-  if (!abs.startsWith(outputDir + path.sep)) return { status: "rejected" };
-  // Scoped to outputDir, not the broader root: the lexical startsWith check
-  // above only rejects an unresolved path outside output/, but a symlink
-  // PLACED under output/ can still resolve to somewhere else inside root
-  // (e.g. reports/) and pass a root-scoped realpath check — serving a file
-  // this route was never meant to expose.
-  if (!isRegularContainedFile(abs, outputDir)) return { status: "rejected" };
-  let html: string | null = null;
-  if (entry.html) {
-    const htmlAbs = path.resolve(root, entry.html);
-    if (htmlAbs.startsWith(outputDir + path.sep) && isRegularContainedFile(htmlAbs, outputDir)) html = htmlAbs;
-  }
+  // Studio can still open the recorded HTML when the PDF is unavailable.
+  const html = entry.html ? containedOutputFile(root, outputDir, entry.html) : null;
+  if (!entry.path) return { status: "rejected", html };
+  const abs = containedOutputFile(root, outputDir, entry.path);
+  if (!abs) return { status: "rejected", html };
   return { status: "found", path: abs, html };
+}
+
+/** The members of `reports` whose indexed CV PDF exists under output/ right
+ *  now, i.e. every n in `reports` for which pdfPathStatusForReport(n) is
+ *  "found". The pipeline list needs this for every tracker row: asking
+ *  pdfPathStatusForReport once per row re-resolved the data root and re-read
+ *  the manifest once per row, which took 8 s on a 5,000-row tracker (#6974).
+ *  Here the manifest is read once, and only rows for the asked-about reports
+ *  are stat'ed: manifest rows for reports no longer in the tracker cost
+ *  nothing, and an empty tracker checks no files at all. */
+export async function pdfReadyReportNumbers(reports: ReadonlySet<number>): Promise<Set<number>> {
+  if (reports.size === 0) return new Set();
+  const entries = await indexedPdfEntries("cv");
+  if (!entries) return new Set();
+  const root = careerOpsRoot();
+  const outputDir = path.resolve(root, "output");
+  return readyReportNumbers(entries, reports, (rel: string) => containedOutputFile(root, outputDir, rel) !== null);
+}
+
+/** Parsed manifest, report number -> first entry of that kind. Reused until
+ *  the manifest's mtime or size changes; the entries are only read, never
+ *  mutated, so callers share the cached Map. null when there is no manifest
+ *  or it cannot be read (same answer the per-call read gave: "not found"). */
+async function indexedPdfEntries(kind: "cv" | "cover"): Promise<Map<number, { path: string | null; html: string | null }> | null> {
+  const indexPath = await resolvePdfIndexPath();
+  if (!indexPath) return null;
+  try {
+    return cachedFileValue(indexPath, `pdf-index-${kind}`, (tsv) => pdfIndexEntriesByReport(tsv, kind));
+  } catch {
+    return null;
+  }
+}
+
+/** Absolute path of a manifest-relative file, or null unless it is a regular
+ *  file contained in output/.
+ *
+ *  The manifest is a user-layer file (generate-pdf.mjs writes it, but nothing
+ *  stops a hand edit) turned into a filesystem read that the viewer route then
+ *  serves — the path must be contained BY CONSTRUCTION, not by trusting the
+ *  writer. Rows are written relative to the WORKSPACE root (careerOpsRoot()),
+ *  not to the manifest's own data/ directory — same base the pre-ACL version
+ *  of this lookup used — and must stay under the project's output/ tree.
+ *  The realpath check is scoped to outputDir, not the broader root: the
+ *  lexical startsWith check only rejects an unresolved path outside output/,
+ *  but a symlink PLACED under output/ can still resolve to somewhere else
+ *  inside root (e.g. reports/) and pass a root-scoped realpath check. */
+function containedOutputFile(root: string, outputDir: string, rel: string): string | null {
+  const abs = path.resolve(root, rel);
+  if (!abs.startsWith(outputDir + path.sep)) return null;
+  return isRegularContainedFile(abs, outputDir) ? abs : null;
 }
 
 export async function pdfPathForReport(n: string): Promise<string | null> {

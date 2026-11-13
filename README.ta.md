@@ -26,7 +26,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> உருவாக்கியது,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders">700+ பங்களிப்பாளர்களுடன்</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> உருவாக்கியது,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders">800+ பங்களிப்பாளர்களுடன்</a></p>
 
 <p align="center">
 <strong>மாதக்கணக்கில் CV அனுப்பினேன், பதில் மௌனம்&nbsp;மட்டுமே.</strong><br>
@@ -64,7 +64,7 @@
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">எனக்குப் பிறகு வந்தவர்கள், தங்களுக்கு எப்படி வேலை கிடைத்தது என்பதை எழுதி வைத்தார்கள்.</p>
 
@@ -131,7 +131,7 @@ npx @santifer/career-ops init
 
 [சரிசெய்தல் எழுதப்படுவது இங்கேதான்](CONTRIBUTING.md). ஒரு அறை, கிளப் அல்ல. **சேர்ந்து கட்டுவோம்.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops சர்வரின் உறுப்பினர்களின் நேரடி எண்ணிக்கை"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: career-ops சர்வரின் உறுப்பினர்களின் நேரடி எண்ணிக்கை"></a></p>
 
 ## ஆதரவாளர்கள்
 
@@ -278,7 +278,7 @@ npm i -g @santifer/career-ops
 
 ## Usage
 
-உங்கள் AI CLI-இல் ஒரு வேலை URL-ஐயோ விவரத்தையோ ஒட்டுங்கள். இணைப்புடன் உள்ள வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா என career-ops சரிபார்க்கும் (ஒட்டிய உரைக்குச் சரிபார்க்க இணைப்பு இல்லை), உங்கள் CV-க்கு எதிராக மதிப்பெண் இடும், ஒரு report எழுதும், உங்கள் CV-ஐ ஏற்றவாறு தயாரிக்கும் (இயல்பாக PDF), உங்கள் tracker-இல் ஒரு வரியைச் சேர்க்கும். பெரும்பாலான நாட்களுக்கு இது போதும். மற்றதெல்லாம் பெயர் சொல்லிக் கேட்கும் mode-கள். ஒரு வேலை அறிவிப்பைப் படிக்க முடியாவிட்டால், pipeline நின்று உரையை ஒட்டச் சொல்லும்.
+உங்கள் AI CLI-இல் ஒரு வேலை URL-ஐயோ விவரத்தையோ ஒட்டுங்கள். இணைப்புடன் உள்ள வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா என career-ops சரிபார்க்கும் (ஒட்டிய உரைக்குச் சரிபார்க்க இணைப்பு இல்லை), உங்கள் CV-க்கு எதிராக மதிப்பெண் இடும், ஒரு report எழுதும், உங்கள் CV-ஐ ஏற்றவாறு தயாரிக்கும் (இயல்பாக PDF), உங்கள் tracker-இல் ஒரு வரியைச் சேர்க்கும். பெரும்பாலான நாட்களுக்கு இது போதும். மற்றதெல்லாம் பெயர் சொல்லிக் கேட்கும் mode-கள். ஒரு வேலை அறிவிப்பைப் படிக்க முடியாவிட்டால், pipeline நின்று உரையை ஒட்டவோ ஒரு திரைப்பிடிப்பைப் பகிரவோ சொல்லும்.
 
 ### ஒரு mode-ஐக் கேட்பது எப்படி
 
@@ -508,7 +508,7 @@ Go dashboard TUI, Node.js ஸ்கிரிப்ட்கள், AI ஏஜெ�
 - **Data**: Markdown அட்டவணைகள் + YAML config + TSV batch கோப்புகள்
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -589,7 +589,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 ## Contributors
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 கோடு, ஆவணங்கள், மொழிபெயர்ப்புகள் அல்லது சோதனைகளை வழங்கிய ஒவ்வொருவரும்
@@ -604,6 +604,8 @@ career-ops மூலம் வேலை கிடைத்ததா? [உங்�
 பிராண்டும் [Trademark Policy](TRADEMARK.md)-யால் நிர்வகிக்கப்படுகின்றன: சமூகப்
 பயன்பாட்டிற்கு அனுமதி, வணிகத் தயாரிப்புப் பெயரிடலுக்கும் ஒப்புதலுக்கும்
 ஒதுக்கீடு.
+
+கோடு MIT உரிமத்தின் கீழ் உள்ளது; [`employers/`](employers/) இல் உள்ள தரவு [CC BY 4.0](employers/LICENSE) உரிமத்தின் கீழ் உள்ளது.
 
 ## ஸ்டார் வரலாறு
 

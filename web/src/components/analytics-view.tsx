@@ -35,7 +35,7 @@ export function AnalyticsShell({ total, view, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <PageFrame>
+    <PageFrame width="wide">
       <header className="flex flex-col gap-5 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-brand-text">Operations / Analytics</p>

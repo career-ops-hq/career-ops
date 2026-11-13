@@ -54,6 +54,11 @@
 # for a candidate in Great Britain may say the rule applies to them. Northern
 # Ireland has its own regime and is not covered by that row.
 #
+# NORWAY (key "NO", quoted): arbeidsmarkedsloven ss. 26 and 27 protect the job
+# seeker and the hired-out worker whatever their immigration status, so the
+# note for a candidate in Norway may say the rule applies to them. The row
+# states no fee rule for parties other than placement and staffing businesses.
+#
 # CANDIDATE ROWS FOR CONTRIBUTORS (comments only — NOT seeds; do NOT add as
 # rows until each has an official source, an effective date, and an as_of
 # date read first-hand):
@@ -143,3 +148,36 @@ jurisdictions:
       - "legislation.gov.uk — Employment Agencies Act 1973, section 6 (legislation.gov.uk/ukpga/1973/35/section/6)"
       - "legislation.gov.uk — Conduct of Employment Agencies and Employment Businesses Regulations 2003, regulation 26 (legislation.gov.uk/uksi/2003/3319/regulation/26)"
     as_of: "2026-10-19"
+
+  # Key quoted: a YAML 1.1 parser reads a bare NO as boolean false.
+  # "effective" is the date the latest amendment to a cited section (s. 25) took effect; s. 26
+  # carries no amendment note and has applied since the Act took effect on 2005-07-01.
+  "NO":
+    jurisdiction_name: "Norway"
+    law_name: "Arbeidsmarkedsloven (lov om arbeidsmarkedstjenester, LOV-2004-12-10-76), ss. 25, 26, 27 and 30"
+    effective: "2024-07-01"
+    applies_to: >-
+      Section 26 bars a business that carries out private placement ("privat
+      arbeidsformidling") from charging the job seeker for the placement
+      service. Section 25 defines private placement as any active matching of
+      job seeker and employer carried out by anyone other than the public
+      employment service (NAV), and applies chapter 8 to activity carried out in
+      Norway. Section 27 first paragraph no. 3 also bars a business that hires
+      out workers ("utleie", a staffing enterprise) from charging the worker for
+      the hiring-out service. Neither section limits the protection by the job
+      seeker's nationality or immigration status. Whether a given intermediary
+      carries out "privat arbeidsformidling" or "utleie", and whether a foreign
+      agency's service counts as activity in Norway, is not stated here and is
+      not verified.
+    exceptions:
+      - "s. 26 first paragraph: a business that carries out private placement may not demand payment from the job seeker for the placement service"
+      - "s. 26 second paragraph: the ministry may issue regulations on notification, reporting, supervision and operation, may grant exemptions from the payment ban in special cases, and may set specific rules for the placement of seafarers; whether any exemption is in force is not stated here and is not verified"
+      - "s. 27 first paragraph no. 3: a business that has hired out a worker may not demand payment from the worker for the hiring-out service (current wording in force since 2023-04-01)"
+      - "s. 30: unless a stricter penal provision applies, anyone who intentionally or negligently breaks rules laid down in or under ss. 26 and 27 is punished with fines (current wording in force since 2015-10-01)"
+    official_source:
+      url: "https://lovdata.no/dokument/NL/lov/2004-12-10-76/KAPITTEL_8"
+      what_it_shows: "Lovdata's official text of arbeidsmarkedsloven chapter 8 (Privat arbeidsformidling og utleie av arbeidstakere): ss. 25, 26, 27 and 30, with each section's amendment notes."
+    legal_basis: "Lov 10. desember 2004 nr. 76 om arbeidsmarkedstjenester (arbeidsmarkedsloven), s. 25 (as amended, latest in force 2024-07-01), s. 26 (no amendment since the Act took effect on 2005-07-01), s. 27 first paragraph no. 3 (as amended, latest in force 2023-04-01) and s. 30 (as amended, in force 2015-10-01) (verified on lovdata.no)"
+    sources:
+      - "Lovdata — arbeidsmarkedsloven chapter 8 (lovdata.no/dokument/NL/lov/2004-12-10-76/KAPITTEL_8)"
+    as_of: "2026-11-06"
