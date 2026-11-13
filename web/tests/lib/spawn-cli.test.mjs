@@ -149,9 +149,33 @@ test("spawnHeadlessCli never lets a child inherit the server's console (windowsH
   assert.equal(calls.length, 2);
   for (const { options } of calls) {
     assert.equal(options.windowsHide, true);
+    assert.equal(options.detached, process.platform !== "win32");
     assert.equal(options.cwd, process.cwd());
     assert.equal(options.env, process.env);
   }
+});
+
+test("spawnHeadlessCli detaches on POSIX even when the caller says not to", () => {
+  const realSpawn = childProcess.spawn;
+  const calls = [];
+  childProcess.spawn = (command, args, options) => {
+    calls.push(options);
+    return { stdin: { end() {} } };
+  };
+  syncBuiltinESMExports();
+  try {
+    spawnHeadlessCli(
+      process.execPath,
+      ["-e", ""],
+      { cwd: process.cwd(), env: process.env, detached: false },
+      PASSTHROUGH,
+    );
+  } finally {
+    childProcess.spawn = realSpawn;
+    syncBuiltinESMExports();
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].detached, process.platform !== "win32");
 });
 
 function pidAlive(pid) {

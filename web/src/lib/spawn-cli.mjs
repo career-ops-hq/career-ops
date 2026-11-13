@@ -68,16 +68,21 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // output at all; the same spawn with windowsHide (CREATE_NO_WINDOW) succeeds.
   // Nothing spawned here needs a console, so never inherit one. Set after the
   // caller's options so no caller can opt back in. No-op on POSIX (#3809).
-  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true });
+  // POSIX: a detached child leads its own group, so Stop can signal that
+  // group. A normal child shares the server's group, and signalling that
+  // group would kill the server. Windows has no such group kill here, and
+  // detached would open a console, so it stays off there.
+  const detached = process.platform !== "win32";
+  const spawnOptions = { ...options, windowsHide: true, detached };
+  const child = spawn(launch.command, launch.args, spawnOptions);
   child.stdin?.end();
-  armCliStop(child, options);
+  armCliStop(child, spawnOptions);
   return child;
 }
 
 // A CLI can trap SIGTERM and keep writing after Stop. The routes only call
-// kill("SIGTERM"). Follow it with SIGKILL. A detached child is its own
-// process-group leader, so the group goes too. A normal child shares the
-// server's group; signalling that group would kill the server.
+// kill("SIGTERM"). Follow it with SIGKILL. The child is detached on POSIX,
+// so it leads its own group and the group goes too.
 const CLI_STOP_GRACE_MS = 5_000;
 
 /**
