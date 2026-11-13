@@ -169,11 +169,12 @@
       }
     },
     "source": {
-      "description": "Where a pointer came from: community, ats-directory, vc-portfolio, employer-list:<org>, or prior-mit:<owner>/<repo>@<commit>.",
+      "description": "Where a pointer came from: community, ats-directory, vc-portfolio, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, or web-index:<name>@<YYYY-MM-DD>.",
       "anyOf": [
         { "enum": ["community", "ats-directory", "vc-portfolio"] },
         { "type": "string", "pattern": "^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
-        { "type": "string", "pattern": "^prior-mit:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$" }
+        { "type": "string", "pattern": "^prior-mit:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$" },
+        { "type": "string", "pattern": "^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\\d{4}-\\d{2}-\\d{2}$" }
       ]
     }
   }

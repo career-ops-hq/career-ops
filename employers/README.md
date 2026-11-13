@@ -35,7 +35,7 @@ One JSON object per line in `boards/<ats>/<initial>.ndjson`:
 | `website` | no | The employer's registrable domain (`example.com`), without scheme, `www` or path. |
 | `countries` | no | ISO 3166-1 alpha-2 codes. Stored; the scanner does not filter on them yet. |
 | `tags` | no | Reserved. No tag is accepted until the vocabulary is defined. |
-| `source` | yes | Where the pointer came from: `community`, `ats-directory`, `vc-portfolio`, `employer-list:<org>` or `prior-mit:<owner>/<repo>@<commit>`. It must match the manifest's `source`. |
+| `source` | yes | Where the pointer came from: `community`, `ats-directory`, `vc-portfolio`, `employer-list:<org>`, `prior-mit:<owner>/<repo>@<commit>` or `web-index:<name>@<YYYY-MM-DD>` (pointers found in a public web index: the index's name and the date it was queried, for example `web-index:wayback@2026-11-12`). It must match the manifest's `source`. |
 | `contribution` | yes | The id of the manifest that added the row. |
 | `added` | yes | The date the row was added (`YYYY-MM-DD`). |
 | `retired`, `retired_reason` | maintainers only | `retired: true` with a reason: `gone`, `owner_request`, `moved`, `duplicate` or `policy`. |

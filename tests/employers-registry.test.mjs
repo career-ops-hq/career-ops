@@ -28,7 +28,7 @@ import {
   ALSO_PERMITS, DOMAIN_RE, FIXED_SOURCES, GITHUB_LOGIN_RE, LICENSE_ID, MANIFEST_ID_RE, MANIFEST_KEYS,
   MANIFEST_REQUIRED, NAME_MAX, RETIRED_REASONS, ROW_KEYS, ROW_REQUIRED, SOURCE_PATTERNS,
   BOARDS_WARN_BYTES, SUMMARY_MAX_FINDINGS, annotation, compareRows, escapeCommandData, escapeCommandProperty,
-  renderChangelog, renderStepSummary, validateRegistry, writeChangelog,
+  renderChangelog, renderStepSummary, sourceProblem, validateRegistry, writeChangelog,
 } from '../seeds/employers-validate.mjs';
 
 import greenhouse from '../providers/greenhouse.mjs';
@@ -227,6 +227,21 @@ test('schema.json: manifest keys, required keys and license terms match the vali
 test('schema.json: the source list matches the validator', () => {
   assert.deepEqual(sourceSchema.anyOf[0].enum, [...FIXED_SOURCES]);
   assert.deepEqual(sourceSchema.anyOf.slice(1).map((s) => new RegExp(s.pattern).source), Object.values(SOURCE_PATTERNS).map((re) => re.source));
+});
+
+test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real date', () => {
+  for (const ok of ['web-index:wayback@2026-11-12', 'web-index:a@2026-02-28', 'web-index:a1-b2@2024-02-29']) {
+    assert.equal(sourceProblem(ok), null, ok);
+  }
+  for (const bad of [
+    'web-index:wayback', 'web-index:wayback@', 'web-index:wayback@2026-11', 'web-index:wayback@2026-13-40',
+    'web-index:wayback@2026-02-30', 'web-index:wayback@2025-02-29', 'web-index:Wayback@2026-11-12',
+    'web-index:@2026-11-12', 'web-index:-wayback@2026-11-12', 'web-index:wayback-@2026-11-12',
+    `web-index:${'a'.repeat(65)}@2026-11-12`, 'web-index:way back@2026-11-12', 'web-index:wayback@2026-11-12 ',
+  ]) {
+    assert.match(sourceProblem(bad) ?? '', /^source .* (is not one of|does not end in a real calendar date)/, bad);
+  }
+  assert.match(sourceProblem('scraped'), /web-index:<name>@<YYYY-MM-DD>$/);
 });
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {

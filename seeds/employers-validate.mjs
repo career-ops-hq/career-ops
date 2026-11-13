@@ -88,12 +88,13 @@ export const MANIFEST_KEYS = Object.freeze([
 ]);
 export const RETIRED_REASONS = Object.freeze(['gone', 'owner_request', 'moved', 'duplicate', 'policy']);
 
-// Where a row's pointer came from. A closed list: three fixed values and two
+// Where a row's pointer came from. A closed list: three fixed values and three
 // parameterised forms.
 export const FIXED_SOURCES = Object.freeze(['community', 'ats-directory', 'vc-portfolio']);
 export const SOURCE_PATTERNS = Object.freeze({
   'employer-list': /^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/,
   'prior-mit': /^prior-mit:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$/,
+  'web-index': /^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\d{4}-\d{2}-\d{2}$/,
 });
 
 export const LICENSE_ID = 'CC-BY-4.0';
@@ -251,8 +252,11 @@ export function websiteProblem(website) {
 export function sourceProblem(source) {
   if (typeof source !== 'string') return 'source must be a string';
   if (FIXED_SOURCES.includes(source)) return null;
+  if (SOURCE_PATTERNS['web-index'].test(source)) {
+    return isIsoDate(source.slice(source.lastIndexOf('@') + 1)) ? null : `source ${show(source)} does not end in a real calendar date (YYYY-MM-DD)`;
+  }
   if (Object.values(SOURCE_PATTERNS).some((re) => re.test(source))) return null;
-  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>`;
+  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>`;
 }
 
 /** @param {unknown} value */
