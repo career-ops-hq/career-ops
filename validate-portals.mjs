@@ -223,6 +223,7 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'interamt_searches',
   'topdev_searches',
   'seek_searches',
+  'hn_hiring',
   'dayforce_boards',
   'location_filter',
   'country_eligibility_filter',
