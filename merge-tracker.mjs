@@ -59,6 +59,17 @@ Options:
   -h, --help       Show this help and exit`;
 const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migrate-via', '--migrate-urls', '--backfill-urls', '--allow-headerless', '--help', '-h'];
 
+// applications.md is gitignored. A rewrite that changes bytes keeps the
+// previous file beside it, so a bad merge can be put back. An unchanged
+// rewrite leaves any existing backup where it is.
+function writeTrackerReplacing(file, nextText) {
+  if (existsSync(file)) {
+    const prev = readFileSync(file, 'utf-8');
+    if (prev !== nextText) copyFileSync(file, `${file}.bak`);
+  }
+  writeFileAtomic(file, nextText);
+}
+
 // Executable hooks live beside this script even when user data is redirected
 // through CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / .career-ops-data.
 const CAREER_OPS_CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -1426,7 +1437,7 @@ export async function mergeTracker(options = {}) {
       if (DRY_RUN) {
         console.log(`🔎 Migration (dry-run): ${changed} row(s) would be rewritten in ${basename(APPS_FILE)}`);
       } else {
-        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        writeTrackerReplacing(APPS_FILE, migrated.join('\n'));
         console.log(`✅ Migration: rewrote ${changed} report link(s) in ${basename(APPS_FILE)} relative to ${TRACKER_DIR === DATA_ROOT ? 'repo root' : 'data/'}`);
       }
       return 0;
@@ -1469,7 +1480,7 @@ export async function mergeTracker(options = {}) {
       if (DRY_RUN) {
         console.log(`🔎 Migration (dry-run): Via column would be inserted after Company (${changed} table line(s) rewritten)`);
       } else {
-        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        writeTrackerReplacing(APPS_FILE, migrated.join('\n'));
         console.log(`✅ Migration: inserted Via column after Company (${changed} table line(s) rewritten). Direct applications are marked —.`);
       }
       return 0;
@@ -1532,7 +1543,7 @@ export async function mergeTracker(options = {}) {
       if (DRY_RUN) {
         console.log(`🔎 Migration (dry-run): ${changed} URL cell(s) would be rendered as markdown links in ${basename(APPS_FILE)}.${skippedNote}`);
       } else {
-        writeFileAtomic(APPS_FILE, migrated.join('\n'));
+        writeTrackerReplacing(APPS_FILE, migrated.join('\n'));
         console.log(`✅ Migration: rendered ${changed} URL cell(s) as markdown links in ${basename(APPS_FILE)}. Every row's dedup key is unchanged (verified per cell).${skippedNote}`);
       }
       return 0;
@@ -1730,7 +1741,7 @@ export async function mergeTracker(options = {}) {
           : `would fill ${filled} row(s)`;
         console.log(`🔎 Backfill URLs (dry-run): ${action}. (${summary})`);
       } else {
-        writeFileAtomic(APPS_FILE, backfilled.join('\n'));
+        writeTrackerReplacing(APPS_FILE, backfilled.join('\n'));
         console.log(`✅ Backfill URLs: ${urlColumnAdded ? 'added the URL column; ' : ''}${summary}.`);
       }
       trackerLock.release();
@@ -1785,7 +1796,7 @@ export async function mergeTracker(options = {}) {
       // time rather than at insert time.
       const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
       if (DRY_RUN) console.log('(dry-run — no changes written)');
       trackerLock.release();
       return 0;
@@ -1799,7 +1810,7 @@ export async function mergeTracker(options = {}) {
       // time rather than at insert time.
       const moved = DRY_RUN ? 0 : sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeFileAtomic(APPS_FILE, appLines.join('\n'));
+      if ((pdfSynced > 0 || moved > 0) && !DRY_RUN) writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
       if (DRY_RUN) console.log('(dry-run — no changes written)');
       trackerLock.release();
       return 0;
@@ -2102,6 +2113,28 @@ export async function mergeTracker(options = {}) {
         );
       }
 
+      // True when this match would point a submitted row at a posting the URLs
+      // do not show is the same one. Exact URL, same report, same aggregator
+      // id, and an aggregator sighting of an employer URL are not retargets.
+      const wouldRetargetSubmittedRow = (row) => {
+        if (dupReason === 'url' || dupReason === 'report-file' || reportNumMatched) return false;
+        if (!addUrl) return false;
+        const rowUrl = postingUrl(row);
+        // A placeholder, a local:jds pointer, or a report that names no posting
+        // is not a URL this guard can compare. The title match still decides.
+        if (!normalizeUrl(rowUrl)) return false;
+        if (normalizeUrl(rowUrl) === addUrl) return false;
+        if (isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) {
+          const rowId = aggregatorPostingId(rowUrl);
+          const addId = aggregatorPostingId(addition.url);
+          if (rowId && addId && rowId.domain === addId.domain && rowId.id === addId.id) return false;
+        }
+        if (normalizeUrl(rowUrl) && !isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) return false;
+        if (!isAggregatorUrl(rowUrl) && !isAggregatorUrl(addition.url)
+            && postingUrlRelation(rowUrl, addition.url) === 'same') return false;
+        return true;
+      };
+
       if (!duplicate) {
         // Company + role fuzzy match
         // Two passes, exact company first. With a single find() the wider
@@ -2194,35 +2227,31 @@ export async function mergeTracker(options = {}) {
           if (additionReqNum && !appReqNum) return false;
           return true;
         };
-        duplicate = existingApps.find(app => fuzzyTierMatch(app, false))
-          || existingApps.find(app => fuzzyTierMatch(app, true));
+        // find() stops at the first title match. An Applied row this posting
+        // must not retarget used to win that race, the guard below cleared it,
+        // and a later Evaluated row with the same title was never checked.
+        // Skip those submitted rows and keep looking. Warn only when nothing
+        // later qualifies, so a real update of the later row stays quiet.
+        let protectedSubmitted = null;
+        const fuzzyCandidate = (app, widenToCorporateForm) => {
+          if (!fuzzyTierMatch(app, widenToCorporateForm)) return false;
+          if (submittedStatus(app.status) && wouldRetargetSubmittedRow(app)) {
+            if (!protectedSubmitted) protectedSubmitted = app;
+            return false;
+          }
+          return true;
+        };
+        duplicate = existingApps.find(app => fuzzyCandidate(app, false))
+          || existingApps.find(app => fuzzyCandidate(app, true));
+        if (!duplicate && protectedSubmitted) {
+          console.warn(
+            `⚠️  ${file}: #${protectedSubmitted.num} is ${protectedSubmitted.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
+          );
+        }
       }
 
-      // True when this match would point a submitted row at a posting the URLs
-      // do not show is the same one. Exact URL, same report, same aggregator
-      // id, and an aggregator sighting of an employer URL are not retargets.
-      const wouldRetargetSubmittedRow = (row) => {
-        if (dupReason === 'url' || dupReason === 'report-file' || reportNumMatched) return false;
-        if (!addUrl) return false;
-        const rowUrl = postingUrl(row);
-        // A placeholder, a local:jds pointer, or a report that names no posting
-        // is not a URL this guard can compare. The title match still decides.
-        if (!normalizeUrl(rowUrl)) return false;
-        if (normalizeUrl(rowUrl) === addUrl) return false;
-        if (isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) {
-          const rowId = aggregatorPostingId(rowUrl);
-          const addId = aggregatorPostingId(addition.url);
-          if (rowId && addId && rowId.domain === addId.domain && rowId.id === addId.id) return false;
-        }
-        if (normalizeUrl(rowUrl) && !isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) return false;
-        if (!isAggregatorUrl(rowUrl) && !isAggregatorUrl(addition.url)
-            && postingUrlRelation(rowUrl, addition.url) === 'same') return false;
-        return true;
-      };
-
-      // Applied and later rows keep the posting that was submitted. A title
-      // match that cannot prove the incoming URL is that posting must not
-      // replace the URL, the score, or the report. The addition is a new row.
+      // Entry-number matches still land here. The fuzzy tier already skipped
+      // a submitted row it would retarget, so this does not warn twice.
       if (duplicate && submittedStatus(duplicate.status) && wouldRetargetSubmittedRow(duplicate)) {
         console.warn(
           `⚠️  ${file}: #${duplicate.num} is ${duplicate.status} and this posting is not the same URL. Left that row unchanged and added a new one.`,
@@ -2476,14 +2505,7 @@ export async function mergeTracker(options = {}) {
     if (!DRY_RUN) {
       const moved = sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      const nextText = appLines.join('\n');
-      // The tracker is gitignored. Keep the bytes from before this rewrite
-      // when the text actually changes, so the previous rows can be put back.
-      if (existsSync(APPS_FILE)) {
-        const prevText = readFileSync(APPS_FILE, 'utf-8');
-        if (prevText !== nextText) copyFileSync(APPS_FILE, `${APPS_FILE}.bak`);
-      }
-      writeFileAtomic(APPS_FILE, nextText);
+      writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
 
       // Move processed files to merged/ — but only the ones actually applied.
       // Archiving a TSV whose row never reached the tracker is what turns a bug
