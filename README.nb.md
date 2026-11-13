@@ -613,6 +613,8 @@ Koden er lisensiert under [MIT](LICENSE). Navnet og merkevaren
 for bruk i fellesskapet og forbeholder kommersiell produktnavngivning og
 anbefalinger.
 
+Koden er MIT; dataene i [`employers/`](employers/) er under [CC BY 4.0](employers/LICENSE).
+
 ## Stjernehistorikk
 
 <p align="center">
