@@ -145,6 +145,8 @@ try {
   } else {
     fail(`thehub.fetch() includeRemote requested = ${JSON.stringify(remoteReq)}, returned ${withRemote.length} jobs (expected 3)`);
   }
+  if (withRemote.truncated === undefined) pass('thehub.fetch() leaves the board unmarked when both passes answer');
+  else fail(`thehub.fetch() complete two-pass read was marked: ${JSON.stringify(withRemote.truncated)}`);
 
   if (paged.length === 17) pass('thehub.fetch() aggregates valid jobs across pages (15 + 2, dropping the empty-title row)');
   else fail(`thehub.fetch() returned ${paged.length} jobs (expected 17)`);
@@ -253,6 +255,13 @@ try {
   } else {
     fail(`thehub.fetch() region-pass partial failure: requested ${blipReq.length}, returned ${blipJobs.length} jobs (expected 2 requests, 15 jobs)`);
   }
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 15) {
+    pass('thehub.fetch() marks the board partial when a later region page fails');
+  } else {
+    fail(`thehub.fetch() region-pass partial failure: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
 
   // The remote pass failing after the region pass already succeeded must not
   // discard the region-pass results (the "one bad pass shouldn't sink the
@@ -272,6 +281,11 @@ try {
     pass('thehub.fetch() keeps region-pass jobs when the remote pass fails after the region pass already succeeded');
   } else {
     fail(`thehub.fetch() remote-pass failure: requested ${remoteFailReq.length}, returned ${remoteFailJobs.length} jobs (expected 2 requests, 1 job)`);
+  }
+  if (remoteFailJobs.truncated?.reason === 'fetch-error' && remoteFailJobs.truncated.fetched === 1) {
+    pass('thehub.fetch() marks the board partial when the remote pass fails');
+  } else {
+    fail(`thehub.fetch() remote-pass failure: truncated = ${JSON.stringify(remoteFailJobs.truncated)}`);
   }
 
 } catch (e) {
