@@ -2,14 +2,15 @@ package screens
 
 // The Inbox tab (#5269): the Pending rows of data/pipeline.md, beside the
 // tracker tabs, with the first-pass rank and what the batch files record for
-// each row. It is read only. No key on this tab writes a file, and none skips,
-// queues, triages or evaluates a row.
+// each row. One key acts on a row: `e` queues it for evaluation through
+// sync-batch-input.mjs (pipeline_pending_queue.go). No key skips, triages or
+// evaluates a row, and the dashboard itself writes no file.
 //
-// Two things keep it that way. applyFilterAndSort leaves the tracker's row
-// list empty while the Inbox is active, so CurrentApp has nothing to return
-// and every tracker action has no row to act on. And handleKey sends every
-// key to handlePendingKey first, which lets through only the keys listed in
-// pendingSharedKeys and swallows the rest.
+// Two things keep tracker actions off this tab. applyFilterAndSort leaves the
+// tracker's row list empty while the Inbox is active, so CurrentApp has
+// nothing to return and every tracker action has no row to act on. And
+// handleKey sends every key to handlePendingKey first, which lets through only
+// the keys listed in pendingSharedKeys and swallows the rest.
 
 import (
 	"fmt"
@@ -67,7 +68,7 @@ func (m *PipelineModel) SetPendingRows(rows []data.PendingRow) {
 
 // leavePendingTab moves to ALL when the Inbox is active. Flows that write the
 // tracker (the discard reason picker, the hired flow) call it, so they never
-// run on the read-only tab.
+// run on the Inbox, which has no tracker rows.
 func (m *PipelineModel) leavePendingTab() {
 	if !m.onPendingTab() {
 		return
@@ -249,6 +250,9 @@ func (m PipelineModel) handlePendingKey(msg tea.KeyMsg) (next PipelineModel, cmd
 		}
 		target := row.URL
 		return m, func() tea.Msg { return PipelineOpenURLMsg{URL: target} }, true
+	case "e":
+		next, cmd := m.queuePendingRow()
+		return next, cmd, true
 	}
 	return m, nil, true
 }
@@ -515,6 +519,7 @@ func pendingHelpItems() []keyHelpItem {
 		{"s", i18n.Current.HelpSort},
 		{"r", i18n.Current.HelpRefresh},
 		{"o", i18n.Current.HelpOpenURL},
+		{"e", i18n.Current.HelpQueue},
 		{"p", i18n.Current.HelpProgress},
 		{"S", i18n.Current.HelpStats},
 		{"t", i18n.Current.HelpLanguage},
