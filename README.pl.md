@@ -278,7 +278,7 @@ Zobacz [docs/SETUP.md](docs/SETUP.md) po pełny przewodnik konfiguracji, [docs/R
 
 ## Użycie
 
-Wklej adres URL lub opis oferty do swojego CLI z AI. career-ops sprawdza, czy oferta z linkiem jest nadal aktualna (wklejony tekst nie ma linku do sprawdzenia), ocenia ją względem Twojego CV, pisze raport, dopasowuje Twoje CV (domyślnie jako PDF) i dodaje wiersz do trackera. To pokrywa większość dni. Wszystko inne to tryb, o który prosisz po nazwie. Jeśli nie da się odczytać oferty, pipeline zatrzymuje się i prosi o wklejenie tekstu.
+Wklej adres URL lub opis oferty do swojego CLI z AI. career-ops sprawdza, czy oferta z linkiem jest nadal aktualna (wklejony tekst nie ma linku do sprawdzenia), ocenia ją względem Twojego CV, pisze raport, dopasowuje Twoje CV (domyślnie jako PDF) i dodaje wiersz do trackera. To pokrywa większość dni. Wszystko inne to tryb, o który prosisz po nazwie. Jeśli nie da się odczytać oferty, pipeline zatrzymuje się i prosi o wklejenie tekstu lub udostępnienie zrzutu ekranu.
 
 ### Jak poprosić o tryb
 
