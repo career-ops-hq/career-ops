@@ -414,6 +414,21 @@ try {
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.recruitmentplatform.com/details.html?jobId=101',
   );
+
+  // themuse.parseSearchPage — for…of over the /search cards; the title-link
+  // href feeds the posting URL, so a lone surrogate in it must drop just
+  // that card (the href is validated against a /jobs/{company}/{slug}
+  // shape, and lone surrogates are rejected explicitly).
+  const { parseSearchPage: parseMusePage } = await load('themuse.mjs');
+  const museCard = (href, title) =>
+    `<article class="sr-tile" data-job-id="00000000-0000-0000-0000-000000000000"><div class="sr-tile__body"><h2 class="sr-tile__title"><a href="${href}">${title}</a></h2><div class="sr-tile__details"><p>At <a href="/profiles/acme">Acme</a> - Berlin</p><p>Posted on Nov 10</p></div></div></article>`;
+  check(
+    'themuse.parseSearchPage',
+    () => parseMusePage(
+      `<h1 class="sr-count"><strong>2</strong> jobs</h1>${museCard(`/jobs/acme/${LONE}bad`, 'Bad Id')}${museCard('/jobs/acme/good-id', 'Good Id')}`,
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.themuse.com/jobs/acme/good-id',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
