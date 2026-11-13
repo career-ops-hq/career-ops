@@ -30,19 +30,41 @@ export function claudePluginsRoots(env = process.env) {
   return roots;
 }
 
+// The path with its symlinks resolved. A path not on disk yet resolves through
+// its nearest existing ancestor, so `<link-to-plugin-copy>/new-data` reads as
+// inside the copy just like `<link>` does (#7026). Null when nothing resolves.
+function realSpelling(path) {
+  try {
+    return realpathSync(path);
+  } catch {
+    // Not on disk yet: resolve the nearest ancestor that is.
+  }
+  const missing = [];
+  let current = resolve(path);
+  for (;;) {
+    const parent = dirname(current);
+    if (parent === current) return null;
+    missing.unshift(basename(current));
+    current = parent;
+    try {
+      return join(realpathSync(current), ...missing);
+    } catch {
+      // Keep walking up.
+    }
+  }
+}
+
 function spellings(path) {
   const out = [resolve(path)];
-  try {
-    out.push(realpathSync(path));
-  } catch {
-    // Not on disk yet: the lexical spelling is all there is.
-  }
+  const real = realSpelling(path);
+  if (real) out.push(real);
   return process.platform === 'win32' ? out.map((p) => p.toLowerCase()) : out;
 }
 
 function isWithin(child, parent) {
   const rel = relative(parent, child);
-  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  // A '..' segment leaves the parent; a name like '..local' stays inside it.
+  return rel !== '' && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /**
