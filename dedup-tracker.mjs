@@ -58,14 +58,15 @@ const STATUS_RANK = {
   'discarded': 0,
   'rejected': 1,
   'evaluated': 2,
-  'applied': 3,
-  'responded': 4,
-  'assessment': 5,
-  'interview': 6,
-  'offer': 7,
+  'preparation': 3,
+  'applied': 4,
+  'responded': 5,
+  'assessment': 6,
+  'interview': 7,
+  'offer': 8,
   // Hired outranks everything: the accepted-job record must never lose a
   // dedup contest to a repost row.
-  'hired': 8,
+  'hired': 9,
 };
 
 // templates/states.yml is system layer: it lives beside this script, not in the

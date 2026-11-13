@@ -230,7 +230,11 @@ export async function compileLatexFile(absPath, content, outputPath, compileOnly
       execFileSync(resolvedEngineBin || 'tectonic', ['--outdir', texDir, compilePath], {
         cwd: texDir,
         stdio: 'pipe',
-        timeout: 120_000,
+        // Tectonic downloads its TeX bundle on the first compile. CI's cold
+        // cache can take over two minutes before typesetting even starts.
+        // Keep the engine bounded and below the compile suite's five-minute
+        // outer deadline, while allowing that one-time download to finish.
+        timeout: 4 * 60_000,
       });
     } else {
       const pdflatexArgs = [

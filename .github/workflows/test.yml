@@ -114,6 +114,11 @@ jobs:
         run: npm install --ignore-scripts
       - if: env.SKIP_LEG != 'true'
         run: node test-all.mjs --quick
+        env:
+          # Windows suites start nested Node/Git processes and contend on the
+          # filesystem. Leave capacity for those children instead of timing
+          # out correctness checks while all four suite slots are occupied.
+          CAREER_OPS_TEST_JOBS: ${{ runner.os == 'Windows' && '2' || '' }}
       - name: Go dashboard tests
         if: env.SKIP_LEG != 'true'
         run: go test ./...

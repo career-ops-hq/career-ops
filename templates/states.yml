@@ -20,6 +20,12 @@ states:
     description: Offer evaluated with report, pending decision
     dashboard_group: evaluated
 
+  - id: preparation
+    label: Preparation
+    aliases: [preparation]
+    description: Preparing contacts, referrals, or documents before applying
+    dashboard_group: preparation
+
   - id: applied
     label: Applied
     aliases: [aplicado, enviada, aplicada, sent, başvuruldu, basvuruldu, 已投递, 已申请, 已投遞, 已申請]

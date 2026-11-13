@@ -219,6 +219,10 @@ async function runWhileLocked({
       retryMs: 20,
       staleMs: 5_000,
       tracker,
+      // This fixture must actually let go before testing the waiting writer.
+      // A transient Windows rm failure would otherwise be swallowed by the
+      // production release policy, leaving our still-live PID as the owner.
+      removeLock: path => rmSync(path, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 }),
     });
 
     const probe = launchWriter(PROBE_LOCK_TIMEOUT_MS);
@@ -313,12 +317,11 @@ async function runWhileLocked({
     // On windows-latest this removal sometimes fails with EPERM (#5514). Thrown
     // from here, it replaced the evidence above, so every subtest of the case
     // reported the EPERM and none of them what the writer did. It is recorded
-    // instead, and the case's own cleanup subtest reports it. No maxRetries:
-    // rmSync retries only a directory that is not yet empty. EPERM on the
-    // directory itself is what Node 25 reports while another process has it as
-    // its working directory (Node 22 says EBUSY), and neither is retried.
+    // instead, and the case's own cleanup subtest reports it. Bounded retries
+    // allow transient Windows handles to close; persistent failures still
+    // produce the cleanup assertion with the writer's evidence intact.
     try {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 25 });
     } catch (err) {
       evidence.cleanupError = err;
     }

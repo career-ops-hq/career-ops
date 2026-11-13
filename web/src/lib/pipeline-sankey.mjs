@@ -144,7 +144,7 @@ export function classifyLeaf(app, log) {
   const reachedInterview = ADVANCED.has(status) || logReachedAdvanced(num, log);
 
   if (status === "SKIP") return "skip";
-  if (status === "EVALUATED") return "evaluated";
+  if (status === "EVALUATED" || status === "PREPARATION") return "evaluated";
   if (status === "APPLIED") return "waiting";
   if (status === "RESPONDED") return "screening";
   if (status === "ASSESSMENT") return "assessment";

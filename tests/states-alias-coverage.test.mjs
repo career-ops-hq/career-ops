@@ -176,16 +176,17 @@ try {
     : fail('dedup-tracker no longer calls resolveCanonicalStateId — with an id-only table, every alias would rank 0');
   const rankOf = (spelling) => ranks.get(resolveCanonicalStateId(spelling, states));
   const expectedRanks = [
-    ['screening', 5],
-    ['online assessment', 5],
-    ['online_assessment', 5],
-    ['online screening', 5],
-    ['entrevista', 6],
-    ['oferta', 7],
-    ['contratado', 8],
-    ['contratada', 8],
-    ['accepted', 8],
-    ['accept', 8],
+    ['preparation', 3],
+    ['screening', 6],
+    ['online assessment', 6],
+    ['online_assessment', 6],
+    ['online screening', 6],
+    ['entrevista', 7],
+    ['oferta', 8],
+    ['contratado', 9],
+    ['contratada', 9],
+    ['accepted', 9],
+    ['accept', 9],
   ];
   const rankMismatches = expectedRanks.filter(([alias, rank]) => rankOf(alias) !== rank);
   rankMismatches.length === 0

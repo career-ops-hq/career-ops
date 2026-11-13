@@ -88,6 +88,17 @@ ok('a states.yml alias below Applied still merges as before', () => {
   });
 });
 
+ok('dedup keeps Preparation progress when merging an evaluated duplicate', () => {
+  withTracker([
+    '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',
+    '| 2 | 2026-09-02 | Acme | Backend Engineer | 3.0/5 | Preparation | ❌ | — | preparing referral |',
+  ], (rows) => {
+    assert.deepEqual(nums(rows), ['1']);
+    assert.equal(cells(rows[0])[6], 'Preparation');
+    assert.match(cells(rows[0])[9], /preparing referral/);
+  });
+});
+
 ok('a canonical Applied row is still protected (regression guard)', () => {
   withTracker([
     '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',
@@ -119,7 +130,7 @@ ok('a bold alias with a trailing date ("**Entrevista** 2026-06-01") is still rea
 // purpose: a new state in states.yml fails the first check below until someone
 // decides which side of the line it is on.
 const IN_MOTION = ['applied', 'responded', 'assessment', 'interview', 'offer', 'hired'];
-const NOT_IN_MOTION = ['evaluated', 'rejected', 'discarded', 'skip'];
+const NOT_IN_MOTION = ['evaluated', 'preparation', 'rejected', 'discarded', 'skip'];
 
 const { loadCanonicalStates } = await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
 const states = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));

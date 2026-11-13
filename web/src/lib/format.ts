@@ -16,6 +16,7 @@ export { canonStatus, legitimacyTone };
 
 export const CANONICAL_STATES = [
   "Evaluated",
+  "Preparation",
   "Applied",
   "Responded",
   "Assessment",
