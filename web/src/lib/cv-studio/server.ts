@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
@@ -17,7 +17,14 @@ import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, 
 const EDITED_SUFFIX = "-edited";
 
 export function missingDataFolderMessage(): string | null {
-  const root = careerOpsRoot();
+  let root: string;
+  try {
+    root = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return unsafe;
+  }
   return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
 }
 

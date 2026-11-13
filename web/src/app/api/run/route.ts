@@ -11,7 +11,7 @@ import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsFo
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
 import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
@@ -47,7 +47,17 @@ export async function POST(req: Request) {
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  const userData = careerOpsRoot();
+  let userData: string;
+  try {
+    userData = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return new Response(JSON.stringify({ error: unsafe }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   if (!fs.existsSync(userData)) {
     return new Response(JSON.stringify({ error: dataFolderMissingMessage(userData) }), {
       status: 400,

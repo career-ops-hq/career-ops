@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import * as yaml from "js-yaml";
@@ -32,8 +33,14 @@ import { normalizeMemoryFact } from "@/lib/memory-fact.mjs";
 /**
  * Resolve the career-ops DATA root — the directory holding the user's files
  * (cv.md, data/, reports/). Same precedence as the core: CAREER_OPS_ROOT →
- * CAREER_OPS_DATA_DIR → `.career-ops-data` marker → the checkout itself. For
+ * CAREER_OPS_DATA_DIR → `.career-ops-data` marker → `~/career-ops-data` when the
+ * checkout is a Claude Code plugin install copy → the checkout itself. For
  * scripts, system modes and templates use resolveCodeRoot() (core/code-root.mjs).
+ *
+ * Throws UnsafeDataRootError (core/data-root.mjs) when an environment variable or
+ * the marker names a folder inside a plugin install copy, as the core does: that
+ * folder is deleted on the next plugin update. The error message is one line that
+ * names the setting to change; callers that report a bad data root surface it.
  */
 export function careerOpsRoot(): string {
   // `process.cwd()` is `<core>/web` for `next dev`/`next start`, so its parent is
@@ -60,6 +67,7 @@ export function careerOpsRoot(): string {
     process.env,
     path.resolve,
     path.join,
+    { homedir: os.homedir, realpath: fs.realpathSync, platform: process.platform },
   );
 }
 
