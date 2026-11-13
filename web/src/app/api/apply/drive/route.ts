@@ -65,6 +65,20 @@ export async function POST(req: Request) {
             cvPath = null;
             cvResolveError = error instanceof Error ? error.message.slice(0, 160) : "Could not resolve the résumé.";
           }
+          const fin = await finalizeDrivenSession(s.id, cliId);
+          if (!fin) {
+            const unread = { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." };
+            emit({
+              t: "done",
+              filled: false,
+              turns: result.turns,
+              reason: result.reason,
+              gaps: cvResolveError
+                ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }, unread]
+                : [unread],
+            });
+            return;
+          }
           const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
           const supplied = answersByFieldId(s.fields, body.answers);
           // The agent already typed these answers. An empty fill map attaches

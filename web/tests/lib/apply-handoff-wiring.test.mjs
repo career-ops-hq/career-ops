@@ -14,6 +14,13 @@ import "../helpers/web-ts-alias-loader.mjs";
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "../../src");
 
+test("a finished agent drive drops the previous read-back before merging gaps", () => {
+  const provider = readFileSync(join(src, "components/apply/apply-provider.tsx"), "utf8");
+  const agent = provider.slice(provider.indexOf("const agentFill"));
+  assert.match(agent, /withoutReadbackIssues\(prev\)/);
+  assert.match(agent, /issuesAfterAgent\(/);
+});
+
 test("the review screen does not promise a CV from the field label alone", () => {
   const view = readFileSync(join(src, "components/apply-view.tsx"), "utf8");
   assert.match(view, /resumeFieldNotice\(/);
@@ -42,7 +49,13 @@ export async function fillSession(id, answers, fields, cvPath, cvUploadName, rea
 export async function handoffSession(id) {
   globalThis.__applyFixture.handoffCalls.push(id);
 }
-export async function finalizeDrivenSession() { return null; }
+export async function finalizeDrivenSession() {
+  const fixture = globalThis.__applyFixture;
+  fixture.finalizeCalls = (fixture.finalizeCalls || 0) + 1;
+  if (fixture.finalizeResult === null) return null;
+  if (fixture.finalFields) fixture.session.fields = fixture.finalFields;
+  return { title: fixture.session.title, fields: fixture.session.fields, issues: [] };
+}
 export async function extractCurrent() { return { form: {} }; }
 export function isApplicationFormFn() { return true; }
 `;
@@ -221,4 +234,46 @@ test("drive read-back uses the agent's answers when no résumé is attached", as
   });
   assert.equal(globalThis.__applyFixture.fillCalls, 0);
   assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { visa: "No" });
+});
+
+test("a wrong radio on the drive path stays in the done gaps", async () => {
+  resetFixture();
+  globalThis.__applyFixture.session.fields = [
+    { id: "visa", type: "radio", label: "Will you require visa sponsorship?", required: true },
+  ];
+  globalThis.__applyFixture.verifyIssues = [
+    { level: "warn", code: "fill-mismatch", message: "These answers didn't seem to land on the real form — check them: Will you require visa sponsorship?." },
+  ];
+  const done = (await postDrive({
+    answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "Yes" }],
+  })).find((event) => event.t === "done");
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { visa: "Yes" });
+  assert.ok(done.gaps.some((gap) => gap.code === "fill-mismatch"));
+});
+
+test("drive read-back uses the fields on the page the agent reached", async () => {
+  resetFixture({
+    finalFields: [{ id: "office", type: "select", label: "Office", required: true }],
+  });
+  globalThis.__applyFixture.session.fields = [];
+  const done = (await postDrive({
+    answers: [{ id: "office", label: "Office", value: "Springfield" }],
+  })).find((event) => event.t === "done");
+  assert.equal(globalThis.__applyFixture.finalizeCalls, 1);
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { office: "Springfield" });
+  assert.equal(done.filled, true);
+});
+
+test("a drive that cannot re-read the form does not check the old fields", async () => {
+  resetFixture({ finalizeResult: null });
+  globalThis.__applyFixture.session.fields = [
+    { id: "visa", type: "radio", label: "Will you require visa sponsorship?", required: true },
+  ];
+  const done = (await postDrive({
+    answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+  })).find((event) => event.t === "done");
+  assert.equal(done.filled, false);
+  assert.ok(done.gaps.some((gap) => gap.code === "fill-unverified"));
+  assert.equal(globalThis.__applyFixture.fillCalls, 0);
+  assert.equal(globalThis.__applyFixture.verifyAnswers, undefined);
 });

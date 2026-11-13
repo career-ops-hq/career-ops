@@ -18,3 +18,8 @@ export function showPrefilledBanner(status, issues) {
 export function readbackIssues(issues) {
   return (issues || []).filter((issue) => READBACK_ISSUE_CODES.has(issue?.code));
 }
+
+/** Drop an earlier read-back so a later fill or drive can replace it. */
+export function withoutReadbackIssues(issues) {
+  return (issues || []).filter((issue) => !READBACK_ISSUE_CODES.has(issue?.code));
+}

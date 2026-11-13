@@ -399,13 +399,14 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             const opt = sel.selectedOptions?.[0];
             // "Choose…" uses an ellipsis, not three ASCII periods. An empty
             // value with that label used to count as a filled select.
-            const blankish = (part: string) => !part || /^(select|choose)(?:\.{3}|…)?$|^--$/i.test(part);
-            const texts = [sel.value, opt?.textContent, opt?.value]
+            const blankish = (part: string) => !part || /^(?:please\s+select|select|choose)(?:\.{3}|…)?$|^--$/i.test(part);
+            const value = (sel.value || "").replace(/\s+/g, " ").trim();
+            const texts = [value, opt?.textContent, opt?.value]
               .map((part) => (part || "").replace(/\s+/g, " ").trim())
               .filter((part) => !blankish(part));
             if (intended && intended.trim()) {
               if (!texts.some((part) => norm(part) === norm(intended))) mismatches.push(f.label);
-            } else if (f.required && (!(sel.value || "").trim() || texts.length === 0)) requiredEmpty.push(f.label);
+            } else if (f.required && (blankish(value) || texts.length === 0)) requiredEmpty.push(f.label);
             continue;
           }
           note(f.label, intended, (el as HTMLInputElement).value || "", f.required);

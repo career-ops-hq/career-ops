@@ -10,7 +10,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readbackIssues, showPrefilledBanner } from "../../src/lib/apply/prefilled-banner.mjs";
+import { readbackIssues, showPrefilledBanner, withoutReadbackIssues } from "../../src/lib/apply/prefilled-banner.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureHtml = readFileSync(join(here, "../fixtures/apply-readback.html"), "utf8");
@@ -25,6 +25,14 @@ const fields = [
 function codes(issues) {
   return issues.map((issue) => issue.code);
 }
+
+test("a later drive drops an earlier read-back issue", () => {
+  assert.deepEqual(withoutReadbackIssues([
+    { code: "fill-mismatch", message: "A field did not match" },
+    { code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." },
+    { code: "ai-filled", message: "AI filled the form" },
+  ]), [{ code: "ai-filled", message: "AI filled the form" }]);
+});
 
 test("the green banner stays off unless read-back passed", () => {
   assert.equal(showPrefilledBanner("done", []), true);
@@ -116,9 +124,15 @@ test("a required select with a blank value is empty whatever its label says", as
 
   select.value = "--";
   option.value = "--";
-  option.textContent = "--";
+  option.textContent = "Please select";
   const dashes = await verifyFill(frame, fields, {});
   assert.ok(codes(dashes).includes("required-empty"), JSON.stringify(dashes));
+
+  select.value = "Please select";
+  option.value = "Please select";
+  option.textContent = "Pick one";
+  const words = await verifyFill(frame, fields, {});
+  assert.ok(codes(words).includes("required-empty"), JSON.stringify(words));
 
   select.value = "mw";
   option.value = "mw";
