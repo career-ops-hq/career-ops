@@ -86,9 +86,42 @@
  *                               Unique within that ATS, not across employers —
  *                               pair it with the source if you key on it. Not
  *                               read by the scanner, whose per-posting identity
- *                               is the URL. Left unset when the source exposes no
- *                               posting id — never filled with a requisition id,
- *                               which is shared by sibling postings.
+ *                               is the URL plus, where a provider sets it,
+ *                               `listingIdentity` below. Left unset when the
+ *                               source exposes no posting id — never filled
+ *                               with a requisition id, which is shared by
+ *                               sibling postings.
+ * @property {{ats_provider: string, board_slug: string, posting_id: string}} [listingIdentity]
+ *                               The posting's ATS-native identity
+ *                               (docs/listing-fingerprint.md): which ATS, which
+ *                               board on it, which posting on that board. Set it
+ *                               only when the payload carries a stable posting
+ *                               id; `git grep -l listingIdentity providers/`
+ *                               lists the providers that do (`lever.mjs` and
+ *                               `join.mjs` are short references).
+ *                               - `ats_provider`: a lowercase slug
+ *                                 (`/^[a-z][a-z0-9_-]*$/`), the provider's `id`.
+ *                               - `board_slug`: the full board namespace the
+ *                                 provider already resolved to fetch the board
+ *                                 (company slug, account slug, tenant subdomain).
+ *                               - `posting_id`: the posting's own id from the
+ *                                 payload, never parsed out of a URL and never a
+ *                                 requisition id (shared by sibling postings).
+ *                               All three are opaque strings: no trimming, case
+ *                               folding or decoding. A source whose ids are
+ *                               integers renders a safe integer in its one
+ *                               decimal form (`greenhouse.mjs`, `join.mjs`); a
+ *                               source whose ids are strings never coerces a
+ *                               stray number (`smartrecruiters.mjs`), since `1`
+ *                               and `"1"` must not become one listing.
+ *                               Omit the key when any part is missing, empty,
+ *                               padded or carries a control character: the row
+ *                               then falls back to URL dedup. scan.mjs uses the
+ *                               derived key as a dedup token next to the URL, so
+ *                               the same posting reached at two URLs is one row,
+ *                               and writes it to scan-history.tsv's
+ *                               `listing_key` column. The URL stays the
+ *                               primary dedup key.
  * @property {string} [requisitionId] The EMPLOYER's requisition id — the
  *                               schema.org/JobPosting `identifier` concept — from
  *                               wherever the ATS exposes it: a dedicated payload
@@ -112,7 +145,8 @@
  *                               Correct use: an ADVISORY grouping signal ("possible
  *                               repost / sibling req"), always paired with employer
  *                               and, where it matters, location. Per-posting
- *                               identity is the URL. scan.mjs's company+role dedup
+ *                               identity is the URL (and `listingIdentity`,
+ *                               where set). scan.mjs's company+role dedup
  *                               reads it only in the safe direction: two
  *                               same-titled postings with DIFFERENT ids are two
  *                               requisitions. Written to scan-history.tsv. The
