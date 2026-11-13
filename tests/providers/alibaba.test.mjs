@@ -244,6 +244,22 @@ try {
     fail(`alibaba.fetch() partial results on failure: ${JSON.stringify(blipJobs.map(j => j.title))}`);
   }
 
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 1) {
+    pass('alibaba.fetch() marks the board partial when a later request fails');
+  } else {
+    fail(`alibaba.fetch() a later request fails: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
+
+  const whole = mkCtx(() => ({ success: true, content: { totalCount: 1, datas: [mkJob(9, '全读岗位')] } }));
+  const wholeJobs = await alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI', '大模型'] }, whole.ctx);
+  if (wholeJobs.length === 1 && wholeJobs.truncated === undefined) {
+    pass('alibaba.fetch() leaves the board unmarked when every request answers');
+  } else {
+    fail(`alibaba.fetch() whole board: ${wholeJobs.length} jobs, truncated = ${JSON.stringify(wholeJobs.truncated)}`);
+  }
+
   const softFail = mkCtx(({ key }) => (key === '大模型'
     ? { success: false, errorMsg: 'rate limited' }
     : { success: true, content: { totalCount: 1, datas: [mkJob(8, '幸存岗位2')] } }));
@@ -252,6 +268,14 @@ try {
     pass('alibaba.fetch() treats an in-band success:false as a blip once jobs are collected');
   } else {
     fail(`alibaba.fetch() success:false blip: ${JSON.stringify(softFailJobs.map(j => j.title))}`);
+  }
+
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (softFailJobs.truncated?.reason === 'fetch-error' && softFailJobs.truncated.fetched === 1) {
+    pass('alibaba.fetch() marks the board partial when a later request answers success:false');
+  } else {
+    fail(`alibaba.fetch() a later request answers success:false: truncated = ${JSON.stringify(softFailJobs.truncated)}`);
   }
 
   let softDeadThrew = false;

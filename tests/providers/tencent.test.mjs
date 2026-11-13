@@ -266,6 +266,22 @@ try {
     fail(`tencent.fetch() partial results on failure: ${JSON.stringify(blipJobs.map(j => j.title))}`);
   }
 
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 1) {
+    pass('tencent.fetch() marks the board partial when a later request fails');
+  } else {
+    fail(`tencent.fetch() a later request fails: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
+
+  const whole = mkCtx(() => ({ Code: 200, Data: { Count: 1, Posts: [mkPost(9, '全读岗位')] } }));
+  const wholeJobs = await tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI', '大模型'] }, whole.ctx);
+  if (wholeJobs.length === 1 && wholeJobs.truncated === undefined) {
+    pass('tencent.fetch() leaves the board unmarked when every request answers');
+  } else {
+    fail(`tencent.fetch() whole board: ${wholeJobs.length} jobs, truncated = ${JSON.stringify(wholeJobs.truncated)}`);
+  }
+
   const zeroThenBlip = mkCtx((keyword) => {
     if (keyword === '大模型') throw new Error('HTTP 503');
     return { Code: 200, Data: { Count: 0, Posts: [] } };
