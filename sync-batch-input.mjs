@@ -19,10 +19,21 @@
  * (already-processed URLs). Idempotent: safe to run repeatedly.
  * Read-only over the pipeline; the only write is appending to batch-input.tsv.
  *
+ * --url <url> queues that one Pending row instead of all of them, with the same
+ * normalization, dedupe, id allocation, lock and row format (#5269; the
+ * dashboard's Inbox `e` key calls it). With --url the exit status says what
+ * happened, so a caller need not read the output:
+ *   0  the row was queued (or, with --dry-run, would be)
+ *   3  nothing to queue: the URL is already in batch-input.tsv or batch-state.tsv
+ *   4  the URL is not an unchecked Pending row this script can read (its URL
+ *      must be the first cell after "- [ ] ")
+ *   1  any other error, such as a --url that is not a public http(s) URL
+ * Without --url a run with nothing to add still exits 0.
+ *
  * The "Pending" section heading is read in every language a mode writes it
  * in (lib/pipeline-sections.mjs, shared with reconcile-pipeline.mjs and scan.mjs).
  *
- * Run: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]
+ * Run: node sync-batch-input.mjs [--dry-run] [--url <url>] [--pipeline <path>] [--input <path>] [--state <path>]
  */
 
 import { readFileSync, writeFileSync, existsSync, appendFileSync, mkdirSync, realpathSync, lstatSync } from 'fs';
@@ -43,6 +54,9 @@ const CHECKOUT_ROOT = dirname(fileURLToPath(import.meta.url));
 
 /** Batch source label written into the source column. */
 export const SOURCE = 'pipeline';
+
+/** Exit statuses of a --url run besides 0 (queued) and 1 (error). */
+export const URL_EXIT = Object.freeze({ ALREADY_QUEUED: 3, NOT_PENDING: 4 });
 
 function canonicalInputPath(inputPath) {
   let existing = inputPath;
@@ -315,9 +329,12 @@ export function planBatchRows(pending, existingUrls, startId = 1) {
 
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
-  const USAGE = 'Usage: node sync-batch-input.mjs [--dry-run] [--pipeline <path>] [--input <path>] [--state <path>]\n'
-    + '  Syncs pipeline.md "Pending" entries into batch/batch-input.tsv.';
-  const VALUE_FLAGS = ['--pipeline', '--input', '--state'];
+  const USAGE = 'Usage: node sync-batch-input.mjs [--dry-run] [--url <url>] [--pipeline <path>] [--input <path>] [--state <path>]\n'
+    + '  Syncs pipeline.md "Pending" entries into batch/batch-input.tsv.\n'
+    + '  --url <url>  queue only the Pending row with this posting URL. Exit status:\n'
+    + '               0 queued, 3 already in batch-input.tsv or batch-state.tsv (nothing to queue),\n'
+    + '               4 not an unchecked Pending row whose URL is the first cell after "- [ ] ", 1 other errors.';
+  const VALUE_FLAGS = ['--pipeline', '--input', '--state', '--url'];
   // A mistyped --dry-run must not fall through to a real write, and --input=path
   // must not be dropped in favour of the default file.
   validateFlags(args, ['--dry-run', ...VALUE_FLAGS, '--help', '-h'], USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
@@ -353,13 +370,33 @@ if (isMainModule(import.meta.url)) {
   const INPUT_FILE = canonicalInputPath(inputPath);
   const STATE_FILE = resolveInsideRepo(argValue('--state'), join(CHECKOUT_ROOT, 'batch', 'batch-state.tsv'), '--state', CHECKOUT_ROOT);
 
+  // --url: normalized the way parsePending normalizes each row, so the match
+  // and the dedupe below compare the same form of the URL.
+  const urlArg = argValue('--url');
+  let ONLY_URL = null;
+  if (urlArg !== null) {
+    if (!isSafePublicHttpUrl(urlArg)) {
+      console.error(`--url must be a public http(s) URL: ${urlArg}`);
+      process.exit(1);
+    }
+    ONLY_URL = new URL(urlArg).href;
+  }
+  const notPending = () => {
+    console.error(`Not an unchecked Pending row in ${PIPELINE_FILE}: ${ONLY_URL} (the URL must be the first cell after "- [ ] ")`);
+    process.exit(URL_EXIT.NOT_PENDING);
+  };
+
   if (!existsSync(PIPELINE_FILE)) {
+    if (ONLY_URL) notPending();
     console.log('No pipeline.md found — nothing to sync.');
     process.exit(0);
   }
 
-  const pending = parsePending(readFileSync(PIPELINE_FILE, 'utf-8'));
+  const allPending = parsePending(readFileSync(PIPELINE_FILE, 'utf-8'));
+  // The first matching row wins, as it does in planBatchRows.
+  const pending = ONLY_URL ? allPending.filter((e) => e.url === ONLY_URL).slice(0, 1) : allPending;
   if (pending.length === 0) {
+    if (ONLY_URL) notPending();
     console.log('No valid pending entries found — nothing to sync.');
     process.exit(0);
   }
@@ -384,12 +421,16 @@ if (isMainModule(import.meta.url)) {
 
     const newRows = planBatchRows(pending, existingUrls, startId);
     if (newRows.length === 0) {
+      if (ONLY_URL) {
+        console.log(`${ONLY_URL} is already in batch-input.tsv or batch-state.tsv — nothing to queue.`);
+        process.exit(URL_EXIT.ALREADY_QUEUED);
+      }
       console.log(`All ${pending.length} pending entries already in batch-input.tsv or batch-state.tsv — nothing to sync.`);
       process.exit(0);
     }
 
     console.log('=== Sync pipeline.md -> batch-input.tsv ===');
-    console.log(`📋 Pipeline pending: ${pending.length} entries`);
+    console.log(ONLY_URL ? `📋 Pipeline pending: ${allPending.length} entries, 1 selected with --url` : `📋 Pipeline pending: ${pending.length} entries`);
     console.log(`⏭️  Already queued/processed: ${pending.length - newRows.length}`);
     console.log(`➕ New entries to add: ${newRows.length}`);
     for (const e of newRows) {
