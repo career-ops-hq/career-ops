@@ -76,7 +76,10 @@ function runDocumentedStep(payload, report = '', dirPrefix = 'pdf-ats-variant-')
   // Split the documented template into arguments FIRST, then substitute into
   // each argument, so a substituted value containing whitespace (a checkout or
   // tmp path with a space) stays one argument.
+  // {cv-stem} is the #6667 stem: report-led when a report exists, legacy otherwise.
+  const stem = report ? `${report}-acme-cv-jane-smith-2026-11-12` : 'cv-jane-smith-acme-2026-11-12';
   const fillArg = (arg, atsTemplate) => arg
+    .replaceAll('{cv-stem}', stem)
     .replaceAll('[-{report}]', seg) // empty for a standalone run with no report number
     .replaceAll('{candidate}', 'jane-smith')
     .replaceAll('{company}', 'acme')
@@ -99,7 +102,7 @@ function runDocumentedStep(payload, report = '', dirPrefix = 'pdf-ats-variant-')
     if (args[0] === 'cv-templates.mjs') atsTemplate = r.stdout.trim();
     steps.push({ raw, status: r.status, stdout: r.stdout, stderr: r.stderr });
   }
-  return { dir, styledJson, steps, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, styledJson, stem, steps, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 test('pdf --ats is documented as an opt-in pass and routed from AGENTS.md', () => {
@@ -125,11 +128,11 @@ test('the optional ATS PDF is rendered without --report', () => {
 });
 
 test('the documented commands produce a gated ATS variant with competencies under Skills', () => {
-  const { dir, styledJson, steps, cleanup } = runDocumentedStep(PAYLOAD);
+  const { dir, styledJson, stem, steps, cleanup } = runDocumentedStep(PAYLOAD);
   try {
     for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}\n${s.stderr}`);
-    const html = join(dir, 'output', 'cv-jane-smith-acme-ats.html');
-    assert.ok(existsSync(html), 'output/cv-{candidate}-{company}-ats.html must be written');
+    const html = join(dir, 'output', `${stem}-ats.html`);
+    assert.ok(existsSync(html), 'output/{cv-stem}-ats.html must be written');
     const text = readFileSync(html, 'utf-8');
     assert.match(text, /Core Competencies: <\/span>Distributed Systems, Latency Tuning/,
       'competencies must reach the ATS render as a comma-delimited Skills line');
@@ -142,11 +145,12 @@ test('the documented commands produce a gated ATS variant with competencies unde
 });
 
 test('with a report number, every path carries it before the company', () => {
-  const { dir, steps, cleanup } = runDocumentedStep(PAYLOAD, '042');
+  const { dir, stem, steps, cleanup } = runDocumentedStep(PAYLOAD, '042');
   try {
     for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}\n${s.stderr}`);
-    assert.ok(existsSync(join(dir, 'output', 'cv-jane-smith-042-acme-ats.html')),
-      'output/cv-{candidate}-{report}-{company}-ats.html must be written');
+    assert.ok(stem.startsWith('042-'), 'a report-numbered run leads with the report number');
+    assert.ok(existsSync(join(dir, 'output', `${stem}-ats.html`)),
+      'output/{cv-stem}-ats.html must be written');
     assert.ok(existsSync(join(dir, 'cv-jane-smith-042-acme-ats.json')),
       '/tmp/cv-{candidate}-{report}-{company}-ats.json must be written');
   } finally {
@@ -170,13 +174,13 @@ test('the ATS gate catches a claim the styled HTML fix never carried back to the
 
 test('the documented commands still work when the scratch directory name contains a space', () => {
   // Regression for #5410: substituted paths must stay single arguments.
-  const { dir, steps, cleanup } = runDocumentedStep(PAYLOAD, '', 'pdf ats variant ');
+  const { dir, stem, steps, cleanup } = runDocumentedStep(PAYLOAD, '', 'pdf ats variant ');
   try {
     assert.match(dir, / /, 'fixture directory must contain a space');
     for (const s of steps) assert.equal(s.status, 0, `${s.raw} exited ${s.status}
 ${s.stderr}`);
-    assert.ok(existsSync(join(dir, 'output', 'cv-jane-smith-acme-ats.html')),
-      'output/cv-{candidate}-{company}-ats.html must be written under a spaced directory');
+    assert.ok(existsSync(join(dir, 'output', `${stem}-ats.html`)),
+      'output/{cv-stem}-ats.html must be written under a spaced directory');
   } finally {
     cleanup();
   }
