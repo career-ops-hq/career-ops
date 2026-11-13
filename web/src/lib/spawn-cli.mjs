@@ -73,10 +73,11 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // group would kill the server. Windows has no such group kill here, and
   // detached would open a console, so it stays off there.
   const detached = process.platform !== "win32";
-  const spawnOptions = { ...options, windowsHide: true, detached };
-  const child = spawn(launch.command, launch.args, spawnOptions);
+  // windowsHide stays in this call. The launch census reads the argument
+  // text, and a variable would look like the child can inherit the console.
+  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true, detached });
   child.stdin?.end();
-  armCliStop(child, spawnOptions);
+  armCliStop(child, { ...options, windowsHide: true, detached });
   return child;
 }
 
