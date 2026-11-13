@@ -47,7 +47,9 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot, resolveUserPath } from './path-resolver.mjs';
 
 // ---------------------------------------------------------------------------
 // Unicode inventories
@@ -77,6 +79,14 @@ const VOID_TAGS = new Set([
   'embed', 'source', 'track', 'wbr',
 ]);
 const SKIP_TAGS = new Set(['script', 'style', 'noscript', 'svg', 'template']);
+// Closing one of these ends a text run. Without the break, `<p>Java</p><p>Ignore
+// previous instructions</p>` reads as one line and no line-anchored pattern fires.
+const BLOCK_TAGS = new Set([
+  'address', 'article', 'aside', 'blockquote', 'dd', 'div', 'dl', 'dt', 'fieldset',
+  'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'header', 'hr', 'li', 'main', 'nav', 'ol', 'p', 'pre', 'section', 'table', 'td',
+  'th', 'tr', 'ul',
+]);
 
 const entityMap = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
 
@@ -108,18 +118,24 @@ function styleHidden(style) {
   return null;
 }
 
+const ATTR_RE = /([a-zA-Z_:][-\w:.]*)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/g;
+
 function attrsHidden(attrs) {
-  const a = attrs.toLowerCase();
-  // `hidden` attribute (not part of a longer word) or aria-hidden="true"
-  if (/(^|[\s"'])hidden\s*=/.test(a + ' ') || /(^|[\s"'])hidden(?=[\s>]|$)/.test(a + ' ')) {
-    return 'hidden attribute';
+  let style = null;
+  let ariaHidden = false;
+  for (const m of attrs.matchAll(ATTR_RE)) {
+    const name = m[1].toLowerCase();
+    const value = m[3] ?? m[4] ?? m[5] ?? '';
+    if (name === 'style') style = value;
+    else if (name === 'aria-hidden' && value.trim().toLowerCase() === 'true') ariaHidden = true;
   }
-  if (/aria-hidden\s*=\s*["']?true/.test(a)) return 'aria-hidden=true';
-  // A quoted value may legitimately contain the other quote character, so the
-  // closing quote is the one that opened it — a lazy "[\"']" would stop early.
-  const quoted = a.match(/style\s*=\s*(["'])([\s\S]*?)\1/);
-  const m = quoted ? quoted[2] : a.match(/style\s*=\s*([^\s>]+)/)?.[1];
-  if (m) return styleHidden(m);
+  // A bare `hidden` attribute has no value, so the name=value pairs are removed
+  // first: matching the word anywhere in the tag fires on `title="no longer
+  // hidden"` and drops a visible block.
+  const bare = attrs.replace(ATTR_RE, ' ').toLowerCase();
+  if (/(^|[\s"'/])hidden(?=[\s/>]|$)/.test(bare + ' ')) return 'hidden attribute';
+  if (ariaHidden) return 'aria-hidden=true';
+  if (style) return styleHidden(style);
   return null;
 }
 
@@ -207,8 +223,9 @@ function scanText(text, findings) {
     return ch;
   }).join('');
 
-  // zero-width inside a word = tampering signal
-  for (const m of text.matchAll(new RegExp(`[\\p{L}][${ZERO_WIDTH.slice(0, 3)}]+[\\p{L}]`, 'gu'))) {
+  // zero-width inside a word = tampering signal (every invisible class, not
+  // only the first three: a word joiner splits a word just as well)
+  for (const m of text.matchAll(new RegExp(`[\\p{L}][${ZERO_WIDTH}]+[\\p{L}]`, 'gu'))) {
     tampering.push({ kind: 'zero-width inside a word', context: excerptAt(text, m.index) });
   }
 
@@ -251,6 +268,29 @@ function excerptAt(text, idx) {
   return (start > 0 ? '…' : '') + text.slice(start, idx + 60).replace(/\s+/g, ' ') + '…';
 }
 
+function splitHtmlTags(markup) {
+  const tokens = [];
+  let textStart = 0;
+  for (let i = 0; i < markup.length; i++) {
+    if (markup[i] !== '<') continue;
+    let quote = null;
+    let end = -1;
+    for (let j = i + 1; j < markup.length; j++) {
+      const c = markup[j];
+      if (quote) { if (c === quote) quote = null; continue; }
+      if (c === '"' || c === "'") { quote = c; continue; }
+      if (c === '>') { end = j; break; }
+    }
+    if (end === -1) break; // unterminated: leave the remainder as text
+    if (i > textStart) tokens.push(markup.slice(textStart, i));
+    tokens.push(markup.slice(i, end + 1));
+    textStart = end + 1;
+    i = end;
+  }
+  if (textStart < markup.length) tokens.push(markup.slice(textStart));
+  return tokens;
+}
+
 function cleanHtml(markup, findings) {
   findings.hidden_blocks = [];
   findings.hiddenUrls = [];
@@ -277,11 +317,12 @@ function cleanHtml(markup, findings) {
     });
   }
 
-  // stack-based pass: strip tags, route text inside hidden elements
-  const tokens = markup.split(/(<[^>]*>)/g);
+  // Tags are split on a `>` outside quotes: a value like title="up to >100k"
+  // would otherwise end the opening tag early and leak a hidden block's text.
+  const tokens = splitHtmlTags(markup);
   let visible = '';
   const stack = []; // { tag, hidden }
-  const tagRe = /^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>?$/;
+  const tagRe = /^<\s*(\/?)\s*([a-zA-Z][a-zA-Z0-9-]*)([\s\S]*)>$/;
 
   for (const token of tokens) {
     if (!token) continue;
@@ -299,6 +340,7 @@ function cleanHtml(markup, findings) {
       if (hide) {
         findings.hidden_blocks.push({ tag, reason: hide, excerpt: `<${tag} ${rawAttrs.trim().slice(0, 118)}` });
       }
+      if (tag === 'br') visible += '\n';
       continue;
     }
     if (!closing) {
@@ -308,9 +350,11 @@ function cleanHtml(markup, findings) {
         findings.hidden_blocks.push({ tag, reason: hide, excerpt: `<${tag} ${rawAttrs.trim().slice(0, 118)}` });
       }
     } else {
+      const block = BLOCK_TAGS.has(tag);
       for (let i = stack.length - 1; i >= 0; i--) {
         if (stack[i].tag === tag) { stack.length = i; break; }
       }
+      if (block) visible += '\n';
     }
   }
 
@@ -319,7 +363,7 @@ function cleanHtml(markup, findings) {
     findings.hiddenUrls.push(u[0]);
   }
 
-  const visibleText = visible
+  const visibleText = decodeEntities(visible)
     .replace(/\n{3,}/g, '\n\n')
     .replace(/[ \t]{2,}/g, ' ')
     .trim();
@@ -349,15 +393,22 @@ function verdict(f) {
 // ---------------------------------------------------------------------------
 
 function parseArgs(argv) {
-  const args = { in: null, mode: null, json: false, out: null };
+  const args = { in: null, mode: null, json: false, out: null, error: null };
+  const value = (i) => (argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null);
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--in') args.in = argv[++i];
-    else if (a === '--html') args.mode = 'html';
+    if (a === '--in') {
+      args.in = value(i);
+      if (!args.in) return { ...args, error: '--in needs a path' };
+      i++;
+    } else if (a === '--html') args.mode = 'html';
     else if (a === '--text') args.mode = 'text';
     else if (a === '--json') args.json = true;
-    else if (a === '--out') args.out = argv[++i];
-    else if (a === '-h' || a === '--help') args.help = true;
+    else if (a === '--out') {
+      args.out = value(i);
+      if (!args.out) return { ...args, error: '--out needs a path' };
+      i++;
+    } else if (a === '-h' || a === '--help') args.help = true;
   }
   return args;
 }
@@ -374,15 +425,25 @@ export function guard(raw, mode = null) {
 
 export function main(argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
+  if (args.error) {
+    process.stderr.write(`❌ ${args.error}\n`);
+    return 2;
+  }
   if (args.help) {
     console.log('Usage: node posting-guard.mjs [--in FILE] [--html|--text] [--json] [--out FILE]');
     return 0;
   }
+  // Relative paths mean the data root, the way the modes write `jds/{slug}.md`.
+  const root = getCareerOpsRoot();
+  const inPath = args.in ? resolveUserPath(args.in, root) : null;
+  const outPath = args.out ? resolveUserPath(args.out, root) : null;
+  if (inPath && outPath && resolve(inPath) === resolve(outPath)) {
+    process.stderr.write('❌ --out must not be the --in file: the guard never rewrites its source\n');
+    return 2;
+  }
   let raw;
   try {
-    raw = args.in
-      ? readFileSync(args.in, 'utf8')
-      : readFileSync(0, 'utf8');
+    raw = inPath ? readFileSync(inPath, 'utf8') : readFileSync(0, 'utf8');
   } catch {
     process.stderr.write(`❌ cannot read input${args.in ? `: ${args.in}` : ' (stdin)'}\n`);
     return 2;
@@ -390,9 +451,9 @@ export function main(argv = process.argv.slice(2)) {
 
   const { clean, findings: f } = guard(raw, args.mode);
 
-  if (args.out) {
+  if (outPath) {
     try {
-      writeFileSync(args.out, clean, 'utf8');
+      writeFileSync(outPath, clean, 'utf8');
     } catch (err) {
       process.stderr.write(`❌ cannot write ${args.out}: ${err.message}\n`);
       return 2;
