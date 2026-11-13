@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-opus-5, rep 1, profile ai-engineer.
+# Report: 001-grupo-asegurador-meridia-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 1.5
+ARCHETYPE: AI Platform / LLMOps
+ARCHETYPE_RAW: AI Platform / LLMOps
+LEGITIMACY: Proceed with Caution
+DECISION: Skip
+WORK_AUTH: no_sponsorship
+COST_USD: 3.0479670000000003
+TURNS: 26
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: none
+EXPECT_FAILURES: none
+---END_SUMMARY---

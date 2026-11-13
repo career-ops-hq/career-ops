@@ -46,6 +46,7 @@
 import { intInRange } from './_config-utils.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
 import { fetchJsonWithRetry } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const MAX_PAGE_SIZE = 100; // server-enforced ceiling, confirmed by execution
 const DEFAULT_MAX_PAGES = 5; // 5 x 100 = 500 postings/keyword before over-fetch stops paying off
@@ -218,6 +219,11 @@ export default {
       throw new Error(`mycareersfuture: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
 
-    return [...byId.values()].map(({ id, ...job }) => job);
+    const jobs = [...byId.values()].map(({ id, ...job }) => job);
+    // A keyword that failed was never read, so the board is only partly read.
+    // scan.mjs takes a board's health from the returned array: unmarked, it
+    // logs the board reachable as if every keyword had answered.
+    if (errors.length) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

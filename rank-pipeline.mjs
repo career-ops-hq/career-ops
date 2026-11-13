@@ -43,6 +43,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readRememberedCli } from './lib/agent-cli.mjs';
 import { resolveCliLaunch } from './lib/agent-launch.mjs';
+import { SCORE_MAX, SCORE_MIN } from './lib/score-action.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -129,15 +130,16 @@ const KNOWN_FLAGS = [
 ];
 const VALUE_FLAGS = ['--limit', '--cli', '--model'];
 /**
- * Clamp to [0,5] at one decimal, and sanitize the reason so a model-generated
- * string can never break the row's pipe-delimited grammar or forge a new row.
+ * Clamp to SCORE_MIN..SCORE_MAX (lib/score-action.mjs) at one decimal, and
+ * sanitize the reason so a model-generated string can never break the row's
+ * pipe-delimited grammar or forge a new row.
  * Returns '' when there is no usable reason — the caller then skips the entry
  * rather than writing a bare number.
  */
 export function formatRankSegment(score, reason) {
   const n = Number(score);
   if (!Number.isFinite(n)) return '';
-  const clamped = Math.min(5, Math.max(0, n)).toFixed(1);
+  const clamped = Math.min(SCORE_MAX, Math.max(SCORE_MIN, n)).toFixed(1);
   // sanitizeMarkdownField collapses newlines/tabs and maps `|` to `/`, so the
   // reason cannot inject a column break or a fake `- [ ]` line.
   let clean = sanitizeMarkdownField(reason ?? '').trim();

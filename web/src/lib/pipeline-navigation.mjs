@@ -80,3 +80,17 @@ export function pipelineTab(raw) {
   const value = String((Array.isArray(raw) ? raw[0] : raw) ?? "").toUpperCase();
   return PIPELINE_TABS.find((t) => t === value) ?? "INBOX";
 }
+
+/**
+ * How far the tab strip should scroll so the selected tab is inside it.
+ * scrollIntoView would also scroll the list.
+ *
+ * @param {{ left: number, right: number }} strip
+ * @param {{ left: number, right: number }} tab
+ * @param {number} scrollLeft
+ */
+export function tabStripScrollLeft(strip, tab, scrollLeft) {
+  if (tab.left < strip.left) return scrollLeft - (strip.left - tab.left);
+  if (tab.right > strip.right) return scrollLeft + (tab.right - strip.right);
+  return scrollLeft;
+}

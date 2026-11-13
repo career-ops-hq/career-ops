@@ -29,7 +29,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Créé par <a href="https://github.com/santifer"><strong>@santifer</strong></a>, avec&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders">700+ contributeurs</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Créé par <a href="https://github.com/santifer"><strong>@santifer</strong></a>, avec&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.fr.md#builders">800+ contributeurs</a></p>
 
 <p align="center">
 <strong>Des mois à envoyer des CV dans le&nbsp;silence.</strong><br>
@@ -281,7 +281,7 @@ Voir [docs/SETUP.md](docs/SETUP.md) pour le guide d'installation complet, [docs/
 
 ## Utilisation
 
-Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte.
+Colle l'URL ou la description d'une offre dans ta CLI d'IA. career-ops vérifie qu'une offre liée est toujours ouverte (un texte collé n'a pas de lien à vérifier), la note par rapport à ton CV, rédige un rapport, adapte ton CV (en PDF par défaut) et ajoute une ligne à ton tracker. Cela suffit pour la plupart des jours. Tout le reste est un mode que tu demandes par son nom. Si une offre est illisible, le pipeline s'arrête et te demande de coller le texte ou de partager une capture d'écran.
 
 ### Demander un mode
 
@@ -607,6 +607,8 @@ Le code est distribué sous [Licence MIT](LICENSE). Le nom et la marque
 « career-ops » sont régis par la [Politique de marques déposées](TRADEMARK.md),
 permissive pour l'usage communautaire, réservée pour la dénomination de
 produits commerciaux et les endossements.
+
+Le code est sous licence MIT ; les données de [`employers/`](employers/) sont sous licence [CC BY 4.0](employers/LICENSE).
 
 ## Historique des étoiles
 

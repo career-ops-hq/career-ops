@@ -27,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Dibuat oleh <a href="https://github.com/santifer"><strong>@santifer</strong></a>, bersama&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders">700+ kontributor</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Dibuat oleh <a href="https://github.com/santifer"><strong>@santifer</strong></a>, bersama&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.id.md#builders">800+ kontributor</a></p>
 
 <p align="center">
 <strong>Berbulan-bulan kirim CV tanpa&nbsp;kabar.</strong><br>
@@ -282,7 +282,7 @@ Lihat [docs/SETUP.md](docs/SETUP.md) untuk panduan penyiapan lengkap (termasuk [
 
 ## Penggunaan
 
-Tempelkan URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang ditautkan masih aktif (teks yang ditempel tidak memiliki tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan CV Anda (PDF secara bawaan), dan menambahkan satu baris ke tracker Anda. Itu saja sudah mencakup sebagian besar kebutuhan harian Anda. Sisanya adalah mode yang Anda minta dengan menyebut namanya. Jika sebuah lowongan tidak dapat dibaca, pipeline berhenti dan meminta Anda menempelkan teksnya.
+Tempelkan URL atau deskripsi lowongan ke CLI AI Anda. career-ops memeriksa apakah lowongan yang ditautkan masih aktif (teks yang ditempel tidak memiliki tautan untuk diperiksa), menilainya terhadap CV Anda, menulis laporan, menyesuaikan CV Anda (PDF secara bawaan), dan menambahkan satu baris ke tracker Anda. Itu saja sudah mencakup sebagian besar kebutuhan harian Anda. Sisanya adalah mode yang Anda minta dengan menyebut namanya. Jika sebuah lowongan tidak dapat dibaca, pipeline berhenti dan meminta Anda menempelkan teksnya atau membagikan tangkapan layar.
 
 ### Cara meminta sebuah mode
 
@@ -606,6 +606,8 @@ Diterima kerja berkat career-ops? [Bagikan cerita Anda!](https://github.com/care
 ## Lisensi & Merek Dagang
 
 Kode program dilisensikan di bawah [MIT](LICENSE). Nama dan merek "career-ops" diatur dalam [Kebijakan Merek Dagang](TRADEMARK.md), yang bersifat terbuka untuk penggunaan komunitas namun dilindungi untuk penamaan produk komersial dan *endorsement*.
+
+Kode berlisensi MIT; data di [`employers/`](employers/) berlisensi [CC BY 4.0](employers/LICENSE).
 
 ## Riwayat Bintang (Star History)
 

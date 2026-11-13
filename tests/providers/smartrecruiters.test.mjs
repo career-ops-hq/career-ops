@@ -117,14 +117,51 @@ try {
     fail(`row 2 url = ${JSON.stringify(jobs[2]?.url)}`);
   }
 
-  // Empty input safety
-  if (parseSmartRecruitersResponse({}, 'X').length === 0) pass('empty {} input → empty result');
-  else fail('empty {} input should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty page. Any other
+  // envelope throws, naming the keys (or the type) it got, so a changed API or
+  // an error served with a 200 cannot read as "no open roles".
+  const emptyPage = parseSmartRecruitersResponse({ offset: 0, limit: 100, totalFound: 0, content: [] }, 'X');
+  if (Array.isArray(emptyPage) && emptyPage.length === 0) pass('parseSmartRecruitersResponse returns [] for { content: [] }');
+  else fail(`{ content: [] } → ${JSON.stringify(emptyPage)}`);
 
-  if (parseSmartRecruitersResponse({ content: 'not an array' }, 'X').length === 0) {
-    pass('non-array content → empty result (no crash)');
-  } else {
-    fail('non-array content should yield empty result');
+  const brokenCases = [
+    [{}, '[]'],
+    [{ error: 'rate limited' }, '[error]'],
+    [{ content: null }, '[content]'],
+    [{ content: 'not an array' }, '[content]'],
+    ['oops', '[string]'],
+    [null, '[null]'],
+  ];
+  let brokenOk = true;
+  for (const [body, got] of brokenCases) {
+    let out;
+    let err = null;
+    try { out = parseSmartRecruitersResponse(body, 'Acme'); } catch (e) { err = e; }
+    const msg = String(err?.message || '');
+    if (!err || !msg.startsWith('smartrecruiters: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+      brokenOk = false;
+      fail(`parseSmartRecruitersResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+      break;
+    }
+  }
+  if (brokenOk) pass('parseSmartRecruitersResponse throws, naming what it got, for a body that is not { content: [...] }');
+
+  // Through fetch(): a first page that is not a board fails the run instead of
+  // returning an empty board, and so does a later page.
+  for (const [label, firstPage] of [['first', {}], ['later', { content: Array.from({ length: 100 }, (_, i) => ({ id: `F${i}`, name: `Role ${i}` })) }]]) {
+    let err = null;
+    try {
+      await sr.fetch(
+        { name: 'BrokenCo', careers_url: 'https://careers.smartrecruiters.com/broken' },
+        { transport: 'http', sleep: async () => {}, fetchJson: async (url) => (new URL(url).searchParams.get('offset') === '0' ? firstPage : { error: 'upstream' }) },
+      );
+    } catch (e) { err = e; }
+    if (/^smartrecruiters: unexpected response for BrokenCo/.test(String(err?.message))) {
+      pass(`smartrecruiters.fetch() throws when the ${label} page is not a board`);
+    } else {
+      fail(`smartrecruiters.fetch() with a broken ${label} page: ${err ? err.message : 'no throw'}`);
+    }
   }
 
   // careers_url with non-string value → detect() returns null without crashing
@@ -559,6 +596,98 @@ try {
       pass('fetch() keeps postedAt on the rows it returns');
     } else {
       fail(`fetch row = ${JSON.stringify(fetched[0])}`);
+    }
+  }
+
+  // ── listingIdentity (#6908): the posting id the payload already carries
+  //    becomes the strong ATS-native identity instead of being thrown away.
+  {
+    const { smartRecruitersListingIdentity } = smartrecruitersModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+    const entry = { name: 'Acme', careers_url: 'https://careers.smartrecruiters.com/acme' };
+    const fetchWith = (content) => sr.fetch(entry, { fetchJson: async () => ({ content }) });
+
+    const [row] = await fetchWith([{ id: '744000012345678', name: 'Staff Engineer' }]);
+    if (row?.listingIdentity?.ats_provider === 'smartrecruiters'
+        && row?.listingIdentity?.board_slug === 'acme'
+        && row?.listingIdentity?.posting_id === '744000012345678'
+        && !('id' in row)) {
+      pass('fetch() returns the smartrecruiters/<slug>/<posting id> identity and still strips the raw id');
+    } else {
+      fail(`identity row = ${JSON.stringify(row)}`);
+    }
+
+    // The board slug comes from the configured entry, not from the posting URL:
+    // a branded careers_url with the slug pinned via api: keys on that slug.
+    const [pinned] = await sr.fetch(
+      { name: 'Continental', careers_url: 'https://jobs.continental.com', api: 'https://careers.smartrecruiters.com/Continental' },
+      { fetchJson: async () => ({ content: [{ id: '42', name: 'Role' }] }) },
+    );
+    if (pinned?.listingIdentity?.board_slug === 'Continental' && pinned?.listingIdentity?.posting_id === '42') {
+      pass('fetch() keys the identity on the api:-pinned slug of a branded careers_url');
+    } else {
+      fail(`pinned identity = ${JSON.stringify(pinned?.listingIdentity)}`);
+    }
+
+    // The same posting reached through a second URL (the employer's branded
+    // careers page instead of the ATS host) is one listing, not two. URL dedup
+    // alone cannot join these; only the ATS-native identity can.
+    const [before] = await fetchWith([{ id: '744000099', name: 'Backend Engineer' }]);
+    const branded = { ...before, url: 'https://careers.acme.example/jobs/744000099-backend-engineer' };
+    const seen = new Set();
+    markOfferSeen(before, seen);
+    if (isOfferSeen(branded, seen)) {
+      pass('the same SmartRecruiters posting under a branded URL is already seen (one row, not two)');
+    } else {
+      fail(`branded URL not seen; identity = ${JSON.stringify(before?.listingIdentity)}`);
+    }
+
+    // A different posting on the same board stays a different listing.
+    const [other] = await fetchWith([{ id: '744000100', name: 'Backend Engineer' }]);
+    if (listingIdentityToken(other) !== listingIdentityToken(before) && !isOfferSeen(other, seen)) {
+      pass('a different posting id on the same board is a different listing');
+    } else {
+      fail(`other token = ${listingIdentityToken(other)}`);
+    }
+
+    // No usable id → no identity, so the scan falls back to URL dedup.
+    const unusable = await fetchWith([
+      { name: 'No id', ref: 'https://api.smartrecruiters.com/v1/companies/acme/postings/1' },
+      { id: ' 7 ', name: 'Padded id' },
+      { id: 'a\u0007b', name: 'Control in id' },
+    ]);
+    if (unusable.length === 3 && unusable.every((j) => !('listingIdentity' in j))) {
+      pass('a missing, padded or control-bearing posting id leaves listingIdentity off');
+    } else {
+      fail(`unusable rows = ${JSON.stringify(unusable)}`);
+    }
+
+    // A numeric payload id is stringified for the detail call and the URL, but
+    // identity ids are never coerced: 1 and '1' must not become one listing.
+    const [numeric] = await fetchWith([{ id: 1, name: 'Numeric id' }]);
+    const [stringOne] = await fetchWith([{ id: '1', name: 'String id' }]);
+    if (numeric && !('listingIdentity' in numeric)
+        && numeric.url === 'https://jobs.smartrecruiters.com/acme/1-numeric-id'
+        && stringOne?.listingIdentity?.posting_id === '1') {
+      pass('a numeric payload id keeps its URL but gets no identity (no numeric coercion)');
+    } else {
+      fail(`numeric = ${JSON.stringify(numeric)}, string = ${JSON.stringify(stringOne?.listingIdentity)}`);
+    }
+
+    // The internal postingId never reaches a Job row.
+    if ([row, numeric, stringOne, ...unusable].every((j) => j && !('postingId' in j) && !('id' in j))) {
+      pass('fetch() strips both the raw id and the internal postingId from Job rows');
+    } else {
+      fail('postingId or id leaked into a Job row');
+    }
+
+    if (smartRecruitersListingIdentity('', '1') === undefined
+        && smartRecruitersListingIdentity(null, '1') === undefined
+        && smartRecruitersListingIdentity('acme', 1) === undefined
+        && smartRecruitersListingIdentity('acme', '') === undefined) {
+      pass('smartRecruitersListingIdentity() returns undefined for an empty slug or a non-string/empty id');
+    } else {
+      fail('smartRecruitersListingIdentity() accepted an incomplete triple');
     }
   }
 

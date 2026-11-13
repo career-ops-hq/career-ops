@@ -1395,10 +1395,10 @@ export function reorderCvSections(html, order) {
  * force content under the limit.
  *
  * @param {number} pageCount - Actual pages in the rendered PDF.
- * @param {{ maxPages?: number, strictPages?: boolean }} [options]
+ * @param {{ maxPages?: number, strictPages?: boolean, kind?: string }} [options]
  * @returns {void}
  */
-export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false } = {}) {
+export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false, kind = 'cv' } = {}) {
   if (!Number.isInteger(pageCount) || pageCount < 1) {
     throw new Error(`Could not determine the rendered PDF page count (received ${pageCount}).`);
   }
@@ -1407,12 +1407,15 @@ export function enforcePageBudget(pageCount, { maxPages = 2, strictPages = false
 
   const actualLabel = 'pages';
   const allowedLabel = maxPages === 1 ? 'page' : 'pages';
+  const isCover = kind === 'cover';
   const message =
-    `CV is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
-    'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.';
+    `${isCover ? 'Cover letter' : 'CV'} is ${pageCount} ${actualLabel}; the allowed maximum is ${maxPages} ${allowedLabel}. ` +
+    (isCover
+      ? 'Shorten the opening, the profile intro, or the achievements, then regenerate.'
+      : 'Trim lower-priority bullets, older roles, secondary projects, or the competencies strip, then regenerate.');
 
   if (strictPages) {
-    throw new Error(`${message} (strict page budget: --strict-pages or cv.strict_pages)`);
+    throw new Error(`${message} (strict page budget: ${isCover ? '--strict-pages' : '--strict-pages or cv.strict_pages'})`);
   }
 
   console.warn(`⚠️  ${message} Overflow is warning-only by default; use --strict-pages to reject it.`);
@@ -1638,9 +1641,10 @@ export function resolveArtifactKind(explicit, outputPath) {
  * in the file's basename (`cv-ana-042-acme-2026-10-30.pdf` -> `042`); the
  * output name is tried first, then the input name. Directories are ignored.
  *
- * An ATS variant (an `ats` token in the name) is never inferred: modes/pdf.md
- * renders it without --report on purpose, because an indexed ATS PDF would
- * replace the styled CV the dashboard opens for that report.
+ * An ATS variant (an `ats` token in the name, including a `.ats.pdf` suffix)
+ * is never inferred: modes/pdf.md renders it without --report on purpose,
+ * because an indexed ATS PDF would replace the styled CV the dashboard opens
+ * for that report.
  *
  * @param {string} [outputPath] - Destination PDF path.
  * @param {string} [inputPath] - Source HTML path.
@@ -1651,7 +1655,7 @@ export function inferReportNumber(outputPath, inputPath) {
   for (const p of [outputPath, inputPath]) {
     const name = basename(p || '');
     if (!name) continue;
-    if (/(^|[-_])ats([-_.]|$)/i.test(name)) return null;
+    if (/(^|[-_.])ats([-_.]|$)/i.test(name)) return null;
     const m = name.match(/[-_](\d{3})[-_]/);
     if (m) return { reportNum: m[1], from: p };
   }
@@ -2501,7 +2505,7 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
       // with the draft it wrote instead of the output path (#6377); the
       // warning is repeated on the page count alone, so a painter still
       // running from before drafts existed is reported honestly too.
-      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false });
+      enforcePageBudget(result.pageCount, { maxPages: opts.maxPages ?? 2, strictPages: false, kind: resolveArtifactKind(opts.kind, outputPath).kind ?? 'cv' });
       if (result.draftPath) {
         console.warn(`⚠️  Overflow draft: ${result.draftPath} (nothing was written to the output path). Trim and rerun to write ${result.outputPath}.`);
         console.log(`📊 Pages: ${result.pageCount}`);
@@ -2590,7 +2594,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
   // loop and the profile reader validate it, but a direct caller does not, and
   // an unusable value would skip the strict-overflow branch below, replace the
   // PDF at outputPath, and only then be rejected by enforcePageBudget().
-  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false };
+  const budget = { maxPages: opts.maxPages ?? 2, strictPages: opts.strictPages ?? false, kind: artifactKind };
   assertValidMaxPages(budget.maxPages);
 
   // Reject an escaping destination before creating directories, launching

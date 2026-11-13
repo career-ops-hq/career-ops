@@ -134,7 +134,7 @@ Mantieni un feedback stringato. Una o due cose da affinare per risposta — non 
 
 ### Scrivi il Resoconto (Transcript) della Sessione
 
-Dopo il riepilogo, scrivi una trascrizione della sessione leggibile meccanicamente su `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (usa `practice` per lo slug di azienda/ruolo se non era una sessione specifica per un'azienda). Questo è un registro strutturato del round per le modalità di analisi a valle (downstream); i turni etichettati col parlante permettono al fruitore di leggere entrambi i lati senza dover re-inferire chi ha parlato. Il contratto completo si trova in `interview-prep/sessions/README.md`.
+Dopo il riepilogo, scrivi una trascrizione della sessione leggibile meccanicamente su `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (usa `practice` per lo slug di azienda/ruolo se non era una sessione specifica per un'azienda). Se quel file esiste già, non sovrascriverlo: aggiungi il successivo contatore libero (`-2`, `-3`, ...) prima di `.md`, come descritto nella sezione "File names" del README. Questo è un registro strutturato del round per le modalità di analisi a valle (downstream); i turni etichettati col parlante permettono al fruitore di leggere entrambi i lati senza dover re-inferire chi ha parlato. Il contratto completo si trova in `interview-prep/sessions/README.md`.
 
 Formato:
 

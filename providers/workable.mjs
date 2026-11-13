@@ -174,7 +174,7 @@ export default {
         payload = null; // fall through to the markdown feed
       }
       if (payload && Array.isArray(payload.jobs)) {
-        return parseWorkableWidget(payload, entry.name);
+        return parseWorkableWidget(payload, entry.name, slug);
       }
 
       // Fallback: legacy markdown feed (small accounts only — see header note).
@@ -247,6 +247,36 @@ function toPlainText(html) {
   ).replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// Opaque board and posting ids, per docs/listing-fingerprint.md: a nonempty
+// string with no surrounding whitespace and no ASCII controls. Anything else
+// is not an id. Numbers are not coerced, and nothing is trimmed or case-folded.
+function opaqueListingId(value) {
+  if (typeof value !== 'string' || value === '' || value !== value.trim()) return undefined;
+  if (/[\u0000-\u001f\u007f]/u.test(value)) return undefined;
+  return value;
+}
+
+/**
+ * The posting's ATS-native identity: the account slug the board was already
+ * resolved at, and the widget payload's `shortcode`, never a token parsed out
+ * of a URL. Returns undefined unless the shortcode is a clean opaque string
+ * and the slug is an account slug this provider would resolve, so an unusable
+ * shortcode or slug leaves that row on URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} shortcode
+ * @returns {{ats_provider: 'workable', board_slug: string, posting_id: string} | undefined}
+ */
+export function workableListingIdentity(slug, shortcode) {
+  const board = opaqueListingId(slug);
+  const postingId = opaqueListingId(shortcode);
+  // The slug is the account namespace resolveWorkableSlug already accepted.
+  // A string that could not be that namespace is not a board_slug.
+  if (!board || !SLUG_RE.test(board) || !postingId) return undefined;
+  return { ats_provider: 'workable', board_slug: board, posting_id: postingId };
+}
+
 /**
  * Parse the widget API payload. Exported for unit tests.
  *
@@ -273,14 +303,24 @@ function toPlainText(html) {
  * it does not fan out, it just prints the primary location and drops the rest
  * at the source, so nothing is left in its rows to accumulate.
  *
+ * listingIdentity belongs to the folded posting, not to each location row.
+ * It is attached once, after the fold, from the first entry's `shortcode`
+ * (the same entry that supplies every non-location field) and the account
+ * slug the caller already resolved. A sibling does not get its own identity,
+ * and a shortcode is never read out of the URL. No slug, or a shortcode that
+ * is missing, padded, numeric or carrying a control character, leaves
+ * listingIdentity off so the scan keeps URL dedup.
+ *
  * @param {any} payload — parsed JSON body of the widget endpoint
  * @param {string} companyName — value to write into job.company
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
+ * @param {string} [boardSlug] Account slug the board was already resolved at.
+ *   Callers with no namespace (the public XML feed) omit it and get no identity.
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>}
  */
-export function parseWorkableWidget(payload, companyName) {
+export function parseWorkableWidget(payload, companyName, boardSlug) {
   if (!payload || !Array.isArray(payload.jobs)) return [];
   const jobs = [];
-  /** @type {Map<string, {job: any, locations: Set<string>, tele: boolean}>} */
+  /** @type {Map<string, {job: any, locations: Set<string>, tele: boolean, shortcode: unknown}>} */
   const byUrl = new Map();
   for (const raw of payload.jobs) {
     const title = typeof raw?.title === 'string' ? raw.title.trim() : '';
@@ -316,19 +356,23 @@ export function parseWorkableWidget(payload, companyName) {
     if (Number.isFinite(stamp)) job.postedAt = stamp;
 
     jobs.push(job);
-    byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele });
+    byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele, shortcode: raw?.shortcode });
   }
 
   // A Set iterates in insertion order, so the joined cell follows payload order
   // and a single-location posting re-joins to the exact string it already had.
   // Remote is appended once, after the join, and only when no place already
   // says it — an empty-place row already contributed the word "Remote".
-  for (const { job, locations, tele } of byUrl.values()) {
+  // Identity is applied here, on the merged posting, from the first entry's
+  // shortcode. Siblings contributed locations only.
+  for (const { job, locations, tele, shortcode } of byUrl.values()) {
     let location = [...locations].join(LOCATION_SEPARATOR);
     if (tele && !/remote/i.test(location)) {
       location = location ? `${location}${LOCATION_SEPARATOR}Remote` : 'Remote';
     }
     job.location = location;
+    const listingIdentity = workableListingIdentity(boardSlug, shortcode);
+    if (listingIdentity) job.listingIdentity = listingIdentity;
   }
   return jobs;
 }
@@ -545,7 +589,8 @@ export function createFeedJobSplitter(onBlock) {
  * A posting is kept when its title passes `titleFilter` (called with the
  * employer's name, which stands in for the company slug of other sources) and
  * none of its rows is older than `cutoffMs`: the posting's date is its oldest
- * row. A row with no date counts only with `includeUndated`.
+ * row. A row with no date counts only with `includeUndated`. Every employer
+ * in the feed is returned, with no postings when none was kept.
  *
  * Throws, so the caller keeps nothing from a bad read, when the response is
  * not the feed (no `<source>` root), when it ends before `</source>` (a body
@@ -576,11 +621,14 @@ export async function loadWorkableFeed({
   const stale = new Set();
   const stats = { rows: 0, keptRows: 0, postings: 0, staleRows: 0, undatedRows: 0, bytes: 0 };
   let held = 0;
+  /** @type {Map<string, string>} every employer in the feed → its website */
+  const employers = new Map();
 
   const splitter = createFeedJobSplitter((block) => {
     stats.rows++;
     const row = feedRowToWidgetRow(block);
     if (!row || !row.company) return;
+    if (!employers.get(row.company)) employers.set(row.company, row.website);
     if (!titleFilter(row.title, row.company)) return;
     const key = row.shortlink;
     if (row._postedMs === null) {
@@ -613,23 +661,24 @@ export async function loadWorkableFeed({
     throw new Error(`workable feed: the response ended before </source> after ${stats.rows} <job> rows; the feed was cut short`);
   }
 
-  /** @type {Map<string, { company: string, website: string, rows: any[] }>} */
-  const byCompany = new Map();
+  /** @type {Map<string, any[]>} employer → its kept rows */
+  const rowsByCompany = new Map();
   for (const rows of rowsByUrl.values()) {
     stats.keptRows += rows.length;
-    const { company, website } = rows[0];
-    const group = byCompany.get(company) ?? { company, website, rows: [] };
-    if (!group.website && website) group.website = website;
-    group.rows.push(...rows);
-    byCompany.set(company, group);
+    const { company } = rows[0];
+    const group = rowsByCompany.get(company) ?? [];
+    group.push(...rows);
+    rowsByCompany.set(company, group);
   }
+  // Every employer in the feed is a board, an empty one when none of its
+  // postings passed, as every tenant of a directory is for the other sources.
   const companies = [];
-  for (const { company, website, rows } of byCompany.values()) {
+  for (const [company, website] of employers) {
+    const rows = rowsByCompany.get(company) ?? [];
     // Oldest row first: parseWorkableWidget takes a posting's date from the
     // first row it sees for that URL.
     rows.sort((a, b) => (a._postedMs ?? Infinity) - (b._postedMs ?? Infinity));
     const jobs = parseWorkableWidget({ jobs: rows }, company);
-    if (!jobs.length) continue;
     stats.postings += jobs.length;
     companies.push({ company, website, jobs });
   }

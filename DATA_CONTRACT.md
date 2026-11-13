@@ -62,7 +62,7 @@ These files contain your personal data, customizations, and work product. Update
 | `data/blacklist.md` | Your do-not-apply list (opt-in — absence = no filtering; never auto-populated: only you, or the agent on your explicit instruction, write to it. Its `Scope` is `company` (default: normalized feed company name) or `domain` (the Company cell is a hostname suffix matched to the posting URL); no parent/subsidiary relationship is inferred. Respected by `scan.mjs`, by `discover-new-companies.mjs` and `discover-ats.mjs` (a blacklisted company is never proposed, probed, or written to `portals.yml`), and by the `auto-pipeline`/`oferta`/`apply` gates; never a scoring input. The discover scripts read it from `{DATA_ROOT}/data/blacklist.md`, overridable with `CAREER_OPS_BLACKLIST`) |
 | `data/assessments.tsv` | Your append-only skills-assessment log: `{date}\t{company}\t{report#\|-}\t{platform}\t{subject}\t{threshold%\|-}\t{score%\|-}\t{stale_note}`. Appended by `node assessment-log.mjs add`; never edited in place. Empty stale_note = no staleness observed. Optional trailing cells for take-home / demo-recording assignments: `{kind}\t{deadline}\t{deliverable}\t{requirements_url}\t{submitted_at}\t{proof}` (kind `skills-test` when absent; a submission is a new appended row via `assessment-log.mjs submit`). Read by `assessment-log.mjs` |
 | `data/contacts.tsv` | Your job-search phonebook (third-party PII — gitignored): `{name}\t{company}\t{type}\t{title}\t{phone}\t{email}\t{linkedin}\t{tracker#\|-}\t{notes}`. `type` optional; when present must be one of the enum (recruiter\|hiring-manager\|peer\|interviewer\|internal-referral\|other), else flagged in `quality`. Written by the `contacto` mode only after you confirm; lines are updated in place when a contact's details change (unlike the append-only salary log). Read by `contacts.mjs` |
-| `data/Connections.csv` | Your LinkedIn connections export (third-party PII — gitignored, never committed, never touched by the updater). Placed here by you: LinkedIn → Settings → Data Privacy → Get a copy of your data → Connections. Read fresh on every run by `linkedin-join.mjs`, which writes no cache, index or sidecar state, so the file is disposable — delete it after use and re-export when you need it again. Never enters a prompt and never leaves the machine; only rows you paste by hand reach `data/contacts.tsv` |
+| `data/Connections.csv` | Your LinkedIn connections export (third-party PII — gitignored, never committed, never touched by the updater). Placed here by you: LinkedIn → Settings → Data Privacy → Get a copy of your data → Connections. Read fresh on every run by `linkedin-join.mjs`, which writes no cache, index or sidecar state, so the file is disposable — delete it after use and re-export when you need it again. The file itself never enters a prompt and never leaves the machine. Its **output** does reach your CLI's context when you ask the agent to run the join, and from there your AI provider sees it: the name, title, LinkedIn URL and email of each matching connection. By default the join matches every company in your tracker and `portals.yml`; `--company <name>` limits it to one; run it in a plain terminal instead if you would rather it didn't. Only rows you paste by hand reach `data/contacts.tsv` |
 | `writing-samples/*` | Your personal writing samples for style calibration (except `writing-samples/README.md`, which is system-owned documentation delivered by updates) |
 | `reports/*` | Your evaluation reports, including optional `job_facts_cache` metadata; `reports/.gitkeep` is the system-owned directory scaffold and may be replaced by the updater. `evaluation-cache.mjs` projects only the public allowlist documented in `batch/batch-prompt.md`; candidate-fit data never enters the reusable job-facts payload. Reports and application bundles remain private user-layer files. No sharing or separate cache store is introduced. |
 | `batch/tracker-additions/*.tsv` | Pending tracker rows, one TSV per evaluation (gitignored). `merge-tracker.mjs` reads them from the data root, not the checkout |
@@ -140,12 +140,14 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `modes/retro.md` | Session review instructions: propose rules for `learn.mjs` to check |
 | `modes/update.md` | System update instructions |
 | `modes/ar/*` | Arabic language modes |
+| `modes/at/*` | Austria market modes (English) |
 | `modes/da/*` | Danish language modes |
 | `modes/de/*` | German language modes |
 | `modes/es/*` | Spanish language modes |
 | `modes/fr/*` | French language modes |
 | `modes/hi/*` | Hindi language modes |
 | `modes/id/*` | Indonesian language modes |
+| `modes/in/*` | India market modes (English) |
 | `modes/it/*` | Italian language modes |
 | `modes/ja/*` | Japanese language modes |
 | `modes/ko/*` | Korean language modes |
@@ -171,6 +173,7 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `plugins.mjs` | Plugin CLI (list/run/available/add/new/enable/skill/trust/remove) |
 | `plugins-registry/` | Curated community plugins, one `<id>.json` per plugin (the trust root) |
 | `plugin-install.mjs` / `plugin-audit.mjs` / `validate-plugin-registry.mjs` | Plugin install/audit/registry-validation utilities |
+| `seeds/` | Scanner seed sources: the VC portfolio fetchers (`seeds/vc-portfolios.mjs`) and the employer registry's tools: validator, inbox rules, importer and fold (`seeds/employers-*.mjs`) |
 | `config/plugins.example.yml` | Plugin activation template (seed for `config/plugins.yml`) |
 | `opencode.example.json` | OpenCode project config template (seed for `opencode.json`; ships Playwright MCP registration) |
 | `batch/batch-prompt.md` | Batch worker prompt |
@@ -189,6 +192,14 @@ These files contain system logic, scripts, templates, and instructions that impr
 | `writing-samples/README.md` | System-owned onboarding documentation for the writing-samples directory |
 | `seed-fixture.mjs` / `test-fixtures/*` | Upgrade-test fixtures and seeder (system layer; fictional data, never user data) |
 | `upgrade-tests.mjs` | Dynamic upgrade regression harness (PR gate: old install applies the commit under test hermetically) |
+
+## Repository only (not updated on installs)
+
+Tracked in the repository, but `update-system.mjs` never writes, updates or deletes them on an install: they are neither system layer nor user layer.
+
+| File | Purpose |
+|------|---------|
+| `employers/` | The employer registry: community-maintained pointers from an employer to its ATS board, CC BY 4.0 (see `employers/README.md`). A fresh clone has the copy of that day; the updater does not refresh it. |
 
 ## The Rule
 

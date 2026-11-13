@@ -279,6 +279,14 @@ try {
   if (hourly === null) pass('extractSalary() skips hourly free-text rates and non-ISO currency symbols');
   else fail(`extractSalary() should skip hourly rates, got ${JSON.stringify(hourly)}`);
 
+  const freeText = (value) => extractSalary({ customFieldGroup: { stringFields: [
+    { nameCode: { codeValue: 'SalaryRange' }, stringValue: value },
+    { nameCode: { codeValue: 'CurrencySymbolOrCode' }, stringValue: 'USD' },
+  ] } });
+  assert.equal(freeText('Competitive, DOE'), null);
+  assert.deepEqual(freeText('$50,000.00 - $70,000.00, annually'), { min: 50000, max: 70000, currency: 'USD' });
+  pass('extractSalary() reads no figure from a comma between words');
+
   // ── parseListPage ────────────────────────────────────────────────────────
 
   const cfg = { cid: CID, ccId: CCID, companyName: 'ExampleCo' };

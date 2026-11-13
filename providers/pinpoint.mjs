@@ -122,8 +122,14 @@ function isPinpointDemoPosting(j) {
  * @returns {Array<{title: string, url: string, company: string, location: string}>}
  */
 export function parsePinpointResponse(json, companyName) {
-  const postings = json?.data;
-  if (!Array.isArray(postings)) return [];
+  // { data: [] } is an empty board. Any other envelope ({}, { error }, a bare
+  // string) is a changed or failing API and must not read as a board with no
+  // open roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const postings = json && Array.isArray(json.data) ? json.data : null;
+  if (!postings) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`pinpoint: unexpected response for ${companyName} — expected data[], got: [${got}]`);
+  }
   return postings
     .map(j => {
       if (isPinpointDemoPosting(j)) return null;

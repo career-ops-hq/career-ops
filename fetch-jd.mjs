@@ -14,6 +14,9 @@
  *   node fetch-jd.mjs <url>
  *
  * JD text on stdout, exit 0, when a known ATS answers with real content.
+ * Exit 3 with `CLOSED_POSTING <evidence>` on stdout when the page itself says the
+ * posting is closed: a JobPosting past its validThrough date, or closure text
+ * in the visible page.
  * Exit 1 with empty stdout and no stderr noise otherwise — a miss is the
  * expected "fall back to the browser path" case, not an error condition, and
  * a visible miss is the whole point: never a fabricated JD.
@@ -21,13 +24,18 @@
  * Coverage is JD_TEXT_API_ATS (liveness-api.mjs), including company careers
  * pages that carry only a Greenhouse `?gh_jid=`, and canonical/share-link
  * Workable postings (description, requirements and benefits).
- * Every fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
+ * When no API covers the host, the page's own schema.org JobPosting (JSON-LD)
+ * is read next (lib/jd-page-fetch.mjs, behind the same egress guard). Phenom and
+ * bespoke career sites render the JD from script data, so their visible HTML is
+ * a shell that any text conversion, WebFetch included, reports as empty.
+ * Every API fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
  * — the same dispatch its own `jd` mode uses — so this script and the
  * interactive extractor cannot drift on which ATS is API-fetchable.
  */
 
 import { fetchJdViaKnownApi } from './browser-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { fetchJdFromPage, markCappedAtsText } from './lib/jd-page-fetch.mjs';
 
 const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
 const TIMEOUT_MS = 15_000;
@@ -51,7 +59,11 @@ Options:
     process.exit(1);
   }
 
-  const result = await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS);
+  // Tier 1: the ATS's public API. Tier 2: the page's own JSON-LD JobPosting, for
+  // template-driven boards no API covers (Phenom, bespoke sites) whose visible
+  // HTML carries no JD at all.
+  const result = (await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS))
+    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS));
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.
@@ -66,8 +78,18 @@ Options:
     return;
   }
 
+  // The posting's own data says it is closed: the page's JobPosting, its visible
+  // text, or an ATS API flag such as Ashby's isListed: false. Say so with a
+  // distinct exit code instead of a plain miss, so a caller does not fall back
+  // to a fetch that could return the JD from the visible page and score it.
+  if (result.closed) {
+    process.stdout.write(`CLOSED_POSTING ${result.evidence}`);
+    process.exitCode = 3;
+    return;
+  }
+
   const header = result.title ? `${result.title}\n\n` : '';
-  process.stdout.write(header + result.text);
+  process.stdout.write(header + markCappedAtsText(result.text, TEXT_CAP));
 }
 
 if (isMainModule(import.meta.url)) {

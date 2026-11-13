@@ -27,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Tạo bởi <a href="https://github.com/santifer"><strong>@santifer</strong></a>, cùng&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders">700+ người đóng góp</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Tạo bởi <a href="https://github.com/santifer"><strong>@santifer</strong></a>, cùng&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.vi.md#builders">800+ người đóng góp</a></p>
 
 <p align="center">
 <strong>Nhiều tháng gửi CV vào&nbsp;im&nbsp;lặng.</strong><br>
@@ -283,7 +283,7 @@ Xem [docs/SETUP.md](docs/SETUP.md) để có hướng dẫn thiết lập đầy
 
 ## Cách dùng
 
-Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh CV của bạn (mặc định là PDF) và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên. Nếu không đọc được một tin tuyển dụng, pipeline sẽ dừng lại và yêu cầu bạn dán văn bản.
+Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh CV của bạn (mặc định là PDF) và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên. Nếu không đọc được một tin tuyển dụng, pipeline sẽ dừng lại và yêu cầu bạn dán văn bản hoặc chia sẻ ảnh chụp màn hình.
 
 ### Cách gọi một mode
 
@@ -609,6 +609,8 @@ Mã được cấp phép theo [MIT](LICENSE). Tên và thương hiệu "career-o
 được điều chỉnh bởi [Chính sách nhãn hiệu](TRADEMARK.md), thoáng với
 cộng đồng, bảo lưu cho việc đặt tên sản phẩm thương mại và
 bảo chứng.
+
+Mã nguồn theo giấy phép MIT; dữ liệu trong [`employers/`](employers/) theo giấy phép [CC BY 4.0](employers/LICENSE).
 
 ## Lịch sử sao
 

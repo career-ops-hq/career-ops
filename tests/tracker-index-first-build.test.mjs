@@ -17,11 +17,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb, runTracker } from '../tracker.mjs';
 import { canonicalizeTrackerPath } from '../tracker-utils.mjs';
+import { rmSync } from './helpers.mjs';
 
 const HAS_SQLITE = await import('node:sqlite').then(() => true, () => false);
 const SQLITE = HAS_SQLITE ? {} : { skip: 'node:sqlite unavailable: tracker index cases skipped' };

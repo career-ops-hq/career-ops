@@ -17,6 +17,7 @@ const src = readFileSync(
 test("the follow-up report link shows the word Open", () => {
   const start = src.indexOf('title="Open report"');
   assert.ok(start >= 0, "the report link keeps title Open report");
-  const link = src.slice(start, src.indexOf("Snooze", start));
+  const link = src.slice(start, src.indexOf("</a>", start));
   assert.match(link, />Open</, "a visible Open sits in the report link");
+  assert.match(link, /aria-label=\{`Open report for \$\{[^}]+\}`\}/, "the link has an aria-label naming the company");
 });

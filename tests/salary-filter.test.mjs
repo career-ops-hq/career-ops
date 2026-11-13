@@ -78,6 +78,20 @@ section('parseCompensation — hourly interval (annualization)');
   assert(result.max === 75 * 2080, `hourly max annualized: ${result?.max} = ${75 * 2080}`);
 }
 
+{
+  // Issue #6912: 50-65 USD per hour
+  const result = parseCompensation({
+    compensation: { minValue: 50, maxValue: 65, currency: 'USD', interval: '1 HOUR' }
+  });
+  assert(result != null, 'issue #6912: hourly 50-65 USD returns non-null');
+  assert(result.min === 104000, 'issue #6912: hourly min annualized to 104000');
+  assert(result.max === 135200, 'issue #6912: hourly max annualized to 135200');
+  assert(result.currency === 'USD', 'issue #6912: currency is USD');
+  assert(result.period === 'hour', 'issue #6912: period is "hour"');
+  assert(result.posted?.min === 50, 'issue #6912: posted.min is 50');
+  assert(result.posted?.max === 65, 'issue #6912: posted.max is 65');
+}
+
 section('parseCompensation — monthly interval');
 
 {
@@ -129,6 +143,20 @@ section('parseCompensation — partial range (min only, max only)');
   assert(maxOnly != null, 'max-only returns non-null');
   assert(maxOnly.min === 200000, 'max-only: min falls back to max = 200000');
   assert(maxOnly.max === 200000, 'max-only: max = 200000');
+}
+
+{
+  // Issue #6912: from 120000 EUR per year
+  const result = parseCompensation({
+    compensation: { minValue: 120000, maxValue: null, currency: 'EUR', interval: '1 YEAR' }
+  });
+  assert(result != null, 'issue #6912: from 120000 EUR returns non-null');
+  assert(result.min === 120000, 'issue #6912: min is 120000');
+  assert(result.max === 120000, 'issue #6912: max falls back to min = 120000');
+  assert(result.currency === 'EUR', 'issue #6912: currency is EUR');
+  assert(result.period === 'year', 'issue #6912: period is "year"');
+  assert(result.posted?.min === 120000, 'issue #6912: posted.min is 120000');
+  assert(!('max' in (result.posted ?? {})), 'issue #6912: posted.max is absent');
 }
 
 section('parseCompensation — unknown interval');
@@ -573,6 +601,24 @@ section('End-to-end — Ashby job through salary filter');
   });
   assert(malformed === null, 'e2e: malformed comp → null');
   assert(filter(malformed) === true, 'e2e: malformed → null → pass (conservative)');
+}
+
+section('buildSalaryFilter — parity with and without period/posted (issue #6912)');
+
+{
+  const filter = buildSalaryFilter({ min: 100000, max: 200000, currency: 'USD' });
+  const withMeta = { min: 120000, max: 150000, currency: 'USD', period: 'hour', posted: { min: 57.69, max: 72.11 } };
+  const withoutMeta = { min: 120000, max: 150000, currency: 'USD' };
+  assert(filter(withMeta) === filter(withoutMeta), 'buildSalaryFilter gives identical result with and without period/posted (in range)');
+
+  const belowFilter = buildSalaryFilter({ min: 200000, max: 300000, currency: 'USD' });
+  assert(belowFilter(withMeta) === belowFilter(withoutMeta), 'buildSalaryFilter gives identical result with and without period/posted (below range)');
+
+  const aboveFilter = buildSalaryFilter({ min: 50000, max: 100000, currency: 'USD' });
+  assert(aboveFilter(withMeta) === aboveFilter(withoutMeta), 'buildSalaryFilter gives identical result with and without period/posted (above range)');
+
+  const currFilter = buildSalaryFilter({ min: 100000, max: 200000, currency: 'EUR' });
+  assert(currFilter(withMeta) === currFilter(withoutMeta), 'buildSalaryFilter gives identical result with and without period/posted (currency mismatch)');
 }
 
 // ══════════════════════════════════════════════════════════════════════

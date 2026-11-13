@@ -134,7 +134,7 @@ Halte das Feedback knapp. Ein oder zwei Dinge zum Schärfen pro Antwort — kein
 
 ### Write Session Transcript
 
-Schreibe nach der Zusammenfassung ein maschinenlesbares Session-Transkript nach `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (verwende `practice` als Company/Role-Slug, wenn dies keine unternehmensspezifische Session war). Dies ist eine strukturierte Aufzeichnung der Runde für nachgelagerte Analysemodi; die mit Sprecher gekennzeichneten Turns lassen einen Konsumenten jede Seite lesen, ohne neu ableiten zu müssen, wer gesprochen hat. Der vollständige Contract liegt in `interview-prep/sessions/README.md`.
+Schreibe nach der Zusammenfassung ein maschinenlesbares Session-Transkript nach `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (verwende `practice` als Company/Role-Slug, wenn dies keine unternehmensspezifische Session war). Existiert diese Datei bereits, überschreibe sie nicht: Füge den nächsten freien Zähler (`-2`, `-3`, ...) vor `.md` ein, wie im Abschnitt "File names" des README beschrieben. Dies ist eine strukturierte Aufzeichnung der Runde für nachgelagerte Analysemodi; die mit Sprecher gekennzeichneten Turns lassen einen Konsumenten jede Seite lesen, ohne neu ableiten zu müssen, wer gesprochen hat. Der vollständige Contract liegt in `interview-prep/sessions/README.md`.
 
 Format:
 

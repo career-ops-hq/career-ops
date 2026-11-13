@@ -29,7 +29,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Criado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, com&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.pt-BR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.pt-BR.md#builders">700+ contribuidores</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Criado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, com&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.pt-BR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.pt-BR.md#builders">800+ contribuidores</a></p>
 
 <p align="center">
 <strong>Meses mandando currículos para o&nbsp;silêncio.</strong><br>
@@ -281,7 +281,7 @@ Veja [docs/SETUP.md](docs/SETUP.md) para o guia completo de configuração, [doc
 
 ## Uso
 
-Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome. Se uma vaga não puder ser lida, o pipeline para e pede que você cole o texto.
+Cole a URL ou a descrição de uma vaga na sua CLI de IA. O career-ops confere se uma vaga com link ainda está aberta (um texto colado não tem link para conferir), avalia a vaga contra o seu currículo, escreve um relatório, adapta seu currículo (em PDF por padrão) e adiciona uma linha ao seu tracker. Isso cobre a maioria dos dias. Todo o resto é um modo que você pede pelo nome. Se uma vaga não puder ser lida, o pipeline para e pede que você cole o texto ou compartilhe uma captura de tela.
 
 ### Como pedir um modo
 
@@ -607,6 +607,8 @@ O código é licenciado sob [MIT](LICENSE). O nome e a marca
 "career-ops" são regidos pela [Política de Marca](TRADEMARK.md), permissiva
 para uso da comunidade, reservada para nomes de produtos comerciais e
 endossos.
+
+O código é MIT; os dados em [`employers/`](employers/) são [CC BY 4.0](employers/LICENSE).
 
 ## Histórico de estrelas
 

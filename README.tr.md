@@ -27,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> tarafından oluşturuldu,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.tr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.tr.md#builders">700+ katkıcıyla</a> birlikte</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> tarafından oluşturuldu,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.tr.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.tr.md#builders">800+ katkıcıyla</a> birlikte</p>
 
 <p align="center">
 <strong>Aylarca sessizliğe CV&nbsp;gönderdim.</strong><br>
@@ -279,7 +279,7 @@ Tam kurulum kılavuzu için [docs/SETUP.md](docs/SETUP.md), career-ops'u özel v
 
 ## Kullanım
 
-Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur. Bir ilan okunamazsa pipeline durur ve metni yapıştırmanı ister.
+Bir iş ilanı URL'sini veya tanımını yapay zekâ CLI'ına yapıştır. career-ops, bağlantılı bir ilanın hâlâ yayında olup olmadığını denetler (yapıştırılan metnin denetlenecek bir bağlantısı yoktur), ilanı CV'ne göre puanlar, bir rapor yazar, CV'ni ilana göre uyarlar (varsayılan olarak PDF) ve tracker'ına bir satır ekler. Günlerin çoğu için bu yeterlidir. Geri kalan her şey, adıyla istediğin bir moddur. Bir ilan okunamazsa pipeline durur ve metni yapıştırmanı ya da bir ekran görüntüsü paylaşmanı ister.
 
 ### Bir mod istemek
 
@@ -605,6 +605,8 @@ Kod [MIT](LICENSE) ile lisanslanmıştır. "career-ops" adı ve
 markası [Ticari Marka Politikası](TRADEMARK.md) ile yönetilir: topluluk
 kullanımı için izin verici, ticari ürün adlandırması ve onayı için
 saklıdır.
+
+Kod MIT lisanslıdır; [`employers/`](employers/) içindeki veriler [CC BY 4.0](employers/LICENSE) lisanslıdır.
 
 ## Yıldız geçmişi
 

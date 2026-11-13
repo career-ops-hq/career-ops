@@ -16,6 +16,7 @@
  *   OPENAI_MODEL (or --model)   — the model id
  */
 
+import { randomUUID } from 'crypto';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
@@ -26,6 +27,7 @@ import { readLockedSections } from './theme-style.mjs';
 import { redactIfEnabled, restoreIfEnabled } from './utils/privacy-filter.mjs';
 import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
 import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { endpointHeaders } from './lib/endpoint-headers.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer.
@@ -309,6 +311,14 @@ console.log(`🤖  Calling ${modelName} via ${endpointHost} (output cap ${maxTok
 
 const headers = { 'Content-Type': 'application/json' };
 if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+// OpenCode Go answers HTTP 400 MissingSessionID to a request with no session
+// id, and its docs ask for an own user agent: the same headers openai-eval.mjs
+// sends (#5825), for opencode.ai only. One tailoring run is one conversation.
+// https://opencode.ai/v2/docs/console/go/#where-can-i-use-it
+let careerOpsVersion;
+// VERSION may carry a release-please marker ("1.38.0 # x-release-please-version").
+try { careerOpsVersion = readFileSync(join(ROOT, 'VERSION'), 'utf-8').trim().split(/\s+/)[0] || undefined; } catch { /* default User-Agent version */ }
+Object.assign(headers, endpointHeaders(endpointHost, randomUUID(), careerOpsVersion));
 
 let tailoredHtml;
 try {
@@ -349,9 +359,18 @@ try {
   // reasoning, and then this is the only explanation the user gets. A reply
   // cut off at the cap is a CV without its last sections, and saving it would
   // hand that to generate-pdf as the tailored CV, so nothing is saved.
-  if (data.choices?.[0]?.finish_reason === 'length') {
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (finishReason === 'length') {
     console.error(`❌  The reply stopped at the ${maxTokens}-token output cap, so the tailored CV is cut short. Nothing was saved.`);
     console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
+    process.exit(1);
+  }
+  // Any other stated reason than "stop" is a reply that did not finish: a
+  // content filter or a provider error mid-generation leaves a partial CV,
+  // which must not reach generate-pdf as the tailored one. openai-eval refuses
+  // the same replies (#3949). A server that omits finish_reason is not refused.
+  if (finishReason != null && finishReason !== 'stop') {
+    console.error(`❌  The reply ended with finish_reason "${String(finishReason).slice(0, 40)}", not "stop", so the tailored CV may be incomplete. Nothing was saved.`);
     process.exit(1);
   }
   if (!tailoredHtml) {

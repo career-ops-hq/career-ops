@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
@@ -17,7 +17,14 @@ import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, 
 const EDITED_SUFFIX = "-edited";
 
 export function missingDataFolderMessage(): string | null {
-  const root = careerOpsRoot();
+  let root: string;
+  try {
+    root = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return unsafe;
+  }
   return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
 }
 
@@ -45,22 +52,25 @@ function originalOf(htmlPath: string) {
 
 /**
  * The tailored HTML for a report: the HTML path recorded in data/pdf-index.tsv
- * when it sits inside output/, else the sibling of the recorded PDF, else the
- * newest output/ HTML for the report's company. An edited copy is never a
- * source, because edits are always made against the original the tailor wrote.
+ * when it sits inside output/, or the sibling of the recorded PDF. Only
+ * reports without an index row use a filename match. Studio edits the
+ * original the tailor wrote.
  */
 async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
   const indexed = await pdfPathStatusForReport(reportNum);
+  if ("html" in indexed && indexed.html) {
+    const candidate = originalOf(indexed.html);
+    const name = path.basename(candidate).toLowerCase();
+    if (name.endsWith(".html") && !name.endsWith(`${EDITED_SUFFIX}.html`) && isRegularContainedFile(candidate, dir)) return candidate;
+  }
   if (indexed.status === "found") {
-    if (indexed.html) {
-      const candidate = originalOf(indexed.html);
-      const name = path.basename(candidate).toLowerCase();
-      if (name.endsWith(".html") && !name.endsWith(`${EDITED_SUFFIX}.html`) && isRegularContainedFile(candidate, dir)) return candidate;
-    }
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }
+  // An indexed report must not borrow another application's matching HTML
+  // when its own files are missing or rejected. Keep guessing for legacy rows only.
+  if (indexed.status !== "not-found") return null;
   if (!slug) return null;
   let files: string[];
   try {

@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Bell, CircleHelp, Sparkles, ArrowRight, Undo2, X } from "lucide-react";
 import { instrumentSerif } from "@/lib/fonts";
-import { HeroGlow } from "@/components/hero-glow";
 import type { Application, InboxJob } from "@/lib/career-ops";
 import type { DiscoveredOffer } from "@/lib/explore";
 import { DiscoveryCard } from "@/components/explore/discovery-card";
@@ -17,7 +16,7 @@ import { LinkedInPaste } from "@/components/linkedin-paste";
 import { FollowupsDueSectionSkeleton } from "@/components/page-loading-skeletons";
 import { scoreNum } from "@/lib/format";
 import { undoStatus } from "@/lib/pipeline-status.mjs";
-import { pickAwaitingDecision, groupAwaiting } from "@/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, groupAwaiting, pickApplyNext, includeApplyTarget } from "@/lib/home/awaiting.mjs";
 import { orderTodayQueue } from "@/lib/home/today-queue.mjs";
 import { selectDueFollowups } from "@/lib/core/followup-view.mjs";
 import { companyPresentation } from "@/lib/company-presentation.mjs";
@@ -141,11 +140,20 @@ export function TodayDashboard({
   // Awaiting decision: scored (Evaluated) but no terminal status yet. The
   // ordering lives in lib/home/awaiting.mjs so it can be tested — see the file
   // for why "first six in the array" was a bug waiting for #3529.
-  const awaiting = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const ranked = useMemo(() => pickAwaitingDecision(applications, scoreNum), [applications]);
+  const applyTarget = useMemo(
+    () => pickApplyNext(
+      applications,
+      scoreNum,
+      (row) => reasons[row.n]?.decision ?? "",
+      (row) => legitimacy[row.n],
+    ),
+    [applications, reasons, legitimacy],
+  );
+  const awaiting = useMemo(() => includeApplyTarget(ranked, applyTarget), [ranked, applyTarget]);
   // With the legitimacy, a flagged posting is grouped as the report page
-  // labels it (#5300), so "Apply next" below never points at one.
+  // labels it (#5300).
   const awaitingGroups = useMemo(() => groupAwaiting(awaiting, (a) => legitimacy[a.n]), [awaiting, legitimacy]);
-  const recommended = awaitingGroups.find(([label]) => label === "Recommended")?.[1] ?? [];
 
   const newThisWeek = freshCount;
   const dataLoading = followupsLoading || freshLoading;
@@ -182,10 +190,7 @@ export function TodayDashboard({
   return (
     <div className="mx-auto max-w-5xl px-6 py-10 max-sm:pb-24">
       <section className="dot-bg relative overflow-hidden rounded-2xl border border-border bg-surface/40 px-7 py-10 md:px-10 md:py-12">
-        <HeroGlow />
-        {/* Readability scrim between the animated glow (z-0) and the copy (z-10). */}
-        <div aria-hidden className="pointer-events-none absolute inset-0 z-[1] bg-surface/55 backdrop-blur-[2px] dark:bg-background/45" />
-        <div className="relative z-10">
+        <div>
           <p className="font-mono text-xs uppercase tracking-[0.2em] text-muted">
             <span className="text-faint">//</span> today · <span className="tabular-nums">{dateLabel}</span>
           </p>
@@ -296,13 +301,13 @@ export function TodayDashboard({
       {/* B. Awaiting your decision */}
       {awaiting.length > 0 && (
         <Section icon={CircleHelp} title="Awaiting your decision" hint="Best score first">
-          {recommended.length > 0 && (
+          {applyTarget && (
             <ApplyNext
-              n={recommended[0].n}
-              company={companyPresentation(recommended[0]).label}
-              score={recommended[0].score}
-              pdfOnDisk={applyFacts[recommended[0].n]?.pdfOnDisk ?? false}
-              postingUrl={applyFacts[recommended[0].n]?.postingUrl ?? ""}
+              n={applyTarget.n}
+              company={companyPresentation(applyTarget).label}
+              score={applyTarget.score}
+              pdfOnDisk={applyFacts[applyTarget.n]?.pdfOnDisk ?? false}
+              postingUrl={applyFacts[applyTarget.n]?.postingUrl ?? ""}
             />
           )}
           {awaitingGroups.map(([label, group]) => (

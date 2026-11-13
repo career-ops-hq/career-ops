@@ -191,8 +191,17 @@ jobs:
     steps:
       - name: Gate on allowlist
         id: gate
+        # The author reaches the shell through env:, never through `run:`.
+        # `${{ … }}` is substituted into the script text before the shell parses
+        # it, so an event field there is shell syntax rather than data; `env:`
+        # values are read as data and never re-parsed. GitHub logins cannot carry
+        # a metacharacter today, which is exactly the kind of "safe for now" the
+        # convention in tests/workflow-run-interpolation.test.mjs refuses to rely
+        # on. The rest of this file already reads event payloads the same way.
+        env:
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
         run: |
-          echo "${APPROVER_ALLOWLIST}" | tr ',' '\n' | grep -qix "${{ github.event.comment.user.login }}" \
+          echo "${APPROVER_ALLOWLIST}" | tr ',' '\n' | grep -qix "${COMMENT_AUTHOR}" \
             && echo "ok=true" >> "$GITHUB_OUTPUT" || echo "ok=false" >> "$GITHUB_OUTPUT"
       - name: Apply signature from PR metadata
         if: steps.gate.outputs.ok == 'true'

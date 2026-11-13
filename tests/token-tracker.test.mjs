@@ -1,6 +1,9 @@
 // tests/token-tracker.test.mjs — token tracking & cost estimation unit tests
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { pass, fail } from './helpers.mjs';
-import { estimateCost, TokenAccumulator, formatBreakdown, formatK } from '../utils/token-tracker.mjs';
+import { estimateCost, TokenAccumulator, formatBreakdown, formatK, RATES } from '../utils/token-tracker.mjs';
 import { parseTokenVal } from '../batch/aggregate-tokens.mjs';
 
 console.log('\ntoken-tracker.mjs & aggregate-tokens.mjs unit tests');
@@ -114,6 +117,56 @@ try {
     pass('formatK(12400) returns "12.4k"');
   } else {
     fail(`formatK failed: expected "12.4k", got "${formatted}"`);
+  }
+
+  // 10. Current Claude models price cache reads at their own (0.1x-class) rate,
+  //     not the generic 0.5x fallback, and resolve through provider prefixes and
+  //     OpenRouter's dotted version spelling without landing on a shorter sibling.
+  //     1M uncached + 1M cached input + 1M output:
+  const claudeUsage = { prompt_tokens: 2000000, completion_tokens: 1000000, cached_tokens: 1000000 };
+  const claudeCases = [
+    ['claude-haiku-4-5', 'claude', 1 + 0.1 + 5],
+    ['claude-sonnet-5', 'claude', 2 + 0.2 + 10],
+    ['claude-opus-5', 'claude', 5 + 0.5 + 25],
+    ['anthropic/claude-opus-5-5', 'openrouter', 4 + 0.2 + 20],
+    ['anthropic/claude-sonnet-4.6', 'openrouter', 3 + 0.3 + 15],
+    ['claude-some-future-model', 'claude', 2 + 0.1 + 10], // falls back to the standard tier (Sonnet 5.5)
+    // The 5.5 tier models and Fable each resolve to their own row: Sonnet 5.5
+    // is not Sonnet 5 (0.20 cache read), and Haiku 5.5 / Fable 5.2 do not fall
+    // to the unknown-Claude fallback.
+    ['claude-sonnet-5-5', 'claude', 2 + 0.1 + 10],
+    ['claude-opus-5-5', 'claude', 4 + 0.2 + 20],
+    ['claude-haiku-5-5', 'claude', 0.1 + 0.01 + 0.5],
+    ['claude-fable-5-2', 'claude', 8 + 0.2 + 40],
+    ['claude-fable-5-1', 'claude', 10 + 0.25 + 50],
+    ['claude-fable-5', 'claude', 10 + 1 + 50],
+    ['anthropic/claude-sonnet-5.5', 'openrouter', 2 + 0.1 + 10], // dotted spelling, not claude-sonnet-5
+    ['anthropic/claude-fable-5.2', 'openrouter', 8 + 0.2 + 40], // dotted spelling, not claude-fable-5
+    ['anthropic/claude-haiku-5-5', 'openrouter', 0.1 + 0.01 + 0.5],
+  ];
+  const prevModel = process.env.CAREER_OPS_MODEL;
+  process.env.CAREER_OPS_MODEL = 'set'; // OpenRouter is only priced when a model is pinned
+  for (const [model, provider, expected] of claudeCases) {
+    const actual = estimateCost(model, claudeUsage, provider);
+    if (actual !== null && Math.abs(actual - expected) < 1e-9) {
+      pass(`estimateCost prices ${model} (${provider}) at current Claude rates`);
+    } else {
+      fail(`estimateCost for ${model} (${provider}) failed: expected ${expected}, got ${actual}`);
+    }
+  }
+  if (prevModel === undefined) delete process.env.CAREER_OPS_MODEL; else process.env.CAREER_OPS_MODEL = prevModel;
+
+  // 11. Every model batch/batch-runner.sh maps a spend_tier to has a row of its
+  //     own under its exact id, so a tier change there that forgets this table
+  //     fails here instead of pricing the new model as a sibling.
+  const runner = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'batch', 'batch-runner.sh'), 'utf8');
+  const tierBody = (runner.match(/spend_tier_to_model\(\)\s*\{([\s\S]*?)\n\}/) || [])[1] || '';
+  const tierModels = [...tierBody.matchAll(/echo\s+"(claude-[a-z0-9-]+)"/g)].map((m) => m[1]);
+  const unpriced = tierModels.filter((id) => !Object.hasOwn(RATES, id));
+  if (tierModels.length >= 3 && unpriced.length === 0) {
+    pass(`every spend_tier model in batch-runner.sh has its own rate row (${tierModels.join(', ')})`);
+  } else {
+    fail(`spend_tier models without their own rate row: ${unpriced.join(', ') || `(found only ${tierModels.length} tier models)`}`);
   }
 } catch (e) {
   fail(`token-tracker tests crashed: ${e.message}`);
