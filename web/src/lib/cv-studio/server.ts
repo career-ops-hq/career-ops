@@ -12,6 +12,7 @@ import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/li
 import { escapeHtml, htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
+import { withPdfExport } from "./put-order.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
 
 const EDITED_SUFFIX = "-edited";
@@ -21,8 +22,10 @@ export function missingDataFolderMessage(): string | null {
   return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
 }
 
+export type PdfExportFailure = { ok: false; error: string };
+
 export type StudioLoad =
-  | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean }
+  | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean; pdfExport: PdfExportFailure | null }
   | { ok: false; reason: "no-report" | "no-tailored-cv" | "unreadable-layout" };
 
 type KeywordMatch = { extractKeywords: (report: string) => string[]; keywordCount: (keyword: string, text: string) => number };
@@ -143,13 +146,28 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const { edits, stale } = parseEdits(raw, sourceHash) ?? { edits: emptyEdits(sourceHash), stale: false };
-  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
+  const pdfExport = stale ? null : readPdfExport(raw);
+  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null, pdfExport };
 }
 
-export function saveEdits(reportNum: string, edits: StudioEdits) {
+function readPdfExport(raw: unknown): PdfExportFailure | null {
+  const flag = raw && typeof raw === "object" ? (raw as { pdfExport?: { ok?: unknown; error?: unknown } }).pdfExport : null;
+  if (flag && flag.ok === false && typeof flag.error === "string" && flag.error.length > 0) return { ok: false, error: flag.error };
+  return null;
+}
+
+export function saveEdits(reportNum: string, edits: StudioEdits, pdfExport?: PdfExportFailure | null) {
   const file = editsPath(reportNum);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  atomicWrite(file, JSON.stringify(edits, null, 2) + "\n");
+  let stored: PdfExportFailure | null = null;
+  if (pdfExport === undefined) {
+    try {
+      stored = readPdfExport(JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+  atomicWrite(file, JSON.stringify(withPdfExport(edits, stored, pdfExport), null, 2) + "\n");
 }
 
 export async function keywordsInText(n: string, text: string): Promise<string[] | null> {

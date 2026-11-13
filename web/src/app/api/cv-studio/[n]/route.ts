@@ -66,7 +66,13 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (!putOrder.accept(load.reportNum, body.tab, body.rev)) return NextResponse.json({ ok: true, superseded: true });
     saveEdits(load.reportNum, parsed.edits);
     const result = await renderEditedPdf(load, parsed.edits);
-    return result.ok ? NextResponse.json(result) : NextResponse.json({ error: result.error.slice(0, 600) }, { status: 422 });
+    if (result.ok) {
+      saveEdits(load.reportNum, parsed.edits, null);
+      return NextResponse.json(result);
+    }
+    const error = result.error.slice(0, 600);
+    saveEdits(load.reportNum, parsed.edits, { ok: false, error });
+    return NextResponse.json({ error }, { status: 422 });
   } finally {
     saving.delete(load.reportNum);
     releaseTrackerWrite(token);
