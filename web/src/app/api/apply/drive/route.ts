@@ -106,7 +106,7 @@ export async function POST(req: Request) {
             ? [{
               level: "warn" as const,
               code: "fill-unverified",
-              message: `Couldn't match these answers to the form, so they are not counted as pre-filled: ${dropped.slice(0, 4).join(", ")}${dropped.length > 4 ? "…" : ""}.`,
+              message: `Couldn't match these answers to the form, so they are not counted as pre-filled: ${dropped.join(", ")}.`,
             }]
             : [];
           const gaps = [

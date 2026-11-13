@@ -323,6 +323,19 @@ test("a dropped answer is unverified on the drive result", async () => {
   assert.ok(done.gaps.some((gap) => gap.code === "fill-unverified" && gap.message.includes("Phone")));
 });
 
+test("every dropped answer is named on the drive result", async () => {
+  const names = ["City", "State", "Country", "Postal", "Street"];
+  resetFixture({ finalFields: [{ id: "co0", type: "text", label: "Team" }] });
+  globalThis.__applyFixture.session.fields = [];
+  const done = (await postDrive({
+    answers: names.map((label, index) => ({ id: `old${index}`, label, value: "x" })),
+  })).find((event) => event.t === "done");
+  const gap = done.gaps.find((item) => item.code === "fill-unverified");
+  assert.ok(gap);
+  for (const name of names) assert.match(gap.message, new RegExp(name));
+  assert.equal(gap.message.includes("…"), false);
+});
+
 test("a full drive keeps the fencing warning from finalization", async () => {
   resetFixture({
     finalizeIssues: [{ level: "warn", code: "cli-unfenced", message: "This CLI read the form without verified fencing." }],
