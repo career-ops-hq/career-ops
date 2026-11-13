@@ -92,6 +92,6 @@ Show the draft in a code block, followed by:
 - **Open questions for the client**: taken from the report's Risk Summary when
   there is one (payment terms, end client, contract length, on-site days).
 
-With a report number, save the draft to `output/pitch-{company-slug}-{YYYY-MM-DD}.md`.
+When run as the `pitch` mode with a report number, save the draft to `output/pitch-{company-slug}-{YYYY-MM-DD}.md`.
 Do not change the tracker status: sending is the user's step, and
 `node set-status.mjs` records it when they say they have sent it.

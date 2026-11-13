@@ -33,6 +33,11 @@ hold the role.
 4. **Hybrid or on-site**: where, and how many days. Compare with
    `hybrid_cities` and `max_onsite_days_per_month`.
 
+Thresholds, unless `modes/_profile.md` sets its own: a required overlap that fits
+inside 09:00-18:00 at home is a match; one that needs work until about 20:00 is
+a caution; one that needs regular work after 20:00 or before 07:00, or the
+other region's full business hours, is a mismatch.
+
 ## Verdicts
 
 | Verdict | Meaning | In the report |

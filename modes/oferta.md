@@ -100,7 +100,7 @@ If deeper company research is useful, recommend running `/career-ops deep` separ
 
 ## Search tracks (optional)
 
-If `config/profile.yml` has a `tracks:` block, read `modes/tracks/README.md` now and follow it: it loads the mode file of each enabled track (Europe, AI gigs, freelance, remote) and runs `node track-signals.mjs` on the posting. The tracks add rows to Block A, flag lines to Block B and a rate analysis to Block D; they add no blocks and no scoring dimensions. With no `tracks:` block, skip this section.
+If `config/profile.yml` has a `tracks:` block, read `modes/tracks/README.md` now and follow it: it loads the mode file of each enabled track (Europe, AI gigs, freelance, remote) and runs `node track-signals.mjs` on the posting. The tracks add rows to Block A, flag lines to Block B and a rate analysis to Block D; for a freelance engagement they replace the cover letter draft with a pitch draft and add a `gig:` segment to the tracker Notes. They add no blocks and no scoring dimensions. With no `tracks:` block, skip this section.
 
 ## Step 0 — Archetype Detection
 

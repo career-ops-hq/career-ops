@@ -27,6 +27,13 @@ test('language requirements map wording to CEFR and separate required from optio
   assert.deepEqual(reqs('We build in Python and Go.'), []);
 });
 
+test('each language is read from its own clause, and names are not languages', () => {
+  assert.deepEqual(reqs('Native fluency in German and fluent in English.'), [['de', 'native', true], ['en', 'C1', true]]);
+  assert.deepEqual(reqs('Fließende Deutschkenntnisse (mind. B2), Englisch wünschenswert.'), [['de', 'B2', true], ['en', 'B2', false]]);
+  assert.deepEqual(reqs('German and English are a plus.'), [['de', 'B2', false], ['en', 'B2', false]]);
+  assert.deepEqual(reqs('Idealerweise Erfahrungen im Umfeld der Deutschen Bahn.'), []);
+});
+
 test('requirements compared with the languages the profile lists', () => {
   const held = { en: 'C1', de: 'native' };
   assert.equal(compareLanguages(readLanguageRequirements('Fluent French required.'), held).verdict, 'gap');

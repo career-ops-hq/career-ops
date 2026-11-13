@@ -84,6 +84,11 @@ test('a place with no word on remote work is unknown, not a mismatch', () => {
   assert.equal(verdict({ title: 'AI Engineer', location: 'India' }), 'unknown');
 });
 
+test('a location line in the body and an overlap rule with an abbreviated zone', () => {
+  const r = classifyRemoteFit({ title: 'AI Engineer', location: 'United States, Canada, Europe, Poland', description: '● Location: Remote\nMust overlap at least 5 hours with U.S. Pacific time.' }, HOME);
+  assert.deepEqual([r.arrangement, r.timezone.requiredOverlapHours, r.verdict], ['remote', 5, 'mismatch']);
+});
+
 test('helpers', () => {
   assert.equal(utcOffsetHours('Europe/Berlin') >= 1, true);
   assert.equal(utcOffsetHours('Not/AZone'), null);

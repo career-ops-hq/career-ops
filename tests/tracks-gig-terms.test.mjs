@@ -90,6 +90,13 @@ test('contract length, extension, start and utilisation', () => {
   assert.equal(parseContractTerms('We have 12 months of runway.').months, null, 'a number of months without a contract cue is not a length');
 });
 
+test('benefits and remote shares are not pay or utilisation', () => {
+  assert.equal(pickSalary(parseRates('Wir bieten 50€ Gutschein monatlich und 30 Tage Urlaub.')), null);
+  assert.equal(parseContractTerms('Projekt mit 100% Auslastung, 60% Remote.').utilisation.percent, 100);
+  assert.equal(parseContractTerms('This is a part-time role.').utilisation.percent, null, 'part-time names no share');
+  assert.deepEqual(assessScheinselbstaendigkeit('Fully remote. You will use the client laptop.').mitigations, [], 'remote work alone is not a free choice of hours');
+});
+
 test('agency or direct', () => {
   assert.equal(detectIntermediary('Für unseren Kunden aus der Automobilbranche', 'Hays AG').via, 'agency');
   assert.equal(detectIntermediary('Our client, a leading bank, needs a contractor.', 'Acme').via, 'agency');

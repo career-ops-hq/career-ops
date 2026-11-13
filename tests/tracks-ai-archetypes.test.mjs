@@ -32,6 +32,12 @@ test('per-task training work is told apart by the expertise it asks for', () => 
   assert.equal(classifyAiRole({ title: 'Senior LLM Engineer' }).crowdWork, 'no');
 });
 
+test('keywords match whole words only', () => {
+  const r = classifyAiRole({ title: 'Prompt Engineer', description: 'You leverage tools. Autorater quality, gold data, precision and recall.' });
+  assert.deepEqual(r.archetypes.find(a => a.id === 'llm_engineer')?.keywords ?? [], [], '"rag" is not in "leverage"');
+  assert.ok(r.archetypes.some(a => a.id === 'evals'));
+});
+
 test('every archetype id is unique and input is never trusted to be well-formed', () => {
   assert.equal(new Set(AI_ARCHETYPES.map(a => a.id)).size, AI_ARCHETYPES.length);
   assert.equal(classifyAiRole(null).isAiRole, false);

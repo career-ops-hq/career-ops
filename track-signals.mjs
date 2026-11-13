@@ -68,7 +68,8 @@ export function trackSignals(posting, tracks) {
     });
     const requirements = readLanguageRequirements(description);
     const languages = Object.keys(tracks.europe.languages).length ? compareLanguages(requirements, tracks.europe.languages) : { verdict: 'not_configured', gaps: [], stretches: [] };
-    const country = placeIds.map(id => europeCountry(id)).find(Boolean) || null;
+    // A list of eligible countries is not a job location: pay conventions apply only to a single named country.
+    const country = placeIds.length === 1 ? europeCountry(placeIds[0]) || null : null;
     const salary = pickSalary(rates);
     out.europe = {
       jobCountry: country ? country.name : null,

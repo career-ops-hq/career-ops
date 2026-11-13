@@ -30,6 +30,9 @@ gates and before Step 0:
    It is zero-token and offline. Its JSON holds, per enabled track, what the
    posting states, the sentence each finding came from, and a `flags` list
    with a level: `blocker`, `caution` or `info`.
+   Put only the posting's own text in that file. Board metadata (tags, category
+   labels, your own notes) changes what the reader finds: pass the title,
+   location and company through the flags instead.
 3. Treat that output as evidence to check, not as a verdict. It reads common
    wording conservatively and returns `unknown` when the posting is silent or
    phrased in a way it does not recognise. Read the posting yourself, confirm
@@ -50,6 +53,12 @@ existing ones:
   `⚠️ **{Track} blocker:** {what is ruled out} (`{verbatim posting line}")"
 - **Block D** (Comp and Demand): the pay analysis of the Europe and freelance
   tracks (see their files).
+- **After Block G**, for a freelance or contract engagement: a `Pitch Draft`
+  section following `modes/pitch.md` in place of the `Cover Letter Draft`. The
+  draft lives in the report; `output/pitch-*.md` is written only when the user
+  runs the `pitch` mode.
+- **Block D with no pay stated**: keep the market comparison the tracks ask for
+  as an information table, also where `oferta.md` would shorten the block.
 - **Block G** and the Risk Summary: cautions that are about the posting's
   reliability, such as an agency hiding the end client.
 
@@ -58,7 +67,9 @@ existing ones:
 Tracks feed the existing dimensions; they add none. Decide the Global Score
 once, as `_shared.md` says.
 
-- A confirmed **blocker** is a dealbreaker in the sense of the Dealbreaker gate:
+- A confirmed **blocker** is found during the evaluation, so the report is still
+  written in full (the Dealbreaker gate, which stops before Block A, is only for
+  the user's own dealbreakers in `modes/_profile.md`):
   say so in the Verdict, cap the Global Score at 2.0, and do not generate a CV
   or a pitch unless the user asks. A blocker the posting only implies is a
   caution, and a question for the user.
@@ -73,8 +84,10 @@ once, as `_shared.md` says.
 
 The tracker table keeps its columns and its canonical states.
 
-- An engagement that is not permanent employment starts its Notes cell with a
-  gig segment, which `node gigs.mjs` reads:
+- A freelance or contract engagement (the candidate invoices) starts its Notes
+  cell with a gig segment. Fixed-term and temp-agency employment are employment
+  and get no gig segment, even when a freelance board lists them: say in Block A
+  that the listing is employment. `node gigs.mjs` reads the segment:
   `gig: {rate with unit and currency}, {length}, {direct or the agency name}; `
   for example `gig: 850 EUR/day, 6 mo, via Hays; posted: 2026-11-02`.
   Write "rate n/s" or "length n/s" when the posting does not state one.
