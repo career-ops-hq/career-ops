@@ -14,7 +14,7 @@
 // timing defaults and their env overrides, and the timeout error. The
 // protocol's helpers are re-exported so existing importers keep working.
 
-import { realpathSync } from 'fs';
+import { lstatSync, readlinkSync, realpathSync } from 'fs';
 import { basename, dirname, join, resolve } from 'path';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 
@@ -51,11 +51,32 @@ export class LockTimeoutError extends Error {
  * different directories, so two scans both wrote and one offer disappeared.
  * A symlink in a parent directory already shared one inode; resolving the
  * file makes the file-symlink case do the same. A file that is not there yet
- * resolves the parent that does exist and keeps its own name.
+ * resolves the parent that does exist and keeps its own name. A dangling
+ * symlink is followed by its link text, so the lock stays on the target
+ * after that file is created.
  *
  * @param {string} pipelinePath
  * @returns {string}
  */
+function followSymlinks(start) {
+  let current = start;
+  const seen = new Set();
+  for (let hop = 0; hop < 16; hop++) {
+    if (seen.has(current)) return current;
+    seen.add(current);
+    let stat;
+    try {
+      stat = lstatSync(current);
+    } catch (err) {
+      if (err.code === 'ENOENT') return current;
+      throw err;
+    }
+    if (!stat.isSymbolicLink()) return current;
+    current = resolve(dirname(current), readlinkSync(current));
+  }
+  return current;
+}
+
 function canonicalPipelinePath(pipelinePath) {
   const absolute = resolve(pipelinePath);
   try {
@@ -63,13 +84,14 @@ function canonicalPipelinePath(pipelinePath) {
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
   }
-  const parent = dirname(absolute);
-  const name = basename(absolute);
+  const followed = followSymlinks(absolute);
+  const parent = dirname(followed);
+  const name = basename(followed);
   try {
     return join(realpathSync(parent), name);
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
-    return absolute;
+    return followed;
   }
 }
 

@@ -32,6 +32,32 @@ test('a symlink to the file shares the pipeline lock with the real path', async 
   }
 });
 
+test('a dangling symlink keeps one lock after the target file is created', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-dangling-'));
+  const real = join(root, 'pipeline.md');
+  const link = join(root, 'alias.md');
+  try {
+    symlinkSync('pipeline.md', link);
+    const before = lockDirFor(link);
+    const held = await acquirePipelineLock(link, { timeoutMs: 200, retryMs: 20 });
+    try {
+      writeFileSync(real, '# Pipeline\n');
+      assert.equal(lockDirFor(link), before);
+      assert.equal(lockDirFor(link), lockDirFor(real));
+      assert.equal(before.endsWith('pipeline.md.lock'), true);
+      assert.equal(before.endsWith('alias.md.lock'), false);
+      await assert.rejects(
+        () => acquirePipelineLock(link, { timeoutMs: 200, retryMs: 20 }),
+        (err) => err instanceof LockTimeoutError,
+      );
+    } finally {
+      held.release();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('two writers, one through a file symlink, both keep their offer', async () => {
   const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-append-'));
   const real = join(root, 'pipeline.md');
