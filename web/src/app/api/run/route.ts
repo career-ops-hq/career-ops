@@ -692,8 +692,16 @@ export async function POST(req: Request) {
               } catch (e) {
                 send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
               } finally {
-                if (scratchDir) fs.rmSync(scratchDir, { recursive: true, force: true });
-                close();
+                // force:true only skips a missing dir. EPERM and EBUSY still throw,
+                // and a throw here used to skip close(), which holds the stream
+                // and the tracker-write guard after the PDF is already done.
+                try {
+                  if (scratchDir) fs.rmSync(scratchDir, { recursive: true, force: true });
+                } catch {
+                  // The run already reported its outcome. A leftover scratch dir is the smaller failure.
+                } finally {
+                  close();
+                }
               }
             });
             return;
