@@ -176,10 +176,15 @@ try {
   const truncated = await laterEmpty(`<html>${countHtml('3.596')}</html>`);
   if (truncated.jobs.length === 2 && truncated.warnings.length === 1 && truncated.warnings[0].includes('3596 postings reported')) pass('deutschebahn.fetch() keeps partials and warns when a page inside the reported total is empty');
   else fail(`deutschebahn.fetch() truncated walk wrong: ${JSON.stringify(truncated)}`);
+  // Each warned stop is also marked, so scan.mjs logs the board partial, not reachable.
+  if (truncated.jobs.truncated?.reason === 'source-reports-more' && truncated.jobs.truncated.fetched === 2) pass('deutschebahn.fetch() marks the board partial when a page inside the reported total is empty');
+  else fail(`deutschebahn.fetch() empty page inside the total: truncated = ${JSON.stringify(truncated.jobs.truncated)}`);
   const endOfBoard = await laterEmpty(`<html>${countHtml('2')}</html>`);
   const noCount = await laterEmpty('<html><h1>Suche</h1></html>');
   if (endOfBoard.jobs.length === 2 && endOfBoard.warnings.length === 0 && noCount.jobs.length === 2 && noCount.warnings.length === 0) pass('deutschebahn.fetch() ends silently when the offset reached the total or no count is reported');
   else fail(`deutschebahn.fetch() natural end wrong: end=${JSON.stringify(endOfBoard)} noCount=${JSON.stringify(noCount)}`);
+  if (endOfBoard.jobs.truncated === undefined && noCount.jobs.truncated === undefined) pass('deutschebahn.fetch() leaves a board that ended on its own unmarked');
+  else fail(`deutschebahn.fetch() natural end was marked: end=${JSON.stringify(endOfBoard.jobs.truncated)} noCount=${JSON.stringify(noCount.jobs.truncated)}`);
 
   // max_pages safety valve — a small explicit cap stops the walk even though
   // every page keeps returning fresh ids (DB's board runs into the thousands,
@@ -201,12 +206,16 @@ try {
   else fail(`deutschebahn.fetch() max_pages cap wrong: ${capped.jobs.length} jobs after ${capCalls} calls`);
   if (capped.warnings.length === 1 && capped.warnings[0].includes('raise max_pages')) pass('deutschebahn.fetch() warns when max_pages cuts the walk after a full page');
   else fail(`deutschebahn.fetch() cap warning wrong: ${JSON.stringify(capped.warnings)}`);
+  if (capped.jobs.truncated?.reason === 'page-cap' && capped.jobs.truncated.fetched === 3) pass('deutschebahn.fetch() marks the board partial when max_pages cuts the walk');
+  else fail(`deutschebahn.fetch() max_pages cut: truncated = ${JSON.stringify(capped.jobs.truncated)}`);
   // The reported total shows the capped walk already covered the board: no warning.
   const coveredPage = (id) => fullPage([id]).replace('</html>', `${countHtml('2.500')}</html>`);
   let coveredCalls = 0;
   const covered = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', max_pages: 3 }, { sleep: async () => {}, fetchText: async () => coveredPage(String(700150 + ++coveredCalls)) }) }));
   if (covered.jobs.length === 3 && covered.warnings.length === 0) pass('deutschebahn.fetch() stays silent at max_pages when the reported total is already covered');
   else fail(`deutschebahn.fetch() covered-cap wrong: ${JSON.stringify({ jobs: covered.jobs.length, warnings: covered.warnings })}`);
+  if (covered.jobs.truncated === undefined) pass('deutschebahn.fetch() leaves a capped walk that covered the reported total unmarked');
+  else fail(`deutschebahn.fetch() covered cap was marked: ${JSON.stringify(covered.jobs.truncated)}`);
 
   // A later page that exhausts its retries keeps the pages already collected
   // and warns; under a liveness probe (ctx.maxPages) the rejection propagates.
@@ -227,6 +236,8 @@ try {
   const partial = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, laterFailure(false)) }));
   if (partial.jobs.length === 2 && partial.warnings.length === 1 && partial.warnings[0].includes('page 1 failed') && !partial.warnings[0].includes('raise max_pages')) pass('deutschebahn.fetch() keeps partials and warns when a later page fails');
   else fail(`deutschebahn.fetch() later-page failure wrong: ${JSON.stringify({ jobs: partial.jobs.length, warnings: partial.warnings })}`);
+  if (partial.jobs.truncated?.reason === 'fetch-error' && partial.jobs.truncated.fetched === 2) pass('deutschebahn.fetch() marks the board partial when a later page fails');
+  else fail(`deutschebahn.fetch() later-page failure: truncated = ${JSON.stringify(partial.jobs.truncated)}`);
   let probeError = null;
   try {
     await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588' }, laterFailure(true));
