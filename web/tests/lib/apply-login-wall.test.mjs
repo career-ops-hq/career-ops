@@ -87,7 +87,7 @@ test("a password box is a login wall and stays blank", async (t) => {
   globalThis.__coApplySessions.set(lateId, { id: lateId, frame: page.mainFrame(), page, title: application.title, url: page.url() });
   try {
     const email = application.fields.find((field) => field.type === "email");
-    const filled = await fillSession(lateId, { [email.id]: "person@example.test" }, application.fields);
+    const filled = await fillSession(lateId, { [email.id]: "not-a-secret" }, application.fields);
     assert.equal(filled.issues.some((issue) => issue.code === "login-wall"), true);
     assert.equal(filled.steps.length, 0);
   } finally {
