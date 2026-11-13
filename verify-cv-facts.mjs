@@ -1091,6 +1091,13 @@ function zhToolClaims(clean, sourceNormalized = null) {
 // A prize named in a sentence. Requires a capitalised name ("Nobel Prize",
 // "Example Industry Award") so a lowercase "award" in ordinary prose is not a claim.
 const PROSE_AWARD_RE = /\b((?:[Nn]obel|[Pp]ulitzer)\s+[Pp]rize|(?:[\p{Lu}][\p{L}\p{N}&.'’-]*\s+){1,6}(?:Prize|Award|Medal|Fellowship))\b/gu;
+const AWARD_SENTENCE_VERB_RE = /^(?:won|received|awarded|earned|named|granted|given)\s+/i;
+
+function awardClaimValue(raw) {
+  const stripped = String(raw).replace(AWARD_SENTENCE_VERB_RE, '');
+  if (stripped !== raw && /(?:prize|award|medal|fellowship)\s*$/i.test(stripped)) return normalizeFact(stripped);
+  return normalizeFact(raw);
+}
 
 export function factClaims(text, sourceNormalized = null) {
   const clean = stripMarkup(text);
@@ -1207,7 +1214,10 @@ export function factClaims(text, sourceNormalized = null) {
   // A prize in a sentence is the same claim as an award-title field. The
   // pattern keeps a lowercase "award" in ordinary prose, and reads a name
   // such as "Nobel Prize" or "Example Industry Award".
-  for (const match of clean.matchAll(PROSE_AWARD_RE)) claims.push({ kind: 'award', value: normalizeFact(match[1]) });
+  for (const match of clean.matchAll(PROSE_AWARD_RE)) {
+    const value = awardClaimValue(match[1]);
+    if (value) claims.push({ kind: 'award', value });
+  }
   // Report each claim once. Both tool patterns read most names, so without
   // this every tool would be listed twice. Repeated employer and title claims
   // collapse too, as they already did in verifyFacts.
@@ -1359,13 +1369,38 @@ export function structuredFieldClaims(text) {
  * Tool-shaped tokens on a skills line or a competency tag.
  *
  * The whole line is not a claim: "status notes, agendas, Kubernetes" may
- * reword the first items and still invent the last. A token blocks only when
- * it looks like a product name (Title Case, or a digit such as "n8n") and no
- * source contains that name. Lowercase items are left alone.
+ * reword the first items and still invent the last. "and" and "or" split a
+ * token the way a comma does. A token blocks only when it looks like a
+ * product name (Title Case, or a digit such as "n8n") and no source contains
+ * that name. Lowercase items are left alone. A LaTeX skills row is read the
+ * same way as an HTML skill item.
  *
  * @param {string} text generated HTML or LaTeX
  * @returns {{kind: string, value: string}[]}
  */
+const LATEX_SKILL_ROW_RE = /^\s*(?:\\textbf\{(?:[^{}]|\{[^{}]*\})*\}\{: \})?\{((?:[^{}]|\{[^{}]*\})*)\}\s*\\\\/gm;
+
+function skillTokens(text) {
+  const tokens = [];
+  for (const piece of String(text).split(/[,;|•·]/)) {
+    for (const part of piece.split(/\s+\b(?:and|or)\b\s+/i)) {
+      const trimmed = part.replace(/^(?:and|or)\b\s+/i, '').trim();
+      if (trimmed) tokens.push(trimmed);
+    }
+  }
+  return tokens;
+}
+
+function pushSkillTokens(claims, seen, text) {
+  for (const trimmed of skillTokens(text)) {
+    if (!looksToolShaped(trimmed)) continue;
+    const value = normalizeFact(trimmed);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    claims.push({ kind: 'tool', value });
+  }
+}
+
 export function skillToolClaims(text) {
   const raw = latexBody(text ?? '');
   const claims = [];
@@ -1376,15 +1411,11 @@ export function skillToolClaims(text) {
         inner,
         /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])skill-category(?![\w-])[^"]*"[^>]*>/gi,
       );
-      for (const token of stripMarkup(withoutCategory).split(/[,;|•·]/)) {
-        const trimmed = token.trim();
-        if (!trimmed || !looksToolShaped(trimmed)) continue;
-        const value = normalizeFact(trimmed);
-        if (!value || seen.has(value)) continue;
-        seen.add(value);
-        claims.push({ kind: 'tool', value });
-      }
+      pushSkillTokens(claims, seen, stripMarkup(withoutCategory));
     }
+  }
+  for (const match of raw.matchAll(LATEX_SKILL_ROW_RE)) {
+    pushSkillTokens(claims, seen, match[1].replace(/\\([&%$#_{}])/g, '$1'));
   }
   return claims;
 }

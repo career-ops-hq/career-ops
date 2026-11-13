@@ -62,6 +62,42 @@ test('a prize named in a sentence blocks when the source never names it', () => 
   assert.equal(result.unsupportedFacts.some((fact) => fact.kind === 'award' && fact.value === 'nobel prize'), true);
 });
 
+test('and before a tool-shaped skill still blocks that tool', () => {
+  const result = verifyFacts(skillLine('status notes and Kubernetes'), options);
+  assert.equal(result.verdict, 'block');
+  assert.deepEqual(result.unsupportedFacts.map((fact) => `${fact.kind}=${fact.value}`), ['tool=kubernetes']);
+  const comma = verifyFacts(skillLine('status notes, and Kubernetes'), options);
+  assert.equal(comma.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'kubernetes'), true);
+});
+
+test('an unsourced tool on a LaTeX skills line blocks', () => {
+  const tex = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\textbf{Writing}{: }{status notes and Kubernetes} \\\\',
+    '\\end{document}',
+  ].join('\n');
+  const result = verifyFacts(tex, options);
+  assert.equal(result.verdict, 'block');
+  assert.equal(result.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'kubernetes'), true);
+});
+
+test('a sentence verb is not part of the award name', () => {
+  const backed = join(tmp, 'cv-award-verb.md');
+  writeFileSync(backed, `${readSource()}\nExample Industry Award\nNobel Prize\n`);
+  const opts = { ...options, sourcePaths: [backed] };
+  const won = verifyFacts('<p>Won Example Industry Award in 2024.</p>', opts);
+  assert.equal(won.verdict, 'pass', JSON.stringify(won.unsupportedFacts));
+  const received = verifyFacts('<p>Received Nobel Prize in 2024.</p>', opts);
+  assert.equal(received.verdict, 'pass', JSON.stringify(received.unsupportedFacts));
+});
+
+test('an unsourced award still blocks after the sentence verb is dropped', () => {
+  const result = verifyFacts('<p>Won Example Industry Award in 2024.</p>', options);
+  assert.equal(result.verdict, 'block');
+  assert.equal(result.unsupportedFacts.some((fact) => fact.kind === 'award' && fact.value === 'example industry award'), true);
+});
+
 test('a prize named in a sentence passes when the source names it', () => {
   const backed = join(tmp, 'cv-prize.md');
   writeFileSync(backed, `${readSource()}\nNobel Prize\n`);
