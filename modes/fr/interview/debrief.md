@@ -42,6 +42,8 @@ Si la mémoire est incomplète, posez des questions ciblées :
 - "Y a-t-il quelque chose auquel vous auriez souhaité répondre différemment ?"
 - "L'intervieweur a-t-il relancé sur quoi que ce soit — cela signifie généralement qu'il en voulait plus ?"
 
+**Format et ton (une question courte, facultative).** Posez-la une seule fois : "Rapidement, sur l'ambiance du round : quel était le format (recruiter screen / 1:1 / panel / group / take-home review), combien de personnes étaient en ligne, comment décririez-vous le ton (relaxed-conversational / structured-formal / rapid-fire / adversarial), et à quel point vous êtes-vous senti à l'aise (1-5, ou quelques mots à vous) ?" **N'inférez jamais le niveau d'aisance et ne le remplissez jamais à la place du candidat** : c'est son ressenti subjectif, donc consignez-le uniquement avec ses propres mots, et omettez-le s'il passe la question. S'il passe toute la question, n'écrivez aucune des quatre valeurs.
+
 ---
 
 ## Step 2 — Honest Assessment Per Question
@@ -153,13 +155,20 @@ Ajoutez à `interview-prep/{company-slug}-{role-slug}.md` :
 **Calendrier :** [toutes les dates ou échéances mentionnées]
 **Autres candidats :** [si divulgué]
 **Prochaines étapes :** [ce que l'intervieweur a dit qu'il se passerait ensuite et d'ici quand]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Format et ton de l'entretien :** (listez uniquement les champs auxquels le candidat a répondu ; supprimez entièrement les puces sans réponse, sans espace réservé ni valeur inférée)
+- Format : [recruiter screen / 1:1 / panel / group / take-home review]
+- Personnes en ligne : [nombre]
+- Ton : [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Aisance du candidat : [1-5, ou une courte phrase, avec les propres mots du candidat]
 ```
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-Après le débriefing, rédigez également une transcription de session lisible par machine vers `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. C'est un enregistrement structuré du round pour les modes d'analyse en aval ; les tours étiquetés par l'intervenant permettent à un consommateur de lire les deux côtés sans réinférer qui a parlé. Le contrat complet se trouve dans `interview-prep/sessions/README.md`.
+Après le débriefing, rédigez également une transcription de session lisible par machine vers `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Avant d'écrire, listez tous les fichiers existants pour cette entreprise, ce rôle, ce round et cette date (le nom de base et toutes les variantes `-2`, `-3`, ..., même lorsque le nom de base lui-même manque). S'il n'y en a aucun, écrivez le nom de base. Sinon, n'écrasez jamais en silence : montrez les fichiers avec le `interviewer_role` et la première question de chacun, et demandez au candidat si ce débriefing relance l'un d'eux (mettez à jour sur place le fichier qu'il choisit) ou s'il s'agit d'un round distinct (écrivez le prochain compteur libre, `-2`, `-3`, ..., avant `.md`). Voir la section "File names" du README. C'est un enregistrement structuré du round pour les modes d'analyse en aval ; les tours étiquetés par l'intervenant permettent à un consommateur de lire les deux côtés sans réinférer qui a parlé. Le contrat complet se trouve dans `interview-prep/sessions/README.md`.
 
 Format :
 
@@ -171,6 +180,10 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [rôle, si connu]
 source: debrief
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # facultatif (Step 1)
+people_on_call: [nombre]                                              # facultatif
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # facultatif
+candidate_comfort: "[1-5, ou une courte phrase avec les propres mots du candidat]"      # facultatif
 ---
 
 ## Q1
@@ -188,6 +201,7 @@ Règles pour la transcription :
 - **Taguez chaque réponse.** Sur la ligne juste au-dessus de chaque ligne `**Candidate:**`, émettez `<!-- competency: tag[, tag...] -->` — en minuscules kebab-case, séparés par des virgules pour les réponses multi-compétences (par ex. `system-design`, `people-leadership`, `incident-response`). Vous avez déjà évalué chaque réponse à l'étape 2, donc taguez à partir de cette évaluation plutôt que de relire. Les tags sont libres ; choisissez la compétence que la question a réellement testée.
 - **Reconstruisez fidèlement le tour du candidat.** Utilisez ce que le candidat a déclaré avoir dit à l'étape 1, et non une réponse idéalisée. La "réponse correcte/complète" de l'étape 2 appartient au fichier de débriefing, jamais dans la transcription — la transcription enregistre ce qui s'est passé.
 - **`source: debrief`.**
+- **`format`, `people_on_call`, `tone` et `candidate_comfort` sont des clés facultatives du front matter** qui portent les valeurs du Step 1 / Step 8, afin que les modes en aval puissent les lire sans analyser la prose. N'écrivez que les clés auxquelles le candidat a répondu ; omettez les autres, et n'écrivez jamais `candidate_comfort` si le candidat ne l'a pas donné. Mettez `candidate_comfort` entre guillemets doubles (ce peut être du texte libre) ; si vous échappez à la main, échappez les barres obliques inverses avant les guillemets doubles internes, afin qu'un `\n` littéral reste deux caractères au lieu de devenir un saut de ligne. Les fichiers de session d'entraînement ne les portent pas.
 - Le fichier de session atterrit dans un répertoire gitignored (les vrais noms/entreprises n'entrent jamais dans le contrôle de version) ; rédigez-le sans expurger.
 
 ---
