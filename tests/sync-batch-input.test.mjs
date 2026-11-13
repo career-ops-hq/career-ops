@@ -353,8 +353,10 @@ try {
 
     reset();
     const dry = runCli(['--dry-run', '--url', 'https://jobs.example.com/acme/3', ...paths]);
+    // Compare the listed URLs as whole tokens, not substrings of the output.
+    const dryUrls = dry.stdout.match(/https?:\/\/[^\s|]+/g) ?? [];
     check('--dry-run with --url lists only the selected row',
-      dry.exitCode === 0 && dry.stdout.includes('https://jobs.example.com/acme/3') && !dry.stdout.includes('https://jobs.example.com/acme/1')
+      dry.exitCode === 0 && dryUrls.length > 0 && dryUrls.every((u) => u === 'https://jobs.example.com/acme/3')
         && /dry-run — no changes written/.test(dry.stdout));
     check('--dry-run with --url writes nothing', readInput() === inputHeader);
     const dryMissing = runCli(['--dry-run', '--url', 'https://jobs.example.com/acme/missing', ...paths]);
