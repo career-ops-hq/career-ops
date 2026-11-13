@@ -2274,8 +2274,10 @@ search_queries:
 #   provider: jobspresso
 #   enabled: true
 #
-# - name: The Muse                        # board-wide public jobs API
+# - name: The Muse                        # board-wide search page (server-rendered HTML)
 #   provider: themuse
+#   location: Germany                     # optional: narrows the search (country or city)
+#   posted: 30                            # optional: 1, 7 or 30 (days) — keeps the run small
 #   enabled: true
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)

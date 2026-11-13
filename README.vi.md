@@ -282,7 +282,7 @@ Xem [docs/SETUP.md](docs/SETUP.md) để có hướng dẫn thiết lập đầy
 
 ## Cách dùng
 
-Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh CV của bạn (mặc định là PDF) và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên. Nếu không đọc được một tin tuyển dụng, pipeline sẽ dừng lại và yêu cầu bạn dán văn bản.
+Dán URL hoặc mô tả công việc vào AI CLI của bạn. career-ops kiểm tra xem tin tuyển dụng có liên kết còn mở hay không (văn bản dán vào không có liên kết để kiểm tra), chấm điểm tin đó so với CV của bạn, viết báo cáo, tùy chỉnh CV của bạn (mặc định là PDF) và thêm một dòng vào tracker của bạn. Chừng đó là đủ cho phần lớn các ngày. Mọi thứ còn lại là các mode mà bạn gọi bằng tên. Nếu không đọc được một tin tuyển dụng, pipeline sẽ dừng lại và yêu cầu bạn dán văn bản hoặc chia sẻ ảnh chụp màn hình.
 
 ### Cách gọi một mode
 

@@ -639,6 +639,34 @@ ok('uk. vs www. host variants of ONE Indeed posting still collapse to ONE row', 
   assertMerged(rows, 'same posting id across regional hosts');
 });
 
+ok('two Himalayas postings at one company stay TWO rows, Applied row intact (#4469)', () => {
+  // The scanner path: providers/himalayas.mjs emits applicationLink (utm param
+  // included). Two different job slugs are two postings, however close the titles.
+  const rows = mergeTwoWithUrls(
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing?utm_source=api',
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing-emea?utm_source=api', 'Applied');
+  assert.equal(rows.length, 2, 'two job slugs at one company are two requisitions');
+  const applied = rows.find(r => urlHref(r).includes('/jobs/director-of-marketing?'));
+  assert.ok(applied && applied.includes('Applied') && applied.includes('1-acme.md'),
+    'the posting applied to keeps its URL, status and report');
+});
+
+ok('one Himalayas posting with and without the feed\'s utm param still collapses to ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing',
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing?utm_source=api');
+  assertMerged(rows, 'same company and job slug → not evidence → fuzzy tier decides');
+});
+
+ok('two Jobicy job ids stay TWO rows; one id stays ONE row (#4469)', () => {
+  assert.equal(mergeTwoWithUrls(
+    'https://jobicy.com/jobs/161691-director-of-marketing',
+    'https://jobicy.com/jobs/161692-director-of-marketing').length, 2, 'two feed ids are two postings');
+  assertMerged(mergeTwoWithUrls(
+    'https://jobicy.com/jobs/161691-director-of-marketing',
+    'https://www.jobicy.com/jobs/161691-director-of-marketing/'), 'same feed id');
+});
+
 ok('KNOWN LIMITATION: an unmapped aggregator id shape over-merges two requisitions', () => {
   // This pins today's behaviour; it does not endorse it. JV_1 and JV_2 are two
   // DIFFERENT listings, and with no extractable id they fold into ONE row — the

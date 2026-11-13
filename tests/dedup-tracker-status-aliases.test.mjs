@@ -167,6 +167,8 @@ const SANDBOX_FILES = [
   'dedup-tracker.mjs', 'path-resolver.mjs', 'role-matcher.mjs', 'url-key.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
   'lib/cli-flags.mjs', 'lib/linkedin-url.mjs', 'lib/dir-lock.mjs', 'lib/yaml-document.mjs',
+  // url-key.mjs reads Himalayas posting ids through the liveness resolver.
+  'himalayas-posting.mjs', 'lib/is-main-module.mjs',
 ];
 const DUPLICATE_ROWS = [
   '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',

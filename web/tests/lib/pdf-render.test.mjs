@@ -10,18 +10,21 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { StringDecoder } from "node:string_decoder";
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readdirSync, readFileSync, rmSync, existsSync, utimesSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { atsPdfPath, styledCvNames } from "../../src/lib/apply/ats-pdf.mjs";
 import {
   pdfRunOutcome,
   writeCvHtml,
   spawnGeneratePdf,
   markTrackerReady,
   cleanupPdfScratch,
+  keepTailoredHtml,
   renderAndMarkPdf,
   failureReason,
 } from "../../src/lib/pdf-render.mjs";
+import { tailoredCvForKeywordMatch } from "../../src/lib/keyword-match-cv.mjs";
 
 // A fake stdio stream: emits raw Buffers, or decoded strings once the code
 // under test calls setEncoding() — the same contract a real child's stream
@@ -274,6 +277,47 @@ test("cleanupPdfScratch: a single file's removal failure logs but does not throw
     assert.deepEqual(readdirSync(dir), ["cv-web-3.stuck-dir"]);
   } finally {
     console.error = originalError;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── keepTailoredHtml ──
+
+test("keepTailoredHtml: replaces a read-only sibling with the new CV", () => {
+  const dir = makeScratchDir();
+  try {
+    const html = join(dir, "cv-web-1.html");
+    const pdf = join(dir, "cv.pdf");
+    const sibling = join(dir, "cv.html");
+    writeFileSync(html, "new cv");
+    writeFileSync(sibling, "old cv");
+    chmodSync(sibling, 0o444);
+    const warnings = [];
+    keepTailoredHtml({ html, finalPdf: pdf }, warnings);
+    assert.equal(readFileSync(sibling, "utf8"), "new cv");
+    assert.deepEqual(warnings, []);
+    assert.equal(tailoredCvForKeywordMatch(pdf), sibling);
+    assert.equal(readdirSync(dir).some((name) => name.startsWith(".cv-html-")), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("keepTailoredHtml: a failed copy does not leave the previous sibling selectable", () => {
+  const dir = makeScratchDir();
+  try {
+    const html = join(dir, "missing.html");
+    const pdf = join(dir, "cv.pdf");
+    const sibling = join(dir, "cv.html");
+    writeFileSync(sibling, "old cv");
+    const warnings = [];
+    keepTailoredHtml({ html, finalPdf: pdf }, warnings);
+    assert.equal(existsSync(sibling), false);
+    assert.equal(tailoredCvForKeywordMatch(pdf), null);
+    assert.equal(warnings.length, 1);
+    assert.match(warnings[0], /HTML was not kept for the CV Studio/);
+    assert.equal(readdirSync(dir).some((name) => name.startsWith(".cv-html-")), false);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -741,6 +785,178 @@ test("writeCvHtml: a shorter re-render leaves no trailing bytes", () => {
   }
 });
 
+test("pdfRunOutcome: a JSON envelope with no HTML still proceeds to the builder", () => {
+  const outcome = pdfRunOutcome({
+    ...GOOD,
+    envelope: { ok: true, kind: "json", payload: { candidate: { name: "Jane Doe" } }, format: "letter", warnings: [] },
+  });
+  assert.deepEqual(outcome, { ok: true });
+});
+
+test("atsPdfPath: the ATS suffix cannot be a styled PDF for a company whose slug ends in ats", () => {
+  const acme = "/output/cv-jane-8-acme-2026-07-26.pdf";
+  const acmeAtsStyled = "/output/cv-jane-8-acme-ats-2026-07-26.pdf";
+  assert.equal(atsPdfPath(acme), "/output/cv-jane-8-acme-2026-07-26.ats.pdf");
+  assert.notEqual(atsPdfPath(acme), acmeAtsStyled);
+  assert.equal(atsPdfPath(acmeAtsStyled), "/output/cv-jane-8-acme-ats-2026-07-26.ats.pdf");
+  const atsCompany = "/output/cv-jane-8-ats-2026-07-26.pdf";
+  assert.equal(atsPdfPath(atsCompany), "/output/cv-jane-8-ats-2026-07-26.ats.pdf");
+  assert.notEqual(atsPdfPath(atsCompany), atsCompany);
+  assert.equal(atsPdfPath(atsPdfPath(acme)), atsPdfPath(acme));
+});
+
+test("styledCvNames: a .ats.pdf is never a styled CV, and a lone older -ats- name stays", () => {
+  assert.deepEqual(styledCvNames(["cv-jane-8-acme-2026-07-26.ats.pdf"]), []);
+  assert.deepEqual(
+    styledCvNames([
+      "cv-jane-8-acme-2026-07-26.pdf",
+      "cv-jane-8-acme-2026-07-26.ats.pdf",
+    ]),
+    ["cv-jane-8-acme-2026-07-26.pdf"],
+  );
+  assert.deepEqual(
+    styledCvNames(["cv-jane-doe-ats-2026-01-01.pdf"]),
+    ["cv-jane-doe-ats-2026-01-01.pdf"],
+  );
+  assert.deepEqual(
+    styledCvNames(["cv-jane-doe-acme-engineer-ats-2026-01-01.pdf"]),
+    ["cv-jane-doe-acme-engineer-ats-2026-01-01.pdf"],
+  );
+  assert.deepEqual(
+    styledCvNames([
+      "cv-jane-doe-acme-engineer-ats-2026-01-01.pdf",
+      "cv-jane-doe-acme-engineer-2026-01-01.pdf",
+    ]),
+    ["cv-jane-doe-acme-engineer-2026-01-01.pdf"],
+  );
+});
+
+test("renderAndMarkPdf: a styled rerun with no ATS leaves the previous ATS PDF", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "12");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const staleAts = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(staleAts, "old-ats");
+  const { spawnFn } = makeRouterSpawn({
+    "generate-pdf.mjs": { exitCode: 0, writes: pdfPaths.finalPdf },
+    "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
+  });
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "12",
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(readFileSync(staleAts, "utf8"), "old-ats");
+    assert.equal(readFileSync(pdfPaths.finalPdf, "utf8"), "%PDF-fake");
+    assert.ok(!result.warnings.some((warning) => warning.includes("previous ATS PDF")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: a failed styled render leaves the previous ATS PDF", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "13");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const staleAts = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(staleAts, "old-ats");
+  const spawnFn = () => fakeChild({ exitCode: 1, stderr: "❌ render failed" });
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "13",
+    });
+    assert.equal(result.kind, "render-failed");
+    assert.equal(readFileSync(staleAts, "utf8"), "old-ats");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: an ATS path equal to the styled PDF does not replace that file", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "14");
+  pdfPaths.finalPdf = join(dir, "output", "cv-jane-ats-2026-07-26.pdf");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  let generateCalls = 0;
+  const spawnFn = (execPath, args) => {
+    const script = String(args[0]);
+    if (script.endsWith("generate-pdf.mjs")) {
+      generateCalls += 1;
+      return fakeChild({ exitCode: 0, writes: pdfPaths.finalPdf });
+    }
+    if (script.endsWith("mark-pdf-ready.mjs")) {
+      return fakeChild({ exitCode: 0, stdout: JSON.stringify({ changed: true }) });
+    }
+    throw new Error(script);
+  };
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "14",
+      ats: { html: join(dir, "cv-web-14.ats.html"), finalPdf: pdfPaths.finalPdf },
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(generateCalls, 1);
+    assert.equal(readFileSync(pdfPaths.finalPdf, "utf8"), "%PDF-fake");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: the ATS sibling omits --report and --allow-nonchronological", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "8");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const atsHtml = join(dir, "cv-web-8.ats.html");
+  writeFileSync(atsHtml, "<html>ats</html>");
+  const atsPdf = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  const { spawnFn, calls } = makeRouterSpawn({
+    "generate-pdf.mjs": { exitCode: 0, writes: pdfPaths.finalPdf },
+    "mark-pdf-ready.mjs": { exitCode: 0, stdout: JSON.stringify({ changed: true }) },
+  });
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "8",
+      ats: { html: atsHtml, finalPdf: atsPdf },
+    });
+    assert.equal(result.kind, "rendered");
+    const renders = calls.filter((call) => String(call.args[0]).endsWith("generate-pdf.mjs"));
+    assert.equal(renders.length, 2);
+    const styled = renders.find((call) => call.args.includes("--report=8"));
+    const ats = renders.find((call) => !call.args.some((arg) => String(arg).startsWith("--report")));
+    assert.ok(styled);
+    assert.ok(ats);
+    assert.deepEqual(styled.args.slice(1), [pdfPaths.html, pdfPaths.finalPdf, "--format=letter", "--report=8", "--allow-reorder"]);
+    assert.deepEqual(ats.args.slice(1), [atsHtml, atsPdf, "--format=letter", "--allow-reorder"]);
+    for (const call of renders) {
+      assert.ok(!call.args.includes("--allow-nonchronological"));
+      assert.equal(call.opts.windowsHide, true);
+      assert.equal(call.opts.env.CAREER_OPS_PDF_SHARED, "1");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("failureReason: keeps the failing line, drops the advisories printed before it", () => {
   // Given stderr where a voice-check warning precedes the real failure
   const stderr = [
@@ -796,8 +1012,129 @@ test("renderAndMarkPdf: a failed render with advisories before the failure surfa
   }
 });
 
+test("renderAndMarkPdf: a failed ATS render warns and the styled PDF still counts", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "9");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const atsHtml = join(dir, "cv-web-9.ats.html");
+  writeFileSync(atsHtml, "<html>ats</html>");
+  const staleAts = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(staleAts, "stale-ats");
+  let generateCalls = 0;
+  const spawnFn = (execPath, args) => {
+    const script = String(args[0]);
+    if (script.endsWith("generate-pdf.mjs")) {
+      generateCalls += 1;
+      return fakeChild(generateCalls === 1
+        ? { exitCode: 0, writes: pdfPaths.finalPdf }
+        : { exitCode: 1, stderr: "ATS renderer exploded" });
+    }
+    if (script.endsWith("mark-pdf-ready.mjs")) {
+      return fakeChild({ exitCode: 0, stdout: JSON.stringify({ changed: true }) });
+    }
+    throw new Error(script);
+  };
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "9",
+      ats: { html: atsHtml, finalPdf: join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf") },
+    });
+    assert.equal(result.kind, "rendered");
+    assert.ok(result.warnings.some((warning) => warning.includes("ATS PDF was not created") && warning.includes("ATS renderer exploded")));
+    assert.ok(result.warnings.some((warning) => warning.includes("styled PDF")));
+    assert.equal(existsSync(staleAts), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: an ATS exit 0 that writes nothing removes the previous ATS PDF", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "10");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const atsHtml = join(dir, "cv-web-10.ats.html");
+  writeFileSync(atsHtml, "<html>ats</html>");
+  const atsPdf = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(atsPdf, "stale-ats");
+  let generateCalls = 0;
+  const spawnFn = (execPath, args) => {
+    const script = String(args[0]);
+    if (script.endsWith("generate-pdf.mjs")) {
+      generateCalls += 1;
+      return fakeChild(generateCalls === 1
+        ? { exitCode: 0, writes: pdfPaths.finalPdf }
+        : { exitCode: 0 });
+    }
+    if (script.endsWith("mark-pdf-ready.mjs")) {
+      return fakeChild({ exitCode: 0, stdout: JSON.stringify({ changed: true }) });
+    }
+    throw new Error(script);
+  };
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "10",
+      ats: { html: atsHtml, finalPdf: atsPdf },
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(existsSync(atsPdf), false);
+    assert.equal(readFileSync(pdfPaths.finalPdf, "utf8"), "%PDF-fake");
+    assert.ok(result.warnings.some((warning) => warning.includes("ATS PDF was not created") && warning.includes("wrote nothing")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderAndMarkPdf: a new ATS PDF replaces the previous file", async () => {
+  const dir = makeScratchDir();
+  const pdfPaths = makePdfPaths(dir, "11");
+  writeFileSync(pdfPaths.html, "<html>styled</html>");
+  const atsHtml = join(dir, "cv-web-11.ats.html");
+  writeFileSync(atsHtml, "<html>ats</html>");
+  const atsPdf = join(dir, "output", "cv-jane-acme-ats-2026-07-26.pdf");
+  writeFileSync(atsPdf, "stale-ats");
+  let generateCalls = 0;
+  const spawnFn = (execPath, args) => {
+    const script = String(args[0]);
+    if (script.endsWith("generate-pdf.mjs")) {
+      generateCalls += 1;
+      return fakeChild(generateCalls === 1
+        ? { exitCode: 0, writes: pdfPaths.finalPdf }
+        : { exitCode: 0, writes: atsPdf });
+    }
+    if (script.endsWith("mark-pdf-ready.mjs")) {
+      return fakeChild({ exitCode: 0, stdout: JSON.stringify({ changed: true }) });
+    }
+    throw new Error(script);
+  };
+  try {
+    const result = await renderAndMarkPdf({
+      spawnFn,
+      execPath: "node",
+      coreRoot: "/root",
+      pdfPaths,
+      format: "letter",
+      reportNum: "11",
+      ats: { html: atsHtml, finalPdf: atsPdf },
+    });
+    assert.equal(result.kind, "rendered");
+    assert.equal(readFileSync(atsPdf, "utf8"), "%PDF-fake");
+    assert.ok(!result.warnings.some((warning) => warning.includes("ATS PDF was not created")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("failureReason: no failure marker -> whole stderr; empty -> generic message", () => {
   assert.equal(failureReason("boom"), "boom");
   assert.equal(failureReason(""), "PDF rendering failed.");
 });
-

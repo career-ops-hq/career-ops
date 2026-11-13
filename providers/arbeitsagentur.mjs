@@ -4,6 +4,7 @@
 import { intInRange } from './_config-utils.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Arbeitsagentur (Bundesagentur für Arbeit) provider — an aggregator (one entry,
 // many employers), so it goes in the `job_boards:` list of portals.yml.
@@ -376,10 +377,14 @@ export default {
     if (succeeded === 0 && errors.length) {
       throw new Error(`arbeitsagentur: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
+    const jobs = [...byRef.values()].map(({ refnr, inGermany, ...job }) => job);
     if (errors.length) {
       console.warn(`arbeitsagentur: "${entry.name || '(unnamed)'}" returned partial results — ${errors.join('; ')}`);
+      // The warning reaches only the terminal. scan.mjs reads a board's health
+      // from the returned array, so the result says it too, or the board is
+      // logged reachable with a keyword, offer type or remote pass unread.
+      markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     }
-
-    return [...byRef.values()].map(({ refnr, inGermany, ...job }) => job);
+    return jobs;
   },
 };

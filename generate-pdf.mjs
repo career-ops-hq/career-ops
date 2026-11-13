@@ -1641,9 +1641,10 @@ export function resolveArtifactKind(explicit, outputPath) {
  * in the file's basename (`cv-ana-042-acme-2026-10-30.pdf` -> `042`); the
  * output name is tried first, then the input name. Directories are ignored.
  *
- * An ATS variant (an `ats` token in the name) is never inferred: modes/pdf.md
- * renders it without --report on purpose, because an indexed ATS PDF would
- * replace the styled CV the dashboard opens for that report.
+ * An ATS variant (an `ats` token in the name, including a `.ats.pdf` suffix)
+ * is never inferred: modes/pdf.md renders it without --report on purpose,
+ * because an indexed ATS PDF would replace the styled CV the dashboard opens
+ * for that report.
  *
  * @param {string} [outputPath] - Destination PDF path.
  * @param {string} [inputPath] - Source HTML path.
@@ -1654,7 +1655,7 @@ export function inferReportNumber(outputPath, inputPath) {
   for (const p of [outputPath, inputPath]) {
     const name = basename(p || '');
     if (!name) continue;
-    if (/(^|[-_])ats([-_.]|$)/i.test(name)) return null;
+    if (/(^|[-_.])ats([-_.]|$)/i.test(name)) return null;
     const m = name.match(/[-_](\d{3})[-_]/);
     if (m) return { reportNum: m[1], from: p };
   }

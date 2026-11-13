@@ -41,6 +41,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { linkedInCanonicalKey, linkedInPathJobId } from './lib/linkedin-url.mjs';
+import { resolveHimalayasPosting } from './himalayas-posting.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
@@ -189,9 +190,14 @@ function foldHostname(host) {
 // guessed regex that reads two spellings of one posting as two IDs splits that
 // posting into two rows, which is the failure direction this file exists to
 // avoid; a missing extractor merely leaves the pair UNKNOWN, i.e. exactly the
-// behaviour shipped for #3652. The two below are the shapes this repo already
+// behaviour shipped for #3652. LinkedIn and Indeed are the shapes this repo already
 // resolves in liveness-api.mjs (see its `linkedin` provider) and exercises in
 // tests/liveness-api-linkedin.test.mjs — not inferred from the URLs' looks.
+// Himalayas and Jobicy (#4469, part 2) are the boards the scanner itself emits
+// (providers/himalayas.mjs, providers/jobicy.mjs), checked against their own
+// feeds: every Himalayas `guid` is /companies/{companySlug}/jobs/{jobSlug} and
+// the feed's `applicationLink` is that URL plus utm params; every Jobicy `url`
+// is /jobs/{id}-{slug} where {id} equals the feed item's numeric `id`.
 //
 // Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
 // also Workable's employer-board shape, where it means something else.
@@ -206,6 +212,19 @@ const AGGREGATOR_POSTING_ID = {
     const jk = u.searchParams.get('jk') ?? u.searchParams.get('vjk');
     return jk && /^[\w-]+$/.test(jk) ? jk : null;
   },
+  // himalayas.app/companies/{companySlug}/jobs/{jobSlug}, parsed by the resolver
+  // the liveness check already uses (himalayas-posting.mjs). A job slug is unique
+  // within its company: a second posting with the same title gets a numeric suffix
+  // (`senior-security-engineer-6458775437`), so the pair is the posting identity.
+  // Anything that resolver refuses (another host label, a non-tracking query
+  // param, another path) stays UNKNOWN.
+  'himalayas.app': (u) => {
+    const posting = resolveHimalayasPosting(u.href);
+    return posting ? `${posting.companySlug}/${posting.jobSlug}` : null;
+  },
+  // jobicy.com/jobs/{id}-{slug}: the leading number is the feed's job `id`. A
+  // slug-only path carries no id and stays UNKNOWN.
+  'jobicy.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
 };
 
 /**
@@ -528,6 +547,10 @@ function greenhouseJobId(url) {
   return pathId || queryId;
 }
 
+const SR_POSTING_ID = String.raw`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)`;
+const SR_PAGE_PATH = new RegExp(String.raw`^/([^/]+)/${SR_POSTING_ID}(?:-[^/]*)?/?$`, 'i');
+const SR_API_PATH = new RegExp(String.raw`^/v1/companies/([^/]+)/postings/${SR_POSTING_ID}/?$`, 'i');
+
 /**
  * SmartRecruiters' posting id with its company, or null when this URL is not a
  * SmartRecruiters posting.
@@ -542,17 +565,23 @@ function greenhouseJobId(url) {
  * addresses a posting under its company (`/v1/companies/{company}/postings/{id}`),
  * so the id is not shown to be global the way Greenhouse's is.
  *
+ * The API also addresses a posting by its UUID. A UUID is read whole, before
+ * the numeric form, so one whose first group is all digits is not cut down
+ * to that group and collapsed with another posting. A UUID key and a numeric
+ * key for the same posting stay two keys: a visible duplicate, not a silent
+ * merge.
+ *
  * @param {URL} url - Hostname already folded.
  * @returns {string|null}
  */
 function smartRecruitersJobId(url) {
   let match = null;
   if (url.hostname === 'jobs.smartrecruiters.com') {
-    match = url.pathname.match(/^\/([^/]+)\/(\d+)(?:-[^/]*)?\/?$/);
+    match = url.pathname.match(SR_PAGE_PATH);
   } else if (url.hostname === 'api.smartrecruiters.com') {
-    match = url.pathname.match(/^\/v1\/companies\/([^/]+)\/postings\/(\d+)\/?$/);
+    match = url.pathname.match(SR_API_PATH);
   }
-  return match ? `${match[1].toLowerCase()}/${match[2]}` : null;
+  return match ? `${match[1].toLowerCase()}/${match[2].toLowerCase()}` : null;
 }
 
 function indeedJobId(url) {
