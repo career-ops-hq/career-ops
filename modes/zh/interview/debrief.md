@@ -258,7 +258,7 @@ candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      
 - **给每次作答打标签。** 在每行 `**Candidate:**` 正上方输出 `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case，多能力用逗号分隔（例如 `system-design`、`people-leadership`、`incident-response`）。你在 Step 2 已评估过每次作答，按那次评估打标签，而不是重读。标签是自由形式；选该题实际考察的能力。
 - **忠实重建候选人回合。** 用候选人在 Step 1 报告说过的内容，而不是理想化答案。Step 2 的"correct/complete answer"属于复盘文件，绝不要进记录——记录记的是发生了什么。
 - **`source: debrief`。**
-- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。每个 `speaker` 也用双引号包裹：像 `Hiring Manager: Jane` 这样的值含冒号，不加引号就是非法 YAML。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。每个 `speaker` 也用双引号包裹，并按 `quote` 的方式转义（先转义反斜杠、再转义内部双引号）：像 `Hiring Manager: Jane` 这样的值含冒号，不加引号就是非法 YAML。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
 - **`format`、`people_on_call`、`tone`、`candidate_comfort` 是可选的 front matter 键**，承载 Step 1 / Step 8 的值，让下游模式不必解析正文就能读取。只写候选人回答过的键，其余省略；候选人没给出时绝不写 `candidate_comfort`。`candidate_comfort` 用双引号包裹（可能是自由文本）；手工转义时与 `quote` 一样，先转义反斜杠、再转义内部双引号。练习场次文件不带这些键。
 - 场次文件落在 gitignore 目录（真实姓名/公司永不进版本库）；写入时不要脱敏。
 

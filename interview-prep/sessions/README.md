@@ -47,7 +47,7 @@ place, so one real interview is never stored as two sessions.
 ## Stated priorities (optional)
 
 `stated_priorities` is an optional front-matter list written by `interview/debrief`.
-Each item has `speaker` (name or role, or `unknown`; double-quote it, since a role like `Hiring Manager: Jane` contains a colon and breaks unquoted YAML) and `quote` (a short verbatim
+Each item has `speaker` (name or role, or `unknown`; double-quote it, escaping backslashes before inner double quotes, since a role like `Hiring Manager: Jane` contains a colon and breaks unquoted YAML) and `quote` (a short verbatim
 statement by the interviewer about what the role needs most, copied from a real transcript; recall-only debriefs omit the field). The item's round and
 date are the file's own `round` and `date`. `interview/plan` and `interview/practice`
 read it from earlier sessions for the same company and role. Omit the field when
