@@ -1334,7 +1334,7 @@ posting_location: "Halifax, NS"
 }
 
 // --- Real sources ---
-const REPORT_FILE_RE = /^(\d{3})-.*-(\d{4}-\d{2}-\d{2})\.md$/;
+const REPORT_FILE_RE = /^(\d+)-.*-(\d{4}-\d{2}-\d{2})\.md$/;
 
 /**
  * Resolve applications from tracker rows, reaching each row's report through
