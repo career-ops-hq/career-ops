@@ -44,13 +44,16 @@ for (const exactFails of [false, true]) {
     const uploads = [];
     const frame = {
       url: () => "about:blank",
-      locator: (selector) => ({ first: () => ({ setInputFiles: async (file) => {
-        if (exactFails && selector === '[data-co-field="resume"]') throw new Error("tagged input replaced");
-        uploads.push({ selector, file });
-      } }) }),
+      locator: (selector) => ({
+        count: async () => 0,
+        first: () => ({ setInputFiles: async (file) => {
+          if (exactFails && selector === '[data-co-field="resume"]') throw new Error("tagged input replaced");
+          uploads.push({ selector, file });
+        } }),
+      }),
       evaluate: async () => ({ mismatches: [], requiredEmpty: [], valErrors: [] }),
     };
-    const page = { screenshot: async () => Buffer.from("fixture") };
+    const page = { screenshot: async () => Buffer.from("fixture"), frames: () => [frame] };
     const result = await withSession(frame, page, (id) => fillSession(id, {}, [cover, resume], "/fixture/cv.pdf"));
     assert.deepEqual(uploads, exactFails ? [] : [{ selector: '[data-co-field="resume"]', file: "/fixture/cv.pdf" }]);
     assert.equal(result.steps.length, 1);
@@ -71,10 +74,13 @@ test("CV upload carries the display name and leaves the file on disk as it was",
   const uploads = [];
   const frame = {
     url: () => "about:blank",
-    locator: (selector) => ({ first: () => ({ setInputFiles: async (file) => { uploads.push({ selector, file }); } }) }),
+    locator: (selector) => ({
+      count: async () => 0,
+      first: () => ({ setInputFiles: async (file) => { uploads.push({ selector, file }); } }),
+    }),
     evaluate: async () => ({ mismatches: [], requiredEmpty: [], valErrors: [] }),
   };
-  const page = { screenshot: async () => Buffer.from("fixture") };
+  const page = { screenshot: async () => Buffer.from("fixture"), frames: () => [frame] };
   const result = await withSession(frame, page, (id) => fillSession(id, {}, [resume], onDisk, "Jane-Doe-Data-Engineer-CV.pdf"));
   assert.equal(result.steps[0].ok, true);
   assert.equal(uploads.length, 1);
@@ -90,10 +96,13 @@ test("CV upload without a display name still sends the path", async () => {
   const uploads = [];
   const frame = {
     url: () => "about:blank",
-    locator: (selector) => ({ first: () => ({ setInputFiles: async (file) => { uploads.push(file); } }) }),
+    locator: (selector) => ({
+      count: async () => 0,
+      first: () => ({ setInputFiles: async (file) => { uploads.push(file); } }),
+    }),
     evaluate: async () => ({ mismatches: [], requiredEmpty: [], valErrors: [] }),
   };
-  const page = { screenshot: async () => Buffer.from("fixture") };
+  const page = { screenshot: async () => Buffer.from("fixture"), frames: () => [frame] };
   await withSession(frame, page, (id) => fillSession(id, {}, [resume], "/fixture/cv.pdf"));
   assert.deepEqual(uploads, ["/fixture/cv.pdf"]);
 });
