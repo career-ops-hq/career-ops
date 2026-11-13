@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Radancy (TalentBrew) provider — the career sites Radancy hosts for large
 // employers (careers.munichre.com and its ERGO brands, plus many others). The
@@ -480,7 +481,14 @@ export default {
               + ` (max_pages/max_jobs reached) — raise max_jobs/max_pages on this entry for more`,
             );
           }
-          return jobs.slice(0, maxJobs);
+          const result = jobs.slice(0, maxJobs);
+          // A partly read board says so in the return value, so scan.mjs logs it
+          // `partial` instead of `reachable` (lib/board-truncation.mjs). The stop
+          // reason above drives it, as it drives the warnings; never while probing.
+          if (!probing && stopReason !== 'complete') {
+            markTruncated(result, stopReason === 'cap' ? 'page-cap' : 'fetch-error', { fetched: result.length });
+          }
+          return result;
         }
       } catch (err) {
         // succeededOnce can only still be false here (the one JSON request
@@ -498,6 +506,7 @@ export default {
     // THROW so scan/portal-health record a failure instead of "live but empty"
     // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
     // failure here, keeps partials instead.
+    let stoppedOnError = false;
     for (let page = 1; page <= effectiveMaxPages; page++) {
       if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       let rows;
@@ -507,6 +516,7 @@ export default {
       } catch (err) {
         if (probing) throw err; // propagate ProbePageBudgetReached (or any rejection) unwrapped
         if (!succeededOnce) throw err;
+        stoppedOnError = true;
         break; // keep jobs collected so far — a transient mid-scan failure shouldn't discard earlier pages
       }
       succeededOnce = true;
@@ -523,6 +533,9 @@ export default {
       if (fresh === 0) break;
       if (jobs.length >= maxJobs) break;
     }
-    return jobs.slice(0, maxJobs);
+    const result = jobs.slice(0, maxJobs);
+    // The pages after the failure were never read: marked, as on the fragment path.
+    if (stoppedOnError) markTruncated(result, 'fetch-error', { fetched: result.length });
+    return result;
   },
 };
