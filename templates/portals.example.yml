@@ -323,6 +323,31 @@
 #   max: 0
 #   currency: "USD"
 
+# -- Employment-type filter (optional) --
+# Keep only the employment types you want: full_time, part_time, contract,
+# temporary, internship. Applied right after the salary filter. Reads the
+# structured type a provider takes from the source's own field, never the title
+# or description. Providers that set it today: himalayas ("Full Time",
+# "Contractor", ...), weworkremotely (<type>), remotive (job_type; "freelance"
+# counts as contract), ashby (employmentType) and lever (categories.commitment,
+# free text per employer; "Permanent" says nothing about the hours and is left
+# unknown). Every other provider leaves it unknown.
+#
+# Semantics:
+#   - a type in `allow` → kept; any other known type → removed
+#   - unknown type → kept, unless `include_unknown: false`. Most boards expose
+#     no type, so `false` drops every posting from them.
+#   - a value outside the five above is a config error (scan.mjs exits before
+#     fetching), so a typo like "contractor" cannot silently drop contracts
+#   - removals are counted on the "Filtered by employment type" summary line
+#   - the type is also written to scan-history.tsv's employment_type column
+#   - If this entire block is absent, nothing is filtered on employment type.
+#
+# Example: contract and part-time roles only
+# employment_type_filter:
+#   allow: [contract, part_time]
+#   include_unknown: true
+
 # Read-only portal housekeeping: `node stats.mjs --prune --summary`.
 # Uses exact-lowercase company names, scan history and recent health evidence.
 # First health observation is a lower bound, not the date config was added.

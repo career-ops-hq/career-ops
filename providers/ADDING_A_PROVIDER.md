@@ -120,7 +120,12 @@ export default {
   with a `language` / `lang` / `locale` param returns one Job per version,
   each with `language` set, the posting's own default language first — the
   URL dedup relies on that order, and never reads a candidate's language from
-  its URL (`_types.js`, `language`; reference `providers/personio.mjs`). See
+  its URL (`_types.js`, `language`; reference `providers/personio.mjs`). When
+  the payload has a dedicated employment-type field, spread
+  `...employmentTypeField(raw)` from `_employment-type.mjs` into the Job: it
+  sets `employmentType` to `full_time`, `part_time`, `contract`, `temporary`
+  or `internship`, and leaves the key off for anything else (reference
+  `providers/ashby.mjs`). Never derive it from the title or description. See
   `_types.js` for the full list of optional fields.
   Populate `description` **only** when the list payload carries it for free
   (no extra per-job request — the scanner is zero-token). The one exception

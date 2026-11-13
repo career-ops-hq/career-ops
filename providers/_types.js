@@ -55,6 +55,21 @@
  *                               `description`; content_filter and
  *                               country_eligibility_filter never read it.
  *                               Omitted when the source has no such text.
+ * @property {'full_time'|'part_time'|'contract'|'temporary'|'internship'} [employmentType]
+ *                               The posting's employment type, normalized by
+ *                               `normalizeEmploymentType()` in
+ *                               `_employment-type.mjs` from the source's own
+ *                               field (Himalayas `employmentType`, We Work
+ *                               Remotely `<type>`, Remotive `job_type`, Ashby
+ *                               `employmentType`, Lever `categories.commitment`).
+ *                               Set ONLY from a dedicated field, never read out
+ *                               of the title or description. Omitted when the
+ *                               source has no such field or its value names no
+ *                               known type ("Volunteer", "Other", "Permanent").
+ *                               Spread `...employmentTypeField(raw)` into a Job
+ *                               literal to get that. Read by scan.mjs's
+ *                               employment_type_filter and written to
+ *                               scan-history.tsv's `employment_type` column.
  * @property {number} [postedAt] Epoch ms when the posting was published.
  *                               Omitted when the source doesn't expose a
  *                               usable date. scan.mjs ignores it; consumers
