@@ -70,6 +70,18 @@ test('and before a tool-shaped skill still blocks that tool', () => {
   assert.equal(comma.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'kubernetes'), true);
 });
 
+test('a formatted tool name on a LaTeX skills row still blocks', () => {
+  const tex = [
+    '\\documentclass{article}',
+    '\\begin{document}',
+    '\\textbf{Writing}{: }{\\textit{Kubernetes}} \\\\',
+    '\\end{document}',
+  ].join('\n');
+  const result = verifyFacts(tex, options);
+  assert.equal(result.verdict, 'block');
+  assert.equal(result.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'kubernetes'), true);
+});
+
 test('an unsourced tool on a LaTeX skills line blocks', () => {
   const tex = [
     '\\documentclass{article}',

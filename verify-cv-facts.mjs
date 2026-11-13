@@ -1391,6 +1391,17 @@ function skillTokens(text) {
   return tokens;
 }
 
+function plainLatexSkillText(value) {
+  let text = String(value);
+  const wrap = /\\(?:textit|textbf|emph|texttt|textsc)\{([^{}]*)\}/g;
+  for (let pass = 0; pass < 4; pass++) {
+    const next = text.replace(wrap, '$1');
+    if (next === text) break;
+    text = next;
+  }
+  return text.replace(/\\([&%$#_{}])/g, '$1');
+}
+
 function pushSkillTokens(claims, seen, text) {
   for (const trimmed of skillTokens(text)) {
     if (!looksToolShaped(trimmed)) continue;
@@ -1415,7 +1426,7 @@ export function skillToolClaims(text) {
     }
   }
   for (const match of raw.matchAll(LATEX_SKILL_ROW_RE)) {
-    pushSkillTokens(claims, seen, match[1].replace(/\\([&%$#_{}])/g, '$1'));
+    pushSkillTokens(claims, seen, plainLatexSkillText(match[1]));
   }
   return claims;
 }
