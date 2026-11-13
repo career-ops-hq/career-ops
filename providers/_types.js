@@ -60,17 +60,26 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like scan-ats-full.mjs use it for recency
  *                               filtering.
- * @property {{min?: number, max?: number, currency?: string}} [salary]
+ * @property {{min?: number, max?: number, currency?: string, period?: string, posted?: {min?: number, max?: number}}} [salary]
  *                               Annualized compensation, attached ONLY when the
  *                               source exposes real figures — never inferred
  *                               (`ashby.mjs` is the reference shape; most
- *                               providers omit it). At least one of `min` / `max`
- *                               is present; most providers normalize both bounds
- *                               (filling a one-sided range from the other), but
- *                               some — e.g. `agentic-jobs.mjs` — leave the absent
- *                               bound off rather than coerce it. scan.mjs's
+ *                               providers omit it). `min` / `max` stay annualized;
+ *                               at least one of `min` / `max` is present; most
+ *                               providers normalize both bounds (filling a
+ *                               one-sided range from the other), but some —
+ *                               e.g. `agentic-jobs.mjs` — leave the absent bound
+ *                               off rather than coerce it. scan.mjs's
  *                               salary_filter reads `min ?? max` and tolerates
  *                               either bound alone.
+ *                               `period` is the normalized pay period string
+ *                               ('hour' | 'day' | 'week' | 'month' | 'year')
+ *                               when the source posts in a base unit; omitted for
+ *                               sub- or multi-unit intervals ('2 WEEK', '0.5 MONTH').
+ *                               `posted` holds the source's as-posted bounds in
+ *                               that period: never annualized, no one-sided fill
+ *                               (an absent bound stays absent), and omitted when
+ *                               `period` is absent or neither bound is given.
  *                               `currency` is the source's currency string,
  *                               upper-cased by most providers (`''` or absent
  *                               when the source gives none); it is not validated
