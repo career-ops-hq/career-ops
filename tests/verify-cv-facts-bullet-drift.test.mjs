@@ -159,6 +159,15 @@ check('-ing list nouns in later clauses are not read as verbs',
   check('a Unicode-bulleted list item stays its own statement',
     bulletDriftClaims(ul('Led the 2024 repricing analysis'), unicodeBullets).some(claim => claim.added.includes('led')),
     bulletDriftClaims(ul('Led the 2024 repricing analysis'), unicodeBullets));
+
+  // A thematic break (---, ***, ___) is a block boundary, so statements on
+  // either side are not merged and a verb below the rule does not vouch above.
+  const thematicBreak = 'Presented the Q3 product roadmap\n'
+    + '---\n'
+    + 'Led the migration of reporting to Snowflake\n';
+  check('a thematic break keeps the statements on either side separate',
+    bulletDriftClaims(ul('Led the Q3 product roadmap'), thematicBreak).some(claim => claim.added.includes('led')),
+    bulletDriftClaims(ul('Led the Q3 product roadmap'), thematicBreak));
 }
 // Review on #6630: an opening modifier from the JD is not a verb, so it warns.
 {

@@ -1519,11 +1519,12 @@ function factStatements(text) {
 }
 
 /**
- * A line that opens its own block: list item, ordered item, heading, table row,
- * quote or HTML tag. The bullet markers mirror LIST_MARKER_RE so a Unicode-
+ * A line that opens its own block: list item, ordered item, heading, table row
+ * (leading pipe, as lib/cv-markdown.mjs parses them), quote, HTML tag, or a
+ * thematic break. The bullet markers mirror LIST_MARKER_RE so a Unicode-
  * bulleted list keeps each item a separate statement.
  */
-const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)/u;
+const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)|^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u;
 /** A line that closes its block: heading, table row, bold-only label, or an explicit hard break. */
 const BLOCK_END_RE = /^\s*(?:#|\|)|^\s*\*\*[^*]+\*\*\s*$|(?:\\|\s{2}|>)$/u;
 
