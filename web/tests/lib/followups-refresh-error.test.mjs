@@ -29,4 +29,7 @@ test("a failed follow-ups refresh keeps the list and names a network error", () 
   assert.match(view, /followupsAfterRefreshFailure/);
   assert.match(view, /FOLLOWUPS_NETWORK_ERROR/);
   assert.match(view, /!data\.available && !data\.refreshFailed/);
+  assert.match(view, /refreshWithoutAList/);
+  assert.match(view, /data\?\.refreshFailed && !meta && entries\.length === 0/);
+  assert.doesNotMatch(view, /refreshFailed && filtered\.length === 0/);
 });

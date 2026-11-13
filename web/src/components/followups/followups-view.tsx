@@ -150,6 +150,9 @@ export function FollowupsView() {
   const meta = data?.available ? data.metadata : null;
 
   const filtering = tab !== "ALL" || q.trim().length > 0;
+  // A failed refresh with no list yet is not an empty cadence. A retained list
+  // still shows "No matches" when the filter hides every row.
+  const refreshWithoutAList = Boolean(data?.refreshFailed && !meta && entries.length === 0);
   const filtered = useMemo(() => {
     let rows = entries;
     if (tab !== "ALL") rows = rows.filter((e) => e.urgency.toUpperCase() === tab);
@@ -271,7 +274,7 @@ export function FollowupsView() {
 
       {data && !data.available && !data.refreshFailed ? (
         <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
-      ) : data?.refreshFailed && filtered.length === 0 ? null : data && !isPending && filtered.length === 0 ? (
+      ) : refreshWithoutAList ? null : data && !isPending && filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
         ) : (
