@@ -71,10 +71,11 @@ until their corresponding recovery units have evidence.
 
 ### Recovery work units
 
-- [ ] R1 — Hermetic capture tests and a genuine locked duplicate no-op, including
+- [x] R1 — Hermetic capture tests and a genuine locked duplicate no-op, including
       Pending/Processed forms and concurrent requests. Route: delegated direct;
       preparation and 2+ non-trivial file triggers. Checks: focused Node runner,
-      source syntax, and duplicate/concurrency runtime fixtures. Commit: pending.
+      source syntax, and duplicate/concurrency runtime fixtures. Commit:
+      `41788e7e4183caae5f21cd0c3748e126c7dc17e3` (384 authored lines).
 - [ ] R2 — Strict URL and capture-file boundary validation. Route: delegated direct;
       preparation and 2+ non-trivial file triggers. Acceptance/checks to be scoped
       before implementation. Commit: pending.
@@ -179,7 +180,7 @@ This worktree (`t3/selected-jd-capture-data-dir`) for code; the data root
   scratch data, isolate inherited Git variables/config/hooks, and forbid real
   push/evaluation. Never modify the personal data checkout or home repository.
 
-## R1 evidence — independently verified, pending commit decision
+## R1 evidence — independently verified and committed
 
 - 2026-11-13 — Skills resolved from the injected `work-unit-commits/SKILL.md`
   and `cognitive-doc-design/SKILL.md` paths. TDD on; RDD off. No delegation
@@ -231,16 +232,30 @@ This worktree (`t3/selected-jd-capture-data-dir`) for code; the data root
   Git/index isolation in production, strict URL/file validation, receiver policy,
   and launcher redesign remain R2–R4. Full runner and real-data/manual checks
   were not run; dependency-dependent integration remains pending, not a pass.
-- Rollback: reverse only the R1 changes in `capture-jd.mjs`,
-  `tests/capture-jd.test.mjs`, and this evidence/next-step section. Preserve the
-  parent's existing task edits and unrelated `.atl/`. No commit was created;
-  human delivery-slicing decision and work-unit commit remain required.
-  R1 stays unchecked solely for that delivery boundary, not missing verification.
+- Closure (parent-reported, 2026-11-13): user selected **core first**
+  (`Núcleo primero (Recommended)`); delivery remains `ask-on-risk` with
+  `chain_strategy: stacked-to-main`, optional extension later/in the fork.
+  Parent created and verified local work-unit commit
+  `41788e7e4183caae5f21cd0c3748e126c7dc17e3` —
+  `fix(capture): preserve original JD on duplicate requests`.
+  Exactly `capture-jd.mjs`, `tests/capture-jd.test.mjs`, and
+  `odd/tasks/capture-jd.md`: **323 additions + 61 deletions = 384 authored lines**.
+  R1 is complete on the existing independent verification and parent spot checks;
+  T1–T6 and R2–R6 remain pending (T2 still includes unresolved production Git policy).
+  No push/PR/merge; original prototype history preserved. Parent reported only
+  pre-existing untracked `.atl/` remained after the implementation commit.
+- Rollback boundary: the R1 duplicate-preservation/Processed-row changes and
+  hermetic regression fixtures in `capture-jd.mjs` and
+  `tests/capture-jd.test.mjs` from the exact commit above, plus corresponding
+  R1 task evidence/status. Preserve prototype history, unrelated `.atl/`, and
+  parent delivery-policy/task edits; do not blindly discard the entire task
+  document. No rollback or additional commit is authorized in this follow-up.
 
 ## Next step
 
-Decide delivery slicing before authorizing a work-unit commit; no commit is
-currently permitted. Independent verification and parent spot checks are complete.
-R1 and all T1–T6 remain unchecked; proceed to separately scoped R2–R6 only
-after parent coordination. Do not install the extension, merge into another
-checkout, touch real personal data, or publish changes.
+Scope R2 strict URL and capture-file boundary validation with explicit acceptance
+criteria and TDD regressions before implementation. R1 is closed; T1–T6 and
+R2–R6 remain pending. Keep core delivery independent of optional extension work.
+This follow-up changes documentation/memory only; the parent will commit the
+bookkeeping separately. No installations, real personal data access, remote
+operations, publishing, push/PR/merge, or additional worker commit.
