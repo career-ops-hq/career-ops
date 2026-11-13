@@ -1208,7 +1208,7 @@ function classifyCompanySize(teamSize) {
   if (!teamSize) return 'unknown';
   const lower = teamSize.toLowerCase();
   // Extract numbers
-  const nums = lower.match(/[\d,]+/g);
+  const nums = lower.match(/\d[\d,]*/g);
   if (nums) {
     const max = Math.max(...nums.map(n => parseInt(n.replace(/,/g, ''))));
     if (max <= 50) return 'startup';
