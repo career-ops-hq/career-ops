@@ -13,7 +13,7 @@ import "../helpers/web-ts-alias-loader.mjs";
 import { editSaveStatus, withPdfExport } from "../../src/lib/cv-studio/put-order.mjs";
 import { emptyEdits, parseEdits } from "../../src/lib/cv-studio/studio.mjs";
 
-const { saveEdits } = await import("../../src/lib/cv-studio/server.ts");
+const { recordPdfExport, saveEdits } = await import("../../src/lib/cv-studio/server.ts");
 
 test("a rejected draft does not count as Saved, and a later autosave keeps the failure", () => {
   const edits = emptyEdits("hash");
@@ -51,6 +51,17 @@ test("saveEdits records a failed export and an autosave does not drop it", () =>
     saveEdits("011", afterAutosave, null);
     const cleared = JSON.parse(fs.readFileSync(file, "utf8"));
     assert.equal(cleared.pdfExport, undefined);
+
+    const newer = { ...edits, hidden: ["b2"] };
+    saveEdits("011", newer);
+    recordPdfExport("011", { ok: false, error: "Fact check failed" });
+    const duringRender = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.deepEqual(duringRender.hidden, ["b2"]);
+    assert.equal(duringRender.pdfExport.error, "Fact check failed");
+    recordPdfExport("011", null);
+    const afterSuccess = JSON.parse(fs.readFileSync(file, "utf8"));
+    assert.deepEqual(afterSuccess.hidden, ["b2"]);
+    assert.equal(afterSuccess.pdfExport, undefined);
   } finally {
     if (previous === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = previous;

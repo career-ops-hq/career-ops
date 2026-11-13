@@ -170,6 +170,20 @@ export function saveEdits(reportNum: string, edits: StudioEdits, pdfExport?: Pdf
   atomicWrite(file, JSON.stringify(withPdfExport(edits, stored, pdfExport), null, 2) + "\n");
 }
 
+/** Write the PDF result onto the draft already on disk. A save that landed during the render keeps its edits. */
+export function recordPdfExport(reportNum: string, pdfExport: PdfExportFailure | null) {
+  const file = editsPath(reportNum);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return;
+  }
+  if (!raw || typeof raw !== "object") return;
+  atomicWrite(file, JSON.stringify(withPdfExport(raw, null, pdfExport), null, 2) + "\n");
+}
+
 export async function keywordsInText(n: string, text: string): Promise<string[] | null> {
   const id = reportIdentity(n);
   if (!id) return null;
