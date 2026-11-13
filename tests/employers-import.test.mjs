@@ -13,11 +13,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry } from './helpers.mjs';
 
 import { BOARD_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
@@ -229,7 +229,7 @@ test('chunkInbox: one file up to 5,000 lines, then numbered parts', () => {
 
 function checkout() {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-import-'));
-  cpSync(join(ROOT, 'employers'), join(dir, 'employers'), { recursive: true });
+  copyEmployerRegistry(dir);
   return dir;
 }
 
