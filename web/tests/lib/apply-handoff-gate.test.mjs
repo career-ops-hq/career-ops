@@ -7,7 +7,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { answersByFieldId, handoffDecision, issuesAfterAgent, issuesAfterFill, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
+import { answersByFieldId, answersForRefreshedFields, handoffDecision, issuesAfterAgent, issuesAfterFill, mergeIssues, replaceRequiredEmpty, resumeFieldNotice, screeningKind, withoutHandoffGaps } from "../../src/lib/apply/handoff-gate.mjs";
 
 const sponsorship = { id: "visa", type: "select", label: "Will you require visa sponsorship?", required: true };
 const salary = { id: "pay", type: "text", label: "Desired salary", required: true };
@@ -198,6 +198,52 @@ test("labeled answers land on field ids, and a blank stays blank", () => {
   ]);
   assert.deepEqual(mapped, { visa: "No", pay: "  " });
   assert.equal(handoffDecision({ fields, answers: mapped }).handoff, false);
+});
+
+test("a refreshed field list does not keep an answer on a reused positional id", () => {
+  const before = [
+    { id: "co0", label: "Name", nativeId: "name" },
+    { id: "co1", label: "Office", nativeId: "office" },
+  ];
+  const after = [
+    { id: "co0", label: "Department", nativeId: "dept" },
+    { id: "co1", label: "Name", nativeId: "name" },
+    { id: "co2", label: "Office", nativeId: "office" },
+  ];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Name", value: "Ada" },
+    { id: "co1", label: "Office", value: "Springfield" },
+  ]);
+  assert.deepEqual(mapped, { co1: "Ada", co2: "Springfield" });
+});
+
+test("a shared label with no DOM id stays unmatched after the field list changes", () => {
+  const before = [
+    { id: "co0", label: "Phone" },
+    { id: "co1", label: "Phone" },
+  ];
+  const after = [
+    { id: "co0", label: "Team" },
+    { id: "co1", label: "Phone" },
+    { id: "co2", label: "Phone" },
+  ];
+  const mapped = answersForRefreshedFields(before, after, [
+    { id: "co0", label: "Phone", value: "111" },
+    { id: "co1", label: "Phone", value: "222" },
+  ]);
+  assert.deepEqual(mapped, {});
+});
+
+test("an unchanged field list still maps two answers that share a label", () => {
+  const fields = [
+    { id: "phone-a", label: "Phone" },
+    { id: "phone-b", label: "Phone" },
+  ];
+  const mapped = answersForRefreshedFields(fields, fields, [
+    { id: "phone-a", label: "Phone", value: "111" },
+    { id: "phone-b", label: "Phone", value: "" },
+  ]);
+  assert.deepEqual(mapped, { "phone-a": "111", "phone-b": "" });
 });
 
 test("two fields that share a label keep the answer stored on each id", () => {

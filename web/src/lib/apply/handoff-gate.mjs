@@ -249,3 +249,95 @@ export function answersByFieldId(fields, labeled = []) {
   }
   return answers;
 }
+
+function fieldLabel(field) {
+  return String(field?.label || "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * True when a fresh extract assigned the same ids to the same labels.
+ * Positional ids are only safe to reuse in that case.
+ *
+ * @param {{ id?: string, label?: string }[]} before
+ * @param {{ id?: string, label?: string }[]} after
+ */
+function sameFieldList(before, after) {
+  if (before.length !== after.length) return false;
+  return before.every((field, index) => {
+    const next = after[index];
+    return !!field?.id && field.id === next?.id && fieldLabel(field) === fieldLabel(next);
+  });
+}
+
+/**
+ * First field for each non-empty key, dropped when the key is shared.
+ *
+ * @template T
+ * @param {T[]} fields
+ * @param {(field: T) => string} keyOf
+ */
+function uniqueIndex(fields, keyOf) {
+  /** @type {Map<string, { field: T, count: number }>} */
+  const groups = new Map();
+  for (const field of fields) {
+    const key = keyOf(field);
+    if (!key) continue;
+    const group = groups.get(key);
+    if (group) group.count += 1;
+    else groups.set(key, { field, count: 1 });
+  }
+  /** @type {Map<string, T>} */
+  const unique = new Map();
+  for (const [key, group] of groups) {
+    if (group.count === 1) unique.set(key, group.field);
+  }
+  return unique;
+}
+
+/**
+ * Map drive answers onto the fields extracted after the agent moved the page.
+ * A positional id is reused only when that id still labels the same question.
+ * Otherwise the answer follows the control's DOM id, or a label that appears
+ * once. A shared label with no DOM id stays unmatched, so it cannot land on
+ * a different question. A blank value stays blank.
+ *
+ * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} before
+ * @param {{ id?: string, label?: string, nativeId?: string, nativeName?: string }[]} after
+ * @param {{ id?: string, label?: string, value?: string }[]} [labeled]
+ */
+export function answersForRefreshedFields(before, after, labeled = []) {
+  const prior = Array.isArray(before) ? before : [];
+  const next = Array.isArray(after) ? after : [];
+  const items = Array.isArray(labeled) ? labeled : [];
+  if (sameFieldList(prior, next)) return answersByFieldId(next, items);
+
+  const beforeById = new Map(prior.filter((field) => field?.id).map((field) => [field.id, field]));
+  const afterByNativeId = uniqueIndex(next, (field) => field?.nativeId || "");
+  const afterByNativeName = uniqueIndex(next, (field) => field?.nativeName || "");
+  const afterByLabel = uniqueIndex(next, (field) => fieldLabel(field));
+  /** @type {[string, string][]} */
+  const picks = [];
+  for (const item of items) {
+    if (!item || item.value == null) continue;
+    const source = item.id ? beforeById.get(item.id) : undefined;
+    const label = fieldLabel(source) || fieldLabel(item);
+    let target;
+    if (source?.nativeId) target = afterByNativeId.get(source.nativeId);
+    if (!target && source?.nativeName && label) {
+      const named = afterByNativeName.get(source.nativeName);
+      if (named && fieldLabel(named) === label) target = named;
+    }
+    if (!target && label) target = afterByLabel.get(label);
+    if (!target?.id) continue;
+    picks.push([target.id, String(item.value)]);
+  }
+  /** @type {Map<string, number>} */
+  const counts = new Map();
+  for (const [id] of picks) counts.set(id, (counts.get(id) || 0) + 1);
+  /** @type {Record<string, string>} */
+  const answers = {};
+  for (const [id, value] of picks) {
+    if (counts.get(id) === 1) answers[id] = value;
+  }
+  return answers;
+}

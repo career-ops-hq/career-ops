@@ -54,7 +54,7 @@ export async function finalizeDrivenSession() {
   fixture.finalizeCalls = (fixture.finalizeCalls || 0) + 1;
   if (fixture.finalizeResult === null) return null;
   if (fixture.finalFields) fixture.session.fields = fixture.finalFields;
-  return { title: fixture.session.title, fields: fixture.session.fields, issues: [] };
+  return { title: fixture.session.title, fields: fixture.session.fields, issues: fixture.finalizeIssues || [] };
 }
 export async function extractCurrent() { return { form: {} }; }
 export function isApplicationFormFn() { return true; }
@@ -276,4 +276,40 @@ test("a drive that cannot re-read the form does not check the old fields", async
   assert.ok(done.gaps.some((gap) => gap.code === "fill-unverified"));
   assert.equal(globalThis.__applyFixture.fillCalls, 0);
   assert.equal(globalThis.__applyFixture.verifyAnswers, undefined);
+});
+
+test("drive read-back does not reuse a positional id after the form changes", async () => {
+  resetFixture({
+    finalFields: [
+      { id: "co0", type: "text", label: "Department", nativeId: "dept" },
+      { id: "co1", type: "text", label: "Name", nativeId: "name" },
+      { id: "co2", type: "select", label: "Office", nativeId: "office", required: true },
+    ],
+  });
+  globalThis.__applyFixture.session.fields = [
+    { id: "co0", type: "text", label: "Name", nativeId: "name" },
+    { id: "co1", type: "select", label: "Office", nativeId: "office", required: true },
+  ];
+  const done = (await postDrive({
+    answers: [
+      { id: "co0", label: "Name", value: "Ada" },
+      { id: "co1", label: "Office", value: "Springfield" },
+    ],
+  })).find((event) => event.t === "done");
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { co1: "Ada", co2: "Springfield" });
+  assert.equal(done.filled, true);
+});
+
+test("a full drive keeps the fencing warning from finalization", async () => {
+  resetFixture({
+    finalizeIssues: [{ level: "warn", code: "cli-unfenced", message: "This CLI read the form without verified fencing." }],
+  });
+  globalThis.__applyFixture.session.fields = [
+    { id: "visa", type: "radio", label: "Will you require visa sponsorship?", required: true },
+  ];
+  const done = (await postDrive({
+    answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+  })).find((event) => event.t === "done");
+  assert.ok(done.gaps.some((gap) => gap.code === "cli-unfenced"));
+  assert.equal(done.filled, true);
 });
