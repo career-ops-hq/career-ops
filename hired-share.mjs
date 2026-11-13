@@ -328,6 +328,23 @@ export function buildIssueUrl({ role, companyType, story, feature, timeToHire, a
 export const OPENER_TIMEOUT_MS = 15_000;
 
 /**
+ * Escape a URL for `cmd /c start`.
+ *
+ * cmd reads its whole command line before `start` runs, and an unescaped `&`
+ * ends the command there: the prefilled issue URL joins its fields with `&`,
+ * so `start` got only the template and cmd ran `title=…`, `role=…` as
+ * commands of their own. A caret makes cmd take the next character literally.
+ * Node passes the argument unquoted (a serialized URL has no space or `"`),
+ * so the carets reach cmd and none of them reach the browser.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+export function escapeForCmd(url) {
+  return url.replace(/[&|<>^()]/g, '^$&');
+}
+
+/**
  * Hand a URL to the platform's opener.
  *
  * `exec` is a seam so a test can assert the bound without opening a browser.
@@ -339,7 +356,7 @@ export const OPENER_TIMEOUT_MS = 15_000;
  */
 export function openInBrowser(url, exec = execFileSync) {
   const cmd = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
-  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  const args = process.platform === 'win32' ? ['/c', 'start', '', escapeForCmd(url)] : [url];
   try {
     // windowsHide: `cmd /c start` otherwise flashes a console window over
     // whatever the user is looking at.
