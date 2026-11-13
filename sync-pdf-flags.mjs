@@ -20,7 +20,7 @@
  *   node sync-pdf-flags.mjs --prune [--write] [--json]
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, copyFileSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, resolveWorkspaceRoot, pathIsInsideCanonical } from './tracker-utils.mjs';
@@ -50,6 +50,8 @@ const USAGE = 'Usage: node sync-pdf-flags.mjs [--dry-run] [--json]\n       node 
  * @param {{dryRun?: boolean, json?: boolean, prune?: boolean, write?: boolean}} [options.flags]
  * @param {string} [options.lockDir] - Tracker lock; defaults to the one derived from appsFile.
  * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options.lock] - Lock timing.
+ * @param {boolean} [options.keepExistingBackup] - The caller already saved the
+ *   pre-write tracker. A flag update must not replace that backup.
  * @param {{log: Function, error: Function}} [options.logger=console]
  * @returns {Promise<number>} The exit code the CLI exits with.
  */
@@ -266,7 +268,14 @@ export async function syncTrackerPdfFlags(options = {}) {
 
     if (updated > 0 && !flags.dryRun) {
       try {
-        transaction.replace(lines.join('\n'));
+        const next = lines.join('\n');
+        // The caller may already have saved the bytes from before its own
+        // write. Replacing that backup would keep the flag change and drop
+        // the earlier tracker. When this sync is the change, save first.
+        if (next !== content && !options.keepExistingBackup) {
+          copyFileSync(APPS_FILE, `${APPS_FILE}.bak`);
+        }
+        transaction.replace(next);
       } catch (err) {
         transaction.close();
         if (flags.json) console.log(JSON.stringify({ error: `Cannot write tracker: ${err.message}`, code: 'write-failure' }));

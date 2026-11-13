@@ -233,6 +233,55 @@ ok('a report-link migration backs up the tracker, and a second run leaves that b
   } finally { cleanup(env); }
 });
 
+function writeLivePdf(env, reportNum) {
+  const pdfDir = join(env.base, 'output');
+  mkdirSync(pdfDir, { recursive: true });
+  writeFileSync(join(pdfDir, `${reportNum}.pdf`), '%PDF-1.1\n');
+  writeFileSync(join(env.dataDir, 'pdf-index.tsv'),
+    `${reportNum}\toutput/${reportNum}.pdf\toutput/${reportNum}.html\tpdf\t2026-06-01\n`);
+}
+
+ok('an unchanged merge followed by PDF sync backs up the tracker', () => {
+  const env = makeEnv();
+  try {
+    const url = 'https://boards.greenhouse.io/fixtureco/jobs/7001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.0/5 | Evaluated | — | [1](reports/1-fixture.md) | n | ${url} |`,
+    ]);
+    writeLivePdf(env, 1);
+    addTsv(env, '1-fixture.tsv', ['1', '2026-06-03', 'Fixture Co', 'Director of Marketing', 'Evaluated', 'N/A', '—',
+      '[1](reports/1-fixture.md)', 're-eval', url]);
+    const before = readFileSync(env.tracker, 'utf-8');
+    runMerge(env);
+    assert.equal(readFileSync(`${env.tracker}.bak`, 'utf-8'), before,
+      'the backup is the tracker from before the PDF flag update');
+    const row = trackerRows(env)[0];
+    assert.ok(row.includes('✅') && row.includes('4.0/5'), 'the PDF flag updates and the score stays');
+    assert.equal(urlHref(row), url, 'the URL stays');
+  } finally { cleanup(env); }
+});
+
+ok('a PDF sync after a real merge leaves the pre-merge backup in place', () => {
+  const env = makeEnv();
+  try {
+    const url = 'https://boards.greenhouse.io/fixtureco/jobs/7001';
+    writeTracker(env, [
+      `| 1 | 2026-06-01 | Fixture Co | Director of Marketing | 4.0/5 | Evaluated | — | [1](reports/1-fixture.md) | n | ${url} |`,
+    ]);
+    writeLivePdf(env, 1);
+    addTsv(env, '2-fixture.tsv', ['2', '2026-06-03', 'Other Co', 'Analyst', 'Evaluated', '3.2/5', '❌',
+      '[2](reports/2-fixture.md)', 'n', 'https://boards.greenhouse.io/otherco/jobs/8001']);
+    const before = readFileSync(env.tracker, 'utf-8');
+    runMerge(env);
+    assert.equal(readFileSync(`${env.tracker}.bak`, 'utf-8'), before,
+      'the PDF flag update does not replace the pre-merge backup');
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 2, 'the new company is on the tracker');
+    assert.ok(rows.some(r => r.includes('Other Co')) && rows.some(r => r.includes('✅')),
+      'the merged row and the updated PDF flag are both in the tracker');
+  } finally { cleanup(env); }
+});
+
 ok('an unchanged migration does not create a backup', () => {
   const env = makeEnv();
   try {

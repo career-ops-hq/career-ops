@@ -63,11 +63,16 @@ const MERGE_TRACKER_KNOWN_FLAGS = ['--dry-run', '--verify', '--migrate', '--migr
 // previous file beside it, so a bad merge can be put back. An unchanged
 // rewrite leaves any existing backup where it is.
 function writeTrackerReplacing(file, nextText) {
+  let backedUp = false;
   if (existsSync(file)) {
     const prev = readFileSync(file, 'utf-8');
-    if (prev !== nextText) copyFileSync(file, `${file}.bak`);
+    if (prev !== nextText) {
+      copyFileSync(file, `${file}.bak`);
+      backedUp = true;
+    }
   }
   writeFileAtomic(file, nextText);
+  return backedUp;
 }
 
 // Executable hooks live beside this script even when user data is redirected
@@ -2505,16 +2510,19 @@ export async function mergeTracker(options = {}) {
       appLines.splice(insertIdx, 0, ...newLines);
     }
 
-    // Write back
+    // Write back. keptEarlierBackup tells the PDF sync below not to replace
+    // a backup this write just saved: restoring that file undoes the merge
+    // and the flag update together.
+    let keptEarlierBackup = false;
     if (!DRY_RUN) {
       const moved = sortTrackerRowsInPlace(appLines);
       if (moved > 0) console.log(`\n🔢 Sorted tracker by # ascending (${moved} row(s) repositioned).`);
-      writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
+      keptEarlierBackup = writeTrackerReplacing(APPS_FILE, appLines.join('\n'));
 
       // Move processed files to merged/ — but only the ones actually applied.
       // Archiving a TSV whose row never reached the tracker is what turns a bug
-      // into permanent data loss, since applications.md is gitignored and no backup
-      // is written.
+      // into permanent data loss. The .bak beside the tracker is the previous
+      // file, so it does not contain that row either.
       if (!existsSync(MERGED_DIR)) mkdirSync(MERGED_DIR, { recursive: true });
       const archivable = tsvFiles.filter(f => !failedAdditions.includes(f) && !refusedAdditions.includes(f));
       for (const file of archivable) {
@@ -2548,6 +2556,7 @@ export async function mergeTracker(options = {}) {
           lockDir: TRACKER_LOCK_DIR,
           lock: options.lock,
           logger: console,
+          keepExistingBackup: keptEarlierBackup,
         });
         if (code !== 0) console.warn(`⚠️  Failed to sync PDF flags: sync-pdf-flags exited with ${code}`);
       } catch (e) {
