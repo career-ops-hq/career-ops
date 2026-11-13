@@ -148,8 +148,38 @@ value the length implies, the agency, and the rate against your target.
 are public APIs, feeds or pages read without logging in. Each can be switched
 off with `enabled: false` in your `portals.yml`.
 
-<!-- sources:start -->
-<!-- sources:end -->
+| Track | Board | Provider | Access |
+|-------|-------|----------|--------|
+| Europe | Arbeitnow | `arbeitnow` | public API |
+| Europe | Arbeitsagentur (German federal employment agency) | `arbeitsagentur` | official public API |
+| Europe | GermanTechJobs | `germantechjobs` | RSS feed |
+| Europe | Landing.jobs | `landingjobs` | public API |
+| Europe | The Hub | `thehub` | public API |
+| Europe | EU Remote Jobs | `euremotejobs` | the board's listing endpoint |
+| Europe | Berlin Startup Jobs | `berlinstartupjobs` | RSS feed |
+| Europe | Munich Startup | `munich-startup` | public page |
+| Europe | karriere.at | `karriere-at` | public listing page (JSON view) |
+| AI gigs | Agentic Engineering Jobs | `agentic-jobs` | public API |
+| AI gigs | Hacker News "Who is hiring?" | `hackernews` | public API |
+| AI gigs | Welcome to the Jungle | `wttj` | public search index |
+| AI gigs | Alignerr | `alignerr` | the site's job list endpoint |
+| AI gigs | Mercor | `mercor` | public page |
+| AI gigs | DataAnnotation | `dataannotation` | public page |
+| AI gigs | Surge AI | `surge` | public careers page |
+| Freelance | freelancermap | `freelancermap` | the site's project search, first page per query |
+| Freelance | Braintrust | `braintrust` | public API |
+| Freelance | Etengo | `etengo` | the site's project filter |
+| Freelance | Freelancer.com | `freelancer-com` | official public API |
+| Freelance | Arbeitsagentur, self-employment offers | `arbeitsagentur` with `angebotsart: [2]` | official public API |
+| Freelance | Hacker News "Freelancer?" thread | `hackernews` with `thread: freelancer` | public API |
+| Remote | Remotive, RemoteOK, We Work Remotely, Working Nomads, Himalayas, NoDesk, Jobicy (Europe) | their own providers | public APIs and feeds |
+| Remote | RemoteYeah, Real Work From Anywhere | `remoteyeah`, `realworkfromanywhere` | RSS feeds |
+
+Each track also adds two web-search queries to `search_queries` for the agent-driven scan.
+
+Also available, not in a preset: `get-in-it` and `efellows` (German graduate boards), `jobs-ch` and `jobscout24ch` (Switzerland), `a16z-portfolio`. Their example stanzas are in `templates/portals.example.yml`.
+
+Things to know: the Hacker News freelancer thread had no client posts in its latest edition at the time of writing. freelancermap and Etengo show anonymous visitors only part of their inventory. The per-task AI platforms list many roles limited to certain countries or languages; the evaluation checks that.
 
 Other boards in `docs/SUPPORTED_JOB_BOARDS.md` can be added by hand in the same way.
 
@@ -158,8 +188,16 @@ Other boards in `docs/SUPPORTED_JOB_BOARDS.md` can be added by hand in the same 
 These are not scanned, because their terms or access rules do not allow it.
 Check them by hand, or through their own alerts.
 
-<!-- skipped:start -->
-<!-- skipped:end -->
+| Source | Why |
+|--------|-----|
+| freelance.de | Its robots.txt forbids automated access |
+| Malt, Hays, SOLCOM | Bot walls on the project pages |
+| Upwork | API access needs an approved key |
+| GULP, Outlier | Only an undocumented internal endpoint is available, and their terms were not reviewed. Many Outlier projects also appear on Braintrust |
+| absolventa, jobs.de, micro1 | Blocked by a CAPTCHA, a bot challenge or a 403 when tested |
+| stellenanzeigen.de, yourfirm.de | Refused from the test machine's country (403); not tested from Germany |
+| LinkedIn, XING, Indeed, StepStone, Glassdoor | Login walls or terms that forbid scraping. Use their own job alerts; career-ops has LinkedIn alert import (`docs/LINKEDIN_ALERTS.md`) |
+| Paid job-data APIs (Adzuna, Jooble, SerpAPI and similar) | Need a key; nothing in the tracks depends on a paid service |
 
 ## Limits
 

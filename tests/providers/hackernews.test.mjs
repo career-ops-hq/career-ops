@@ -293,6 +293,69 @@ try {
   } else {
     fail('hackernews.fetch() should throw when no matching thread found');
   }
+
+  // freelancer thread (opt-in `hackernews: { thread: freelancer }`)
+  const { parseHnFreelancerComment } = hackernewsModule;
+  const flTitle = 'Ask HN: Freelancer? Seeking freelancer? (October 2025)';
+  if (resolveLatestThreadId({ hits: [{ objectID: '1', title: 'Ask HN: Who is hiring? (June 2025)' }, { objectID: '2', title: flTitle }] }, /ask\s+hn[:\s]+freelancer\?\s+seeking\s+freelancer/i) === '2') {
+    pass('resolveLatestThreadId accepts a custom title pattern');
+  } else {
+    fail('resolveLatestThreadId custom pattern did not pick the freelancer thread');
+  }
+
+  const seeking = parseHnFreelancerComment('SEEKING FREELANCER | Seattle, Remote fine<p>Senior C# role<p>Details at <a href="https:&#x2F;&#x2F;acme.example&#x2F;jobs&#x2F;9" rel="nofollow">https:&#x2F;&#x2F;acme.example&#x2F;jobs&#x2F;9</a>', 'https://news.ycombinator.com/item?id=7');
+  if (seeking && seeking.title === 'Freelancer wanted: Seattle, Remote fine — Senior C# role' && seeking.location === 'Seattle, Remote fine'
+      && seeking.url === 'https://acme.example/jobs/9' && /Details at/.test(seeking.description)) {
+    pass('parseHnFreelancerComment maps location, role title, job link and description');
+  } else {
+    fail(`parseHnFreelancerComment = ${JSON.stringify(seeking)}`);
+  }
+  const noLink = parseHnFreelancerComment('SEEKING FREELANCER | Remote (US)<p>Drupal dev', 'https://news.ycombinator.com/item?id=8');
+  if (noLink?.url === 'https://news.ycombinator.com/item?id=8') pass('parseHnFreelancerComment falls back to the comment permalink');
+  else fail(`parseHnFreelancerComment fallback = ${JSON.stringify(noLink)}`);
+  if (parseHnFreelancerComment('SEEKING WORK | Berlin | Remote<p>Backend dev', 'x') === null
+      && parseHnFreelancerComment('Hello world', 'x') === null && parseHnFreelancerComment('', 'x') === null) {
+    pass('parseHnFreelancerComment drops "SEEKING WORK" and unrelated comments');
+  } else {
+    fail('parseHnFreelancerComment kept a non-"SEEKING FREELANCER" comment');
+  }
+
+  const flSearchUrls = [];
+  const flCtx = {
+    async fetchJson(url, opts) {
+      if (opts?.redirect !== 'error') throw new Error('hackernews freelancer: redirect:error missing');
+      if (url.includes('search_by_date')) {
+        flSearchUrls.push(url);
+        return { hits: [{ objectID: '77', title: 'Ask HN: Who is hiring? (X)' }, { objectID: '78', title: flTitle }] };
+      }
+      if (url.endsWith('/items/78')) {
+        return { id: 78, children: [
+          { id: 1, text: 'SEEKING WORK | Berlin | Remote<p>Backend dev', created_at: '2025-10-01T16:00:00Z' },
+          { id: 2, text: 'SEEKING FREELANCER | Remote<p>Rust engineer', created_at: '2025-10-01T17:00:00Z' },
+          { id: 3, deleted: true, text: '' },
+        ] };
+      }
+      throw new Error(`hackernews freelancer mock: unexpected fetch ${url}`);
+    },
+  };
+  const flJobs = await hn.fetch({ name: 'HN Freelancer', provider: 'hackernews', hackernews: { thread: 'freelancer' } }, flCtx);
+  if (flJobs.length === 1 && flJobs[0].company === 'HN Freelancer' && flJobs[0].title === 'Freelancer wanted: Remote — Rust engineer'
+      && flJobs[0].url === 'https://news.ycombinator.com/item?id=2' && flJobs[0].postedAt === Date.parse('2025-10-01T17:00:00Z')
+      && new URL(flSearchUrls[0]).searchParams.get('tags') === 'story,author_whoishiring') {
+    pass('hackernews.fetch() with thread: freelancer reads the freelancer thread and keeps only SEEKING FREELANCER comments');
+  } else {
+    fail(`hackernews freelancer fetch = ${JSON.stringify({ flJobs, flSearchUrls })}`);
+  }
+
+  const defaultUrls = [];
+  await hn.fetch({ name: 'HN' }, { async fetchJson(url) { defaultUrls.push(url); return url.includes('search_by_date') ? { hits: [{ objectID: '5', title: 'Ask HN: Who is hiring? (X)' }] } : { children: [] }; } });
+  if (defaultUrls[0].endsWith('hitsPerPage=5') && defaultUrls[1].endsWith('/items/5')) pass('hackernews.fetch() default path is unchanged (hitsPerPage=5, hiring thread)');
+  else fail(`hackernews default urls = ${JSON.stringify(defaultUrls)}`);
+
+  let flThrew = false;
+  try { await hn.fetch({ name: 'HN', hackernews: { thread: 'freelancer' } }, { async fetchJson() { return { hits: [{ objectID: '9', title: 'Ask HN: Who is hiring? (X)' }] }; } }); } catch { flThrew = true; }
+  if (flThrew) pass('hackernews.fetch() with thread: freelancer throws when no freelancer thread is found');
+  else fail('hackernews.fetch() freelancer should throw when no thread found');
 } catch (e) {
   fail(`hackernews provider tests crashed: ${e.message}`);
 }

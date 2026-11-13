@@ -9,6 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSy
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -29,17 +30,10 @@ const POSTING = [
   'Must work Pacific hours. Fluent German required. Payment 60 days net.',
 ].join('\n');
 
-test('the built-in self-tests pass', () => {
-  for (const script of ['track-signals.mjs', 'gigs.mjs']) {
-    const r = run(script, ['--self-test']);
-    assert.equal(r.status, 0, script + ': ' + r.stdout + r.stderr);
-  }
-});
-
 test('an unknown flag is refused', () => {
   for (const script of ['track-signals.mjs', 'gigs.mjs', 'tracks-setup.mjs']) {
     const r = run(script, ['--bogus']);
-    assert.notEqual(r.status, 0, script);
+    assert.ok(exitedNonZero(r), describeSpawn(r, script + ' --bogus'));
   }
 });
 

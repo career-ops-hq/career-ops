@@ -17,6 +17,15 @@
 //
 // Wire in via a `job_boards:` entry with `provider: hackernews`.
 //
+// Opt-in `hackernews: { thread: freelancer }` reads the monthly "Ask HN:
+// Freelancer? Seeking freelancer?" thread instead. Only "SEEKING FREELANCER"
+// comments are postings (a client looking for a freelancer); "SEEKING WORK"
+// comments are people offering themselves and are dropped. Those posts have no
+// company field, so company is the entry name, location is the rest of the
+// header line, title is "Freelancer wanted: <header> — <first body line>" and the comment
+// text is the description. whoishiring has posted no such thread since
+// October 2025, so this reads the latest one that exists, which may be old.
+//
 // NOTE: a free-text query ("Ask HN Who is hiring") against search_by_date used
 // to be the lookup here, but Algolia's free-text ranking can surface an
 // unrelated recent story that merely contains those words in its body — once
@@ -28,6 +37,14 @@
 // date always surfaces the latest real one first.
 const SEARCH_URL =
   'https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=5';
+// The freelancer thread is posted alongside the other two monthly threads, so
+// a wider window is needed to reach it.
+const FREELANCER_SEARCH_URL =
+  'https://hn.algolia.com/api/v1/search_by_date?tags=story,author_whoishiring&hitsPerPage=60';
+const HIRING_TITLE_RE = /ask\s+hn[:\s]+who\s+is\s+hiring/i;
+const FREELANCER_TITLE_RE = /ask\s+hn[:\s]+freelancer\?\s+seeking\s+freelancer/i;
+const SEEKING_FREELANCER_RE = /^seeking\s+freelancer\b/i;
+const FREELANCER_DESCRIPTION_CAP = 4000;
 
 /** @param {string} id */
 function itemUrl(id) {
@@ -99,6 +116,53 @@ import { decodeEntities } from './_html-entities.mjs';
 import { ATS_HOST_PATTERNS } from '../ats-vendor.mjs';
 
 /**
+ * Strip HTML. Anchors: keep the href value in place so URL extraction works.
+ * Block-level tags (<p>, <br>, <div>, <li>, headings) become newlines so that
+ * body paragraphs never bleed into the first header line after the join.
+ * @param {string} text
+ */
+function commentPlainText(text) {
+  return decodeEntities(text
+    .replace(/<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, (_, href) => href)
+    .replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
+
+/**
+ * Parse one "SEEKING FREELANCER" comment from the freelancer thread. Returns
+ * null for anything else, notably "SEEKING WORK" comments, which are people.
+ * Exported for unit testing.
+ *
+ * @param {string} text  Raw comment text (may contain HTML).
+ * @param {string} fallbackUrl  The comment's own permalink, used when the post carries no job link.
+ * @returns {{ title: string, url: string, location: string, description: string } | null}
+ */
+export function parseHnFreelancerComment(text, fallbackUrl = '') {
+  if (!text || typeof text !== 'string') return null;
+  const plain = commentPlainText(text);
+  const lines = plain.split('\n').map(l => l.trim()).filter(Boolean);
+  if (lines.length === 0 || !SEEKING_FREELANCER_RE.test(lines[0])) return null;
+
+  const location = lines[0]
+    .replace(SEEKING_FREELANCER_RE, '')
+    .replace(URL_RE, '')
+    .replace(/^[\s|:,\-–—]+/, '')
+    .trim();
+  const subject = [location, lines[1]].filter(Boolean).join(' — ').replace(URL_RE, '').replace(/\s{2,}/g, ' ').trim();
+  const url = extractUrls(plain).find(looksLikeJobUrl) || fallbackUrl;
+  if (!subject || !url) return null;
+
+  return {
+    title: `Freelancer wanted: ${subject.slice(0, 140)}`,
+    url,
+    location,
+    description: plain.trim().slice(0, FREELANCER_DESCRIPTION_CAP),
+  };
+}
+
+/**
  * Parse a single HN comment text into a normalized job object.
  * The canonical format is "Company | Role | Location | URL" on the first line,
  * but posts are free-form — we only guarantee title (first line) and url.
@@ -124,15 +188,7 @@ import { ATS_HOST_PATTERNS } from '../ats-vendor.mjs';
 export function parseHnComment(text, fallbackUrl = '') {
   if (!text || typeof text !== 'string') return null;
 
-  // Strip HTML. Anchors: keep the href value in place so URL extraction works.
-  // Block-level tags (<p>, <br>, <div>, <li>, headings) become newlines so that
-  // body paragraphs never bleed into the first header line after the join.
-  const plain = decodeEntities(text
-    .replace(/<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, (_, href) => href)
-    .replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' '))
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n');
+  const plain = commentPlainText(text);
 
   // Split into lines; first non-blank line is the header.
   const lines = plain.split('\n').map(l => l.trim()).filter(Boolean);
@@ -175,18 +231,18 @@ export function parseHnComment(text, fallbackUrl = '') {
  * Find the objectID of the latest "Ask HN: Who is hiring?" story.
  * Returns null when the search yields no matching hits.
  * @param {unknown} data  Parsed Algolia search response.
+ * @param {RegExp} [titleRe]  Thread title pattern; defaults to "Who is hiring?".
  */
-export function resolveLatestThreadId(data) {
+export function resolveLatestThreadId(data, titleRe = HIRING_TITLE_RE) {
   if (!data || typeof data !== 'object') return null;
   const hits = /** @type {any} */ (data).hits;
   if (!Array.isArray(hits) || hits.length === 0) return null;
 
   // Algolia search_by_date returns newest first; find the first hit whose title
   // matches the monthly thread pattern (case-insensitive).
-  const RE = /ask\s+hn[:\s]+who\s+is\s+hiring/i;
   for (const hit of hits) {
     if (hit && typeof hit.objectID === 'string' && typeof hit.title === 'string') {
-      if (RE.test(hit.title)) return hit.objectID;
+      if (titleRe.test(hit.title)) return hit.objectID;
     }
   }
   return null;
@@ -197,11 +253,15 @@ export default {
   id: 'hackernews',
 
   async fetch(entry, ctx) {
-    // Step 1: Find the latest "Who is hiring?" story id.
-    const searchData = await ctx.fetchJson(SEARCH_URL, { redirect: 'error' });
-    const threadId = resolveLatestThreadId(searchData);
+    const freelancer = entry?.hackernews?.thread === 'freelancer';
+
+    // Step 1: Find the latest "Who is hiring?" (or freelancer) story id.
+    const searchData = await ctx.fetchJson(freelancer ? FREELANCER_SEARCH_URL : SEARCH_URL, { redirect: 'error' });
+    const threadId = resolveLatestThreadId(searchData, freelancer ? FREELANCER_TITLE_RE : HIRING_TITLE_RE);
     if (!threadId) {
-      throw new Error('hackernews: could not find "Ask HN: Who is hiring?" thread in search results');
+      throw new Error(freelancer
+        ? 'hackernews: could not find "Ask HN: Freelancer? Seeking freelancer?" thread in search results'
+        : 'hackernews: could not find "Ask HN: Who is hiring?" thread in search results');
     }
 
     const threadHnUrl = `https://news.ycombinator.com/item?id=${threadId}`;
@@ -232,6 +292,19 @@ export default {
       const fallbackUrl = commentId != null && String(commentId) !== ''
         ? `https://news.ycombinator.com/item?id=${encodeURIComponent(String(commentId))}`
         : threadHnUrl;
+      if (freelancer) {
+        const post = parseHnFreelancerComment(text, fallbackUrl);
+        if (!post) continue;
+        jobs.push({
+          title: post.title,
+          url: post.url,
+          company: entry.name || 'HN Freelancer',
+          location: post.location,
+          description: post.description,
+          ...(Number.isNaN(Date.parse(child.created_at)) ? {} : { postedAt: Date.parse(child.created_at) }),
+        });
+        continue;
+      }
       const parsed = parseHnComment(text, fallbackUrl);
       if (!parsed) continue;
 

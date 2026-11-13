@@ -1,0 +1,11 @@
+// Fictional, reduced fixtures retaining the response shapes observed live on
+// 2026-10-28. No downloaded source code is executed by these tests.
+export const nextPage = rows => `<script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: { data: { jobs: { pages: rows, result_count: 999999 } } } } })}</script>`;
+export const jobiqoRow = (n = 101) => ({ id: n, title: 'R&amp;D Engineer', organization: 'Acme &amp; Co', url: { path: `/job/r-d-engineer-${n}` }, address: ['London'], remoteOptions: [{ label: 'Hybrid' }], published: '1970-01-01T00:00:00Z' });
+export const karriereRow = (n = '101') => ({ jobsItem: { id: n, title: 'R&amp;D Engineer', company: { name: 'Acme &amp; Co', isChiffre: false }, locations: [{ name: 'Wien' }], isActive: true, isHomeOffice: true, employmentTypes: 'Teilzeit', salary: '40 € stündlich' } });
+export const karrierePage = (rows, more = false) => ({ data: { jobsSearchList: { activeItems: { items: rows }, loadMoreJobsButton: { active: more, next: 999999 } } } });
+export const surgeCard = (slug = 'r-d-engineer', title = 'R&amp;D Engineer') => `<a target="" href="/careers/${slug}" class="job-item w-inline-block"><div class="job-title"><div data-job="title" class="txt fs-16">${title}</div></div><div class="job-sub"></div><div class="job-remote"><div class="txt fs-12">Remote</div></div></a>`;
+export const jobscoutCard = (n = '00000000-0000-4000-8000-000000000101') => `<li class="job-list-item" data-job-id="101"><div class="upper-line"><a href="/de/job/${n}/" class="job-link-detail job-title">R&amp;D Engineer</a></div><p class="job-attributes"><span>Acme &amp; Co</span>, <span>Z&#252;rich</span></p><div><ul><li>100%</li></ul></div></li>`;
+export const jobscoutPage = (cards, more = false) => `${cards}<div class="pagination">${more ? '<a href="/de/jobs/?p=2" title="Weiter" data-page-index="2">Weiter</a>' : ''}</div>`;
+export const jobsChRow = (id = '00000000-0000-4000-8000-000000000101') => ({ id, title: 'R&amp;D Engineer', company: { name: 'Acme &amp; Co', visible: true }, place: 'Geneva', isActive: true, initialPublicationDate: '1970-01-01T00:00:00Z' });
+export const jobsChPage = rows => `<script>__INIT__ = ${JSON.stringify({ vacancy: { results: { main: { results: rows, meta: { numPages: 999999 } } } } })}; __LOAD_LAZY__ = false;</script>`;

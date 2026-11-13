@@ -37,6 +37,22 @@ europe:
         countryCode: EU
         includeRemote: true
       notes: "Nordic and EU startup board"
+    - name: EU Remote Jobs
+      provider: euremotejobs
+      max_pages: 3
+      notes: "Remote roles open to Europe and the UK"
+    - name: Berlin Startup Jobs
+      provider: berlinstartupjobs
+      max_pages: 3
+      notes: "Public RSS feed; the feed carries no location"
+    - name: Munich Startup
+      provider: munich-startup
+      max_pages: 3
+      notes: "Munich startup job board"
+    - name: karriere.at
+      provider: karriere-at
+      max_pages: 5
+      notes: "Austrian job board"
   search_queries:
     - name: "Europe: AI roles on ATS boards, remote EMEA"
       query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co "AI Engineer" OR "LLM Engineer" OR "Applied AI" "Remote" ("Europe" OR "EMEA" OR "Germany")'
@@ -68,6 +84,19 @@ ai_gigs:
         queries: ["ai engineer", "llm engineer", "machine learning engineer", "applied ai"]
         max_hits: 100
       notes: "European startup board via its public search index"
+    - name: Alignerr
+      provider: alignerr
+      max_pages: 3
+      notes: "AI evaluation contracts (Labelbox); many are language- or domain-specific"
+    - name: Mercor
+      provider: mercor
+      notes: "Expert AI-training and evaluation contracts; check the country list on each"
+    - name: DataAnnotation
+      provider: dataannotation
+      notes: "Standing AI-training roles; the stated pay is a ceiling"
+    - name: Surge AI
+      provider: surge
+      notes: "Surge AI's own openings"
   search_queries:
     - name: "AI gigs: agent and LLM engineering"
       query: 'site:jobs.ashbyhq.com OR site:job-boards.greenhouse.io OR site:jobs.lever.co "Agent Engineer" OR "LLM Engineer" OR "AI Automation" OR "Forward Deployed" remote'
@@ -78,14 +107,22 @@ ai_gigs:
 
 freelance:
   job_boards:
-    - name: freelancermap
+    - name: "freelancermap: AI and software projects"
       provider: freelancermap
-      notes: "Largest DACH freelance project board; the public page shows the newest projects only"
+      site: de
+      queries: ["KI", "LLM", "Machine Learning", "Fullstack", "IT Consultant"]
+      notes: "Largest DACH freelance project board. Anonymous visitors get the first page per query, so keep queries narrow. Edit them to your services."
     - name: Braintrust
       provider: braintrust
-      braintrust:
-        job_types: [freelance]
-      notes: "Freelance talent network, public API; rates in USD"
+      notes: "Freelance talent network, public API; rates in USD, many roles limited to listed countries"
+    - name: Etengo
+      provider: etengo
+      notes: "German IT freelance projects through one agency; the end client is not named"
+    - name: "Freelancer.com: AI projects"
+      provider: freelancer-com
+      queries: ["LLM", "AI agent", "machine learning"]
+      max_pages: 1
+      notes: "Global marketplace, official public API; mostly small fixed-price projects"
     - name: "Arbeitsagentur: freelance and self-employed"
       provider: arbeitsagentur
       arbeitsagentur:
@@ -124,5 +161,11 @@ remote:
       provider: jobicy
       geo: europe
       notes: "Remote-only board, filtered server-side to roles open to Europe"
+    - name: RemoteYeah
+      provider: remoteyeah
+      notes: "Remote-only RSS feed"
+    - name: Real Work From Anywhere
+      provider: realworkfromanywhere
+      notes: "Roles advertised as work-from-anywhere (RSS feed)"
   tracks_filter:
     remote_fit: drop

@@ -472,6 +472,19 @@
 #   min_match: 2
 #   rescue_title_misses: true
 
+# ── Search tracks filter (optional) ────────────────────────────────────
+# Uses the tracks: block of config/profile.yml (docs/TRACKS.md). Absent,
+# the scan is unchanged. Only a STATED mismatch is dropped; a posting that
+# does not say stays in.
+#   remote_fit: drop  removes postings that are remote for another region only,
+#                     require a far time zone, or are on-site against a remote
+#                     preference. Needs tracks.remote.preference.
+#   engagement        any | freelance_only | employment_only
+#
+# tracks_filter:
+#   remote_fit: drop
+#   engagement: any
+
 # -- Visa / work-authorization filter (optional) --
 # Surfaces roles that sponsor a work visa — US (H-1B / H-1B1 / O-1), Singapore
 # (Employment Pass / S Pass / ONE Pass / Work Pass), EU (Blue Card), UK (Skilled
@@ -2037,6 +2050,99 @@ search_queries:
 #   max_pages: 5          # optional page cap per keyword (100 jobs/page, default 5, max 100)
 #   enabled: true
 #
+# - name: a16z (portfolio)                # VC portfolio aggregator (~18k postings, newest-first, 25/page)
+#   provider: a16z-portfolio
+#   max_pages: 60         # optional page cap (25 jobs/page, default 60, max 400)
+#   a16z_max_age_days: 14 # optional; stop paging once postings are older (default 14)
+#   enabled: true
+#
+# - name: Alignerr                        # AI-training / evaluation contracts (Labelbox); pay stays in the description
+#   provider: alignerr
+#   max_pages: 60         # optional page cap (120 jobs/page, default 60, max 200)
+#   enabled: true
+#
+# - name: Berlin Startup Jobs             # public WordPress RSS feed; location left empty
+#   provider: berlinstartupjobs
+#   max_pages: 20         # optional page cap (default 20, max 100)
+#   enabled: true
+#
+# - name: Braintrust                      # freelance + direct-hire talent network, public JSON API
+#   provider: braintrust                  # never pages (robots.txt): newest 100 + oldest 100, merged
+#   enabled: true
+#
+# - name: DataAnnotation                  # standing AI-training roles, one request; pay is a ceiling
+#   provider: dataannotation
+#   enabled: true
+#
+# - name: e-fellows.net                   # student/graduate board (Jobiqo SSR), 10 rows/page, 10 s pacing
+#   provider: efellows
+#   max_pages: 100        # optional page cap (default 100, max 1000)
+#   enabled: true
+#
+# - name: Etengo — IT-Projekte            # German IT freelance projects, end client anonymous; one request
+#   provider: etengo
+#   enabled: true
+#
+# - name: EU Remote Jobs                  # Europe/UK remote board (WP Job Manager AJAX endpoint)
+#   provider: euremotejobs
+#   max_pages: 100        # optional page cap (100 jobs/page, default 100, max 200)
+#   enabled: true
+#
+# - name: Freelancer.com — AI projects    # freelance marketplace, public REST API
+#   provider: freelancer-com
+#   queries: ["machine learning", "LLM"]  # optional (max 20); omit for one unfiltered newest-first pass
+#   max_pages: 3          # optional pages of 100 per query (default 3, max 20)
+#   enabled: true
+#
+# - name: freelancermap — AI projects (DACH)  # freelance projects; anonymous visitors get only page 1 (~22) per query
+#   provider: freelancermap
+#   site: de              # optional: de (default, DACH) or com (international)
+#   queries: ["KI", "Machine Learning", "LLM"]  # optional (max 20); omit for one unfiltered pass
+#   remote_only: true     # optional; only projects marked 100% remote
+#   enabled: true
+#
+# - name: GET in IT                       # German IT board (SSR state); homeOffice is not full remote
+#   provider: get-in-it
+#   max_pages: 10         # optional page cap (default 10, max 100)
+#   enabled: true
+#
+# - name: jobs.ch — Software              # Swiss board; queries[] is required (an empty term serves no inventory)
+#   provider: jobs-ch
+#   queries: ["software"]
+#   max_pages: 100        # optional page cap per query (20 rows/page, default 100, max 1000)
+#   enabled: true
+#
+# - name: JobScout24.ch                   # Swiss board (SSR cards), relative dates only
+#   provider: jobscout24ch
+#   max_pages: 100        # optional page cap (default 100, max 1000)
+#   enabled: true
+#
+# - name: karriere.at                     # Austrian board (guest JSON view of /jobs)
+#   provider: karriere-at
+#   max_pages: 100        # optional page cap (default 100, max 1000)
+#   enabled: true
+#
+# - name: Mercor                          # AI-training / evaluation contracts (work.mercor.com), one request
+#   provider: mercor
+#   enabled: true
+#
+# - name: Munich Startup                  # Munich startup pinboard; location left empty
+#   provider: munich-startup
+#   max_pages: 10         # optional page cap (15 jobs/page, default 10, max 50)
+#   enabled: true
+#
+# - name: Real Work From Anywhere         # public RSS feed, one request; location left empty
+#   provider: realworkfromanywhere
+#   enabled: true
+#
+# - name: RemoteYeah                      # remote-only RSS feed, one request (about three days of postings)
+#   provider: remoteyeah
+#   enabled: true
+#
+# - name: Surge AI                        # Surge AI's own careers page, one request
+#   provider: surge
+#   enabled: true
+#
 # - name: Arbeitsagentur — AI Roles      # German federal jobs API
 #   provider: arbeitsagentur
 #   arbeitsagentur:
@@ -2252,6 +2358,12 @@ search_queries:
 #
 # - name: Hacker News "Who is hiring?"    # monthly "Ask HN: Who is hiring?" thread
 #   provider: hackernews
+#   enabled: true
+#
+# - name: Hacker News "Freelancer?"       # "Ask HN: Freelancer? Seeking freelancer?" (clients only; last thread Oct 2025)
+#   provider: hackernews
+#   hackernews:
+#     thread: freelancer
 #   enabled: true
 #
 # - name: Jobspresso                      # curated remote roles (public WordPress feed)
