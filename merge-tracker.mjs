@@ -2205,6 +2205,9 @@ export async function mergeTracker(options = {}) {
         if (dupReason === 'url' || dupReason === 'report-file' || reportNumMatched) return false;
         if (!addUrl) return false;
         const rowUrl = postingUrl(row);
+        // A placeholder, a local:jds pointer, or a report that names no posting
+        // is not a URL this guard can compare. The title match still decides.
+        if (!normalizeUrl(rowUrl)) return false;
         if (normalizeUrl(rowUrl) === addUrl) return false;
         if (isAggregatorUrl(rowUrl) && isAggregatorUrl(addition.url)) {
           const rowId = aggregatorPostingId(rowUrl);
