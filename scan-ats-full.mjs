@@ -2601,24 +2601,35 @@ async function main() {
 
 // Only run main() when invoked directly, not when imported by tests.
 if (isMainModule(import.meta.url)) {
-  // Exit explicitly once main() returns. The watchdog now cancels a timed-out
-  // board's work, but a keep-alive socket a single-host pool still holds (or a
-  // request aborting just as the summary prints) can otherwise keep the event
-  // loop open for minutes past the summary (#5570). Flush stdout first so a
-  // piped summary is never truncated.
-  const flushAndExit = (code) => {
-    // Exit from a write-completion callback, queued after whatever is already
-    // buffered, so a piped summary flushes first. `writableLength > 0` is not a
-    // reliable "wait for drain" signal — `drain` only fires for a write that
-    // returned false (past the high-water mark), so bytes queued below it would
-    // never drain and the process would hang (the opposite of the intent).
+  // Once main() settles, set the exit code and let the process end on its own
+  // when the event loop drains. On Windows, calling process.exit() right away
+  // made the run abort: Node 24 asserts in libuv when process.exit() runs right
+  // after a request (nodejs/node#56645), and the run ends with a crash code
+  // instead of 0 or 1. Measured 2026-11-13 on Node 24.14.1 with --limit 3
+  // --dry-run: a Greenhouse sweep aborted 4 times out of 4, and so did one that
+  // failed after the sweep; an Ashby sweep aborted 3 times out of 4.
+  //
+  // The timer keeps #5570's guarantee: if something still holds the loop open
+  // after the summary (a keep-alive socket, or a request aborting just as the
+  // summary prints), the process exits anyway after EXIT_BACKSTOP_MS. unref()
+  // keeps the timer itself from holding the process open, so a run whose loop
+  // drains never waits for it.
+  const EXIT_BACKSTOP_MS = 5_000;
+  const exitWhenDrained = (code) => {
     process.exitCode = code;
-    process.stdout.write('', () => process.exit(code));
+    setTimeout(() => {
+      // Exit from a write-completion callback, queued after whatever is already
+      // buffered, so a piped summary flushes first. `writableLength > 0` is not a
+      // reliable "wait for drain" signal — `drain` only fires for a write that
+      // returned false (past the high-water mark), so bytes queued below it would
+      // never drain and the process would hang (the opposite of the intent).
+      process.stdout.write('', () => process.exit(code));
+    }, EXIT_BACKSTOP_MS).unref();
   };
   main()
-    .then(() => flushAndExit(0))
+    .then(() => exitWhenDrained(0))
     .catch(err => {
       console.error('Fatal:', err.message);
-      flushAndExit(1);
+      exitWhenDrained(1);
     });
 }
