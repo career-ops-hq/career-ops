@@ -198,8 +198,10 @@ export default {
       if (total === null && Number.isSafeInteger(json?.totalFound) && json.totalFound >= 0) total = json.totalFound;
       const parsed = parseSmartRecruitersResponse(json, entry.name, slug);
       all.push(...parsed);
-      // A dropped malformed ID must not hide postings on subsequent pages.
-      if (!Array.isArray(json?.content) || json.content.length < SR_PAGE_SIZE) { ended = true; break; }
+      // A dropped malformed ID must not hide postings on subsequent pages, so the
+      // raw page decides; the parser above already threw on a page that is not
+      // { content: [...] }.
+      if (json.content.length < SR_PAGE_SIZE) { ended = true; break; }
     }
     // The cap ended the walk with postings still unread, or with no sign the
     // board ended when the API reports no total. Said out loud: a silently
@@ -290,8 +292,14 @@ export default {
  * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, postingId?: string, requisitionId?: string, language?: string}>}
  */
 export function parseSmartRecruitersResponse(json, companyName, companySlug) {
-  const items = json?.content;
-  if (!Array.isArray(items)) return [];
+  // { content: [] } is an empty page. Any other envelope ({}, { error }, a bare
+  // string) is a changed or failing API and must not read as a board with no
+  // open roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const items = json && Array.isArray(json.content) ? json.content : null;
+  if (!items) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`smartrecruiters: unexpected response for ${companyName} — expected content[], got: [${got}]`);
+  }
   return items.flatMap(j => {
     const loc = j.location || {};
     const fullLocation = loc.fullLocation || [loc.city, loc.region, loc.country].filter(Boolean).join(', ');
