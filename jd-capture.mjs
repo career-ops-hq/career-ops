@@ -16,7 +16,7 @@
  */
 
 import { createHash } from 'crypto';
-import { readdirSync, statSync } from 'fs';
+import { lstatSync, readdirSync, statSync } from 'fs';
 import { join, extname } from 'path';
 
 const SLUG_MAX = 60;
@@ -152,6 +152,40 @@ export function findCaptureForReport(jdsDir, reportNum, { companySlug } = {}) {
   };
 }
 
+const CAPTURE_EXTENSIONS = new Set(['.md', '.txt', '.html', '.pdf']);
+
+/** Shared allow-list for generated names and URL-based capture lookup. */
+export function isSupportedCaptureExtension(extension) {
+  return CAPTURE_EXTENSIONS.has(extension);
+}
+
+/**
+ * Validate and return the raw posting URL, trimmed only at its outer edges.
+ * URL identity deliberately hashes this value without serializing the URL object.
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+export function validateCaptureUrl(value) {
+  const raw = String(value ?? '').trim();
+  if (!/^https?:\/\//i.test(raw) || /[\\|\s\p{Cc}]/u.test(raw) || /%(?![\da-f]{2})/i.test(raw)) {
+    throw new TypeError('url must be a valid absolute http(s) URL without internal whitespace, controls, backslashes, pipes, or malformed escapes');
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new TypeError('url must be a valid absolute http(s) URL');
+  }
+  const authority = /^https?:\/\/([^/?#]*)/i.exec(raw)?.[1] || '';
+  if (!['http:', 'https:'].includes(parsed.protocol) || !authority || !parsed.hostname ||
+      parsed.username || parsed.password || authority.includes('@')) {
+    throw new TypeError('url must be an absolute http(s) URL with a hostname and no credentials');
+  }
+  return raw;
+}
+
 /**
  * The URL identity every capture filename carries.
  *
@@ -179,13 +213,17 @@ export function captureIdentity(url) {
  * @param {string} jdsDir            Directory holding captures (usually jds/).
  * @param {string} url               The posting URL as it was captured.
  * @param {object} [opts]
- * @param {string[]} [opts.extensions] Extensions to consider, in preference order.
+ * @param {string[]} [opts.extensions] Supported extensions to consider, in preference order.
  * @returns {{path: string, filename: string, ext: string, candidates: string[]}|null}
- *   null when the URL is not http(s) or no capture carries its identity.
+ *   null when the URL is invalid or no regular non-symlink capture carries its identity.
  */
 export function findCaptureForUrl(jdsDir, url, { extensions = ['.md', '.txt', '.html', '.pdf'] } = {}) {
-  const raw = String(url ?? '').trim();
-  if (!/^https?:\/\//i.test(raw)) return null;
+  let raw;
+  try {
+    raw = validateCaptureUrl(url);
+  } catch {
+    return null;
+  }
 
   const identity = captureIdentity(raw);
   let entries;
@@ -195,22 +233,30 @@ export function findCaptureForUrl(jdsDir, url, { extensions = ['.md', '.txt', '.
     return null; // No captures directory yet — nothing to resolve, not an error.
   }
 
-  const matches = entries.filter(name => name.includes(identity));
+  const preferredExtensions = extensions
+    .map(extension => String(extension).toLowerCase())
+    .filter(extension => CAPTURE_EXTENSIONS.has(extension));
+  const identitySuffix = new RegExp(`_${identity}(?:-(?:[2-9]|[1-9]\\d+))?$`);
+  const matches = entries.filter(name => {
+    const extension = extname(name).toLowerCase();
+    if (!CAPTURE_EXTENSIONS.has(extension) || !preferredExtensions.includes(extension)) return false;
+    const stem = name.slice(0, -extname(name).length);
+    return identitySuffix.test(stem);
+  });
   if (matches.length === 0) return null;
 
-  const rank = (name) => {
-    const i = extensions.indexOf(extname(name).toLowerCase());
-    return i === -1 ? extensions.length : i;
-  };
+  const rank = (name) => preferredExtensions.indexOf(extname(name).toLowerCase());
   const byPreference = matches
     .map(name => {
-      let mtimeMs = 0;
       try {
-        mtimeMs = statSync(join(jdsDir, name)).mtimeMs;
-      } catch { /* vanished mid-scan — sorts last, still returned as a candidate */ }
-      return { name, mtimeMs };
+        const fileStat = lstatSync(join(jdsDir, name));
+        if (!fileStat.isFile() || fileStat.isSymbolicLink()) return null;
+        return { name, mtimeMs: fileStat.mtimeMs };
+      } catch { return null; } // Missing or inaccessible files are not candidates.
     })
+    .filter(Boolean)
     .sort((a, b) => rank(a.name) - rank(b.name) || b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name));
+  if (byPreference.length === 0) return null;
 
   const chosen = byPreference[0];
   return {

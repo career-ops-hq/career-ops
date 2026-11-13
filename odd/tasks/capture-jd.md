@@ -77,8 +77,15 @@ until their corresponding recovery units have evidence.
       source syntax, and duplicate/concurrency runtime fixtures. Commit:
       `41788e7e4183caae5f21cd0c3748e126c7dc17e3` (384 authored lines).
 - [ ] R2 — Strict URL and capture-file boundary validation. Route: delegated direct;
-      preparation and 2+ non-trivial file triggers. Acceptance/checks to be scoped
-      before implementation. Commit: pending.
+      preparation and 2+ non-trivial file triggers. Tests: TDD, focused capture
+      suite. Acceptance: reject malformed/non-HTTP URLs, credentials, whitespace,
+      control characters, backslashes and pipeline delimiters before writes; preserve
+      valid raw URL identity. Reject unsafe capture date/extension; derive only safe
+      basenames. `findCaptureForUrl` accepts only exact URL-hash suffixes with known
+      archive extensions, and only regular non-symlink files. Malformed escaped ATS
+      tenant text must not crash label derivation. Preserve existing archive names,
+      including report prefixes and collision suffixes. Parent verified; local
+      work-unit commit: pending. Keep unchecked until that commit is recorded.
 - [ ] R3 — Explicit Git opt-in and isolation from unrelated work/index/environment.
       Route: delegated direct; preparation and 2+ non-trivial file triggers.
       Must never push real data during tests. Commit: pending.
@@ -251,11 +258,159 @@ This worktree (`t3/selected-jd-capture-data-dir`) for code; the data root
   parent delivery-policy/task edits; do not blindly discard the entire task
   document. No rollback or additional commit is authorized in this follow-up.
 
+## R2 execution scope
+
+- [ ] R2 — Add tests first for invalid and delimiter-breaking URLs, credentialed
+      URLs, malformed percent escapes, path-injection dates/extensions, malformed
+      ATS tenant escapes, and resolver false positives (hash only in the middle,
+      unknown extension, directory/symlink entries). Preserve known good URL
+      hashes, report-prefixed archives and `-2` collision suffixes.
+- [ ] R2 — Validate once before labels, pipeline writes, capture writes or Git;
+      only absolute http/https URL values with a hostname are accepted. Trim only
+      outer whitespace; reject internal whitespace/control bytes, backslashes,
+      pipeline `|`, credentials and malformed percent escapes. Keep the valid raw
+      URL as the canonical identity; do not refetch or reserialize it.
+- [ ] R2 — Restrict generated capture names to a valid real ISO date, safe slugs
+      and a single extension; resolver requires the exact 16-hex identity suffix,
+      a supported archive extension and a regular file (never symlink/directory).
+      Malformed encoded ATS tenant text yields an empty/unknown employer, not the
+      ATS vendor. JD output must refuse a pre-existing capture-file symlink before
+      modifying its target or appending a pipeline row; intentional pipeline-file
+      symlink handling remains unchanged.
+- [ ] R2 — Parent completed the PowerShell smoke capture with a disposable
+      `CAREER_OPS_DATA_DIR` and a synthetic UTF-8-no-BOM JD file; no real data root
+      or clipboard access. The final user-invoked copy/paste command will read
+      `Get-Clipboard -Raw`, use a disposable demo root for now and omit `--commit`.
+      R2 remains unchecked until its local work-unit commit is recorded.
+
+TDD on; exact runner `node --test tests/capture-jd.test.mjs`. Keep R2 local to this
+worktree. R1 remains closed; Git/index production policy (R3), receiver (R4),
+extension (R5), and upstream packaging (R6) remain separate. Do not install, use
+personal data, launch an evaluation, commit until verification and next boundary
+are reviewed, push, open a PR, or merge.
+
+## R2 evidence — parent verified, local work-unit commit pending
+
+- 2026-11-13 — Route: delegated direct; preparation and 2+ non-trivial file
+  triggers. `skill_resolution: paths-injected`: read exactly
+  `C:\Users\nessu\.agents\skills\work-unit-commits\SKILL.md` and
+  `C:\Users\nessu\.agents\skills\cognitive-doc-design\SKILL.md` before work.
+  No further delegation, SDD, RDD or native review. TDD on; delivery remains
+  **core first**, `ask-on-risk` / `stacked-to-main`. No commit authorization.
+- Read this complete task and full Engram observation **#222** before source
+  edits. Reconciliation: disk already contained the current R2 acceptance/scope;
+  #222 still ended at the earlier scoping next step. Disk was authoritative, and
+  the complete mirror is refreshed after this implementation, not used to erase
+  those newer scope instructions. Branch/HEAD verified locally:
+  `t3/selected-jd-capture-data-dir`, `760f2134b32d81ded616792b285c2a10d36ce1fe`.
+- Tests were appended before production edits. Initial RED exited 1:
+  **31 pass, 6 fail**. One raw-row preservation assertion expected an extra space;
+  corrected that test expectation before production changes. Authoritative RED,
+  same runner, exited 1: **32 pass, 5 fail**. Exact failing tests:
+  - `invalid capture URLs are refused before any filesystem or Git activity`
+  - `captureName rejects impossible dates and unsupported or unsafe extensions`
+  - `findCaptureForUrl only resolves a hash suffix and known archive extensions`
+  - `findCaptureForUrl ignores directories and symlink captures`
+  - `malformed percent-encoded ATS tenant does not throw during label derivation`
+- First GREEN: `node --test tests/capture-jd.test.mjs` exited 0:
+  **37 pass, 0 fail, 0 skipped**. Shared URL validation now runs before label
+  derivation or writes/Git, retaining the trimmed raw URL rather than serializing
+  it. Name generation rejects impossible ISO dates and unsafe/unsupported
+  extensions before creating directories. ATS tenant decoding falls back safely.
+- Boundary-expansion TDD: added empty-authority and collision-index cases before
+  refining production code. RED exited 1: **37 pass, 2 fail**; failing tests were
+  `invalid capture URLs are refused before any filesystem or Git activity` and
+  `findCaptureForUrl only resolves a hash suffix and known archive extensions`.
+  Empty authority (triple slash) and unsupported `-1` collision suffix were then
+  rejected. GREEN exited 0: **39 pass, 0 fail, 0 skipped**.
+- REFACTOR: shared extension allow-list, hoisted identity-suffix regex and simplified
+  regular-file candidate metadata; separated directory/symlink cases and added
+  invalid-URL lookup evidence. Final focused runner exited 0:
+  **40 pass, 0 fail, 0 skipped**. The symlink fixture actually ran on Windows.
+  Runtime coverage uses only new disposable scratch roots: invalid URLs never
+  reach the label getter or create the root; raw case/port/escape/fragment identity
+  survives; report-prefixed `-2.pdf` archives resolve; middle/extended hashes,
+  unsupported extensions, directories and symlinks do not. Existing hermetic
+  local Git/HTTP fixtures remain unchanged; no real data, push or evaluation.
+- Exact foreground checks: `node --check capture-jd.mjs`,
+  `node --check jd-capture.mjs`, `node --check tests/capture-jd.test.mjs` all
+  exited 0. `node scripts/check-syntax.mjs` exited 0: **1627 .mjs files passed**.
+  `git diff --check` exited 0; CRLF-to-LF informational warning only.
+  No full suite: dependency-dependent integration is pending; no dependencies
+  were installed. No browser, clipboard, remote access, standalone server or
+  additional evaluation/smoke command was run by this worker.
+- Rollback boundary: only the R2 URL/name validation, ATS decode fallback and
+  URL-resolver file checks in `capture-jd.mjs` / `jd-capture.mjs`, the appended
+  R2 regressions and symlink import in `tests/capture-jd.test.mjs`, and this R2
+  evidence. Preserve R1 behavior/history, the parent's existing task scope edits,
+  all other files and the pre-existing `.atl/`. No rollback or commit performed.
+- Limitations unchanged: two writes are not crash-atomic; production Git/index
+  policy and receiver/launcher behavior remain R3/R4. Resolver checks a file at
+  lookup time, not against a later filesystem replacement. R2 is now parent
+  verified but remains unchecked until commit; T1 may be marked only after that
+  commit is recorded. T2–T6/R3–R6 remain open; no broader readiness claim.
+
+## R2 bounded follow-up — output symlinks and unknown employer
+
+- Parent structural-read findings (not RDD): a pre-existing JD output symlink
+  could redirect `atomicWrite` outside `jds/`; malformed tenant fallback invented
+  the ATS vendor as employer. Parent reported native risk **medium**, four paths /
+  343 changed lines before this correction. RDD stays off; no native review run.
+- Tests first: `node --test tests/capture-jd.test.mjs` exited 1:
+  **40 pass, 2 fail, 0 skipped**. Exact failures:
+  `JD output refuses a pre-existing symlink without changing its target or pipeline`
+  (the disposable outside-jds target was overwritten), and
+  `malformed percent-encoded ATS tenant does not throw during label derivation`
+  (`Greenhouse` was returned instead of empty). All fixtures remained disposable.
+- GREEN: same runner exited 0: **42 pass, 0 fail, 0 skipped**. Both new symlink
+  fixtures actually ran. JD writes now opt out of symlink following with a clear
+  refusal before temp-file creation or pipeline append, under the unchanged lock.
+  Target bytes/mtime, pipeline bytes, output symlink and jds inventory stay intact.
+  Pipeline atomic writes retain their intentional default symlink semantics.
+  An undecodable ATS tenant now returns empty/unknown, never the vendor label.
+- REFACTOR: documented the narrowly scoped atomic-write option; no lock, race,
+  Git, server, extension or general label-heuristic redesign. All three explicit
+  `node --check` commands exited 0; repository syntax passed **1627 .mjs files**;
+  `git diff --check` exited 0 (CRLF informational warning only). No full suite,
+  installations, personal data, remote activity or evaluation.
+- Rollback adds only this output symlink opt-out, malformed-tenant return and
+  associated tests/evidence to the existing R2 boundary. No hostile OS TOCTOU or
+  parent-directory redesign is claimed. R2 remains unchecked; no commit performed.
+
+## R2 parent verification — accepted, pending local work-unit commit
+
+- Parent-reported structural and spot verification accepted both bounded
+  corrections. Fresh parent checks: `node --test tests/capture-jd.test.mjs` →
+  **42 pass, 0 fail, 0 skipped**; all three `node --check` commands exited 0;
+  `node scripts/check-syntax.mjs` → **1627 files passed**; `git diff --check` → 0.
+- Native risk assessment succeeded at **medium**, excluding only the known
+  pre-existing untracked `.atl/` inventory by its exact hash. RDD remains globally
+  **off**; no review and no fresh independent verifier were launched. Writer
+  self-verification plus parent structural and spot checks satisfy the medium/off
+  gate. This is parent verification, not a fabricated independent-verifier pass.
+- Parent-reported synthetic PowerShell smoke used a newly created disposable
+  `CAREER_OPS_DATA_DIR`, a UTF-8-no-BOM synthetic JD file and an `example.test` URL
+  with query/fragment, without `--commit`. First capture: **94 ms**; UTF-8
+  roundtrip: **true**; `--find`: **exact match**; repeated capture:
+  **duplicateNoOp true**; Pending rows: **1**; `committed:false,pushed:false`.
+  Parent restored the prior process data-root environment and deleted only the
+  disposable data. No clipboard read/write, browser, network, real data or
+  evaluation was involved. Context7 official PowerShell documentation checked
+  `Get-Clipboard -Raw`; the final demo command reads clipboard only when invoked
+  by the user and still uses a disposable data root. No script was created here.
+- Coherent R2 change at the accepted code boundary: **436 changed lines**, including
+  task evidence. Source, tests and docs are retained without cosmetic trimming;
+  this count predates the present bookkeeping-only additions. Future upstream
+  extraction is a separate core-first delivery step, not authorization to publish.
+- R2 is verified, not committed. Keep R2 unchecked until the local work-unit
+  commit is recorded; T1 may be marked only at that point. No other broad task
+  is complete. Parent-directory symlinks, hostile OS TOCTOU and crash atomicity
+  are not covered. The dependency-dependent full suite remains pending.
+
 ## Next step
 
-Scope R2 strict URL and capture-file boundary validation with explicit acceptance
-criteria and TDD regressions before implementation. R1 is closed; T1–T6 and
-R2–R6 remain pending. Keep core delivery independent of optional extension work.
-This follow-up changes documentation/memory only; the parent will commit the
-bookkeeping separately. No installations, real personal data access, remote
-operations, publishing, push/PR/merge, or additional worker commit.
+Obtain explicit authorization for the local R2 work-unit commit and record its
+identity before closing R2 or T1. R3 production Git hardening is next before any
+real-data use; R4–R6 and future upstream extraction remain separate. No commit,
+push, PR, merge, real-data access or optional extension work is authorized by
+this documentation-only follow-up.
