@@ -270,7 +270,7 @@ export function extractSalary(job) {
   const symbolOrCode = findCustomField(job?.customFieldGroup, 'stringFields', 'CurrencySymbolOrCode')?.stringValue;
   if (typeof salaryRange === 'string' && salaryRange.trim()) {
     if (/\bhour(?:ly)?\b|\bper\s+hour\b/i.test(salaryRange)) return null;
-    const nums = (salaryRange.match(/[\d,]+(?:\.\d+)?/g) || [])
+    const nums = (salaryRange.match(/\d[\d,]*(?:\.\d+)?/g) || [])
       .map((n) => Number(n.replace(/,/g, '')))
       .filter((n) => Number.isFinite(n));
     if (nums.length > 0) {
