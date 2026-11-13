@@ -53,6 +53,8 @@ Ist die Erinnerung unvollständig, stelle gezielte Nachfragen:
 
 Setze den expliziten Quellmarker: **`input_source: recall`**.
 
+**Format und Ton (beide Wege, eine kurze Frage, überspringbar).** Frag einmal: "Kurz noch zur Atmosphäre der Runde: Welches Format hatte sie (recruiter screen / 1:1 / panel / group / take-home review), wie viele Personen waren im Call, wie würdest du den Ton beschreiben (relaxed-conversational / structured-formal / rapid-fire / adversarial), und wie wohl hast du dich gefühlt (1-5, oder ein paar eigene Worte)?" Wenn ein Transkript Format, Personenzahl oder Ton erkennen lässt, biete diese als Vorschlag zur Bestätigung an. **Leite das Wohlbefinden nie ab und trage es nie für den Kandidaten ein**: Es ist seine subjektive Einschätzung, also halte es nur in seinen eigenen Worten fest und lass es weg, wenn er es überspringt. Überspringt er die ganze Frage, schreibe keinen der vier Werte.
+
 Egal, welcher Weg die Frage/Antwort-Daten erzeugt hat, Step 2 und alle folgenden Steps arbeiten identisch damit — ehrliche Bewertung, Lückenschluss und die Aktualisierung von Question Bank/Story Bank unterscheiden nicht zwischen einem Debrief mit `input_source: transcript` und einem mit `input_source: recall`. Der Marker selbst wird trotzdem unverändert mitgeführt, damit Step 9 ihn lesen kann.
 
 ---
@@ -203,6 +205,13 @@ Hänge an `interview-prep/{company-slug}-{role-slug}.md` an:
 **Timeline:** [genannte Termine oder Deadlines]
 **Other candidates:** [falls offengelegt]
 **Next steps:** [was der Interviewer als nächsten Schritt genannt hat und bis wann]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (nur die Felder auflisten, die der Kandidat beantwortet hat; unbeantwortete Punkte ganz streichen, ohne Platzhalter und ohne abgeleitete Werte)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [Anzahl]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5 oder eine kurze Formulierung, in den eigenen Worten des Kandidaten]
 ```
 
 **Wenn in dieser Runde eine Vergütungszahl mündlich genannt wurde** (der Kandidat hat eine Zahl genannt, nicht nur "das Gehalt kam zur Sprache"), hänge eine `stated`-Zeile an `data/salary-observations.tsv` an (lege die Datei an, falls sie fehlt; Format gemäß `docs/SCRIPTS.md` → salary-gap) mit der Tracker#, dem Datum dieser Runde, Betrag/Währung, Quelle `user`, einer kurzen Notiz, dem Rundenlabel und dem Namen des Interviewers. Dadurch kann `interview/plan` den Kandidaten vor der nächsten Runde daran erinnern — siehe dort Inputs #9.
@@ -211,7 +220,7 @@ Hänge an `interview-prep/{company-slug}-{role-slug}.md` an:
 
 ## Step 9 — Write Session Transcript
 
-Schreibe nach dem Debrief außerdem ein maschinenlesbares Session-Transkript nach `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Dies ist eine strukturierte Aufzeichnung der Runde für nachgelagerte Analysemodi; die mit Sprecher gekennzeichneten Turns lassen einen Konsumenten jede Seite lesen, ohne neu ableiten zu müssen, wer gesprochen hat. Der vollständige Contract liegt in `interview-prep/sessions/README.md`.
+Schreibe nach dem Debrief außerdem ein maschinenlesbares Session-Transkript nach `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Liste vor dem Schreiben jede vorhandene Datei für dieses Unternehmen, diese Rolle, diese Runde und dieses Datum auf (den Basisnamen und alle Varianten mit `-2`, `-3`, ..., auch wenn der Basisname selbst fehlt). Gibt es keine, schreibe den Basisnamen. Andernfalls nie stillschweigend überschreiben: Zeige die Dateien jeweils mit ihrer `interviewer_role` und ihrer ersten Frage und frag den Kandidaten, ob dieser Debrief eine davon wiederholt (dann aktualisiere die gewählte Datei an Ort und Stelle) oder eine eigene Runde ist (dann schreibe den nächsten freien Zähler, `-2`, `-3`, ..., vor `.md`). Siehe den Abschnitt "File names" im README. Dies ist eine strukturierte Aufzeichnung der Runde für nachgelagerte Analysemodi; die mit Sprecher gekennzeichneten Turns lassen einen Konsumenten jede Seite lesen, ohne neu ableiten zu müssen, wer gesprochen hat. Der vollständige Contract liegt in `interview-prep/sessions/README.md`.
 
 **Prüfe den in Step 1 gesetzten `input_source`-Marker.** Bei `input_source: transcript` überspringe die Rekonstruktion: Erzeuge das Transkript nicht neu aus der Ausgabe von Step 1/Step 2 — das wäre eine verlustbehaftetere Kopie der echten Quelle, aus der es stammt. Speichere stattdessen das Originaltranskript direkt, leicht normalisiert, damit es zum Schema unten passt (Sprecherlabels, Front Matter, Kompetenz-Tags aus der Bewertung in Step 2). Bei `input_source: recall` rekonstruiere das Transkript wie bisher aus der Ausgabe von Step 1/Step 2 — die Erinnerung hat nie ein wörtliches Original, das erhalten werden könnte.
 
@@ -226,8 +235,12 @@ date: YYYY-MM-DD
 interviewer_role: [Rolle, falls bekannt]
 source: debrief
 stated_priorities:        # nur bei Transkript-Input; weglassen, wenn keine genannt wurden oder bei Erinnerungs-Input (Step 1c)
-  - speaker: [Name oder Rolle, oder "unknown"]
+  - speaker: "[Name oder Rolle, oder unknown]"
     quote: "[kurzes wörtliches Zitat, in doppelten Anführungszeichen]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [Anzahl]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5 oder eine kurze Formulierung in den eigenen Worten des Kandidaten]"      # optional
 ---
 
 ## Q1
@@ -245,7 +258,8 @@ Regeln für das Transkript:
 - **Tagge jede Antwort.** In der Zeile direkt über jeder `**Candidate:**`-Zeile gib `<!-- competency: tag[, tag...] -->` aus — lowercase-kebab-case, kommagetrennt bei Antworten mit mehreren Kompetenzen (z. B. `system-design`, `people-leadership`, `incident-response`). Du hast jede Antwort in Step 2 bereits bewertet, also tagge aus dieser Bewertung, statt neu zu lesen. Tags sind frei wählbar; wähle die Kompetenz, die die Frage tatsächlich geprüft hat.
 - **Rekonstruiere den Turn des Kandidaten getreu.** Verwende, was der Kandidat in Step 1 als seine Aussage berichtet hat, nicht eine idealisierte Antwort. Die "correct/complete answer" aus Step 2 gehört in die Debrief-Datei, nie ins Transkript — das Transkript hält fest, was passiert ist.
 - **`source: debrief`.**
-- **`stated_priorities` gehört ins Front Matter** (Step 1c), als YAML-Liste aus `speaker`- + `quote`-Elementen, damit Skripte und `interview/plan` es lesen können, ohne den Body zu parsen. Setze jedes `quote` in doppelte Anführungszeichen, damit das Front Matter gültiges YAML bleibt und exakt das Gesprochene wieder ergibt: beim manuellen Escapen Backslashes zuerst escapen, dann innere doppelte Anführungszeichen, damit ein wörtliches `\n` im Zitat zwei Zeichen bleibt statt zu einem Zeilenumbruch zu werden. Runde und Datum des Elements sind `round` und `date` der Datei selbst. Lass das Feld weg, wenn nichts genannt wurde, und immer bei `input_source: recall`. Schreibe Prioritäten niemals in eine Datei einer Übungs-Session, denn diese haben keinen echten Interviewer.
+- **`stated_priorities` gehört ins Front Matter** (Step 1c), als YAML-Liste aus `speaker`- + `quote`-Elementen, damit Skripte und `interview/plan` es lesen können, ohne den Body zu parsen. Setze jedes `quote` in doppelte Anführungszeichen, damit das Front Matter gültiges YAML bleibt und exakt das Gesprochene wieder ergibt: beim manuellen Escapen Backslashes zuerst escapen, dann innere doppelte Anführungszeichen, damit ein wörtliches `\n` im Zitat zwei Zeichen bleibt statt zu einem Zeilenumbruch zu werden. Runde und Datum des Elements sind `round` und `date` der Datei selbst. Setze auch jeden `speaker` in doppelte Anführungszeichen und escape ihn wie `quote` (Backslashes zuerst, dann innere doppelte Anführungszeichen): Ein Wert wie `Hiring Manager: Jane` enthält einen Doppelpunkt und ist ohne Anführungszeichen ungültiges YAML. Lass das Feld weg, wenn nichts genannt wurde, und immer bei `input_source: recall`. Schreibe Prioritäten niemals in eine Datei einer Übungs-Session, denn diese haben keinen echten Interviewer.
+- **`format`, `people_on_call`, `tone` und `candidate_comfort` sind optionale Front-Matter-Schlüssel** mit den Werten aus Step 1 / Step 8, damit nachgelagerte Modi sie lesen können, ohne Fließtext zu parsen. Schreibe nur die Schlüssel, die der Kandidat beantwortet hat; lass die übrigen weg, und schreibe `candidate_comfort` nie, wenn der Kandidat es nicht angegeben hat. Setze `candidate_comfort` in doppelte Anführungszeichen (es kann freier Text sein); beim manuellen Escapen Backslashes zuerst escapen, dann innere doppelte Anführungszeichen, wie bei `quote`. Dateien von Übungs-Sessions enthalten sie nicht.
 - Die Session-Datei landet in einem gitignorierten Verzeichnis (echte Namen/Unternehmen gelangen nie in die Versionskontrolle); schreibe sie ohne Schwärzung.
 
 ---

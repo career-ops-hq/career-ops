@@ -53,6 +53,8 @@
 
 设置明确的来源标记：**`input_source: recall`**。
 
+**形式与氛围（两条路径通用，一个简短问题，可跳过）。** 只问一次："简单问一下这一轮的感受：是什么形式（recruiter screen / 1:1 / panel / group / take-home review），通话里有几个人，你会怎么形容氛围（relaxed-conversational / structured-formal / rapid-fire / adversarial），你自己感觉有多自在（1-5，或用你自己的几个词）？"如果转录能看出形式、人数或氛围，就作为建议提出、请候选人确认。**绝不替候选人推断或填写自在程度**：这是候选人的主观感受，只用其本人的原话记录；若跳过就不写。若整道题都跳过，四个值一个都不写。
+
 无论问答数据来自哪条路径，Step 2 及之后的处理完全相同——诚实评估、补齐短板、题库/故事库更新都不区分 `input_source: transcript` 与 `input_source: recall` 的复盘。标记本身仍原样带下去，供 Step 9 读取。
 
 ---
@@ -203,6 +205,13 @@
 **Timeline:** [提到的任何日期或截止日期]
 **Other candidates:** [若有披露]
 **Next steps:** [面试官说的下一步是什么、何时完成]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** （只列出候选人回答过的字段；未回答的条目整行删掉，不留占位符，也不填推断值）
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [人数]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5，或一句简短描述，用候选人自己的话]
 ```
 
 **若本轮口头报出了薪酬数字**（候选人给了具体数字，而不只是"提到了薪酬"），且本轮对应的 tracker# **已知**：向 `data/salary-observations.tsv` 追加一行 `stated`（文件不存在则创建；格式见 `docs/SCRIPTS.md` → salary-gap），写入该 tracker#、本轮日期、金额/币种、来源 `user`、简短备注、轮次标签与面试官姓名。这能让 `interview/plan` 在下一轮前提醒候选人——见该模式 Inputs #9。若 tracker# 尚不可用，**跳过追加**——不要写入不完整或可能错绑的行；等 tracker# 明确后再补记。
@@ -211,7 +220,7 @@
 
 ## Step 9 — Write Session Transcript
 
-复盘之后，再把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
+复盘之后，再把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。写之前，列出该公司、岗位、轮次和日期下已有的所有文件（基础文件名以及任何 `-2`、`-3`、... 变体，即使基础文件名本身已不存在）。一个都没有就写基础文件名。否则绝不静默覆盖：列出这些文件，附上各自的 `interviewer_role` 和第一道题，问候选人这次复盘是重跑其中某一场（就地更新其选中的文件），还是另一轮（在 `.md` 前写下一个空闲编号 `-2`、`-3`、...）。见 README 的 "File names" 一节。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
 
 **检查 Step 1 设置的 `input_source` 标记。** 若为 `input_source: transcript`，跳过重建：不要从 Step 1/Step 2 的输出重新生成记录——那只会是它所来自的真实来源的一份更有损的副本。改为直接保存原始记录稿，并轻度规范化以符合下方 schema（说话人标签、front matter、按 Step 2 评估打的 competency 标签）。若为 `input_source: recall`，照旧从 Step 1/Step 2 的输出重建记录——回忆从来没有可保留的逐字原稿。
 
@@ -226,8 +235,12 @@ date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
 stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
-  - speaker: [name or role, or "unknown"]
+  - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [number]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      # optional
 ---
 
 ## Q1
@@ -245,7 +258,8 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **给每次作答打标签。** 在每行 `**Candidate:**` 正上方输出 `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case，多能力用逗号分隔（例如 `system-design`、`people-leadership`、`incident-response`）。你在 Step 2 已评估过每次作答，按那次评估打标签，而不是重读。标签是自由形式；选该题实际考察的能力。
 - **忠实重建候选人回合。** 用候选人在 Step 1 报告说过的内容，而不是理想化答案。Step 2 的"correct/complete answer"属于复盘文件，绝不要进记录——记录记的是发生了什么。
 - **`source: debrief`。**
-- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。每个 `speaker` 也用双引号包裹，并按 `quote` 的方式转义（先转义反斜杠、再转义内部双引号）：像 `Hiring Manager: Jane` 这样的值含冒号，不加引号就是非法 YAML。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`format`、`people_on_call`、`tone`、`candidate_comfort` 是可选的 front matter 键**，承载 Step 1 / Step 8 的值，让下游模式不必解析正文就能读取。只写候选人回答过的键，其余省略；候选人没给出时绝不写 `candidate_comfort`。`candidate_comfort` 用双引号包裹（可能是自由文本）；手工转义时与 `quote` 一样，先转义反斜杠、再转义内部双引号。练习场次文件不带这些键。
 - 场次文件落在 gitignore 目录（真实姓名/公司永不进版本库）；写入时不要脱敏。
 
 ---

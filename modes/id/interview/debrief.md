@@ -55,6 +55,8 @@ Jika ingatan tidak lengkap, ajukan prompt yang terarah:
 
 Tetapkan source marker eksplisit: **`input_source: recall`**.
 
+**Format dan tone (kedua path, satu pertanyaan singkat, boleh dilewati).** Tanyakan sekali: "Satu pertanyaan cepat tentang nuansa round ini: apa formatnya (recruiter screen / 1:1 / panel / group / take-home review), berapa orang yang ada di call, bagaimana Anda menggambarkan tone-nya (relaxed-conversational / structured-formal / rapid-fire / adversarial), dan seberapa nyaman perasaan Anda (1-5, atau beberapa kata Anda sendiri)?" Jika transcript menunjukkan format, jumlah orang, atau tone, tawarkan itu sebagai saran untuk dikonfirmasi. **Jangan pernah menyimpulkan atau mengisi tingkat kenyamanan untuk kandidat**: itu adalah laporan subjektif mereka, jadi catat hanya dengan kata-kata mereka sendiri, dan hilangkan jika mereka melewatinya. Jika mereka melewati seluruh pertanyaan, jangan tulis satu pun dari keempat nilai tersebut.
+
 Apa pun path yang menghasilkan data question/answer, Steps 2 onward bekerja dengan cara yang sama — penilaian yang jujur, menutup kesenjangan, serta pembaruan question-bank/story-bank tidak membedakan antara debrief `input_source: transcript` dan `input_source: recall`. Marker itu sendiri tetap dibawa tanpa perubahan sehingga Step 9 dapat membacanya.
 
 ---
@@ -208,6 +210,13 @@ Tambahkan ke `interview-prep/{company-slug}-{role-slug}.md`:
 **Timeline:** [any dates or deadlines mentioned]
 **Other candidates:** [if disclosed]
 **Next steps:** [what the interviewer said happens next and by when]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (list only the fields the candidate answered; drop unanswered bullets entirely, with no placeholders and no inferred values)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [number]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5, or a short phrase, in the candidate's own words]
 ```
 
 **Jika compensation number disebutkan secara verbal pada round ini** (kandidat memberikan figure, bukan hanya "comp came up"), tambahkan satu `stated` line ke `data/salary-observations.tsv` (buat file jika belum ada; format sesuai `docs/SCRIPTS.md` → salary-gap) dengan tracker#, tanggal round ini, amount/currency, source `user`, short note, round label, dan nama pewawancara. Ini memungkinkan `interview/plan` mengingatkan kandidat mengenai angka tersebut sebelum round berikutnya — lihat Inputs #9 di sana.
@@ -216,7 +225,7 @@ Tambahkan ke `interview-prep/{company-slug}-{role-slug}.md`:
 
 ## Step 9 — Write Session Transcript
 
-Setelah debrief, tulis juga machine-readable session transcript ke `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Ini merupakan catatan terstruktur dari round untuk downstream analysis modes; speaker-labelled turns memungkinkan consumer membaca kedua sisi tanpa perlu menyimpulkan ulang siapa yang berbicara. Kontrak lengkapnya terdapat di `interview-prep/sessions/README.md`.
+Setelah debrief, tulis juga machine-readable session transcript ke `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Sebelum menulis, daftarkan setiap file yang sudah ada untuk company, role, round, dan tanggal ini (nama dasar dan varian `-2`, `-3`, ..., bahkan ketika nama dasarnya sendiri tidak ada). Jika tidak ada, tulis nama dasar. Jika ada, jangan pernah menimpa diam-diam: tampilkan file-file tersebut beserta `interviewer_role` dan pertanyaan pertama masing-masing, lalu tanyakan kepada kandidat apakah debrief ini mengulang salah satunya (perbarui file yang mereka pilih di tempat) atau merupakan round terpisah (tulis counter bebas berikutnya, `-2`, `-3`, ..., sebelum `.md`). Lihat bagian "File names" di README. Ini merupakan catatan terstruktur dari round untuk downstream analysis modes; speaker-labelled turns memungkinkan consumer membaca kedua sisi tanpa perlu menyimpulkan ulang siapa yang berbicara. Kontrak lengkapnya terdapat di `interview-prep/sessions/README.md`.
 
 **Periksa marker** `input_source` **yang ditetapkan di Step 1.** Jika `input_source: transcript`, lewati reconstruction: jangan membuat ulang transcript dari output Step 1/Step 2 — itu akan menjadi salinan yang lebih lossy dari real source. Sebaliknya, simpan original transcript secara langsung, dengan normalisasi ringan agar sesuai dengan schema di bawah (speaker labels, front-matter, competency tags dari Step 2 assessment). Jika `input_source: recall`, rekonstruksi transcript dari output Step 1/Step 2 seperti sebelumnya — recall tidak memiliki original verbatim yang dapat dipertahankan.
 
@@ -231,8 +240,12 @@ date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
 stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
-  - speaker: [name or role, or "unknown"]
+  - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [number]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      # optional
 ---
 
 ## Q1
@@ -250,7 +263,8 @@ Rules for the transcript:
 * **Tag each answer.** Pada baris tepat di atas setiap `**Candidate:**` line, keluarkan `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case, dipisahkan koma untuk jawaban dengan beberapa competency (misalnya `system-design`, `people-leadership`, `incident-response`). Anda sudah menilai setiap jawaban di Step 2, jadi gunakan tag dari assessment tersebut alih-alih membaca ulang. Tags bersifat free-form; pilih competency yang benar-benar diuji oleh pertanyaan.
 * **Reconstruct the candidate turn faithfully.** Gunakan apa yang kandidat laporkan telah mereka katakan di Step 1, bukan jawaban yang diidealkan. "Correct/complete answer" dari Step 2 berada di debrief file, tidak pernah di transcript — transcript mencatat apa yang terjadi.
 * **`source: debrief`.**
-* **`stated_priorities` goes in the front matter** (Step 1c), sebagai YAML list berisi item `speaker` + `quote`, agar script dan `interview/plan` dapat membacanya tanpa mem-parsing isi file. Apit setiap `quote` dengan tanda kutip ganda agar front matter tetap valid YAML dan terbaca kembali sebagai nilai yang persis diucapkan: jika melakukan escape secara manual, escape backslash terlebih dahulu sebelum meng-escape tanda kutip ganda di dalamnya, sehingga `\n` literal dalam kutipan tetap dua karakter dan tidak berubah menjadi baris baru. Round dan tanggal item adalah `round` dan `date` milik file itu sendiri. Hilangkan field ini jika tidak ada yang disebutkan dan setiap kali `input_source: recall`. Jangan pernah menaruh prioritas di file practice-session, karena sesi tersebut tidak memiliki pewawancara nyata.
+* **`stated_priorities` goes in the front matter** (Step 1c), sebagai YAML list berisi item `speaker` + `quote`, agar script dan `interview/plan` dapat membacanya tanpa mem-parsing isi file. Apit setiap `quote` dengan tanda kutip ganda agar front matter tetap valid YAML dan terbaca kembali sebagai nilai yang persis diucapkan: jika melakukan escape secara manual, escape backslash terlebih dahulu sebelum meng-escape tanda kutip ganda di dalamnya, sehingga `\n` literal dalam kutipan tetap dua karakter dan tidak berubah menjadi baris baru. Round dan tanggal item adalah `round` dan `date` milik file itu sendiri. Apit juga setiap `speaker` dengan tanda kutip ganda dan escape seperti `quote` (backslash terlebih dahulu, lalu tanda kutip ganda di dalamnya): nilai seperti `Hiring Manager: Jane` mengandung titik dua dan tidak valid sebagai YAML tanpa tanda kutip. Hilangkan field ini jika tidak ada yang disebutkan dan setiap kali `input_source: recall`. Jangan pernah menaruh prioritas di file practice-session, karena sesi tersebut tidak memiliki pewawancara nyata.
+* **`format`, `people_on_call`, `tone`, dan `candidate_comfort` adalah key front matter opsional** yang membawa nilai dari Step 1 / Step 8, agar downstream modes dapat membacanya tanpa mem-parsing prosa. Tulis hanya key yang dijawab kandidat; hilangkan sisanya, dan jangan pernah menulis `candidate_comfort` kecuali kandidat memberikannya. Apit `candidate_comfort` dengan tanda kutip ganda (bisa berupa teks bebas); jika melakukan escape secara manual, escape backslash terlebih dahulu sebelum tanda kutip ganda di dalamnya, sama seperti untuk `quote`. File practice-session tidak memuatnya.
 * File session berada di direktori yang di-gitignore (nama asli/perusahaan tidak pernah masuk version control); tulis file tersebut tanpa melakukan redaction.
 
 ---

@@ -53,6 +53,8 @@
 
 明示的な情報源マーカーを設定する：**`input_source: recall`**。
 
+**形式とトーン（両経路共通、短い質問を 1 つ、スキップ可）。** 1 回だけ尋ねる：「ラウンドの雰囲気について手短に。形式は何でしたか（recruiter screen / 1:1 / panel / group / take-home review）、通話には何人いましたか、トーンはどう表現しますか（relaxed-conversational / structured-formal / rapid-fire / adversarial）、どのくらい落ち着いて臨めましたか（1-5、またはご自身の短い言葉で）？」トランスクリプトから形式・人数・トーンがわかる場合は、確認用の候補として提示する。**快適さを推測したり、候補者の代わりに埋めたりしてはならない**。これは候補者自身の主観的な申告なので、本人の言葉でのみ記録し、スキップされたら書かない。質問全体がスキップされたら、4 つの値のどれも書かない。
+
 どちらの経路で質問・回答データが得られても、Step 2 以降はまったく同じように扱う。正直な評価、ギャップの解消、質問バンク・ストーリーバンクの更新は、`input_source: transcript` と `input_source: recall` のデブリーフを区別しない。マーカー自体は Step 9 が読めるようにそのまま引き継ぐ。
 
 ---
@@ -203,6 +205,13 @@
 **Timeline:** [言及された日程や締め切り]
 **Other candidates:** [開示されていれば]
 **Next steps:** [面接官が、次に何がいつ起きると述べたか]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** （候補者が答えた項目だけを列挙する。未回答の行はプレースホルダーも推測値も残さず丸ごと削除する）
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [人数]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5、または短いフレーズ。候補者自身の言葉で]
 ```
 
 **このラウンドで報酬の数字を口頭で述べた場合**（候補者が具体的な額を出し、単に「報酬の話が出た」だけではない場合）、`data/salary-observations.tsv` に `stated` 行を 1 行追記する。ファイルがなければ作成する（書式は `docs/SCRIPTS.md` → salary-gap を参照）。記載するのは、tracker#、このラウンドの日付、金額と通貨、source `user`、短いメモ、ラウンドのラベル、面接官の氏名。これがあることで、`interview/plan` が次ラウンドの前に候補者へ想起させられる（同ファイルの Inputs #9 を参照）。
@@ -211,7 +220,7 @@
 
 ## Step 9 — Write Session Transcript
 
-デブリーフのあと、機械可読なセッション記録も書き出す。出力先は `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。これは下流の分析モードのための、そのラウンドの構造化された記録である。発話者ラベル付きのやり取りにより、読み手はどちらが話したかを推測し直さずにどちらの側でも読める。契約の全文は `interview-prep/sessions/README.md` にある。
+デブリーフのあと、機械可読なセッション記録も書き出す。出力先は `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。書き込む前に、この企業・職種・ラウンド・日付の既存ファイルをすべて列挙する（ベース名と `-2`、`-3`、... の各バリアント。ベース名自体が存在しない場合も含む）。1 つもなければベース名で書く。あれば決して黙って上書きしない。各ファイルの `interviewer_role` と最初の質問を添えて示し、このデブリーフがそのどれかの再実行なのか（選ばれたファイルをその場で更新する）、別のラウンドなのか（次の空き番号 `-2`、`-3`、... を `.md` の前に付けて書く）を候補者に尋ねる。README の「File names」セクションを参照。これは下流の分析モードのための、そのラウンドの構造化された記録である。発話者ラベル付きのやり取りにより、読み手はどちらが話したかを推測し直さずにどちらの側でも読める。契約の全文は `interview-prep/sessions/README.md` にある。
 
 **Step 1 で設定した `input_source` マーカーを確認する。** `input_source: transcript` であれば再構成は飛ばす。Step 1 / Step 2 の出力からトランスクリプトを再生成してはいけない — それは元になった実際の情報源の、より欠落の多いコピーになるだけである。代わりに、元のトランスクリプトを、以下のスキーマ（発話者ラベル、front-matter、Step 2 の評価から得た competency タグ）に合わせて軽く正規化してそのまま保存する。`input_source: recall` であれば、従来どおり Step 1 / Step 2 の出力からトランスクリプトを再構成する。想起には保存すべき逐語の原文がそもそも存在しない。
 
@@ -226,8 +235,12 @@ date: YYYY-MM-DD
 interviewer_role: [役割（判明していれば）]
 source: debrief
 stated_priorities:        # トランスクリプト入力のみ。何も述べられなかった場合や想起入力の場合は省略（Step 1c）
-  - speaker: [氏名または役割、あるいは "unknown"]
+  - speaker: "[氏名または役割、あるいは unknown]"
     quote: "[短い逐語の引用、ダブルクォートで囲む]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # 任意（Step 1）
+people_on_call: [人数]                                              # 任意
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # 任意
+candidate_comfort: "[1-5、または候補者自身の言葉による短いフレーズ]"      # 任意
 ---
 
 ## Q1
@@ -245,7 +258,8 @@ stated_priorities:        # トランスクリプト入力のみ。何も述べ�
 - **各回答にタグを付ける。** 各 `**Candidate:**` 行のすぐ上の行に `<!-- competency: tag[, tag...] -->` を出力する — lowercase-kebab-case。複数コンピテンシーの回答はカンマ区切りとする（例：`system-design`、`people-leadership`、`incident-response`）。Step 2 で各回答はすでに評価しているので、読み直すのではなくその評価からタグ付けする。タグは自由記述で、その質問が実際に試していたコンピテンシーを選ぶ。
 - **候補者の発話を忠実に再構成する。** Step 1 で候補者がこう言ったと報告した内容を使い、理想化した回答は使わない。Step 2 の「Correct/complete answer」はデブリーフファイルに属し、トランスクリプトには決して入らない — トランスクリプトは起きたことを記録するものである。
 - **`source: debrief`。**
-- **`stated_priorities` は front matter に入れる**（Step 1c）。`speaker` + `quote` の項目からなる YAML リストとして書き、スクリプトや `interview/plan` が本文を解析せずに読めるようにする。すべての `quote` をダブルクォートで囲み、front matter を有効な YAML に保ち、パース後に発言そのものが復元されるようにする。手動でエスケープする場合は、内側のダブルクォートより先にバックスラッシュをエスケープする。こうして引用内のリテラル `\n` は 2 文字のまま保たれ、改行文字に変わらない。項目のラウンドと日付は、そのファイル自身の `round` と `date` である。何も述べられなかった場合と、`input_source: recall` の場合は、このフィールドを省略する。練習セッションのファイルには優先事項を決して入れない。そこには実在の面接官がいないからである。
+- **`stated_priorities` は front matter に入れる**（Step 1c）。`speaker` + `quote` の項目からなる YAML リストとして書き、スクリプトや `interview/plan` が本文を解析せずに読めるようにする。すべての `quote` をダブルクォートで囲み、front matter を有効な YAML に保ち、パース後に発言そのものが復元されるようにする。手動でエスケープする場合は、内側のダブルクォートより先にバックスラッシュをエスケープする。こうして引用内のリテラル `\n` は 2 文字のまま保たれ、改行文字に変わらない。項目のラウンドと日付は、そのファイル自身の `round` と `date` である。`speaker` もすべてダブルクォートで囲み、`quote` と同じようにエスケープする（内側のダブルクォートより先にバックスラッシュ）。`Hiring Manager: Jane` のような値はコロンを含むため、クォートなしでは無効な YAML になる。何も述べられなかった場合と、`input_source: recall` の場合は、このフィールドを省略する。練習セッションのファイルには優先事項を決して入れない。そこには実在の面接官がいないからである。
+- **`format`、`people_on_call`、`tone`、`candidate_comfort` は任意の front matter キー**で、Step 1 / Step 8 の値を持ち、下流のモードが本文を解析せずに読めるようにする。候補者が答えたキーだけを書き、残りは省略する。候補者が答えていない限り `candidate_comfort` は決して書かない。`candidate_comfort` はダブルクォートで囲む（自由記述の場合があるため）。手動でエスケープする場合は、`quote` と同じく内側のダブルクォートより先にバックスラッシュをエスケープする。練習セッションのファイルにはこれらを入れない。
 - セッションファイルは gitignore されたディレクトリに置かれる（実名や企業名がバージョン管理に入ることはない）。墨消しせずにそのまま書く。
 
 ---

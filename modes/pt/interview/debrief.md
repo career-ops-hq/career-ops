@@ -53,6 +53,8 @@ Se a memória estiver incompleta, faça perguntas direcionadas:
 
 Defina o marcador de origem explícito: **`input_source: recall`**.
 
+**Formato e tom (ambos os caminhos, uma pergunta curta, opcional).** Pergunte uma vez: "Uma rápida sobre o clima da rodada: qual foi o formato (recruiter screen / 1:1 / panel / group / take-home review), quantas pessoas estavam na chamada, como você descreveria o tom (relaxed-conversational / structured-formal / rapid-fire / adversarial) e quão confortável você se sentiu (1-5, ou algumas palavras suas)?" Se uma transcrição mostrar o formato, o número de pessoas ou o tom, ofereça-os como sugestão para confirmar. **Nunca deduza nem preencha o conforto pelo candidato**: é a avaliação subjetiva dele, então registre-a apenas com as palavras dele e deixe-a de fora se ele pular. Se ele pular a pergunta inteira, não escreva nenhum dos quatro valores.
+
 Qualquer que seja o caminho que produziu os dados de pergunta/resposta, os Steps 2 em diante operam sobre eles de forma idêntica — avaliação honesta, fechamento de lacunas e atualizações no banco de perguntas/story bank não distinguem entre um debrief com `input_source: transcript` e um com `input_source: recall`. O próprio marcador é levado adiante inalterado para que o Step 9 possa lê-lo.
 
 ---
@@ -203,6 +205,13 @@ Acrescente a `interview-prep/{company-slug}-{role-slug}.md`:
 **Timeline:** [quaisquer datas ou prazos mencionados]
 **Other candidates:** [se divulgado]
 **Next steps:** [o que o entrevistador disse que acontece a seguir e até quando]
+
+### Interview Format and Tone (qualquer rodada — omita se o candidato pulou)
+**Interview format and tone:** (liste apenas os campos que o candidato respondeu; remova por completo os itens sem resposta, sem placeholders e sem valores deduzidos)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [número]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5, ou uma frase curta, nas palavras do próprio candidato]
 ```
 
 **Se um valor de remuneração foi declarado verbalmente nesta rodada** (o candidato forneceu um número, não apenas "o assunto remuneração surgiu"), acrescente uma linha `stated` a `data/salary-observations.tsv` (crie o arquivo se estiver ausente; formate conforme `docs/SCRIPTS.md` → salary-gap) com o tracker#, a data desta rodada, o valor/moeda, fonte `user`, uma nota curta, o rótulo da rodada e o nome do entrevistador. É isso que permite que o `interview/plan` lembre o candidato disso antes da próxima rodada — veja o Input #9 lá.
@@ -211,7 +220,7 @@ Acrescente a `interview-prep/{company-slug}-{role-slug}.md`:
 
 ## Step 9 — Write Session Transcript
 
-Após o debrief, escreva também uma transcrição da sessão legível por máquina em `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Este é um registro estruturado da rodada para modos de análise posteriores; os turnos com identificação de quem fala permitem que um consumidor leia qualquer um dos lados sem reinferir quem falou. O contrato completo reside em `interview-prep/sessions/README.md`.
+Após o debrief, escreva também uma transcrição da sessão legível por máquina em `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Antes de escrever, liste todos os arquivos existentes para esta empresa, vaga, rodada e data (o nome base e quaisquer variantes `-2`, `-3`, ..., mesmo quando o próprio nome base estiver ausente). Se não houver nenhum, escreva o nome base. Caso contrário, nunca sobrescreva em silêncio: mostre os arquivos com o `interviewer_role` e a primeira pergunta de cada um, e pergunte ao candidato se este debrief refaz um deles (atualize no lugar o arquivo que ele escolher) ou é uma rodada separada (escreva o próximo contador livre, `-2`, `-3`, ..., antes de `.md`). Veja a seção "File names" do README. Este é um registro estruturado da rodada para modos de análise posteriores; os turnos com identificação de quem fala permitem que um consumidor leia qualquer um dos lados sem reinferir quem falou. O contrato completo reside em `interview-prep/sessions/README.md`.
 
 **Verifique o marcador `input_source` definido no Step 1.** Se `input_source: transcript`, pule a reconstrução: não regenere a transcrição a partir da saída do Step 1/Step 2 — isso seria uma cópia com mais perdas da fonte real de onde veio. Em vez disso, salve a transcrição original diretamente, levemente normalizada para corresponder ao esquema abaixo (rótulos de quem fala, front-matter, tags de competência da avaliação do Step 2). Se `input_source: recall`, reconstrua a transcrição a partir da saída do Step 1/Step 2 como antes — a lembrança nunca tem um original literal para preservar.
 
@@ -226,8 +235,12 @@ date: YYYY-MM-DD
 interviewer_role: [cargo, se souber]
 source: debrief
 stated_priorities:        # apenas entrada de transcrição; omita se nenhuma foi declarada ou para entrada de memória (Step 1c)
-  - speaker: [nome ou cargo, ou "unknown"]
+  - speaker: "[nome ou cargo, ou unknown]"
     quote: "[citação literal curta, entre aspas duplas]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # opcional (Step 1)
+people_on_call: [número]                                              # opcional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # opcional
+candidate_comfort: "[1-5, ou uma frase curta nas palavras do próprio candidato]"      # opcional
 ---
 
 ## Q1
@@ -245,7 +258,8 @@ Regras para a transcrição:
 - **Marque cada resposta com tags.** Na linha imediatamente acima de cada linha `**Candidate:**`, emita `<!-- competency: tag[, tag...] -->` — em minúsculas com hífen (lowercase-kebab-case), separadas por vírgula para respostas com múltiplas competências (ex.: `system-design`, `people-leadership`, `incident-response`). Você já avaliou cada resposta no Step 2, portanto marque a partir dessa avaliação em vez de reler. As tags são livres; escolha a competência que a pergunta realmente testou.
 - **Reconstrua o turno do candidato fielmente.** Use o que o candidato relatou ter dito no Step 1, não uma resposta idealizada. A "resposta correta/completa" do Step 2 pertence ao arquivo de debrief, nunca à transcrição — a transcrição registra o que aconteceu.
 - **`source: debrief`.**
-- **`stated_priorities` vai no front matter** (Step 1c), como uma lista YAML de itens `speaker` + `quote`, para que scripts e `interview/plan` possam ler sem fazer o parsing do corpo. Coloque entre aspas duplas cada `quote` para que o front matter permaneça como YAML válido e o valor interpretado seja exatamente o que foi dito: ao escapar manualmente, escape as barras invertidas antes das aspas duplas internas, para que um `\n` literal na citação permaneça dois caracteres em vez de virar uma quebra de linha. A rodada e a data do item são as do próprio arquivo (`round` e `date`). Omita o campo quando nada foi informado e sempre que `input_source: recall`. Nunca coloque prioridades em um arquivo de sessão prática, pois essas não têm um entrevistador real.
+- **`stated_priorities` vai no front matter** (Step 1c), como uma lista YAML de itens `speaker` + `quote`, para que scripts e `interview/plan` possam ler sem fazer o parsing do corpo. Coloque entre aspas duplas cada `quote` para que o front matter permaneça como YAML válido e o valor interpretado seja exatamente o que foi dito: ao escapar manualmente, escape as barras invertidas antes das aspas duplas internas, para que um `\n` literal na citação permaneça dois caracteres em vez de virar uma quebra de linha. A rodada e a data do item são as do próprio arquivo (`round` e `date`). Coloque também cada `speaker` entre aspas duplas e escape-o como `quote` (primeiro as barras invertidas, depois as aspas duplas internas): um valor como `Hiring Manager: Jane` contém dois-pontos e é YAML inválido sem aspas. Omita o campo quando nada foi informado e sempre que `input_source: recall`. Nunca coloque prioridades em um arquivo de sessão prática, pois essas não têm um entrevistador real.
+- **`format`, `people_on_call`, `tone` e `candidate_comfort` são chaves opcionais do front matter** que carregam os valores do Step 1 / Step 8, para que modos posteriores possam lê-los sem fazer o parsing do texto. Escreva apenas as chaves que o candidato respondeu; omita as demais e nunca escreva `candidate_comfort` a menos que o candidato o tenha informado. Coloque `candidate_comfort` entre aspas duplas (pode ser texto livre); ao escapar manualmente, escape as barras invertidas antes das aspas duplas internas, como para `quote`. Arquivos de sessão prática não as incluem.
 - O arquivo da sessão fica em um diretório ignorado pelo git (nomes/empresas reais nunca entram no controle de versão); escreva-o sem ocultar nomes.
 
 ---

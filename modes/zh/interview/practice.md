@@ -134,7 +134,7 @@
 
 ### Write Session Transcript
 
-总结之后，把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`（若不是公司专属场次，company/role slug 用 `practice`）。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
+总结之后，把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`（若不是公司专属场次，company/role slug 用 `practice`）。若该文件已存在，不要覆盖：按 README 的 "File names" 一节，在 `.md` 前加上下一个空闲编号（`-2`、`-3`、...）。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
 
 格式：
 
