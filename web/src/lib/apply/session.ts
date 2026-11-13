@@ -5,7 +5,7 @@ import { chromium, type Browser, type BrowserContext, type Page, type Frame, typ
 import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
-import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, type ApplyIssue } from "./diagnose";
+import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
@@ -85,7 +85,24 @@ async function gotoResilient(page: Page, url: string): Promise<Response | null> 
 /** Distinguish a real APPLICATION form from a careers-listing / job-search form
  *  (a closed Greenhouse posting redirects to the board, whose keyword/department
  *  filters would otherwise look like a fillable form). */
+/** A password box is a sign-in or account page, even when it also asks for an email. */
+function formHasPassword(form: ExtractedForm): boolean {
+  return form.fields.some((f) => f.type === "password" || /\bpassword\b/i.test(f.label || ""));
+}
+
+// fieldsMeta is the extract snapshot. A sign-in dialog that opens later is on
+// the live page and missing from that snapshot, so the fill would still upload
+// and type. Count password inputs in every frame before either of those.
+async function pageHasPassword(page: Page): Promise<boolean> {
+  for (const frame of page.frames()) {
+    const count = await frame.locator('input[type="password"]').count().catch(() => 0);
+    if (count > 0) return true;
+  }
+  return false;
+}
+
 function looksLikeApplicationForm(form: ExtractedForm): boolean {
+  if (formHasPassword(form)) return false;
   const fs = form.fields;
   if (fs.length === 0) return false;
   const lab = (f: ApplyField) => (f.label || "").toLowerCase();
@@ -280,12 +297,16 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   //    trigger lazy/virtualized fields, then (b) clicking an "Apply" button (SPA;
   //    never a submit) — re-settling and re-extracting after each.
   let { frame, form } = await pickFormFrame(page);
+  // A password box is a login wall. Stop before scroll, Apply clicks, or the
+  // agent, so nothing is typed into the password field.
+  if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   // "no usable form yet" = 0 fields OR only non-application fields (e.g. a search
   // box on a job-description page) — both should trigger the recovery, not just 0.
   if (!looksLikeApplicationForm(form)) {
     await nudgeScroll(page);
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
+    if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   }
   if (!noApplyBtn && !looksLikeApplicationForm(form)) {
     const trigger = await tryApplyTrigger(page);
@@ -309,6 +330,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
         return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label, true) };
       }
       ({ frame, form } = await pickFormFrame(page));
+      if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
       await snap();
     }
   }
@@ -424,6 +446,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (!s) return null;
   let { frame, form } = await pickFormFrame(s.page);
   await enrichFromAts(s.url, form.fields);
+  if (formHasPassword(form)) return null;
   let aiInterpreted = false;
   let agentSpawned = false; // see openSession: launch, not result
   if (!looksLikeApplicationForm(form) && cliId) {
@@ -485,6 +508,9 @@ export async function fillSession(
 ): Promise<{ steps: FillStep[]; navigated: boolean; issues: ApplyIssue[] }> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found (it may have expired)");
+  if (formHasPassword({ title: s.title, url: s.url, fields: fieldsMeta }) || await pageHasPassword(s.page)) {
+    return { steps: [], navigated: false, issues: [{ level: "block", code: "login-wall", message: LOGIN_WALL_MESSAGE }] };
+  }
   const byId = new Map(fieldsMeta.map((f) => [f.id, f]));
   const steps: FillStep[] = [];
   // Belt-and-suspenders: if filling ever navigates the page (i.e. something got
@@ -612,6 +638,8 @@ export async function fillSession(
           });
         });
       } else {
+        const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
+        if (liveType === "password") continue;
         await loc.fill(value);
       }
       ok = !gaveUp;

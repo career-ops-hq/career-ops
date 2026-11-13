@@ -365,6 +365,40 @@ try {
     fail(`lever.fetch() workplaceType locations = ${JSON.stringify(workplaceLocs)}`);
   }
 
+  // workplaceType (#6909): dedicated field mapped to 'remote' | 'hybrid' | 'onsite'.
+  // Case/whitespace trimmed and folded, 'on-site' mapped to 'onsite'. Blank/unspecified/unknown omitted.
+  const leverWtJobs = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    {
+      fetchJson: async () => [
+        { text: 'Remote', hostedUrl: 'https://jobs.lever.co/acme/w1', workplaceType: 'remote' },
+        { text: 'Remote caps', hostedUrl: 'https://jobs.lever.co/acme/w2', workplaceType: '  Remote  ' },
+        { text: 'Hybrid', hostedUrl: 'https://jobs.lever.co/acme/w3', workplaceType: 'hybrid' },
+        { text: 'Onsite', hostedUrl: 'https://jobs.lever.co/acme/w4', workplaceType: 'onsite' },
+        { text: 'On-site hyphen', hostedUrl: 'https://jobs.lever.co/acme/w5', workplaceType: 'on-site' },
+        { text: 'Blank', hostedUrl: 'https://jobs.lever.co/acme/w6', workplaceType: '   ' },
+        { text: 'Unspecified', hostedUrl: 'https://jobs.lever.co/acme/w7', workplaceType: 'unspecified' },
+        { text: 'Unknown', hostedUrl: 'https://jobs.lever.co/acme/w8', workplaceType: 'flexible' },
+        { text: 'None', hostedUrl: 'https://jobs.lever.co/acme/w9' },
+      ],
+    },
+  );
+  if (
+    leverWtJobs[0]?.workplaceType === 'remote'
+    && leverWtJobs[1]?.workplaceType === 'remote'
+    && leverWtJobs[2]?.workplaceType === 'hybrid'
+    && leverWtJobs[3]?.workplaceType === 'onsite'
+    && leverWtJobs[4]?.workplaceType === 'onsite'
+    && !('workplaceType' in leverWtJobs[5])
+    && !('workplaceType' in leverWtJobs[6])
+    && !('workplaceType' in leverWtJobs[7])
+    && !('workplaceType' in leverWtJobs[8])
+  ) {
+    pass('lever.fetch() maps workplaceType (remote/hybrid/onsite), trims/lowercases, normalizes on-site, and omits unknown/blank');
+  } else {
+    fail(`lever.fetch() workplaceType = ${JSON.stringify(leverWtJobs.map(j => [j.title, j.workplaceType]))}`);
+  }
+
   // salaryRange (#6907) — Lever's public postings API documents an optional
   // salaryRange ({ currency, interval, min, max }) on each posting. It maps
   // to Job.salary annualized, the way parseCompensation() in ashby.mjs does:

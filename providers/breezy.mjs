@@ -121,7 +121,14 @@ function withCountry(name, country) {
  * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
  */
 export function parseBreezyResponse(json, companyName) {
-  const rows = Array.isArray(json) ? json : [];
+  // [] is an empty board. Any other body ({}, { error }, a bare string) is a
+  // changed or failing API and must not read as a board with no open roles
+  // (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  if (!Array.isArray(json)) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`breezy: unexpected response for ${companyName} — expected an array of positions, got: [${got}]`);
+  }
+  const rows = json;
   const out = [];
   for (const j of rows) {
     if (!j || !j.name) continue;

@@ -2,7 +2,7 @@ import type { Page, Frame } from "playwright-core";
 
 export type ApplyField = {
   id: string; // our stable handle, also set as data-co-field on the live element
-  type: "text" | "email" | "tel" | "url" | "number" | "date" | "textarea" | "select" | "checkbox" | "radio" | "file";
+  type: "text" | "email" | "tel" | "url" | "number" | "date" | "textarea" | "select" | "checkbox" | "radio" | "file" | "password";
   label: string;
   required: boolean;
   options?: string[];
@@ -171,7 +171,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         fields.push({ id: fid, type: "select", label: clean(labelFor(el)), required, options, nativeId, nativeName });
         continue;
       }
-      const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file"].includes(itype) ? itype : "text";
+      const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file", "password"].includes(itype) ? itype : "text";
       const ml = (el as HTMLInputElement).maxLength;
       fields.push({
         id: fid,

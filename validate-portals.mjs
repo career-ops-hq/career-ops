@@ -11,6 +11,7 @@
  */
 
 import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { normalizeWorkplaceType } from './providers/_workplace-type.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -223,10 +224,12 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'interamt_searches',
   'topdev_searches',
   'seek_searches',
+  'hn_hiring',
   'dayforce_boards',
   'location_filter',
   'country_eligibility_filter',
   'salary_filter',
+  'workplace_filter',
   'experience_filter',
   'portal_prune_quiet_days',
   'max_posting_age_days',
@@ -512,6 +515,31 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       }
       if (ef.concurrency !== undefined && (!Number.isInteger(ef.concurrency) || ef.concurrency < 1 || ef.concurrency > 16)) {
         add(errors, 'experience_filter.concurrency', 'must be an integer from 1 to 16 when set');
+      }
+    }
+  }
+
+  if (config.workplace_filter !== undefined) {
+    if (!isObject(config.workplace_filter)) {
+      add(errors, 'workplace_filter', 'workplace_filter must be an object');
+    } else {
+      const wf = config.workplace_filter;
+      rejectUnknownFields(wf, 'workplace_filter', ['allow', 'include_unknown'], errors);
+      if (wf.include_unknown !== undefined && typeof wf.include_unknown !== 'boolean') {
+        add(errors, 'workplace_filter.include_unknown', 'must be a boolean when set');
+      }
+      if (wf.allow !== undefined) {
+        if (!Array.isArray(wf.allow)) {
+          add(errors, 'workplace_filter.allow', 'workplace_filter.allow must be an array');
+        } else {
+          for (let i = 0; i < wf.allow.length; i++) {
+            const v = wf.allow[i];
+            const norm = typeof v === 'string' ? normalizeWorkplaceType(v) : undefined;
+            if (!norm) {
+              add(errors, `workplace_filter.allow[${i}]`, `invalid workplace type "${v}" — must be one of: remote, hybrid, onsite`);
+            }
+          }
+        }
       }
     }
   }

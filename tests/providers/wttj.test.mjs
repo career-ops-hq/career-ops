@@ -262,10 +262,11 @@ try {
   }
 
   // --- Server-side filters (#wttj-filters) -------------------------------
-  // A keyword query cannot narrow a global board: Algolia's relevance ranking
-  // picks which max_hits results come back, and the scanner's own title/location
-  // filters only run on what already arrived. `filters` shrinks the result set
-  // server-side instead, which is what makes a scan exhaustive.
+  // A keyword query keeps only jobs that contain every query word, so it drops
+  // a matching role worded another way, and the scanner's own title/location
+  // filters only run on what already arrived. `filters` narrows the board
+  // server-side on structured fields such as country and contract type instead
+  // of on wording. The scan still returns no match past the max_hits cap.
   const FILTER = 'offices.country_code:FR AND contract_type:full_time';
 
   const filtered = mkCtx(ENV_OK, () => ({ hits: [mkHit('job-f', 'Product Manager')] }));

@@ -109,10 +109,26 @@ try {
     fail(`row 1 postedAt should be undefined, got ${JSON.stringify(jobs[1]?.postedAt)}`);
   }
 
-  if (parseBreezyResponse(null, 'X').length === 0 && parseBreezyResponse({}, 'X').length === 0) {
-    pass('non-array payload → empty result (no crash)');
-  } else {
-    fail('non-array payload should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parseBreezyResponse([], 'X');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parseBreezyResponse returns [] for []');
+    else fail(`parseBreezyResponse [] → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parseBreezyResponse(body, 'X'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('breezy: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parseBreezyResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parseBreezyResponse throws, naming what it got, for a body that is not a board');
   }
 
   // a row already containing "Remote" must not get a duplicate "Remote" suffix
