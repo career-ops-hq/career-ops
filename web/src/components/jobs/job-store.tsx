@@ -5,7 +5,7 @@ import { scoreTone } from "@/lib/format";
 import { resolveCliId } from "@/lib/saved-cli";
 import { createWorkerFeedback } from "@/lib/worker-feedback.mjs";
 import { readJobStream } from "@/lib/job-stream.mjs";
-import { createJobsPersister } from "@/lib/jobs-persist.mjs";
+import { createJobsPersister, restoreStoredJobs, saveJobsAfterOpen } from "@/lib/jobs-persist.mjs";
 import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
@@ -76,21 +76,18 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     return () => { owner.dispose(); feedback.current = null; };
   }, []);
   const seq = useRef(0);
-  const loaded = useRef(false);
 
-  // restore history
+  // Restore first. setReady in this effect, and save only on a later render
+  // where ready is already true. Saving from a ref flipped in this same
+  // commit still sees the initial empty list and writes it over storage.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(arr)) {
-        // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
-      }
+      if (Array.isArray(arr)) setJobs(restoreStoredJobs(arr, Date.now()));
     } catch {
       /* ignore */
     }
-    loaded.current = true;
     setReady(true);
   }, []);
 
@@ -120,9 +117,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
   useEffect(() => {
-    if (!loaded.current) return;
-    persister.current?.save(jobs);
-  }, [jobs]);
+    saveJobsAfterOpen(persister.current, ready, jobs);
+  }, [jobs, ready]);
 
   const patch = useCallback((id: string, fn: (j: Job) => Job) => {
     setJobs((js) => js.map((j) => (j.id === id ? fn(j) : j)));

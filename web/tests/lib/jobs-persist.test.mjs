@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createJobsPersister } from "../../src/lib/jobs-persist.mjs";
+import { createJobsPersister, restoreStoredJobs, saveJobsAfterOpen } from "../../src/lib/jobs-persist.mjs";
 
 const webRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -70,6 +70,35 @@ test("the jobs provider stores through the persister and flushes on pagehide", (
   const src = readFileSync(join(webRoot, "src/components/jobs/job-store.tsx"), "utf8");
   assert.match(src, /createJobsPersister(<[^>]*>)?\(/);
   assert.match(src, /addEventListener\("pagehide"/);
+  assert.match(src, /saveJobsAfterOpen\(persister\.current, ready, jobs\)/);
+  assert.doesNotMatch(src, /loaded\.current/);
   // One direct write is left: the persister's own write callback.
   assert.equal(src.match(/localStorage\.setItem\(/g)?.length, 1);
+});
+
+test("opening does not write the empty list over a saved running worker", () => {
+  const stored = [{
+    id: "job-1",
+    title: "Evaluate Fixture Co",
+    status: "running",
+    steps: [{ kind: "status", label: "Started", ts: 1 }],
+  }];
+  const restored = restoreStoredJobs(stored, 50);
+  assert.equal(restored[0].status, "error");
+  assert.equal(restored[0].title, "Evaluate Fixture Co");
+  assert.equal(restored[0].steps.at(-1).label, "Interrupted (page reloaded)");
+  assert.equal(restored[0].steps[0].label, "Started");
+  assert.equal(stored[0].status, "running", "restore does not edit the stored object");
+
+  const { persister, writes } = harness();
+  saveJobsAfterOpen(persister, false, []);
+  assert.equal(writes.length, 0, "the first render's empty list is not stored");
+  saveJobsAfterOpen(persister, true, restored);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0][0].status, "error");
+  assert.equal(writes[0][0].title, "Evaluate Fixture Co");
+
+  const done = restoreStoredJobs([{ id: "job-2", status: "done", title: "Scan Fixture Co", steps: [] }], 50);
+  assert.equal(done[0].status, "done");
+  assert.deepEqual(restoreStoredJobs(null, 50), []);
 });
