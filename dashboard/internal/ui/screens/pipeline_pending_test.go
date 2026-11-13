@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/santifer/career-ops/dashboard/internal/data"
@@ -175,22 +176,77 @@ func TestInboxOrdersByRankThenUnranked(t *testing.T) {
 		t.Fatalf("order = %v, want %v", roles, want)
 	}
 	body := ansi.Strip(strings.Join(m.renderBodyWindow(0, 10), "\n"))
-	if !strings.Contains(body, "4.5/5") || !strings.Contains(body, "2.1/5") {
-		t.Fatalf("body lacks the ranks:\n%s", body)
+	if !strings.Contains(body, "4.5") || !strings.Contains(body, "2.1") || strings.Contains(body, "/5") {
+		t.Fatalf("body lacks the ranks, or shows them with /5:\n%s", body)
 	}
 	if strings.Index(body, "High") > strings.Index(body, "Low") || strings.Index(body, "Low") > strings.Index(body, "Unranked") {
 		t.Fatalf("rendered order is wrong:\n%s", body)
 	}
 }
 
-func TestInboxUnrankedRowSaysNotRankedWithNoNumber(t *testing.T) {
+func TestInboxUnrankedRowShowsADashAndThePreviewSaysNotRanked(t *testing.T) {
 	m := onInbox(t, newInboxModel(t, []data.PendingRow{{URL: "https://jobs.example.com/u", Company: "Acme", Role: "Unranked"}}))
 	line := ansi.Strip(m.renderPendingLine(m.pendingView[0], false))
-	if !strings.Contains(line, i18n.Current.InboxNotRanked) || strings.Contains(line, "/5") {
-		t.Fatalf("unranked row = %q, want %q and no /5", line, i18n.Current.InboxNotRanked)
+	if !strings.HasPrefix(strings.TrimSpace(line), "—") || strings.Contains(line, "/5") {
+		t.Fatalf("unranked row = %q, want the tracker's em dash first and no /5", line)
 	}
 	if preview := ansi.Strip(m.renderPreview()); !strings.Contains(preview, i18n.Current.InboxNotRanked) || strings.Contains(preview, "/5") {
 		t.Fatalf("preview = %q", preview)
+	}
+}
+
+// The Inbox columns follow the tracker's order (score, company, role, status,
+// location, posted), so switching tabs does not reshuffle the table.
+func TestInboxColumnsFollowTheTrackerOrder(t *testing.T) {
+	m := onInbox(t, newInboxModel(t, inboxRows()))
+	header := ansi.Strip(m.renderColumnHeader())
+	labels := []string{i18n.Current.ColRank, i18n.Current.ColCompany, i18n.Current.ColRole,
+		i18n.Current.ColStatus, i18n.Current.ColLocation, i18n.Current.ColPosted}
+	last := -1
+	for _, label := range labels {
+		at := strings.Index(header, label)
+		if at <= last {
+			t.Fatalf("header %q: %q is out of order, want %v", header, label, labels)
+		}
+		last = at
+	}
+	line := ansi.Strip(m.renderPendingLine(m.pendingView[0], false))
+	status, loc := strings.Index(line, i18n.Current.InboxStatusQueued), strings.Index(line, "Berlin")
+	if status < 0 || loc < 0 || status > loc {
+		t.Fatalf("row %q: want the status, then the location", line)
+	}
+	if !strings.HasPrefix(strings.TrimSpace(line), "4.5 ") {
+		t.Fatalf("row %q: want the rank as the tracker shows a score, 4.5 with no /5", line)
+	}
+}
+
+// The Inbox uses the tracker's location width, drops posted and then location
+// as the tracker does when the terminal narrows, and keeps every row within it.
+func TestInboxColumnWidthsAndNarrowing(t *testing.T) {
+	for _, tc := range []struct {
+		width            int
+		wantLoc, wantPos bool
+	}{{140, true, true}, {80, true, false}, {40, false, false}} {
+		m := onInbox(t, newInboxModel(t, inboxRows()))
+		m.width = tc.width
+		cw := m.pendingColumnWidths()
+		if (cw.loc > 0) != tc.wantLoc || (cw.posted > 0) != tc.wantPos {
+			t.Errorf("width %d: loc=%d posted=%d, want loc shown %v, posted shown %v", tc.width, cw.loc, cw.posted, tc.wantLoc, tc.wantPos)
+		}
+		if cw.loc > 0 && cw.loc != 20 {
+			t.Errorf("width %d: loc = %d, want the tracker's 20", tc.width, cw.loc)
+		}
+		if cw.posted > 0 && cw.loc == 0 {
+			t.Errorf("width %d: posted shown without location; posted must drop first", tc.width)
+		}
+		for i, row := range m.pendingView {
+			if w := lipgloss.Width(m.renderPendingLine(row, i == 0)); w > tc.width {
+				t.Errorf("width %d: row %d is %d cells wide", tc.width, i, w)
+			}
+		}
+		if w := lipgloss.Width(m.renderColumnHeader()); w > tc.width {
+			t.Errorf("width %d: header is %d cells wide", tc.width, w)
+		}
 	}
 }
 

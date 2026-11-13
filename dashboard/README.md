@@ -20,8 +20,10 @@ value.
 ### Inbox tab
 
 The INBOX tab, left of ALL, lists the unchecked rows of the Pending section of
-`data/pipeline.md`: rank, company, role, location, posted date and batch
-status. ALL stays the tab the dashboard opens on. The rank is the first-pass
+`data/pipeline.md`: rank, company, role, batch status, location and posted
+date, in the tracker tabs' column order and with their company, location and
+posted widths. A row with no rank shows the tracker's `—`. ALL stays the tab
+the dashboard opens on. The rank is the first-pass
 rank `rank-pipeline.mjs` writes (`rank: 4.2/5 — reason`), not an evaluation
 score; rows are ordered by it, highest first, with unranked rows after them,
 and the preview shows the rank reason and the URL. The status is what
