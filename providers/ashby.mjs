@@ -14,6 +14,7 @@
 import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { workplaceField } from './_workplace-type.mjs';
 
 // verify-portals.mjs probes Ashby boards with it too, so both read the same board.
 export const ASHBY_TIMEOUT_MS = 30_000;
@@ -471,12 +472,12 @@ async function fetchFromEmbed(entry, ctx) {
       url: encodedId === null ? '' : `https://${EMBED_HOST}/${encodedSlug}/${encodedId}`,
       company: entry.name,
       location,
+      ...workplaceField(p.workplaceType),
       // The embed payload carries neither descriptionPlain nor publishedAt —
       // the posting API's two extras — and compensation only as a display string
       // (compensationTierSummary), which is not parsed: a bare "$" names no
       // currency. An absent date means "unknown", never
-      // "stale", so nothing is invented here. workplaceType is folded into
-      // location above, exactly as on the API path, and not emitted on its own.
+      // "stale", so nothing is invented here.
     };
   }).filter((/** @type {any} */ j) => j && j.title && j.url);
 }
@@ -589,6 +590,7 @@ export default {
       description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',
       salary: parseCompensation(j),
       postedAt: toEpochMs(j.publishedAt),
+      ...workplaceField(j.workplaceType),
     }));
   },
 };
