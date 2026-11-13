@@ -31,11 +31,11 @@ import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
 import { getCareerOpsRoot, resolveBatchStatePaths } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
-import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
+import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks, soleMarkdownLink, unwrapReportUrlToken, extractTrackerReportLinks } from './tracker-parse.mjs';
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, resolveCanonicalStateId, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken } from './tracker-utils.mjs';
 // Canonical posting-URL key and URL comparison, shared with the other tracker
 // scripts and scan.mjs so the definitions cannot drift apart.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
@@ -549,6 +549,80 @@ export async function mergeTracker(options = {}) {
     if (!isUnsetUrlCell(app.url)) return app.url;
     if (!reportUrls.has(app.report)) reportUrls.set(app.report, resolveReportUrl(app.report).url);
     return reportUrls.get(app.report);
+  }
+
+  // An explicitly declared employer posting in the report's top metadata is
+  // negative evidence only. An aggregator URL is not a verified alias for it,
+  // but a different requisition on that SAME ATS board must not overwrite it
+  // merely because the company and title match. Never scan JD prose for links.
+  const declaredEmployerUrls = new Map();
+  let resolvePostingApi = null;
+  let workdayPostingKey = null;
+  function reportFieldForMetadata(app) {
+    const direct = String(app.report ?? '').trim();
+    if (direct && !PLACEHOLDER_CELL.test(direct)) return direct;
+    // With no Report column buildRow appends "Report: <link>." to Notes.
+    // Prefer that last valid marked reference over older examples/history.
+    const notes = String(app.notes ?? '');
+    const markers = [...notes.matchAll(/(?:^|\s)Report:\s*(?=\[)/gi)];
+    for (const marker of markers.reverse()) {
+      const tail = notes.slice(marker.index + marker[0].length);
+      // Use the shared parser for escaped/balanced report filenames. A partial
+      // first link must not make a later unmarked prose link authoritative.
+      const endings = [...tail.matchAll(/\)\.(?=\s|$)/g)].map(match => match.index + 1);
+      endings.push(tail.trimEnd().length);
+      for (const end of endings) {
+        const field = tail.slice(0, end);
+        if (soleMarkdownLink(field)) return field;
+      }
+    }
+    return '';
+  }
+  function declaredEmployerUrl(app) {
+    const reportField = reportFieldForMetadata(app);
+    if (declaredEmployerUrls.has(reportField)) return declaredEmployerUrls.get(reportField);
+    let url = '';
+    const reportPath = resolveReportPath(reportField);
+    if (reportPath) {
+      for (const line of readFileSync(reportPath, 'utf-8').replace(/\r\n?/g, '\n').split('\n')) {
+        // Body sections, examples, and machine-summary payloads are not metadata.
+        if (/^[ \t]*(?:#{2,}(?:\s|$)|`{3,}|~{3,}|<!--)/.test(line)) break;
+        const match = line.match(/^[ ]{0,3}\*\*Official employer posting:\*\*[ \t]*(\S+)/i);
+        if (!match) continue;
+        const raw = unwrapReportUrlToken(match[1]);
+        if (normalizeUrl(raw) && !isAggregatorUrl(raw)) url = raw;
+        break;
+      }
+    }
+    declaredEmployerUrls.set(reportField, url);
+    return url;
+  }
+
+  function atsPostingIdentity(url) {
+    const resolved = resolvePostingApi?.(url);
+    if (!resolved) return null;
+    const idField = resolved.ats === 'workday' ? 'jobPath'
+      : ['jobId', 'id', 'shortcode'].find(key => resolved.parts[key]);
+    if (!idField) return null;
+    const scope = Object.entries(resolved.parts).filter(([key]) => key !== idField)
+      .sort(([a], [b]) => a.localeCompare(b));
+    // Reuse Workday's validated trailing requisition token, not its title or
+    // location slug. Keep the resolver's tenant/shard/site as comparison scope.
+    const rawId = resolved.ats === 'workday'
+      ? workdayPostingKey?.({ url })?.split(':').pop() : resolved.parts[idField];
+    if (!rawId) return null;
+    // UUID hex is case-insensitive. Other ATS identifiers are opaque strings.
+    const id = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId)
+      ? rawId.toLowerCase() : rawId;
+    return { scope: JSON.stringify([resolved.ats, scope]), id };
+  }
+
+  function declaredEmployerConflict(a, b) {
+    const declaredA = declaredEmployerUrl(a);
+    const declaredB = declaredEmployerUrl(b);
+    if (!declaredA && !declaredB) return false;
+    const identities = app => [postingUrl(app), declaredEmployerUrl(app)].map(atsPostingIdentity).filter(Boolean);
+    return identities(a).some(left => identities(b).some(right => left.scope === right.scope && left.id !== right.id));
   }
 
   /**
@@ -1922,6 +1996,32 @@ export async function mergeTracker(options = {}) {
         missingReports++;
       }
 
+      const incomingReportTargets = new Set(extractTrackerReportLinks(addition.report, addition.notes).map(link => link.target));
+      // The optional metadata guard alone needs the API URL parser. Load its
+      // provider graph only for a relevant declaration, not on every merge.
+      if (declaredEmployerUrl(addition) || existingApps.some(app =>
+        (companiesMatch(app.company, addition.company)
+          || companiesMatchIgnoringCorporateForm(app.company, addition.company)
+          || extractTrackerReportLinks(app.report, app.notes).some(link => incomingReportTargets.has(link.target))) && declaredEmployerUrl(app))) {
+        if (!resolvePostingApi) {
+          resolvePostingApi = (await import('./liveness-api.mjs')).resolveAtsApi;
+          workdayPostingKey = (await import('./providers/workday.mjs')).workdayDedupKey;
+        }
+      }
+
+      // A report number is also a PDF/index key. If it names conflicting
+      // employer requisitions, even through the same file, appending a row
+      // would preserve the wrong shared key. Keep the artifacts and the TSV
+      // pending instead; never rename a report or overwrite the prior row.
+      const conflictingReportTarget = [...incomingReportTargets].find(target => existingApps.some(app =>
+        extractTrackerReportLinks(app.report, app.notes).some(link => link.target === target)
+        && declaredEmployerConflict(app, addition)));
+      if (conflictingReportTarget !== undefined) {
+        console.error(`❌ ${file}: report #${conflictingReportTarget} names conflicting employer postings; nothing merged for this addition. Keep the reports and correct the report-number collision before re-running.`);
+        failedAdditions.push(file);
+        continue;
+      }
+
       let duplicate = null;
       // True only for a tier-1 match (report number + company): the one heuristic
       // tier where the addition is provably the same evaluation as the existing
@@ -1941,7 +2041,8 @@ export async function mergeTracker(options = {}) {
       const addUrl = normalizeUrl(addition.url);
       let dupReason = null;
       if (addUrl) {
-        duplicate = existingApps.find(a => normalizeUrl(postingUrl(a)) === addUrl);
+        duplicate = existingApps.find(a => normalizeUrl(postingUrl(a)) === addUrl
+          && !declaredEmployerConflict(a, addition));
         if (duplicate) dupReason = 'url';
       }
 
@@ -2015,15 +2116,26 @@ export async function mergeTracker(options = {}) {
       // it, but it is not proof of one either: a bare row SKIPped for its German
       // text and an incoming evaluation of the English version share a title,
       // and folding them would bury the English one under the SKIP.
+      const additionReqNum = extractReqNumber(addition.notes);
       const urlBlocksHeuristic = (cand) => {
+        if (declaredEmployerConflict(cand, addition)) return true;
         if (urlDiffers(cand)) return true;
         const candPostingUrl = postingUrl(cand);
+        // An old stop with no posting, req, or report identity cannot identify
+        // a newly keyed opening merely by row number or a similar title. Keep
+        // its decision intact; the exact URL/report tiers remain authoritative.
+        if ((addUrl || additionReqNum) && !normalizeUrl(candPostingUrl)
+          && !extractReqNumber(cand.notes)
+          && extractReportNum(cand.report, cand.notes) === null
+          && !resolveReportTarget(cand.report)) {
+          const state = resolveCanonicalStateId(cand.status, _canonicalStates);
+          if (state === 'skip' || state === 'discarded') return true;
+        }
         if (!isAggregatorUrl(candPostingUrl) && !isAggregatorUrl(addition.url)
           && postingUrlRelation(candPostingUrl, addition.url) === 'one-sided-language') return true;
         return Boolean(normalizeUrl(candPostingUrl)) && !addUrl;
       };
 
-      const additionReqNum = extractReqNumber(addition.notes);
       // Req IDs are evidence against a heuristic match only when both sides carry
       // one and they disagree. Missing on either side stays unknown, matching the
       // existing tier-3 guard and the URL guard above.
@@ -2068,7 +2180,8 @@ export async function mergeTracker(options = {}) {
         duplicate = existingApps.find(app => {
           const existingReportNum = extractReportNum(app.report, app.notes);
           // Provable tier: only a CONFLICT disqualifies, never a missing key.
-          return existingReportNum === reportNum && companiesMatch(app.company, addition.company) && !urlDiffers(app);
+          return existingReportNum === reportNum && companiesMatch(app.company, addition.company)
+            && !urlDiffers(app) && !declaredEmployerConflict(app, addition);
         });
         if (duplicate) reportNumMatched = true;
       }
