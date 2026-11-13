@@ -35,7 +35,7 @@ import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnset
 // The ATS vendor table shared with analyze-patterns.mjs and the scanners, so
 // the URL cell's label and the per-vendor analysis name a board identically.
 import { atsVendorOf } from './ats-vendor.mjs';
-import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, backupFileAtomically, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken, resolveCanonicalStateId } from './tracker-utils.mjs';
+import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerLockDirFor, acquireTrackerLock, writeFileAtomic, backupFileAtomically, normalizeCompany, companiesMatchIgnoringCorporateForm, cell, loadCanonicalStates, findDeadReportLink, rebuildRow, trackerLinkDirsFor, containedReportTarget, containedReportFile, reportUrlToken, resolveCanonicalStateId, stripStatusDecoration } from './tracker-utils.mjs';
 // Canonical posting-URL key and URL comparison, shared with the other tracker
 // scripts and scan.mjs so the definitions cannot drift apart.
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
@@ -427,6 +427,12 @@ export async function mergeTracker(options = {}) {
   // SKIP are not in this set: this guard is about a posting already submitted.
   const SUBMITTED_STATUS_IDS = new Set(['applied', 'responded', 'assessment', 'interview', 'offer', 'hired']);
   const submittedStatus = (status) => {
+    // No states file: resolveCanonicalStateId cannot name an id, so every
+    // status would look unsubmitted and an Applied row could be retargeted.
+    // These English labels are still readable on the row. Aliases need the file.
+    if (!_canonicalStates.length) {
+      return SUBMITTED_STATUS_IDS.has(stripStatusDecoration(status).toLowerCase());
+    }
     const id = resolveCanonicalStateId(status, _canonicalStates);
     return id !== null && SUBMITTED_STATUS_IDS.has(id);
   };
