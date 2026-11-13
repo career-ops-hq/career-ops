@@ -99,3 +99,10 @@ test('audit reports only variants with problems, and [] with none', () => {
   assert.deepEqual(findings.map((f) => f.name), ['bad']);
   assert.equal(findings[0].problems[0].type, 'parse');
 });
+
+test('a file name --variant cannot select is a name problem, and the audit still runs', () => {
+  const root = workspace({ 'Back End.md': OMIT_AND_REORDER, 'bad.md': '# Jane\n' });
+  const findings = auditCvVariants({ root });
+  assert.deepEqual(findings.map((f) => f.problems[0].type), ['name', 'parse']);
+  assert.match(findings[0].problems[0].detail, /back-end\.md/);
+});
