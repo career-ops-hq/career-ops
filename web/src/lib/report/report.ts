@@ -1,16 +1,7 @@
 import { recentLogs } from "./logbuf";
+import { scrub } from "./scrub.mjs";
 
 const REPO = "career-ops-hq/career-ops";
-
-/** Strip PII / secrets that could ride in error text, paths or logs BEFORE anything
- *  leaves the machine. Defence-in-depth — the user also reviews the full payload
- *  (preview-then-confirm) before the issue opens. */
-export function scrub(s: string): string {
-  return (s || "")
-    .replace(/\/Users\/[^/\s"']+/g, "~")
-    .replace(/\/home\/[^/\s"']+/g, "~")
-    .replace(/(sk|key|token|secret|bearer|api[-_]?key)([-_=:\s"']+)[A-Za-z0-9._-]{8,}/gi, "$1$2[redacted]");
-}
 
 /** Structural fingerprint from /api/report/shape — shapes/counts, never contents. */
 export type Shape = {
