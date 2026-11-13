@@ -27,7 +27,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from './lib/is-main-module.mjs';
 import { parseOutputName, slugFromReport } from './lib/output-names.mjs';
 
 // Agent working files that are not deliverables live in this one subdirectory.
@@ -180,4 +180,4 @@ async function main() {
   for (const l of lines) console.log(l);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) await main();
+if (isMainModule(import.meta.url)) await main();
