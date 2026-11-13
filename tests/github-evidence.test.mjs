@@ -438,7 +438,9 @@ function cli(root, runGh, args = ['--json']) {
   return { code, out, err };
 }
 
-const outputFiles = (root) => (existsSync(join(root, 'output')) ? readdirSync(join(root, 'output')) : []);
+// Run files land in output/diagnostics/ (#7006); "nothing written" must hold for output/ too.
+const outputFiles = (root) => (existsSync(join(root, 'output', 'diagnostics')) ? readdirSync(join(root, 'output', 'diagnostics')) : []);
+const legacyFiles = (root) => (existsSync(join(root, 'output')) ? readdirSync(join(root, 'output')).filter((n) => n.endsWith('.json') || n.endsWith('.md')) : []);
 
 {
   const root = sandbox();
@@ -510,8 +512,9 @@ const outputFiles = (root) => (existsSync(join(root, 'output')) ? readdirSync(jo
     check(res.code === 0, res.code === 0 ? 'success -> exit 0' : `success -> exit 0 (got ${res.code}: ${res.err.trim()})`);
     const files = outputFiles(root).sort();
     check(JSON.stringify(files) === JSON.stringify(['github-evidence-2026-10-16.json', 'github-evidence-2026-10-16.md']),
-      `writes output/github-evidence-{date}.{json,md} under the data root (got ${files})`);
-    const written = JSON.parse(readFileSync(join(root, 'output', 'github-evidence-2026-10-16.json'), 'utf8'));
+      `writes output/diagnostics/github-evidence-{date}.{json,md} under the data root (got ${files})`);
+    check(legacyFiles(root).length === 0, 'a new run writes nothing into output/ itself');
+    const written = JSON.parse(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-16.json'), 'utf8'));
     const printed = JSON.parse(res.out);
     check(written.status === 'ok' && printed.user === 'jane-doe', '--json prints the same report on stdout');
     check(written.contributions.some((c) => c.repo === 'ClientCo/App'), 'the profile allowlist reaches the report');
@@ -526,7 +529,7 @@ const outputFiles = (root) => (existsSync(join(root, 'output')) ? readdirSync(jo
   try {
     const { runner, calls } = fakeGh(readmeFixture());
     const res = cli(root, runner);
-    const written = JSON.parse(readFileSync(join(root, 'output', 'github-evidence-2026-10-16.json'), 'utf8'));
+    const written = JSON.parse(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-16.json'), 'utf8'));
     check(res.code === 0 && calls.some((a) => String(a[1]).endsWith('/readme')) && written.readmes.length > 0,
       'CLI: read_readmes: true enables README reads for allowlisted repos');
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -812,7 +815,7 @@ const countTarget = (a) => /^repos\/([^/]+\/[^/?]+)\/commits\?/.exec(String(a[1]
     });
     const res = cli(root, runner);
     check(res.code === 0, res.code === 0 ? 'CLI with commits -> exit 0' : `CLI with commits -> exit 0 (got ${res.code}: ${res.err.trim()})`);
-    const written = JSON.parse(readFileSync(join(root, 'output', 'github-evidence-2026-10-16.json'), 'utf8'));
+    const written = JSON.parse(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-16.json'), 'utf8'));
     check(written.claimCheck.commitsNotNamed.some((c) => c.repo === 'pushco/service') && written.commitSearch.status === 'ok',
       'CLI: a commits-only repo reaches claimCheck.commitsNotNamed in the written JSON');
     check(written.privateNotAllowlisted.some((r) => r.repo === 'orgco/internal' && r.commits.count === 1 && !('first' in r.commits)),

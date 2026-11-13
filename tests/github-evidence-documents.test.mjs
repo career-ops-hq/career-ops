@@ -375,8 +375,8 @@ function cli(root, runGh) {
       profilePath: join(root, 'config', 'profile.yml'), today: '2026-10-23',
       stdout: () => {}, stderr: () => {}, pause: () => {},
     });
-    const json = JSON.parse(readFileSync(join(root, 'output', 'github-evidence-2026-10-23.json'), 'utf8'));
-    const md = readFileSync(join(root, 'output', 'github-evidence-2026-10-23.md'), 'utf8');
+    const json = JSON.parse(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-23.json'), 'utf8'));
+    const md = readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-23.md'), 'utf8');
     check(result === 0 && json.documents?.status === 'skipped' && treeCalls === 0,
       'the skip flag omits document tree queries and marks documents skipped');
     check(md.includes('Document listing skipped') && json.contributions.length > 0,
@@ -394,8 +394,8 @@ function cli(root, runGh) {
       `    - "clientco/app"`, `    - "clientco/app"\n    - "secretco/private-repo"`,
     ));
     const result = cli(root, fullGh({ leakHiddenErrors: true }).runner);
-    const json = readFileSync(join(root, 'output', 'github-evidence-2026-10-23.json'), 'utf8');
-    const md = readFileSync(join(root, 'output', 'github-evidence-2026-10-23.md'), 'utf8');
+    const json = readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-23.json'), 'utf8');
+    const md = readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-23.md'), 'utf8');
     const allOutput = `${json}\n${md}\n${result.err}`;
     check(result.code === 0 && /HTTP 403 forbidden/.test(json) && /HTTP 404 not found/.test(json),
       'hidden-repo failures preserve safe HTTP status and error kind');
@@ -416,8 +416,8 @@ function cli(root, runGh) {
     const good = cli(root, fullGh().runner);
     const bad = cli(failRoot, fullGh({ failDocs: true }).runner);
     check(good.code === 0 && bad.code === 0, `exit 0 whether the document listing works or fails (got ${good.code}, ${bad.code})`);
-    const goodJson = JSON.parse(readFileSync(join(root, 'output', 'github-evidence-2026-10-23.json'), 'utf8'));
-    const badJson = JSON.parse(readFileSync(join(failRoot, 'output', 'github-evidence-2026-10-23.json'), 'utf8'));
+    const goodJson = JSON.parse(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-23.json'), 'utf8'));
+    const badJson = JSON.parse(readFileSync(join(failRoot, 'output', 'diagnostics', 'github-evidence-2026-10-23.json'), 'utf8'));
     check(goodJson.documents?.status === 'partial' && rowOf(goodJson.documents, 'ClientCo/App'),
       'the JSON carries `documents`, with the profile allowlist applied');
     check(badJson.documents?.status === 'failed' && /document listing failed/.test(bad.err),
@@ -427,7 +427,7 @@ function cli(root, runGh) {
     check(same(restGood, restBad) && same(Object.keys(goodJson).slice(0, -1), Object.keys(restBad)),
       'every other key of the report is the same whether the listing works or fails');
     check(same(JSON.parse(good.out), goodJson), '--json prints the same report, documents included');
-    const md = readFileSync(join(root, 'output', 'github-evidence-2026-10-23.md'), 'utf8');
+    const md = readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-23.md'), 'utf8');
     check(md.includes('## Claim check against cv.md') && md.includes('## Documents on default branches (names only, never opened)')
       && md.indexOf('## Documents on default branches') > md.indexOf('## Your own repos'),
       'the Markdown report keeps its sections and adds the document section last');

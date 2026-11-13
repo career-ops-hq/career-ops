@@ -5,7 +5,8 @@
  * `oferta`, `auto-pipeline` and batch workers score a JD against cv.md,
  * article-digest.md and the profile. GitHub activity reaches those files only
  * when the user runs `expand`, whose optional step (github-evidence.mjs) writes
- * output/github-evidence-{YYYY-MM-DD}.{md,json}. Nothing said how old that scan
+ * output/diagnostics/github-evidence-{YYYY-MM-DD}.{md,json} (older scans sit in
+ * output/, and are still found). Nothing said how old that scan
  * was, so PRs merged after it were silently missing from the fit and a score
  * could understate it with no warning.
  *
@@ -13,7 +14,7 @@
  * so nobody gets a GitHub call they did not ask for. Interactive evaluations run
  * it once before Block A; batch-runner.sh runs it once per batch run and hands
  * the result to every worker. When on, it reports:
- *   - the newest output/github-evidence-*.json and how many days old it is
+ *   - the newest github-evidence-*.json and how many days old it is
  *   - how many PRs the user authored and merged since then in repos they do not
  *     own (owning a repo is not authorship, so github-evidence.mjs never counts
  *     those either), from ONE metadata-only `gh search prs` call through the
@@ -38,7 +39,7 @@
  */
 
 import { spawnSync } from 'child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
@@ -46,12 +47,13 @@ import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { normalizeGithubUser } from './github-evidence.mjs';
+import { listScanFiles } from './lib/github-evidence-paths.mjs';
 
 const KNOWN_FLAGS = ['--help', '-h'];
 const USAGE = `Usage:
   node evidence-freshness.mjs   # JSON on stdout, always exit 0
 
-Says whether the newest output/github-evidence-*.json is stale: its age, and
+Says whether the newest github-evidence-*.json (output/diagnostics/ or output/) is stale: its age, and
 the PRs you authored and merged since then in repos you do not own (one
 metadata-only gh search through your existing gh auth). Read-only.
 Opt-in: set config/profile.yml -> evidence_freshness.enabled: true.`;
@@ -61,7 +63,6 @@ export const DEFAULTS = Object.freeze({ enabled: false, minNewMergedPrs: 5, maxA
 /** One search page: the count is exact below this and shown as "100+" at it. */
 export const QUERY_LIMIT = 100;
 
-const SCAN_FILE_RE = /^github-evidence-(\d{4})-(\d{2})-(\d{2})\.json$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -107,14 +108,9 @@ export function readThresholds(profile) {
  * @returns {{date: string, file: string, since: string}|null}
  */
 export function findLatestScan(dataRoot, user) {
-  const dir = join(dataRoot, 'output');
-  if (!existsSync(dir)) return null;
-  const candidates = readdirSync(dir)
-    .map((name) => ({ name, m: name.match(SCAN_FILE_RE) }))
-    .filter(({ m }) => m && isCalendarDate(+m[1], +m[2], +m[3]))
-    .sort((a, b) => b.name.localeCompare(a.name));
-  for (const { name, m } of candidates) {
-    const path = join(dir, name);
+  const candidates = listScanFiles(join(dataRoot, 'output'))
+    .filter(({ date }) => { const [y, mo, d] = date.split('-').map(Number); return isCalendarDate(y, mo, d); });
+  for (const { date, path, rel } of candidates) {
     let doc;
     try {
       doc = JSON.parse(readFileSync(path, 'utf8'));
@@ -123,15 +119,15 @@ export function findLatestScan(dataRoot, user) {
     }
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) continue;
     if (typeof doc.user === 'string' && doc.user.toLowerCase() !== user.toLowerCase()) continue;
-    const date = `${m[1]}-${m[2]}-${m[3]}`;
-    let since = isoSeconds(new Date(+m[1], +m[2] - 1, +m[3]));
+    const [y, mo, d] = date.split('-').map(Number);
+    let since = isoSeconds(new Date(y, mo - 1, d));
     try {
       const mtime = statSync(path).mtime;
       if (localToday(mtime) === date) since = isoSeconds(mtime);
     } catch {
       // Unreadable metadata: keep the start of the scan's day.
     }
-    return { date, file: `output/${name}`, since };
+    return { date, file: rel, since };
   }
   return null;
 }
