@@ -75,6 +75,17 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
   );
 
+  // taleez.parseTaleezResponse — for…of over the site's jobs[]; slug feeds the posting URL.
+  const { parseTaleezResponse } = await load('taleez.mjs');
+  check(
+    'taleez.parseTaleezResponse',
+    () => parseTaleezResponse(
+      { jobs: [{ id: 1, label: 'Bad Slug', slug: `${LONE}bad` }, { id: 2, label: 'Good Slug', slug: 'ok-2' }] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://taleez.com/apply/ok-2',
+  );
+
   // hibob.parseHibobJobAds — for…of over jobAdDetails; id feeds the posting URL.
   const { parseHibobJobAds } = await load('hibob.mjs');
   check(
@@ -106,6 +117,17 @@ try {
       'X', { origin: 'https://x.darwinbox.in', companyId: 'main' },
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.darwinbox.in/ms/candidatev2/main/careers/jobDetails/a5',
+  );
+
+  // turbohire.parseTurbohireResponse — for…of over the Result array.
+  const { parseTurbohireResponse } = await load('turbohire.mjs');
+  check(
+    'turbohire.parseTurbohireResponse',
+    () => parseTurbohireResponse(
+      { Total: 2, Result: [{ JobIdObfuscated: `${LONE}bad`, JobTitle: 'Bad Id' }, { JobIdObfuscated: 'a5', JobTitle: 'Good Id' }] },
+      'X', { tenant: 'x', origin: 'https://x.turbohire.co' },
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.turbohire.co/job/publicjobs/a5',
   );
 
   // jibeapply.parseJibeapplyResponse — .map().filter(Boolean) over one page.
@@ -392,6 +414,32 @@ try {
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.aldi-nord.de/karriere/detail/good-id-101.html',
   );
+
+  // talentlink.parseJobsResponse — for…of over the FO jobs[]; id feeds the posting URL.
+  const { parseJobsResponse: parseTalentlinkJobs, parseCriteria: parseTalentlinkCriteria } = await load('talentlink.mjs');
+  check(
+    'talentlink.parseJobsResponse',
+    () => parseTalentlinkJobs(
+      { globals: { jobsCount: 2 }, jobs: [{ id: `${LONE}bad`, jobFields: { jobTitle: 'Bad Id' } }, { id: 101, jobFields: { jobTitle: 'Good Id' } }] },
+      { detailPage: 'https://acme.recruitmentplatform.com/details.html', company: 'Acme', locations: parseTalentlinkCriteria(null) },
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://acme.recruitmentplatform.com/details.html?jobId=101',
+  );
+
+  // themuse.parseSearchPage — for…of over the /search cards; the title-link
+  // href feeds the posting URL, so a lone surrogate in it must drop just
+  // that card (the href is validated against a /jobs/{company}/{slug}
+  // shape, and lone surrogates are rejected explicitly).
+  const { parseSearchPage: parseMusePage } = await load('themuse.mjs');
+  const museCard = (href, title) =>
+    `<article class="sr-tile" data-job-id="00000000-0000-0000-0000-000000000000"><div class="sr-tile__body"><h2 class="sr-tile__title"><a href="${href}">${title}</a></h2><div class="sr-tile__details"><p>At <a href="/profiles/acme">Acme</a> - Berlin</p><p>Posted on Nov 10</p></div></div></article>`;
+  check(
+    'themuse.parseSearchPage',
+    () => parseMusePage(
+      `<h1 class="sr-count"><strong>2</strong> jobs</h1>${museCard(`/jobs/acme/${LONE}bad`, 'Bad Id')}${museCard('/jobs/acme/good-id', 'Good Id')}`,
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.themuse.com/jobs/acme/good-id',
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
@@ -443,10 +491,13 @@ try {
     'platsbanken.mjs',
     'polymer.mjs',
     'remote-com.mjs',
+    'taleez.mjs',
+    'talentlink.mjs',
     'techinasia.mjs',
     'thehub.mjs',
     'tkms.mjs',
     'trakstar.mjs',
+    'turbohire.mjs',
     'vdab.mjs',
     'zoho-recruit.mjs',
   ];

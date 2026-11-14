@@ -235,7 +235,7 @@ I nomi dei campi dell'intestazione (`Date`, `URL`, `Archetype`, `Score`, `Legiti
 ## Score Evidence
 (cinque dimensioni, stato dell'evidenza, domande aperte, Evidence confidence, priorità)
 
-## H) Bozze di risposta per la candidatura
+## H) Bozze di risposta per la candidatura (draft)
 (solo se punteggio >= 4.5 -- risposte pronte per i moduli del portale aziendale)
 
 ---
@@ -313,7 +313,7 @@ Registrare **SEMPRE** la valutazione nel tracker. Scrivere un TSV (regola 9 di `
 **Formato del tracker:**
 
 ```markdown
-| # | Data | Azienda | Ruolo | Punteggio | Stato | PDF | Report |
+| # | Data | Azienda | Ruolo | Punteggio | Stato | PDF | Report | Notes |
 ```
 
 ### 3. Osservazioni salariali (solo cifra desiderata)

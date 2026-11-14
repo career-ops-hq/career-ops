@@ -26,6 +26,8 @@ export const STATUS_ALIAS = {
   verificar: "EVALUATED",
   "değerlendirildi": "EVALUATED",
   degerlendirildi: "EVALUATED",
+  "已评估": "EVALUATED",
+  "已評估": "EVALUATED",
   evaluado: "EVALUATED", // web-only: not in states.yml
   // Applied — states.yml `applied`
   aplicado: "APPLIED",
@@ -34,6 +36,10 @@ export const STATUS_ALIAS = {
   sent: "APPLIED",
   "başvuruldu": "APPLIED",
   basvuruldu: "APPLIED",
+  "已投递": "APPLIED",
+  "已申请": "APPLIED",
+  "已投遞": "APPLIED",
+  "已申請": "APPLIED",
   // Responded — states.yml `responded`
   respondido: "RESPONDED",
   "yanıt verildi": "RESPONDED",
@@ -41,23 +47,36 @@ export const STATUS_ALIAS = {
   "yanit verildi": "RESPONDED",
   yanit_verildi: "RESPONDED",
   respondida: "RESPONDED", // web-only: not in states.yml
+  "已回复": "RESPONDED",
+  "已回覆": "RESPONDED",
   contestada: "RESPONDED", // web-only: not in states.yml
   // Assessment — states.yml `assessment`
   screening: "ASSESSMENT",
   "online assessment": "ASSESSMENT",
   online_assessment: "ASSESSMENT",
   "online screening": "ASSESSMENT",
+  "笔试": "ASSESSMENT",
+  "测评": "ASSESSMENT",
+  "筆試": "ASSESSMENT",
+  "測評": "ASSESSMENT",
   // Interview — states.yml `interview`
   entrevista: "INTERVIEW",
   "mülakat": "INTERVIEW",
   mulakat: "INTERVIEW",
+  "面试": "INTERVIEW",
+  "面試": "INTERVIEW",
   // Offer — states.yml `offer`
   oferta: "OFFER",
   teklif: "OFFER",
+  "录用": "OFFER",
+  "錄用": "OFFER",
   // Rejected — states.yml `rejected`
   rechazado: "REJECTED",
   rechazada: "REJECTED",
   reddedildi: "REJECTED",
+  "已拒绝": "REJECTED",
+  "被拒": "REJECTED",
+  "已拒絕": "REJECTED",
   // Discarded — states.yml `discarded`
   descartado: "DISCARDED",
   descartada: "DISCARDED",
@@ -68,6 +87,12 @@ export const STATUS_ALIAS = {
   "ıptal edildi": "DISCARDED",
   "ıptal_edildi": "DISCARDED",
   lapsed: "DISCARDED",
+  "已放弃": "DISCARDED",
+  "放弃": "DISCARDED",
+  "已关闭": "DISCARDED",
+  "已放棄": "DISCARDED",
+  "放棄": "DISCARDED",
+  "已關閉": "DISCARDED",
   duplicado: "DISCARDED", // web-only: not in states.yml
   repost: "DISCARDED", // web-only: not in states.yml
   // SKIP — states.yml `skip`
@@ -81,6 +106,9 @@ export const STATUS_ALIAS = {
   "uygun_değil": "SKIP",
   "uygun degil": "SKIP",
   uygun_degil: "SKIP",
+  "不投": "SKIP",
+  "跳过": "SKIP",
+  "跳過": "SKIP",
   // Hired — states.yml `hired`
   contratado: "HIRED",
   contratada: "HIRED",
@@ -92,6 +120,8 @@ export const STATUS_ALIAS = {
   "işe alındı": "HIRED",
   "ise alindi": "HIRED",
   "işe alindi": "HIRED",
+  "已入职": "HIRED",
+  "已入職": "HIRED",
 };
 
 /**

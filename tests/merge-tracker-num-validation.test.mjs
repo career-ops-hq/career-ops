@@ -56,7 +56,7 @@ function mergeOne(shape, num) {
     writeFileSync(join(adds, 'a.tsv'), shapes[shape](num));
     let out = '';
     try {
-      out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      out = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
         encoding: 'utf-8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe'],
         env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(adds) },
       });

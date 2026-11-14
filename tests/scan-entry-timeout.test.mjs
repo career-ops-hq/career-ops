@@ -58,3 +58,28 @@ test('an unusable timeout_ms is ignored with a warning naming the entry', (t) =>
   assert.equal(warnings.length, bads.length);
   assert.ok(warnings.every((w) => w.includes('BadCo') && w.includes('timeout_ms')));
 });
+
+test('timeout_ms preserves the fetchJson receiver', async () => {
+  const ctx = {
+    state: {
+      name: 'Career Board'
+    },
+
+    async fetchJson(url, opts = {}) {
+      return {
+        name: this.state.name,
+        opts
+      };
+    }
+  };
+
+  applyEntryTimeout(ctx, {
+    name: 'BigCo',
+    timeout_ms: 60_000
+  });
+
+  const result = await ctx.fetchJson('https://example.com/a');
+
+  assert.equal(result.name, 'Career Board');
+  assert.equal(result.opts.timeoutMs, 60_000);
+});

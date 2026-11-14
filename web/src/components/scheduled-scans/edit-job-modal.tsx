@@ -115,7 +115,7 @@ export function EditJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="edit-scan-engine" className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label htmlFor="edit-scan-engine" className="mb-1 block text-[13px] font-medium text-foreground">Where to check</label>
               <select
                 id="edit-scan-engine"
                 value={engine}

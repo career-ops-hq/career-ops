@@ -68,6 +68,7 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const ORIGIN = 'https://www.occ.com.mx';
 const DEFAULT_MAX_PAGES = 3;
@@ -199,6 +200,7 @@ export default {
     const jobs = [];
     const errors = [];
     let succeeded = 0; // query/state pairs whose first request the board answered
+    let laterPageFailed = false; // a page after the first failed: that pair is only partly read
 
     for (const query of queries) {
       for (const state of states) {
@@ -226,6 +228,7 @@ export default {
             // Otherwise recall-first: one bad keyword/state/page must not kill
             // the whole board, but record it for the outage guard below.
             if (page === 1) errors.push(`"${query}"${state ? `/${state}` : ''}: ${(err && err.message) || err}`);
+            else laterPageFailed = true; // the pages already read are kept
             break;
           }
 
@@ -275,6 +278,11 @@ export default {
       throw new Error(`occ: all ${errors.length} search request(s) failed — ${errors[0]}`);
     }
 
+    // Part of the board was never read: a query/state pair failed or served an
+    // unreadable page 1 while another answered, or a later page failed.
+    // scan.mjs takes a board's health from the returned array, so the result
+    // says so; unmarked, the board is logged reachable as if fully read.
+    if (errors.length || laterPageFailed) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     return jobs;
   },
 };

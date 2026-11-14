@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
-import { companyDomain } from "@/lib/company";
+import { curatedCompanyDomain } from "@/lib/company";
 import { companyCacheKey } from "@/lib/core/logo-cache-key.mjs";
 import { companyDomains } from "@/lib/core/company-domains.mjs";
 import { cacheLogoResult, resolveLogo } from "@/lib/core/logo-fetch.mjs";
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     const companyKey = companyCacheKey(company);
     if (!companyKey) return new Response("bad company", { status: 400 });
     key = companyKey;
-    candidates = companyDomains(company, companyDomain);
+    candidates = companyDomains(company, curatedCompanyDomain);
     if (candidates.length === 0) return new Response("no logo", { status: 404 });
   } else {
     return new Response("need domain or company", { status: 400 });

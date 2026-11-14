@@ -377,6 +377,16 @@ export function lookupsPerMinFromEnv(env = process.env) {
 let patched = null;
 
 /**
+ * Is the process-wide dns.lookup patch installed? It is the connect-time address
+ * guard's carrier, so it is absent only when CAREER_OPS_NO_DNS_CACHE=1 opted out.
+ *
+ * @returns {boolean}
+ */
+export function dnsLookupPatched() {
+  return Boolean(patched);
+}
+
+/**
  * Pacing counters for the process-wide patched lookup.
  *
  * Zeroes when the patch is opted out, so callers never need to branch.

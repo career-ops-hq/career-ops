@@ -1,6 +1,9 @@
-import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession } from "@/lib/apply/session";
+import { getSession, finalizeDrivenSession, extractCurrent, isApplicationFormFn, handoffSession, fillSession } from "@/lib/apply/session";
 import { driveSession } from "@/lib/apply/drive";
-import { classifyEmpty } from "@/lib/apply/diagnose";
+import { classifyEmpty, verifyFill } from "@/lib/apply/diagnose";
+import { resolveSessionCv, uploadNameForCv } from "@/lib/apply/cv";
+import { answersForRefreshedFields, handoffDecision } from "@/lib/apply/handoff-gate.mjs";
+import { readbackIssues } from "@/lib/apply/prefilled-banner.mjs";
 import { resolveCliOrFallback } from "@/lib/clis";
 import { readJsonObject } from "@/lib/json-body";
 
@@ -12,7 +15,7 @@ export const maxDuration = 300;
 // REACH a fillable application form (the user watches each step live), then we
 // extract + finalize. NEVER submits (enforced in driveSession).
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { label: string; value: string }[] }>(req);
+  const body = await readJsonObject<{ sessionId?: string; cliId?: string; goal?: "reach" | "full"; answers?: { id?: string; label: string; value: string }[]; company?: string; application?: string }>(req);
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { sessionId, goal = "reach", answers } = body;
   // Same fallback as the session open that precedes every drive, which is where
@@ -44,10 +47,82 @@ export async function POST(req: Request) {
         const result = await driveSession(page, cliId, goal, isFormReady, (step) => emit({ t: "step", ...step }), budget, answers);
 
         if (goal === "full") {
-          // The agent filled the real form — bring it to the front for the human
-          // to review + submit themselves. We never submit.
-          if (result.reached) await handoffSession(s.id).catch(() => {});
-          emit({ t: "done", filled: result.reached, turns: result.turns, reason: result.reason });
+          // Open the window only when required screening answers have values and a claimed résumé file landed.
+          if (!result.reached) {
+            emit({ t: "done", filled: false, turns: result.turns, reason: result.reason });
+            return;
+          }
+          const company = typeof body.company === "string" ? body.company : undefined;
+          const application = typeof body.application === "string" ? body.application : undefined;
+          // A throw here used to skip the gate and return t:error. The résumé is
+          // unattached, the gate still decides, and the message rides the same
+          // done stream as the other gaps.
+          let cvPath: string | null = null;
+          let cvResolveError = "";
+          try {
+            cvPath = await resolveSessionCv({ company, application, title: s.title });
+          } catch (error) {
+            cvPath = null;
+            cvResolveError = error instanceof Error ? error.message.slice(0, 160) : "Could not resolve the résumé.";
+          }
+          // Snapshot first. Finalizing replaces s.fields and reassigns positional ids.
+          const beforeFields = Array.isArray(s.fields) ? s.fields.slice() : [];
+          const fin = await finalizeDrivenSession(s.id, cliId);
+          if (!fin) {
+            const unread = { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." };
+            emit({
+              t: "done",
+              filled: false,
+              turns: result.turns,
+              reason: result.reason,
+              gaps: cvResolveError
+                ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }, unread]
+                : [unread],
+            });
+            return;
+          }
+          const cvUploadName = cvPath ? uploadNameForCv({ application, title: s.title }) : undefined;
+          const refreshed = answersForRefreshedFields(beforeFields, s.fields, body.answers);
+          const supplied = refreshed.answers;
+          // The agent already typed these answers. An empty fill map attaches
+          // the résumé only. `supplied` is what read-back compares.
+          const attached = cvPath
+            ? await fillSession(s.id, {}, s.fields, cvPath, cvUploadName, supplied)
+            : { steps: [], issues: await verifyFill(s.frame, s.fields, supplied) };
+          const unmetLabels = (attached.issues ?? []).flatMap((issue) =>
+            issue.code === "required-empty" && Array.isArray(issue.labels) ? issue.labels : [],
+          );
+          const decision = handoffDecision({
+            fields: s.fields,
+            answers: supplied,
+            cvAttached: !!cvPath,
+            steps: attached.steps,
+            unmetLabels,
+          });
+          if (decision.handoff) await handoffSession(s.id).catch(() => {});
+          const readback = readbackIssues(attached.issues);
+          const dropped = Array.isArray(refreshed.dropped) ? refreshed.dropped : [];
+          const unmatched = dropped.length
+            ? [{
+              level: "warn" as const,
+              code: "fill-unverified",
+              message: `Couldn't match these answers to the form, so they are not counted as pre-filled: ${dropped.join(", ")}.`,
+            }]
+            : [];
+          const gaps = [
+            ...(cvResolveError ? [{ level: "warn" as const, code: "cv-resolve", message: cvResolveError }] : []),
+            ...(Array.isArray(fin.issues) ? fin.issues : []),
+            ...decision.gaps,
+            ...readback,
+            ...unmatched,
+          ];
+          emit({
+            t: "done",
+            filled: decision.handoff,
+            turns: result.turns,
+            reason: result.reason,
+            gaps,
+          });
           return;
         }
 

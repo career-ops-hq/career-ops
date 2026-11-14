@@ -11,6 +11,8 @@ Verwende `modes/de/`, wenn mindestens eine der folgenden Bedingungen zutrifft:
 - Du brauchst Antworten und Anschreiben in **natürlichem Tech-Deutsch**, nicht maschinenübersetzt
 - Du musst mit **DACH-spezifischen Vertragselementen** umgehen: 13. Monatsgehalt, Probezeit, Kündigungsfrist, AGG, Tarifvertrag, Festanstellung vs. Freelance, VWL, bAV, Arbeitszeugnisse
 
+> **Österreich:** Die Marktregeln in `_shared.md` beschreiben Deutschland. Für Stellen bei Arbeitgebern in Österreich (14 Gehälter, KV-Mindestgehalt im Inserat, Probemonat) gibt es `modes/at/`, siehe `modes/at/README.md`.
+
 Wenn die meisten deiner Stellenanzeigen auf Englisch sind, bleib bei den Standard-Modi unter `modes/`. Die englischen Modi greifen automatisch zu deutschen Anzeigen, sobald Claude sie als deutschsprachig erkennt — aber sie kennen die DACH-Marktbesonderheiten nicht im selben Detail.
 
 ## Wie aktivieren?

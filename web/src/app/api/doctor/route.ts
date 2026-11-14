@@ -1,6 +1,7 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import { rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 export const runtime = "nodejs";
@@ -25,7 +26,7 @@ export async function GET() {
   // "Doctor didn't answer" must surface as available:false, never as a clean
   // bill of health.
   const { failed, stdout } = await new Promise<{ failed: boolean; stdout: string }>((resolve) => {
-    execFile(process.execPath, [doctor, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 10_000, windowsHide: true }, (err, out) =>
+    execFile(process.execPath, [doctor, "--json"], { cwd: resolveCodeRoot(process.cwd(), process.env), env: coreProfileEnv(careerOpsRoot()), timeout: 10_000, windowsHide: true }, (err, out) =>
       resolve({ failed: !!err || !(out ?? "").trim(), stdout: out || "" }),
     );
   });

@@ -18,6 +18,7 @@ const SECTION_PAIRS = [
   ["In attesa", "Elaborati"],
   ["In afwachting", "Verwerkt"],
   ["Afventer", "Behandlede"],
+  ["Venter", "Behandlet"],
   ["Oczekujące", "Przetworzone"],
   ["Bekleyenler", "İşlenenler"],
   ["Menunggu", "Diproses"],

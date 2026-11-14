@@ -201,4 +201,58 @@ test('a real posting that ALSO carries an incidental "sign in" prompt is still a
   assert.match(result.filename, /\.pdf$/);
 });
 
+// A live Cloudflare managed challenge (#6713): HTTP 403, title "Just a
+// moment...", and a site-branded body that is longer than
+// NON_CONTENT_PAGE_MAX_CHARS and carries none of the challenge phrases, so the
+// body check never fires. The rendered title is what identifies it. Text is a
+// real employer-site interstitial with the ray id, IP and token removed.
+const CHALLENGE_BODY = 'Humans only\n\n'
+  + 'Acme has been built on the contributions of real employees and job seekers. We use advanced security systems to keep our site safe and prevent misuse or unauthorized access.\n\n'
+  + 'In rare cases, security protections may mistakenly block legitimate activity from real users. If you have been mistakenly blocked from accessing our site, please review our Help Center article for troubleshooting steps.\n\n'
+  + 'Ray ID: 0000000000000000\nTimestamp: 2026-11-09T04:11:42.866Z\nYour IP address: 192.0.2.1\nCloudflare Location: XX\n'
+  + 'Requested URL: https://careers.acme.example/jobs/7?__cf_chl_rt_tk=redacted-token-redacted-token-redacted-token-redacted-token-redacted-token-redacted-token-redacted-token-redacted-token-redacted-token';
+
+test('a Cloudflare challenge page ("Just a moment...", HTTP 403) is refused even when its body is long', async () => {
+  assert.ok(CHALLENGE_BODY.length > 600, 'fixture must take the long-page path that skips the body markers');
+  const { browser, pdfCalled } = makeFakeBrowser({ bodyText: CHALLENGE_BODY, title: 'Just a moment...', h1: 'Humans only', httpStatus: 403 });
+  await assert.rejects(
+    () => archiveUrl(browser, 'https://careers.acme.example/jobs/7', {}),
+    /refusing to archive: HTTP 403 Cloudflare challenge page/i,
+  );
+  assert.equal(pdfCalled(), false, 'a challenge page must never reach page.pdf()');
+});
+
+test('a Cloudflare block page ("Attention Required! | Cloudflare", HTTP 403) is refused', async () => {
+  const { browser, pdfCalled } = makeFakeBrowser({
+    bodyText: 'Sorry, you have been blocked. You are unable to access careers.acme.example.',
+    title: 'Attention Required! | Cloudflare',
+    h1: 'Sorry, you have been blocked',
+    httpStatus: 403,
+  });
+  await assert.rejects(
+    () => archiveUrl(browser, 'https://careers.acme.example/jobs/8', {}),
+    /refusing to archive: HTTP 403 Cloudflare/i,
+  );
+  assert.equal(pdfCalled(), false);
+});
+
+test('a 403 whose challenge solved and rendered the posting is still archived', async () => {
+  // The first response is the challenge, but the browser passed it and the
+  // page that settled is the real posting, so its title is the posting's.
+  const bodyText = 'We are looking for a Senior Backend Engineer to join our platform team and own the checkout service end to end. Requirements: 5+ years experience.';
+  const { browser, pdfCalled } = makeFakeBrowser({ bodyText, httpStatus: 403 });
+  const result = await archiveUrl(browser, 'https://careers.acme.example/jobs/9', {});
+  assert.equal(pdfCalled(), true);
+  assert.match(result.filename, /\.pdf$/);
+});
+
+test('a 200 page titled "Just a moment..." is not treated as a challenge', async () => {
+  // Cloudflare serves its interstitial with a 403 or 503. A site whose own
+  // loading title is "Just a moment..." on a 200 keeps the existing checks.
+  const bodyText = 'We are looking for a Senior Backend Engineer to join our platform team and own the checkout service end to end. Requirements: 5+ years experience.';
+  const { browser, pdfCalled } = makeFakeBrowser({ bodyText, title: 'Just a moment...', httpStatus: 200 });
+  await archiveUrl(browser, 'https://careers.acme.example/jobs/10', { company: 'Acme', role: 'backend-engineer' });
+  assert.equal(pdfCalled(), true);
+});
+
 process.on('exit', () => rmSync(tmp, { recursive: true, force: true, maxRetries: 5 }));

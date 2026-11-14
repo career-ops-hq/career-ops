@@ -59,7 +59,7 @@ export function CreateJobModal({
             </div>
             <div>
               <h2 id="create-scheduled-scan-title" className="text-lg font-semibold text-foreground">Create Scheduled Scan</h2>
-              <p className="text-xs text-muted">Configure a persistent background job for automatic role discovery.</p>
+              <p className="text-xs text-muted">Choose which boards to check, and how often.</p>
             </div>
           </div>
           <button
@@ -90,7 +90,7 @@ export function CreateJobModal({
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="create-scan-engine" className="mb-1 block text-[13px] font-medium text-foreground">Scan Engine</label>
+              <label htmlFor="create-scan-engine" className="mb-1 block text-[13px] font-medium text-foreground">Where to check</label>
               <select
                 id="create-scan-engine"
                 value={engine}

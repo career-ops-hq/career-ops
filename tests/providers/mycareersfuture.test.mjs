@@ -363,6 +363,28 @@ try {
     } else {
       fail(`mycareersfuture.fetch() with one failing keyword returned ${JSON.stringify(fetched)}`);
     }
+    // The failed keyword was never read, so the result says the board is
+    // partial: scan.mjs logs it partial instead of reachable.
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 1) {
+      pass('mycareersfuture.fetch(): a failed keyword marks the board partial (fetch-error)');
+    } else {
+      fail(`mycareersfuture.fetch() with one failing keyword: truncated = ${JSON.stringify(fetched.truncated)}`);
+    }
+
+    const complete = await mycareersfuture.fetch(
+      { provider: 'mycareersfuture', name: 'Both answer', mycareersfuture: { keywords: ['one', 'two'] } },
+      {
+        fetchJson: async (url, opts) => {
+          const search = JSON.parse(opts.body).search;
+          return { results: [{ ...record, title: search, metadata: { ...record.metadata, jobPostId: search } }] };
+        },
+      },
+    );
+    if (complete.length === 2 && complete.truncated === undefined) {
+      pass('mycareersfuture.fetch(): every keyword answering leaves the board unmarked');
+    } else {
+      fail(`mycareersfuture.fetch() with every keyword answering: ${complete.length} jobs, truncated = ${JSON.stringify(complete.truncated)}`);
+    }
   }
 
   // ── fetch(): total outage throws ──

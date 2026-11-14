@@ -29,7 +29,8 @@ export function ApplyChecklist({
   answers,
   work,
   education,
-  cvMissing,
+  workEmpty,
+  educationEmpty,
   tips,
   blocked = null,
   trackerNum,
@@ -49,7 +50,8 @@ export function ApplyChecklist({
   answers: CopyItem[];
   work: CopyItem[];
   education: string;
-  cvMissing: boolean;
+  workEmpty: string;
+  educationEmpty: string;
   tips: Tip[];
   blocked?: { label: string; message: string; tip: string } | null;
   trackerNum: string | null;
@@ -122,26 +124,22 @@ export function ApplyChecklist({
       </Section>
 
       <Section title="Work history">
-        {cvMissing ? (
-          <Empty>cv.md is not in this workspace.</Empty>
-        ) : work.length > 0 ? (
+        {work.length > 0 ? (
           <div className="grid gap-3">
             {work.map((item) => (
               <CopyField key={`${item.label}:${item.text}`} item={item} />
             ))}
           </div>
         ) : (
-          <Empty>No work history in cv.md.</Empty>
+          <Empty>{workEmpty}</Empty>
         )}
       </Section>
 
       <Section title="Education">
-        {cvMissing ? (
-          <Empty>cv.md is not in this workspace.</Empty>
-        ) : education ? (
+        {education ? (
           <CopyField item={{ label: "Education", text: education }} />
         ) : (
-          <Empty>No education section in cv.md.</Empty>
+          <Empty>{educationEmpty}</Empty>
         )}
       </Section>
 

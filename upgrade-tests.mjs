@@ -59,9 +59,15 @@ export function releaseTags(cwd = ROOT) {
 }
 
 // v1.18.0 is the user-data format boundary (via / Machine Summary / salary).
+// Every leg takes its old tag from newestAncestorTag(), which is past that
+// boundary, so state-v1.18 is the only fixture any leg seeds. The pre-1.18
+// state-v1.16 was removed (#6707): no leg seeded it, and its files did not
+// match what a v1.16 install holds. An older tag fails loudly here rather
+// than seeding a state from the wrong side of the boundary.
 export function fixtureStateFor(tag) {
   const [maj, min] = semverKey(tag);
-  return maj > 1 || min >= 18 ? 'state-v1.18' : 'state-v1.16';
+  if (maj > 1 || (maj === 1 && min >= 18)) return 'state-v1.18';
+  throw new Error(`no upgrade fixture state for ${tag}: fixtures start at career-ops-v1.18.0`);
 }
 
 function sha256(path) { return createHash('sha256').update(readFileSync(path)).digest('hex'); }

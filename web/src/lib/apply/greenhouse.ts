@@ -32,7 +32,8 @@ const GH_TYPE: Record<string, GhField["type"]> = {
   multi_value_multi_select: "select",
   multi_select: "select",
   single_select: "select",
-  boolean: "select",
+  // A yes/no is a radio, not a menu. A multi-select stays a select.
+  boolean: "radio",
 };
 
 /** Fetch the public Greenhouse question schema → map keyed by BOTH the field

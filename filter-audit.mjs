@@ -66,10 +66,10 @@ by definition they match no positive keyword.`;
  * was decided after the title cut. A posting can carry several rows (one per
  * status), so rows are deduped on the scanner's own URL key.
  *
- * Pre-v1.18 rows carry three cells, url / date / title, with no header, and an
- * upgrade keeps them byte-identical. Read by the current column order their
- * title lands in `portal`, so a three-cell row takes its title from there and
- * has no company or status.
+ * A three-cell row (url / date / title, no header) is still read. No release is
+ * known to have written that layout (#6707), but read by the current column
+ * order its title would land in `portal`, so a three-cell row takes its title
+ * from there and has no company or status.
  */
 export function readHistory(tsv) {
   const lines = String(tsv ?? '').split('\n');

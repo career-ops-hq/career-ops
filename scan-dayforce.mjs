@@ -73,6 +73,7 @@ import {
   BROWSER_PROCESS_ENV,
   DATA_ROOT as SCAN_DATA_ROOT,
   loadSeenUrls,
+  scanHistoryPolicy,
   seenJobKey,
   buildTitleFilter,
   buildLocationFilter,
@@ -94,6 +95,7 @@ import { decodeEntities } from './providers/_html-entities.mjs';
 import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -399,7 +401,8 @@ export function loadConfig(portalsPath = PORTALS_PATH, singleTenant = null) {
     matchedTitleKeywords: (title) => matchedTitleKeywords(title, config.title_filter),
   };
 
-  return { boards, invalidCount, filters };
+  // The recheck window scan.mjs applies to the same seen set.
+  return { boards, invalidCount, filters, historyPolicy: scanHistoryPolicy(config) };
 }
 
 // ── Fetch helpers (all run through page.request — same context, same cookies) ──
@@ -655,7 +658,7 @@ export async function scanBoardWithRetry(boardCfg, filters, {
 async function main() {
   const { dryRun, debug, singleTenant } = parseArgs();
   mkdirSync(join(DATA_ROOT, 'data'), { recursive: true });
-  const { boards, invalidCount, filters } = loadConfig(PORTALS_PATH, singleTenant);
+  const { boards, invalidCount, filters, historyPolicy } = loadConfig(PORTALS_PATH, singleTenant);
 
   if (invalidCount > 0) {
     console.log(`  Skipping ${invalidCount} malformed dayforce_boards entr${invalidCount === 1 ? 'y' : 'ies'} (bad tenant/board/culture/jobBoardId)`);
@@ -666,7 +669,7 @@ async function main() {
     return;
   }
 
-  const { seen } = loadSeenUrls();
+  const { seen } = loadSeenUrls(historyPolicy);
   const date = localToday();
 
   let totalFound = 0;
@@ -720,9 +723,7 @@ async function main() {
     await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Dayforce Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Dayforce Scan', date);
   console.log(`Boards scanned:     ${boards.length}`);
   console.log(`Total found:        ${totalFound}`);
   console.log(`Filtered by title:  ${titleSkipped.length}`);

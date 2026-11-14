@@ -33,7 +33,16 @@ jobs:
           set -euo pipefail
           # Solo SIGNATURES.md puede cambiar
           CHANGED=$(git diff --name-only "$BASE_SHA...$HEAD_SHA")
-          [ "$CHANGED" = "SIGNATURES.md" ] || { echo "reason=Only SIGNATURES.md may change in a signature PR (changed: $CHANGED)" >> "$GITHUB_OUTPUT"; exit 1; }
+          if [ "$CHANGED" != "SIGNATURES.md" ]; then
+            # $GITHUB_OUTPUT takes one name=value per line, and git lists one
+            # file per line, so the list goes in as ONE line: each name in a
+            # code span (no @mentions or markdown in the comment), backticks
+            # and control characters stripped, at most 10 names.
+            LIST=$(printf '%s\n' "$CHANGED" | tr -d '`\000-\011\013-\037\177' \
+              | awk 'NR <= 10 { printf "%s`%s`", (NR > 1 ? ", " : ""), $0 } END { if (NR > 10) printf " and %d more", NR - 10 }')
+            echo "reason=Only SIGNATURES.md may change in a signature PR (changed: $LIST)" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
           # Exactamente +1/-0
           read -r ADD DEL _ <<< "$(git diff --numstat "$BASE_SHA...$HEAD_SHA" -- SIGNATURES.md)"
           [ "$ADD" = "1" ] && [ "$DEL" = "0" ] || { echo "reason=Signature PRs add exactly 1 line and remove 0 (got +$ADD/-$DEL)" >> "$GITHUB_OUTPUT"; exit 1; }
@@ -55,7 +64,7 @@ jobs:
             // el contenido se trata SOLO como frase opcional (el bot sanitiza y reescribe
             // la línea canónica desde metadatos — nadie imputa identidad por contenido).
             console.log("shape OK");
-          ' 2> /tmp/reason.txt || { cat /tmp/reason.txt >> "$GITHUB_OUTPUT"; exit 1; }
+          ' 2> /tmp/reason.txt || { grep -m1 '^reason=' /tmp/reason.txt >> "$GITHUB_OUTPUT" || true; exit 1; }
       - name: Friendly ack (valid)
         if: success()
         # Fork PRs carry a read-only token, so this comment can fail with
@@ -74,11 +83,15 @@ jobs:
       - name: Friendly fix-it (invalid)
         if: failure()
         continue-on-error: true
+        # The reason can carry PR file names: read it from the environment,
+        # never interpolate it into the script source.
+        env:
+          REASON: ${{ steps.check.outputs.reason }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const login = context.payload.pull_request.user.login;
-            const reason = `${{ steps.check.outputs.reason || 'the diff shape or line format is off' }}`;
+            const reason = process.env.REASON || 'the diff shape or line format is off';
             await github.rest.issues.createComment({
               ...context.repo, issue_number: context.payload.pull_request.number,
               body: `Almost there — ${reason}.\n\nAdd exactly ONE line at the very END of SIGNATURES.md: one sentence about your search (or what you want hiring to become), or just a dash:\n\n\`\`\`\n-\n\`\`\`\n\nYour username, the date and the id are added automatically when your signature lands. No other file or line should change.`

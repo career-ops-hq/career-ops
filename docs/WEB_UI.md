@@ -50,3 +50,9 @@ npm run ui -- --no-open
 - **Readiness Polling**: Polls the server until it responds before launching the browser, draining responses properly via `res.resume()`.
 - **Graceful Shutdown**: Handles `SIGINT` (Ctrl+C) and `SIGTERM` signals cleanly across Linux, macOS, and Windows (terminating the launched child process and waiting for shutdown before exiting).
 
+
+---
+
+## Keeping the Dashboard Running
+
+`npm run ui` serves the dashboard while its terminal is open. To have it start at login and restart if it exits, install it as a service for your own user with `node web/scripts/web-service.mjs install` (macOS launchd, Linux `systemd --user`, Windows Task Scheduler). See [Run as a login service](../web/README.md#run-as-a-login-service) for what it does and how to manage it.
