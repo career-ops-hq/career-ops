@@ -16,7 +16,7 @@
  * network: a check that gets as far as GitHub answers `offline` at once.
  */
 
-import { copyFileSync } from 'fs';
+import { copyFileSync, mkdirSync, writeFileSync } from 'fs';
 import { spawnSync, execFileSync } from 'child_process';
 import { dirname, join } from 'path';
 import { pass, fail, warn, NODE, ROOT, rmSync, hermeticGitEnv, makeUpdaterRepo } from './helpers.mjs';
@@ -25,10 +25,17 @@ console.log('\n🧪 Testing updater check on a checkout git cannot read...');
 
 const DEAD_PROXY = 'http://127.0.0.1:9';
 
+// curl reads the first config file it finds and looks in CURL_HOME first, so an
+// empty one there keeps the developer's ~/.curlrc (a `noproxy`, another
+// `proxy`) from sending a check around DEAD_PROXY.
+const curlHome = (dir) => join(dir, '.git', 'co-curl-home');
+
 function makeFixture({ commit = true } = {}) {
   const { dir, g } = makeUpdaterRepo({ prefix: 'co-unreadable-' });
   copyFileSync(join(ROOT, 'update-system.mjs'), join(dir, 'update-system.mjs'));
   copyFileSync(join(ROOT, 'VERSION'), join(dir, 'VERSION'));
+  mkdirSync(curlHome(dir));
+  writeFileSync(join(curlHome(dir), '.curlrc'), '');
   if (commit) {
     g('add', 'update-system.mjs', 'VERSION');
     g('commit', '-q', '-m', 'fixture');
@@ -40,6 +47,7 @@ function updaterEnv(dir, extra = {}) {
   const env = {
     ...hermeticGitEnv(join(dir, '.git', 'co-hermetic-gitconfig')),
     GIT_CEILING_DIRECTORIES: dirname(dir),
+    CURL_HOME: curlHome(dir),
     http_proxy: DEAD_PROXY,
     https_proxy: DEAD_PROXY,
     HTTP_PROXY: DEAD_PROXY,
