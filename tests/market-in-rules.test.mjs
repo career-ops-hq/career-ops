@@ -75,3 +75,15 @@ test('no rupee amounts or percentage rates are hardcoded in the Indian mode file
     assert.deepEqual(hits, [], `modes/in/${name} hardcodes an amount or rate: ${hits.join(', ')}`);
   }
 });
+
+// The candidate's files live in the data root, which can sit outside the
+// checkout, and apply.md fills experience and education from its Step 4b
+// sources (the tailored CV first). The layer used to point at `cv.md` in the
+// project root for both (#6964).
+test('modes/in reads candidate files from {DATA_ROOT} and fills experience from the Step 4b sources', () => {
+  assert.match(shared, /^\| cv\.md \| `\{DATA_ROOT\}\/cv\.md` \|/m);
+  assert.doesNotMatch(shared, /\(project root\)/);
+  const apply = read('apply.md');
+  assert.match(apply, /Total and relevant experience:\*\* counted from the dates in the Step 4b\s+sources of `modes\/apply\.md`/);
+  assert.doesNotMatch(apply, /counted from the dates in `cv\.md`/);
+});

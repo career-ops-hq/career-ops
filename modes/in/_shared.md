@@ -28,9 +28,9 @@
 
 | File | Path | When |
 |------|------|------|
-| cv.md | `cv.md` (project root) | ALWAYS |
-| article-digest.md | `article-digest.md` (if present) | ALWAYS (detailed proof points) |
-| profile.yml | `config/profile.yml` | ALWAYS (identity and target roles) |
+| cv.md | `{DATA_ROOT}/cv.md` | ALWAYS |
+| article-digest.md | `{DATA_ROOT}/article-digest.md` (if present) | ALWAYS (detailed proof points) |
+| profile.yml | `{DATA_ROOT}/config/profile.yml` | ALWAYS (identity and target roles) |
 
 **RULE: NEVER hardcode metrics from proof points.** Read them from `cv.md` and `article-digest.md` at evaluation time.
 **RULE: For article/project metrics, `article-digest.md` takes precedence over `cv.md`** (`cv.md` may hold older data).
