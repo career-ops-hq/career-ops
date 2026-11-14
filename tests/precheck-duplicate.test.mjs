@@ -50,6 +50,7 @@ try {
     { num: 7, date: '2026-04-03', company: 'Initech', role: 'Analyst', status: 'Applied', notes: '', url: 'https://jobs.example.test/openings/AbC' },
     { num: 8, date: '2026-04-04', company: 'Hooli', role: 'Designer', status: 'Applied', notes: '', url: 'https://jobs.lever.co/hooli/5ac21346-8e0c-4494-8e7a-3eb92ff77902' },
     { num: 9, date: '2026-04-05', company: 'Vandelay', role: 'Buyer', status: 'Applied', notes: '', url: 'https://careers.vandelay.example/job?ref=1' },
+    { num: 10, date: '2026-04-06', company: 'Umbrella', role: 'Chemist', status: 'Applied', notes: '', url: 'https://careers.umbrella.example/openings/123' },
   ];
   const urlHits = (url) => findDuplicateCandidates(spelled, { url }).map((c) => `${c.num}:${c.reason}`).join(',');
   const hits = [
@@ -61,8 +62,9 @@ try {
     urlHits('https://jobs.example.test/openings/abc'),
     urlHits('https://jobs.lever.co/hooli/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply'),
     urlHits('https://careers.vandelay.example/job?ref=2'),
+    urlHits('https://careers.umbrella.example/openings/123//'),
   ];
-  if (hits.join('|') === '5:url|5:url|6:url||||8:url|') pass('another spelling of the same posting is a URL match; another id, a path in another case or another ?ref= is not');
+  if (hits.join('|') === '5:url|5:url|6:url||||8:url||') pass('another spelling of the same posting is a URL match; another id, or a generic path in another case, with extra slashes or another ?ref=, is not');
   else fail(`same-posting spellings: ${JSON.stringify(hits)}`);
 
   // 2. Repost under a new title but the same requisition ID.

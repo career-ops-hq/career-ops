@@ -14,8 +14,9 @@
  *   1. url / req   the same posting URL (normalizeUrl(), or another spelling that
  *                  canonicalJobKey() reads as the same posting: an id it extracts,
  *                  like a Greenhouse id on another host or a LinkedIn slug URL, or
- *                  an ATS form like a Lever `/apply` page; never letter case alone
- *                  or a query it drops), or the same requisition ID
+ *                  a form it folds on an ATS host, like a Lever `/apply` page;
+ *                  never its generic folds of case, slashes or query), or the
+ *                  same requisition ID
  *                  (REQ_NUMBER_RE via extractReqNumber) at the same or a parent
  *                  company. A bare req ID with an unrelated company never counts.
  *                  IDs are compared after normReq(), so JR9727 == JR-9727 == 9727.
@@ -171,13 +172,15 @@ export function companyRelation(a, b) {
   return null;
 }
 
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
 function samePosting(a, b) {
   const job = canonicalJobKey(a);
   if (!job || job !== canonicalJobKey(b)) return false;
   if (!job.includes('://')) return true;
   const na = normalizeUrl(a);
   const nb = normalizeUrl(b);
-  return Boolean(na && nb) && new URL(na).search === new URL(nb).search && na.toLowerCase() !== nb.toLowerCase();
+  return Boolean(na && nb) && PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(na).search === new URL(nb).search;
 }
 
 /**
