@@ -247,7 +247,9 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
   if (sig.hasPassword || /\/(login|sign-?in|register|sign-?up|auth|account|mfa|2fa)(\/|$|\?)/.test(u)) {
     return { level: "block", code: "login-wall", message: LOGIN_WALL_MESSAGE };
   }
-  if (/no longer accepting|position has been filled|posting is closed|no longer available|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
+  // "job not found" is how Ashby renders a closed posting: the page title stays the
+  // company name, so only the body says the job is gone.
+  if (/no longer accepting|position has been filled|posting is closed|no longer available|job (listing )?not found|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
     return { level: "block", code: "expired", message: "This job posting is closed or expired — it's no longer accepting applications." };
   }
   let landedUrl = "";
