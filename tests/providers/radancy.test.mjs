@@ -79,6 +79,9 @@ try {
   const partialJobs = await radancy.fetch({ name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' }, partialCtx);
   if (partialJobs.length === 2 && partialCalls === 2) pass('radancy.fetch() preserves jobs from earlier pages when a later page fetch throws');
   else fail(`radancy.fetch() partial-failure handling wrong: ${partialJobs.length} jobs after ${partialCalls} calls`);
+  // Partly read, so the result says so: scan.mjs logs the board partial, not reachable.
+  if (partialJobs.truncated?.reason === 'fetch-error' && partialJobs.truncated.fetched === 2) pass('radancy.fetch() marks the board partial when a later HTML page fails');
+  else fail(`radancy.fetch() later HTML page failure: truncated = ${JSON.stringify(partialJobs.truncated)}`);
 
   // A FIRST-page failure means the board is unreachable, not empty. It must
   // throw so scan/portal-health record a failure instead of "live but empty".
@@ -399,6 +402,8 @@ try {
   } else {
     fail(`radancy truncation warning: returned ${overshootJobs?.length}, warned "${warned}" (expected 4 / "4")`);
   }
+  if (overshootJobs.truncated?.reason === 'page-cap' && overshootJobs.truncated.fetched === 4) pass('radancy.fetch() marks the board partial when max_jobs cuts the fragment walk');
+  else fail(`radancy.fetch() max_jobs cut: truncated = ${JSON.stringify(overshootJobs.truncated)}`);
 
   // ══════════════════════════════════════════════════════════════════════════
   // ctx.maxPages / verify-portals probe handling (ADDING_A_PROVIDER.md's
@@ -549,6 +554,8 @@ try {
   } else {
     fail(`radancy.fetch() exact-max_jobs handling: jobs=${exactJobs?.length} warnings=${JSON.stringify(exactWarnings)}`);
   }
+  if (exactJobs.truncated === undefined) pass('radancy.fetch() leaves a naturally complete walk unmarked when max_jobs matches it exactly');
+  else fail(`radancy.fetch() exact max_jobs was marked: ${JSON.stringify(exactJobs.truncated)}`);
 
   // Every fetch call — both JSON fragment pages and the HTML fallback — must
   // refuse a redirect (#1440's mandatory SSRF guard, every peer provider
@@ -645,6 +652,8 @@ try {
   } else {
     fail(`radancy.fetch() overstated-total handling: ${overstateJobs?.length} jobs, warnings=${JSON.stringify(overstateWarnings)}`);
   }
+  if (overstateJobs.truncated === undefined) pass('radancy.fetch() leaves a natural end under an inflated total unmarked');
+  else fail(`radancy.fetch() natural end was marked: ${JSON.stringify(overstateJobs.truncated)}`);
 
   // max_pages capping the walk short of the source's own LARGER totalPages IS
   // worth a warning — this is the one case where "raise max_pages" is
@@ -675,6 +684,8 @@ try {
   } else {
     fail(`radancy.fetch() genuine cap handling: jobs=${genuineCapJobs?.length} pages=${capPage} warned=${genuineCapWarned}`);
   }
+  if (genuineCapJobs.truncated?.reason === 'page-cap' && genuineCapJobs.truncated.fetched === 4) pass('radancy.fetch() marks the board partial when max_pages cuts the fragment walk');
+  else fail(`radancy.fetch() max_pages cut: truncated = ${JSON.stringify(genuineCapJobs.truncated)}`);
 
   // A mid-walk JSON fetch error must keep earlier pages and log why
   // pagination stopped, distinct from — and without — cap advice. Page 2
@@ -712,6 +723,8 @@ try {
   } else {
     fail(`radancy.fetch() mid-walk JSON error handling: jobs=${jsonErrorJobs?.length} warnings=${JSON.stringify(errWarnings)}`);
   }
+  if (jsonErrorJobs.truncated?.reason === 'fetch-error' && jsonErrorJobs.truncated.fetched === 1) pass('radancy.fetch() marks the board partial when a later fragment page fails');
+  else fail(`radancy.fetch() later fragment page failure: truncated = ${JSON.stringify(jsonErrorJobs.truncated)}`);
 
   // The actual point of routing through fetchJsonWithRetry: a page that
   // fails once transiently (429/5xx/network) then succeeds must recover
