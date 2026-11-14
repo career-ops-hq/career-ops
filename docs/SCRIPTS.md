@@ -1713,7 +1713,7 @@ of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
 row is skipped, so you can work through a large pipeline in bounded passes.
 
 The ranking is done by whichever agent CLI you already have installed (the
-Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
+headless command table in `modes/_headless.md`): `claude`, `opencode`, `codex`,
 `copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
 dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
 first ~2000 chars) and the selected postings through that CLI's own auth and

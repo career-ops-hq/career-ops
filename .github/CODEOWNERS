@@ -35,6 +35,13 @@
 /OPENCODE.md           @santifer
 /GEMINI.md             @santifer
 /KIMI.md               @santifer
+# Reference AGENTS.md hands off to (#6693): the same contract, read on demand.
+/modes/_files.md            @santifer
+/modes/_onboarding.md       @santifer
+/modes/_tracker-tsv.md      @santifer
+/modes/_markets.md          @santifer
+/modes/_community-asks.md   @santifer
+/modes/_headless.md         @santifer
 # The skill router. Every CLI's skill entrypoint (.claude/, .cursor/,
 # .opencode/, .qwen/, .kimi/, .grok/, .antigravitycli/) is a symlink to this
 # one file, so an edit here changes only this path — the symlinks never show

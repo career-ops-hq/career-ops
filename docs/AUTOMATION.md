@@ -236,7 +236,7 @@ that already cleared a free title/location filter.
 Unlike the scan (deterministic, zero-token), a follow-up sweep needs an LLM to
 read `data/applications.md`, decide what's overdue, and draft each email —
 so this piece runs `claude -p` (or your CLI's headless equivalent, see
-`AGENTS.md` → Headless / Batch Mode) instead of a plain Node script.
+`modes/_headless.md`) instead of a plain Node script.
 
 `scripts/followup-sweep.sh` wraps that call. It:
 

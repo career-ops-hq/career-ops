@@ -6,14 +6,25 @@ When the user runs `/career-ops update`, execute this interactive update flow.
 
 Run `node update-system.mjs check --force` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
 
+**When the user asks for the latest `main` instead of the release** (checkout only; a plugin install refuses), run `node update-system.mjs check --force --channel main` instead, so an up-to-date release cannot end the flow, and follow Steps 2 to 4 with `main` as the target:
+- Step 2 fetches `main` instead of the release tag. Record the commit you previewed with `PREVIEW_SHA=$(git rev-parse FETCH_HEAD)` and show its short form with the summary.
+- `main` can move while the user reads the preview, and `apply` installs the tip it fetches. So in Step 4, after the user confirms and right before item 3, run `git ls-remote https://github.com/career-ops-hq/career-ops.git refs/heads/main`. If the commit it prints is not `PREVIEW_SHA`, do not apply: tell the user `main` changed since the preview and go back to Step 2.
+- Item 3 runs `node update-system.mjs apply --channel main --confirm`. After it succeeds, confirm what it installed: `git rev-parse refs/backup-pre-update-target/{branch}`, with `{branch}` from apply's `Backup branch created:` line. If that commit is not `PREVIEW_SHA`, a push landed between the check and the apply: show `git log --oneline {PREVIEW_SHA}..{installed}` and offer `/career-ops update rollback` before item 6.
+
+The `check` without `--channel main` reports releases only, never commits merged to `main` between them. Following `main` is a one-off: the choice is not saved, and the session-start check still looks only at releases, so staying on `main` means running this flow again.
+
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop. If the JSON carries a `detail` field, show it verbatim after that sentence: it is a fixed-English diagnostic naming what failed (for example `ENOENT` when curl is not installed, or a proxy or TLS error), and that is what the user needs to fix it.
 - If `no-remote-version`: Tell the user "Couldn't determine the latest career-ops release right now. Try again later." and stop.
+- If `managed-by-plugin`: career-ops runs as a Claude Code plugin, and `apply` and `rollback` refuse. Tell the user that Claude updates the plugin: from the career-ops entry under `/plugin` → **Installed** (**Update now**), or, for a plugin added in Claude desktop, with **Check for updates** under **Customize → Plugins**. Stop.
+- If `worktree-without-main`: this is a linked git worktree, and an update installs in the checkout that has `main` checked out, which `update-system.mjs` could not find. Tell the user and stop.
 - If `update-available`: Continue to Step 2.
+
+From a linked git worktree, `check`, `apply` and `rollback` run in the checkout that has `main` checked out, so the update lands on `main`. After an update applied that way, suggest `git merge main` in the worktree.
 
 ## Step 2 — Show What Changed
 
-Show the user what will change: the release `apply` installs, `career-ops-v{remote}`, not `main`. Run:
+Show the user what will change: the release `apply` installs, `career-ops-v{remote}`, not `main`. When the user asked for the latest `main` (Step 1), fetch `main` in place of `career-ops-v{remote}` below. Run:
 
 ```bash
 git fetch https://github.com/career-ops-hq/career-ops.git career-ops-v{remote} || {
@@ -73,7 +84,7 @@ Ask the user for confirmation:
 If yes:
 1. Capture the current commit as a run-specific pre-update baseline before apply runs, e.g. `PRE_UPDATE_REF=$(git rev-parse HEAD)`. Don't rely on `backup-pre-update-{local}` alone — `update-system.mjs apply` reuses that branch if it already exists, so it may point at an older snapshot.
 2. **Save local CLAUDE.md additions.** CLAUDE.md is a system file. When this install has changed it, `apply` keeps the local version by default: it lists CLAUDE.md under "Keeping your versions" and writes `CLAUDE.md.bak`. It replaces CLAUDE.md with the two-line template (`@AGENTS.md` + the local-additions comment) only with `--force`, or when it does not see the change as a local edit. Before applying, read the current CLAUDE.md and save everything after that two-line header, so step 4 can put it back if apply replaced the file. If CLAUDE.md has nothing beyond the two-line header, note that there is nothing to restore.
-3. Run `node update-system.mjs apply --confirm`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently.
+3. Run `node update-system.mjs apply --confirm` (with `--channel main` when the user asked for the latest `main`), capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently.
 4. **Restore local CLAUDE.md additions if apply removed them**, whether step 3 succeeded or failed. Re-read CLAUDE.md. If the content saved in step 2 is still in it, which is the default because `apply` kept your version, leave the file as it is: appending the content again would duplicate it, and every later update would add another copy. Only if the saved content is missing, append it after the two-line header.
 5. Now check the exit code captured in step 3:
    - If non-zero, treat apply as failed. Show the captured output and offer:
@@ -107,8 +118,8 @@ If yes:
    commands, and the `--commit-on-branch` opt-in (#3846).
 
 If no:
-1. Run `node update-system.mjs dismiss --version {remote}`
-2. Tell the user they will be asked again when a newer release is out, and can run `/career-ops update` anytime to check again.
+- On the `main` path (Step 1), do not run `dismiss`: `{remote}` there can be a `VERSION` on `main` that no release carries yet, and dismissing it would hide that release when it ships. Tell the user the `main` update was skipped and the release check is unchanged.
+- Otherwise, run `node update-system.mjs dismiss --version {remote}`, then tell the user they will be asked again when a newer release is out, and can run `/career-ops update` anytime to check again.
 
 ## Step 5 — Rollback (if requested)
 
@@ -123,7 +134,7 @@ If the user says "rollback" or runs `/career-ops update rollback`:
 - Exception: `modes/_profile.md` may be edited **only** in Step 4.7, and **only** after the user explicitly confirms each individual rename/removal. Never batch-edit without per-change consent.
 - User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`, never in `modes/_shared.md`
 - CLAUDE.md's local additions (everything after the two-line `@AGENTS.md` header) MUST be saved before apply and checked immediately after — on both the success AND failure path (Step 4.2, Step 4.4). Restore them only when they are no longer in CLAUDE.md. `apply` keeps a CLAUDE.md this install changed unless `--force` is given, and appending the saved content to a file that still has it duplicates the additions on every update.
-- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `AGENTS.md` → "Celebrating a hire (the Hired Wall)".
+- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `modes/_community-asks.md` → "Celebrating a hire (the Hired Wall)".
 - Never trim the staged-but-uncommitted notice or its recovery commands (Step 4.8).
 - If anything goes wrong, tell the user to run `node update-system.mjs rollback`
 - Keep the output concise — users don't want walls of text during an update

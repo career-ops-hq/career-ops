@@ -5,7 +5,7 @@
 // but it reads only web/src/lib/clis.ts. The root spawners are invisible to
 // it: batch-tailor.mjs launches the `pdf` worker with
 // --dangerously-skip-permissions, which hands back the Bash that #2172 took
-// away on the web path, and nothing went red. So the rule written in AGENTS.md
+// away on the web path, and nothing went red. So the rule written in modes/_headless.md
 // ("Headless worker permissions") is enforced here, in the root suite.
 //
 // Discovery, not a list of files to scan: the whole tree is walked and every
@@ -123,7 +123,7 @@ test('no file outside KNOWN passes a blanket auto-approve flag', () => {
   const unexpected = [...hits].filter(([file]) => !KNOWN.has(file))
     .map(([file, flags]) => `${file} (${Object.keys(flags).join(', ')})`);
   assert.deepEqual(unexpected, [],
-    `new blanket-approval grant(s): ${unexpected.join('; ')}. A headless worker may not get more write power than the web grants it — see "Headless worker permissions" in AGENTS.md. If a CLI cannot express the web's deny list, withhold the writing workers from it instead.`);
+    `new blanket-approval grant(s): ${unexpected.join('; ')}. A headless worker may not get more write power than the web grants it — see "Headless worker permissions" in modes/_headless.md. If a CLI cannot express the web's deny list, withhold the writing workers from it instead.`);
 });
 
 test('a KNOWN file carries exactly its pinned grants, no more and no others', () => {

@@ -74,7 +74,7 @@ List `unreadable` items separately too, with URL and a reason code, when the JD 
 | # | Company | Role | Score | PDF | Recommended action |
 ```
 
-5. **Then, once per run (interactive runs only):** if the run saved at least one report, finish with `node community-asks.mjs next` and follow AGENTS.md → "Community asks".
+5. **Then, once per run (interactive runs only):** if the run saved at least one report, finish with `node community-asks.mjs next` and follow `modes/_community-asks.md`.
 
 ## Format of pipeline.md
 

@@ -2,6 +2,12 @@
   - changed-files:
       - any-glob-to-any-file:
           - AGENTS.md
+          - modes/_files.md
+          - modes/_onboarding.md
+          - modes/_tracker-tsv.md
+          - modes/_markets.md
+          - modes/_community-asks.md
+          - modes/_headless.md
           - CLAUDE.md
           - OPENCODE.md
           - DATA_CONTRACT.md

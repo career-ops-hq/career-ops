@@ -19431,11 +19431,12 @@ try {
     fail('docs/SCRIPTS.md missing the exit-code semantics for check-table-freshness');
   }
 
-  const agentsDoc = readFile('AGENTS.md');
-  if (agentsDoc.includes('`check-table-freshness.mjs`')) {
-    pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
+  // The Main Files table moved from AGENTS.md to modes/_files.md (#6693).
+  const filesDoc = readFile('modes/_files.md');
+  if (filesDoc.includes('`check-table-freshness.mjs`')) {
+    pass('modes/_files.md Main Files table lists check-table-freshness.mjs');
   } else {
-    fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+    fail('modes/_files.md Main Files table missing check-table-freshness.mjs');
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold
