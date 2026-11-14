@@ -1,0 +1,35 @@
+{"ats":"ashby","board":"sarvam","name":"Sarvam AI"}
+{"ats":"greenhouse","board":"cloudflare","name":"Cloudflare"}
+{"ats":"greenhouse","board":"databricks","name":"Databricks"}
+{"ats":"greenhouse","board":"datadog","name":"Datadog"}
+{"ats":"greenhouse","board":"druva","name":"Druva"}
+{"ats":"greenhouse","board":"elastic","name":"Elastic"}
+{"ats":"greenhouse","board":"gitlab","name":"GitLab"}
+{"ats":"greenhouse","board":"groww","name":"Groww"}
+{"ats":"greenhouse","board":"hackerrank","name":"HackerRank"}
+{"ats":"greenhouse","board":"mongodb","name":"MongoDB"}
+{"ats":"greenhouse","board":"pubmatic","name":"PubMatic"}
+{"ats":"greenhouse","board":"rubrik","name":"Rubrik"}
+{"ats":"greenhouse","board":"stripe","name":"Stripe"}
+{"ats":"greenhouse","board":"trivago","name":"trivago"}
+{"ats":"greenhouse","board":"wise","name":"Wise"}
+{"ats":"lever","board":"cred","name":"CRED"}
+{"ats":"lever","board":"meesho","name":"Meesho"}
+{"ats":"lever","board":"mindtickle","name":"Mindtickle"}
+{"ats":"lever","board":"paytm","name":"Paytm"}
+{"ats":"lever","board":"zeta","name":"Zeta"}
+{"ats":"smartrecruiters","board":"BoschGroup","name":"Bosch"}
+{"ats":"workday","board":"accenture/wd103/AccentureCareers","name":"Accenture"}
+{"ats":"workday","board":"adobe/wd5/external_experienced","name":"Adobe"}
+{"ats":"workday","board":"amat/wd1/External","name":"Applied Materials"}
+{"ats":"workday","board":"analogdevices/wd1/External","name":"Analog Devices"}
+{"ats":"workday","board":"barclays/wd3/External_Career_Site_Barclays","name":"Barclays"}
+{"ats":"workday","board":"cat/wd5/CaterpillarCareers","name":"Caterpillar"}
+{"ats":"workday","board":"db/wd3/DBWebsite","name":"Deutsche Bank"}
+{"ats":"workday","board":"ebay/wd5/apply","name":"eBay"}
+{"ats":"workday","board":"fis/wd5/SearchJobs","name":"FIS"}
+{"ats":"workday","board":"intel/wd1/External","name":"Intel"}
+{"ats":"workday","board":"mastercard/wd1/CorporateCareers","name":"Mastercard"}
+{"ats":"workday","board":"nasdaq/wd1/Global_External_Site","name":"Nasdaq"}
+{"ats":"workday","board":"salesforce/wd12/External_Career_Site","name":"Salesforce"}
+{"ats":"workday","board":"synechron/wd1/SynechronCareers","name":"Synechron"}

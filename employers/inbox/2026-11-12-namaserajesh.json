@@ -1,0 +1,15 @@
+{
+  "id": "2026-11-12-namaserajesh",
+  "contributor": "namaserajesh",
+  "signed_by": "Rajesh Namase",
+  "rows": 35,
+  "source": "community",
+  "origin": "Compiled by hand from each employer's own careers page for the India Fresher Pack (github.com/namaserajesh/ai-job-search-india), tested with the career-ops scanner on 2026-10-25, and each board checked live against its ATS's public jobs API on 2026-11-12.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": ["ODbL-1.0", "CC0-1.0"],
+  "attribution": "Boards for India roles, contributed by @namaserajesh",
+  "date": "2026-11-12"
+}
