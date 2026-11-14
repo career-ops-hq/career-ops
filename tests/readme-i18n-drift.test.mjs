@@ -13,7 +13,10 @@ const ROOT = join(__dirname, '..');
 // Note: The global install command token ("npm i -g @santifer/career-ops") was deliberately
 // left out pending a separate translation rollout across the 14 remaining files.
 const REQUIRED_TOKENS = [
-  'A-H'
+  'A-H',
+  // The data in employers/ is CC BY 4.0, not MIT like the code: every
+  // translation links its license.
+  'employers/LICENSE',
 ];
 
 // RETIRED_TOKENS should be updated deliberately whenever a fact legitimately changes.

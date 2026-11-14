@@ -137,13 +137,26 @@ try {
     fail(`parsePinpointResponse row 2 location = ${JSON.stringify(jobs[2]?.location)}`);
   }
 
-  if (parsePinpointResponse({}, 'X').length === 0) pass('parsePinpointResponse: empty {} → empty result');
-  else fail('parsePinpointResponse: empty {} should yield empty result');
-
-  if (parsePinpointResponse({ data: null }, 'X').length === 0) {
-    pass('parsePinpointResponse: null data → empty result (no crash)');
-  } else {
-    fail('parsePinpointResponse: null data should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parsePinpointResponse({ data: [] }, 'X');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parsePinpointResponse returns [] for { data: [] }');
+    else fail(`parsePinpointResponse { data: [] } → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], [{ data: null }, '[data]'], [{ data: {} }, '[data]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parsePinpointResponse(body, 'X'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('pinpoint: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parsePinpointResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parsePinpointResponse throws, naming what it got, for a body that is not a board');
   }
 
   // fetch(): requests the derived postings.json URL and passes the SSRF guard.

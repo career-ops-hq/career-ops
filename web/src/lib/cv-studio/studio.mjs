@@ -382,6 +382,9 @@ function readableRuns(parts) {
   let ins = "";
   const flush = () => {
     if (del) out.push({ op: "del", text: del });
+    // A removed word and the words that replace it are printed as two runs.
+    // Without a space at that boundary the runs glue: "thewrites", "read.messy".
+    if (del && ins && /\S$/.test(del) && /^\S/.test(ins)) out.push({ op: "same", text: " " });
     if (ins) out.push({ op: "ins", text: ins });
     del = "";
     ins = "";

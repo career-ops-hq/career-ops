@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import { dataFolderMissingMessage } from "./core/data-root.mjs";
 
 /**
  * @typedef {Object} PdfRunSignals
@@ -127,11 +128,16 @@ export function pdfFingerprint(file) {
  * this render has a new identity, one that was kept or never written has the
  * old one (or none). Every caller reads `delivered`, so the judgement lives
  * here and not in one of them.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", reportNum: string, dataRoot?: string}} args
  * @returns {Promise<{ok: boolean, delivered: boolean, stderr: string}>}
  */
-export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum }) {
+export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, reportNum, dataRoot }) {
+  if (dataRoot && !fs.existsSync(dataRoot)) {
+    return Promise.resolve({ ok: false, delivered: false, stderr: dataFolderMissingMessage(dataRoot) });
+  }
   const before = pdfFingerprint(finalPdf);
+  const env = { ...process.env, CAREER_OPS_PDF_SHARED: "1" };
+  if (dataRoot) env.CAREER_OPS_ROOT = dataRoot;
   return new Promise((resolve) => {
     const child = spawnFn(
       execPath,
@@ -145,7 +151,7 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
       {
         cwd: coreRoot,
         windowsHide: true,
-        env: { ...process.env, CAREER_OPS_PDF_SHARED: "1" },
+        env,
       },
     );
     let stderr = "";
@@ -161,6 +167,42 @@ export function spawnGeneratePdf({ spawnFn, execPath, coreRoot, html, finalPdf, 
       resolve({ ok, delivered: ok && landed, stderr: stderr.trim() });
     });
     child.on("error", (e) => resolve({ ok: false, delivered: false, stderr: `PDF rendering failed to start: ${e.message}` }));
+  });
+}
+
+/**
+ * Exit 0 can still write nothing (#6377). `delivered` is the new file at
+ * `finalPdf`, same rule as spawnGeneratePdf.
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, html: string, finalPdf: string, format: "letter"|"a4", dataRoot?: string}} args
+ * @returns {Promise<{ok: boolean, delivered: boolean, stderr: string}>}
+ */
+export function spawnAtsPdf({ spawnFn, execPath, coreRoot, html, finalPdf, format, dataRoot }) {
+  if (dataRoot && !fs.existsSync(dataRoot)) {
+    return Promise.resolve({ ok: false, delivered: false, stderr: dataFolderMissingMessage(dataRoot) });
+  }
+  const before = pdfFingerprint(finalPdf);
+  const env = { ...process.env, CAREER_OPS_PDF_SHARED: "1" };
+  if (dataRoot) env.CAREER_OPS_ROOT = dataRoot;
+  return new Promise((resolve) => {
+    const child = spawnFn(
+      execPath,
+      [path.join(coreRoot, "generate-pdf.mjs"), html, finalPdf, `--format=${format}`, "--allow-reorder"],
+      {
+        cwd: coreRoot,
+        windowsHide: true,
+        env,
+      },
+    );
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (d) => { stderr += d; });
+    child.on("close", (code) => {
+      const ok = code === 0;
+      const after = pdfFingerprint(finalPdf);
+      const landed = after !== null && after !== before;
+      resolve({ ok, delivered: ok && landed, stderr: stderr.trim() });
+    });
+    child.on("error", (e) => resolve({ ok: false, delivered: false, stderr: `ATS PDF rendering failed to start: ${e.message}` }));
   });
 }
 
@@ -202,12 +244,19 @@ export function undeliveredRenderError(render, finalPdf) {
  * a failure exit when --json is passed) so a caller can surface the specific
  * reason (not-found / ambiguous / lock-timeout / ...) rather than raw stderr.
  * `code` is the exit code, or null when the child never started.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, reportNum: string, dataRoot?: string}} args
  * @returns {Promise<{ok: boolean, code: number | null, data: {error?: string} | null, stderr: string}>}
  */
-export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum }) {
+export function markTrackerReady({ spawnFn, execPath, coreRoot, reportNum, dataRoot }) {
+  if (dataRoot && !fs.existsSync(dataRoot)) {
+    return Promise.resolve({ ok: false, code: null, data: null, stderr: dataFolderMissingMessage(dataRoot) });
+  }
   return new Promise((resolve) => {
-    const child = spawnFn(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"], { cwd: coreRoot, windowsHide: true });
+    const child = spawnFn(execPath, [path.join(coreRoot, "mark-pdf-ready.mjs"), reportNum, "--json"], {
+      cwd: coreRoot,
+      windowsHide: true,
+      ...(dataRoot ? { env: { ...process.env, CAREER_OPS_ROOT: dataRoot } } : {}),
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d) => { stdout += d.toString(); });
@@ -257,10 +306,27 @@ export function cleanupPdfScratch(scratchDir, prefix) {
  * @param {string[]} warnings
  */
 export function keepTailoredHtml(pdfPaths, warnings) {
+  const published = pdfPaths.finalPdf.replace(/\.pdf$/i, ".html");
+  let stagingDir;
   try {
-    fs.copyFileSync(pdfPaths.html, pdfPaths.finalPdf.replace(/\.pdf$/i, ".html"));
+    // Remove the sibling first so a failed publish cannot leave the previous
+    // CV selectable. The new file is copied aside and renamed into place, so
+    // a reader never scores a half-written HTML file.
+    fs.rmSync(published, { force: true });
+    stagingDir = fs.mkdtempSync(path.join(path.dirname(published), ".cv-html-"));
+    const staged = path.join(stagingDir, "tailored.html");
+    fs.copyFileSync(pdfPaths.html, staged);
+    fs.renameSync(staged, published);
   } catch (err) {
     warnings.push(`PDF rendered, but its HTML was not kept for the CV Studio: ${err.message}`);
+  } finally {
+    if (stagingDir) {
+      try {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      } catch (err) {
+        warnings.push(`Could not remove temporary CV HTML: ${err.message}`);
+      }
+    }
   }
 }
 
@@ -304,10 +370,10 @@ export function failureReason(stderr) {
  * Call after writeCvHtml for the same pdfPaths — this reads the HTML that
  * function wrote. `format` is passed in rather than read back off disk, so the two
  * no longer share a file and the only coupling left is the HTML itself.
- * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string}} args
+ * @param {{spawnFn: Function, execPath: string, coreRoot: string, pdfPaths: {html: string, finalPdf: string}, format: "letter"|"a4", reportNum: string, dataRoot?: string, ats?: {html: string, finalPdf: string}|null}} args
  * @returns {Promise<RenderResult>}
  */
-export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum }) {
+export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, format, reportNum, dataRoot, ats = null }) {
   const warnings = [];
 
   // A render over a warn-only page budget exits 0 but writes nothing to the
@@ -315,8 +381,23 @@ export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, 
   // ready, and "done" would point the user at a file that was never written,
   // so it is reported the way a strict overflow is. spawnGeneratePdf judges
   // delivery from the file itself.
-  const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum });
+  const render = await spawnGeneratePdf({ spawnFn, execPath, coreRoot, html: pdfPaths.html, finalPdf: pdfPaths.finalPdf, format, reportNum, dataRoot });
   if (render.delivered) keepTailoredHtml(pdfPaths, warnings);
+  const atsTarget = ats?.html && ats.finalPdf && ats.finalPdf !== pdfPaths.finalPdf ? ats.finalPdf : null;
+  if (render.delivered && atsTarget) {
+    const atsRender = await spawnAtsPdf({ spawnFn, execPath, coreRoot, html: ats.html, finalPdf: atsTarget, format, dataRoot });
+    if (!atsRender.delivered) {
+      try {
+        fs.rmSync(atsTarget, { force: true });
+      } catch (err) {
+        warnings.push(`Could not remove the previous ATS PDF ${path.basename(atsTarget)}: ${err.message}`);
+      }
+      const why = atsRender.ok
+        ? undeliveredRenderError(atsRender, atsTarget)
+        : (atsRender.stderr || "render failed");
+      warnings.push(`ATS PDF was not created: ${why}. Apply will use the styled PDF.`);
+    }
+  }
   cleanupPdfScratch(path.dirname(pdfPaths.html), `cv-web-${reportNum}.`);
 
   if (!render.delivered) {
@@ -338,7 +419,7 @@ export async function renderAndMarkPdf({ spawnFn, execPath, coreRoot, pdfPaths, 
   // tracker-sync miss (e.g. the row was edited away mid-flight) doesn't fail
   // the whole job, but it must still be visible to whoever is watching this
   // run, not just a server-side log nobody sees.
-  const mark = await markTrackerReady({ spawnFn, execPath, coreRoot, reportNum });
+  const mark = await markTrackerReady({ spawnFn, execPath, coreRoot, reportNum, dataRoot });
   if (!mark.ok) {
     console.error(`mark-pdf-ready.mjs failed for report #${reportNum}: ${mark.data?.error ?? mark.stderr}`);
     warnings.push(

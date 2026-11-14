@@ -1,3 +1,5 @@
+import { gapHoldsEditor } from "./handoff-gate.mjs";
+
 /**
  * Consume full-fill NDJSON. Only a terminal record confirms completion; EOF is
  * an interruption. Return to the editor on failure so answers remain retryable.
@@ -7,7 +9,7 @@
  * @param {() => boolean} isCurrent
  * @param {AbortSignal} [signal] Aborts the pending read when the session generation is dropped.
  *   A generation check alone cannot unblock `reader.read()` if no further chunk arrives.
- * @returns {Promise<{status: "done", filled: boolean} | {status: "ready", error: string} | null>}
+ * @returns {Promise<{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string} | null>}
  */
 export async function readFillResult(response, onStep, isCurrent, signal) {
   const failed = (error) => ({ status: /** @type {const} */ ("ready"), error });
@@ -38,9 +40,10 @@ export async function readFillResult(response, onStep, isCurrent, signal) {
       return unreadable();
     }
     if (event?.t === "done") {
-      return typeof event.filled === "boolean"
-        ? { status: /** @type {const} */ ("done"), filled: event.filled }
-        : unreadable();
+      if (typeof event.filled !== "boolean") return unreadable();
+      const done = { status: /** @type {const} */ ("done"), filled: event.filled };
+      if (Array.isArray(event.gaps) && event.gaps.length) done.gaps = event.gaps;
+      return done;
     }
     if (event?.t === "error") {
       return failed(typeof event.message === "string" && event.message.trim()
@@ -87,21 +90,28 @@ export async function readFillResult(response, onStep, isCurrent, signal) {
  * in `filled`. `filled: false` means the agent stopped short, so the editor
  * stays up and the drafted answers stay put.
  *
- * @param {{status: "done", filled: boolean} | {status: "ready", error: string}} result
- * @returns {{status: "done", issue: string} | {status: "ready", error: string}}
+ * @param {{status: "done", filled: boolean, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error: string}} result
+ * @returns {{status: "done", issue: string, gaps?: {level: "warn", code: string, message: string, field?: string}[]} | {status: "ready", error?: string, gaps?: {level: "warn", code: string, message: string, field?: string}[]}}
  */
 export function screenForFill(result) {
-  if (result.status === "done" && result.filled) {
-    return {
+  if (result.status !== "done") {
+    return { status: /** @type {const} */ ("ready"), error: result.error };
+  }
+  const gaps = Array.isArray(result.gaps) ? result.gaps : [];
+  const blocking = gaps.some((gap) => gapHoldsEditor(gap));
+  if (blocking || (gaps.length > 0 && !result.filled)) {
+    return { status: /** @type {const} */ ("ready"), gaps };
+  }
+  if (result.filled) {
+    const done = {
       status: /** @type {const} */ ("done"),
       issue: "AI filled the form for you — review every answer on the real form, then submit it yourself.",
     };
+    if (gaps.length) done.gaps = gaps;
+    return done;
   }
-  if (result.status === "done") {
-    return {
-      status: /** @type {const} */ ("ready"),
-      error: "AI did its best but couldn't finish. Check the real form before trying again.",
-    };
-  }
-  return { status: /** @type {const} */ ("ready"), error: result.error };
+  return {
+    status: /** @type {const} */ ("ready"),
+    error: "AI did its best but couldn't finish. Check the real form before trying again.",
+  };
 }

@@ -49,8 +49,11 @@
  *             name?: string, title?: string, alt?: string }} ElementFacts
  */
 
-// Whitespace-collapsed, uncapped: what the guard classifies on.
-const collapse = (s) => (s || "").replace(/\s+/g, " ").trim();
+// Whitespace-collapsed, uncapped: what the guard classifies on. NFC, because the
+// terms below are written precomposed and a label can arrive decomposed: a
+// Vietnamese «Nộp» typed with a combining-mark keyboard is n, o, U+0323,
+// U+0302, p, which the precomposed term would never match.
+const collapse = (s) => (s || "").normalize("NFC").replace(/\s+/g, " ").trim();
 // The 80-char cap is for the snapshot line the planner reads, never for the
 // decision: a submit term past the cap must still be seen by the guard.
 const clean = (s) => collapse(s).slice(0, 80);
@@ -179,6 +182,11 @@ const IN_FORM_TERMS = [
   "postuler", "candidati", "candidatar(-se|-me)?", "solliciteren", "solliciteer", "aplikuj", "bewerben",
   "postular(me|se)?", "відгукнутися", "lamar", "आवेदन करें", "ansøg", "søk",
   "send",
+  // vi: «nộp» (file, submit), «ứng tuyển» (apply), «gửi» (send). In this tier
+  // only, like "apply": CareerViet opens the application from the posting page
+  // with «Nộp đơn ứng tuyển» (the Apply control liveness-core.mjs reads, #4832),
+  // so outside a form these words are the way in. Inside one they file it.
+  "nộp", "ứng tuyển", "gửi",
 ];
 
 // The same two tiers for Japanese, Chinese and Korean, matched as substrings:

@@ -82,6 +82,7 @@ import { createDecipheriv } from 'crypto';
 import { sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_PATH = '/api/outer/ats-apply/website/jobs/v2';
 // Explicit allowlist, not a `*.mokahr.com` wildcard: hire-r1-ats.mokahr.com is a
@@ -105,12 +106,6 @@ const INTER_PAGE_DELAY_MS = 400;
 // tenants). Only orgId + siteId are load-bearing for the API; the prefix is
 // cosmetic and ignored here.
 const TENANT_PATH_RE = /^\/(?:social-recruitment|campus-recruitment|apply)\/([^/]+)\/(\d+)\/?$/;
-// Exact paths excluded by app.mokahr.com/robots.txt (checked 2026-08-26).
-// Keep this pathname-scoped: robots.txt does not exclude other routes.
-const ROBOTS_EXCLUDED_PATHS = new Set([
-  '/social-recruitment/lingjuninvest/46355',
-  '/social-recruitment/shopee/74378',
-]);
 
 /**
  * @param {string} url
@@ -125,7 +120,6 @@ function parseTenantUrl(url) {
   const siteId = Number(m[2]);
   if (!Number.isSafeInteger(siteId) || siteId <= 0) return null;
   const pathname = u.pathname.replace(/\/$/, '');
-  if (ROBOTS_EXCLUDED_PATHS.has(pathname)) return null;
   return { orgId: m[1], siteId, baseUrl: `${u.origin}${pathname}`, apiUrl: `${u.origin}${API_PATH}` };
 }
 
@@ -271,7 +265,9 @@ export default {
         } catch (err) {
           if (!succeededOnce) throw err;
           console.error(`  ⚠ mokahr: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
         }
 
         let decrypted;
@@ -283,7 +279,9 @@ export default {
         } catch (err) {
           if (!succeededOnce) throw err;
           console.error(`  ⚠ mokahr: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
         }
 
         succeededOnce = true;

@@ -104,6 +104,7 @@ test("a stock phrase from another CV bullet is allowed and a metric from that bu
       "- Ran the weekly release train for the payments app",
       "- Followed the team best practices for the refund page at Northwind",
       "- Cut cloud spend by 37% at Northwind",
+      "- Used Kafka for event ingestion in the billing service",
       "",
     ].join("\n"));
     fs.writeFileSync(path.join(dir, "article-digest.md"), "- Spearheaded the weekly release train for the payments app\n");
@@ -118,6 +119,18 @@ test("a stock phrase from another CV bullet is allowed and a metric from that bu
       "Spearheaded the weekly release train for the payments app",
     );
     assert.ok(tailored.claims.includes("spearheaded"));
+    // Checked as the list item it renders as, so the bullet-drift gate the
+    // PDF render runs on save (#1411) discards it here first.
+    const drifted = await unsupportedRewriteClaims(
+      "Led a Kafka migration for the billing service",
+      "Used Kafka for event ingestion in the billing service",
+    );
+    assert.ok(drifted.claims.includes("led a kafka migration for the billing service"));
+    const kept = await unsupportedRewriteClaims(
+      "Used Kafka for billing service event ingestion",
+      "Used Kafka for event ingestion in the billing service",
+    );
+    assert.deepEqual(kept.claims, []);
     const dashed = await unsupportedRewriteClaims("Ran the weekly release train \u2013 the Tuesday one", bullet);
     assert.deepEqual(dashed.claims, []);
     assert.match(dashed.warning, /en dash/);

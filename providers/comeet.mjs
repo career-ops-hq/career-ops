@@ -113,7 +113,14 @@ export default {
  * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
  */
 export function parseComeetResponse(json, companyName) {
-  const positions = Array.isArray(json) ? json : [];
+  // [] is an empty board. Any other body ({}, { error }, a bare string) is a
+  // changed or failing API and must not read as a board with no open roles
+  // (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  if (!Array.isArray(json)) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`comeet: unexpected response for ${companyName} — expected an array of positions, got: [${got}]`);
+  }
+  const positions = json;
   return positions
     .map(row => {
       // Coerce each row to a safe object so null / non-object members can't throw.

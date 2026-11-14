@@ -235,7 +235,7 @@ Feltnavnene i hovedet (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 ## Score Evidence
 (fem dimensioner, evidensstatus, åbne spørgsmål, Evidence confidence, prioriteter)
 
-## H) Udkast til svar til ansøgningen
+## H) Udkast til svar til ansøgningen (draft)
 (kun ved score >= 4.5 -- udkast til svar til ansøgningsformularen)
 
 ---
@@ -313,7 +313,7 @@ process.exit(spawnSync(process.execPath, args, { stdio: "inherit" }).status ?? 1
 **Tracker-format:**
 
 ```markdown
-| # | Dato | Virksomhed | Rolle | Score | Status | PDF | Report |
+| # | Dato | Virksomhed | Rolle | Score | Status | PDF | Report | Notes |
 ```
 
 ### 3. Lønobservationer (kun ønsket beløb)

@@ -97,7 +97,7 @@ reviews:
     - path: "plugins-registry.json"
       instructions: "Registry entries must be pinned to a commit SHA and reviewed under docs/PLUGIN_REVIEW.md. Flag unpinned refs or entries that fetch from a mutable branch."
     - path: "README*.md"
-      instructions: "There are 17 localized READMEs. When README.md changes, note which localized copies now drift, but do not request translations in the same PR."
+      instructions: "Localized READMEs (README.<lang>.md) mirror README.md. When README.md changes, note which localized copies now drift, but do not request translations in the same PR."
     - path: "package.json"
       instructions: "New dependencies need a discussion first. Flag any new dependency, any postinstall change, and any version range widening."
 
@@ -114,7 +114,7 @@ reviews:
     eslint: { enabled: true }
     yamllint: { enabled: true }
     github-checks: { enabled: true, timeout_ms: 900000 }
-    markdownlint: { enabled: false }   # 17 READMEs and long prompts: style noise, not review
+    markdownlint: { enabled: false }   # localized READMEs and long prompts: style noise, not review
     languagetool: { enabled: false }
     vale: { enabled: false }
     ast-grep: { enabled: false }
@@ -228,13 +228,15 @@ knowledge_base:
     - repository: career-ops-hq/career-ops-docs
       instructions: "The documentation site. When a PR here changes a CLI flag, a script name, a mode block or an output format, note that the docs may drift."
 
-# Steers @coderabbitai generate unit tests. The suite has no framework by
-# design (issue #1440): it must run on a fresh clone with only Node.
+# Steers @coderabbitai generate unit tests. The suite has no external framework
+# by design (issue #1440): it must run on a fresh clone with only Node, so a
+# suite uses the tests/helpers.mjs helpers or Node's built-in node:test
+# (tests/README.md, #2463).
 code_generation:
   unit_tests:
     path_instructions:
       - path: "**/*.mjs"
-        instructions: "Put the suite in tests/<subject>.test.mjs. test-all.mjs discovers that directory automatically, so no registration is needed. Do not use node:test, jest, vitest or any other framework and do not add a dependency: import pass, fail and the run helper from ./helpers.mjs, print a one-line header with console.log, and never call process.exit. Keep every test hermetic: no network, and no writes outside a temporary directory. Never read or write a user-layer path as defined in DATA_CONTRACT.md (cv.md, config/profile.yml, data/, reports/, output/, modes/_profile.md, modes/_custom.md); use a fixture instead."
+        instructions: "Put the suite in tests/<subject>.test.mjs. test-all.mjs discovers that directory automatically, so no registration is needed. Use one of the two forms tests/README.md allows, and never call process.exit: either import pass, fail and the run helper from ./helpers.mjs and print a one-line header with console.log, or import test from node:test and assert from node:assert/strict (test-all.mjs runs such a suite under node --test). Do not use jest, vitest, mocha or any other external framework, and do not add a dependency. Keep every test hermetic: no network, and no writes outside a temporary directory. Never read or write a user-layer path as defined in DATA_CONTRACT.md (cv.md, config/profile.yml, data/, reports/, output/, modes/_profile.md, modes/_custom.md); use a fixture instead."
       - path: "dashboard/**/*.go"
         instructions: "Standard library table-driven tests in the same package, _test.go suffix, no external test framework, no network."
       - path: "web/**"

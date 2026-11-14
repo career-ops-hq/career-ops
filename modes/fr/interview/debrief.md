@@ -22,7 +22,7 @@ Après un véritable entretien, capturez ce qui a été demandé, évaluez ce qu
 6. **Banque d'histoires** dans `interview-prep/story-bank.md` — ajoute de nouvelles histoires si elles font surface
 7. **CV** dans `cv.md` + `article-digest.md` (si présent) — pour ancrer les réponses suggérées dans une expérience réelle
 8. **Affirmations rétractées** dans `interview-prep/retracted-claims.md` (si présent) — barrière stricte ; n'utilisez jamais une affirmation rétractée dans une réponse suggérée même si le candidat l'a dite pendant l'entretien
-9. **Fichier de préparation spécifique au rôle** — ajoutez les notes de débriefing
+9. **Fichier de préparation spécifique au rôle** — ajoutez les notes de débriefing (ou remplacez l'entrée de ce round lors d'une relance, voir Step 1d)
 
 ---
 
@@ -41,6 +41,19 @@ Si la mémoire est incomplète, posez des questions ciblées :
 - "Y a-t-il eu des questions qui vous ont pris au dépourvu ?"
 - "Y a-t-il quelque chose auquel vous auriez souhaité répondre différemment ?"
 - "L'intervieweur a-t-il relancé sur quoi que ce soit — cela signifie généralement qu'il en voulait plus ?"
+
+**Format et ton (une question courte, facultative).** Posez-la une seule fois : "Rapidement, sur l'ambiance du round : quel était le format (recruiter screen / 1:1 / panel / group / take-home review), combien de personnes étaient en ligne, comment décririez-vous le ton (relaxed-conversational / structured-formal / rapid-fire / adversarial), et à quel point vous êtes-vous senti à l'aise (1-5, ou quelques mots à vous) ?" **N'inférez jamais le niveau d'aisance et ne le remplissez jamais à la place du candidat** : c'est son ressenti subjectif, donc consignez-le uniquement avec ses propres mots, et omettez-le s'il passe la question. S'il passe toute la question, n'écrivez aucune des quatre valeurs.
+
+---
+
+## Step 1d — Check for an Earlier Debrief of This Round
+
+Avant d'enregistrer quoi que ce soit (Step 8 et Step 9 dépendent tous deux de la réponse), vérifiez si ce débriefing relance un débriefing déjà enregistré. Dès que l'entreprise, le rôle, le type de round et la date sont connus (demandez-les sinon), listez tous les fichiers de session existants pour eux dans `interview-prep/sessions/` : le nom de base `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` et toutes les variantes `-2`, `-3`, ..., même lorsque le nom de base lui-même manque.
+
+- **Aucun fichier :** cherchez dans `interview-prep/{company-slug}-{role-slug}.md` une entrée `## Round [N] Debrief — [YYYY-MM-DD]` pour ce round et cette date, laissée par une exécution précédente arrêtée après le Step 8. S'il y en a une, demandez si ce débriefing la relance ; si oui, le Step 8 remplace cette entrée. Sinon, c'est un nouveau round et le Step 8 ajoute. Dans les deux cas, le Step 9 écrit le nom de base.
+- **Un ou plusieurs fichiers :** n'écrasez jamais en silence. Montrez les fichiers avec le `interviewer_role` et la première question de chacun, et demandez au candidat si ce débriefing relance l'un d'eux ou s'il s'agit d'un round distinct. Listez aussi comme choix supplémentaire toute entrée `## Round [N] Debrief — [YYYY-MM-DD]` de cette date dans le fichier de préparation à laquelle aucun des fichiers ne correspond (une exécution arrêtée après le Step 8 en laisse une) : si le candidat la choisit, le Step 8 remplace cette entrée et le Step 9 écrit le prochain compteur libre. Montrez chacune de ces entrées avec ses lignes `**Intervieweur :**` et `**Type de round :**`, pour que le candidat distingue l'entrée interrompue d'un débriefing terminé d'un autre type de round à la même date.
+  - **Relance :** notez le fichier choisi par le candidat. Le Step 8 remplace l'entrée de ce round dans le fichier de préparation au lieu d'en ajouter une seconde, et le Step 9 met à jour sur place le fichier choisi selon sa règle de relance.
+  - **Round distinct :** le Step 8 ajoute comme d'habitude, et le Step 9 écrit le prochain compteur libre (`-2`, `-3`, ...) avant `.md`.
 
 ---
 
@@ -128,7 +141,7 @@ Soyez honnête. Une fourchette de probabilité avec un raisonnement clair est pl
 
 ## Step 8 — Save Debrief
 
-Ajoutez à `interview-prep/{company-slug}-{role-slug}.md` :
+Ajoutez à `interview-prep/{company-slug}-{role-slug}.md`. **Si le Step 1d a confirmé une relance**, remplacez plutôt l'entrée `## Round [N] Debrief — [YYYY-MM-DD]` existante de ce round (le titre et tout jusqu'au titre `## ` suivant), afin qu'un entretien garde une seule entrée ; n'ajoutez que si le fichier n'a aucune entrée pour ce round et cette date.
 
 ```markdown
 ## Round [N] Debrief — [YYYY-MM-DD]
@@ -153,13 +166,22 @@ Ajoutez à `interview-prep/{company-slug}-{role-slug}.md` :
 **Calendrier :** [toutes les dates ou échéances mentionnées]
 **Autres candidats :** [si divulgué]
 **Prochaines étapes :** [ce que l'intervieweur a dit qu'il se passerait ensuite et d'ici quand]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Format et ton de l'entretien :** (listez uniquement les champs auxquels le candidat a répondu ; supprimez entièrement les puces sans réponse, sans espace réservé ni valeur inférée)
+- Format : [recruiter screen / 1:1 / panel / group / take-home review]
+- Personnes en ligne : [nombre]
+- Ton : [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Aisance du candidat : [1-5, ou une courte phrase, avec les propres mots du candidat]
 ```
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-Après le débriefing, rédigez également une transcription de session lisible par machine vers `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. C'est un enregistrement structuré du round pour les modes d'analyse en aval ; les tours étiquetés par l'intervenant permettent à un consommateur de lire les deux côtés sans réinférer qui a parlé. Le contrat complet se trouve dans `interview-prep/sessions/README.md`.
+Après le débriefing, rédigez également une transcription de session lisible par machine vers `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Utilisez la réponse du Step 1d, jamais un écrasement silencieux : sans fichier antérieur, écrivez le nom de base ; pour un round distinct, écrivez le prochain compteur libre (`-2`, `-3`, ...) avant `.md` ; pour une relance, mettez à jour sur place le fichier choisi par le candidat. Voir la section "File names" du README. C'est un enregistrement structuré du round pour les modes d'analyse en aval ; les tours étiquetés par l'intervenant permettent à un consommateur de lire les deux côtés sans réinférer qui a parlé. Le contrat complet se trouve dans `interview-prep/sessions/README.md`.
+
+**Règle de relance (le Step 1d a confirmé une relance).** Le fichier choisi peut contenir des tours verbatim issus d'un débriefing antérieur fait à partir d'une transcription, et rien dans le fichier ne l'indique. Conservez ses tours existants tels quels et n'ajoutez que ce que ce débriefing a appris : les questions qui manquent au fichier (comme nouveaux tours `## Q` dans l'ordre de l'entretien), les tags de compétence sur les réponses qui n'en ont pas, et les clés de format et de ton données par le candidat lors de cette exécution. Ne réécrivez jamais un tour existant de mémoire.
 
 Format :
 
@@ -171,6 +193,10 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [rôle, si connu]
 source: debrief
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # facultatif (Step 1)
+people_on_call: [nombre]                                              # facultatif
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # facultatif
+candidate_comfort: "[1-5, ou une courte phrase avec les propres mots du candidat]"      # facultatif
 ---
 
 ## Q1
@@ -188,6 +214,7 @@ Règles pour la transcription :
 - **Taguez chaque réponse.** Sur la ligne juste au-dessus de chaque ligne `**Candidate:**`, émettez `<!-- competency: tag[, tag...] -->` — en minuscules kebab-case, séparés par des virgules pour les réponses multi-compétences (par ex. `system-design`, `people-leadership`, `incident-response`). Vous avez déjà évalué chaque réponse à l'étape 2, donc taguez à partir de cette évaluation plutôt que de relire. Les tags sont libres ; choisissez la compétence que la question a réellement testée.
 - **Reconstruisez fidèlement le tour du candidat.** Utilisez ce que le candidat a déclaré avoir dit à l'étape 1, et non une réponse idéalisée. La "réponse correcte/complète" de l'étape 2 appartient au fichier de débriefing, jamais dans la transcription — la transcription enregistre ce qui s'est passé.
 - **`source: debrief`.**
+- **`format`, `people_on_call`, `tone` et `candidate_comfort` sont des clés facultatives du front matter** qui portent les valeurs du Step 1 / Step 8, afin que les modes en aval puissent les lire sans analyser la prose. N'écrivez que les clés auxquelles le candidat a répondu ; omettez les autres, et n'écrivez jamais `candidate_comfort` si le candidat ne l'a pas donné. Mettez `candidate_comfort` entre guillemets doubles (ce peut être du texte libre) ; si vous échappez à la main, échappez les barres obliques inverses avant les guillemets doubles internes, afin qu'un `\n` littéral reste deux caractères au lieu de devenir un saut de ligne. Les fichiers de session d'entraînement ne les portent pas.
 - Le fichier de session atterrit dans un répertoire gitignored (les vrais noms/entreprises n'entrent jamais dans le contrôle de version) ; rédigez-le sans expurger.
 
 ---

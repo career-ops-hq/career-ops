@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { extractHeadings, compareStructure, discoverLangs, checkLang, formatReport, toJSON } from '../i18n-drift.mjs';
+import { extractHeadings, compareStructure, discoverLangs, checkLang, formatReport, toJSON, coveragePercent } from '../i18n-drift.mjs';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -316,6 +316,66 @@ test('CLI is advisory, accepts repeated language selection, and resolves modes o
   const summary = runCLI(root, ['--lang', 'zh', '--summary']);
   assert.equal(summary.status, 0, describeSpawn(summary));
   assert.match(summary.stdout, /zh/);
+});
+
+test('--fail-under turns a coverage shortfall into exit 1 and leaves the default advisory', (t) => {
+  const root = fixture(t, {
+    'modes/oferta.md': '# Evaluate\n## Context\n### Evidence',
+    'modes/zh/oferta.md': '# 评估\n## 背景',
+    'modes/ar/oferta.md': '# تقييم\n## السياق\n### الأدلة',
+  });
+  installCLI(root);
+
+  // The counterpart of the advisory contract: no flag, exit 0.
+  assert.equal(runCLI(root, ['--lang', 'zh', '--summary']).status, 0);
+
+  // 2 of 3 structural slots → 66% rounded down, below an 80% floor.
+  const failing = runCLI(root, ['--lang', 'zh', '--fail-under', '80']);
+  assert.equal(failing.status, 1, describeSpawn(failing));
+  assert.match(failing.stderr, /1 language\(s\) below --fail-under 80: zh 66%/);
+  // The report still prints, so the failing run explains itself.
+  assert.match(failing.stdout, /zh/);
+
+  // The displayed number is floored, not rounded: a language below the floor
+  // must never print as if it met it. 199/250 is 79.6% and 1999/2500 is 79.96%;
+  // rounding would render both as 80 under an error about failing 80.
+  assert.equal(coveragePercent({ sectionsCovered: 199, sectionsTotal: 250 }), 79);
+  assert.equal(coveragePercent({ sectionsCovered: 1999, sectionsTotal: 2500 }), 79);
+  assert.equal(coveragePercent({ sectionsCovered: 2, sectionsTotal: 3 }), 66);
+  assert.equal(coveragePercent({ sectionsCovered: 3, sectionsTotal: 3 }), 100);
+  assert.equal(coveragePercent({ sectionsCovered: 0, sectionsTotal: 0 }), null);
+
+  assert.equal(runCLI(root, ['--lang', 'zh', '--fail-under', '60']).status, 0, 'a floor below the coverage passes');
+  assert.equal(runCLI(root, ['--lang', 'zh', '--fail-under', '0']).status, 0, '0 accepts any coverage');
+  assert.equal(runCLI(root, ['--lang', 'ar', '--fail-under', '100']).status, 0, 'full coverage meets a 100% floor');
+  assert.equal(runCLI(root, ['--lang', 'zh', '--fail-under=60']).status, 0, '--fail-under=N is the same flag');
+
+  // The machine-readable output keeps its schema; only the exit code changes.
+  const jsonRun = runCLI(root, ['--lang', 'zh', '--json', '--fail-under', '80']);
+  assert.equal(jsonRun.status, 1, describeSpawn(jsonRun));
+  assert.doesNotThrow(() => JSON.parse(jsonRun.stdout));
+
+  for (const args of [
+    ['--fail-under'], ['--fail-under='], ['--fail-under', '101'], ['--fail-under', '-1'],
+    ['--fail-under', 'eighty'], ['--fail-under=50.5'],
+  ]) {
+    const result = runCLI(root, args);
+    assert.equal(result.status, 1, `${args.join(' ')} must be rejected: ${describeSpawn(result)}`);
+    assert.match(result.stderr, /--fail-under requires a whole percentage between 0 and 100/);
+  }
+
+  // A locale whose files are all skipped has nothing measurable, so no
+  // percentage exists to compare against a floor. Counting that as 0% would
+  // fail a locale with nothing wrong, and counting it as 100% would hide it.
+  const skippedOnly = fixture(t, {
+    'modes/oferta.md': '# Evaluate\n## Context',
+    'modes/de/local-only.md': '# Local guidance',
+  });
+  installCLI(skippedOnly);
+  const noSections = runCLI(skippedOnly, ['--lang', 'de', '--json', '--fail-under', '100']);
+  assert.equal(noSections.status, 0, describeSpawn(noSections));
+  assert.equal(JSON.parse(noSections.stdout)[0].summary.sectionsTotal, 0);
+  assert.equal(noSections.stderr, '');
 });
 
 test('CLI rejects invalid flags, missing operands and unknown languages before printing a report', (t) => {

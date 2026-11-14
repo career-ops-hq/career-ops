@@ -85,7 +85,7 @@ test('a daylight rule that ended years ago still covers a later interview', () =
 });
 
 test('an offset minute, hour, or second past the limit stays unconverted', () => {
-  for (const offset of ['+126000', '+240000', '-005961']) {
+  for (const offset of ['+126000', '+240000', '-005961', '+053060']) {
     const zone = observance('STANDARD', '16010101T000000', offset, offset);
     const { event } = parseIcs(invite('Example Zone', zone, '20260115T120000'), { displayZone: 'UTC' });
     assert.equal(event.start.kind, 'unknown-tzid', offset);

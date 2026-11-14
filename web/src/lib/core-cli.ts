@@ -1,5 +1,6 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
-import { rootScript } from "@/lib/career-ops";
+import { careerOpsRoot, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 
 const CORE_CLI_TIMEOUT_MS = 30_000;
@@ -28,7 +29,7 @@ function boundedLockWait(): Record<string, string> {
 
 export type CliResult = { code: number; stdout: string; stderr: string; spawnFailed: boolean; timedOut: boolean };
 
-export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
+export function runCoreCli(script: string, args: string[], opts?: { signal?: AbortSignal }): Promise<CliResult> {
   return new Promise((resolve) => {
     execFile(
       process.execPath,
@@ -36,7 +37,8 @@ export function runCoreCli(script: string, args: string[]): Promise<CliResult> {
       {
         cwd: resolveCodeRoot(process.cwd(), process.env),
         timeout: CORE_CLI_TIMEOUT_MS,
-        env: { ...process.env, ...boundedLockWait() },
+        signal: opts?.signal,
+        env: { ...coreProfileEnv(careerOpsRoot()), ...boundedLockWait() },
         // windowsHide: see api/doctor/route.ts — a stale inherited console
         // kills every child with 0xC0000142 on Windows; never inherit one.
         windowsHide: true,

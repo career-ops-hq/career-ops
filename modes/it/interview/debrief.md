@@ -22,7 +22,7 @@ Dopo un vero colloquio, metti a verbale quanto chiesto, valuta ciò che ha funzi
 6. **Banca delle storie** in `interview-prep/story-bank.md` — per aggiungere nuove storie se emerse
 7. **CV** in `cv.md` + `article-digest.md` (se presente) — per ancorare le risposte suggerite ad esperienze reali
 8. **Affermazioni ritirate** in `interview-prep/retracted-claims.md` (se presente) — sbarramento rigido; mai usare un'affermazione ritirata in una risposta suggerita, anche se il candidato la usasse nel colloquio
-9. **File di preparazione specifico per il ruolo** — per aggiungere note di debriefing; correggi in tempo reale ogni fatto pregresso che il colloquio contraddice in via diretta (vedi Passo 1b)
+9. **File di preparazione specifico per il ruolo** — per aggiungere note di debriefing (o sostituire la voce di questo round in una ripetizione, vedi Passo 1d); correggi in tempo reale ogni fatto pregresso che il colloquio contraddice in via diretta (vedi Passo 1b)
 
 ---
 
@@ -51,6 +51,8 @@ Se il ricordo è lacunoso, fai domande mirate per aiutarlo:
 - "L'intervistatore ha fatto domande di follow-up specifiche su qualche argomento per approfondire?"
 
 Aggiungi esplicitamente il contrassegno **`input_source: recall`**.
+
+**Formato e tono (entrambi i percorsi, una domanda breve, facoltativa).** Chiedi una sola volta: "Una cosa veloce su come è andato il round: che formato aveva (recruiter screen / 1:1 / panel / group / take-home review), quante persone c'erano in chiamata, come descriveresti il tono (relaxed-conversational / structured-formal / rapid-fire / adversarial) e quanto ti sei sentito a tuo agio (1-5, o poche parole tue)?" Se una trascrizione mostra il formato, il numero di persone o il tono, proponili come suggerimento da confermare. **Non dedurre né compilare mai il livello di agio al posto del candidato**: è una sua valutazione soggettiva, quindi registrala solo con le sue parole e omettila se la salta. Se salta l'intera domanda, non scrivere nessuno dei quattro valori.
 
 A prescindere dalla fonte (transcript o recall), i passaggi successivi (Passo 2 in poi) sono identici: analisi onesta, identificazione delle lacune e aggiornamento della banca dati. Il marcatore `input_source` deve semplicemente essere preservato intatto fino al Passo 9.
 
@@ -89,6 +91,17 @@ Mentre registri quanto è stato chiesto, registra anche ciò che l'intervistator
 - **Le affermazioni del candidato sono fuori ambito.** Qui vanno solo le dichiarazioni dell'intervistatore sul ruolo, non ciò che il candidato ha detto di sé.
 
 Porta l'elenco nel Passo 6 e nel Passo 8, e nel Passo 9 solo per l'input da trascrizione.
+
+---
+
+## Passo 1d — Controlla se Esiste un Debriefing Precedente di Questo Round
+
+Prima di salvare qualsiasi cosa (Passo 8 e Passo 9 dipendono entrambi dalla risposta), controlla se questo debriefing ripete uno già salvato. Appena sono noti azienda, ruolo, tipo di round e data (chiedili se mancano), elenca ogni file di sessione esistente per questi dati in `interview-prep/sessions/`: il nome base `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` e ogni variante `-2`, `-3`, ..., anche quando manca il nome base stesso.
+
+- **Nessun file:** cerca in `interview-prep/{company-slug}-{role-slug}.md` una voce `## Debriefing del Round [N] — [YYYY-MM-DD]` per questo round e questa data, che lascia un'esecuzione precedente interrotta dopo il Passo 8. Se c'è, chiedi se questo debriefing la ripete; in caso affermativo il Passo 8 sostituisce quella voce. Altrimenti è un round nuovo e il Passo 8 accoda. In entrambi i casi il Passo 9 scrive il nome base.
+- **Uno o più file:** non sovrascrivere mai in silenzio. Mostra i file con l'`interviewer_role` e la prima domanda di ciascuno, e chiedi al candidato se questo debriefing ripete uno di essi o è un round separato. Elenca inoltre come ulteriore scelta ogni voce `## Debriefing del Round [N] — [YYYY-MM-DD]` di questa data nel file di preparazione a cui non corrisponde nessuno dei file (la lascia un'esecuzione interrotta dopo il Passo 8): se il candidato la sceglie, il Passo 8 sostituisce quella voce e il Passo 9 scrive il successivo contatore libero. Mostra ciascuna di queste voci con le sue righe `**Intervistatore:**` e `**Tipo di round:**`, così che il candidato distingua la voce interrotta da un debriefing completato di un altro tipo di round nella stessa data.
+  - **Ripetizione:** annota il file scelto dal candidato. Il Passo 8 sostituisce la voce di quel round nel file di preparazione invece di accodarne una seconda, e il Passo 9 aggiorna sul posto il file scelto secondo la sua regola di ripetizione.
+  - **Round separato:** il Passo 8 accoda come al solito, e il Passo 9 scrive il successivo contatore libero (`-2`, `-3`, ...) prima di `.md`.
 
 ---
 
@@ -174,7 +187,7 @@ Sii onesto. Un intervallo di probabilità con ragionamenti chiari è più utile 
 
 ## Passo 8 — Salva il Debriefing
 
-Accoda a `interview-prep/{company-slug}-{role-slug}.md`:
+Accoda a `interview-prep/{company-slug}-{role-slug}.md`. **Se il Passo 1d ha confermato una ripetizione**, sostituisci invece la voce `## Debriefing del Round [N] — [YYYY-MM-DD]` esistente di quel round (l'intestazione e tutto fino alla successiva intestazione `## `), così che un colloquio conservi una sola voce; accoda solo quando il file non ha alcuna voce per quel round e quella data.
 
 ```markdown
 ## Debriefing del Round [N] — [YYYY-MM-DD]
@@ -202,17 +215,26 @@ Accoda a `interview-prep/{company-slug}-{role-slug}.md`:
 **Tempistiche:** [eventuali date o scadenze menzionate]
 **Altri candidati:** [se divulgato]
 **Prossimi passi:** [cosa ha detto l'intervistatore succederà a seguire ed entro quando]
+
+### Formato e Tono del Colloquio (qualsiasi round — ometti se il candidato l'ha saltato)
+**Formato e tono del colloquio:** (elenca solo i campi a cui il candidato ha risposto; elimina del tutto le voci senza risposta, senza segnaposto e senza valori dedotti)
+- Formato: [recruiter screen / 1:1 / panel / group / take-home review]
+- Persone in chiamata: [numero]
+- Tono: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Agio del candidato: [1-5, o una breve frase, con le parole del candidato]
 ```
 
-**Se in questo round è stata espressa verbalmente una cifra relativa al compenso** (il candidato ha indicato un numero, non solo un generico "è uscito il discorso compenso"), aggiungi in calce una riga marcata `stated` a `data/salary-observations.tsv`. La riga deve rispettare rigorosamente il formato canonico a campi (separati da tab): `{tracker#}`, `{date}` (data del round), `stated` (tipo), `{amount}` (cifra), `{currency}` (valuta), `user` (sorgente), `{note}` (nota breve), `{round}` (round del colloquio), `{interviewer}` (nome dell'intervistatore). Crea il file usando la documentazione in `docs/SCRIPTS.md` (sezione `salary-gap`) se non esiste. Questo permette al piano di preparazione per i round successivi di riesumare la cifra e ricordarla al candidato (vedi Passo 4).
+**Se in questo round è stata espressa verbalmente una cifra relativa al compenso** (il candidato ha indicato un numero, non solo un generico "è uscito il discorso compenso"), aggiungi in calce una riga marcata `stated` a `data/salary-observations.tsv`. La riga deve rispettare rigorosamente il formato canonico a campi (separati da tab): `{tracker#}`, `{date}` (data del round), `stated` (tipo), `{amount}` (cifra), `{currency}` (valuta), `user` (sorgente), `{note}` (nota breve), `{round}` (round del colloquio), `{interviewer}` (nome dell'intervistatore). Crea il file usando la documentazione in `docs/SCRIPTS.md` (sezione `salary-gap`) se non esiste. Questo permette al piano di preparazione per i round successivi di riesumare la cifra e ricordarla al candidato (vedi Passo 4). In una ripetizione, salta la riga se il file contiene già una riga `stated` con lo stesso tracker#, round, data, cifra e valuta.
 
 ---
 
 ## Passo 9 — Scrivi il Resoconto (Transcript) della Sessione
 
-Dopo il debriefing, scrivi anche una trascrizione meccanicamente leggibile della sessione su `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Questo è un registro strutturato del round per le modalità di analisi a valle (downstream); i turni etichettati col parlante permettono al fruitore di leggere entrambi i lati senza dover re-inferire chi ha parlato. Il contratto completo si trova in `interview-prep/sessions/README.md`.
+Dopo il debriefing, scrivi anche una trascrizione meccanicamente leggibile della sessione su `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Usa la risposta del Passo 1d, mai una sovrascrittura silenziosa: senza file precedenti, scrivi il nome base; per un round separato, scrivi il successivo contatore libero (`-2`, `-3`, ...) prima di `.md`; per una ripetizione, aggiorna sul posto il file scelto dal candidato. Vedi la sezione "File names" del README. Questo è un registro strutturato del round per le modalità di analisi a valle (downstream); i turni etichettati col parlante permettono al fruitore di leggere entrambi i lati senza dover re-inferire chi ha parlato. Il contratto completo si trova in `interview-prep/sessions/README.md`.
 
-**Controlla l'indicatore `input_source` impostato al Passo 1.** Se compare `input_source: transcript`, ignora ogni opera operosa su d'adibiti passaggi di ricostituzione a restauro: desisti nell'intento impiegandovi generazione sostitutiva del canovaccio d'archivio di questo resoconto testuale tramite uso al ricalcolo di prelievi ripresi prelevandoli da depositi d'output espunti all'uscita elaborata fra il Passo 1/Passo 2 — il ricorrervi arrecherebbe la maldestra produzione scaturente e riduttiva a decadimento intrinseco ed estrinseco per le virtù e qualità documentali di una matrice prodotta d'esito che deporrebbe come nient'altro d'identificabile ad una copia e traccia peggiorativa assai lacunosa e più precaria inficiata su base per difetto e a perdita a smarrimento di matrice (lossier copy) traendo lo specchio distorto dalla sua veridica ed originale sorgente primaria in ascesa da qual punto traeva radice di prelievo originante all'effettivo e per scaturigine accertata all'esame in origine. Si espleterà a converso la manovra inversa per accantonare preservandolo integralmente ponendovi stesura a deposito del transcript primigenio per stiva depositandovi d'ufficio alla sede diretta a sua natura (directly), apportandovi un lesto affinamento superficiale limitativo agli standard accreditati operando minimamente la ri-normalizzazione della forma ai soli confini di mera rispondenza alle sembianze dello schema qui delineato a discesa, uniformandovi a tali fini le siglature attinenti su l'indicazione ai ruoli dei soggetti a voce parlante espressi (speaker labels), i connotati e diciture pertinenti sui blocchi intestati (front-matter), ed introducendovi in innesto con marcatura di segnale a tag, in via esclusiva ed al fine, le stime delle estrazioni a referto inerenti a tag competenza prodotte dal vaglio espresso e prodotto per il rendiconto operante ad emersione ad espunto d'attestazione da vaglio (assessment) espresso all'altezza dell'accertamento d'inchiesta emerso dal Passo 2. Ove in disamina si rintracci a contro-esempio l'appalesarsi dell'impiego al richiamo su `input_source: recall`, s'inizializzi per obbligo d'istruzione il procedimento d'iter d'assemblamento operante nella costituzione e ricostituzione a stesura per redazione ad integrazione d'assemblaggio formale nel tracciare questo resoconto ad attestato testuale (transcript) procedendovi d'opera interamente traendone dote pescando i tracciati su prelievi prelevando il dispiegarsi dall'output al Passo 1/Passo 2 proprio siccome d'uopo in conformità alle manovre istituite alle direttrici originarie conformandosi d'espletamento ad uso finora già tracciato d'ordinanza precedente ed asseverata — dopotutto all'esporsi per estrapolazione operando a memoria, non comparendo su un registro verbale veridico e primigenio in forma letterale ed accertata alle origini testuali, occorre ed obbliga d'accertarne per fatto predefinito che quest'operazione stessa per sua natura nativa (recall) non detiene o produrrà e in virtù originante intrinseca della sua matrice, mai un reperto incontestabile originario o verbatim originario natio integro sul qual poter esercitare in operatività d'archiviazione un'azione a salvaguardia (preserve).
+**Controlla l'indicatore `input_source` impostato al Passo 1.** Con `input_source: transcript`, salta la ricostruzione: non rigenerare la trascrizione dall'output del Passo 1/Passo 2, perché sarebbe una copia con più perdite della fonte reale da cui proviene. Salva invece direttamente la trascrizione originale, normalizzata solo quanto basta per rispettare lo schema qui sotto (etichette dei parlanti, front matter, tag di competenza dalla valutazione del Passo 2). Con `input_source: recall`, ricostruisci la trascrizione dall'output del Passo 1/Passo 2 come prima: un nuovo file da memoria non ha un originale letterale da preservare.
+
+**Regola di ripetizione (il Passo 1d ha confermato una ripetizione).** Il file scelto può contenere turni letterali di un debriefing precedente fatto da trascrizione, e nulla nel file lo indica. Con `input_source: transcript`, la trascrizione sostituisce i turni e `stated_priorities` del file. Con `input_source: recall`, mantieni i turni e `stated_priorities` esistenti del file esattamente come sono, e aggiungi solo ciò che l'esecuzione a memoria ha portato: domande che mancano nel file (come nuovi turni `## Q` nell'ordine del colloquio), tag di competenza sulle risposte che non ne hanno, e le chiavi di formato e tono date dal candidato in questa esecuzione. Non riscrivere mai un turno esistente a memoria.
 
 Formato:
 
@@ -224,9 +246,13 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [ruolo, se noto]
 source: debrief
-stated_priorities:        # solo input da trascrizione; ometti se non ne sono state dichiarate o per l'input a memoria (Passo 1c)
-  - speaker: [nome o ruolo, oppure "unknown"]
+stated_priorities:        # scritto solo da input da trascrizione; ometti se non ne sono state dichiarate (Passo 1c); una ripetizione a memoria mantiene la lista esistente
+  - speaker: "[nome o ruolo, oppure unknown]"
     quote: "[breve citazione testuale, tra virgolette doppie]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # facoltativo (Passo 1)
+people_on_call: [numero]                                              # facoltativo
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # facoltativo
+candidate_comfort: "[1-5, o una breve frase con le parole del candidato]"      # facoltativo
 ---
 
 ## Q1
@@ -244,7 +270,8 @@ Regole per il resoconto testuale:
 - **Etichetta ogni risposta.** Nella riga direttamente precedente ogni riga `**Candidato:**`, emetti `<!-- competency: tag[, tag...] -->` — kebab-case tutto in minuscolo, separato da virgola in caso di risposte multi-competenza (es. `system-design`, `people-leadership`, `incident-response`). Hai già valutato ogni risposta nel Passo 2, quindi inserisci i tag prelevandoli da quella valutazione senza dover rileggere le risposte. I tag sono liberi; scegli la competenza che la domanda ha effettivamente testato.
 - **Ricostruisci fedelmente il turno del candidato.** Usa ciò che il candidato ha riferito di aver detto nel Passo 1, non una risposta idealizzata. La "risposta corretta/completa" estrapolata al Passo 2 appartiene rigorosamente e unicamente al file del debriefing, e a preclusione imperativa deve restare esiliata del tutto all'inserirsi ad innesto sul transcript (mai nel transcript) — il resoconto ha lo scopo d'attestare ciò che è propriamente occorso al tempo (what happened).
 - **`source: debrief`.**
-- **`stated_priorities` va nel front matter** (Passo 1c), come lista YAML di elementi `speaker` + `quote`, così che gli script e `interview/plan` possano leggerla senza analizzare il corpo. Metti ogni `quote` tra virgolette doppie, affinché il front matter resti YAML valido e riporti esattamente quanto detto: nell'escape manuale, gestisci prima le barre rovesciate e poi le virgolette doppie interne, così che un `\n` letterale resti due caratteri invece di diventare un a-capo. Round e data dell'elemento sono `round` e `date` del file stesso. Ometti il campo quando non è stato dichiarato nulla e ogni volta che `input_source: recall`. Non mettere mai priorità in un file di sessione di pratica, perché non c'è un intervistatore reale.
+- **`stated_priorities` va nel front matter** (Passo 1c), come lista YAML di elementi `speaker` + `quote`, così che gli script e `interview/plan` possano leggerla senza analizzare il corpo. Metti ogni `quote` tra virgolette doppie, affinché il front matter resti YAML valido e riporti esattamente quanto detto: nell'escape manuale, gestisci prima le barre rovesciate e poi le virgolette doppie interne, così che un `\n` letterale resti due caratteri invece di diventare un a-capo. Round e data dell'elemento sono `round` e `date` del file stesso. Metti tra virgolette doppie anche ogni `speaker`, con lo stesso escape di `quote` (prima le barre rovesciate, poi le virgolette doppie interne): un valore come `Hiring Manager: Jane` contiene i due punti e senza virgolette è YAML non valido. Ometti il campo quando non è stato dichiarato nulla, e non scriverlo mai da `input_source: recall`: un nuovo file da memoria non lo riceve, e una ripetizione a memoria mantiene invariata la lista esistente del file scelto. Non mettere mai priorità in un file di sessione di pratica, perché non c'è un intervistatore reale.
+- **`format`, `people_on_call`, `tone` e `candidate_comfort` sono chiavi facoltative del front matter** che riportano i valori del Passo 1 / Passo 8, così che le modalità a valle possano leggerli senza analizzare il testo. Scrivi solo le chiavi a cui il candidato ha risposto; ometti le altre e non scrivere mai `candidate_comfort` se il candidato non l'ha indicato. Metti `candidate_comfort` tra virgolette doppie (può essere testo libero); nell'escape manuale, gestisci prima le barre rovesciate e poi le virgolette doppie interne, come per `quote`. I file delle sessioni di pratica non le contengono.
 - Il file della sessione finisce in una directory in gitignore (i nomi reali/aziende non entrano mai nel controllo di versione); scrivilo senza operare censure.
 
 ---

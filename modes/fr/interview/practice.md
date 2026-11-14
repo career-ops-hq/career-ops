@@ -134,7 +134,7 @@ Gardez les retours concis. Une ou deux choses à affûter par réponse — pas u
 
 ### Write Session Transcript
 
-Après le résumé, rédigez une transcription de session lisible par machine vers `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (utilisez `practice` pour le slug entreprise/rôle s'il ne s'agissait pas d'une session spécifique à l'entreprise). C'est un enregistrement structuré du round pour les modes d'analyse en aval ; les tours étiquetés par l'intervenant permettent à un consommateur de lire les deux côtés sans réinférer qui a parlé. Le contrat complet se trouve dans `interview-prep/sessions/README.md`.
+Après le résumé, rédigez une transcription de session lisible par machine vers `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (utilisez `practice` pour le slug entreprise/rôle s'il ne s'agissait pas d'une session spécifique à l'entreprise). Si ce fichier existe déjà, ne l'écrasez pas : ajoutez le prochain compteur libre (`-2`, `-3`, ...) avant `.md`, comme le décrit la section "File names" du README. C'est un enregistrement structuré du round pour les modes d'analyse en aval ; les tours étiquetés par l'intervenant permettent à un consommateur de lire les deux côtés sans réinférer qui a parlé. Le contrat complet se trouve dans `interview-prep/sessions/README.md`.
 
 Format :
 

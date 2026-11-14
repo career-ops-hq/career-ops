@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5, rep 2, profile ai-engineer.
+# Report: 001-solstice-systems-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3.8
+ARCHETYPE: AI Forward Deployed
+ARCHETYPE_RAW: AI Forward Deployed Engineer (primary) + Solutions Architect (secondary)
+LEGITIMACY: High Confidence (strong role definition, clear responsibilities)
+DECISION: null
+WORK_AUTH: null
+COST_USD: 0.2449819
+TURNS: 14
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key score_rationale; extra key posted_date; extra key advertised_comp_currency; extra key advertised_comp_period; missing legitimacy_tier; missing archetype; missing final_decision; missing hard_stops; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; missing work_auth; missing discard_reasons; missing via; missing company_confidential; missing reports_to; 7 requirement_importance row(s) off-schema (e.g. missing jd_signal); extra key risk_summary.posting_legitimacy; extra key risk_summary.employment_classification; extra key risk_summary.culture_screen; extra key risk_summary.interview_red_flags; missing risk_summary.legitimacy; missing risk_summary.classification; missing risk_summary.culture; missing risk_summary.interview_redflags; missing risk_summary.ai_infra; missing risk_summary.ai_screening_disclosure
+EXPECT_FAILURES: none
+---END_SUMMARY---

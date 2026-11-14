@@ -58,7 +58,7 @@ function runMergeDetailed(additions, opts = {}) {
     let exitCode = 0;
     let killedBy = null;
     try {
-      output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+      output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
         encoding: 'utf-8',
         timeout: 30000,
         // Capture stderr instead of letting execFileSync echo it: the
@@ -776,7 +776,7 @@ try {
     writeFileSync(join(work, 'output', '1.pdf'), '%PDF-1.4\n');
     
     // Normal run should trigger sync and flip the PDF flag
-    const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+    const result = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
     });
@@ -809,7 +809,7 @@ try {
     // Create a pending addition so the merge has something to "dry-run"
     writeFileSync(join(addsDir, '2-globex.tsv'), '2\t2026-01-02\tGlobex\tEng\tEvaluated\t4.0/5\t❌\t[2](reports/2.md)\t\n');
     
-    execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--dry-run'], {
+    execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless', '--dry-run'], {
       encoding: 'utf-8',
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex },
     });
@@ -846,7 +846,7 @@ try {
       writeFileSync(pdfIndex, '# report\tpdf\thtml\tformat\tdate\n' + manifest);
       for (const [name, line] of Object.entries(additions)) writeFileSync(join(addsDir, name), line);
       for (const pdf of pdfs) writeFileSync(join(workGone, 'output', pdf), '%PDF-1.4\n');
-      execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), ...(dryRun ? ['--dry-run'] : [])], {
+      execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless', ...(dryRun ? ['--dry-run'] : [])], {
         encoding: 'utf-8',
         env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: addsDir, CAREER_OPS_PDF_INDEX: pdfIndex, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir) },
       });

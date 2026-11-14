@@ -43,6 +43,9 @@ BS Computer Science, State University
 
 ## Certifications
 AWS Certified Developer – Associate
+
+## Skills
+Python, Go
 `;
 const source = join(tmp, 'cv.md');
 writeFileSync(source, CV);
@@ -143,12 +146,14 @@ test('the \\resumeSubheading definition in a preamble is not a claim', () => {
   assert.deepEqual(structuredFieldClaims(tex), []);
 });
 
-test('skills lists are not structured claims', () => {
+test('a tool on the skills line blocks when the source never names it', () => {
   const html = build('build-cv-html.mjs', {
     ...htmlPayload(TRUE),
     skills: [{ category: 'Platforms', items: 'Kubernetes, Terraform' }],
   }, 'html');
-  assert.equal(verifyFacts(html, options()).verdict, 'pass', 'rewording a skill is the tailoring the gate allows');
+  const result = verifyFacts(html, options());
+  assert.equal(result.verdict, 'block');
+  assert.deepEqual(kinds(result.unsupportedFacts), ['tool=kubernetes', 'tool=terraform']);
 });
 
 test('a nowrap span inside a title keeps its hyphenated word (#5632)', () => {
@@ -323,6 +328,8 @@ for (const [label, linked] of [
   ['an escaped-parenthesis target', '[Fabrikam](https://fabrikam.example/x\\)(Director))'],
   ['an inline link title', '[Fabrikam](https://fabrikam.example/ "Director")'],
   ['a same-line reference-definition title', '[Fabrikam][ml]\n\n[ml]: https://fabrikam.example/ "Director"'],
+  ['a reference-definition target on the line after its label', '[Fabrikam][ml]\n\n[ml]:\n  https://fabrikam.example/x_(Director)'],
+  ['a reference-definition target in angle brackets holding a space', '[Fabrikam][ml]\n\n[ml]: <./fabrikam/x (Director).pdf>'],
 ]) {
   test(`a role that appears only in ${label} is not evidence`, () => {
     const source = join(tmp, `cv-meta-${Math.random().toString(36).slice(2)}.md`);

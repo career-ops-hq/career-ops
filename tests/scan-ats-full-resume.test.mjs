@@ -8,7 +8,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\nscan-ats-full — resume machinery');
 
 const mod = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
-const { parallelEach, withTimeout, datasetFingerprint } = mod;
+const { parallelEach, withTimeout, datasetFingerprint, restorePendingRetries, retryCheckpointFields } = mod;
 
 // withTimeout: passes a fast promise through untouched.
 {
@@ -189,6 +189,8 @@ const { loadCheckpoint, checkpointCompatible } = mod;
     ['missing name', { resumeAt: 5, datasetLen: 10 }],
     ['non-array deferred', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: 3 }],
     ['non-integer deferred index', { name: 'workday', resumeAt: 5, datasetLen: 10, deferred: [1, 'x'] }],
+    ['non-array retries', { name: 'workday', resumeAt: 5, datasetLen: 10, retries: 3 }],
+    ['non-integer retries index', { name: 'workday', resumeAt: 5, datasetLen: 10, retries: [1, 'x'] }],
   ]) {
     writeFileSync(p, JSON.stringify({ version: 1, current }), 'utf-8');
     if (loadCheckpoint(p) === null) pass(`loadCheckpoint rejects malformed current (${label})`);
@@ -204,6 +206,38 @@ const { loadCheckpoint, checkpointCompatible } = mod;
   writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884, deferred: [12, 480] } }), 'utf-8');
   if (JSON.stringify(loadCheckpoint(p)?.current?.deferred) === '[12,480]') pass('loadCheckpoint keeps the deferred board indices');
   else fail('deferred board indices lost or rejected');
+
+  writeFileSync(p, JSON.stringify({ version: 1, current: { name: 'workday', resumeAt: 500, datasetLen: 12884, deferred: [12], retries: [12, 480] } }), 'utf-8');
+  if (JSON.stringify(loadCheckpoint(p)?.current?.retries) === '[12,480]') pass('loadCheckpoint keeps the pending retry indices');
+  else fail('pending retry indices lost or rejected');
+
+  const boards = [{ name: 'below' }, { name: 'deferred' }, { name: 'admitted' }, { name: 'ahead' }];
+  const restored = restorePendingRetries(boards, 3, { deferred: [1], retries: [1, 2, 3] });
+  const names = restored.truncated.map((entry) => entry.name).join(',');
+  const deferredNames = [...restored.deferred.keys()].map((entry) => entry.name).join(',');
+  if (names === 'deferred,admitted' && deferredNames === 'deferred' && restored.pendingRetries.get(boards[2]) === 2) {
+    pass('restorePendingRetries retries an admitted board below the offset and defers only the gate-deferred one');
+  } else {
+    fail(`restorePendingRetries mixed the queues: truncated=${names} deferred=${deferredNames}`);
+  }
+  const legacy = restorePendingRetries(boards, 3, { deferred: [1] });
+  if (legacy.truncated.length === 1 && legacy.truncated[0].name === 'deferred' && legacy.deferred.has(boards[1])) {
+    pass('restorePendingRetries still retries a checkpoint that stored only deferred indices');
+  } else {
+    fail('restorePendingRetries dropped a legacy deferred index');
+  }
+  const pending = new Map([[boards[2], 2], [boards[1], 1]]);
+  const deferred = new Map([[boards[1], { index: 1, jobs: null }]]);
+  const fields = retryCheckpointFields(pending, deferred);
+  if (JSON.stringify(fields.retries) === '[2,1]' && JSON.stringify(fields.deferred) === '[1]') {
+    pass('retryCheckpointFields keeps an admitted retry beside the deferred subset');
+  } else {
+    fail(`retryCheckpointFields ${JSON.stringify(fields)}`);
+  }
+  pending.delete(boards[2]);
+  const after = retryCheckpointFields(pending, deferred);
+  if (JSON.stringify(after.retries) === '[1]') pass('dropping a finished retry removes it from the next checkpoint');
+  else fail(`finished retry stayed in the checkpoint: ${JSON.stringify(after)}`);
 
   // current: null is the legitimate "source finished" marker, not malformed.
   writeFileSync(p, JSON.stringify({ version: 1, current: null }), 'utf-8');
