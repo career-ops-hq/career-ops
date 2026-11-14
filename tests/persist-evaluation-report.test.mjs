@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, lstatSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -34,18 +34,21 @@ function payload(overrides = {}) {
   };
 }
 
-function tsvWriteFails(real = { mkdirSync, existsSync, unlinkSync, writeFileSync }) {
+function tsvWriteFails(real = { mkdirSync, openSync, closeSync, fstatSync, lstatSync, unlinkSync, writeFileSync }) {
   return {
     mkdirSync: real.mkdirSync,
-    existsSync: real.existsSync,
+    closeSync: real.closeSync,
+    fstatSync: real.fstatSync,
+    lstatSync: real.lstatSync,
     unlinkSync: real.unlinkSync,
-    writeFileSync(file, data, enc) {
+    writeFileSync: real.writeFileSync,
+    openSync(file, flags) {
       if (String(file).endsWith(".tsv")) {
         const err = new Error("tracker additions dir is not writable");
         err.code = "EACCES";
         throw err;
       }
-      real.writeFileSync(file, data, enc);
+      return real.openSync(file, flags);
     },
   };
 }
@@ -149,7 +152,7 @@ test("a failed addition write removes only the new report", () => {
   }
 });
 
-test("a failed addition write leaves a report that already existed", () => {
+test("a conflicting report save leaves its existing contents intact", () => {
   const root = mkdtempSync(join(tmpdir(), "co-persist-report-"));
   const reportPath = join(root, "reports", ROW.reportFile);
   try {
@@ -158,30 +161,39 @@ test("a failed addition write leaves a report that already existed", () => {
     const result = writeEvaluationArtifacts(root, payload(), tsvWriteFails());
     assert.equal(result.ok, false);
     assert.equal(existsSync(reportPath), true);
-    assert.equal(readFileSync(reportPath, "utf8"), payload().markdown);
+    assert.equal(readFileSync(reportPath, "utf8"), "already here\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
 test("cleanup ignores ENOENT when the new report is already gone", () => {
-  const result = writeEvaluationArtifacts("/tmp/co-persist-enoent", payload(), {
-    mkdirSync() {},
-    existsSync() { return false; },
-    writeFileSync(file) {
-      if (String(file).endsWith(".tsv")) {
-        const err = new Error("tracker additions dir is not writable");
-        err.code = "EACCES";
+  const root = mkdtempSync(join(tmpdir(), "co-persist-enoent-"));
+  try {
+    const result = writeEvaluationArtifacts(root, payload(), {
+      mkdirSync() {},
+      openSync(file) {
+        if (String(file).endsWith(".tsv")) {
+          const err = new Error("tracker additions dir is not writable");
+          err.code = "EACCES";
+          throw err;
+        }
+        return 1;
+      },
+      closeSync() {},
+      fstatSync() { return { dev: 1, ino: 1, birthtimeMs: 1 }; },
+      lstatSync() { throw Object.assign(new Error("gone"), { code: "ENOENT" }); },
+      writeFileSync() {},
+      unlinkSync() {
+        const err = new Error("gone");
+        err.code = "ENOENT";
         throw err;
-      }
-    },
-    unlinkSync() {
-      const err = new Error("gone");
-      err.code = "ENOENT";
-      throw err;
-    },
-  });
-  assert.equal(result.ok, false);
-  assert.match(result.error, /not writable/);
-  assert.doesNotMatch(result.error, /gone/);
+      },
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.error, /not writable/);
+    assert.doesNotMatch(result.error, /gone/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
