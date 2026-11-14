@@ -231,7 +231,9 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get("token") : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get("gh_jid");
   const queryId = query && /^\d+$/.test(query) ? query : null;
