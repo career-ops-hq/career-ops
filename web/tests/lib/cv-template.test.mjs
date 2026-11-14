@@ -23,8 +23,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveCvTemplate } from "../../src/lib/core/cv-template.mjs";
-import { BASE_CV_TEMPLATE, buildPrompt } from "../../src/lib/run-prompts.mjs";
+import { resolveCvTemplate, resolveUserTemplatesDir } from "../../src/lib/core/cv-template.mjs";
+import { BASE_CV_TEMPLATE, buildPrompt, cvTemplateAbsolute } from "../../src/lib/run-prompts.mjs";
 import { linkCorePackage } from "../helpers/core-package.mjs";
 
 const CORE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -47,7 +47,7 @@ try {
  * directory, which also gives cv-templates.mjs a fresh module URL — it caches its
  * default profile path at load, so a shared copy would freeze the first case's env.
  */
-function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pack = null } = {}) {
+function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pack = null, named = true } = {}) {
   // realpath: macOS symlinks /var → /private/var, and path.relative() against an
   // unresolved base would compare two spellings of the same directory.
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cv-template-")));
@@ -77,6 +77,10 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
     path.join(CORE, "providers", "_html-entities.mjs"),
     path.join(root, "providers", "_html-entities.mjs"),
   );
+  fs.copyFileSync(
+    path.join(CORE, "providers", "_html-entity-table.mjs"),
+    path.join(root, "providers", "_html-entity-table.mjs"),
+  );
   // js-yaml is a bare specifier: outside the checkout there is no node_modules on
   // the way up, the import throws, and EVERY case below would fall back to the
   // base template — i.e. pass for the reason the fix exists to remove.
@@ -90,10 +94,13 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
   fs.mkdirSync(path.join(root, "templates"), { recursive: true });
   fs.writeFileSync(path.join(root, "templates", "cv-template.html"), body);
   // One home for the named template, never both: discover() throws on a name two
-  // files claim, which would fail every case for an unrelated reason.
-  const home = pack ? path.join(root, "templates", pack) : path.join(root, "templates");
-  fs.mkdirSync(home, { recursive: true });
-  fs.writeFileSync(path.join(home, `cv-template.${template}.html`), body);
+  // files claim, which would fail every case for an unrelated reason. `named:
+  // false` leaves it out, for a case that puts it in the user layer instead.
+  if (named) {
+    const home = pack ? path.join(root, "templates", pack) : path.join(root, "templates");
+    fs.mkdirSync(home, { recursive: true });
+    fs.writeFileSync(path.join(home, `cv-template.${template}.html`), body);
+  }
   const profile = path.resolve(root, profileAt);
   fs.mkdirSync(path.dirname(profile), { recursive: true });
   fs.writeFileSync(profile, `cv:\n  template: ${template}\n`);
@@ -107,9 +114,10 @@ function fakeCheckout({ profileAt = "config/profile.yml", template = "mine", pac
  * root, so "the checkout's own config/profile.yml" is only the fake checkout's
  * while nothing points the root elsewhere — and an inherited CAREER_OPS_ROOT
  * does: the core suite pins one for every child it spawns, and a developer may
- * export their own (#5113).
+ * export their own (#5113). `dataRoot` sets one on purpose, for a case about a
+ * data root that is not the checkout.
  */
-async function asDashboard(root, profileEnv, fn) {
+async function asDashboard(root, profileEnv, fn, { dataRoot } = {}) {
   const priorCwd = process.cwd();
   const priorEnv = {};
   for (const name of ["CAREER_OPS_PROFILE", "CAREER_OPS_ROOT", "CAREER_OPS_DATA_DIR"]) {
@@ -119,6 +127,7 @@ async function asDashboard(root, profileEnv, fn) {
   fs.mkdirSync(path.join(root, "web"), { recursive: true });
   process.chdir(path.join(root, "web"));
   if (profileEnv !== undefined) process.env.CAREER_OPS_PROFILE = profileEnv;
+  if (dataRoot !== undefined) process.env.CAREER_OPS_ROOT = dataRoot;
   try {
     return await fn();
   } finally {
@@ -177,11 +186,9 @@ test("a template pack survives BOTH halves: the resolver and the prompt's guard"
   const rel = await asDashboard(root, undefined, () => resolveCvTemplate(root));
   assert.equal(rel, "templates/My Pack/cv-template.mine.html");
 
-  // And the prompt names the file the resolver actually chose.
-  assert.ok(
-    buildPrompt({ kind: "pdf", input: "018", memory: "", today: "2026-08-04", cvTemplate: rel }).includes(rel),
-    "the resolver's own output must pass run-prompts.mjs's template guard",
-  );
+  assert.equal(cvTemplateAbsolute({ cvTemplate: rel, codeRoot: root }), path.join(root, rel));
+  const prompt = buildPrompt({ kind: "pdf", input: "018", memory: "", today: "2026-08-04", cvTemplate: rel });
+  assert.ok(!prompt.includes(rel), "the prompt no longer names the template file");
 });
 
 test("an unresolvable checkout yields the base template rather than throwing", async () => {
@@ -190,4 +197,39 @@ test("an unresolvable checkout yields the base template rather than throwing", a
   const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cv-template-empty-")));
 
   assert.equal(await resolveCvTemplate(root), BASE_CV_TEMPLATE);
+});
+
+test("a template in the data root's user layer reaches the prompt relative to the data root", { skip: !coreUsable }, async () => {
+  // Given a data root kept apart from the checkout (#524's split layout), whose
+  // user-template directory holds the named template (#5777) and whose profile
+  // selects it. Where that directory sits is the core's rule, so it is asked for
+  // here rather than spelled out: DEFAULT_USER_TEMPLATES_DIR() reads the data
+  // root per call, so the env set around it is the one it uses.
+  const dataRoot = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "cv-template-data-")));
+  const root = fakeCheckout({ named: false, profileAt: path.join(dataRoot, "config", "profile.yml") });
+  const { DEFAULT_USER_TEMPLATES_DIR } = await import(path.join(CORE, "cv-templates.mjs"));
+  const userDir = await asDashboard(root, undefined, () => DEFAULT_USER_TEMPLATES_DIR(), { dataRoot });
+  fs.mkdirSync(userDir, { recursive: true });
+  fs.writeFileSync(path.join(userDir, "cv-template.mine.html"), "{{NAME}}{{EXPERIENCE}}{{EDUCATION}}");
+  const expected = path.relative(dataRoot, path.join(userDir, "cv-template.mine.html")).split(path.sep).join("/");
+
+  // When the dashboard resolves it the way the route does
+  const rel = await asDashboard(root, undefined, () => resolveCvTemplate(root, dataRoot), { dataRoot });
+
+  // Then the path is relative to the data root, which is the worker's cwd, and
+  // not a `../` climb out of the checkout that the prompt's guard refuses
+  assert.equal(rel, expected);
+
+  // And the directory the prompt checks it against is the core's, relativized the same way
+  const userTemplatesDir = await asDashboard(root, undefined, () => resolveUserTemplatesDir(root, dataRoot), { dataRoot });
+  assert.equal(userTemplatesDir, path.posix.dirname(expected));
+
+  const prompt = buildPrompt({ kind: "pdf", input: "018", memory: "", today: "2026-08-04", cvTemplate: rel, userTemplatesDir, codeRoot: root });
+  assert.equal(
+    cvTemplateAbsolute({ cvTemplate: rel, userTemplatesDir, codeRoot: root, dataRoot }),
+    path.join(dataRoot, expected),
+  );
+  assert.ok(!prompt.includes(expected), "the prompt must not name the template file");
+  assert.ok(!prompt.includes(`${root}/${expected}`), "a user template must not be anchored to the checkout");
+  fs.rmSync(dataRoot, { recursive: true, force: true });
 });

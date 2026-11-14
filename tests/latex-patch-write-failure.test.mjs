@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pass, fail } from './helpers.mjs';
 import { buildManifest } from '../lib/latex-content.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const cli = fileURLToPath(new URL('../patch-latex-content.mjs', import.meta.url));
 const tex = String.raw`\documentclass{article}
@@ -60,7 +61,7 @@ require('node:module').syncBuiltinESMExports();
       assert.equal(result.status, 0, result.stdout + result.stderr);
       assert.equal(readFileSync(source, 'utf8'), tex.replace('Original verified experience.', 'Updated verified experience.'));
     } else {
-      assert.notEqual(result.status, 0, result.stdout);
+      assert.ok(exitedNonZero(result), describeSpawn(result, 'expected a non-zero exit'));
       assert.match(result.stderr, /injected partial disk-full write/);
       assert.equal(readFileSync(source, 'utf8'), tex, 'the user-owned source CV must survive a failed save');
       if (destination === 'existing') assert.equal(readFileSync(output, 'utf8'), 'Previous complete tailored CV.');

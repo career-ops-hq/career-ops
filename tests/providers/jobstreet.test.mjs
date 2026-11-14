@@ -97,6 +97,66 @@ try {
     fail(`jobstreet.fetch() SEEK AU gave ${JSON.stringify(auJobs)}`);
   }
 
+  // fetch() — SEEK AU's API now lives on au.seek.com; links stay on www.seek.com.au
+  let auNewHostUrl = '';
+  let auNewHostRedirect;
+  const auNewHostJobs = await jobstreet.fetch(
+    {
+      name: 'SEEK AU (au.seek.com)',
+      provider: 'jobstreet',
+      api: 'https://au.seek.com/api/jobsearch/v5/search',
+      siteKey: 'AU-Main',
+      searchKeywords: 'business analyst',
+    },
+    {
+      transport: 'http',
+      fetchJson: async (url, opts) => {
+        auNewHostUrl = String(url);
+        auNewHostRedirect = opts && opts.redirect;
+        return { data: [{ id: '95650205', title: 'Technical Business Analyst' }], totalCount: 1 };
+      },
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (new URL(auNewHostUrl).hostname === 'au.seek.com'
+      && auNewHostRedirect === 'error'
+      && auNewHostJobs.length === 1
+      && auNewHostJobs[0].url === 'https://www.seek.com.au/job/95650205') {
+    pass('jobstreet.fetch() accepts au.seek.com and keeps /job/ links on www.seek.com.au');
+  } else {
+    fail(`jobstreet.fetch() au.seek.com gave url=${auNewHostUrl} redirect=${auNewHostRedirect} jobs=${JSON.stringify(auNewHostJobs)}`);
+  }
+
+  // fetch() — a config still naming the old www.seek.com.au API host is sent to au.seek.com
+  let auLegacyHostUrl = '';
+  let auLegacyHostRedirect;
+  const auLegacyHostJobs = await jobstreet.fetch(
+    {
+      name: 'SEEK AU (legacy api host)',
+      provider: 'jobstreet',
+      api: 'https://www.seek.com.au/api/jobsearch/v5/search',
+      siteKey: 'AU-Main',
+      searchKeywords: 'business analyst',
+    },
+    {
+      transport: 'http',
+      fetchJson: async (url, opts) => {
+        auLegacyHostUrl = String(url);
+        auLegacyHostRedirect = opts && opts.redirect;
+        return { data: [{ id: '95650205', title: 'Technical Business Analyst' }], totalCount: 1 };
+      },
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (new URL(auLegacyHostUrl).hostname === 'au.seek.com'
+      && auLegacyHostRedirect === 'error'
+      && auLegacyHostJobs.length === 1
+      && auLegacyHostJobs[0].url === 'https://www.seek.com.au/job/95650205') {
+    pass('jobstreet.fetch() sends a legacy www.seek.com.au api config to au.seek.com, links unchanged');
+  } else {
+    fail(`jobstreet.fetch() legacy AU host gave url=${auLegacyHostUrl} redirect=${auLegacyHostRedirect} jobs=${JSON.stringify(auLegacyHostJobs)}`);
+  }
+
   // parseJobstreetItem — uses companyName fallback when advertiser.description is absent
   const noAdvertiserItem = {
     id: '2',

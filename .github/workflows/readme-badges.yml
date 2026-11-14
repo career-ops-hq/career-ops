@@ -1,0 +1,48 @@
+# readme-badges — keeps the README's Discord and npm badges as SVGs in the repo.
+#
+# GitHub fetches external README images through its image proxy, which gives
+# up after about four seconds. Live shields.io badges (Discord's member count,
+# the npm release) were often slower, and the README showed broken images
+# (2026-11-08: Discord's failed on every request). docs/discord-badge.svg and
+# docs/npm-badge.svg are served by GitHub itself; this redraws them weekly and
+# whenever a release bumps the version. The Hired Wall badge is redrawn by the
+# hired-wall workflow, after each hire.
+#
+# Commits as @careerops-ledger (LEDGER_TOKEN), like the wall's bookkeeping.
+# A source or shields.io that does not answer keeps the last badge and warns.
+name: readme-badges
+on:
+  schedule:
+    - cron: '17 6 * * 1'
+  push:
+    branches: [main]
+    paths: ['.release-please-manifest.json']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    if: github.repository == 'career-ops-hq/career-ops'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: readme-badges
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24 }
+      - name: Redraw the Discord and npm badges
+        run: node .github/scripts/readme-badges.mjs discord npm
+      - name: Commit
+        run: |
+          git config user.name "careerops-ledger"
+          git config user.email "careerops-ledger@users.noreply.github.com"
+          git add docs/discord-badge.svg docs/npm-badge.svg
+          if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
+          git commit -m "chore(badges): redraw the README's Discord and npm badges"
+          git push

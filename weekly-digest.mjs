@@ -104,7 +104,7 @@ function inRange(dateStr, from, to) {
  * @param {string} content - Raw session file text.
  */
 export function parseSessionFile(content) {
-  const text = String(content ?? '').replace(/\r\n/g, '\n');
+  const text = String(content ?? '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return null;
   let front;
@@ -354,6 +354,8 @@ function printSummary(result) {
       ? '(interview-prep/sessions/ not found)'
       : '(no session files fall inside this range)';
     console.log(`No interviews recorded in this range ${reason}.`);
+    console.log('This reads interview notes in interview-prep/sessions, not job-scan results. A scan saves new roles to data/pipeline.md, or to CAREER_OPS_PIPELINE when set.');
+    console.log('Example: node scan.mjs');
     console.log('');
     return;
   }
@@ -446,6 +448,10 @@ async function runSelfTest() {
     'date: 2026-07-21',
     'interviewer_role: Senior HR Partner',
     'source: debrief',
+    'format: panel',
+    'people_on_call: 3',
+    'tone: structured-formal',
+    'candidate_comfort: "3/5, a bit stiff"',
     '---',
     '',
     '## Q1',
@@ -465,6 +471,7 @@ async function runSelfTest() {
     check(parsed.role === 'Instructional Designer', 'role extracted');
     check(parsed.round === 'behavioral' && ROUND_ENUM.includes(parsed.round), 'round extracted and in enum');
     check(parsed.date === '2026-07-21', 'date extracted');
+    check(parsed.company === 'Acme Corp', 'optional format/tone front-matter keys do not break parsing');
     check(parsed.competencyTags.length === 3, 'all competency tags collected across Q&A pairs');
     check(parsed.competencyTags.filter((t) => t === 'stakeholder-management').length === 2, 'repeated tag counted once per occurrence');
   }
@@ -677,6 +684,10 @@ const USAGE = `Usage:
   node weekly-digest.mjs --self-test            # run the built-in fixtures
   node weekly-digest.mjs --help                 # show this message
 
+Reads interview notes in interview-prep/sessions. It does not list jobs from a scan.
+node scan.mjs saves new roles to data/pipeline.md (or CAREER_OPS_PIPELINE).
+node scan.mjs --dry-run previews them and saves nothing.
+
 Both bounds are optional; supplying one without the other is rejected rather
 than silently widened.`;
 
@@ -713,6 +724,7 @@ if (isMainModule(import.meta.url)) {
   // session — silently widening the window instead of reporting the mistake.
   if ((from !== undefined && !isValidDateStr(from)) || (to !== undefined && !isValidDateStr(to))) {
     console.error('  Invalid --from/--to date — expected YYYY-MM-DD');
+    console.error('  Example: node weekly-digest.mjs --summary --from 2026-07-20 --to 2026-07-26');
     process.exit(1);
   }
 

@@ -1,6 +1,7 @@
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { Skeleton } from "@/components/ui/skeleton";
 
-// Mirrors scheduled-jobs-view.tsx: max-w-5xl container, a serif title, a
+// Mirrors scheduled-jobs-view.tsx: the wide frame, a serif title, a
 // four-up summary row, then the job cards.
 //
 // Added because tests/lib/route-loading-coverage.test.mjs caught this route
@@ -9,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 // page on screen with no feedback.
 export default function ScheduledScansLoading() {
   return (
-    <div className="mx-auto max-w-5xl px-5 py-8" aria-label="Loading scheduled scans">
+    <div className={`mx-auto px-5 py-8 md:px-8 ${pageFrameWidthClass.wide}`} aria-label="Loading scheduled scans">
       <Skeleton className="h-9 w-60" />
       <Skeleton className="mt-3 h-4 w-full max-w-lg" />
       <div className="mt-6 grid gap-3.5 sm:grid-cols-4">

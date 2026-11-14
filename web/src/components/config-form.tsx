@@ -3,8 +3,6 @@
 import { useEffect, useState } from "react";
 import {
   Check,
-  KeyRound,
-  TerminalSquare,
   Terminal,
   Loader2,
   CircleDashed,
@@ -12,6 +10,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CadenceSettings } from "@/components/followups/cadence-settings";
+import { TemplatesSection } from "@/components/templates/templates-section";
 import { persistCliId, readSavedCliId } from "@/lib/saved-cli";
 import { keepIfInstalled, pickDefaultInstalled } from "@/lib/cli-pick.mjs";
 import { CONFIG_KEY as STORAGE_KEY, writeConfig } from "@/lib/config-events.mjs";
@@ -112,29 +111,13 @@ export function ConfigForm() {
       <label className="mt-8 mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-muted">
         AI Engine
       </label>
-      <div className="grid gap-2 sm:grid-cols-3">
+      <div>
         <ModeCard
           active={mode === "cli"}
           onClick={() => setMode("cli")}
           icon={Terminal}
           title="Use an AI tool you have"
           hint="Recommended"
-        />
-        <ModeCard
-          active={mode === "key"}
-          onClick={() => setMode("key")}
-          icon={KeyRound}
-          title="Paste an AI key"
-          hint="Coming soon"
-          disabled
-        />
-        <ModeCard
-          active={mode === "manual"}
-          onClick={() => setMode("manual")}
-          icon={TerminalSquare}
-          title="No setup needed"
-          hint="Coming soon"
-          disabled
         />
       </div>
 
@@ -316,6 +299,10 @@ export function ConfigForm() {
       </button>
 
       <CadenceSettings />
+
+      <TemplatesSection kind="cv" />
+
+      <TemplatesSection kind="cover" />
 
       <div className="mt-8 flex items-center gap-3">
         <button

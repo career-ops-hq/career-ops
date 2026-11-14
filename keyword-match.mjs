@@ -19,6 +19,7 @@
  *      node keyword-match.mjs --url <posting-url> [--cv path] [--json]
  *      node keyword-match.mjs --jd-text <file> [--cv path] [--json]
  *      node keyword-match.mjs --self-test                 (built-in assertions)
+ *      node keyword-match.mjs --help                      (this list, exit 0)
  *
  * Exactly one JD source per run: a report path, --url, or --jd-text. URL fetch
  * uses fetchJdViaKnownApi only (no browser). Thin / unreachable / zero-skill
@@ -30,6 +31,15 @@ import { join, isAbsolute, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
+import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
+
+// A normal path stays readable. A space or other shell syntax is quoted so the
+// example stays one argument.
+function shellExampleArg(value) {
+  const text = String(value);
+  if (!/[\s'"$`!*?;&|()<>#{}]/.test(text)) return text;
+  return `'${text.replace(/'/g, "'\\''")}'`;
+}
 
 /**
  * Small, deliberately conservative map of interchangeable ATS surface forms.
@@ -192,6 +202,7 @@ export const KEYWORDS_HEADINGS = [
   'Keywords extracted',             // en, ar, ja — modes/oferta.md, modes/ar/fursah.md, modes/ja/kyujin.md
   'Extracted Keywords',             // en — batch/batch-prompt.md (batch workers)
   'Udtrukne nøgleord',              // da — modes/da/oferta.md
+  'Uttrukne nøkkelord',             // nb — modes/nb/stilling.md
   'Extrahierte Keywords',           // de — modes/de/angebot.md
   'Palabras clave extraídas',       // es — modes/es/oferta.md
   'Mots-cles extraits',             // fr — modes/fr/offre.md
@@ -711,6 +722,30 @@ function refuseNoSkills(sourceLabel) {
 }
 
 /**
+ * A relative report, CV or JD-text path, resolved the way the modes write it.
+ * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
+ * root, which is not the process's working directory when the user layer lives
+ * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT).
+ *
+ * A bare relative path therefore always means the data root, whether or not
+ * the file is there. Falling back to the working directory when the data root
+ * lacks the file would score a stale copy left in the checkout (say, from
+ * before the user layer moved out) instead of saying the report is missing.
+ * A path that starts with `./` or `../` names the working directory on
+ * purpose, so it resolves there. With no data root, the working directory is
+ * used, as before.
+ *
+ * @param {string} arg
+ * @param {string} root
+ * @returns {string}
+ */
+export function resolveUserPath(arg, root) {
+  if (isAbsolute(arg)) return arg;
+  if (!root || /^\.\.?(?:[\\/]|$)/.test(arg)) return join(process.cwd(), arg);
+  return join(root, arg);
+}
+
+/**
  * Resolve keywords + provenance for any MatchInput.
  *
  * @param {MatchInput} input
@@ -738,7 +773,7 @@ export async function resolveKeywords(input, root) {
   }
 
   if (input.kind === 'jd-text') {
-    const textPath = isAbsolute(input.textPath) ? input.textPath : join(process.cwd(), input.textPath);
+    const textPath = resolveUserPath(input.textPath, root);
     const body = await resolveJdTextFile(textPath);
     if (!body.ok) {
       console.error(body.message);
@@ -755,9 +790,13 @@ export async function resolveKeywords(input, root) {
   }
 
   const reportArg = input.reportPath;
-  const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
+  const reportPath = resolveUserPath(reportArg, root);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
-    console.error(`Report not found: ${reportArg}`);
+    console.error(`Report not found: ${reportArg} (looked for ${reportPath}).`);
+    if (!isAbsolute(reportArg) && !/^\.\.?(?:[\\/]|$)/.test(reportArg)) {
+      console.error(`A relative path is read from the data root. For a file in the current directory, pass ./${reportArg}.`);
+    }
+    console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
     process.exit(1);
   }
 
@@ -881,7 +920,7 @@ async function runKeywordMatch(args) {
 
   const cvArg = args.cvPath;
   const cvPath = cvArg
-    ? (isAbsolute(cvArg) ? cvArg : join(process.cwd(), cvArg))
+    ? resolveUserPath(cvArg, getCareerOpsRoot())
     : join(getCareerOpsRoot(), 'cv.md');
 
   if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {
@@ -896,7 +935,10 @@ async function runKeywordMatch(args) {
     console.error(`Unable to read CV: ${cvPath}`);
     process.exit(1);
   }
-  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : rawCv;
+  // The words a reader sees. htmlToText() already drops an HTML CV's hrefs; a
+  // markdown CV kept its link targets, so "[modules](https://…/terraform-modules)"
+  // counted Terraform as present in cv.md and missing in the same CV as HTML.
+  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : collapseMarkdownLinks(rawCv);
   const sourceLabel = cvArg ? basename(cvPath) : 'cv.md (base CV, before per-role tailoring)';
 
   const result = analyzeCoverage(keywords, cvText);
@@ -911,9 +953,14 @@ async function runKeywordMatch(args) {
 }
 
 if (isMainModule(import.meta.url)) {
+  const argv = process.argv.slice(2);
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   let args;
   try {
-    args = parseMatchArgs(process.argv.slice(2));
+    args = parseMatchArgs(argv);
   } catch (err) {
     console.error(err?.message || err);
     process.exit(1);

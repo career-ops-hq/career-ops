@@ -19,6 +19,7 @@
 // a short page, or until `max_pages` (default DEFAULT_MAX_PAGES) is reached.
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { parseDate } from '../lib/parse-date.mjs';
 
 const API_URL = 'https://www-api.ibm.com/search/api/v2';
 const PAGE_SIZE = 30;
@@ -49,11 +50,23 @@ export function buildPostFilter(cfg) {
 }
 
 /**
+ * Epoch ms (UTC midnight) for `dcdate`, or undefined when absent or not a real
+ * YYYY-MM-DD calendar day. parseDate round-trips the date, so an impossible one
+ * like 2026-02-30 is rejected instead of rolling over to 2 March.
+ * @param {unknown} value
+ */
+function toEpochMs(value) {
+  if (typeof value !== 'string') return undefined;
+  const date = parseDate(value);
+  return date ? date.getTime() : undefined;
+}
+
+/**
  * Normalizes one page of the IBM careers API response into job entries.
  * Throws if the response doesn't carry the expected `hits.hits[]` shape, so a
  * silent endpoint change surfaces as a hard error instead of empty results.
  * @param {any} json - A single API response page.
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
  */
 export function parseIbmResponse(json) {
   const hits = json && json.hits && Array.isArray(json.hits.hits) ? json.hits.hits : null;
@@ -68,12 +81,18 @@ export function parseIbmResponse(json) {
     if (typeof s.url !== 'string' || !/^https?:\/\//i.test(s.url.trim())) continue;
     const loc = typeof s.field_keyword_19 === 'string' ? s.field_keyword_19.trim() : '';
     const mode = typeof s.field_keyword_17 === 'string' ? s.field_keyword_17.trim() : '';
-    out.push({
+    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number}} */
+    const job = {
       title: s.title.trim(),
       url: s.url.trim(),
       company: 'IBM',
       location: [loc, mode].filter(Boolean).join(' · '),
-    });
+    };
+    // `dcdate` is the only date the API lets a caller request; it tracks the
+    // job ids (newer id, later date), so it reads as the posting date.
+    const postedAt = toEpochMs(s.dcdate);
+    if (postedAt !== undefined) job.postedAt = postedAt;
+    out.push(job);
   }
   return out;
 }
@@ -125,7 +144,7 @@ export default {
         lang: 'zz',
         localeSelector: {},
         sm: { query: '', lang: 'zz' },
-        _source: ['_id', 'title', 'url', 'description', 'language',
+        _source: ['_id', 'title', 'url', 'description', 'language', 'dcdate',
           'field_keyword_05', 'field_keyword_08', 'field_keyword_17',
           'field_keyword_18', 'field_keyword_19'],
       };

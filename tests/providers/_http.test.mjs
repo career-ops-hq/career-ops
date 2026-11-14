@@ -332,3 +332,83 @@ if (isRefusedRedirectError(transportFailure) === false) {
     }
   }
 }
+
+// A request that already spent its whole timeout fails the same way on a
+// retry, and the retry spends that budget again. One hung board was measured
+// at three full timeouts (about 94s for Ashby's 30s budget). Fast transport
+// errors leave timedOut unset and still retry. A 429 keeps its status, so the
+// flag must not hide it.
+{
+  const spent = Object.assign(new Error('This operation was aborted'), { name: 'AbortError', timedOut: true });
+  if (isRetryableError(spent) === false) {
+    pass('isRetryableError(timer already spent) is false');
+  } else {
+    fail('isRetryableError(timer already spent) should be false');
+  }
+  if (isRetryableError({ status: 429, timedOut: true }) === true) {
+    pass('isRetryableError(429) stays true even if timedOut is also set');
+  } else {
+    fail('isRetryableError(429) should stay true when timedOut is set');
+  }
+}
+
+{
+  let calls = 0;
+  const ctx = {
+    fetchJson: async () => { calls++; throw new Error('socket reset'); },
+    sleep: async () => {},
+  };
+  try {
+    await fetchJsonWithRetry(ctx, 'https://example.com/jobs', {}, { retries: 2, baseDelayMs: 1, maxDelayMs: 5 });
+    fail('fetchJsonWithRetry should rethrow a fast transport error after retries');
+  } catch (e) {
+    if (calls === 3 && e?.timedOut !== true) {
+      pass('fetchJsonWithRetry still retries a fast transport error that did not spend the timeout');
+    } else {
+      fail(`fast transport retry: calls=${calls}, timedOut=${e?.timedOut}`);
+    }
+  }
+}
+
+{
+  const realFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async (_url, opts) => {
+    calls++;
+    await new Promise((resolve, reject) => {
+      const signal = opts?.signal;
+      if (!signal) {
+        reject(new Error('missing abort signal'));
+        return;
+      }
+      if (signal.aborted) {
+        reject(Object.assign(new DOMException('This operation was aborted', 'AbortError')));
+        return;
+      }
+      const onAbort = () => {
+        reject(Object.assign(new DOMException('This operation was aborted', 'AbortError')));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  };
+  const t0 = Date.now();
+  try {
+    await fetchJsonWithRetry(
+      makeHttpCtx(),
+      'https://example.com/jobs',
+      { timeoutMs: 200 },
+      { retries: 2, baseDelayMs: 20, maxDelayMs: 40 },
+    );
+    fail('fetchJsonWithRetry should throw when the server never answers');
+  } catch (e) {
+    const ms = Date.now() - t0;
+    // One attempt. A retry would be calls=3 and about 3x the timeout.
+    if (calls === 1 && e?.timedOut === true && ms < 1000) {
+      pass('fetchJsonWithRetry does not retry a request that already spent its timeout');
+    } else {
+      fail(`spent-timeout retry: calls=${calls}, timedOut=${e?.timedOut}, ms=${ms}, name=${e?.name}`);
+    }
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+}

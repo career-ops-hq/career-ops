@@ -1,0 +1,16 @@
+{"ats":"greenhouse","region":"us","board":"acme","careers_url":"https://job-boards.greenhouse.io/acme","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acme","careers_url":"https://job-boards.greenhouse.io/acme","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"ap","board":"acme-ap","careers_url":"https://job-boards.greenhouse.io/acme-ap","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","board":"acme-noregion","careers_url":"https://job-boards.greenhouse.io/acme-noregion","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acme-wrongurl","careers_url":"https://boards.greenhouse.io/acme-wrongurl","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acmemail","careers_url":"https://job-boards.greenhouse.io/acmemail","name":"jobs@fixture.example","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acmephone","careers_url":"https://job-boards.greenhouse.io/acmephone","name":"Fixture +1 415 555 0100","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acmeweb","careers_url":"https://job-boards.greenhouse.io/acmeweb","name":"Fixture Co","website":"jooble.org","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acmex","careers_url":"https://job-boards.greenhouse.io/acmex","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01","foo":"bar"}
+{"ats":"greenhouse","region":"us","board":"acmey","careers_url":"https://job-boards.greenhouse.io/acmey","name":"Fixture Co","source":"scraped","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acmez","careers_url":"https://job-boards.greenhouse.io/acmez","name":"Fixture Co","source":"community","contribution":"2026-10-31-missing","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"aardvark","careers_url":"https://job-boards.greenhouse.io/aardvark","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}
+{"ats":"greenhouse","region":"us","board":"acmezz","careers_url":"https://job-boards.greenhouse.io/acmezz","name":"Fixture Co","source":"community","contribution":"2026-11-01-good","added":"2026-11-01","retired":true}
+
+{"ats": "greenhouse", "board": 
+{"ats":"greenhouse","region":"us","board":"azure-handle","careers_url":"https://job-boards.greenhouse.io/azure-handle","name":"Fixture @fixturejobs","source":"community","contribution":"2026-11-01-good","added":"2026-11-01"}

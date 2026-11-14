@@ -33,7 +33,9 @@ import { TokenAccumulator, formatBreakdown, normalizeOpenAIUsage } from './utils
 import { anonymizeContext } from './utils/privacy-filter.mjs';
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
-import { appendToPipeline, appendToScanHistory, atomicWriteFile } from './scan.mjs';
+import {
+  appendToPipeline, appendToScanHistory, atomicWriteFile, BROWSER_PROCESS_ENV,
+} from './scan.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -41,7 +43,18 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { withJdArchiveSection } from './lib/jd-archive-section.mjs';
 import { locateApplyReport } from './apply-scope.mjs';
-import { classifyLiveness, isUnreadableVerdict } from './liveness-core.mjs';
+import { classifyLiveness, isUnreadableVerdict, JOB_ID_PATTERN } from './liveness-core.mjs';
+import { fetchJdViaKnownApi } from './browser-extract.mjs';
+import { HYDRATING_CODES, extractApplyControls, postingIdentity } from './liveness-browser.mjs';
+import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
+import { assertLlmRequestAllowed } from './lib/llm-outbound.mjs';
+import { APPLY_MIN } from './lib/score-action.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
+
+// Ambient privacy guard over global fetch. Installed explicitly here (rather
+// than relying on NODE_OPTIONS) so the OpenRouter path is guarded in a plain
+// checkout. Idempotent — a second install is a no-op.
+installPiiInterceptor();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tracker = new TokenAccumulator();
@@ -383,6 +396,19 @@ export function buildCachedSystemMessage(systemPrompt) {
   };
 }
 
+// A reply that stopped for any reason other than "stop" is incomplete, the rule
+// openai-eval follows since #3949: cut off at max_tokens ("length"), filtered
+// ("content_filter"), or ended by a provider error ("error"). Its text can
+// still carry every block heading and the score line validateEvaluationResponse
+// checks, so it would be saved as the report. A reply with no finish_reason is
+// accepted: some servers omit the field, and nothing then says it stopped early.
+function assertReplyFinished(data) {
+  const reason = data.choices?.[0]?.finish_reason;
+  if (reason == null || reason === 'stop') return;
+  const hint = reason === 'length' ? ` (cut off at max_tokens ${MAX_TOKENS})` : '';
+  throw new Error(`Incomplete reply: finish_reason "${String(reason).slice(0, 40)}"${hint}`);
+}
+
 // ---------------------------------------------------------------------------
 // OpenRouter API call — automatic model rotation with fallback
 // ---------------------------------------------------------------------------
@@ -412,6 +438,9 @@ async function callOpenRouter(systemPrompt, userMessage) {
     const timeoutMs = getModelTimeoutMs();
     const timerId = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
+      // Privacy gate: the complete serialized request is inspected after prompt
+      // construction and before the network call. Throws (nothing sent) on a hit.
+      assertLlmRequestAllowed(OPENROUTER_API_URL, body);
       const resp = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
         headers: {
@@ -434,6 +463,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       if (data.error) throw new Error(data.error.message);
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
+      assertReplyFinished(data);
       console.log('OK');
       const usage = normalizeOpenAIUsage(data.usage);
       return { content, usage };
@@ -477,6 +507,8 @@ async function callOpenRouter(systemPrompt, userMessage) {
       const timerId = setTimeout(() => controller.abort(), timeoutMs);
       let data;
       try {
+        // Privacy gate (rotation path). Same rule as the pinned-model path above.
+        assertLlmRequestAllowed(OPENROUTER_API_URL, body);
         const resp = await fetch(OPENROUTER_API_URL, {
           method: 'POST',
           headers: {
@@ -506,6 +538,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
+      assertReplyFinished(data);
 
       const usage = normalizeOpenAIUsage(data.usage);
 
@@ -515,6 +548,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       return { content, usage };
 
     } catch (e) {
+      if (e?.code === 'PRIVACY_GUARD_BLOCKED') throw e;
       if (e instanceof QuotaExhaustedError || e.name === 'QuotaExhaustedError') {
         console.log(`FAILED (${e.message})`);
         throw e;
@@ -710,8 +744,94 @@ export function unreadableJobPage({ status = 0, requestedUrl = '', finalUrl = ''
   return null;
 }
 
-async function fetchJobPage(url) {
+// What the page read strips before the text is taken: it is not job content.
+const NON_CONTENT_SELECTOR = 'script,style,nav,footer,header';
+
+// Most text the runner keeps of one job description. Handed to the API fetcher
+// too, so it does not cut the text short of what the slices below would keep.
+const JD_TEXT_CAP = 16_000;
+
+// Wait for a single-page app to render its job description, at most 15 s. The
+// wait ends once the text the read will keep (the main content, minus
+// nav/header/footer and what is not shown) holds more than 1500 chars. Counting
+// the whole body let a long nav or a consent panel pass while the description
+// still said "Loading...". The count leaves the live DOM alone; the read strips
+// it afterwards. A page that stays shorter (a short posting) ends the wait at
+// the first decisive liveness verdict instead, the rule liveness-browser.mjs
+// polls by: any code outside HYDRATING_CODES. A decisive verdict ends it only
+// for a closed posting, or when the text the read keeps passes
+// unreadableJobPage: an apply control above a "Loading..." description is
+// decisive but not yet readable. Not when the text stops changing, as a
+// spinner holds it constant on a live page. An HTTP error status (`status` >=
+// 400) has nothing to wait for; the caller reads the status.
+export async function waitForJobText(page, { status = 0, url = '' } = {}) {
+  if (status >= 400) return;
+  const deadline = Date.now() + 15_000;
+  const requested = url ? postingIdentity(url) : { postingId: null };
+  for (;;) {
+    try {
+      const reading = await page.evaluate((selector) => {
+        const root = document.querySelector('main, [role="main"], article') || document.body || document;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        let length = 0;
+        const parts = [];
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const el = node.parentElement;
+          if (!el || el.closest(selector) || (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true }))) continue;
+          length += node.nodeValue.trim().length;
+          if (length > 1500) return { long: true };
+          parts.push(node.nodeValue);
+        }
+        return { long: false, bodyText: document.body?.innerText ?? '', kept: parts.join(' ') };
+      }, NON_CONTENT_SELECTOR);
+      if (reading.long) return;
+      // The apply controls are read as liveness-browser's readPage reads them,
+      // with the same posting identity.
+      const finalUrl = page.url();
+      const landed = postingIdentity(finalUrl);
+      const anotherPosting = requested.postingId && landed.postingId !== requested.postingId;
+      const applyControls = await page.evaluate(extractApplyControls, {
+        ...(anotherPosting ? { postingId: null, postingSegment: null } : landed),
+        pageUrl: finalUrl,
+        idPattern: JOB_ID_PATTERN,
+      });
+      const { bodyText, kept } = reading;
+      const verdict = classifyLiveness({ status, requestedUrl: url, finalUrl, bodyText, applyControls });
+      if (!HYDRATING_CODES.has(verdict.code)) {
+        // An apply control is a decisive verdict even over a description that
+        // still says "Loading...": the wait ends only on a closed posting or
+        // once the text the read keeps is readable.
+        if (verdict.result === 'expired') return;
+        const text = kept.replace(/\s+/g, ' ').trim();
+        if (!unreadableJobPage({ status, requestedUrl: url, finalUrl, text })) return;
+      }
+    } catch {
+      // the page navigated or rebuilt its DOM mid-read; try again
+    }
+    if (Date.now() + 250 > deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+// `fetchApi` is a test seam for the ATS API fetch; the default is the real one.
+export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) {
   assertSafeRemoteUrl(url);
+  const viaApi = await fetchApi(url, JD_TEXT_CAP);
+  if (viaApi?.text) {
+    const { title, text } = viaApi;
+    // The title leads the content, as fetch-jd.mjs prints it: the normalizers
+    // keep it apart from the text and a description need not repeat it.
+    const unreadable = unreadableJobPage({ status: 200, requestedUrl: url, finalUrl: url, text });
+    if (!unreadable) return (title ? `${title}\n\n${text}` : text).slice(0, JD_TEXT_CAP);
+    // The ATS says the posting is closed (Workday canApply, SmartRecruiters
+    // active): a browser read would only lose that. Any other unreadable
+    // reason (too short ...) still falls through to the page.
+    if (classifyLiveness({ status: 200, requestedUrl: url, finalUrl: url, bodyText: text }).result === 'expired') {
+      // Left pending in pipeline.md like any unreadable page (#5814): cmdPipeline
+      // marks a row done only when cmdEvaluate returns a report.
+      throw new Error(`No job description to evaluate at ${url} (${unreadable})`);
+    }
+  }
   let chromium;
   if (!process.env.CAREER_OPS_NO_PLAYWRIGHT) {
     try {
@@ -725,16 +845,19 @@ async function fetchJobPage(url) {
     let browser;
     let unreadable = null;
     try {
-      browser = await chromium.launch({ headless: true });
+      browser = await chromium.launch(browserLaunchOptions(
+        { headless: true },
+        { projectRoot: DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+      ));
       const page = await browser.newPage();
       const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-      await page.waitForTimeout(2000); // wait for SPA render
-      const text = await page.evaluate(() => {
-        document.querySelectorAll('script,style,nav,footer,header').forEach(el => el.remove());
+      await waitForJobText(page, { status: response?.status() ?? 0, url }); // wait for SPA render
+      const text = await page.evaluate((selector) => {
+        document.querySelectorAll(selector).forEach(el => el.remove());
         return (document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, ' ').trim();
-      });
+      }, NON_CONTENT_SELECTOR);
       unreadable = unreadableJobPage({ status: response?.status() ?? 0, requestedUrl: url, finalUrl: page.url(), text });
-      if (!unreadable) return text.slice(0, 16_000);
+      if (!unreadable) return text.slice(0, JD_TEXT_CAP);
     } catch (e) {
       console.warn(`[fetch] Playwright error: ${e.message} — falling back to plain fetch.`);
     } finally {
@@ -754,7 +877,7 @@ async function fetchJobPage(url) {
     const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
     const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
     if (unreadable) throw new Error(`no job description (${unreadable})`);
-    return text.slice(0, 16_000);
+    return text.slice(0, JD_TEXT_CAP);
   } catch (e) {
     throw new Error(`Could not fetch job page: ${e.message}`);
   }
@@ -1124,6 +1247,9 @@ async function cmdPipeline(ctx, options = {}) {
 }
 
 // -- APPLY --
+// Returns false when no answers were produced (no report, unreadable report, or
+// a failed request) and true otherwise, including when the user declines a
+// low-score report: that is their choice, not a failure.
 async function cmdApply(ref, ctx) {
   tracker.recordZeroToken('scan');
   tracker.recordZeroToken('evaluation');
@@ -1139,12 +1265,12 @@ async function cmdApply(ref, ctx) {
     });
     if (!located.ok) {
       console.error(`Report not found: ${ref}`);
-      return;
+      return false;
     }
     reportPath = located.path;
   } catch (e) {
     console.error(e instanceof Error ? e.message : String(e));
-    return;
+    return false;
   }
   try {
     reportContent = fs.readFileSync(reportPath, 'utf8');
@@ -1152,13 +1278,13 @@ async function cmdApply(ref, ctx) {
     reportContent = null;
   }
 
-  if (!reportContent) { console.error('Could not read report content.'); return; }
+  if (!reportContent) { console.error('Could not read report content.'); return false; }
 
   // Score-gate: warn and confirm before applying to low-fit roles (AGENTS.md Ethical Use)
   const scoreMatch = reportContent.match(/^\s*\*?\*?\s*(?:score|puntuaci[oó]n)\s*:\s*\*?\*?\s*(\d+(?:\.\d+)?)\s*\/\s*5/im);
   const scoreValue = scoreMatch ? parseFloat(scoreMatch[1]) : NaN;
-  if (isFinite(scoreValue) && scoreValue < 4.0) {
-    console.log(`\n⚠️  This report scored ${scoreValue.toFixed(1)}/5 — below the 4.0/5 threshold.`);
+  if (isFinite(scoreValue) && scoreValue < APPLY_MIN) {
+    console.log(`\n⚠️  This report scored ${scoreValue.toFixed(1)}/5 — below the ${APPLY_MIN.toFixed(1)}/5 threshold.`);
     console.log('Strongly discourage low-fit applications. Your time and the recruiter\'s time are both valuable.');
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise(resolve => {
@@ -1167,7 +1293,7 @@ async function cmdApply(ref, ctx) {
     rl.close();
     if (answer.trim().toLowerCase() !== 'yes') {
       console.log('Aborted.');
-      return;
+      return true;
     }
   }
 
@@ -1182,7 +1308,7 @@ async function cmdApply(ref, ctx) {
     );
   } catch (e) {
     console.error(`OpenRouter error: ${e.message}`);
-    return;
+    return false;
   }
   tracker.record('apply', resultObj.usage);
   const result = resultObj.content;
@@ -1190,6 +1316,7 @@ async function cmdApply(ref, ctx) {
   console.log('\n─── APPLICATION ANSWERS ─────────────────────────────\n');
   console.log(result);
   console.log('\n─────────────────────────────────────────────────────\n');
+  return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1207,15 +1334,21 @@ if (invokedDirectly && ['evaluate', 'eval', 'pipeline', 'apply', 'models'].inclu
   await loadFreeModels();
 }
 
+// A command that did not do its job exits 1: a mistyped command, `apply`
+// without a report, an evaluation that saved no report, answers that were not
+// generated. A script or scheduler that checks the status read each of them as
+// a success.
 if (invokedDirectly) switch (command) {
   case 'scan':
     await cmdScan();
     break;
 
   case 'evaluate':
-  case 'eval':
-    await cmdEvaluate(args.join(' ').trim() || null, ctx);
+  case 'eval': {
+    const res = await cmdEvaluate(args.join(' ').trim() || null, ctx);
+    if (res?.success !== true) process.exitCode = 1;
     break;
+  }
 
   case 'pipeline':
     const isOneJob = args.includes('--one') || args.includes('-1') || args.includes('--limit=1');
@@ -1223,16 +1356,20 @@ if (invokedDirectly) switch (command) {
     break;
 
   case 'apply':
-    if (!args[0]) { console.error('Usage: node openrouter-runner.mjs apply <report_num|report_path>'); break; }
-    await cmdApply(args[0], ctx);
+    if (!args[0]) {
+      console.error('Usage: node openrouter-runner.mjs apply <report_num|report_path>');
+      process.exitCode = 1;
+      break;
+    }
+    if (!(await cmdApply(args[0], ctx))) process.exitCode = 1;
     break;
 
   case 'models':
     await cmdModels();
     break;
 
-  default:
-    console.log(`
+  default: {
+    const usage = `
 career-ops OpenRouter Runner
 Auto-fetches free models from OpenRouter API and rotates through them with fallback.
 
@@ -1254,7 +1391,15 @@ MODEL SELECTION:
   - Free models are fetched automatically via the OpenRouter API at runtime.
   - They are tried in sequence; if one fails the next is used automatically.
   - Pin a model:  CAREER_OPS_MODEL=deepseek/deepseek-r1:free node openrouter-runner.mjs eval <url>
-`);
+`;
+    if (command === undefined || ['help', '--help', '-h'].includes(command)) {
+      console.log(usage);
+    } else {
+      // A mistyped command (`evalute`) ran nothing, so it must not exit 0.
+      console.error(`openrouter-runner.mjs: unknown command "${command}"\n${usage}`);
+      process.exitCode = 1;
+    }
+  }
 }
 
 if (invokedDirectly && ['scan', 'evaluate', 'eval', 'pipeline', 'apply'].includes(command)) {

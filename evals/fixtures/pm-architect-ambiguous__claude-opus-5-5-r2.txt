@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-opus-5-5, rep 2, profile ai-engineer.
+# Report: 001-northwind-enterprise-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 3.3
+ARCHETYPE: AI Solutions Architect
+ARCHETYPE_RAW: AI Solutions Architect / Technical AI PM
+LEGITIMACY: Proceed with Caution
+DECISION: Skip
+WORK_AUTH: not_needed
+COST_USD: 1.2851137999999998
+TURNS: 17
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: none
+EXPECT_FAILURES: none
+---END_SUMMARY---

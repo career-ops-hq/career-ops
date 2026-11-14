@@ -173,7 +173,7 @@ Değerlendirmenin tamamını `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` olar
 ## Risk Summary
 (her risk sinyali için bir satır, sabit sıra — yukarıdaki Risk Summary bölümüne bakın)
 
-## H) Başvuru Formu Taslak Yanıtları
+## H) Başvuru Formu Taslak Yanıtları (draft)
 (yalnızca puan >= 4,5 ise — form alanları için taslak yanıtlar)
 
 ---
@@ -186,7 +186,12 @@ Değerlendirmenin tamamını `reports/{###}-{company-slug}-{YYYY-MM-DD}.md` olar
 
 ## Job Description (archived verbatim)
 (the posting's full text, pasted verbatim — see requirement below)
+
+## Machine Summary
+(sonraki betikler için YAML bloğu — aşağıdaki gereksinime bakın)
 ```
+
+**Machine Summary (zorunlu):** raporun sonunda, `## Job Description (archived verbatim)` bölümünden sonra gelen bir YAML bloğu. Betikler onu konumuyla değil başlığıyla bulur; bu yüzden okuyucu ile Blok A arasına girmemesi için en sona konur. Şema, alan adlarının tam yazımı ve kurallar `batch/batch-prompt.md` içindedir (kaynak orasıdır; burada tekrarlamayın). `## Machine Summary` başlığı ve alan adları İngilizce kalır. `advertised_comp` (ilandaki maaş rakamı olduğu gibi, yoksa `null`), `risk_summary` (Risk Summary bloğunun eşlem hali) ve `requirement_importance` (Blok B satır satır; ilan kullanılabilir bir gereksinim listesi vermiyorsa `[]`) alanlarını içerir.
 
 **JD arşivi (zorunlu, #2789):** Her rapor, ilanın tam metnini olduğu gibi içeren bir `## Job Description (archived verbatim)` bölümü taşır; metin asla özetlenmez, asla başka sözcüklerle yeniden yazılmaz. Başlık İngilizce kalır, çünkü `check-jd-archive.mjs` bölümü adıyla arar. `**URL:**` alanı bir arşiv değildir: ilan kapandığında bağlantı çalışmaz olur ve özgün gereksinimleri geri getirmenin bir yolu kalmaz. Bölümün ilk satırı, kaynakta göründüğü haliyle yayın tarihidir (`Posted: {tarih ya da göründüğü gibi göreli ifade}`, gerçekten görünmüyorsa `Posted: not visible in source`); bu satır asla rapor dosyasının tarihiyle doldurulmaz. İlan çok uzunsa ya da tamamı alıntılanamıyorsa, `archive-posting.mjs` (aşağıdaki komut) ile kaydedin ve bölüme başka hiçbir metin eklemeden **tam olarak** şu cümleyi yazın: `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` Metnin yerine başka sözcüklerle yazılmış bir özet konmaz; kuralın tamamı `modes/oferta.md` içinde (**JD archival**).
 
@@ -338,7 +343,7 @@ Rapor gövdesini, Blok G'yi izleyen `## Karar (lead)` bloğunun hemen ardından,
 
 **Yalnızca toplama, sıfır yeni yargı.** Her satır, kaynak sinyalin zaten ürettiği kararı alıntılar veya ona bağlanır. Özet asla yeniden puanlamaz, yeniden ağırlıklandırmaz veya kararı geçersiz kılmaz — bir satır yanlış görünüyorsa düzeltme buraya değil, kaynak sinyale aittir.
 
-Satır başına üç durum: `✅ {net karar}` / `⚠️ {bulgu}` / `— not evaluated`. **`— not evaluated` birinci sınıf bir durumdur:** bir sinyal çalıştırılamadıysa satırı atlamak yerine bunu açıkça belirtin; ancak o zaman tamamı ✅ olan bir özete güvenilebilir. **Adlandırılmış istisna:** Mülakat kırmızı bayrakları satırı, değerlendirilmemiş durumunu `— no interview sessions yet` olarak yazar — aynı "değerlendirilmedi" kavramının o satıra özgü, daha belirgin ifadesi (çapraz kontrol çalıştı, yalnızca redflags dosyası bulunamadı); dördüncü bir durum değildir.
+Satır başına üç durum: `✅ {net karar}` / `⚠️ {bulgu}` / `— not evaluated`. **`— not evaluated` birinci sınıf bir durumdur:** bir sinyal çalıştırılamadıysa satırı atlamak yerine bunu açıkça belirtin; ancak o zaman tamamı ✅ olan bir özete güvenilebilir. **Adlandırılmış istisna:** Mülakat kırmızı bayrakları satırı, değerlendirilmemiş durumunu `— no interview sessions yet` olarak yazar — aynı "değerlendirilmedi" kavramının o satıra özgü, daha belirgin ifadesi (çapraz kontrol çalıştı, yalnızca redflags dosyası bulunamadı); dördüncü bir durum değildir. Doğrulanmamış olarak işaretlenmiş bir redflags dosyası bu istisna değil, olağan `— not evaluated` durumudur: dosya vardır, bu yüzden satır oturum olmadığını söylememelidir.
 
 Satır etiketleri, `| Signal | Status |` başlıkları ve durum sözcükleri sabit literaldir, çevrilmez: Machine Summary'deki `risk_summary` alanı bunlara dayanır.
 
@@ -347,7 +352,7 @@ Satır etiketleri, `| Signal | Status |` başlıkları ve durum sözcükleri sab
 | Posting legitimacy | Blok G değerlendirme kademesi | `✅ High Confidence`; Proceed with Caution / Suspicious için `⚠️ {tier} — {tek cümlelik gerekçe}` |
 | Employment classification | Blok G içindeki çalışma biçimi sinyali | Kontrol çalıştı ve bir şey bulunmadıysa `✅ clear`; bayrak tetiklendiyse `⚠️ contractor-style language: "{alıntı ifade}"`; kontrol çalışamadıysa `— not evaluated` |
 | Culture screen | Blok A'daki kültür taraması alanı | `✅ pass` veya `⚠️ caution — {kanıt}` / `⚠️ fail — {kanıt}`; tarama yapılmadıysa `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md` (`interview-redflag` modundan) | **Kopya değil, çapraz referans:** dosya varsa mevcut uyarı düzeyini ve göreli bağlantısını yazın — `[{level}](../interview-prep/{company-slug}-redflags.md)` (`reports/` klasörüne göre); yoksa `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (`interview-redflag` modundan) | **Kopya değil, çapraz referans:** dosya varsa mevcut uyarı düzeyini ve göreli bağlantısını yazın — `[{level}](../interview-prep/{company-slug}-redflags.md)` (`reports/` klasörüne göre); yoksa `— no interview sessions yet`. **Doğrulanmamış dosya:** dosya `<!-- career-ops:redflags-unverified -->` işaretini içeriyorsa (`interview-redflag` modu dosyayı arkasında gerçek bir mülakat oturumu olmadan tuttu), uyarı düzeyini asla yazmayın: `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)` yazın; `risk_summary.interview_redflags` değeri `not_evaluated` olur. Notun metnine değil işarete bakın: not, kullanıcının çıktı dilinde yazılır. |
 | AI claims vs. infrastructure | Blok G'deki AI/altyapı tutarlılık kontrolü (varsa) | Bu rapor kontrolü içeriyorsa kararını yansıtın (`✅ consistent` / `⚠️ {bulgu}`); aksi halde `— not evaluated`. Kontrol var olduğunda satır kendiliğinden etkinleşir, sıralama bağımlılığı yoktur |
 
 Blok biçimi:

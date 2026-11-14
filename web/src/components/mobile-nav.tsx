@@ -34,6 +34,7 @@ const STYLE = `
 .co-pulse{animation:co-pulse 1.6s ease-in-out infinite}
 @keyframes co-pulse{0%,100%{opacity:1}50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){.co-mdrawer,.co-mscrim{transition:none}.co-pulse{animation:none}}
+@media print{.co-mnav,.co-mscrim,.co-mdrawer{display:none}}
 `;
 
 export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
@@ -194,13 +195,7 @@ export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
 
         <div className="co-msafe mt-auto space-y-3 border-t border-border px-4 pt-4">
           <UsageMeter />
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className={`${instrumentSerif.className} text-sm text-faint`}>local-first · v0</span>
-              <span className="font-mono text-[10px] text-faint">THEME</span>
-            </div>
-            <ThemeToggle showLabel className="bg-surface-hover/40" />
-          </div>
+          <ThemeToggle showLabel className="bg-surface-hover/40" />
         </div>
       </aside>
     </>

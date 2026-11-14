@@ -10,6 +10,34 @@
 
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
+import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { intInRange } from './_config-utils.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
+
+// A board too big to read with every body inline (content=true) is read as the
+// plain list instead (#6560). With the entry's opt-in
+// (`greenhouse: { fetchDetails: true, detailLimit: 25 }`, the same shape as
+// eploy.mjs), bodies are then fetched one posting at a time for just the
+// postings this scan keeps (ctx.titleWanted), up to detailLimit, and never
+// during a health probe (ctx.maxPages). Greenhouse documents both
+// shapes: "GET /v1/boards/{board_token}/jobs" lists jobs, `?content=true`
+// adds each job's full description, and "GET /v1/boards/{board_token}/jobs/{id}"
+// returns one job with its content
+// (https://developers.greenhouse.io/job-board.html#list-jobs, #retrieve-a-job).
+// Anduril, 2026-11-07: 2,600 jobs; 45.7 MB with content=true, 2.7 MB without,
+// ~10 KB per posting detail. The inline body grows with board size times
+// description length, so the response cap is a board-size limit in disguise;
+// the plain list and one detail per kept posting stay small at any size.
+const DETAIL_DELAY_MS = 200; // ADDING_A_PROVIDER.md: 150-250 ms between sequential requests
+
+/** @param {any} entry */
+function parseDetailConfig(entry) {
+  const cfg = entry?.greenhouse || {};
+  return {
+    fetchDetails: cfg.fetchDetails === true,
+    detailLimit: intInRange(cfg.detailLimit, 25, 1, 100),
+  };
+}
 
 const LEGACY_BOARD_HOSTS = new Set(['boards.greenhouse.io', 'boards.eu.greenhouse.io']);
 const JOB_BOARD_HOSTS = new Set(['job-boards.greenhouse.io', 'job-boards.eu.greenhouse.io']);
@@ -84,18 +112,36 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// The documented envelope is { jobs: [...] }. Only that container, present and
+// empty, is an empty board; anything else ({}, { error }, { jobs: null }, a bare
+// string) is an API change or an error served with a 200, and returning [] for
+// it would read as "no open roles" on every scan (ADDING_A_PROVIDER.md,
+// "Defensive parsing").
+/** @param {any} json @param {{ name: string }} entry @returns {any[]} */
+function boardJobs(json, entry) {
+  if (json && Array.isArray(json.jobs)) return json.jobs;
+  const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+  throw new Error(`greenhouse: unexpected response for ${entry.name} — expected jobs[], got: [${got}]`);
+}
+
 // ── Office enrichment ───────────────────────────────────────────────
 // Some Greenhouse boards put the *work model* ("Hybrid", "In-Office",
 // "Distributed") in location.name and keep the actual city in the separate
-// offices[] array — which the /jobs list endpoint does not return. For those
-// boards scan.mjs's location_filter never sees a city, so every role is
-// evaluated against the string "Hybrid" and silently dropped. Same bug class
-// as #1073 (Ashby dropping secondaryLocations), different provider.
-//
-// The city is recoverable from /v1/boards/{slug}/offices, which nests
-// offices → departments → jobs and costs one extra request. That request is
-// only worth making for boards that actually exhibit the pattern: boards
+// offices[] array. The /jobs?content=true payload embeds offices[] per job (#6911),
+// while the plain /jobs endpoint without content=true does not. For the latter
+// (oversized-board fallback), the city is recoverable from /v1/boards/{slug}/offices,
+// which nests offices → departments → jobs and costs one extra request. That request
+// is only worth making for boards that actually exhibit the pattern: boards
 // already reporting real cities pay nothing (Datadog's /offices is 2.8MB).
+
+// /offices gets its own ceiling. It repeats the board's job list once per
+// office in the nested tree, so it outgrows the shared 10 MB / 10 s defaults
+// long before /jobs does: Stripe's was 29.2 MB on 2026-11-09 for a 769-job
+// board, and every run aborted, leaving each Stripe role as a bare "Hybrid"
+// the location filter cannot place. 64 MB / 60 s leaves 2x headroom on the
+// largest board seen while still bounding a hostile endpoint.
+export const OFFICES_MAX_BYTES = 64 * 1024 * 1024;
+export const OFFICES_TIMEOUT_MS = 60_000;
 
 const WORK_MODEL = /^(?:hybrid|in[-\s]?office|on[-\s]?site|distributed|remote|flexible)$/i;
 
@@ -124,6 +170,33 @@ export function officesUrlFor(apiUrl) {
 }
 
 /**
+ * Extract clean office name if non-empty string, or '' otherwise.
+ * @param {any} office
+ * @returns {string}
+ */
+function officeName(office) {
+  return typeof office === 'string' ? office.trim() : (typeof office?.name === 'string' ? office.name.trim() : '');
+}
+
+/**
+ * Trim, skip unnamed, dedupe in a Set, and sort office names.
+ * Accepts an array of office objects (from j.offices) or an iterable of office names.
+ * Exported for tests.
+ * @param {unknown} offices
+ * @returns {string[]}
+ */
+export function extractSortedOfficeNames(offices) {
+  if (!offices) return [];
+  const set = new Set();
+  const iter = offices instanceof Set || Array.isArray(offices) ? offices : [];
+  for (const item of iter) {
+    const name = officeName(item);
+    if (name) set.add(name);
+  }
+  return [...set].sort();
+}
+
+/**
  * Build jobId → Set(office names) by walking offices → departments → jobs.
  * A job listed under several offices collects all of them, which is how a
  * genuinely multi-site role keeps every city it is open to.
@@ -137,7 +210,7 @@ export function buildOfficeMap(json) {
     if (!Array.isArray(offices)) return;
     for (const office of offices) {
       if (!office || typeof office !== 'object') continue;
-      const name = typeof office.name === 'string' ? office.name.trim() : '';
+      const name = officeName(office);
       if (name) {
         for (const dept of Array.isArray(office.departments) ? office.departments : []) {
           for (const job of Array.isArray(dept?.jobs) ? dept.jobs : []) {
@@ -184,10 +257,10 @@ export default {
     }
   },
 
-  // Titles, URLs and dates only: the same list without content=true, and no
-  // /offices lookup. A fraction of fetch()'s bytes (5 live boards sampled
-  // 2026-10-07: 99 KB against 1.67 MB). scan-ats-full.mjs uses it to rule a
-  // board out before paying for fetch(); nothing here is filtered on.
+  // Titles, URLs and dates only: the same list without content=true. A fraction
+  // of fetch()'s bytes (5 live boards sampled 2026-10-07: 99 KB against 1.67 MB).
+  // scan-ats-full.mjs uses it to rule a board out before paying for fetch();
+  // nothing here is filtered on.
   async fetchListing(entry, ctx) {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
@@ -197,7 +270,7 @@ export default {
     const listUrl = new URL(apiUrl);
     listUrl.searchParams.delete('content');
     const json = /** @type {any} */ (await ctx.fetchJson(assertGreenhouseUrl(listUrl.href), { redirect: 'error' }));
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    const jobs = boardJobs(json, entry);
     return jobs
       .filter(/** @param {any} j */ j => j.absolute_url)
       .map(/** @param {any} j */ j => ({ title: j.title || '', url: j.absolute_url, postedAt: toEpochMs(j.first_published) }));
@@ -207,9 +280,10 @@ export default {
     const apiUrl = resolveApiUrl(entry);
     if (!apiUrl) throw new Error(`greenhouse: cannot derive API URL for ${entry.name}`);
     assertGreenhouseUrl(apiUrl);
-    // content=true embeds each posting's body in the list response (one
-    // request, no per-job detail fetches). searchParams.set is idempotent, so
-    // an entry.api that already pins the param can't end up with a duplicate.
+    // content=true embeds each posting's body and offices[] in the list response
+    // (one request, no per-job detail fetches or /offices lookup). searchParams.set
+    // is idempotent, so an entry.api that already pins the param can't end up
+    // with a duplicate.
     const listUrl = new URL(apiUrl);
     listUrl.searchParams.set('content', 'true');
     // Re-validate the final href: the guard chain runs on the exact string
@@ -217,19 +291,73 @@ export default {
     const listHref = assertGreenhouseUrl(listUrl.href);
     // redirect:'error' prevents SSRF via server-side redirects; combined with
     // assertGreenhouseUrl above it guarantees the final hostname stays in the allowlist.
-    const json = /** @type {any} */ (await ctx.fetchJson(listHref, { redirect: 'error' }));
-    const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
+    /** @type {any} */
+    let json;
+    let bodiesInline = true;
+    try {
+      json = await ctx.fetchJson(listHref, { redirect: 'error' });
+    } catch (err) {
+      // A board with thousands of postings (SpaceX, Anduril) exceeds the body cap
+      // once every posting body is embedded. Fall back to titles, URLs and dates:
+      // the same list without content=true. Only an oversized body changes the
+      // plan; every other failure is the board's, and stays loud.
+      if (/** @type {any} */ (err)?.code !== 'response_too_large') throw err;
+      const bare = new URL(apiUrl);
+      bare.searchParams.delete('content');
+      json = await ctx.fetchJson(assertGreenhouseUrl(bare.href), { redirect: 'error' });
+      bodiesInline = false;
+    }
+    const jobs = boardJobs(json, entry);
     const usable = jobs.filter(/** @param {any} j */ j => j.absolute_url);
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v1\/boards\/([^/]+)\/jobs\/?$/)?.[1] || '';
 
-    // Only pay for /offices when this board actually hides its cities there.
+    if (!bodiesInline) {
+      const { fetchDetails, detailLimit } = parseDetailConfig(entry);
+      const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+      const titleWanted = typeof ctx?.titleWanted === 'function' ? ctx.titleWanted : null;
+      if (!fetchDetails || probing || !titleWanted || !boardSlug) {
+        // No opt-in, a probe, or no title filter to narrow the reads to: the
+        // board stays readable, but description-based filters (content_filter,
+        // visa, country eligibility) cannot judge these postings. Say so.
+        if (!probing) console.warn(`[greenhouse] ${entry.name}: board too large for content=true; read without descriptions, so description-based filters (content_filter, visa, country eligibility) cannot judge these postings.${fetchDetails ? '' : ' Set greenhouse.fetchDetails: true on this entry to fetch bodies for title-matched postings.'}`);
+      } else {
+        const wanted = usable.filter(/** @param {any} j */ j => j.id != null && titleWanted(j.title || ''));
+        const candidates = wanted.slice(0, detailLimit);
+        let attempted = 0;
+        let filled = 0;
+        for (const j of candidates) {
+          // Paced on attempts, not successes, so a run of failures is no burst.
+          if (attempted > 0) await sleep(DETAIL_DELAY_MS, ctx);
+          attempted++;
+          try {
+            // Built on the list URL's own path, so a board slug that arrived
+            // percent-encoded stays encoded once rather than twice.
+            const detailRef = new URL(apiUrl);
+            detailRef.search = '';
+            detailRef.pathname = `${detailRef.pathname.replace(/\/+$/, '')}/${encodeURIComponent(String(j.id))}`;
+            const detailUrl = assertGreenhouseUrl(detailRef.href);
+            const detail = /** @type {any} */ (await fetchJsonWithRetry(ctx, detailUrl, { redirect: 'error' }));
+            if (detail && typeof detail.content === 'string') { j.content = detail.content; filled++; }
+          } catch {
+            // One posting's body is enrichment: after the retries, keep the
+            // posting without it rather than lose it, and never the board.
+          }
+        }
+        console.error(`ℹ️  greenhouse: ${entry.name} board too large to read with bodies inline; read the plain list (${usable.length} jobs) and fetched bodies for ${filled} of ${wanted.length} title-matched${wanted.length > detailLimit ? ` (capped at detailLimit ${detailLimit})` : ''}`);
+      }
+    }
+
+    // /offices is only needed when bodiesInline is false (oversized-board
+    // fallback without content=true), because the content=true payload already
+    // embeds offices[] per job (#6911). Even then, only pay for /offices when
+    // this board actually hides its cities there.
     let officeMap = null;
-    if (usable.some(/** @param {any} j */ j => isWorkModelOnly(j.location?.name))) {
+    if (!bodiesInline && usable.some(/** @param {any} j */ j => isWorkModelOnly(j.location?.name))) {
       const officesUrl = officesUrlFor(apiUrl);
       if (officesUrl) {
         try {
           assertGreenhouseUrl(officesUrl);
-          officeMap = buildOfficeMap(await ctx.fetchJson(officesUrl, { redirect: 'error' }));
+          officeMap = buildOfficeMap(await ctx.fetchJson(officesUrl, { redirect: 'error', maxBytes: OFFICES_MAX_BYTES, timeoutMs: OFFICES_TIMEOUT_MS }));
         } catch (err) {
           // No /offices on this board, or it failed — fall back to the bare
           // work-model string. Enrichment is best-effort; a scan must never
@@ -246,19 +374,23 @@ export default {
       }
     }
 
-    return usable.map(/** @param {any} j */ (j) => {
+    const mapped = usable.map(/** @param {any} j */ (j) => {
       let location = j.location?.name || '';
-      if (officeMap && isWorkModelOnly(location)) {
-        const offices = officeMap.get(j.id);
-        // Sorted, not in /offices traversal order. The set is built by walking
-        // the office tree, so the order is Greenhouse's, and it is not promised
-        // to be stable between responses. Unsorted, a board that re-orders its
-        // offices rewrites this string, which changes the posting's location
-        // dedupe key (scan.mjs `normalizeLocationForDedup`) and the row already
-        // written to scan-history.tsv — so a posting nothing changed about
-        // reads as new. Sorting costs nothing and removes the dependency.
-        if (offices && offices.size > 0) location = [location, ...[...offices].sort()].join(' · ');
+      const raw = typeof j.location?.name === 'string' ? j.location.name.trim() : '';
+      const workModel = isWorkModelOnly(raw);
+      // Sorted, not in /offices traversal order or payload order. The set
+      // deduplicates and sorts so re-ordered offices cannot rewrite the
+      // location string or the dedupe key (scan.mjs `normalizeLocationForDedup`).
+      const offices = bodiesInline ? j.offices : officeMap?.get(j.id);
+      const officeList = extractSortedOfficeNames(offices);
+      if (workModel && officeList.length > 0) {
+        location = [location, ...officeList].join(' · ');
       }
+      const places = [
+        ...(raw && !workModel ? [raw] : []),
+        ...officeList.filter(name => !isWorkModelOnly(name)),
+      ];
+      const locations = [...new Set(places)];
       const description = contentToText(j.content);
       return {
         title: j.title || '',
@@ -273,6 +405,7 @@ export default {
         externalId: coerceId(j.id),
         requisitionId: coerceId(j.requisition_id),
         location,
+        ...(locations.length > 0 ? { locations } : {}),
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable
         // from an empty string downstream.
@@ -280,5 +413,13 @@ export default {
         postedAt: toEpochMs(j.first_published),
       };
     });
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    if (!bodiesInline && !probing) {
+      const withBody = mapped.filter((job) => job.description).length;
+      if (withBody < mapped.length) {
+        markTruncated(mapped, 'descriptions-omitted', { fetched: withBody, total: mapped.length });
+      }
+    }
+    return mapped;
   },
 };

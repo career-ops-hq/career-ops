@@ -9,6 +9,9 @@ import { escapeLatex, sanitizeUrl } from './lib/latex-escape.mjs';
 import { resolveTemplate } from './cv-templates.mjs';
 import { stripEmptySections } from './cv-sections-core.mjs';
 import { hasRequiredFields, hasText, validatePayload } from './lib/cv-payload-schema.mjs';
+import { latexPayloadFactHtml } from './lib/cv-payload-facts.mjs';
+import { resolvePageFormat } from './lib/page-format.mjs';
+import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE_PATH = resolve(__dirname, 'templates', 'cv-template.tex');
@@ -220,6 +223,34 @@ async function main() {
   // an absent one leaves no bare header behind. See cv-sections-core.mjs.
   template = stripEmptySections(template, payload, 'tex');
 
+  // Only the bundled templates have the field/slot contract this projection
+  // understands. Arbitrary TeX and custom templates keep the compiler's final
+  // text gate; their macro semantics cannot be inferred from a JSON key.
+  let factCheck = { verdict: 'skipped', reason: 'structured fact gate supports bundled LaTeX templates only' };
+  const bundledTemplates = [TEMPLATE_PATH, resolve(__dirname, 'templates', 'cv-template.cjk.tex')];
+  if (bundledTemplates.includes(resolve(TEMPLATE_PATH_RESOLVED))) {
+    const root = getCareerOpsRoot();
+    if (!existsSync(join(root, 'cv.md'))) {
+      factCheck = { verdict: 'skipped', reason: `no cv.md in ${root}` };
+    } else {
+      const { assertFacts, printFactWarnings } = await import('./verify-cv-facts.mjs');
+      try {
+        const result = assertFacts(latexPayloadFactHtml(payload, template), {
+          sourcePaths: [join(root, 'cv.md'), join(root, 'article-digest.md')],
+          configPath: join(root, 'config', 'cv-facts.json'), label: basename(absOutput),
+        });
+        factCheck = { verdict: result.verdict, configMissing: result.configMissing };
+        if (result.configMissing) console.error('Warning: no config/cv-facts.json — forbidden/advisory phrase checks did not run.');
+        if (result.verdict === 'warn') printFactWarnings(result, console.error);
+      } catch (err) {
+        console.error(err.message);
+        console.log(JSON.stringify({ valid: false, errors: [err.message], warnings,
+          factCheck: { verdict: 'block', reason: err.message } }, null, 2));
+        process.exit(1);
+      }
+    }
+  }
+
   const emailUrl = sanitizeUrl(payload.email?.url || '');
   const emailDisplay = payload.email?.display || emailUrl;
   const linkedinUrl = sanitizeUrl(payload.linkedin?.url || '');
@@ -229,6 +260,16 @@ async function main() {
 
   const substitutions = {
     NAME: escapeLatex(payload.name || ''),
+    // The sheet, decided once for every renderer by lib/page-format.mjs: an
+    // explicit payload `page_format` outranks the profile, and `auto` hands it
+    // to the employer's country. The template used to hardcode letterpaper, so
+    // a `page_format: a4` user got a Letter sheet from the LaTeX path while the
+    // HTML path beside it honored the setting (modes/pdf.md promises it
+    // "already reaches every renderer").
+    PAPER: resolvePageFormat(payload.page_format, {
+      profilePath: getProfilePath(),
+      country: payload.country,
+    }) === 'a4' ? 'a4paper' : 'letterpaper',
     CONTACT_LINE: escapeLatex(payload.contact_line || ''),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),
@@ -285,6 +326,7 @@ async function main() {
       })(),
     },
     warnings,
+    factCheck,
     valid: true,
   };
 
@@ -515,6 +557,10 @@ async function runSelfTest() {
 
   const substitutions = {
     NAME: escapeLatex(sample.name),
+    // The sample sets no page_format, so the self-test pins the project
+    // default instead of reading the user's profile: --test must not depend
+    // on config/profile.yml.
+    PAPER: 'letterpaper',
     CONTACT_LINE: escapeLatex(sample.contact_line),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),

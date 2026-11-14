@@ -37,17 +37,18 @@ try {
     fail(`buildPostFilter sanitization = ${JSON.stringify(sanitizedShould)}`);
   }
 
-  // parseIbmResponse — happy path, location assembled from keyword_19 · keyword_17
+   // parseIbmResponse — happy path, location assembled from keyword_19 · keyword_17
   const sample = {
     hits: {
       hits: [
-        { _source: { title: 'ML Engineer', url: 'https://ibm.com/careers/1', field_keyword_19: 'Berlin, Germany', field_keyword_17: 'Hybrid' } },
-        { _source: { title: 'Data Scientist', url: 'https://ibm.com/careers/2', field_keyword_19: 'Remote' } },
+        { _source: { title: 'ML Engineer', url: 'https://ibm.com/careers/1', field_keyword_19: 'Berlin, Germany', field_keyword_17: 'Hybrid', dcdate: '2026-10-05' } },
+        { _source: { title: 'Data Scientist', url: 'https://ibm.com/careers/2', field_keyword_19: 'Remote', dcdate: 'n/a' } },
+        { _source: { title: 'Impossible Date', url: 'https://ibm.com/careers/2b', dcdate: '2026-02-30' } },
       ],
     },
   };
   const jobs = parseIbmResponse(sample);
-  if (jobs.length === 2 && jobs[0].company === 'IBM') pass('parseIbmResponse extracts 2 jobs with company "IBM"');
+  if (jobs.length === 3 && jobs[0].company === 'IBM') pass('parseIbmResponse extracts 3 jobs with company "IBM"');
   else fail(`parseIbmResponse returned ${JSON.stringify(jobs)}`);
 
   if (jobs[0].location === 'Berlin, Germany · Hybrid') pass('parseIbmResponse joins location · work mode');
@@ -56,6 +57,11 @@ try {
   if (jobs[1].location === 'Remote') pass('parseIbmResponse omits the separator when work mode is absent');
   else fail(`row 1 location = ${JSON.stringify(jobs[1]?.location)}`);
 
+  if (jobs[0].postedAt === Date.UTC(2026, 9, 5) && !('postedAt' in jobs[1])) pass('parseIbmResponse reads dcdate into postedAt and skips an unparseable one');
+  else fail(`postedAt = ${JSON.stringify(jobs.map((j) => j.postedAt))}`);
+
+  if (!('postedAt' in jobs[2])) pass('parseIbmResponse skips an impossible calendar date like 2026-02-30');
+  else fail(`impossible date postedAt = ${JSON.stringify(jobs[2]?.postedAt)}`);
   // parseIbmResponse — drops title-less, url-less, and non-http(s) entries
   const dirty = parseIbmResponse({
     hits: {
@@ -83,6 +89,7 @@ try {
       calls++;
       if (url !== 'https://www-api.ibm.com/search/api/v2') throw new Error(`unexpected url ${url}`);
       if (opts?.method !== 'POST') throw new Error('Expected POST');
+      if (!JSON.parse(opts.body)._source.includes('dcdate')) throw new Error('dcdate not requested');
       // Page 1: a full page (30 hits) → keep paging; page 2: short page → stop.
       const n = calls === 1 ? 30 : 2;
       const hits = Array.from({ length: n }, (_, i) => ({

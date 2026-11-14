@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> द्वारा बनाया गया,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders">700+ योगदानकर्ताओं</a> के साथ</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> द्वारा बनाया गया,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.hi.md#builders">800+ योगदानकर्ताओं</a> के साथ</p>
 
 <p align="center">
 <strong>महीनों तक CV भेजता रहा, जवाब में सिर्फ़&nbsp;खामोशी।</strong><br>
@@ -64,7 +65,7 @@
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">मेरे बाद आए लोगों ने लिखा कि उन्हें नौकरी कैसे मिली।</p>
 
@@ -131,7 +132,7 @@ npx @santifer/career-ops init
 
 [समाधान यहीं लिखा जाता है](CONTRIBUTING.md)। एक कमरा, कोई क्लब नहीं। **आइए, मिलकर बनाएँ।**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: career-ops सर्वर के सदस्यों की लाइव संख्या"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: career-ops सर्वर के सदस्यों की लाइव संख्या"></a></p>
 
 ## प्रायोजक
 
@@ -325,7 +326,7 @@ Codex में स्लैश कमांड की गारंटी नह
 
 ## यह कैसे काम करता है
 
-<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), a PDF (output/*.pdf) and a tracker entry (data/applications.md)." width="760"></picture></p>
+<p align="center"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/how-it-works-dark.svg"><img src="docs/how-it-works-light.svg" alt="How it works: you paste a job URL or description. Archetype Detection classifies it as LLMOps, Agentic, PM, SA, FDE or Transformation. The A-H Evaluation reads cv.md and covers match, gaps, comp research, STAR stories and legitimacy. It produces a report (reports/*.md), the tailored CV in the format set by cv.output_format — a PDF by default — and a tracker entry (data/applications.md)." width="760"></picture></p>
 
 ## Antigravity CLI Integration
 
@@ -421,15 +422,15 @@ pi
 /skill:career-ops tracker
 ```
 
-### वन-शॉट Pi (`pi -p`)
+### वन-शॉट Pi (`pi -a -p`)
 
 ```bash
-pi -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
-pi -p "Run career-ops scan mode and summarize new matches."
-pi -p "Run career-ops tracker mode and summarize the current statuses."
+pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -a -p "Run career-ops scan mode and summarize new matches."
+pi -a -p "Run career-ops tracker mode and summarize the current statuses."
 ```
 
-अगर Pi का कोई बिल्ड प्रोजेक्ट संसाधनों को भरोसे के फ़ैसले के पीछे रखता है, तो रिपॉज़िटरी के अंदर एक बार `/trust` चलाएँ और `pi` को दोबारा शुरू करें ताकि प्रोजेक्ट स्किल लोड हो जाए (`/trust` आगे के Pi प्रोसेस पर लागू होता है), या `-a` के साथ शुरू करें, जो सिर्फ़ एक रन पर भरोसा करता है और उसमें रीस्टार्ट की ज़रूरत नहीं होती।
+अगर Pi का कोई बिल्ड प्रोजेक्ट संसाधनों को भरोसे के फ़ैसले के पीछे रखता है, तो रिपॉज़िटरी के अंदर एक बार `/trust` चलाएँ और `pi` को दोबारा शुरू करें ताकि प्रोजेक्ट स्किल लोड हो जाए (`/trust` आगे के Pi प्रोसेस पर लागू होता है), या `-a` के साथ शुरू करें, जो सिर्फ़ एक रन पर भरोसा करता है और उसमें रीस्टार्ट की ज़रूरत नहीं होती। `-a` Pi 0.79.0 में आया: उससे पुराने वर्ज़न यह फ़्लैग स्वीकार नहीं करते, वहाँ `pi -p "prompt"` चलाएँ। Pi 0.54.0 से पुराना वर्ज़न `.agents/skills` में देखता ही नहीं, इसलिए उसे अपडेट करें ([docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md))।
 
 ### स्टैंडअलोन Gemini API स्क्रिप्ट (CLI इंस्टॉल की ज़रूरत नहीं)
 
@@ -565,7 +566,7 @@ Go डैशबोर्ड TUI, Node.js स्क्रिप्ट और AI �
 - **डेटा**: Markdown तालिकाएँ + YAML कॉन्फ़िग + TSV बैच फ़ाइलें
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -646,7 +647,7 @@ Wikidata: [Santiago Fernández de Valderrama Aparicio](https://www.wikidata.org/
 ## Contributors
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 जिसने भी कोड, दस्तावेज़, अनुवाद या टेस्ट दिए हैं, वह सब
@@ -661,6 +662,8 @@ career-ops से नौकरी मिली? [अपनी कहानी �
 ब्रांड [Trademark Policy](TRADEMARK.md) से शासित हैं: सामुदायिक उपयोग के लिए
 उदार, व्यावसायिक उत्पाद नामकरण और समर्थन के लिए
 आरक्षित।
+
+कोड MIT के तहत है; [`employers/`](employers/) का डेटा [CC BY 4.0](employers/LICENSE) के तहत है।
 
 ## स्टार इतिहास
 

@@ -358,7 +358,7 @@ Run:
 node generate-cover-letter.mjs --payload /tmp/cover-payload-{company-slug}.json
 ```
 
-Report the output path and file size.
+Report the output path and file size. If the script reports the cover letter over its page budget, nothing was written: there is no path to report and no `PDF generated` note to add; trim and rerun first.
 
 ---
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -8,7 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -49,6 +52,7 @@ func (m *appModel) reloadPipelineData() {
 		// empty the pipeline AND drop every rate to 0% through
 		// ComputeProgressMetrics, so the screen would report an empty, failing
 		// search because a file could not be opened.
+		m.reloadPendingRows()
 		m.pipeline, _ = m.pipeline.Update(screens.PipelineTrackerFailedMsg{Err: trackerErr.Error()})
 		return
 	}
@@ -61,6 +65,7 @@ func (m *appModel) reloadPipelineData() {
 	// back to each row's tracker date while current statuses still refresh.
 	data.ApplyStatusDates(apps, ledger.LatestDate)
 	m.pipeline = m.pipeline.WithReloadedData(apps, metrics)
+	m.reloadPendingRows()
 	enrichArchetypes(m.careerOpsPath, apps, &m.pipeline)
 	m.statsMetrics = data.ComputeStatsMetrics(apps)
 	// Count only apps with a score so the header reflects evaluated offers.
@@ -75,6 +80,19 @@ func (m *appModel) reloadPipelineData() {
 		// the failed history read in the TUI after rebuilding the pipeline.
 		m.pipeline, _ = m.pipeline.Update(screens.PipelineHistoryFailedMsg{Err: historyErr.Error()})
 	}
+}
+
+// reloadPendingRows re-reads the Inbox tab's rows (#5269) from
+// data/pipeline.md and the batch files. It runs only with a tracker reload
+// (startup, `r`, after a status write): there is no timer. A failed read keeps
+// the rows already shown and says why.
+func (m *appModel) reloadPendingRows() {
+	rows, err := data.LoadPendingRows(m.careerOpsPath)
+	if err != nil {
+		m.pipeline, _ = m.pipeline.Update(screens.PipelinePendingFailedMsg{Err: err.Error()})
+		return
+	}
+	m.pipeline.SetPendingRows(rows)
 }
 
 // enrichArchetypes lazy-loads each app's report-derived archetype (used by
@@ -271,6 +289,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
 
+	case screens.PipelineQueueEvalMsg:
+		return m, runQueueEval(msg)
+
+	case screens.PipelineQueueEvalDoneMsg:
+		// Re-read the Inbox first, so the row's status cell shows what
+		// batch-input.tsv now records, then let the screen flash the outcome.
+		m.reloadPendingRows()
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
+
 	default:
 		if m.state == viewReport {
 			vm, cmd := m.viewer.Update(msg)
@@ -343,15 +372,130 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			}
 			cmd.Env = append(cmd.Env, "CAREER_OPS_PDF_INDEX="+absolute)
 		}
+		// A render over a warn-only page budget exits 0 but writes nothing to
+		// the PDF path: the PDF went to a sibling .overflow.pdf draft (#6377).
+		// Opening the path would then show the previous PDF, or nothing, as
+		// "generated". A PDF this render wrote is a new file there.
+		// Only a missing file is an expected absence; any other stat error is
+		// reported as itself rather than read as "no previous PDF" (which
+		// would open whatever the render left) or "wrote nothing".
+		before, beforeErr := os.Stat(pdfAbs)
+		if beforeErr != nil && !errors.Is(beforeErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", beforeErr)}
+		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: summarizeCmdError(err, out)}
+		}
+		after, afterErr := os.Stat(pdfAbs)
+		if afterErr != nil && !errors.Is(afterErr, fs.ErrNotExist) {
+			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("cannot read the PDF path: %v", afterErr)}
+		}
+		if afterErr != nil || !pdfWrittenBetween(before, after) {
+			return screens.PipelinePDFGeneratedMsg{Err: summarizeUndelivered(out, pdfAbs)}
 		}
 		if err := openWithDefaultApp(pdfAbs); err != nil {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
 		return screens.PipelinePDFGeneratedMsg{Path: pdfAbs}
 	}
+}
+
+// queueEvalTimeout bounds a queue request. The script takes the batch-input
+// lock, which a running full sync can hold for a moment, and nothing else.
+var queueEvalTimeout = 30 * time.Second
+
+// runQueueEval queues one Inbox row (#5269) by running the checkout's
+// sync-batch-input.mjs with --url. It appends that row to batch-input.tsv and
+// nothing else: it starts no evaluation, and the dashboard never runs
+// batch/batch-runner.sh. --input and --state are left to the script's
+// defaults, beside batch-runner.sh in the checkout, because those are the
+// files the runner reads. --pipeline is the file the Inbox shows.
+func runQueueEval(msg screens.PipelineQueueEvalMsg) tea.Cmd {
+	return func() tea.Msg {
+		done := screens.PipelineQueueEvalDoneMsg{URL: msg.URL}
+		script, err := data.CheckoutScriptPath("sync-batch-input.mjs")
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		// The equals form keeps a value that starts with "-" from being read
+		// as a flag.
+		args := []string{script, "--url=" + msg.URL, "--pipeline=" + data.PendingPipelinePath(root)}
+		ctx, cancel := context.WithTimeout(context.Background(), queueEvalTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", args...)
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			done.Err = "sync-batch-input.mjs timed out; reload to check whether the row was queued"
+			return done
+		}
+		// The script's --url exit statuses (URL_EXIT in sync-batch-input.mjs):
+		// 3 nothing to queue, 4 not a Pending row it can read.
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == 3:
+			done.Already = true
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == 4:
+			done.Unreadable = true
+		default:
+			done.Err = summarizeCmdError(err, out)
+		}
+		return done
+	}
+}
+
+// pdfWrittenBetween reports whether the PDF at the path is a file the render
+// left there: generate-pdf.mjs writes a temp file and renames it into place,
+// so a delivered PDF is a different file (and has a new modification time and
+// usually a new size), while a kept previous PDF is the same file as before.
+// The identity check covers a filesystem whose timestamps are too coarse to
+// tell a same-sized rerender apart.
+func pdfWrittenBetween(before, after fs.FileInfo) bool {
+	if after == nil {
+		return false
+	}
+	if before == nil {
+		return true
+	}
+	return !os.SameFile(before, after) || !after.ModTime().Equal(before.ModTime()) || after.Size() != before.Size()
+}
+
+// reOverflowDraftLine finds the draft generate-pdf.mjs names when a render
+// ran over its page budget, so the help bar can point at the file to inspect.
+var reOverflowDraftLine = regexp.MustCompile(`Overflow draft: (.*?\.overflow(?:-\d+)?\.pdf) \(`)
+
+// rePageBudgetLine is the page-count sentence of the same warning.
+var rePageBudgetLine = regexp.MustCompile(`CV is \d+ pages?; the allowed maximum is \d+ pages?\.`)
+
+// summarizeUndelivered is the help-bar line for a render that exited 0 but
+// wrote nothing to the PDF path. It leads with the page counts and the
+// outcome, and names the draft this render wrote, so the user does not open an
+// older one.
+func summarizeUndelivered(out []byte, pdfAbs string) string {
+	budget := rePageBudgetLine.FindString(string(out))
+	draft := ""
+	if m := reOverflowDraftLine.FindStringSubmatch(string(out)); m != nil {
+		draft = filepath.Base(m[1])
+	}
+	if budget == "" && draft == "" {
+		return fmt.Sprintf("generate-pdf.mjs reported success but wrote nothing to %s", filepath.Base(pdfAbs))
+	}
+	if budget == "" {
+		budget = "The CV is over its page budget."
+	}
+	if draft == "" {
+		return budget + " No PDF was written; the over-budget render was kept as an .overflow.pdf draft beside it."
+	}
+	return fmt.Sprintf("%s No PDF was written; the over-budget draft is %s.", budget, draft)
 }
 
 // summarizeCmdError condenses a failed command into one help-bar-sized line:
@@ -517,6 +661,7 @@ func main() {
 			return n
 		}(),
 	}
+	m.reloadPendingRows()
 
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

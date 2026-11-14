@@ -346,9 +346,10 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     const lastProbed = new Map();
     let newestProbe = 0;
     for (const r of healthRecords) {
-      // Mirrors scan.mjs computeConsecutiveFailures: healthy statuses reset,
-      // every other status (slug_gone/network/auth/server/unknown) counts.
-      if (r.status === 'reachable' || r.status === 'empty') {
+      // Mirrors scan.mjs computeConsecutiveFailures: reached statuses reset
+      // (a `partial` board answered, it was only cut short), every other
+      // status (slug_gone/network/auth/server/unknown) counts.
+      if (r.status === 'reachable' || r.status === 'empty' || r.status === 'partial') {
         streaks.set(r.company, 0);
       } else {
         streaks.set(r.company, (streaks.get(r.company) || 0) + 1);
@@ -418,7 +419,7 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const healthRows = [];
   for (const line of String(healthContent ?? '').split('\n')) {
     const [date, company, status] = line.trimEnd().split('\t');
-    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown'].includes(status)) continue;
+    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown', 'partial'].includes(status)) continue;
     healthRows.push({ date, company, status });
   }
   healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
@@ -428,7 +429,8 @@ export function computePortalRecommendations(portalsContent, scanContent, health
     h.firstObserved = date < h.firstObserved ? date : h.firstObserved;
     h.lastObserved = date;
     h.status = status;
-    h.streak = status === 'reachable' || status === 'empty' ? 0 : h.streak + 1;
+    // `partial` resets like reachable: the board answered (scan.mjs agrees).
+    h.streak = status === 'reachable' || status === 'empty' || status === 'partial' ? 0 : h.streak + 1;
     health.set(key, h);
   }
   const buckets = { neverProduced: [], rotted: [], healthyButQuiet: [] };

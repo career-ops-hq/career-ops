@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { register } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 
 // Node strips types, but the session's imports use Next aliases and omit .ts.
@@ -44,13 +44,16 @@ for (const exactFails of [false, true]) {
     const uploads = [];
     const frame = {
       url: () => "about:blank",
-      locator: (selector) => ({ first: () => ({ setInputFiles: async (file) => {
-        if (exactFails && selector === '[data-co-field="resume"]') throw new Error("tagged input replaced");
-        uploads.push({ selector, file });
-      } }) }),
+      locator: (selector) => ({
+        count: async () => 0,
+        first: () => ({ setInputFiles: async (file) => {
+          if (exactFails && selector === '[data-co-field="resume"]') throw new Error("tagged input replaced");
+          uploads.push({ selector, file });
+        } }),
+      }),
       evaluate: async () => ({ mismatches: [], requiredEmpty: [], valErrors: [] }),
     };
-    const page = { screenshot: async () => Buffer.from("fixture") };
+    const page = { screenshot: async () => Buffer.from("fixture"), frames: () => [frame] };
     const result = await withSession(frame, page, (id) => fillSession(id, {}, [cover, resume], "/fixture/cv.pdf"));
     assert.deepEqual(uploads, exactFails ? [] : [{ selector: '[data-co-field="resume"]', file: "/fixture/cv.pdf" }]);
     assert.equal(result.steps.length, 1);
@@ -58,6 +61,51 @@ for (const exactFails of [false, true]) {
     assert.equal(result.steps[0].ok, !exactFails);
   });
 }
+
+// #6399: the employer sees the uploaded file's name, so the CV goes up as
+// First-Last-Role-CV.pdf while the file on disk keeps the name the manifest
+// and matchers depend on.
+test("CV upload carries the display name and leaves the file on disk as it was", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "apply-upload-name-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const onDisk = join(root, "cv-jane-doe-002-acme-2026-11-01.pdf");
+  const bytes = "%PDF-1.4\nfictional fixture\n";
+  writeFileSync(onDisk, bytes);
+  const uploads = [];
+  const frame = {
+    url: () => "about:blank",
+    locator: (selector) => ({
+      count: async () => 0,
+      first: () => ({ setInputFiles: async (file) => { uploads.push({ selector, file }); } }),
+    }),
+    evaluate: async () => ({ mismatches: [], requiredEmpty: [], valErrors: [] }),
+  };
+  const page = { screenshot: async () => Buffer.from("fixture"), frames: () => [frame] };
+  const result = await withSession(frame, page, (id) => fillSession(id, {}, [resume], onDisk, "Jane-Doe-Data-Engineer-CV.pdf"));
+  assert.equal(result.steps[0].ok, true);
+  assert.equal(uploads.length, 1);
+  const { file } = uploads[0];
+  assert.equal(file.name, "Jane-Doe-Data-Engineer-CV.pdf");
+  assert.equal(file.mimeType, "application/pdf");
+  assert.equal(file.buffer.toString(), bytes);
+  assert.deepEqual(readdirSync(root), ["cv-jane-doe-002-acme-2026-11-01.pdf"]);
+  assert.equal(readFileSync(onDisk, "utf8"), bytes);
+});
+
+test("CV upload without a display name still sends the path", async () => {
+  const uploads = [];
+  const frame = {
+    url: () => "about:blank",
+    locator: (selector) => ({
+      count: async () => 0,
+      first: () => ({ setInputFiles: async (file) => { uploads.push(file); } }),
+    }),
+    evaluate: async () => ({ mismatches: [], requiredEmpty: [], valErrors: [] }),
+  };
+  const page = { screenshot: async () => Buffer.from("fixture"), frames: () => [frame] };
+  await withSession(frame, page, (id) => fillSession(id, {}, [resume], "/fixture/cv.pdf"));
+  assert.deepEqual(uploads, ["/fixture/cv.pdf"]);
+});
 
 // Opt-in browser proof: only local DOM and disposable documents; no ATS or CLI.
 test("a re-rendered resume field never receives its CV through the cover input", { skip: !process.env.APPLY_UPLOAD_BROWSER_TEST }, async (t) => {
@@ -79,6 +127,9 @@ test("a re-rendered resume field never receives its CV through the cover input",
   const good = await withSession(page.mainFrame(), page, (id) => fillSession(id, {}, form.fields, pdf));
   assert.equal(good.steps[0].ok, true);
   assert.equal(await page.locator("#resume").evaluate((el) => el.files.length), 1);
+  const named = await withSession(page.mainFrame(), page, (id) => fillSession(id, {}, form.fields, pdf, "Jane-Doe-Analyst-CV.pdf"));
+  assert.equal(named.steps[0].ok, true);
+  assert.equal(await page.locator("#resume").evaluate((el) => el.files[0].name), "Jane-Doe-Analyst-CV.pdf");
   assert.equal(await page.locator("#cover").evaluate((el) => el.files.length), 0);
 
   // ATS hydration replaces an input after extraction, losing data-co-field.

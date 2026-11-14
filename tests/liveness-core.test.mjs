@@ -679,6 +679,34 @@ closureVerdict('Salary data is not available at this time. Apply now.', ['Apply 
   ? pass('an availability mention on a live posting stays active')
   : fail('the new pattern over-triggered on a live posting');
 
+console.log('\nliveness-core — Built In\'s "Sorry, this job was removed" banner beats its APPLY control (#6327)');
+
+// Built In keeps a removed posting's whole JD and its APPLY control, and says
+// it is gone only in a banner under the title. Before the pattern the APPLY
+// control won and the posting read active.
+const builtInUrl = 'https://builtin.com/job/director-software-engineering/11667112';
+const builtInJd = 'What you will do\nLead the platform engineering organization and own delivery across teams.\n'.repeat(4);
+const builtIn = (banner, applyControls = ['APPLY']) => classifyLiveness({
+  status: 200,
+  requestedUrl: builtInUrl,
+  finalUrl: builtInUrl,
+  bodyText: `JPMorganChase\nDirector of Software Engineering\n${banner}Be an Early Applicant\n${builtInJd}`,
+  applyControls,
+});
+
+// The reported page, banner as browser-extract read it.
+const removedBuiltIn = builtIn('Sorry, this job was removed\n Sorry, this job was removed at 08:47 p.m. (UTC) on Wednesday, Oct 14, 2026\n');
+removedBuiltIn.result === 'expired' && removedBuiltIn.code === 'expired_body'
+  ? pass('Built In "Sorry, this job was removed" -> expired, despite its APPLY')
+  : fail(`removed Built In posting classified ${removedBuiltIn.result}/${removedBuiltIn.code}, expected expired/expired_body`);
+
+// Negative control: a live posting stays active, including one whose
+// "Similar Jobs" list shows a "Job removed" badge on another listing.
+const liveBuiltIn = builtIn('Similar Jobs\nStaff Engineer\nJob removed\n');
+liveBuiltIn.result === 'active'
+  ? pass('a live Built In posting with a sibling "Job removed" badge stays active')
+  : fail(`live Built In posting classified ${liveBuiltIn.result}/${liveBuiltIn.code}, expected active`);
+
 console.log('\nliveness-core — CareerViet: Vietnamese Apply label, and the deadline that closes a posting (#4832)');
 
 // A CareerViet page as the browser reads it: the info block carries the
@@ -880,4 +908,70 @@ isClosureEvidence({ result: 'expired', code: 'hard_expired' }) === true
     && !/verdicts\.filter\(\s*\(?\s*v\s*\)?\s*=>\s*v\.result\s*===\s*'expired'\s*\)/.test(cli)
     ? pass('check-liveness.mjs --discard-expired selects URLs through the shared predicate')
     : fail('check-liveness.mjs builds its discard list without discardableExpiredUrls() — an unreadable page would be closed');
+}
+
+console.log('\nliveness-core — Norwegian apply controls');
+
+// arbeidsplassen.no labels Apply "Gå til søknad"; Jobbnorge and employer sites
+// use "Send søknad", "Søk på stillingen", "Søk nå" and "Søk her". Without them
+// every live Norwegian posting read no_apply_control (#6620).
+const norwegianBody = 'Om stillingen\nVi søker en avdelingsdirektør som skal lede plattform og infrastruktur i en stor offentlig virksomhet.\n'.repeat(4);
+for (const label of ['Gå til søknad', 'Send søknad', 'Søk på stillingen', 'Søk på denne stillingen', 'Søk nå', 'Søk her', 'GÅ TIL SØKNAD']) {
+  const norwegianApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    finalUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    bodyText: norwegianBody,
+    applyControls: ['Lagre favoritt', label],
+  });
+  norwegianApply.result === 'active' && norwegianApply.code === 'apply_control_visible'
+    ? pass(`"${label}" marks a Norwegian posting active`)
+    : fail(`"${label}" classified ${norwegianApply.result}/${norwegianApply.code}, expected active/apply_control_visible`);
+}
+
+// Bare "Søk" is also every Norwegian site's search button, and the deadline
+// line and the "Søknadsfrist" label share the stem. None of them is Apply.
+for (const label of ['Søk', 'Søk etter stillinger', 'Søknadsfrist', 'Søk senest mandag 16. november']) {
+  const norwegianNotApply = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    finalUrl: 'https://arbeidsplassen.nav.no/stillinger/stilling/022e0f20-ab6f-4fa8-ae75-8db6143c5d51',
+    bodyText: norwegianBody,
+    applyControls: [label],
+  });
+  norwegianNotApply.result === 'uncertain' && norwegianNotApply.code === 'no_apply_control'
+    ? pass(`"${label}" is not an Apply control`)
+    : fail(`"${label}" classified ${norwegianNotApply.result}/${norwegianNotApply.code}, expected uncertain/no_apply_control`);
+}
+
+// A closed Norwegian posting can keep its "Søk her" link next to the closure
+// banner. The banner wins; a deadline still ahead does not (#6620).
+// "Søk etter stillinger" is site chrome, not a clause opener: it can sit on the
+// banner's own line and must not hide the closure. Neither may a "Sorter etter
+// søknadsfrist" sort control joined to the banner: its "etter" opens no clause
+// around the banner (#6788).
+for (const notice of ['Søknadsfristen er utløpt', 'Søknadsfristen har gått ut', 'Stillingen er ikke lenger ledig', 'Denne annonsen er utløpt', 'Stillingen er besatt', 'Søk etter stillinger Søknadsfristen er utløpt', 'Sorter etter søknadsfrist Stillingen er besatt', 'Sorter etter søknadsfrist\nStillingen er besatt', 'Sorter etter søknadsfrist Søknadsfristen er utløpt']) {
+  const closed = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    finalUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    bodyText: `${notice}\n${norwegianBody}`,
+    applyControls: ['Søk her'],
+  });
+  closed.result === 'expired'
+    ? pass(`"${notice}" marks a Norwegian posting closed despite "Søk her"`)
+    : fail(`"${notice}" classified ${closed.result}/${closed.code}, expected expired`);
+}
+
+for (const notice of ['Når søknadsfristen er utløpt, blir søkerlisten offentliggjort', 'Etter at søknadsfristen er utløpt vil vi kalle inn til intervju', 'Søknader behandles etter søknadsfristen er utløpt', 'Søkerlisten blir offentlig så snart søknadsfristen har gått ut', 'Søknadsfrist: 20.11.2026', 'Søknadsfristen utløper 20. november', 'Søknadsfristen er 20. november', 'Stillingen er ledig fra 1. januar', 'Stillingen vil bli besatt så snart som mulig']) {
+  const open = classifyLiveness({
+    status: 200,
+    requestedUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    finalUrl: 'https://karriere.example.no/ledig-stilling/lagerleder',
+    bodyText: `${notice}\n${norwegianBody}`,
+    applyControls: ['Søk her'],
+  });
+  open.result === 'active' && open.code === 'apply_control_visible'
+    ? pass(`"${notice}" leaves a Norwegian posting active`)
+    : fail(`"${notice}" classified ${open.result}/${open.code}, expected active/apply_control_visible`);
 }

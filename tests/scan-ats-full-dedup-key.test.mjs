@@ -12,7 +12,7 @@ import { pass, fail, ROOT } from './helpers.mjs';
 console.log('\nscan-ats-full — dedupTokenFor (#3439)');
 
 const mod = await import(pathToFileURL(join(ROOT, 'scan-ats-full.mjs')).href);
-const { dedupTokenFor, SOURCES, providerForSource } = mod;
+const { dedupTokenFor, SOURCES, providerForSource, unseenCheckpointOffers } = mod;
 const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
 
 const workdaySiteA = { url: 'https://acme.wd5.myworkdayjobs.com/External/job/Remote/Staff-Engineer_JR00123' };
@@ -56,13 +56,14 @@ const workdayOtherTenant = { url: 'https://other.wd5.myworkdayjobs.com/External/
 // unchanged from before #3439.
 {
   const greenhouseModule = await import(pathToFileURL(join(ROOT, 'providers/greenhouse.mjs')).href);
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
   const job = { url: 'https://boards.greenhouse.io/acme/jobs/12345?gh_src=abc' };
   const token = dedupTokenFor(job, greenhouseModule.default);
-  if (token === normalizeUrlForDedup(job.url)) {
-    pass('dedupTokenFor() falls back to normalizeUrlForDedup for a provider with no dedupKey');
+  const urlKey = normalizeUrlForDedup(job.url);
+  if (token === 'greenhouse:12345' && token === seenJobKey(job.url) && urlKey.includes('boards.greenhouse.io') && urlKey.includes('gh_jid') === false) {
+    pass('dedupTokenFor() falls back to the same-job key; normalizeUrlForDedup stays a URL');
   } else {
-    fail(`dedupTokenFor() fallback mismatch: ${JSON.stringify({ token, expected: normalizeUrlForDedup(job.url) })}`);
+    fail(`dedupTokenFor() fallback mismatch: ${JSON.stringify({ token, urlKey })}`);
   }
 }
 
@@ -138,5 +139,26 @@ if (SOURCES.workday.provider === workdayModule.default) {
     pass('providerForSource returns undefined for a seed-pass source, not a throw');
   } else {
     fail('providerForSource unexpectedly resolved a seed-pass source to a provider');
+  }
+}
+
+// A failed scan-history write leaves the URL in pipeline.md and the offer in
+// the checkpoint, without the Workday requisition token. Filtering only on
+// that token counts the offer as new on the next stopped run. The URL key
+// has to drop it, and the requisition token has to stay so the other site
+// does not come back as new either.
+{
+  const { seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const siteA = { ...workdaySiteA, source: 'workday-full' };
+  const siteB = { ...workdaySiteB, source: 'workday-full' };
+  const seen = new Set([seenJobKey(siteA.url)]);
+  const fresh = unseenCheckpointOffers([siteA, siteB], seen);
+  const tokenB = dedupTokenFor(siteB, workdayModule.default);
+  const greenhouse = { url: 'https://boards.greenhouse.io/acme/jobs/99999', source: 'greenhouse-full' };
+  const greenhouseFresh = unseenCheckpointOffers([greenhouse], new Set([seenJobKey(siteA.url)]));
+  if (fresh.length === 0 && seen.has(tokenB) && greenhouseFresh.length === 1 && greenhouseFresh[0].url === greenhouse.url) {
+    pass('a pipeline URL drops the checkpoint offer and keeps the Workday requisition key');
+  } else {
+    fail(`checkpoint URL was treated as new: ${JSON.stringify({ fresh: fresh.map((o) => o.url), keptToken: seen.has(tokenB), greenhouse: greenhouseFresh.map((o) => o.url) })}`);
   }
 }

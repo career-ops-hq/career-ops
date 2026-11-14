@@ -48,7 +48,11 @@ const DEFAULT_ATS_ALLOWLIST = [
   'bamboohr.com',
   'teamtailor.com',
   'paylocity.com',
+  'careers.hibob.com',
   'join.com',
+  'hirehive.com',
+  'recruitmentplatform.com',
+  'taleez.com',
 ];
 
 /** @type {Record<string, number>} */

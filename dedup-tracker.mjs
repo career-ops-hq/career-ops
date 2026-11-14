@@ -23,7 +23,7 @@ import {
   stripStatusDecoration,
   resolveWorkspaceRoot, containedReportFile, reportUrlToken,
 } from './tracker-utils.mjs';
-import { resolveColumns, parseTrackerRow, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
+import { resolveColumns, parseTrackerRow, isUnsetUrlCell, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -56,7 +56,9 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const STATUS_RANK = {
   'skip': 0,
   'discarded': 0,
-  'rejected': 1,
+  // Evaluated must not outrank Rejected. A higher score used to promote a
+  // rejection to Evaluated, or delete the rejected row, on a title match.
+  'rejected': 2,
   'evaluated': 2,
   // A pitch that went out outranks a report that is still only evaluated, so a
   // later evaluation of the same role cannot demote it. Below Applied: nothing
@@ -129,6 +131,18 @@ function statusRank(status) {
  */
 function isAdvancedStatus(status) {
   return statusRank(status) >= STATUS_RANK.applied;
+}
+
+/**
+ * A rejection is kept beside an exact-title sibling unless both rows are the
+ * same report. Title match alone is not identity, and Evaluated is not a
+ * later status than Rejected.
+ *
+ * @param {string} status
+ * @returns {boolean}
+ */
+function isRejectedStatus(status) {
+  return resolveCanonicalStateId(status, CANONICAL_STATES) === 'rejected';
 }
 
 /**
@@ -236,7 +250,8 @@ const reportUrls = new Map();
  * distinct" — so `node merge-tracker.mjs` kept both rows and `node
  * dedup-tracker.mjs` then removed one. Both now read through
  * reportUrlToken(), with the same path containment. A placeholder such as
- * `N/A` needs no filtering here: postingUrlRelation() gives it no key.
+ * `N/A` counts as no cell: it has no key of its own, so stopping at it hid the
+ * report and left the same two rows looking identical.
  *
  * Read lazily and memoised: only rows that already share a company reach a
  * guard.
@@ -245,7 +260,7 @@ const reportUrls = new Map();
  * @returns {string}
  */
 function postingUrl(row) {
-  if (row.url) return row.url;
+  if (!isUnsetUrlCell(row.url)) return row.url;
   if (!reportUrls.has(row.report)) {
     reportUrls.set(row.report, reportUrlToken(containedReportFile(row.report, REPORTS_ROOT)));
   }
@@ -363,11 +378,14 @@ function roleMatch(a, b) {
   // because a higher-scored exact-title sibling exists would lose status,
   // report, and notes. Keep both unless the rows point to the exact same
   // report identity.
-  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status)) {
+  if (isAdvancedStatus(a.status) || isAdvancedStatus(b.status) || isRejectedStatus(a.status) || isRejectedStatus(b.status)) {
     const key = pairKey(a, b);
     if (!protectedTitlePairs.has(key)) {
       protectedTitlePairs.add(key);
-      console.warn(`⚠️  Keep #${a.num} and #${b.num}: exact-title match but advanced status requires exact report identity`);
+      const why = isRejectedStatus(a.status) || isRejectedStatus(b.status)
+        ? 'a rejection is kept unless the report is the same'
+        : 'advanced status requires exact report identity';
+      console.warn(`⚠️  Keep #${a.num} and #${b.num}: exact-title match but ${why}`);
     }
     return false;
   }
@@ -553,8 +571,13 @@ for (const [company, companyEntries] of groups) {
       // would admit two rows naming different postings and one would be
       // deleted. Check the candidate's URL and requisition id against every
       // member already in.
+      // roleMatch against the seed is not enough. A Rejected row can join on
+      // shared report identity, and a later exact-title row would then join
+      // through the seed alone and delete the rejection.
       if (companyOk && roleMatch(companyEntries[i], companyEntries[j])
-          && !cluster.some(member => urlsConflict(member, companyEntries[j]) || reqNumsConflict(member, companyEntries[j]))) {
+          && !cluster.some(member => urlsConflict(member, companyEntries[j])
+            || reqNumsConflict(member, companyEntries[j])
+            || !roleMatch(member, companyEntries[j]))) {
         cluster.push(companyEntries[j]);
         processed.add(j);
       }
@@ -571,7 +594,12 @@ for (const [company, companyEntries] of groups) {
     let bestStatus = keeper.status;
     for (let k = 1; k < cluster.length; k++) {
       const rank = statusRank(cluster[k].status);
-      if (rank > bestStatusRank) {
+      // Rejected and Evaluated share a rank. The higher score must not leave
+      // the surviving same-report row as Evaluated.
+      const rejectionWins = rank === bestStatusRank
+        && isRejectedStatus(cluster[k].status)
+        && !isRejectedStatus(bestStatus);
+      if (rank > bestStatusRank || rejectionWins) {
         bestStatusRank = rank;
         bestStatus = cluster[k].status;
       }

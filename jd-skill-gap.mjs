@@ -31,7 +31,8 @@ import { canonicalize, extractSkills, SKILL_PATTERN } from './skill-extract.mjs'
 import { isMainModule } from './lib/is-main-module.mjs';
 import { join } from 'path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
+import { normalizePandocLine, parseCompanyHeading, toPlainText } from './lib/cv-markdown.mjs';
+import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
@@ -54,7 +55,34 @@ const CV_PATH = join(getCareerOpsRoot(), 'cv.md');
 // (missing a skill) is recoverable by the user reading the JD themselves;
 // over-extracting noise into "required skills" is not — it would misreport
 // gaps that aren't real.
-//
+
+// Qualified requirement headings (#6255), kept apart so scanJd() can tell a
+// line matched by one of them from the older requirement headings.
+const QUALIFIED_REQUIREMENT_ARMS = [
+  // The ^ anchor means the keyword has to be the heading's first word, so
+  // a qualified noun heading — Amazon's "Basic Qualifications", Google's
+  // "Minimum Qualifications", "Role Qualifications", "Key Requirements" —
+  // matched nothing and the JD reported no-requirements-section (#6255).
+  // The qualifier is a closed list, not "any words": an open prefix would
+  // turn a prose line such as "Gather and document requirements" into a
+  // heading and open a block in the middle of the responsibilities.
+  // The lookahead also requires the keyword to END the heading (or be
+  // followed by ":" / "("): without it, a bare requirement line such as
+  // "Technical requirements include Python and Kubernetes" read as a
+  // heading and its skills were dropped. Closing heading markers
+  // ("## Basic Qualifications ##", "【Basic Qualifications】") still end it.
+  '(?:(?:basic|minimum|key|core|job|role|position|technical|essential|desired|desirable|additional|mandatory|general|specific|candidate|professional|education(?:al)?)\\s+){1,2}(?:requirement|qualification)(?=s?[\\s#\u3011]*(?:[:\uFF1A(\uFF08]|$))',
+  // US public-sector postings title the block "Knowledge, Skills, and
+  // Abilities" (KSAs), "Experience, Skills, and Abilities", or both joined
+  // by a slash: "Knowledge/Experience, Skills, and Abilities" (#6255).
+  // Same end-of-heading lookahead, for the same prose-line reason.
+  '(?:(?:knowledge|experience|education)(?:\\s*\\/\\s*(?:knowledge|experience|education))?,?\\s+)?skills,?\\s+(?:and|&)\\s+abilit(?:y|ies)(?=[\\s#\u3011]*(?:[:\uFF1A(\uFF08]|$))',
+];
+const QUALIFIED_REQUIREMENT_HEADER_RE = new RegExp(
+  '^#{0,6}\\s*\u3010?\\s*(?:' + QUALIFIED_REQUIREMENT_ARMS.join('|') + ')',
+  'im'
+);
+
 // Real postings rarely use the word "Requirements". The literal-only list
 // missed the phrasings most modern ATS boards actually ship ("What we're
 // looking for", "Who you are", "You may be a good fit if", "You have"), so a
@@ -104,6 +132,7 @@ const REQUIREMENT_HEADER_RE = new RegExp(
     'it\\s+would\\s+be\\s+great\\s+if\\s+you\\s+ha(?:ve|d)',
     'ideal\\s+candidate',
     'skills\\s+(?:and|&)\\s+experience',
+    ...QUALIFIED_REQUIREMENT_ARMS,
   ].join('|') + ')s?\\b|(?:' + [
     // Spanish (es-419 / es-ES) requirement headers. A Spanish-language
     // posting's requirements block is invisible to the English list above, so
@@ -361,8 +390,22 @@ function scanJd(jdText) {
       // The full-width colon and the CJK separators (、，；) count the same as
       // their ASCII forms: "任职要求：Python、Docker".
       const colon = headerLine.search(/[:：]/);
-      const inline = colon === -1 ? '' : headerLine.slice(colon + 1);
+      let inline = colon === -1 ? '' : headerLine.slice(colon + 1);
+      // A qualified heading may carry its list in parentheses instead:
+      // "Basic Qualifications (Python and Kubernetes)", full-width included.
+      if (!inline && QUALIFIED_REQUIREMENT_HEADER_RE.test(headerLine)) {
+        const paren = headerLine.search(/[(（]/);
+        if (paren !== -1) inline = headerLine.slice(paren + 1);
+      }
+      // A qualified heading with no separator ("Technical requirements:
+      // Python and Kubernetes") was a requirement line before #6255 made it a
+      // heading, so its known skills are kept — vocabulary names only. Every
+      // other heading keeps the #5173 rule: a sentence after the colon ("About
+      // you: Curious about Kubernetes.") is not a list.
       if (/[;,、，；]/.test(inline)) addSkillTokens(inline, skills);
+      else if (QUALIFIED_REQUIREMENT_HEADER_RE.test(headerLine)) {
+        for (const skill of extractSkills(inline)) skills.add(skill);
+      }
       continue;
     }
     if (inRequirementsBlock && line.trim() === '') continue;
@@ -549,15 +592,32 @@ const ANY_HEADING_RE = /^#{1,6}\s/;
 // Habilidades" and "Competencias Técnicas". Without them a Spanish cv.md had
 // no named-skills section at all, so every skill it listed was reported as a
 // gap — the check's own "already in Skills section" bucket stayed empty.
+//
+// The Chinese words are the ones generate-pdf.mjs's SECTION_ALIASES maps to
+// `skills`, in both scripts: 技能 (also inside 专业技能), 专长, 技术能力 and
+// 技术栈. They sit outside the `\b` group because a word boundary does not
+// exist between two Han characters, so `\b技能\b` never matches 专业技能.
+// Because they match inside a longer name, they count at any level except on
+// an entry heading (`### 技能培训有限公司 — 上海`, the `### Company — Location`
+// shape parseCompanyHeading() reads), so that job's bullets stay resume prose.
+// Under a level-2 skills section the same shape is a sub-heading
+// (`### 专业技能 — 后端`) and still counts.
 const SKILLS_WORD_RE = /\b(?:skills|competenc(?:y|ies)|aptitudes|habilidades|competencias)\b/i;
 const TOOLS_WORD_RE = /\b(?:tools|technologies|tech\s+stack)\b/i;
+const ZH_SKILLS_WORD_RE = /技能|专长|專長|技术能力|技術能力|技术栈|技術棧/;
+const TOP_HEADING_RE = /^#{1,2}(?!#)\s*\S/;
 
-function isSkillsHeading(line) {
+/**
+ * @param {string} line
+ * @param {boolean} [underSkillsSection] the enclosing level-1/2 heading is a skills heading
+ */
+function isSkillsHeading(line, underSkillsSection = false) {
   // `\s*` rather than `\s+` keeps the historical `#Skills` (no space) form.
   const m = String(line).match(/^(#{1,6})(?!#)\s*(.+?)\s*$/);
   if (!m) return false;
   const text = toPlainText(normalizePandocLine(m[2]).replace(/\s*\{[^}]*\}\s*$/, ''));
-  return SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text));
+  if (SKILLS_WORD_RE.test(text) || (m[1].length <= 2 && TOOLS_WORD_RE.test(text))) return true;
+  return ZH_SKILLS_WORD_RE.test(text) && (underSkillsSection || !parseCompanyHeading(normalizePandocLine(line)));
 }
 
 /**
@@ -573,8 +633,10 @@ function splitSkillsSection(cvText) {
   const named = [];
   const prose = [];
   let inSkills = false;
+  let underSkillsSection = false;
   for (const line of cvText.split('\n')) {
-    const skillsHeading = isSkillsHeading(line);
+    const skillsHeading = isSkillsHeading(line, underSkillsSection);
+    if (TOP_HEADING_RE.test(line)) underSkillsSection = skillsHeading;
     if (skillsHeading || ANY_HEADING_RE.test(line)) {
       inSkills = skillsHeading;
       // A skills heading itself belongs to neither side.
@@ -595,7 +657,12 @@ function splitSkillsSection(cvText) {
  * @returns {{existing: string[], supportedByResume: string[], gap: string[]}}
  */
 function classifySkillGaps(jdSkills, cvText) {
-  const { namedSkillsText, proseText } = splitSkillsSection(cvText);
+  // Only what a reader of the CV sees is evidence: a link's text, not its target,
+  // the rule verify-cv-facts.mjs applies (#6606). "[infrastructure modules](
+  // https://github.com/jane/terraform-modules)" says nothing about Terraform, but
+  // its URL put Terraform in supportedByResume, which modes/pdf.md offers to the
+  // tailored CV's Skills section.
+  const { namedSkillsText, proseText } = splitSkillsSection(collapseMarkdownLinks(cvText));
 
   // Canonical skill sets present in each CV region. Folding BOTH the JD token
   // and the CV text through skill-extract.mjs's canonicalize() is what closes

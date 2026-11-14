@@ -28,6 +28,7 @@ type Catalog struct {
 	TabSkip        string
 	TabRejected    string
 	TabDiscarded   string
+	TabOther       string
 
 	// Table column headers
 	ColFit      string
@@ -113,6 +114,7 @@ type Catalog struct {
 	StatusDiscarded   string
 	StatusSkip        string
 	StatusHired       string
+	StatusOther       string
 
 	// Additional UI strings
 	NoData        string
@@ -129,6 +131,7 @@ type Catalog struct {
 	HelpRefresh    string
 	HelpReport     string
 	HelpOpenURL    string
+	HelpQueue      string
 	HelpOpenPDF    string
 	HelpCopyPDF    string
 	HelpRegenPDF   string
@@ -177,6 +180,33 @@ type Catalog struct {
 	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
+
+	// Inbox tab (#5269): the Pending rows of data/pipeline.md
+	TabInbox               string
+	ColRank                string
+	SortRank               string
+	LabelRank              string
+	LabelURL               string
+	InboxEmpty             string
+	InboxNotRanked         string
+	InboxSummary           string
+	InboxNoWebURL          string
+	InboxUnavailable       string
+	InboxStatusQueued      string
+	InboxStatusRunning     string
+	InboxStatusPaused      string
+	InboxStatusNeedsAnswer string
+	InboxStatusFailed      string
+	InboxStatusDone        string
+
+	// Inbox `e`: queue the selected row in batch/batch-input.tsv (#5269)
+	InboxQueueing         string
+	InboxQueued           string
+	InboxQueueFailed      string
+	InboxQueueAlready     string
+	InboxQueueRetryFailed string
+	InboxQueueUnreadable  string
+	InboxQueueNoWebURL    string
 }
 
 // SortModeLabel returns the localized display label for a sort mode ("score", "date", etc.).
@@ -242,6 +272,8 @@ func (c *Catalog) StatusLabel(norm string) string {
 		return c.StatusRejected
 	case "discarded":
 		return c.StatusDiscarded
+	case "other":
+		return c.StatusOther
 	default:
 		return norm
 	}
@@ -333,6 +365,7 @@ var En = Catalog{
 	TabSkip:        "SKIP",
 	TabRejected:    "REJECTED",
 	TabDiscarded:   "DISCARDED",
+	TabOther:       "OTHER",
 
 	// Table column headers
 	ColFit:      "FIT",
@@ -418,6 +451,7 @@ var En = Catalog{
 	StatusDiscarded:   "Discarded",
 	StatusSkip:        "SKIP",
 	StatusHired:       "Hired",
+	StatusOther:       "Other",
 
 	// Additional UI strings
 	NoData:        "No data",
@@ -434,6 +468,7 @@ var En = Catalog{
 	HelpRefresh:    " refresh  ",
 	HelpReport:     " report  ",
 	HelpOpenURL:    " open URL  ",
+	HelpQueue:      " queue  ",
 	HelpOpenPDF:    " open PDF  ",
 	HelpCopyPDF:    " copy PDF path  ",
 	HelpRegenPDF:   " regen PDF  ",
@@ -482,6 +517,32 @@ var En = Catalog{
 	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
+
+	// Inbox tab
+	TabInbox:               "INBOX",
+	ColRank:                "RANK",
+	SortRank:               "rank",
+	LabelRank:              "Rank: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No pending rows in data/pipeline.md",
+	InboxNotRanked:         "not ranked",
+	InboxSummary:           "%d pending · %d not ranked",
+	InboxNoWebURL:          "Not a web address, nothing opened: %s",
+	InboxUnavailable:       "Inbox unavailable; showing previous rows: %s",
+	InboxStatusQueued:      "Queued",
+	InboxStatusRunning:     "Running",
+	InboxStatusPaused:      "Paused",
+	InboxStatusNeedsAnswer: "Needs answer",
+	InboxStatusFailed:      "Failed",
+	InboxStatusDone:        "Done",
+
+	InboxQueueing:         "Queueing %s ...",
+	InboxQueued:           "Queued. Run batch/batch-runner.sh to evaluate it: %s",
+	InboxQueueFailed:      "Could not queue the row: %s",
+	InboxQueueAlready:     "Already in the batch files, nothing queued: %s",
+	InboxQueueRetryFailed: "Failed in the batch; retry with batch/batch-runner.sh --retry-failed: %s",
+	InboxQueueUnreadable:  "Not queued: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
+	InboxQueueNoWebURL:    "Not a web address, nothing queued: %s",
 }
 
 // Tr is the static Turkish translation catalog.
@@ -504,6 +565,7 @@ var Tr = Catalog{
 	TabSkip:        "UYGUN DEĞİL",
 	TabRejected:    "REDDEDİLDİ",
 	TabDiscarded:   "İPTAL",
+	TabOther:       "DİĞER",
 
 	// Table column headers
 	ColFit:      "UYUM",
@@ -589,6 +651,7 @@ var Tr = Catalog{
 	StatusDiscarded:   "İptal Edildi",
 	StatusSkip:        "Uygun Değil",
 	StatusHired:       "İşe Alındı",
+	StatusOther:       "Diğer",
 
 	// Additional UI strings
 	NoData:        "Veri yok",
@@ -605,6 +668,7 @@ var Tr = Catalog{
 	HelpRefresh:    " yenile  ",
 	HelpReport:     " rapor  ",
 	HelpOpenURL:    " URL aç  ",
+	HelpQueue:      " sıraya al  ",
 	HelpOpenPDF:    " PDF'i aç  ",
 	HelpCopyPDF:    " PDF yolunu kopyala  ",
 	HelpRegenPDF:   " PDF üret  ",
@@ -653,6 +717,32 @@ var Tr = Catalog{
 	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
+
+	// Inbox tab
+	TabInbox:               "GELEN",
+	ColRank:                "SIRA",
+	SortRank:               "sıra",
+	LabelRank:              "Sıra: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "data/pipeline.md içinde bekleyen satır yok",
+	InboxNotRanked:         "sıralanmadı",
+	InboxSummary:           "%d bekleyen · %d sıralanmadı",
+	InboxNoWebURL:          "Web adresi değil, hiçbir şey açılmadı: %s",
+	InboxUnavailable:       "Gelen kutusu okunamadı; önceki satırlar gösteriliyor: %s",
+	InboxStatusQueued:      "Sırada",
+	InboxStatusRunning:     "Çalışıyor",
+	InboxStatusPaused:      "Duraklatıldı",
+	InboxStatusNeedsAnswer: "Yanıt bekliyor",
+	InboxStatusFailed:      "Başarısız",
+	InboxStatusDone:        "Tamamlandı",
+
+	InboxQueueing:         "Sıraya alınıyor: %s ...",
+	InboxQueued:           "Sıraya alındı. Değerlendirmek için batch/batch-runner.sh çalıştırın: %s",
+	InboxQueueFailed:      "Satır sıraya alınamadı: %s",
+	InboxQueueAlready:     "Zaten toplu iş dosyalarında, sıraya alınmadı: %s",
+	InboxQueueRetryFailed: "Toplu işte başarısız; batch/batch-runner.sh --retry-failed ile yeniden deneyin: %s",
+	InboxQueueUnreadable:  "Sıraya alınmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
+	InboxQueueNoWebURL:    "Web adresi değil, sıraya alınmadı: %s",
 }
 
 // Es is the static Spanish translation catalog.
@@ -675,6 +765,7 @@ var Es = Catalog{
 	TabSkip:        "OMITIR",
 	TabRejected:    "RECHAZADAS",
 	TabDiscarded:   "DESCARTADAS",
+	TabOther:       "OTRAS",
 
 	// Table column headers
 	ColFit:      "AJUSTE",
@@ -760,6 +851,7 @@ var Es = Catalog{
 	StatusDiscarded:   "Descartada",
 	StatusSkip:        "OMITIR",
 	StatusHired:       "Contratada",
+	StatusOther:       "Otras",
 
 	// Additional UI strings
 	NoData:        "Sin datos",
@@ -776,6 +868,7 @@ var Es = Catalog{
 	HelpRefresh:    " actualizar  ",
 	HelpReport:     " informe  ",
 	HelpOpenURL:    " abrir URL  ",
+	HelpQueue:      " encolar  ",
 	HelpOpenPDF:    " abrir PDF  ",
 	HelpCopyPDF:    " copiar ruta del PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
@@ -824,6 +917,32 @@ var Es = Catalog{
 	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
+
+	// Inbox tab
+	TabInbox:               "BANDEJA",
+	ColRank:                "RANGO",
+	SortRank:               "rango",
+	LabelRank:              "Rango: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No hay filas pendientes en data/pipeline.md",
+	InboxNotRanked:         "sin rango",
+	InboxSummary:           "%d pendientes · %d sin rango",
+	InboxNoWebURL:          "No es una dirección web; no se abrió nada: %s",
+	InboxUnavailable:       "Bandeja no disponible; se muestran las filas anteriores: %s",
+	InboxStatusQueued:      "En cola",
+	InboxStatusRunning:     "En curso",
+	InboxStatusPaused:      "En pausa",
+	InboxStatusNeedsAnswer: "Falta respuesta",
+	InboxStatusFailed:      "Fallida",
+	InboxStatusDone:        "Hecha",
+
+	InboxQueueing:         "Encolando %s ...",
+	InboxQueued:           "En cola. Ejecuta batch/batch-runner.sh para evaluarla: %s",
+	InboxQueueFailed:      "No se pudo encolar la fila: %s",
+	InboxQueueAlready:     "Ya está en los archivos de batch; no se encoló nada: %s",
+	InboxQueueRetryFailed: "Falló en el batch; reinténtalo con batch/batch-runner.sh --retry-failed: %s",
+	InboxQueueUnreadable:  "No se encoló: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
+	InboxQueueNoWebURL:    "No es una dirección web; no se encoló nada: %s",
 }
 
 // Current points to the active language catalog. Defaults to English (&En).

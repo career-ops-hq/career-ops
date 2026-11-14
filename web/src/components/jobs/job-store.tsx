@@ -5,9 +5,11 @@ import { scoreTone } from "@/lib/format";
 import { resolveCliId } from "@/lib/saved-cli";
 import { createWorkerFeedback } from "@/lib/worker-feedback.mjs";
 import { readJobStream } from "@/lib/job-stream.mjs";
-import { createJobsPersister } from "@/lib/jobs-persist.mjs";
+import { createJobsPersister, restoreStoredJobs, saveJobsAfterOpen } from "@/lib/jobs-persist.mjs";
+import type { EVALUATION_GATE_REASONS } from "@/lib/evaluation-gate.mjs";
 
 export type JobStep = { kind: "tool" | "status"; label: string; ts: number };
+export type JobGate = { reason: (typeof EVALUATION_GATE_REASONS)[number]; message: string; confirmationRequired: boolean };
 export type JobResult = { score: number | null; summary: string; tone: "good" | "warn" | "bad" | "muted" };
 
 export type Job = {
@@ -19,7 +21,8 @@ export type Job = {
   kind?: string;
   evaluationSections?: string[];
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "gated";
+  gate?: JobGate;
   steps: JobStep[];
   text: string;
   result?: JobResult;
@@ -33,6 +36,7 @@ type StartOpts = { title: string; subtitle?: string; kind: string; input: string
 
 type Ctx = {
   jobs: Job[];
+  ready: boolean;
   startJob: (opts: StartOpts) => string | null;
   removeJob: (id: string) => void;
   clearFinished: () => void;
@@ -63,6 +67,7 @@ function parseVerdict(text: string): JobResult {
 
 export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [ready, setReady] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const feedback = useRef<ReturnType<typeof createWorkerFeedback> | null>(null);
   useEffect(() => {
@@ -71,21 +76,19 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     return () => { owner.dispose(); feedback.current = null; };
   }, []);
   const seq = useRef(0);
-  const loaded = useRef(false);
 
-  // restore history
+  // Restore first. setReady in this effect, and save only on a later render
+  // where ready is already true. Saving from a ref flipped in this same
+  // commit still sees the initial empty list and writes it over storage.
   useEffect(() => {
     try {
       const raw = localStorage.getItem(JOBS_KEY);
       const arr = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(arr)) {
-        // anything left "running" from a previous session is stale → mark interrupted
-        setJobs(arr.map((j: Job) => (j.status === "running" ? { ...j, status: "error", steps: [...(j.steps || []), { kind: "status", label: "Interrupted (page reloaded)", ts: Date.now() }] } : j)));
-      }
+      if (Array.isArray(arr)) setJobs(restoreStoredJobs(arr, Date.now()));
     } catch {
       /* ignore */
     }
-    loaded.current = true;
+    setReady(true);
   }, []);
 
   // persist. Every streamed chunk replaces `jobs`, so writes go through the
@@ -114,9 +117,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
   useEffect(() => {
-    if (!loaded.current) return;
-    persister.current?.save(jobs);
-  }, [jobs]);
+    saveJobsAfterOpen(persister.current, ready, jobs);
+  }, [jobs, ready]);
 
   const patch = useCallback((id: string, fn: (j: Job) => Job) => {
     setJobs((js) => js.map((j) => (j.id === id ? fn(j) : j)));
@@ -175,15 +177,16 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         let doneCostUsd: number | null = null;
         let doneReportN: number | null = null;
         let finished = false;
-        const finish = (status: "done" | "error", lastLabel?: string) => {
+        const finish = (status: "done" | "error" | "gated", lastLabel?: string, gate?: JobGate) => {
           if (finished) return;
           finished = true;
           feedback.current?.push({ ...job, status });
           const result = status === "done" ? parseVerdict(verdictLine || text) : undefined;
-          const cost = status === "done" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
+          const cost = status !== "error" && doneTokens > 0 ? { tokens: doneTokens, usd: doneCostUsd ?? undefined } : undefined;
           patch(id, (j) => ({
             ...j,
             status,
+            gate,
             result,
             cost,
             reportN: doneReportN,
@@ -191,15 +194,15 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
             steps: lastLabel ? [...j.steps, { kind: "status", label: lastLabel, ts: Date.now() }] : j.steps,
           }));
           // persist a readable log file so the CLI/assistant can read past runs
-          if (status === "done") {
+          if (status === "done" || status === "gated") {
             fetch("/api/runs/save", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, result, cost, steps, output: text }),
+              body: JSON.stringify({ id, title: opts.title, subtitle: opts.subtitle, page: opts.page, input: opts.input, status, gate, result, cost, steps, output: text }),
             }).catch(() => {});
             // Tell server-snapshot surfaces (Today, pipeline) to refetch — the
             // worker just wrote a real tracker row / report they don't yet see.
-            if (typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
+            if (status === "done" && typeof window !== "undefined" && (opts.kind === "evaluate" || opts.kind === "pdf")) {
               window.dispatchEvent(new CustomEvent("co-job-done", { detail: { kind: opts.kind, input: opts.input } }));
             }
           }
@@ -237,6 +240,14 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           }
           doneTokens = completion.tokens ?? 0;
           doneCostUsd = completion.costUsd ?? null;
+          if (completion.status === "gated") {
+            finish("gated", "Evaluation stopped — review the reason", {
+              reason: completion.reason,
+              message: completion.message,
+              confirmationRequired: completion.confirmationRequired,
+            });
+            return;
+          }
           doneReportN = typeof completion.reportN === "number" ? completion.reportN : null;
           finish("done", "Done");
         } catch {
@@ -254,7 +265,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
 
   // A new object only when the list or an action changes, not on every render
   // of this provider (the screen-reader announcement re-renders it too).
-  const value = useMemo(() => ({ jobs, startJob, removeJob, clearFinished }), [jobs, startJob, removeJob, clearFinished]);
+  const value = useMemo(() => ({ jobs, ready, startJob, removeJob, clearFinished }), [jobs, ready, startJob, removeJob, clearFinished]);
 
   return (
     <JobsContext.Provider value={value}>

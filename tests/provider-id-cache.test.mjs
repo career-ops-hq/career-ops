@@ -90,14 +90,21 @@ try {
       fail('an unsafe provider id got a slice');
     }
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'broken.json'), '{not json', 'utf8');
+    const before = '{"old-key":"kept","also":"kept"}\nnot json\n';
+    writeFileSync(join(dir, 'broken.json'), before, 'utf8');
     const broken = store.forProvider('broken');
-    if (broken.get('x') === undefined) pass('an unreadable cache file reads as an empty slice');
+    if (broken.get('old-key') === undefined) pass('an unreadable cache file reads as an empty slice');
     else fail('an unreadable cache file should read as empty');
-    broken.set('x', { id: 1 });
-    await store.save();
-    if (read('broken').x?.id === 1) pass('a slice read from an unreadable file is rewritten as valid JSON');
-    else fail('the unreadable file was not replaced');
+    broken.set('new-key', 'fresh');
+    let error = null;
+    try {
+      await store.save();
+    } catch (err) {
+      error = err;
+    }
+    const bytes = readFileSync(join(dir, 'broken.json'), 'utf8');
+    if (error && bytes === before) pass('save() leaves a corrupt cache file unchanged');
+    else fail(`corrupt cache save error=${error && error.message} bytes=${JSON.stringify(bytes)}`);
   }
 
   // A slice that cannot be written does not stop the others: they are saved,

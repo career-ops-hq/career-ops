@@ -15,12 +15,13 @@ try {
 
   // normalizeArbeitnowJob — field mapping.
   const full = normalizeArbeitnowJob(
-    { title: '  Staff AI Engineer  ', url: '  https://www.arbeitnow.com/jobs/x1  ', company_name: '  Acme Co  ', location: '  Berlin  ', remote: false, created_at: 1782693032 },
+    { slug: 'staff-ai-engineer-acme-123', title: '  Staff AI Engineer  ', url: '  https://www.arbeitnow.com/jobs/x1  ', company_name: '  Acme Co  ', location: '  Berlin  ', remote: false, created_at: 1782693032 },
     'Fallback',
   );
   if (full && full.title === 'Staff AI Engineer' && full.url === 'https://www.arbeitnow.com/jobs/x1'
-      && full.company === 'Acme Co' && full.location === 'Berlin' && full.postedAt === 1782693032000) {
-    pass('normalizeArbeitnowJob maps + trims title/url/company/location and converts created_at seconds → ms');
+      && full.company === 'Acme Co' && full.location === 'Berlin' && full.postedAt === 1782693032000
+      && full.externalId === 'staff-ai-engineer-acme-123') {
+    pass('normalizeArbeitnowJob maps + trims title/url/company/location and converts created_at seconds → ms + slug → externalId');
   } else {
     fail(`normalizeArbeitnowJob full row = ${JSON.stringify(full)}`);
   }
@@ -61,8 +62,49 @@ try {
   if (noDate && !('postedAt' in noDate)) pass('normalizeArbeitnowJob omits postedAt when created_at is absent');
   else fail(`normalizeArbeitnowJob postedAt presence = ${JSON.stringify(noDate)}`);
 
+  // externalId omitted when the feed carries no usable slug (absent / blank / non-string).
+  const noSlug = normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/ns' });
+  const blankSlug = normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/bs', slug: '   ' });
+  const objSlug = normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/os', slug: {} });
+  if (noSlug && !('externalId' in noSlug) && blankSlug && !('externalId' in blankSlug) && objSlug && !('externalId' in objSlug)) {
+    pass('normalizeArbeitnowJob omits externalId when slug is absent / blank / non-string');
+  } else {
+    fail(`normalizeArbeitnowJob externalId presence = ${JSON.stringify({ noSlug, blankSlug, objSlug })}`);
+  }
+
+  // description: the list payload carries HTML markup, and content_filter /
+  // country_eligibility_filter / visa_filter / the JD fingerprint all read the
+  // plain text. Dropping it made every arbeitnow posting invisible to them.
+  const withDesc = normalizeArbeitnowJob({
+    title: 'T',
+    url: 'https://www.arbeitnow.com/jobs/d1',
+    description: '<p>You will write <strong>Python</strong> and FastAPI.</p>',
+  });
+  if (withDesc?.description === 'You will write Python and FastAPI.') {
+    pass('normalizeArbeitnowJob strips HTML from description (so content_filter can match stack keywords)');
+  } else {
+    fail(`normalizeArbeitnowJob description = ${JSON.stringify(withDesc?.description)}`);
+  }
+
+  // Missing / empty / non-string description → key absent, so the filters read
+  // "no signal" and pass the posting instead of rejecting it for a body they
+  // never had.
+  const descAbsent = [
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d2' }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d3', description: '' }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d4', description: '   ' }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d5', description: null }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d6', description: 42 }),
+    normalizeArbeitnowJob({ title: 'T', url: 'https://www.arbeitnow.com/jobs/d7', description: '<p></p>' }),
+  ];
+  if (descAbsent.every((r) => r && !('description' in r))) {
+    pass('normalizeArbeitnowJob omits description when it is absent / empty / whitespace / non-string / markup-only');
+  } else {
+    fail(`normalizeArbeitnowJob description presence = ${JSON.stringify(descAbsent.map((r) => r?.description))}`);
+  }
+
   // fetch(): pagination by self-built ?page=N, stop on a short page.
-  const mk = (i) => ({ title: `Role ${i}`, url: `https://www.arbeitnow.com/jobs/x${i}`, company_name: `Co ${i}`, location: 'Berlin', remote: false, created_at: 1782693032 + i });
+  const mk = (i) => ({ slug: `role-${i}`, title: `Role ${i}`, url: `https://www.arbeitnow.com/jobs/x${i}`, company_name: `Co ${i}`, location: 'Berlin', remote: false, created_at: 1782693032 + i });
   const page1 = Array.from({ length: 100 }, (_, i) => mk(i));            // full page → continue
   const page2 = [mk(100), mk(101), { title: '', url: 'https://www.arbeitnow.com/jobs/bad' }]; // short page (3 < 100) → stop; 1 drop
   const requested = [];
@@ -91,6 +133,13 @@ try {
 
   if (paged.length === 102) pass('arbeitnow.fetch() aggregates valid jobs across pages (100 + 2, dropping the empty-title row)');
   else fail(`arbeitnow.fetch() returned ${paged.length} jobs (expected 102)`);
+
+  // fetch() carries the feed slug through to externalId on every returned row.
+  if (paged[0].externalId === 'role-0' && paged[101].externalId === 'role-101') {
+    pass('arbeitnow.fetch() carries the feed slug through as externalId');
+  } else {
+    fail(`arbeitnow.fetch() externalId = ${JSON.stringify({ first: paged[0]?.externalId, last: paged[101]?.externalId })}`);
+  }
 
   // max_pages cap: only the first page is requested even though it is full.
   const capRequested = [];

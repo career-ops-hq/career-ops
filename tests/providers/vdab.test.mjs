@@ -324,6 +324,23 @@ try {
   } else {
     fail(`vdab.fetch() partial-success threw=${partialThrew}, result=${JSON.stringify(partial)}`);
   }
+  // ...but the failed keyword was never read, so the result says the board is
+  // partial: scan.mjs logs it partial instead of reachable.
+  if (partial?.truncated?.reason === 'fetch-error' && partial.truncated.fetched === 0) {
+    pass('vdab.fetch() marks the board partial (fetch-error) when one keyword fails and another answers');
+  } else {
+    fail(`vdab.fetch() partial-success truncated = ${JSON.stringify(partial?.truncated)}`);
+  }
+  // Every keyword answering is a complete read: no mark.
+  const bothAnswer = await vdab.fetch(
+    { name: 'VDAB', vdab: { keywords: ['ok', 'also'] } },
+    mkCtx({ ok: [[job(21, 'Data Engineer')]], also: [[job(22, 'ML Engineer')]] }),
+  );
+  if (bothAnswer.length === 2 && bothAnswer.truncated === undefined) {
+    pass('vdab.fetch() leaves a board unmarked when every keyword answers');
+  } else {
+    fail(`vdab.fetch() all-answer result = ${bothAnswer.length} jobs, truncated=${JSON.stringify(bothAnswer.truncated)}`);
+  }
 
   // fetch() — every keyword fails → total outage, throws
   let totalOutageThrew = false;

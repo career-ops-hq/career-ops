@@ -1,0 +1,18 @@
+{
+  "id": "madrid-onsite-spanish",
+  "synthetic": true,
+  "profile": "ai-engineer",
+  "jd": "Ingeniero/a de Plataforma de IA (LLMOps) — Madrid (100% presencial)\nGrupo Asegurador Meridia · Madrid, España\n\nSobre nosotros\nMeridia es un grupo asegurador con más de 3.000 empleados en España y Portugal. Nuestro Centro de Excelencia de IA (40 personas) desarrolla los modelos de tarificación, detección de fraude y los nuevos asistentes basados en LLM para nuestros tramitadores.\n\nQué harás\n- Diseñar y operar la plataforma interna de LLMOps: pipelines de despliegue, registro de modelos, monitorización y evaluación continua de modelos de lenguaje.\n- Construir el sistema de evaluación (conjuntos de prueba, métricas, alertas de regresión) para los asistentes de tramitación de siniestros.\n- Colaborar con los equipos de Seguridad y Cumplimiento para garantizar el cumplimiento del Reglamento Europeo de IA.\n- Dar soporte en guardias rotativas.\n\nQué buscamos\n- 4+ años en ingeniería de ML o plataformas de datos.\n- Python avanzado, Kubernetes, experiencia con MLflow o Kubeflow.\n- Experiencia con monitorización de modelos en producción.\n- Castellano nativo o C2 imprescindible; inglés B2.\n\nCondiciones\n- Contrato indefinido. Trabajo 100% presencial en nuestras oficinas de Madrid (Paseo de la Castellana), 5 días a la semana.\n- Salario: 55.000–65.000 € brutos anuales + bonus del 10% por objetivos.\n- Es imprescindible contar con permiso de trabajo en la Unión Europea; no ofrecemos patrocinio de visado ni ayudas de reubicación.\n- Seguro médico, plan de pensiones, 23 días laborables de vacaciones.\n",
+  "label": {
+    "archetype": "AI Platform / LLMOps",
+    "score": 2.3,
+    "provenance": "author-prior-v2"
+  },
+  "expect": {
+    "score_max": 3,
+    "work_auth": [
+      "no_sponsorship"
+    ]
+  },
+  "edge_note": "Spanish-language JD, 100% on-site Madrid, EU work permit required, no sponsorship, 55-65k EUR. Pinned candidate is US-only, targets $180K+ remote."
+}

@@ -46,3 +46,21 @@ export function createJobsPersister({ write, isActive, delayMs = 1000, setTimer 
     flush: writePending,
   };
 }
+
+export function restoreStoredJobs(stored, now) {
+  if (!Array.isArray(stored)) return [];
+  return stored.map((job) => {
+    if (job?.status !== "running") return job;
+    const steps = Array.isArray(job.steps) ? job.steps : [];
+    return {
+      ...job,
+      status: "error",
+      steps: [...steps, { kind: "status", label: "Interrupted (page reloaded)", ts: now }],
+    };
+  });
+}
+
+export function saveJobsAfterOpen(persister, ready, jobs) {
+  if (!ready || !persister) return;
+  persister.save(jobs);
+}

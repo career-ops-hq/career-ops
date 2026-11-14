@@ -5,18 +5,34 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
-import { markTrackerReady, spawnGeneratePdf } from "@/lib/pdf-render.mjs";
-import { htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
+import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
+import { escapeHtml, htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
+import { withPdfExport } from "./put-order.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
 
 const EDITED_SUFFIX = "-edited";
 
+export function missingDataFolderMessage(): string | null {
+  let root: string;
+  try {
+    root = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return unsafe;
+  }
+  return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
+}
+
+export type PdfExportFailure = { ok: false; error: string };
+
 export type StudioLoad =
-  | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean }
+  | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean; pdfExport: PdfExportFailure | null }
   | { ok: false; reason: "no-report" | "no-tailored-cv" | "unreadable-layout" };
 
 type KeywordMatch = { extractKeywords: (report: string) => string[]; keywordCount: (keyword: string, text: string) => number };
@@ -38,18 +54,26 @@ function originalOf(htmlPath: string) {
 }
 
 /**
- * The tailored HTML for a report: the sibling of the PDF recorded in
- * data/pdf-index.tsv when there is one, else the newest output/ HTML for the
- * report's company. An edited copy is never a source, because edits are always
- * made against the original the tailor wrote.
+ * The tailored HTML for a report: the HTML path recorded in data/pdf-index.tsv
+ * when it sits inside output/, or the sibling of the recorded PDF. Only
+ * reports without an index row use a filename match. Studio edits the
+ * original the tailor wrote.
  */
-async function findTailoredHtml(n: string, slug: string): Promise<string | null> {
+async function findTailoredHtml(reportNum: string, slug: string): Promise<string | null> {
   const dir = path.join(careerOpsRoot(), "output");
-  const indexed = await pdfPathStatusForReport(n);
+  const indexed = await pdfPathStatusForReport(reportNum);
+  if ("html" in indexed && indexed.html) {
+    const candidate = originalOf(indexed.html);
+    const name = path.basename(candidate).toLowerCase();
+    if (name.endsWith(".html") && !name.endsWith(`${EDITED_SUFFIX}.html`) && isRegularContainedFile(candidate, dir)) return candidate;
+  }
   if (indexed.status === "found") {
     const sibling = originalOf(indexed.path.replace(/\.pdf$/i, ".html"));
     if (isRegularContainedFile(sibling, dir)) return sibling;
   }
+  // An indexed report must not borrow another application's matching HTML
+  // when its own files are missing or rejected. Keep guessing for legacy rows only.
+  if (indexed.status !== "not-found") return null;
   if (!slug) return null;
   let files: string[];
   try {
@@ -80,7 +104,9 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
   if (!/^\d+$/.test(n)) return { ok: false, reason: "no-report" };
   const id = reportIdentity(n);
   if (!id) return { ok: false, reason: "no-report" };
-  const file = await findTailoredHtml(n, id.slug);
+  // n is the tracker row; the manifest is keyed by report number, and the two
+  // differ once a row is deleted or reports are renumbered (#1733).
+  const file = await findTailoredHtml(id.reportNum, id.slug);
   if (!file) return { ok: false, reason: "no-tailored-cv" };
 
   const html = fs.readFileSync(file, "utf8");
@@ -127,13 +153,42 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const { edits, stale } = parseEdits(raw, sourceHash) ?? { edits: emptyEdits(sourceHash), stale: false };
-  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.basename(file), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
+  const pdfExport = stale ? null : readPdfExport(raw);
+  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null, pdfExport };
 }
 
-export function saveEdits(reportNum: string, edits: StudioEdits) {
+function readPdfExport(raw: unknown): PdfExportFailure | null {
+  const flag = raw && typeof raw === "object" ? (raw as { pdfExport?: { ok?: unknown; error?: unknown } }).pdfExport : null;
+  if (flag && flag.ok === false && typeof flag.error === "string" && flag.error.length > 0) return { ok: false, error: flag.error };
+  return null;
+}
+
+export function saveEdits(reportNum: string, edits: StudioEdits, pdfExport?: PdfExportFailure | null) {
   const file = editsPath(reportNum);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  atomicWrite(file, JSON.stringify(edits, null, 2) + "\n");
+  let stored: PdfExportFailure | null = null;
+  if (pdfExport === undefined) {
+    try {
+      stored = readPdfExport(JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+  atomicWrite(file, JSON.stringify(withPdfExport(edits, stored, pdfExport), null, 2) + "\n");
+}
+
+/** Write the PDF result onto the draft already on disk. A save that landed during the render keeps its edits. */
+export function recordPdfExport(reportNum: string, pdfExport: PdfExportFailure | null) {
+  const file = editsPath(reportNum);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return;
+  }
+  if (!raw || typeof raw !== "object") return;
+  atomicWrite(file, JSON.stringify(withPdfExport(raw, null, pdfExport), null, 2) + "\n");
 }
 
 export async function keywordsInText(n: string, text: string): Promise<string[] | null> {
@@ -148,12 +203,35 @@ type VerifyCvFacts = {
   auditClaims: (text: string, sourceText: string) => Parameters<typeof unsupportedClaims>[1];
 };
 
-/** The claims in a rewrite that cv.md and article-digest.md do not support, and the metrics its own bullet does not carry. */
-export async function unsupportedRewriteClaims(text: string, bulletText: string): Promise<string[]> {
+type CvVoice = {
+  voiceIssues: (generated: string, source: string) => { kind: string; value: string }[];
+  voiceDashWarning: (issues: { kind: string; value: string }[], label?: string) => string | null;
+  candidateOwnWords: (root: string) => string;
+};
+
+/** Claims and stock wording that discard a rewrite, plus a long-dash warning that does not. */
+export async function unsupportedRewriteClaims(text: string, bulletText: string): Promise<{ claims: string[]; warning: string | null }> {
   const root = careerOpsRoot();
   const { verifyFacts, auditClaims } = await coreModule<VerifyCvFacts>("verify-cv-facts");
-  const cv = verifyFacts(text, { sourcePaths: [path.join(root, "cv.md"), path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
-  return unsupportedClaims(cv, auditClaims(text, bulletText));
+  const voice = await coreModule<CvVoice>("cv-voice");
+  const cvPath = path.join(root, "cv.md");
+  // Checked as the list item it will render as: the PDF gate anchors each
+  // <li> to its source bullet (bullet drift, #1411), and a bare string is not
+  // a list item, so a rewrite that changed the verb would pass here and then
+  // block the render on save.
+  const cv = verifyFacts(`<ul><li>${escapeHtml(text)}</li></ul>`, { sourcePaths: [cvPath, path.join(root, "article-digest.md")], configPath: path.join(root, "config", "cv-facts.json") });
+  // Wording evidence is cv.md, same as the PDF gate. The tailored bullet is
+  // not the candidate's own words. The fact audit below stays on this bullet.
+  let cvText = "";
+  try {
+    cvText = fs.readFileSync(cvPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+  const issues = voice.voiceIssues(text, `${cvText}\n${voice.candidateOwnWords(root)}`);
+  const tells = issues.filter((issue) => issue.kind === "banned-phrase").map((issue) => issue.value);
+  const claims = [...new Set([...unsupportedClaims(cv, auditClaims(text, bulletText)), ...tells])];
+  return { claims, warning: voice.voiceDashWarning(issues) };
 }
 
 export type RenderOutcome = { ok: true; pdf: string; indexed: boolean; warnings: string[] } | { ok: false; error: string };
@@ -175,14 +253,18 @@ export async function renderEditedPdf(load: Extract<StudioLoad, { ok: true }>, e
   const previousHtml = fs.existsSync(editedHtml) ? fs.readFileSync(editedHtml, "utf8") : null;
   atomicWrite(editedHtml, html);
   const format = /size:\s*a4/i.test(html) ? "a4" : "letter";
-  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
-  if (!render.ok) {
+  const render = await spawnGeneratePdf({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), dataRoot: root, html: editedHtml, finalPdf: editedPdf, format, reportNum: load.reportNum });
+  // A render over a warn-only page budget exits 0 but leaves nothing at
+  // editedPdf (the PDF went to a sibling .overflow.pdf draft, #6377), so the
+  // exit code alone would keep an HTML and mark the tracker ready for a PDF
+  // that was never written. Delivery is the file landing, same as the pdf run.
+  if (!render.delivered) {
     if (previousHtml === null) fs.rmSync(editedHtml, { force: true });
     else atomicWrite(editedHtml, previousHtml);
-    return { ok: false, error: render.stderr || "PDF rendering failed." };
+    return { ok: false, error: undeliveredRenderError(render, editedPdf) };
   }
   const warnings = render.stderr.split("\n").map((l: string) => l.trim()).filter(Boolean);
-  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), reportNum: load.reportNum });
+  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: resolveCodeRoot(process.cwd(), process.env), dataRoot: root, reportNum: load.reportNum });
   if (!mark.ok) warnings.push(`PDF rendered, but the tracker's PDF column was not updated${mark.data?.error ? `: ${mark.data.error}` : "."}`);
   const index = await pdfPathStatusForReport(load.reportNum);
   return { ok: true, pdf: path.basename(editedPdf), indexed: index.status === "found" && index.path === path.resolve(editedPdf), warnings };
