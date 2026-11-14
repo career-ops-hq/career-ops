@@ -1951,15 +1951,10 @@ export function copyEmployerRegistry(destDir) {
 
 /** Every row of the committed employer registry, parsed. */
 function employerRegistryRows() {
-  const boards = join(ROOT, 'employers', 'boards');
   const rows = [];
-  if (!existsSync(boards)) return rows;
-  for (const ats of readdirSync(boards)) {
-    for (const file of readdirSync(join(boards, ats))) {
-      if (!file.endsWith('.ndjson')) continue;
-      for (const line of readFileSync(join(boards, ats, file), 'utf8').split('\n')) {
-        if (line.trim()) rows.push(JSON.parse(line));
-      }
+  for (const file of trackedFiles(ROOT, (rel) => /^employers\/boards\/[^/]+\/[^/]+\.ndjson$/.test(rel))) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (line.trim()) rows.push(JSON.parse(line));
     }
   }
   return rows;
@@ -1967,8 +1962,7 @@ function employerRegistryRows() {
 
 /** The ids of the committed contribution manifests. */
 function employerContributionIds() {
-  const dir = join(ROOT, 'employers', 'contributions');
-  return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)) : [];
+  return trackedFiles(ROOT, (rel) => /^employers\/contributions\/[^/]+\.json$/.test(rel)).map((file) => basename(file, '.json'));
 }
 
 /**
