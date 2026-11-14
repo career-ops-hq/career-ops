@@ -118,8 +118,8 @@ If yes:
    commands, and the `--commit-on-branch` opt-in (#3846).
 
 If no:
-1. Run `node update-system.mjs dismiss --version {remote}`
-2. Tell the user they will be asked again when a newer release is out, and can run `/career-ops update` anytime to check again.
+- On the `main` path (Step 1), do not run `dismiss`: `{remote}` there can be a `VERSION` on `main` that no release carries yet, and dismissing it would hide that release when it ships. Tell the user the `main` update was skipped and the release check is unchanged.
+- Otherwise, run `node update-system.mjs dismiss --version {remote}`, then tell the user they will be asked again when a newer release is out, and can run `/career-ops update` anytime to check again.
 
 ## Step 5 — Rollback (if requested)
 
