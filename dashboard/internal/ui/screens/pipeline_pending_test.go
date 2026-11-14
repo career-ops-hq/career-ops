@@ -141,10 +141,10 @@ func TestInboxTabStaysVisibleOnANarrowTerminal(t *testing.T) {
 	if !strings.Contains(tabs, "INBOX (3)") || !strings.Contains(tabs, "›") {
 		t.Fatalf("narrow tabs = %q, want the active INBOX tab and a › marker", tabs)
 	}
-	m, _ = press(m, "right", "right", "right")
+	m, _ = press(m, "right", "right", "right", "right")
 	tabs = ansi.Strip(m.renderTabs())
 	if !strings.Contains(tabs, "INTERVIEW (0)") || !strings.Contains(tabs, "‹") {
-		t.Fatalf("narrow tabs two past ALL = %q, want the active INTERVIEW tab and a ‹ marker", tabs)
+		t.Fatalf("narrow tabs three past ALL = %q, want the active INTERVIEW tab and a ‹ marker", tabs)
 	}
 }
 
