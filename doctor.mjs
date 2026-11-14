@@ -62,7 +62,7 @@ try {
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
 let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
-let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
+let resolveExtractorMode, auditUserTemplates, auditCvVariants, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -71,6 +71,7 @@ try {
     { validateProfile, EXAMPLE_PATH },
     { resolveExtractorMode },
     { auditUserTemplates },
+    { auditCvVariants },
     { browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
@@ -79,6 +80,7 @@ try {
     import('./validate-profile.mjs'),
     import('./browser-extract.mjs'),
     import('./cv-templates.mjs'),
+    import('./lib/cv-variants.mjs'),
     import('./lib/browser-launch.mjs'),
   ]);
 } catch (err) {
@@ -1587,6 +1589,24 @@ function checkUserTemplates(root) {
   };
 }
 
+// CV content variants under data/cv-variants/ (#6792). Advisory: one that no
+// longer parses, or has drifted from cv.md, is named here instead of surfacing
+// at render time.
+function checkCvVariants(root) {
+  let findings;
+  try {
+    findings = auditCvVariants({ root });
+  } catch (err) {
+    return { warn: true, label: `data/cv-variants: could not be audited (${err.message})` };
+  }
+  if (findings.length === 0) return null;
+  return {
+    warn: true,
+    label: `data/cv-variants: ${findings.length} variant${findings.length === 1 ? '' : 's'} need${findings.length === 1 ? 's' : ''} attention`,
+    fix: findings.flatMap((f) => f.problems.map((p) => `${f.name}.md: ${p.detail}`)),
+  };
+}
+
 function checkProfileShape(root) {
   const profilePath = profilePathFor(root);
   if (!existsSync(profilePath)) return null;   // the prereq check owns "absent"
@@ -1653,6 +1673,7 @@ async function main() {
     checkTitleFilterConflicts(projectRoot),
     checkCvShape(projectRoot),
     checkUserTemplates(projectRoot),
+    checkCvVariants(projectRoot),
     ...(userLayerWritable
       ? [checkAutoDir('data'), checkPipelineFile(), checkAutoDir('output'), checkAutoDir('reports')]
       : []),
@@ -1946,6 +1967,7 @@ function onboardingState(root) {
   const skillCheck = checkSkillEntrypoints(codeRoot);
   const cvShape = checkCvShape(root);
   const userTemplates = checkUserTemplates(root);
+  const cvVariants = checkCvVariants(root);
   const envFileProfile = checkEnvFileProfile(root);
   const warnings = [
     ...(cliWarning ? [cliWarning] : []),
@@ -1955,6 +1977,7 @@ function onboardingState(root) {
     ...(skillCheck.warn ? [`${skillCheck.label}\n→ ${[].concat(skillCheck.fix || []).join('\n  ')}`] : []),
     ...(cvShape?.warn ? [`${cvShape.label}\n→ ${[].concat(cvShape.fix || []).join('\n  ')}`] : []),
     ...(userTemplates?.warn ? [`${userTemplates.label}\n→ ${[].concat(userTemplates.fix || []).join('\n  ')}`] : []),
+    ...(cvVariants?.warn ? [`${cvVariants.label}\n→ ${[].concat(cvVariants.fix || []).join('\n  ')}`] : []),
     ...(envFileProfile ? [`${envFileProfile.label}\n→ ${envFileProfile.fix.join('\n  ')}`] : []),
     ...unpersonalized.map((u) => `${u.path} ${u.reason} — ${u.impact}\n→ Personalize it from cv.md before running evaluations.`),
   ];

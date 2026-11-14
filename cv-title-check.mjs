@@ -61,6 +61,9 @@ import { tmpdir } from 'os';
 import { spawnSync } from 'child_process';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
+// Cyclic with lib/cv-variants.mjs (which imports this module); safe, both use the other's exports only when called.
+import { resolveVariant } from './lib/cv-variants.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import {
   boldLineText, findExperienceSections, headingText, toPlainText, EXPERIENCE_HEADING_NAMES,
@@ -709,12 +712,14 @@ function runSelfTest() {
 const args = process.argv.slice(2);
 const USAGE = `Usage:
   node cv-title-check.mjs <tailored-cv-payload.json> [--summary]
+  node cv-title-check.mjs --variant <name> [--summary]
   node cv-title-check.mjs --self-test
 
 Pairs each tailored-CV {company, dates} entry against cv.md's canonical entry
 and flags an exact-string job-title mismatch (case and whitespace normalized,
 never fuzzy). Warn-only: it edits neither file.
 
+  --variant     check data/cv-variants/<name>.md instead of a payload (#6792)
   --summary     human-readable table instead of JSON
   --self-test   run the built-in cases against no payload
   --help, -h    show this message
@@ -722,7 +727,9 @@ never fuzzy). Warn-only: it edits neither file.
 
 const summaryMode = args.includes('--summary');
 const selfTestMode = args.includes('--self-test');
-const payloadPathArg = args.find(a => !a.startsWith('--'));
+const variantName = flagValue(args, '--variant');
+const variantIdx = args.indexOf('--variant');
+const payloadPathArg = args.find((a, i) => !a.startsWith('--') && !(variantIdx >= 0 && i === variantIdx + 1));
 
 if (isMainModule(import.meta.url)) {
   // Checked before the operand, which --self-test also legitimately lacks:
@@ -733,8 +740,9 @@ if (isMainModule(import.meta.url)) {
   } else if (selfTestMode) {
     runSelfTest();
   } else {
-    if (!payloadPathArg || !existsSync(payloadPathArg)) {
+    if (!variantName && (!payloadPathArg || !existsSync(payloadPathArg))) {
       console.error('Usage: node cv-title-check.mjs <tailored-cv-payload.json> [--summary]');
+      console.error('       node cv-title-check.mjs --variant <name> [--summary]');
       console.error('       node cv-title-check.mjs --self-test');
       process.exit(1);
     }
@@ -744,17 +752,23 @@ if (isMainModule(import.meta.url)) {
     }
 
     let payload;
-    try {
-      payload = JSON.parse(readFileSync(payloadPathArg, 'utf-8'));
-    } catch (err) {
-      console.error(`Error: could not parse ${payloadPathArg} as JSON: ${err.message}`);
-      process.exit(1);
+    if (!variantName) {
+      try {
+        payload = JSON.parse(readFileSync(payloadPathArg, 'utf-8'));
+      } catch (err) {
+        console.error(`Error: could not parse ${payloadPathArg} as JSON: ${err.message}`);
+        process.exit(1);
+      }
     }
 
     const cvEntries = parseCvExperience(readFileSync(CV_PATH, 'utf-8'));
     let tailoredEntries;
     try {
-      tailoredEntries = parseTailoredExperience(payload);
+      if (variantName) {
+        tailoredEntries = parseCvExperience(readFileSync(resolveVariant(variantName), 'utf-8'));
+      } else {
+        tailoredEntries = parseTailoredExperience(payload);
+      }
     } catch (err) {
       console.error(`Error: ${err.message}`);
       process.exit(1);
