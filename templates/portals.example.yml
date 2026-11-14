@@ -2906,6 +2906,9 @@ tracked_companies:
   - name: Shiji Group
     careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
     notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    # The board page carries every opening inline (about 2 MB) and takes 6-48s to
+    # arrive, so the 10s default aborts it on most runs. See timeout_ms above.
+    timeout_ms: 60000
     enabled: true
 
   - name: Remote
