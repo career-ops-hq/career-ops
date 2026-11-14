@@ -21,10 +21,11 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 // So this provider fetches the ordinary search URL over plain HTTP and reads that blob.
 // Zero tokens, no browser required.
 //
-// Two complementary discovery modes, both deduped by URL. Neither has a default:
-// a built-in list would be one user's search profile applied to everyone's scan
-// (the occ.mjs precedent), so an entry needs at least one non-empty `queries` or
-// `teams` value and throws without one. Example portals.yml entry:
+// Three discovery modes. `queries` and `teams` are deduped by URL and have no
+// default: a built-in list would be one user's search profile applied to
+// everyone's scan (the occ.mjs precedent), so an entry needs `full_board: true`
+// or at least one non-empty `queries` or `teams` value, and throws without one.
+// Example portals.yml entry:
 //
 //   - name: Apple
 //     careers_url: https://jobs.apple.com/en-us/search
@@ -41,6 +42,10 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 //            small. This is how Apple's non-obvious orgs are reachable at all: Apple has
 //            no "Corporate Strategy" title — that work lives in Operations under
 //            "Business Process Re-Engineering (BPR)".
+//   full_board: true walks every posting in the location once, unsearched, and
+//            ignores queries/teams. Complete by construction: ~230 requests for the
+//            US board (4,606 postings, ~2 minutes paced), with title_filter doing
+//            the selection. Use it when a search keeps hitting max_pages.
 //
 // scan.mjs's title_filter still does the actual role selection; this provider only
 // supplies candidates.
@@ -63,16 +68,22 @@ const DEFAULT_LOCATION = 'united-states-USA';
 // providers/ADDING_A_PROVIDER.md, reference implementation workday.mjs.
 const DEFAULT_MAX_PAGES = 2;
 const MAX_PAGES_CAP = 50; // 50 pages x 20 rows x (queries + teams) is already generous
+// `apple.full_board` (below) is ONE walk of the whole location, so it gets its
+// own ceiling, and that ceiling is also its default: 300 x 20 rows = 6,000
+// postings, room for Apple's whole US board (4,606 on 2026-11-06). The walk
+// still stops at Apple's own total, so a smaller board costs fewer requests.
+const FULL_BOARD_MAX_PAGES_CAP = 300;
 
 // Pages after the first are paced, and every page fetch is retried through the
 // shared helper (429/5xx/transport only, backoff + jitter, capped Retry-After).
 const INTER_PAGE_DELAY_MS = 200;
 
 /** @param {import('./_types.js').PortalEntry} entry */
-function resolveMaxPages(entry) {
+function resolveMaxPages(entry, { fullBoard = false } = {}) {
+  const cap = fullBoard ? FULL_BOARD_MAX_PAGES_CAP : MAX_PAGES_CAP;
   const v = /** @type {any} */ (entry)?.max_pages;
-  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
-  return DEFAULT_MAX_PAGES;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, cap);
+  return fullBoard ? FULL_BOARD_MAX_PAGES_CAP : DEFAULT_MAX_PAGES;
 }
 
 // Matches the escaped JSON string argument, honouring backslash escapes so an
@@ -232,11 +243,19 @@ export default {
     const list = (/** @type {unknown} */ v) => (Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : []);
     const queries = list(cfg.queries);
     const teams = list(cfg.teams);
-    if (!queries.length && !teams.length) {
-      throw new Error(`apple: entry "${entry.name || 'Apple'}" needs a non-empty apple.queries or apple.teams list `
+    // `full_board: true` walks every posting in the location once, unsearched.
+    // Apple's text search also matches job DESCRIPTIONS, so "business
+    // operations" alone returns 2,375 of ~4,600 US postings, and six such
+    // queries cost more requests than the whole board while still stopping at
+    // a page cap. One unsearched walk is complete by definition and leaves the
+    // precise cut to scan.mjs's title_filter (AIP-160: filter on fields, not
+    // free text). Measured 2026-11-06.
+    const fullBoard = cfg.full_board === true;
+    if (!fullBoard && !queries.length && !teams.length) {
+      throw new Error(`apple: entry "${entry.name || 'Apple'}" needs apple.full_board: true or a non-empty apple.queries or apple.teams list `
         + '(e.g. apple: { queries: ["business operations"] }) — there is no default search');
     }
-    const entryMaxPages = resolveMaxPages(entry);
+    const entryMaxPages = resolveMaxPages(entry, { fullBoard });
     // `ctx.maxPages` means verify-portals is probing, not scanning: walk one page
     // and one axis, so a liveness check costs one request instead of
     // queries x teams (providers/ADDING_A_PROVIDER.md).
@@ -244,10 +263,12 @@ export default {
     const probing = ctxMaxPages > 0;
     const maxPages = probing ? Math.min(entryMaxPages, ctxMaxPages) : entryMaxPages;
     /** @type {Record<string,string>[]} */
-    const axes = [
-      ...queries.map((q) => ({ search: q, location, sort: 'relevance' })),
-      ...teams.map((t) => ({ location, team: t })),
-    ];
+    const axes = fullBoard
+      ? [{ location }]
+      : [
+        ...queries.map((q) => ({ search: q, location, sort: 'relevance' })),
+        ...teams.map((t) => ({ location, team: t })),
+      ];
     if (probing) axes.length = 1;
 
     /** @type {Map<string, Job>} */
