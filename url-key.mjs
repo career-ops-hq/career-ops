@@ -630,6 +630,9 @@ export function canonicalJobKey(raw) {
   if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
     out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, '$1');
   }
+  if (out.hostname === 'apply.workable.com') {
+    out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, '/j/$1');
+  }
   return out.toString();
 }
 
