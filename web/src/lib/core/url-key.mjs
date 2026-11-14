@@ -201,10 +201,12 @@ export function postingUrlRelation(rawA, rawB) {
   return a.language && b.language ? "distinct" : "one-sided-language";
 }
 
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
 /**
- * Two normalizeUrl() keys that canonicalJobKey() reads as one posting; the
- * query must match unless the key is an extracted id, and letter case alone
- * never counts.
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an
+ * extracted id, whatever the rest of the query says, or one path on an ATS
+ * host whose spellings it folds, with the same query.
  *
  * @param {string} a
  * @param {string} b
@@ -214,7 +216,7 @@ function sameJobSpelling(a, b) {
   const job = canonicalJobKey(a);
   if (!job || job !== canonicalJobKey(b)) return false;
   if (!job.includes("://")) return true;
-  return new URL(a).search === new URL(b).search && a.toLowerCase() !== b.toLowerCase();
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [

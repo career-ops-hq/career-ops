@@ -186,6 +186,8 @@ test("web postingUrlRelation matches core on every relation", () => {
     ["https://boards.greenhouse.io/acme/jobs/4001", "https://job-boards.greenhouse.io/acme/jobs/4002", "distinct"],
     ["https://careers.acme.example/job?ref=1", "https://careers.acme.example/job?ref=2", "distinct"],
     ["https://careers.acme.example/openings/AbC", "https://careers.acme.example/openings/abc", "distinct"],
+    ["https://careers.acme.example/openings/123//", "https://careers.acme.example/openings/123", "distinct"],
+    ["https://boards.greenhouse.io/acme/jobs/4001?ref=1", "https://boards.greenhouse.io/acme/jobs/4001?ref=2", "same"],
   ];
   for (const [a, b, expected] of CASES) {
     assert.equal(webRelation(a, b), expected, `web: ${a} vs ${b}`);

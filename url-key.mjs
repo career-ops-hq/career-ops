@@ -508,14 +508,17 @@ export function relatePostingLanguageKeys(a, b) {
   return a.language && b.language ? 'distinct' : 'one-sided-language';
 }
 
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
 /**
- * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: the same
- * Greenhouse or SmartRecruiters id on two hosts, or one path once its ATS
- * spellings fold (a Lever `/apply` form, an Ashby `/application` tab). The
- * query must match unless the key is an extracted id, so the wider tracking
- * list canonicalJobKey() drops (`ref`, `source`) is never evidence of one
- * posting here. Nor is letter case alone: canonicalJobKey() lowercases every
- * path, and a generic site's path can be case-sensitive.
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an id
+ * it extracts (the same Greenhouse or SmartRecruiters id on two hosts), which
+ * names the posting whatever the rest of the query says, or, with the same
+ * query, one path on an ATS host whose spellings it folds (a Lever `/apply`
+ * form, an Ashby `/application` tab, a Workable account page). Its other folds
+ * are no evidence here: it lowercases every path, strips every trailing slash
+ * and drops `ref` and `source`, and a generic site may tell pages apart by any
+ * of those.
  *
  * @param {string} a
  * @param {string} b
@@ -525,7 +528,7 @@ function sameJobSpelling(a, b) {
   const job = canonicalJobKey(a);
   if (!job || job !== canonicalJobKey(b)) return false;
   if (!job.includes('://')) return true;
-  return new URL(a).search === new URL(b).search && a.toLowerCase() !== b.toLowerCase();
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [
