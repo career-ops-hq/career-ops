@@ -463,7 +463,8 @@ export function languageSubtag(value) {
  * What two posting URLs say about whether they name the same posting.
  *
  * - `'no-key'`: either side has no key — no evidence at all.
- * - `'same'`: the same page in the same language, or both without one.
+ * - `'same'`: the same page in the same language, or both without one. Two
+ *   spellings of one posting count as one page (sameJobSpelling()).
  * - `'distinct'`: two different pages, or the same page in two known,
  *   different languages — two language versions of one posting are kept as
  *   two tracker rows. Two known, different SCRIPTS of one language count here
@@ -496,7 +497,7 @@ export function postingUrlRelation(rawA, rawB) {
  */
 export function relatePostingLanguageKeys(a, b) {
   if (!a.key || !b.key) return 'no-key';
-  if (a.key !== b.key) return 'distinct';
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return 'distinct';
   if (a.language === b.language) {
     // One language, two scripts: two versions, not one page. Only when BOTH
     // sides actually state a script — `zh` vs `zh-Hant` stays 'same', because
@@ -505,6 +506,24 @@ export function relatePostingLanguageKeys(a, b) {
     return 'same';
   }
   return a.language && b.language ? 'distinct' : 'one-sided-language';
+}
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: the same
+ * Greenhouse or SmartRecruiters id on two hosts, or one path once its ATS
+ * spellings fold (a Lever `/apply` form, an Ashby `/application` tab). The
+ * query must match unless the key is an extracted id, so the wider tracking
+ * list canonicalJobKey() drops (`ref`, `source`) is never evidence of one
+ * posting here.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  return !job.includes('://') || new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [

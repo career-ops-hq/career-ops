@@ -193,12 +193,26 @@ export function postingUrlRelation(rawA, rawB) {
   const a = postingLanguageKey(rawA);
   const b = postingLanguageKey(rawB);
   if (!a.key || !b.key) return "no-key";
-  if (a.key !== b.key) return "distinct";
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return "distinct";
   if (a.language === b.language) {
     if (a.language && a.script && b.script && a.script !== b.script) return "distinct";
     return "same";
   }
   return a.language && b.language ? "distinct" : "one-sided-language";
+}
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting; the
+ * query must match unless the key is an extracted id.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  return !job.includes("://") || new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [

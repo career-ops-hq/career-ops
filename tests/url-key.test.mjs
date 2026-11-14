@@ -303,6 +303,20 @@ ok('different pages are distinct; no key on either side is no evidence', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'N/A'), 'no-key');
   assert.equal(postingUrlRelation('', 'https://acme.recruitee.com/o/a'), 'no-key');
 });
+ok('two spellings canonicalJobKey reads as one posting are the same page', () => {
+  const GH = 'https://boards.greenhouse.io/acme/jobs/4001';
+  assert.equal(postingUrlRelation(GH, 'https://job-boards.greenhouse.io/acme/jobs/4001'), 'same');
+  assert.equal(postingUrlRelation(GH, 'https://careers.acme.example/jobs?gh_jid=4001'), 'same');
+  assert.equal(postingUrlRelation(GH, 'https://boards.greenhouse.io/embed/job_app?for=acme&token=4001'), 'same');
+  assert.equal(postingUrlRelation('https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
+    'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply'), 'same');
+  assert.equal(postingUrlRelation(GH, 'https://job-boards.greenhouse.io/acme/jobs/4002'), 'distinct');
+  assert.equal(postingUrlRelation('https://job-boards.greenhouse.io/acme/jobs/4001?lang=de', `${GH}?lang=en`), 'distinct');
+  assert.equal(postingUrlRelation('https://job-boards.greenhouse.io/acme/jobs/4001?lang=de', GH), 'one-sided-language');
+  // canonicalJobKey drops `ref` and `source`; here they still tell two pages apart.
+  assert.equal(postingUrlRelation('https://careers.acme.example/job?ref=1', 'https://careers.acme.example/job?ref=2'), 'distinct');
+  assert.equal(postingUrlRelation('https://careers.acme.example/job?source=a1', 'https://careers.acme.example/job'), 'distinct');
+});
 ok('the same page with a language on one side only is its own relation, in either order', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'https://acme.recruitee.com/o/a?lang=de'), 'one-sided-language');
   assert.equal(postingUrlRelation('https://acme.jobs.personio.de/job/1?language=en', 'https://acme.jobs.personio.de/job/1'), 'one-sided-language');
