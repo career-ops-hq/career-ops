@@ -53,7 +53,8 @@
 // bug — the same request succeeds from a residential IP. A browser-like
 // User-Agent is sent to reduce (not eliminate) the friction.
 
-import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep, abortableSleep, parseRetryAfterMs, isRetryableError } from './_http.mjs';
+import { currentAbortSignal } from './_connection-scope.mjs';
 import { coerceId } from './_ids.mjs';
 
 const EIGHTFOLD_HOST_RE = /^[a-z0-9-]+\.eightfold\.ai$/i;
@@ -81,6 +82,29 @@ const RETRY_POLICY = { retries: 3, baseDelayMs: 500, maxDelayMs: 8_000 };
 // 0.5s-to-8s backoff stalls partway.
 const PCSX_INTER_PAGE_DELAY_MS = 400;
 const PCSX_RETRY_POLICY = { retries: 5, baseDelayMs: 2_000, maxDelayMs: 32_000 };
+
+// What a 429 (or other transient failure) that outlasts the per-request
+// retries does. Stopping there and keeping what was read brought Netflix (v2:
+// 250ms pacing, 0.5s-8s backoff) back at 100 of 394 postings on every run. The
+// walk adapts instead of quitting, the way TCP does (RFC 5681 multiplicative
+// decrease) and the way the cited retry guidance asks:
+//   - honor Retry-After as the minimum wait (RFC 6585 §4, RFC 9110 §10.2.3),
+//     clamped locally;
+//   - otherwise back off exponentially with equal jitter, capped (AWS
+//     Architecture Blog, "Exponential Backoff and Jitter");
+//   - retry at one layer: the budget below counts the time the per-request
+//     retries already spent, so the two layers never multiply (AWS Builders'
+//     Library, "Timeouts, retries, and backoff with jitter");
+//   - halve the request rate for the rest of the walk (double the page gap);
+//   - all inside a per-board patience budget, the analogue of the Google Cloud
+//     Node client's overall retry deadline (600s), after which the board is
+//     reported partial (AIP-217) rather than returned as if whole.
+const RATE_LIMIT_BUDGET_MS = 300_000;
+const RATE_LIMIT_MAX_WAIT_MS = 60_000;
+const RATE_LIMIT_MAX_PAGE_GAP_MS = 8_000;
+
+/** Half the delay fixed, half random ("equal jitter"), so it never collapses to 0. */
+const equalJitter = (/** @type {number} */ ms) => ms / 2 + Math.random() * (ms / 2);
 
 /**
  * The entry's opt-in branded API host (`eightfold_host`), lowercased, or null
@@ -418,10 +442,20 @@ export default {
     // endpoints' orderings together (duplicated or skipped postings).
     let api = 'v2';
     let rateLimited = false;
+    // Adaptive pacing state: the page gap grows on every exhausted 429 and
+    // never shrinks back within this walk.
+    let pageGapMs = 0;
+    let rateLimitSpentMs = 0;
+    let rateLimitHits = 0;
+    let stopStatus = 0;
+    let retryingPage = false;
 
     for (let page = 0; page < maxPages; page++) {
       const start = page * PAGE_SIZE;
-      if (page > 0) await sleep(api === 'pcsx' ? PCSX_INTER_PAGE_DELAY_MS : INTER_PAGE_DELAY_MS, ctx);
+      const baseGap = api === 'pcsx' ? PCSX_INTER_PAGE_DELAY_MS : INTER_PAGE_DELAY_MS;
+      // A retried page already waited out its backoff below; no second gap.
+      if (page > 0 && !retryingPage) await sleep(Math.max(baseGap, pageGapMs), ctx);
+      retryingPage = false;
 
       /** One request on whichever API this tenant is on. */
       const request = async (/** @type {string} */ which) => {
@@ -442,6 +476,7 @@ export default {
       };
 
       let json;
+      const requestStartedAt = Date.now();
       try {
         json = await request(api);
       } catch (err) {
@@ -477,12 +512,35 @@ export default {
           }
           api = 'pcsx';
           json = { positions: page0.positions, ...(page0.count === undefined ? {} : { count: page0.count }) };
-        } else if (status === 429 && all.length > 0) {
-          // Large PCSX tenants rate-limit a sustained walk (measured: Microsoft
-          // 429s after ~20 pages at 1 req/s even with backoff). Keep the pages
-          // already collected and say the board is partial — never silently.
-          rateLimited = true;
-          break;
+        } else if ((status === 429 || isRetryableError(err)) && all.length > 0 && !ctx?.maxPages) {
+          // Any retryable failure after pages were read (429, 5xx, a dropped
+          // connection) slows the walk; it never discards the pages already read.
+          // Large tenants rate-limit a sustained walk (Microsoft 429s after ~20
+          // pages at 1 req/s; Netflix after ~10 at 4 req/s). Slow down and ask
+          // for the SAME page again, until the patience budget is spent; only
+          // then keep what was read and report the board partial.
+          rateLimitHits++;
+          rateLimitSpentMs += Date.now() - requestStartedAt;
+          const hinted = parseRetryAfterMs(/** @type {any} */ (err)?.retryAfter);
+          // Retry-After is the server's minimum wait, not a replacement for
+          // backoff: take the longer of the two, so `Retry-After: 0` cannot
+          // turn a server that keeps refusing into a tight retry loop.
+          const waitMs = Math.min(
+            RATE_LIMIT_MAX_WAIT_MS,
+            Math.max(hinted ?? 0, equalJitter(2_000 * 2 ** Math.min(rateLimitHits, 5))),
+          );
+          // A board whose watchdog already fired (#5570) stops waiting at once.
+          if (rateLimitSpentMs + waitMs > RATE_LIMIT_BUDGET_MS || currentAbortSignal()?.aborted) {
+            rateLimited = true;
+            stopStatus = typeof status === 'number' ? status : 0;
+            break;
+          }
+          pageGapMs = Math.min(RATE_LIMIT_MAX_PAGE_GAP_MS, Math.max(baseGap, pageGapMs) * 2);
+          rateLimitSpentMs += waitMs;
+          await abortableSleep(waitMs, ctx, currentAbortSignal());
+          retryingPage = true;
+          page--; // retry this page at the slower pace
+          continue;
         } else {
           throw err;
         }
@@ -515,11 +573,13 @@ export default {
     }
 
     if (rateLimited) {
-      console.error(`⚠️  eightfold: ${entry.name} stopped early on HTTP 429 (${all.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial, not empty`);
+      const cause = stopStatus ? `HTTP ${stopStatus}` : 'a transient network error';
+      console.error(`⚠️  eightfold: ${entry.name} stopped early on ${cause} after ${Math.round(rateLimitSpentMs / 1000)}s of backoff (${all.length}${total === null ? '' : ` of ${total}`} jobs) — the board is partial, not empty`);
       // Tagged on the array, as workday.mjs (workdayTruncated) and
       // adp-workforcenow.mjs (adpTruncated) do, so a caller can tell this
       // board from a complete one without reading stderr.
       /** @type {any} */ (all).eightfoldTruncated = true;
+      /** @type {any} */ (all).truncated = { reason: stopStatus === 429 ? 'rate-limited' : 'transient-error', fetched: all.length, ...(total === null ? {} : { total }) };
     } else if (!probeLimited && total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
       // Same tag as the 429 branch above: the page cap cuts a board short just
