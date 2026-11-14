@@ -6,6 +6,13 @@
 //
 // Available divisions: it, engineering, marketing, sales, hr, logistics, finances, other
 // API docs: https://solid.jobs/public-api/offers/{division}?campaign={campaign}
+//
+// Optional entry setting, off by default:
+//   workplace: [remote]   keep only offers matching these work modes
+//                         (remote, hybrid, office). The API gives two booleans
+//                         per offer, isRemote and isHybrid; an offer with both
+//                         set matches remote and hybrid, one with neither is
+//                         office.
 
 const ALLOWED_HOSTS = new Set(['solid.jobs']);
 
@@ -30,6 +37,55 @@ function assertUrl(url) {
   if (!parsed.pathname.startsWith('/public-api/offers/'))
     throw new Error(`solidjobs: URL path must start with /public-api/offers/: ${url}`);
   return url;
+}
+
+/**
+ * Read the optional workplace filter from a portals.yml entry.
+ * @param {any} entry
+ * @returns {Set<string>|null} null keeps everything.
+ */
+export function workplaceFilter(entry) {
+  const raw = entry?.workplace;
+  const list = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .map(v => String(v).trim().toLowerCase())
+    .filter(Boolean);
+  return list.length ? new Set(list) : null;
+}
+
+/**
+ * Whether an offer matches one of the wanted work modes.
+ * @param {any} offer
+ * @param {Set<string>} wanted
+ */
+function matchesWorkplace(offer, wanted) {
+  const remote = offer.isRemote === true;
+  const hybrid = offer.isHybrid === true;
+  return (remote && wanted.has('remote'))
+    || (hybrid && wanted.has('hybrid'))
+    || (!remote && !hybrid && wanted.has('office'));
+}
+
+/**
+ * Normalize the API job list, optionally dropping offers by work mode.
+ * @param {any[]} jobs
+ * @param {{name: string}} entry
+ * @param {Set<string>|null} [workplace]
+ * @param {{dropped: Record<string, number>}} [stats]
+ */
+export function parseSolidJobs(jobs, entry, workplace = null, stats) {
+  return jobs
+    .filter(j => j && typeof j === 'object' && typeof j.url === 'string' && j.url.trim() !== '')
+    .filter(j => {
+      if (!workplace || matchesWorkplace(j, workplace)) return true;
+      if (stats) stats.dropped.workplace = (stats.dropped.workplace || 0) + 1;
+      return false;
+    })
+    .map(j => ({
+      title: j.title || '',
+      url: /** @type {string} */ (j.url || '').trim(),
+      company: j.company || entry.name,
+      location: Array.isArray(j.locations) ? j.locations.join(', ') : (typeof j.locations === 'string' ? j.locations : ''),
+    }));
 }
 
 /** @type {Provider} */
@@ -67,16 +123,11 @@ export default {
       throw new Error(`solidjobs: unexpected API response — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
     }
 
-    /** @type {Array<{ title?: string, url?: string, company?: string, locations?: string | string[] }>} */
-    const jobs = json.jobs;
+    const stats = { dropped: {} };
+    const jobs = parseSolidJobs(json.jobs, entry, workplaceFilter(entry), stats);
 
-    return jobs
-      .filter(j => j && typeof j === 'object' && typeof j.url === 'string' && j.url.trim() !== '')
-      .map(j => ({
-        title: j.title || '',
-        url: /** @type {string} */ (j.url || '').trim(),
-        company: j.company || entry.name,
-        location: Array.isArray(j.locations) ? j.locations.join(', ') : (typeof j.locations === 'string' ? j.locations : ''),
-      }));
+    // Read by scan.mjs for the per-source summary; not part of the job list.
+    Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
+    return jobs;
   },
 };
