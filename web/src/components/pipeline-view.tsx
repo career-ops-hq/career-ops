@@ -1141,7 +1141,7 @@ const TrackerRow = memo(function TrackerRow({
           {r.closesAt ? (
             <span className="whitespace-nowrap text-faint tabular-nums">Closes {r.closesAt}</span>
           ) : null}
-          {r.source && <Badge tone="info" title={r.sourceInferred ? "Job link host; original discovery source was not recorded" : `Source: ${r.source}`}>{r.source}</Badge>}
+          {r.source && <Badge tone="info" className="max-w-32 shrink-0 truncate whitespace-nowrap" title={r.sourceInferred ? "Job link host; original discovery source was not recorded" : `Source: ${r.source}`}>{r.source}</Badge>}
           {posting && (
             <a
               href={posting}
