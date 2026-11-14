@@ -113,6 +113,16 @@ const SAME = [
     ],
     'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
   ],
+  [
+    'workable share link, the account page it redirects to, and the apply form',
+    [
+      'https://apply.workable.com/j/81B46579FE',
+      'https://apply.workable.com/acme/j/81B46579FE/',
+      'https://apply.workable.com/j/81B46579FE/apply',
+      'https://apply.workable.com/acme/j/81B46579FE/apply/?utm_source=linkedin',
+    ],
+    'https://apply.workable.com/j/81b46579fe',
+  ],
 ];
 
 const DIFFERENT = [
@@ -134,6 +144,9 @@ const DIFFERENT = [
   ['https://jobs.example.com/careers#/jobs/123', 'https://jobs.example.com/careers#/jobs/456'],
   ['https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77903'],
   ['https://jobs.example.com/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.example.com/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902'],
+  ['https://apply.workable.com/acme/j/81B46579FE/', 'https://apply.workable.com/acme/j/19A136F8E2/'],
+  ['https://apply.workable.com/acme/j/81B46579FE/apply', 'https://apply.workable.com/j/19A136F8E2'],
+  ['https://careers.example.com/acme/j/81B46579FE', 'https://careers.example.com/j/81B46579FE'],
 ];
 
 test('variants of one posting share one key, on the CLI and the web copy', () => {
