@@ -1,3 +1,4 @@
+import { coreProfileEnv } from "@/lib/core/profile-path.mjs";
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -39,7 +40,7 @@ export async function GET() {
     execFile(
       process.execPath,
       [verifyPortals],
-      { cwd: resolveCodeRoot(process.cwd(), process.env), timeout: 110_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
+      { cwd: resolveCodeRoot(process.cwd(), process.env), env: coreProfileEnv(careerOpsRoot()), timeout: 110_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true },
       (e, out, err) => {
         const stdout = out || "";
         if (!e && stdout.trim()) return resolve({ stdout, error: null });
