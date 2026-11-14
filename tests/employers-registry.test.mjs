@@ -17,13 +17,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT } from './helpers.mjs';
+import { ROOT, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
 
-import { BOARD_ATS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, WORKDAY_HOSTS } from '../lib/ats-board-url.mjs';
+import { BOARD_ATS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, WORKDAY_HOSTS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
   ALSO_PERMITS, DOMAIN_RE, FIXED_SOURCES, GITHUB_LOGIN_RE, LICENSE_ID, MANIFEST_ID_RE, MANIFEST_KEYS,
   MANIFEST_REQUIRED, NAME_MAX, RETIRED_REASONS, ROW_KEYS, ROW_REQUIRED, SOURCE_PATTERNS,
@@ -254,22 +254,31 @@ test('schema.json: the manifest id pattern accepts and rejects what the validato
 
 // ── 4. Pull-request rules (--base), the size limit, the CHANGELOG ─────────
 
+const NEW_DAY = unusedEmployerContributionDay();
 const NEW_MANIFEST = {
-  id: '2026-11-09-newcomer', contributor: 'newcomer', signed_by: 'New Comer', rows: 1, source: 'community',
+  id: `${NEW_DAY}-newcomer`, contributor: 'newcomer', signed_by: 'New Comer', rows: 1, source: 'community',
   origin: 'Typed in by hand from the employer careers page.', no_conflicting_contract: true, personal_data: false,
-  exclusive: false, license: 'CC-BY-4.0', also_permits: ['ODbL-1.0', 'CC0-1.0'], attribution: 'Newcomer', date: '2026-11-09',
+  exclusive: false, license: 'CC-BY-4.0', also_permits: ['ODbL-1.0', 'CC0-1.0'], attribution: 'Newcomer', date: NEW_DAY,
 };
+const NEW_BOARD = unlistedEmployerBoard('breezy', 'fixture-co');
 const NEW_ROW = {
-  ats: 'breezy', board: 'fixture-co', careers_url: 'https://fixture-co.breezy.hr', name: 'Fixture Co',
-  source: 'community', contribution: '2026-11-09-newcomer', added: '2026-11-09',
+  ats: 'breezy', board: NEW_BOARD, careers_url: buildBoardUrl({ ats: 'breezy', board: NEW_BOARD }), name: 'Fixture Co',
+  source: 'community', contribution: NEW_MANIFEST.id, added: NEW_DAY,
 };
+/** Insert a row into its board file in a registry copy, keeping the rows already there. */
+function insertRow(dir, row) {
+  mkdirSync(reg(dir, 'boards', row.ats), { recursive: true });
+  const path = reg(dir, 'boards', row.ats, `${row.board[0].toLowerCase()}.ndjson`);
+  const rows = existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
+  writeFileSync(path, `${[...rows, row].sort(compareRows).map((r) => JSON.stringify(r)).join('\n')}\n`);
+}
 function addContribution(dir, row = NEW_ROW) {
   writeJson(reg(dir, 'contributions', `${NEW_MANIFEST.id}.json`), NEW_MANIFEST);
-  mkdirSync(reg(dir, 'boards', 'breezy'), { recursive: true });
-  writeFileSync(reg(dir, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify(row)}\n`);
+  insertRow(dir, row);
   // No CHANGELOG.md edit: a contribution does not touch it.
 }
-const firstRow = () => rowsOf(REGISTRY)[0].row;
+// Not retired, so that retiring it is a change.
+const firstRow = () => rowsOf(REGISTRY).find((r) => !r.row.retired).row;
 
 /** Run one PR scenario: base is the real registry, head is a copy changed by `change`. */
 function pr(change) {
@@ -316,8 +325,7 @@ test('--base: a new row on an already merged manifest fails', () => {
     const id = firstRow().contribution;
     const m = readJson(reg(head, 'contributions', `${id}.json`));
     writeJson(reg(head, 'contributions', `${id}.json`), { ...m, rows: m.rows + 1 });
-    mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
-    writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, contribution: id, added: m.date })}\n`);
+    insertRow(head, { ...NEW_ROW, contribution: id, added: m.date });
   });
   assert.equal(r.status, 1);
   assert.match(r.stderr, /which is already merged; new rows come with their own manifest/);
@@ -345,7 +353,7 @@ test('--base: a new row cannot arrive retired', () => {
 });
 
 test('--base: the provenance of an existing row is fixed', () => {
-  const r = pr((head) => editRow(head, firstRow().careers_url, (row) => ({ ...row, added: '2026-11-09' })));
+  const r = pr((head) => editRow(head, firstRow().careers_url, (row) => ({ ...row, added: row.added === '2026-11-09' ? '2026-11-10' : '2026-11-09' })));
   assert.equal(r.status, 1);
   assert.match(r.stderr, /changes added of an existing row \(was "\d{4}-\d{2}-\d{2}"\); provenance is fixed once merged/);
 });
@@ -510,7 +518,8 @@ test('in GitHub Actions, a valid registry passes with no ::error and a summary o
     assert.ok(!r.stdout.includes('::error') && !r.stdout.includes('::warning'), r.stdout);
     const md = readFileSync(summary, 'utf8');
     assert.ok(md.startsWith('# an earlier step\n## Employer registry\n'), 'the summary is appended, not overwritten');
-    assert.match(md, /\*\*Valid\*\*: \d+ rows in \d+ files, 1 contribution; 0 errors, 0 warnings\./);
+    const n = readdirSync(join(REGISTRY, 'contributions')).filter((f) => f.endsWith('.json')).length;
+    assert.match(md, new RegExp(`\\*\\*Valid\\*\\*: \\d+ rows in \\d+ files, ${n} contribution${n === 1 ? '' : 's'}; 0 errors, 0 warnings\\.`));
     assert.ok(!md.includes('| Level |'), 'no table without findings');
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });

@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, copyEmployerRegistry } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry, unlistedEmployerBoard } from './helpers.mjs';
 
 import { BOARD_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
@@ -233,19 +233,20 @@ function checkout() {
   return dir;
 }
 
-test('CLI: the 53 committed boards and new ones become an inbox the validator accepts, known boards as a warning', () => {
+test('CLI: the committed boards and new ones become an inbox the validator accepts, known boards as a warning', () => {
   const dir = checkout();
   try {
     const known = committedRows().map((r) => r.careers_url);
     const list = join(dir, 'list.txt');
-    writeFileSync(list, [...known, 'https://jobs.lever.co/newco-one', 'https://nope.example/jobs', ''].join('\n'));
+    writeFileSync(list, [...known, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-one')}`, 'https://nope.example/jobs', ''].join('\n'));
     const r = node(IMPORTER, [list, '--login', 'OctoCat', '--date', '2026-11-10'], dir);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, new RegExp(`wrote ${known.length + 1} board\\(s\\) in 1 file\\(s\\)`));
     const inbox = join(dir, 'employers', 'inbox', '2026-11-10-octocat.ndjson');
     assert.equal(readFileSync(inbox, 'utf8').split('\n').filter(Boolean).length, known.length + 1);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
-      + '55,https://nope.example/jobs,"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, workday)"\n');
+      + `${known.length + 2},https://nope.example/jobs,`
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
@@ -264,7 +265,9 @@ test('CLI: more than 5,000 boards are split into parts that pass the validator',
   try {
     const list = join(dir, 'big.csv');
     const n = 10001;
-    writeFileSync(list, `url,name\n${Array.from({ length: n }, (_, i) => `https://jobs.ashbyhq.com/company${i}x,Company ${i}`).join('\n')}\n`);
+    const boards = Array.from({ length: n }, (_, i) => `company${i}x`);
+    const listed = new Set(committedRows().filter((r) => r.ats === 'ashby').map((r) => r.board.toLowerCase()));
+    writeFileSync(list, `url,name\n${boards.map((b, i) => `https://jobs.ashbyhq.com/${b},Company ${i}`).join('\n')}\n`);
     const r = node(IMPORTER, [list, '--login', 'big-org', '--date', '2026-11-10', '--rejects', join(dir, 'rejects.csv')], dir);
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(readdirSync(join(dir, 'employers', 'inbox')).sort(),
@@ -272,7 +275,7 @@ test('CLI: more than 5,000 boards are split into parts that pass the validator',
     assert.ok(!existsSync(join(dir, 'rejects.csv')), 'no rejects, no file');
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
-    assert.match(v.stdout, new RegExp(`inbox: ${n} board\\(s\\) in 3 file\\(s\\), 0 already in the registry`));
+    assert.match(v.stdout, new RegExp(`inbox: ${n} board\\(s\\) in 3 file\\(s\\), ${boards.filter((b) => listed.has(b)).length} already in the registry`));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
