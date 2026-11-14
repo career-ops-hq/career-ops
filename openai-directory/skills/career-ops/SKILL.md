@@ -232,6 +232,8 @@ Read the resolved shared context (default `modes/_shared.md`) + `modes/_profile.
 
 Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `gambit`, `apply`, `pipeline`, `scan`, `batch`
 
+Run `gambit` here, in the interactive session, never in a worker, even though its research is heavy: its Step 3 checkpoint shows the candidate the role theses and waits for their choice before any document is generated, and a worker cannot ask the candidate anything.
+
 ### Standalone modes with profile and custom context
 
 Read `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + `modes/{mode}.md`
@@ -246,7 +248,7 @@ Applies to: `triage`
 
 ### Modes delegated to subagent
 
-For `scan`, `apply` (with Playwright), `gambit` (research-heavy: WebSearch + Playwright), and `pipeline` (3+ URLs): launch as a worker/subagent with the resolved shared context + `_profile.md` (if exists) + `_custom.md` (if exists) + the resolved selected mode file injected into the worker prompt. If your CLI exposes an `Agent(...)` primitive, the call looks like this:
+For `scan`, `apply` (with Playwright), and `pipeline` (3+ URLs): launch as a worker/subagent with the resolved shared context + `_profile.md` (if exists) + `_custom.md` (if exists) + the resolved selected mode file injected into the worker prompt. If your CLI exposes an `Agent(...)` primitive, the call looks like this:
 
 ```python
 Agent(

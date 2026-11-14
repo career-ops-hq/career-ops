@@ -133,6 +133,15 @@ For the chosen role, write the posting the company *should* publish:
 **Header it clearly:**
 `> Synthetic role — drafted by {candidate} as a proposal. {Company} has not posted this role.`
 
+## Step 4b — Evidence gate (before any document)
+
+Check leg (a) of the Step 8 gate now, on the research and the synthetic JD:
+is the company need real and cited? If it is not, the recommendation is
+**SKIP**: tell the candidate, skip Steps 5–7 (no CV, cover letter or pitch
+package) and go straight to Step 9. The report keeps G0, G1 and the gate in E,
+lists no documents, and records `recommend: skip`. Legs (b) and (c) are
+judged in Step 8, once the CV match and the decision-maker are known.
+
 ## Step 5 — Generate the CV + cover letter (reuse the engine)
 
 Treat the synthetic JD as the JD and run the standard `modes/pdf.md` flow:
@@ -193,8 +202,9 @@ decides the tracker status in Step 9):
   burns a warm company — the "quality over quantity, respect their time" ethos
   applies *harder* here.
 - (a) fails (the need is not evidenced) → **SKIP**: there is no honest pitch to
-  make. Say so, hand over the research, and do not polish the drafts into a
-  send-ready package.
+  make. Step 4b normally stops here before any document exists; if the need
+  only falls apart now, say so, hand over the research, and do not save the
+  drafts as a send-ready package (Step 9 lists no documents for a SKIP).
 
 ## Step 9 — Save report + tracker
 
@@ -232,7 +242,8 @@ claimed in Step 3b. Use this gambit-variant structure.
 - `## F) Interview Plan` — STAR+R stories for the conversation the pitch opens.
 - `## Documents` — links to the saved CV (in `output/`), the cover letter, and
   the pitch artifacts. Save the cold email, the LinkedIn DM, and the memo to
-  `output/` and link them here; inline them only if short.
+  `output/` and link them here; inline them only if short. For a `skip`, write
+  `None: no evidenced need (Step 4b)` and save nothing to `output/`.
 - `## Keywords extracted` — the 15–20 ATS keywords pulled from the synthetic JD
   in Step 5 (mirrors the standard report format for ATS optimization).
 
