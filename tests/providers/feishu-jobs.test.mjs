@@ -345,6 +345,22 @@ try {
     fail(`feishu-jobs.fetch() partial results on failure: ${JSON.stringify(blipJobs.map(j => j.title))}`);
   }
 
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 1) {
+    pass('feishu-jobs.fetch() marks the board partial when a later request fails');
+  } else {
+    fail(`feishu-jobs.fetch() a later request fails: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
+
+  const whole = mkCtx(() => ({ code: 0, data: { count: 1, job_post_list: [mkJob('9', '全读岗位')] } }));
+  const wholeJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI', '大模型'] }, whole.ctx);
+  if (wholeJobs.length === 1 && wholeJobs.truncated === undefined) {
+    pass('feishu-jobs.fetch() leaves the board unmarked when every request answers');
+  } else {
+    fail(`feishu-jobs.fetch() whole board: ${wholeJobs.length} jobs, truncated = ${JSON.stringify(wholeJobs.truncated)}`);
+  }
+
   const softFail = mkCtx(({ keyword }) => (keyword === '大模型'
     ? { code: 1, message: 'rate limited' }
     : { code: 0, data: { count: 1, job_post_list: [mkJob('8', '幸存岗位2')] } }));
@@ -353,6 +369,14 @@ try {
     pass('feishu-jobs.fetch() treats an in-band code!=0 as a blip once jobs are collected');
   } else {
     fail(`feishu-jobs.fetch() code!=0 blip: ${JSON.stringify(softFailJobs.map(j => j.title))}`);
+  }
+
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (softFailJobs.truncated?.reason === 'fetch-error' && softFailJobs.truncated.fetched === 1) {
+    pass('feishu-jobs.fetch() marks the board partial when a later request answers code!=0');
+  } else {
+    fail(`feishu-jobs.fetch() a later request answers code!=0: truncated = ${JSON.stringify(softFailJobs.truncated)}`);
   }
 
   const untrusted = mkCtx(() => ({ code: 0, data: { count: 0, job_post_list: [] } }));
