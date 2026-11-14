@@ -281,6 +281,32 @@ try {
   } else {
     fail(`ashby.fetch() primary-address location = ${JSON.stringify(primaryAddr[0]?.location)}`);
   }
+  if (JSON.stringify(primaryAddr[0]?.locations) === JSON.stringify(['England', 'United States'])
+      && !('locations' in primaryAddr[1])) {
+    pass('ashby.fetch() gives locations without "Remote" and without folded country, omitting when empty');
+  } else {
+    fail(`ashby.fetch() locations row 0 = ${JSON.stringify(primaryAddr[0]?.locations)}, row 1 = ${JSON.stringify(primaryAddr[1]?.locations)}`);
+  }
+
+  const wmJobs = await ashby.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          { title: 'Hybrid Job', location: 'Hybrid' },
+          { title: 'Distributed Hybrid Job', location: 'Distributed; Hybrid' },
+          { title: 'Austin Job', location: 'Austin', secondaryLocations: [{ location: 'Remote' }] },
+        ],
+      }),
+    },
+  );
+  if (!('locations' in wmJobs[0])
+      && !('locations' in wmJobs[1])
+      && JSON.stringify(wmJobs[2]?.locations) === JSON.stringify(['Austin'])) {
+    pass("ashby.fetch() omits 'Hybrid', 'Distributed; Hybrid', and secondaryLocations 'Remote' from locations");
+  } else {
+    fail(`ashby.fetch() work models in locations = ${JSON.stringify(wmJobs.map(j => [j.title, j.locations]))}`);
+  }
   // A primary location that already names its country must not repeat it.
   const namedCountry = await ashby.fetch(
     { name: 'Acme', careers_url: 'https://jobs.ashbyhq.com/acme' },

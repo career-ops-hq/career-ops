@@ -375,14 +375,21 @@ export default {
 
     return usable.map(/** @param {any} j */ (j) => {
       let location = j.location?.name || '';
-      if (isWorkModelOnly(location)) {
-        // Sorted, not in /offices traversal order or payload order. The set
-        // deduplicates and sorts so re-ordered offices cannot rewrite the
-        // location string or the dedupe key (scan.mjs `normalizeLocationForDedup`).
-        const offices = bodiesInline ? j.offices : officeMap?.get(j.id);
-        const officeList = extractSortedOfficeNames(offices);
-        if (officeList.length > 0) location = [location, ...officeList].join(' · ');
+      const raw = typeof j.location?.name === 'string' ? j.location.name.trim() : '';
+      const workModel = isWorkModelOnly(raw);
+      // Sorted, not in /offices traversal order or payload order. The set
+      // deduplicates and sorts so re-ordered offices cannot rewrite the
+      // location string or the dedupe key (scan.mjs `normalizeLocationForDedup`).
+      const offices = bodiesInline ? j.offices : officeMap?.get(j.id);
+      const officeList = extractSortedOfficeNames(offices);
+      if (workModel && officeList.length > 0) {
+        location = [location, ...officeList].join(' · ');
       }
+      const places = [
+        ...(raw && !workModel ? [raw] : []),
+        ...officeList.filter(name => !isWorkModelOnly(name)),
+      ];
+      const locations = [...new Set(places)];
       const description = contentToText(j.content);
       return {
         title: j.title || '',
@@ -397,6 +404,7 @@ export default {
         externalId: coerceId(j.id),
         requisitionId: coerceId(j.requisition_id),
         location,
+        ...(locations.length > 0 ? { locations } : {}),
         // Omitted entirely when the board ships no body — same shape as
         // cryptocurrencyjobs/remotli, so "no signal" stays distinguishable
         // from an empty string downstream.
