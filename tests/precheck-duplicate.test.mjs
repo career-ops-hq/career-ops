@@ -43,6 +43,22 @@ try {
   if (r.candidates[0]?.num === 1 && r.candidates[0].reason === 'url') pass('URL match (tracking params stripped) ranks first');
   else fail(`URL match: ${JSON.stringify(r.candidates)}`);
 
+  // 1b. Another spelling of one posting is still its URL: canonicalJobKey().
+  const spelled = [
+    { num: 5, date: '2026-04-01', company: 'Acme', role: 'Data Engineer', status: 'Applied', notes: '', url: 'https://boards.greenhouse.io/acme/jobs/4001' },
+    { num: 6, date: '2026-04-02', company: 'Globex', role: 'Product Manager', status: 'Applied', notes: '', url: 'https://www.linkedin.com/jobs/view/4100000001' },
+  ];
+  const urlHits = (url) => findDuplicateCandidates(spelled, { url }).map((c) => `${c.num}:${c.reason}`).join(',');
+  const hits = [
+    urlHits('https://job-boards.greenhouse.io/acme/jobs/4001'),
+    urlHits('https://careers.acme.example/jobs?gh_jid=4001'),
+    urlHits('https://www.linkedin.com/jobs/view/product-manager-at-globex-4100000001'),
+    urlHits('https://job-boards.greenhouse.io/acme/jobs/4002'),
+    urlHits('https://www.linkedin.com/jobs/view/4100000002'),
+  ];
+  if (hits.join('|') === '5:url|5:url|6:url||') pass('another spelling of the same posting is a URL match; another id is not');
+  else fail(`same-posting spellings: ${JSON.stringify(hits)}`);
+
   // 2. Repost under a new title but the same requisition ID.
   r = json(['--company', 'Northwind Hospital', '--title', 'Service Desk Lead', '--req', 'JR-1001']);
   if (r.candidates[0]?.num === 1 && r.candidates[0].reason === 'req') pass('same requisition ID at the same company matches');

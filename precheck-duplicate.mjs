@@ -11,7 +11,9 @@
  *        [--req JR-1234] [--url https://...] [--json]
  *
  * Candidates are ranked strongest first, reusing the repo's own matchers:
- *   1. url / req   exact normalizeUrl() match, or the same requisition ID
+ *   1. url / req   the same posting URL (normalizeUrl(), or the canonicalJobKey()
+ *                  the scanner dedups on, so a Greenhouse id on another host or a
+ *                  LinkedIn slug URL still matches), or the same requisition ID
  *                  (REQ_NUMBER_RE via extractReqNumber) at the same or a parent
  *                  company. A bare req ID with an unrelated company never counts.
  *                  IDs are compared after normReq(), so JR9727 == JR-9727 == 9727.
@@ -37,7 +39,7 @@ import {
   resolveTrackerPath, normalizeCompany, companiesMatchIgnoringCorporateForm,
   loadCanonicalStates, resolveCanonicalStateId,
 } from './tracker-utils.mjs';
-import { normalizeUrl } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl } from './url-key.mjs';
 import { titleIdentityKey } from './detect-reposts.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -173,6 +175,7 @@ export function companyRelation(a, b) {
  */
 export function findDuplicateCandidates(rows, { company = '', title = '', req = '', url = '' } = {}) {
   const wantUrl = normalizeUrl(url);
+  const wantJob = canonicalJobKey(url);
   const wantReq = normReq(req);
   const cleanTitle = stripLocationSuffix(title);
   const wantTitleKey = cleanTitle ? titleIdentityKey(cleanTitle) : '';
@@ -180,7 +183,7 @@ export function findDuplicateCandidates(rows, { company = '', title = '', req = 
   for (const row of rows) {
     const rel = companyRelation(company, row.company);
     let reason = null;
-    if (wantUrl && normalizeUrl(row.url) === wantUrl) {
+    if (wantUrl && (normalizeUrl(row.url) === wantUrl || (wantJob && canonicalJobKey(row.url) === wantJob))) {
       reason = 'url';
     } else if (wantReq && rel && normReq(extractReqNumber(row.notes)) === wantReq) {
       reason = 'req';
