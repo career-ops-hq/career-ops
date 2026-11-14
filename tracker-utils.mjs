@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync, copyFileSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -798,6 +798,29 @@ export function writeFileAtomic(path, content, { mode } = {}) {
       chmodSync(tmpPath, mode);
     }
     renameSyncWithRetry(tmpPath, path);
+  } catch (err) {
+    rmSync(tmpPath, { force: true });
+    throw err;
+  }
+}
+
+/**
+ * Copy `filePath` onto `filePath.bak` without exposing a partial backup.
+ *
+ * A direct copy onto `.bak` truncates that file first. A failure mid-copy
+ * removes the previous recovery file, and a reader can observe a short one.
+ * The copy lands in a sibling temp file. The rename replaces `.bak` only
+ * after that copy finishes, so a failure leaves the previous backup alone.
+ *
+ * @param {string} filePath - The file to copy.
+ * @returns {void}
+ */
+export function backupFileAtomically(filePath) {
+  const bak = `${filePath}.bak`;
+  const tmpPath = join(dirname(bak), `.${basename(bak)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+  try {
+    copyFileSync(filePath, tmpPath);
+    renameSyncWithRetry(tmpPath, bak);
   } catch (err) {
     rmSync(tmpPath, { force: true });
     throw err;

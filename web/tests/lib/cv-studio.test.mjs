@@ -294,13 +294,26 @@ test("edits saved against another version of the CV are dropped, not misapplied"
   assert.deepEqual(parseEdits({ v: 1, sourceHash: "old", use: { a: { kind: "custom" }, b: { kind: "base" } } }, "old").edits.use, { b: { kind: "base" } });
 });
 
-test("wordDiff marks removed and inserted words", () => {
+test("wordDiff marks removed and inserted words and keeps a space between the runs", () => {
   assert.deepEqual(wordDiff("Led ML platform team", "Led MLOps platform team"), [
     { op: "same", text: "Led " },
     { op: "del", text: "ML" },
+    { op: "same", text: " " },
     { op: "ins", text: "MLOps" },
     { op: "same", text: " platform team" },
   ]);
+});
+
+test("wordDiff does not glue a rewritten sentence", () => {
+  const parts = wordDiff(
+    "Coordinator who keeps a weekly review on time and writes the notes people actually read.",
+    "Coordinator who keeps a weekly review on time, writes stakeholder updates, and turns a messy board into release notes people finish.",
+  );
+  const shown = parts.map((part) => part.text).join("");
+  assert.equal(shown.includes("thewrites"), false);
+  assert.equal(shown.includes("read.messy"), false);
+  assert.match(shown, /the writes/);
+  assert.match(shown, /read\. messy/);
 });
 
 test("htmlText collapses nested tag shapes so no live tag remains", () => {
@@ -361,6 +374,7 @@ test("wordDiff keeps a trailing comma apart from its word", () => {
 test("wordDiff folds a short unchanged run only when it sits between a deletion and an insertion", () => {
   assert.deepEqual(wordDiff("built internal MLOps tooling: model registry", "as technical lead, mentoring the model registry"), [
     { op: "del", text: "built internal MLOps tooling:" },
+    { op: "same", text: " " },
     { op: "ins", text: "as technical lead, mentoring" },
     { op: "same", text: " " },
     { op: "ins", text: "the " },

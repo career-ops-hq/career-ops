@@ -231,6 +231,11 @@ try {
     pass('greenhouse.fetch() maps ATS identity, title/URL/company/location/date');
   else fail(`greenhouse.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
 
+  if (JSON.stringify(fetched[0]?.locations) === JSON.stringify(['Berlin, Germany'])
+      && !('locations' in fetched[1]))
+    pass('greenhouse.fetch() emits locations for a single location and omits it when empty');
+  else fail(`greenhouse.fetch() locations row 0 = ${JSON.stringify(fetched[0]?.locations)}, row 1 = ${JSON.stringify(fetched[1]?.locations)}`);
+
   if (fetched[1]?.title === '' && fetched[1]?.location === '' && fetched[1]?.postedAt === undefined)
     pass('greenhouse.fetch() defaults missing title/location to "" and omits postedAt when first_published is absent');
   else fail(`greenhouse.fetch() row 1 = ${JSON.stringify(fetched[1])}`);
@@ -467,6 +472,58 @@ try {
     pass('greenhouse.fetch() leaves a job with missing or empty inline offices on its bare work-model string');
   else fail(`greenhouse.fetch() inline row 2 location = ${JSON.stringify(inlineEnriched[2]?.location)}`);
 
+  if (JSON.stringify(inlineEnriched[0]?.locations) === JSON.stringify(['Austin, TX'])
+      && JSON.stringify(inlineEnriched[1]?.locations) === JSON.stringify(['Austin, TX', 'Seattle, WA'])
+      && !('locations' in inlineEnriched[2]))
+    pass('greenhouse.fetch() emits sorted inline offices without work model in locations, and omits locations when work-model-only has no offices');
+  else fail(`greenhouse.fetch() inline enriched locations = ${JSON.stringify([inlineEnriched[0]?.locations, inlineEnriched[1]?.locations, inlineEnriched[2]?.locations])}`);
+
+  const [berlinJob] = await greenhouse.fetch(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            id: 101,
+            title: 'Engineer',
+            absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/101',
+            location: { name: 'Berlin' },
+            offices: [{ id: 1, name: 'Berlin' }, { id: 2, name: 'Paris' }],
+          },
+        ],
+      }),
+    },
+  );
+  if (berlinJob?.location === 'Berlin'
+      && JSON.stringify(berlinJob?.locations) === JSON.stringify(['Berlin', 'Paris'])) {
+    pass('greenhouse.fetch() leaves real city in location and emits deduped inline offices in locations');
+  } else {
+    fail(`greenhouse.fetch() Berlin inline offices = location: ${JSON.stringify(berlinJob?.location)}, locations: ${JSON.stringify(berlinJob?.locations)}`);
+  }
+
+  const [hybridInlineJob] = await greenhouse.fetch(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    {
+      fetchJson: async () => ({
+        jobs: [
+          {
+            id: 102,
+            title: 'Engineer',
+            absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/102',
+            location: { name: 'Hybrid' },
+            offices: [{ id: 1, name: 'Austin, TX' }, { id: 2, name: 'Remote' }],
+          },
+        ],
+      }),
+    },
+  );
+  if (hybridInlineJob?.location === 'Hybrid · Austin, TX · Remote'
+      && JSON.stringify(hybridInlineJob?.locations) === JSON.stringify(['Austin, TX'])) {
+    pass('greenhouse.fetch() folds "Remote" into inline location while omitting it from locations');
+  } else {
+    fail(`greenhouse.fetch() hybrid inline remote = location: ${JSON.stringify(hybridInlineJob?.location)}, locations: ${JSON.stringify(hybridInlineJob?.locations)}`);
+  }
+
   // Inline office order stability (#3750, #6911): reversed payload offices must give the same sorted string.
   const [reversedInline] = await greenhouse.fetch(
     { name: 'Cloudflare', careers_url: 'https://job-boards.greenhouse.io/cloudflare' },
@@ -540,6 +597,37 @@ try {
   if (enriched[2]?.location === 'Hybrid')
     pass('greenhouse.fetch() leaves a job absent from /offices on its bare work-model string');
   else fail(`greenhouse.fetch() enriched row 2 location = ${JSON.stringify(enriched[2]?.location)}`);
+
+  if (JSON.stringify(enriched[0]?.locations) === JSON.stringify(['Austin, TX'])
+      && JSON.stringify(enriched[1]?.locations) === JSON.stringify(['Austin, TX', 'Seattle, WA'])
+      && !('locations' in enriched[2]))
+    pass('greenhouse.fetch() emits sorted offices without work model in locations, and omits locations when work-model-only has no offices');
+  else fail(`greenhouse.fetch() enriched locations = ${JSON.stringify([enriched[0]?.locations, enriched[1]?.locations, enriched[2]?.locations])}`);
+
+  const remoteOfficeBody = {
+    offices: [
+      { name: 'Austin, TX', departments: [{ jobs: [{ id: 103 }] }] },
+      { name: 'Remote', departments: [{ jobs: [{ id: 103 }] }] },
+    ],
+  };
+  const [hybridFallbackJob] = await greenhouse.fetch(
+    { name: 'Acme', careers_url: 'https://job-boards.greenhouse.io/acme' },
+    {
+      fetchJson: async (url) => {
+        if (url.includes('content=true')) throw tooLargeErr();
+        if (url.endsWith('/offices')) return remoteOfficeBody;
+        return {
+          jobs: [{ id: 103, title: 'Engineer', absolute_url: 'https://job-boards.greenhouse.io/acme/jobs/103', location: { name: 'Hybrid' } }],
+        };
+      },
+    },
+  );
+  if (hybridFallbackJob?.location === 'Hybrid · Austin, TX · Remote'
+      && JSON.stringify(hybridFallbackJob?.locations) === JSON.stringify(['Austin, TX'])) {
+    pass('greenhouse.fetch() folds "Remote" into fallback location while omitting it from locations');
+  } else {
+    fail(`greenhouse.fetch() hybrid fallback remote = location: ${JSON.stringify(hybridFallbackJob?.location)}, locations: ${JSON.stringify(hybridFallbackJob?.locations)}`);
+  }
 
   // Order stability (#3750). The folded city list must not inherit the order
   // Greenhouse happened to return its offices in: that order is not promised to
@@ -722,12 +810,15 @@ try {
     }
 
     const off = await run({ name: 'Big', careers_url: 'https://job-boards.greenhouse.io/big' });
-    if (off.rows.length === 3 && details(off.calls).length === 0) pass('greenhouse.fetch() fetches no detail without the fetchDetails opt-in');
-    else fail(`greenhouse detail without opt-in: ${JSON.stringify(off.calls.map((c) => c.url))}`);
+    if (off.rows.length === 3 && details(off.calls).length === 0 && off.rows.truncated?.reason === 'descriptions-omitted' && off.rows.truncated.fetched === 0 && off.rows.truncated.total === 3) {
+      pass('greenhouse.fetch() marks an oversized board partial when it returns no descriptions');
+    } else {
+      fail(`greenhouse detail without opt-in: ${JSON.stringify(off.calls.map((c) => c.url))} truncated=${JSON.stringify(off.rows.truncated)}`);
+    }
 
     const probe = await run(optIn, { ctx: { maxPages: 1 } });
-    if (details(probe.calls).length === 0) pass('greenhouse.fetch() fetches no detail during a health probe');
-    else fail(`greenhouse detail during probe: ${JSON.stringify(probe.calls.map((c) => c.url))}`);
+    if (details(probe.calls).length === 0 && probe.rows.truncated === undefined) pass('greenhouse.fetch() fetches no detail during a health probe and does not mark the probe partial');
+    else fail(`greenhouse detail during probe: ${JSON.stringify(probe.calls.map((c) => c.url))} truncated=${JSON.stringify(probe.rows.truncated)}`);
 
     const capped = await run({ ...optIn, greenhouse: { fetchDetails: true, detailLimit: 1 } });
     if (details(capped.calls).length === 1) pass('greenhouse.fetch() caps detail requests at detailLimit');

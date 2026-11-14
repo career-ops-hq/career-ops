@@ -183,6 +183,46 @@ for (const name of ["CAREER_OPS_ROOT", "CAREER_OPS_DATA_DIR"]) {
   });
 }
 
+/** A symlink to `target` in a fresh tmpdir, or null where symlinks need privileges. */
+function linkTo(target) {
+  const link = path.join(tmpdir(), "link-to-copy");
+  try {
+    fs.symlinkSync(target, link, "dir");
+    return link;
+  } catch {
+    return null;
+  }
+}
+
+// #7026: realpath fails on a folder that does not exist yet, and the check used
+// to fall back to the path as written, so a symlink into a plugin copy was
+// refused while a new folder under that same symlink was accepted.
+test("a data root under a symlink into a plugin copy is refused before it exists", (t) => {
+  const { home, core } = pluginLayout();
+  const link = linkTo(core);
+  if (!link) return t.skip("cannot create a symlink here");
+  for (const target of [link, path.join(link, "new-data"), path.join(link, "new", "nested")]) {
+    assert.throws(
+      () => resolve(tmpdir(), { HOME: home, CAREER_OPS_ROOT: target }),
+      (err) => err instanceof UnsafeDataRootError && err.root === target,
+      target,
+    );
+  }
+  assert.equal(fs.existsSync(path.join(core, "new-data")), false);
+});
+
+test("a folder named ..something inside the plugins cache is refused; a .. segment is not", () => {
+  const home = tmpdir();
+  const cache = path.join(home, ".claude", "plugins", "cache");
+  const inside = path.join(cache, "..local", "data");
+  assert.throws(
+    () => resolve(tmpdir(), { HOME: home, CAREER_OPS_ROOT: inside }),
+    (err) => err instanceof UnsafeDataRootError && err.root === inside,
+  );
+  const outside = path.join(home, ".claude", "plugins", "data");
+  assert.equal(resolve(tmpdir(), { HOME: home, CAREER_OPS_ROOT: `${cache}${path.sep}..${path.sep}data` }), outside);
+});
+
 test("a relative marker in a plugin copy resolves inside it and is refused", () => {
   const { home, core } = pluginLayout();
   fs.writeFileSync(path.join(core, ".career-ops-data"), "./data");
@@ -242,6 +282,11 @@ test("AGREES with the core's path-resolver.mjs on every branch", async (t) => {
     { name: "plugin copy, CAREER_OPS_DATA_DIR inside", plugin: "cache", marker: null, env: { CAREER_OPS_DATA_DIR: "INSIDE" } },
     { name: "checkout, CAREER_OPS_ROOT inside a plugin copy", plugin: "elsewhere", marker: null, env: { CAREER_OPS_ROOT: "INSIDE" } },
     { name: "checkout, marker inside a plugin copy", plugin: "elsewhere", marker: "INSIDE", env: {} },
+    // "LINK_MISSING" is a not-yet-created folder under a symlink to the copy (#7026).
+    { name: "checkout, CAREER_OPS_ROOT under a symlink into a plugin copy", plugin: "elsewhere", marker: null, env: { CAREER_OPS_ROOT: "LINK_MISSING" } },
+    { name: "checkout, marker under a symlink into a plugin copy", plugin: "elsewhere", marker: "LINK_MISSING", env: {} },
+    // "DOTDOT_NAME" is a folder named "..local" inside the copy: a name, not a parent step.
+    { name: "checkout, CAREER_OPS_ROOT under a ..-prefixed folder in a plugin copy", plugin: "elsewhere", marker: null, env: { CAREER_OPS_ROOT: "DOTDOT_NAME" } },
   ];
 
   // Every variable either resolver reads. Cleared before each case so the real
@@ -279,7 +324,13 @@ test("AGREES with the core's path-resolver.mjs on every branch", async (t) => {
     fs.mkdirSync(copy, { recursive: true });
     const core = c.plugin && c.plugin !== "elsewhere" ? copy : tmpdir();
     const inside = path.join(copy, "user-data");
-    const subst = (v) => (v === "ABS" ? abs : v === "INSIDE" ? inside : v);
+    let linkMissing = null;
+    if (Object.values(c.env).includes("LINK_MISSING") || c.marker === "LINK_MISSING") {
+      const link = linkTo(copy);
+      if (!link) continue; // no symlink privilege here: nothing to compare
+      linkMissing = path.join(link, "new-data");
+    }
+    const subst = (v) => (v === "ABS" ? abs : v === "INSIDE" ? inside : v === "LINK_MISSING" ? linkMissing : v === "DOTDOT_NAME" ? path.join(copy, "..local", "data") : v);
 
     fs.copyFileSync(src, path.join(core, "path-resolver.mjs"));
     if (c.marker !== null) fs.writeFileSync(path.join(core, ".career-ops-data"), subst(c.marker));

@@ -157,7 +157,8 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
     if (hit.type) f.type = hit.type as ApplyField["type"];
     if (hit.options.length) f.options = hit.options;
     if (hit.required) f.required = true;
-    if (hit.type === "select") f.combobox = true;
+    // Do not mark a native select or a yes/no as a menu. A combobox keeps the
+    // flag the reader already set. Typing into a menu is only for that flag.
   }
 }
 

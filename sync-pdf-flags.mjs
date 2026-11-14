@@ -23,7 +23,7 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { extractTrackerReportNumbers, resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
-import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, resolveWorkspaceRoot, pathIsInsideCanonical } from './tracker-utils.mjs';
+import { rebuildRow, resolveTrackerPath, resolvePdfIndexPath, openTrackerTransaction, writeFileAtomic, backupFileAtomically, resolveWorkspaceRoot, pathIsInsideCanonical } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { parsePdfIndex, livePdfIndex } from './find.mjs';
@@ -50,6 +50,10 @@ const USAGE = 'Usage: node sync-pdf-flags.mjs [--dry-run] [--json]\n       node 
  * @param {{dryRun?: boolean, json?: boolean, prune?: boolean, write?: boolean}} [options.flags]
  * @param {string} [options.lockDir] - Tracker lock; defaults to the one derived from appsFile.
  * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options.lock] - Lock timing.
+ * @param {boolean} [options.keepExistingBackup] - The caller already saved the
+ *   pre-write tracker. A flag update must not replace that backup.
+ * @param {string} [options.expectedText] - Tracker text the caller just wrote.
+ *   The saved backup is kept only when the locked file still matches it.
  * @param {{log: Function, error: Function}} [options.logger=console]
  * @returns {Promise<number>} The exit code the CLI exits with.
  */
@@ -266,7 +270,17 @@ export async function syncTrackerPdfFlags(options = {}) {
 
     if (updated > 0 && !flags.dryRun) {
       try {
-        transaction.replace(lines.join('\n'));
+        const next = lines.join('\n');
+        // The caller may already have saved the bytes from before its own
+        // write. Trust that backup only while the locked tracker is still the
+        // text the caller wrote. Another writer can replace both after the
+        // caller released the lock, and skipping the backup then would drop
+        // that writer's rows on restore. When this sync is the change, save first.
+        const ownsBackup = options.keepExistingBackup
+          && typeof options.expectedText === 'string'
+          && content === options.expectedText;
+        if (next !== content && !ownsBackup) backupFileAtomically(APPS_FILE);
+        transaction.replace(next);
       } catch (err) {
         transaction.close();
         if (flags.json) console.log(JSON.stringify({ error: `Cannot write tracker: ${err.message}`, code: 'write-failure' }));

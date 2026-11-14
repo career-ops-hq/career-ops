@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Deutsche Bahn provider — single-company (pattern: ibm/dassault/rheinmetall).
 // DB's postings live in an Avature tenant (jobs.deutschebahngroup.careers,
@@ -252,6 +253,7 @@ export default {
           const count = parseResultCount(html);
           if (count !== null && page * ITEMS_PER_PAGE < count) {
             console.warn(`deutschebahn: ${entry.name}: page ${page} came back empty with ${count} postings reported — keeping the ${jobs.length} collected so far`);
+            stopReason = 'source-reports-more';
           }
         }
         break; // past the last page
@@ -284,12 +286,22 @@ export default {
     // max_pages ran out on a full page: warn so a truncated board doesn't
     // pass as complete, unless the reported total shows the walk already
     // covered the whole board.
+    let capCut = false;
     if (stopReason === 'cap') {
       const count = parseResultCount(lastHtml);
       if (count === null || maxPages * ITEMS_PER_PAGE < count) {
         console.warn(`deutschebahn: ${entry.name}: stopped at ${maxPages} pages (${jobs.length} postings); raise max_pages on this entry`);
+        capCut = true;
       }
     }
-    return jobs.slice(0, MAX_JOBS);
+    const result = jobs.slice(0, MAX_JOBS);
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs). The stops
+    // marked are the ones warned about above: a later page that failed, an
+    // empty page inside the reported total, and max_pages cutting a larger
+    // board. A probe never reaches them: its page budget throws first.
+    const partial = stopReason === 'fetch-error' || stopReason === 'source-reports-more' ? stopReason : capCut ? 'page-cap' : null;
+    if (partial && !ctx?.maxPages) markTruncated(result, partial, { fetched: result.length });
+    return result;
   },
 };

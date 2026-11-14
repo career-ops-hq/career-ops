@@ -44,13 +44,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BOARD_ATS,
+  DNS_LABEL_ATS,
+  OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
   REGIONS,
   SLUG_RE,
+  SUBDOMAIN_ATS,
+  SUBDOMAIN_RESERVED_LABELS,
   WORKDAY_HOSTS,
   WORKDAY_INSTANCE_RE,
   WORKDAY_SEGMENT_RE,
   buildBoardUrl,
+  regionsOf,
 } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import {
@@ -88,12 +93,13 @@ export const MANIFEST_KEYS = Object.freeze([
 ]);
 export const RETIRED_REASONS = Object.freeze(['gone', 'owner_request', 'moved', 'duplicate', 'policy']);
 
-// Where a row's pointer came from. A closed list: three fixed values and two
+// Where a row's pointer came from. A closed list: three fixed values and three
 // parameterised forms.
 export const FIXED_SOURCES = Object.freeze(['community', 'ats-directory', 'vc-portfolio']);
 export const SOURCE_PATTERNS = Object.freeze({
   'employer-list': /^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/,
   'prior-mit': /^prior-mit:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$/,
+  'web-index': /^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\d{4}-\d{2}-\d{2}$/,
 });
 
 export const LICENSE_ID = 'CC-BY-4.0';
@@ -124,9 +130,11 @@ const TOP_LEVEL = Object.freeze(['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md
 const OPTIONAL_TOP_LEVEL = Object.freeze(['inbox']);
 const TOP_LEVEL_DIRS = new Set(['contributions', 'boards', 'inbox']);
 
-// ATS whose board id is a subdomain label: their providers only match
-// lowercase hosts, so the id is lowercase letters, digits and hyphens.
-const SUBDOMAIN_ATS = new Set(['recruitee', 'breezy', 'bamboohr', 'pinpoint']);
+// ATS whose board id is a subdomain label (SUBDOMAIN_ATS): their providers
+// only match lowercase hosts, so the id is lowercase letters, digits and
+// hyphens. For DNS_LABEL_ATS it is also at most 63 characters and not one of
+// the vendor's own subdomains (SUBDOMAIN_RESERVED_LABELS).
+const SUBDOMAIN_LABEL_MAX = 63;
 
 // Values that turn up where a board id should be but never name a board:
 // URL path words (Greenhouse's /embed/, Workday's /wday/cxs/) and placeholders.
@@ -175,6 +183,23 @@ export function boardProblem(ats, board) {
 }
 
 /**
+ * Why `region` is not a region of `ats`, or null when it is.
+ * @param {string} ats
+ * @param {unknown} region
+ * @param {string} what  "rows" or "boards", for the message
+ * @returns {string|null}
+ */
+function regionProblem(ats, region, what) {
+  const regions = regionsOf(ats);
+  if (regions.length === 0) {
+    return `region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} ${what}, and on ${Object.keys(OPTIONAL_REGION_BOARD_URL_BUILDERS).join(' and ')} ${what} off the default host`;
+  }
+  if (typeof region === 'string' && regions.includes(region)) return null;
+  const optional = Object.hasOwn(OPTIONAL_REGION_BOARD_URL_BUILDERS, ats) ? '; leave it out for a board on the default host' : '';
+  return `region ${show(region)} is not one of: ${regions.join(', ')}${optional}`;
+}
+
+/**
  * @param {string} ats
  * @param {string} slug
  * @param {string} label
@@ -182,14 +207,16 @@ export function boardProblem(ats, board) {
 function slugProblem(ats, slug, label) {
   if (!SLUG_RE.test(slug)) return `${label} ${show(slug)} has characters outside [A-Za-z0-9._-]`;
   if (slug.length < SLUG_MIN) return `${label} ${show(slug)} is too short to be a board id`;
-  if (slug.length > SEGMENT_MAX) return `${label} is ${slug.length} characters long; the limit is ${SEGMENT_MAX}`;
+  if (slug.length > SEGMENT_MAX && !DNS_LABEL_ATS.includes(ats)) return `${label} is ${slug.length} characters long; the limit is ${SEGMENT_MAX}`;
   if (!/^[A-Za-z0-9]/.test(slug) || !/[A-Za-z0-9]$/.test(slug)) return `${label} ${show(slug)} must start and end with a letter or digit`;
   if (slug.includes('..')) return `${label} ${show(slug)} contains ".."`;
   if (/^[0-9]+$/.test(slug)) return `${label} ${show(slug)} is numeric-only; ${ats} boards are named by a slug, not a number`;
   if (PLACEHOLDER_BOARDS.has(slug.toLowerCase())) return `${label} ${show(slug)} is a placeholder or a URL path word, not a board id`;
-  if (SUBDOMAIN_ATS.has(ats)) {
+  if (SUBDOMAIN_ATS.includes(ats)) {
     if (slug !== slug.toLowerCase()) return `${ats} ${label}s are lowercase (the id is a subdomain): use ${show(slug.toLowerCase())}`;
+    if (DNS_LABEL_ATS.includes(ats) && slug.length > SUBDOMAIN_LABEL_MAX) return `${ats} ${label}s are one subdomain label, at most ${SUBDOMAIN_LABEL_MAX} characters; this one has ${slug.length}`;
     if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug)) return `${ats} ${label}s are one subdomain label: lowercase letters, digits and hyphens`;
+    if (Object.hasOwn(SUBDOMAIN_RESERVED_LABELS, ats) && SUBDOMAIN_RESERVED_LABELS[ats].includes(slug)) return `${label} ${show(slug)} is one of ${ats}'s own subdomains, not a board`;
   }
   if (ats === 'rippling' && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(slug)) return `rippling ${label}s are letters, digits and hyphens`;
   if (ats === 'workable' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `workable ${label}s are letters, digits, "_" and "-"`;
@@ -251,8 +278,11 @@ export function websiteProblem(website) {
 export function sourceProblem(source) {
   if (typeof source !== 'string') return 'source must be a string';
   if (FIXED_SOURCES.includes(source)) return null;
+  if (SOURCE_PATTERNS['web-index'].test(source)) {
+    return isIsoDate(source.slice(source.lastIndexOf('@') + 1)) ? null : `source ${show(source)} does not end in a real calendar date (YYYY-MM-DD)`;
+  }
   if (Object.values(SOURCE_PATTERNS).some((re) => re.test(source))) return null;
-  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>`;
+  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>`;
 }
 
 /** @param {unknown} value */
@@ -526,8 +556,9 @@ export function readInbox(rootDir, report) {
 
 /**
  * Problems with one inbox line: {"ats","board","name"} and, optionally,
- * "website", plus "region" (greenhouse, lever) or "workday_host" (workday) when
- * the board is not on the default host. Empty when the line is valid.
+ * "website", plus "region" (greenhouse, lever, personio, zoho-recruit) or
+ * "workday_host" (workday) when the board is not on the default host. Empty
+ * when the line is valid.
  * @param {any} line
  * @param {Set<string>} [aggregatorDomains]
  * @returns {string[]}
@@ -541,8 +572,8 @@ export function inboxLineProblems(line, aggregatorDomains = loadAggregatorDomain
   const atsOk = typeof line.ats === 'string' && BOARD_ATS.includes(line.ats);
   if (hasOwn(line, 'ats') && !atsOk) out.push(`ats ${show(line.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
   if (atsOk && hasOwn(line, 'region')) {
-    if (!hasOwn(REGIONAL_BOARD_URL_BUILDERS, line.ats)) out.push(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} boards`);
-    else if (!REGIONS.includes(line.region)) out.push(`region ${show(line.region)} is not one of: ${REGIONS.join(', ')}`);
+    const p = regionProblem(line.ats, line.region, 'boards');
+    if (p) out.push(p);
   }
   if (atsOk && hasOwn(line, 'workday_host')) {
     if (line.ats !== 'workday') out.push('workday_host is only used on workday boards');
@@ -760,11 +791,11 @@ export function validateRegistry({
     if (hasOwn(row, 'ats') && !atsOk) e(`ats ${show(row.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
     else if (atsOk && row.ats !== rec.dirAts) e(`ats ${show(row.ats)} is filed under boards/${rec.dirAts}/; a row lives under boards/<its ats>/`);
 
-    if (atsOk && hasOwn(REGIONAL_BOARD_URL_BUILDERS, row.ats)) {
-      if (!hasOwn(row, 'region')) e(`region is required on ${row.ats} rows: ${REGIONS.join(' or ')}`);
-      else if (!REGIONS.includes(row.region)) e(`region ${show(row.region)} is not one of: ${REGIONS.join(', ')}`);
+    if (atsOk && hasOwn(REGIONAL_BOARD_URL_BUILDERS, row.ats) && !hasOwn(row, 'region')) {
+      e(`region is required on ${row.ats} rows: ${REGIONS.join(' or ')}`);
     } else if (atsOk && hasOwn(row, 'region')) {
-      e(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} rows`);
+      const p = regionProblem(row.ats, row.region, 'rows');
+      if (p) e(p);
     }
 
     if (row.ats === 'workday') {

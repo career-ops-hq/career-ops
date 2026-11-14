@@ -15,6 +15,7 @@ import { fetchJsonWithRetry, fetchTextWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { workplaceField } from './_workplace-type.mjs';
+import { isWorkModelOnly } from './greenhouse.mjs';
 
 // verify-portals.mjs probes Ashby boards with it too, so both read the same board.
 export const ASHBY_TIMEOUT_MS = 30_000;
@@ -393,6 +394,27 @@ function containsWholeWord(text, word) {
   return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
 }
 
+/**
+ * Deduplicated individual places from `location` and `secondaryLocations`,
+ * before joining and without any appended "Remote" or work models.
+ * Exported for tests.
+ * @param {any} j
+ * @returns {string[]}
+ */
+export function resolvePlaces(j) {
+  const places = [];
+  const primary = typeof j?.location === 'string' ? j.location.trim() : '';
+  if (primary && !isWorkModelOnly(primary)) places.push(primary);
+  if (Array.isArray(j?.secondaryLocations)) {
+    for (const s of j.secondaryLocations) {
+      if (!s || typeof s !== 'object') continue;
+      const sec = typeof s.location === 'string' ? s.location.trim() : '';
+      if (sec && !isWorkModelOnly(sec) && !places.includes(sec)) places.push(sec);
+    }
+  }
+  return places;
+}
+
 /** @param {any} j */
 function formatLocation(j) {
   const parts = [];
@@ -484,14 +506,16 @@ async function fetchFromEmbed(entry, ctx) {
     // whose locationName is a city would otherwise fail `allow: ["Remote"]`
     // (CodeRabbit, #4298). The embed payload names places `locationName`
     // where the API says `location`; nothing else differs.
-    const location = formatLocation({
+    const locInput = {
       location: p.locationName,
       secondaryLocations: Array.isArray(p.secondaryLocations)
         ? p.secondaryLocations.map((/** @type {any} */ l) => ({ location: l?.locationName }))
         : [],
       workplaceType: p.workplaceType,
       isRemote: p.isRemote,
-    });
+    };
+    const location = formatLocation(locInput);
+    const places = resolvePlaces(locInput);
     // The id comes from the embed payload, so it is host-controlled: a lone
     // surrogate in it would make encodeURIComponent throw and take the whole
     // board down mid-map. Drop that one posting instead (_safe-url.mjs).
@@ -501,6 +525,7 @@ async function fetchFromEmbed(entry, ctx) {
       url: encodedId === null ? '' : `https://${EMBED_HOST}/${encodedSlug}/${encodedId}`,
       company: entry.name,
       location,
+      ...(places.length > 0 ? { locations: places } : {}),
       ...workplaceField(p.workplaceType),
       // The embed payload carries neither descriptionPlain nor publishedAt —
       // the posting API's two extras — and compensation only as a display string
@@ -601,25 +626,29 @@ export default {
     }
     const jobs = json.jobs;
     const boardSlug = new URL(apiUrl).pathname.match(/^\/posting-api\/job-board\/([^/]+)\/?$/)?.[1] || '';
-    return jobs.map(/** @param {any} j */ (j) => ({
-      title: j.title || '',
-      url: j.jobUrl || '',
-      company: entry.name,
-      listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
-        ? { ats_provider: 'ashby', board_slug: boardSlug, posting_id: j.id }
-        : undefined,
-      // Ashby's posting uuid — the only stable id this board API exposes
-      // (no separate employer requisition field), so requisitionId is left unset
-      // rather than guessed at.
-      externalId: coerceId(j.id),
-      location: formatLocation(j),
-      // Ashby's posting-api list ships `descriptionPlain` for free (same
-      // payload, no per-job request) — mirrors lever. Enables scan.mjs's
-      // content_filter / visa_filter.
-      description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',
-      salary: parseCompensation(j),
-      postedAt: toEpochMs(j.publishedAt),
-      ...workplaceField(j.workplaceType),
-    }));
+    return jobs.map(/** @param {any} j */ (j) => {
+      const places = resolvePlaces(j);
+      return {
+        title: j.title || '',
+        url: j.jobUrl || '',
+        company: entry.name,
+        listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
+          ? { ats_provider: 'ashby', board_slug: boardSlug, posting_id: j.id }
+          : undefined,
+        // Ashby's posting uuid — the only stable id this board API exposes
+        // (no separate employer requisition field), so requisitionId is left unset
+        // rather than guessed at.
+        externalId: coerceId(j.id),
+        location: formatLocation(j),
+        ...(places.length > 0 ? { locations: places } : {}),
+        // Ashby's posting-api list ships `descriptionPlain` for free (same
+        // payload, no per-job request) — mirrors lever. Enables scan.mjs's
+        // content_filter / visa_filter.
+        description: typeof j.descriptionPlain === 'string' ? j.descriptionPlain : '',
+        salary: parseCompensation(j),
+        postedAt: toEpochMs(j.publishedAt),
+        ...workplaceField(j.workplaceType),
+      };
+    });
   },
 };

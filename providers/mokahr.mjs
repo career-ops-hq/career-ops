@@ -82,6 +82,7 @@ import { createDecipheriv } from 'crypto';
 import { sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_PATH = '/api/outer/ats-apply/website/jobs/v2';
 // Explicit allowlist, not a `*.mokahr.com` wildcard: hire-r1-ats.mokahr.com is a
@@ -264,7 +265,9 @@ export default {
         } catch (err) {
           if (!succeededOnce) throw err;
           console.error(`  ⚠ mokahr: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
         }
 
         let decrypted;
@@ -276,7 +279,9 @@ export default {
         } catch (err) {
           if (!succeededOnce) throw err;
           console.error(`  ⚠ mokahr: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
         }
 
         succeededOnce = true;
