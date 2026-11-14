@@ -1421,7 +1421,9 @@ function pushSkillTokens(claims, seen, text) {
     const value = normalizeFact(trimmed);
     if (!value || seen.has(value)) continue;
     seen.add(value);
-    claims.push({ kind: 'tool', value, blocking: !plainTitlePhrase(trimmed) });
+    // Classify the normalized claim. A trailing period is not part of the
+    // name ("Distributed Systems."), and the raw token would block on it.
+    claims.push({ kind: 'tool', value, blocking: !plainTitlePhrase(value) });
   }
 }
 

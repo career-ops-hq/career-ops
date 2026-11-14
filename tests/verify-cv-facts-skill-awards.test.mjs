@@ -49,6 +49,13 @@ test('a sourced tool on the skills line passes', () => {
   assert.equal(result.verdict, 'pass', JSON.stringify(result.unsupportedFacts));
 });
 
+test('a plain Title Case phrase with a trailing period warns', () => {
+  const result = verifyFacts(skillLine('Distributed Systems.'), options);
+  assert.equal(result.verdict, 'warn', JSON.stringify(result.unsupportedFacts));
+  assert.equal(result.unsupportedFacts.some((fact) => fact.kind === 'tool'), false);
+  assert.equal(result.advisoryFacts.some((fact) => fact.kind === 'tool' && fact.value === 'distributed systems'), true);
+});
+
 test('a Title Case phrase of plain words warns', () => {
   const result = verifyFacts(skillLine('status notes, Distributed Systems'), options);
   assert.equal(result.verdict, 'warn', JSON.stringify(result));
@@ -81,6 +88,9 @@ test('a digit or a product mark on the skills line still blocks', () => {
   const dotted = verifyFacts(skillLine('Node.js'), options);
   assert.equal(dotted.verdict, 'block');
   assert.equal(dotted.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'node.js'), true);
+  const dottedPeriod = verifyFacts(skillLine('Node.js.'), options);
+  assert.equal(dottedPeriod.verdict, 'block');
+  assert.equal(dottedPeriod.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'node.js'), true);
 });
 
 test('a competency tag the source never names blocks', () => {
