@@ -11,7 +11,12 @@
  *        [--req JR-1234] [--url https://...] [--json]
  *
  * Candidates are ranked strongest first, reusing the repo's own matchers:
- *   1. url / req   exact normalizeUrl() match, or the same requisition ID
+ *   1. url / req   the same posting URL (normalizeUrl(), or another spelling that
+ *                  canonicalJobKey() reads as the same posting: an id it extracts,
+ *                  like a Greenhouse id on another host or a LinkedIn slug URL, or
+ *                  a form it folds on an ATS host, like a Lever `/apply` page;
+ *                  never its generic folds of case, slashes or query), or the
+ *                  same requisition ID
  *                  (REQ_NUMBER_RE via extractReqNumber) at the same or a parent
  *                  company. A bare req ID with an unrelated company never counts.
  *                  IDs are compared after normReq(), so JR9727 == JR-9727 == 9727.
@@ -37,7 +42,7 @@ import {
   resolveTrackerPath, normalizeCompany, companiesMatchIgnoringCorporateForm,
   loadCanonicalStates, resolveCanonicalStateId,
 } from './tracker-utils.mjs';
-import { normalizeUrl } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl } from './url-key.mjs';
 import { titleIdentityKey } from './detect-reposts.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -167,6 +172,17 @@ export function companyRelation(a, b) {
   return null;
 }
 
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
+function samePosting(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes('://')) return true;
+  const na = normalizeUrl(a);
+  const nb = normalizeUrl(b);
+  return Boolean(na && nb) && PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(na).search === new URL(nb).search;
+}
+
 /**
  * Rank tracker rows that could be the same opening as the candidate posting.
  * Pure: takes parsed rows, returns candidates.
@@ -180,7 +196,7 @@ export function findDuplicateCandidates(rows, { company = '', title = '', req = 
   for (const row of rows) {
     const rel = companyRelation(company, row.company);
     let reason = null;
-    if (wantUrl && normalizeUrl(row.url) === wantUrl) {
+    if (wantUrl && (normalizeUrl(row.url) === wantUrl || samePosting(url, row.url))) {
       reason = 'url';
     } else if (wantReq && rel && normReq(extractReqNumber(row.notes)) === wantReq) {
       reason = 'req';
