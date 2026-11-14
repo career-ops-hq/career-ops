@@ -188,6 +188,8 @@ try {
   check('Lead Generation Intern', 'intern');
   check('Lead Generalist', 'senior');
   check('Lead Gene Therapy Scientist', 'senior');
+  check('Lead Gen AI Engineer', 'senior');
+  check('Lead Gen-AI Engineer', 'senior');
 
 } catch (error) {
   fail(`classify-tier.mjs tests could not run: ${error.message}`);
