@@ -306,6 +306,10 @@ export function canonicalJobKey(raw) {
   const smartRecruiters = smartRecruitersJobId(u);
   if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
+  if (u.hostname === "jobs.ashbyhq.com") {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/?$/i, "$1");
+  }
+
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();
     if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
