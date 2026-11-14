@@ -70,7 +70,7 @@ test('an unreachable server exits 1 after the probe, without calling process.exi
   const result = runEval({ preloadBody: 'const answer = () => new Response(\'down\', { status: 503 });' });
   assert.equal(result.status, 1, describeSpawn(result));
   assert.deepEqual(result.requests, ['GET /api/tags']);
-  assert.match(result.stderr, new RegExp(`^\\n❌ {2}Ollama not reachable at ${URL_BASE.replace(/\./g, '\\.')}\\n`));
+  assert.ok(result.stderr.startsWith(`\n❌  Ollama not reachable at ${URL_BASE}\n`), describeSpawn(result));
   assert.doesNotMatch(result.stderr, /process\.exit called/);
 });
 
