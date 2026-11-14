@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
-import { boardTruncation, markTruncated, describeTruncation, partialBoardsNote } from '../lib/board-truncation.mjs';
+import { boardTruncation, markTruncated, describeTruncation, partialBoardsNote, partialRepeatHints } from '../lib/board-truncation.mjs';
 import { computeConsecutiveFailures, computePartialStreaks } from '../scan.mjs';
 import { computePortalStats } from '../stats.mjs';
 
@@ -61,6 +61,20 @@ test('a descriptions-only partial board does not use the unread-postings headlin
   assert.equal(partialBoardsNote([omitted]), 'board(s) returned without some job descriptions');
   assert.equal(partialBoardsNote([capped]), 'board(s) only PARTLY read — postings beyond the cut were not scanned');
   assert.equal(partialBoardsNote([omitted, capped]), 'board(s) only PARTLY read — postings beyond the cut were not scanned');
+});
+
+test('a repeated descriptions-omitted board points at fetchDetails, not max_pages', () => {
+  const omitted = partialRepeatHints(['descriptions-omitted']);
+  assert.equal(omitted.length, 1);
+  assert.match(omitted[0], /greenhouse\.fetchDetails/);
+  assert.doesNotMatch(omitted[0], /max_pages/);
+  const capped = partialRepeatHints(['page-cap']);
+  assert.match(capped[0], /max_pages/);
+  assert.equal(capped.some((line) => /fetchDetails/.test(line)), false);
+  const mixed = partialRepeatHints(['descriptions-omitted', 'page-cap']);
+  assert.equal(mixed.length, 2);
+  assert.match(mixed[0], /fetchDetails/);
+  assert.match(mixed[1], /max_pages/);
 });
 
 test('a partial board is not a dead-board failure; it has its own streak', () => {
