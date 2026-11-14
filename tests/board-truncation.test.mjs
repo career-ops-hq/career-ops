@@ -67,6 +67,8 @@ test('a repeated descriptions-omitted board points at fetchDetails, not max_page
   const omitted = partialRepeatHints(['descriptions-omitted']);
   assert.equal(omitted.length, 1);
   assert.match(omitted[0], /greenhouse\.fetchDetails/);
+  assert.match(omitted[0], /when it is off/);
+  assert.match(omitted[0], /already on/);
   assert.doesNotMatch(omitted[0], /max_pages/);
   const capped = partialRepeatHints(['page-cap']);
   assert.match(capped[0], /max_pages/);
