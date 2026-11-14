@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
+import { boardTruncation, markTruncated } from '../lib/board-truncation.mjs';
 
 // SAP SuccessFactors provider — Recruiting Marketing (RMK, ex-jobs2web) career
 // sites (Career Site Builder's branded job boards). These are the portals big
@@ -426,7 +427,8 @@ async function fetchCsb(entry, cfg, ctx, { probe = false, quiet = false } = {}) 
           if (result.status === 'rejected') {
             firstErr ??= result.reason;
             failed = true;
-            break pages; // this locale failed (e.g. 307 legacy redirect) — try the next
+            // Keep successful siblings from this batch before leaving the locale.
+            continue;
           }
           succeededOnce = true;
           const json = result.value;
@@ -459,6 +461,7 @@ async function fetchCsb(entry, cfg, ctx, { probe = false, quiet = false } = {}) 
           if (total !== null && (batch[i] + 1) * CSB_PAGE_SIZE >= total) break pages;
           if (rawCount < CSB_PAGE_SIZE) break pages;
         }
+        if (failed) break pages;
         page = batch[batch.length - 1] + 1;
       }
       if (failed || total === null || localeIds.size >= total || jobs.length >= maxJobs) break;
@@ -469,6 +472,9 @@ async function fetchCsb(entry, cfg, ctx, { probe = false, quiet = false } = {}) 
   }
   if (truncated.length && !quiet) warnTruncated(entry, truncated.join('; '), 'csb', maxPages, maxJobs);
   if (!probe && !succeededOnce && firstErr) throw firstErr;
+  if (!quiet && firstErr && succeededOnce && (!probe || jobs.length > 0)) {
+    markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+  }
   return jobs;
 }
 
@@ -587,7 +593,11 @@ export default {
       const missing = probed.filter((j) => !have.has(idOf(j)));
       if (failure || missing.length > 0) {
         console.error(`⚠️  successfactors: ${entry.name} full read at the raised limits ${failure ? `failed (${failure.message})` : 'missed a posting the probe found'} — keeping the probed posting; the result may be partial`);
-        return [...full, ...missing];
+        if (missing.length > 0) {
+          full.push(...missing);
+          if (boardTruncation(full)) markTruncated(full, 'fetch-error', { fetched: full.length });
+        }
+        return full;
       }
       return full;
     }
