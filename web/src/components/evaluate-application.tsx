@@ -12,8 +12,8 @@ import { postingHref } from "@/lib/posting-url.mjs";
 export type EvaluationState = { kind: "none" | "partial" | "full" | "missing" | "unreadable"; sections: string[] };
 
 /** Evaluation belongs to a job, independently of its workflow status. */
-export function EvaluateApplication({ n, company, role, url, evaluation = { kind: "none", sections: [] } }: {
-  n: string; company: string; role: string; url: string; evaluation?: EvaluationState;
+export function EvaluateApplication({ n, company, role, url, evaluation = { kind: "none", sections: [] }, compact = false }: {
+  n: string; company: string; role: string; url: string; evaluation?: EvaluationState; compact?: boolean;
 }) {
   const router = useRouter();
   const { jobs, startJob } = useJobs();
@@ -63,11 +63,11 @@ export function EvaluateApplication({ n, company, role, url, evaluation = { kind
     }
   }
 
-  return <div className="mt-1 flex min-w-32 flex-col items-start gap-1">
-    <span className="text-[11px] text-muted">{stateLabel}</span>
+  return <div className={compact ? "mt-1 flex h-5 max-w-32 items-center gap-1 whitespace-nowrap" : "mt-1 flex min-w-32 flex-col items-start gap-1"}>
+    <span title={stateLabel} className={compact ? "min-w-0 truncate text-[11px] text-muted" : "text-[11px] text-muted"}>{stateLabel}</span>
     {running ? <Link href={`/jobs/${running.id}`} className="inline-flex items-center gap-1 text-xs text-brand-text"><Loader2 className="size-3 animate-spin" /> Evaluating…</Link> :
-      <button type="button" onClick={open} className="inline-flex items-center gap-1 rounded-full border border-brand/30 px-2.5 py-1 text-xs text-brand-text hover:bg-brand-soft max-sm:min-h-11"><Sparkles className="size-3" />{label}</button>}
-    {!running && previous?.status === "error" && <Link href={`/jobs/${previous.id}`} className="text-xs text-rose-600 dark:text-rose-400">Evaluation failed · view details</Link>}
+      <button type="button" onClick={open} title={compact ? label : undefined} className={compact ? "inline-flex shrink-0 items-center rounded-full border border-brand/30 p-1 text-brand-text hover:bg-brand-soft" : "inline-flex items-center gap-1 rounded-full border border-brand/30 px-2.5 py-1 text-xs text-brand-text hover:bg-brand-soft max-sm:min-h-11"}><Sparkles aria-hidden="true" className="size-3" /><span className={compact ? "sr-only" : undefined}>{label}</span></button>}
+    {!running && previous?.status === "error" && <Link href={`/jobs/${previous.id}`} className="text-xs text-rose-600 dark:text-rose-400">{compact ? "Failed" : "Evaluation failed · view details"}</Link>}
     <dialog ref={dialog} aria-labelledby={`${id}-title`} className="fixed inset-0 m-auto max-h-[85vh] w-[90vw] max-w-2xl overflow-y-auto rounded-2xl border border-border bg-background p-5 text-foreground shadow-2xl backdrop:bg-black/50">
       <form onSubmit={run} className="space-y-4">
         <h2 id={`${id}-title`} className="text-lg font-semibold">{label}</h2>

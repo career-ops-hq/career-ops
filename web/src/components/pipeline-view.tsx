@@ -968,7 +968,7 @@ export function PipelineView({
             aria-label="Tracked applications"
             style={{ overflowAnchor: "none" }}
             aria-rowcount={filtered.length + 1}
-            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[26%] min-[1440px]:[&_th:nth-child(4)]:w-[32%] min-[1440px]:[&_th:nth-child(5)]:w-[5.5rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
+            className="w-full min-w-[44rem] text-sm min-[1440px]:table-fixed min-[1440px]:[&_th:nth-child(1)]:w-11 min-[1440px]:[&_th:nth-child(2)]:w-[4.5rem] min-[1440px]:[&_th:nth-child(3)]:w-[24%] min-[1440px]:[&_th:nth-child(4)]:w-[28%] min-[1440px]:[&_th:nth-child(5)]:w-[10rem] min-[1440px]:[&_th:nth-child(6)]:w-[14rem] min-[1440px]:[&_th:nth-child(7)]:w-[6.75rem] min-[1440px]:[&_th:nth-child(8)]:w-[4.75rem]"
           >
             <thead className="bg-surface/60 text-left text-xs uppercase tracking-wide text-faint">
               <tr aria-rowindex={1}>
@@ -1158,7 +1158,7 @@ const TrackerRow = memo(function TrackerRow({
       </td>
       <td className="px-4 py-3">
         <Badge tone={scoreTone(r.score)}>{r.score || "—"}</Badge>
-        <EvaluateApplication n={r.n} company={r.company} role={r.role} url={postingHref(r.url) || postingHref(r.applyLink)} evaluation={r.evaluation} />
+        <EvaluateApplication compact n={r.n} company={r.company} role={r.role} url={postingHref(r.url) || postingHref(r.applyLink)} evaluation={r.evaluation} />
       </td>
       <td className="whitespace-nowrap px-4 py-3 text-muted">
         <StatusSelect
