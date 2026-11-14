@@ -38,6 +38,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const skipChain = useRef(new Map<string, Promise<void>>());
   const undoRunning = useRef(new Set<UndoNotice["fn"]>());
   const restoreRunning = useRef(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   // facets
   const [within, setWithin] = useState<number | null>(null);
@@ -175,10 +176,9 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   })), sortMode), [filtered, sortMode]);
 
   const anyFacet = within != null || sources.size > 0 || seniorities.size > 0 || locQ.trim() !== "" || kw.trim() !== "";
-  // Keep the batch cap with filters on too: filters sit under the list, so an
-  // uncapped match set pushes what the filter did off screen.
+  // Keep filtered results capped too; select-all follows the rows on screen.
   const capped = !showAll;
-  const visible = capped ? ordered.slice(0, BATCH) : ordered;
+  const visible = useMemo(() => capped ? ordered.slice(0, BATCH) : ordered, [capped, ordered]);
   const hiddenCount = hidden.length;
   const listTopRef = useRef<HTMLDivElement>(null);
 
@@ -198,6 +198,21 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     if (cursor < 0) return;
     document.querySelector(`[data-triage-index="${cursor}"]`)?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
+
+  const selectable = useMemo(() => visible.filter(({ job }) => !inboxScoreTarget(scoreByUrl.get(job.url)).evaluated), [visible, scoreByUrl]);
+  const allShownSelected = selectable.length > 0 && selectable.every(({ job }) => selected.has(job.url));
+  const someShownSelected = selectable.some(({ job }) => selected.has(job.url));
+  useEffect(() => {
+    if (selectAllRef.current) selectAllRef.current.indeterminate = someShownSelected && !allShownSelected;
+  }, [allShownSelected, someShownSelected]);
+  // Selection follows the shown, scoreable rows when filters or workers change.
+  useEffect(() => {
+    const eligible = new Set(selectable.map(({ job }) => job.url));
+    setSelected(current => {
+      const next = new Set([...current].filter(url => eligible.has(url)));
+      return next.size === current.size ? current : next;
+    });
+  }, [selectable]);
 
   const isShortlisted = (url: string) => shortlist.some((s) => s.url === url);
 
@@ -267,9 +282,12 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     });
   const saveSelected = () => {
     const add = enriched
-      .filter((e) => selected.has(e.job.url) && !isShortlisted(e.job.url))
-      .map((e) => ({ url: e.job.url, company: e.job.company, role: e.job.role }));
-    if (add.length) setShortlist((s) => [...s, ...add]);
+      .filter(({ job }) => selected.has(job.url) && !inboxScoreTarget(scoreByUrl.get(job.url)).evaluated)
+      .map(({ job }) => ({ url: job.url, company: job.company, role: job.role }));
+    setShortlist(current => {
+      const saved = new Set(current.map(item => item.url));
+      return [...current, ...add.filter(item => { if (saved.has(item.url)) return false; saved.add(item.url); return true; })];
+    });
     setSelected(new Set());
   };
   const skipUrls = (jobs: InboxJob[], label: string) => {
@@ -393,10 +411,16 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
       {/* Keep recovery mounted when the last Skip refreshes to an empty inbox. */}
       <div hidden={inbox.length === 0}>
       {/* batch header: fresh/filtered slice by default; "See all" lifts the cap */}
-      <div ref={listTopRef} className="mt-4 flex items-baseline justify-between gap-3">
+      <div ref={listTopRef} className="mt-4 flex flex-wrap items-baseline justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <label className="inline-flex min-h-9 cursor-pointer items-center gap-2 text-xs text-muted max-sm:min-h-11">
+            <input ref={selectAllRef} type="checkbox" aria-label="Select all shown jobs" checked={allShownSelected} disabled={!loaded || selectable.length === 0} onChange={() => setSelected(allShownSelected ? new Set() : new Set(selectable.map(({ job }) => job.url)))} className="size-4 accent-brand disabled:opacity-50" />
+            Select all shown <span className="text-faint tabular-nums">({selectable.length})</span>
+          </label>
         <p className="text-sm font-medium text-foreground">
           {anyFacet ? `${filtered.length} match${filtered.length === 1 ? "" : "es"}` : capped ? (sortMode === "newest" ? "Fresh — worth a look" : "Best fits") : "All roles"}
         </p>
+        </div>
         <div className="flex items-center gap-3">
           <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
             <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
