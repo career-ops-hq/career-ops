@@ -70,7 +70,10 @@ const HARD_EXPIRED_PATTERNS = [
   // on the subject "the job you are looking for" plus a closed verb, so prose
   // that merely contains the word "closed" never matches.
   /\bthe job you(?:'re| are) (?:looking|searching) for (?:may |might |could )?(?:have |has )?closed\b/i,
-  /applications?\s+(?:(?:have|are|is)\s+)?closed/i,
+  // A trailing "?" makes it a question, not a statement about this posting:
+  // Phenom career sites (Truist) put "Applications closed? Don't see what you're
+  // looking for?" on every search page, so the question form is boilerplate.
+  /applications?\s+(?:(?:have|are|is)\s+)?closed(?!\s*\?)/i,
   // "Was closed on 15 December" is a closure. "Will be closed on", "is to be
   // closed on" and "may be closed on" give a date still ahead, on a posting
   // that is open until then.
