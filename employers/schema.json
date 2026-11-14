@@ -10,14 +10,14 @@
       "properties": {
         "ats": {
           "description": "The ATS that hosts the board.",
-          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "workday"]
+          "enum": ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "rippling", "join", "recruitee", "breezy", "bamboohr", "pinpoint", "applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit", "workday"]
         },
         "region": {
-          "description": "Greenhouse and Lever only: the region the board is hosted in.",
-          "enum": ["us", "eu"]
+          "description": "The region or host the board is on. Greenhouse and Lever: us or eu, always. Personio: com for <id>.jobs.personio.com, absent for <id>.jobs.personio.de. Zoho Recruit: the data-centre domain when it is not zohorecruit.com (au: .com.au, ca, cn: .com.cn, eu, in, jp, sa).",
+          "enum": ["us", "eu", "com", "au", "ca", "cn", "in", "jp", "sa"]
         },
         "board": {
-          "description": "The board id. Workday: tenant/wdN/site. Ashby and the Workday site keep their case; recruitee, breezy, bamboohr and pinpoint are lowercase.",
+          "description": "The board id. Workday: tenant/wdN/site. Ashby and the Workday site keep their case; the ATS whose board is a subdomain (recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit) are lowercase; all but the first four (recruitee, breezy, bamboohr, pinpoint) are one DNS label of at most 63 characters; those four are not limited yet.",
           "type": "string",
           "minLength": 2,
           "maxLength": 200
@@ -77,8 +77,17 @@
       "allOf": [
         {
           "if": { "properties": { "ats": { "enum": ["greenhouse", "lever"] } }, "required": ["ats"] },
-          "then": { "required": ["region"] },
-          "else": { "not": { "required": ["region"] } }
+          "then": { "required": ["region"], "properties": { "region": { "enum": ["us", "eu"] } } },
+          "else": {
+            "if": { "properties": { "ats": { "enum": ["personio", "zoho-recruit"] } }, "required": ["ats"] },
+            "then": {
+              "allOf": [
+                { "if": { "properties": { "ats": { "const": "personio" } } }, "then": { "properties": { "region": { "enum": ["com"] } } } },
+                { "if": { "properties": { "ats": { "const": "zoho-recruit" } } }, "then": { "properties": { "region": { "enum": ["au", "ca", "cn", "eu", "in", "jp", "sa"] } } } }
+              ]
+            },
+            "else": { "not": { "required": ["region"] } }
+          }
         },
         {
           "if": { "properties": { "ats": { "const": "workday" } }, "required": ["ats"] },
@@ -92,7 +101,11 @@
           }
         },
         { "if": { "required": ["retired"] }, "then": { "required": ["retired_reason"] } },
-        { "if": { "required": ["retired_reason"] }, "then": { "required": ["retired"] } }
+        { "if": { "required": ["retired_reason"] }, "then": { "required": ["retired"] } },
+        {
+          "if": { "properties": { "ats": { "enum": ["applicantpro", "hibob", "hirehive", "homerun", "jazzhr", "keka", "personio", "prevueaps", "schoolspring", "taleez", "teamtailor", "trakstar", "turbohire", "zoho-recruit"] } }, "required": ["ats"] },
+          "then": { "properties": { "board": { "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$" } } }
+        }
       ]
     },
     "manifest": {

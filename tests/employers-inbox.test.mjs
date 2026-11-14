@@ -98,6 +98,12 @@ test('an inbox line builds its careers URL with the default hosts', () => {
   assert.equal(inboxCareersUrl(NEW[1]), 'https://jobs.eu.lever.co/eurocorp');
   assert.equal(inboxCareersUrl(NEW[3]), 'https://acmeco.wd3.myworkdayjobs.com/Careers');
   assert.equal(inboxCareersUrl(NEW[4]), 'https://wd1.myworkdaysite.com/recruiting/bigco/External');
+  // Zoho Recruit has no default region: without one the board is on zohorecruit.com, and the row has none either.
+  const zoho = { ats: 'zoho-recruit', board: 'acme', name: 'Acme' };
+  assert.equal(inboxCareersUrl(zoho), 'https://acme.zohorecruit.com/jobs/Careers');
+  assert.equal(inboxCareersUrl({ ...zoho, region: 'jp' }), 'https://acme.zohorecruit.jp/jobs/Careers');
+  assert.ok(!('region' in inboxLineToRow(zoho, { source: 'community', contribution: '2026-11-10-octocat', added: DATE })));
+  assert.equal(inboxLineToRow({ ...zoho, region: 'jp' }, { source: 'community', contribution: '2026-11-10-octocat', added: DATE }).region, 'jp');
 });
 
 test('inboxLineToRow writes a full registry row, keys in the registry order', () => {
@@ -125,6 +131,10 @@ test('inboxLineProblems: the short format and nothing else', () => {
     [{ ats: 'workday', board: 'acme', name: 'Acme' }, /workday board is "tenant\/wdN\/site"/],
     [{ ats: 'greenhouse', board: 'jobs', name: 'Acme' }, /placeholder/],
     [{ ats: 'recruitee', board: 'Acme', name: 'Acme' }, /lowercase/],
+    [{ ats: 'teamtailor', board: 'Acme', name: 'Acme' }, /teamtailor boards are lowercase/],
+    [{ ats: 'personio', board: 'acme.gmbh', name: 'Acme' }, /one subdomain label/],
+    [{ ats: 'zoho-recruit', region: 'us', board: 'acme', name: 'Acme' }, /region "us" is not one of: au, ca, cn, eu, in, jp, sa; leave it out/],
+    [{ ats: 'homerun', board: 'feed', name: 'Acme' }, /"feed" is one of homerun's own subdomains/],
     [{ ats: 'ashby', board: 'acme', name: 'Jane jane@example.com' }, /email address/],
     [{ ats: 'ashby', board: 'acme', name: 'Acme +34 600 123 456' }, /phone number/],
     [{ ats: 'ashby', board: 'acme', name: 'Acme', website: 'https://acme.example' }, /bare domain/],

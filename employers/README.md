@@ -26,9 +26,9 @@ One JSON object per line in `boards/<ats>/<initial>.ndjson`:
 
 | Field | Required | Rule |
 |---|---|---|
-| `ats` | yes | One of `greenhouse`, `ashby`, `lever`, `workable`, `smartrecruiters`, `rippling`, `join`, `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `workday`. |
-| `region` | greenhouse and lever only | `us` or `eu`. An EU board (`job-boards.eu.greenhouse.io`, `jobs.eu.lever.co`) is a different board from a US one with the same id. Absent on every other ATS. |
-| `board` | yes | The board id, as it appears in the board's URL. Ashby ids keep their case (`AlephAlpha`, `DeepL`). `recruitee`, `breezy`, `bamboohr` and `pinpoint` ids are lowercase, because they are subdomains. Workday: `tenant/wdN/site`, with the site in the case of the careers page's canonical link (`<link rel="canonical">`), for example `nvidia/wd5/NVIDIAExternalCareerSite`. Numeric-only ids, placeholders and characters outside `A-Z a-z 0-9 . _ -` are rejected. |
+| `ats` | yes | One of `greenhouse`, `ashby`, `lever`, `workable`, `smartrecruiters`, `rippling`, `join`, `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob`, `hirehive`, `homerun`, `jazzhr`, `keka`, `personio`, `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar`, `turbohire`, `zoho-recruit`, `workday`. |
+| `region` | greenhouse and lever; personio and zoho-recruit off their default host | Greenhouse and Lever: `us` or `eu`, always. An EU board (`job-boards.eu.greenhouse.io`, `jobs.eu.lever.co`) is a different board from a US one with the same id. Personio: absent for a board on `<id>.jobs.personio.de`, `com` for one on `<id>.jobs.personio.com`; the two are different boards. Zoho Recruit: absent for a board on `zohorecruit.com`, otherwise its data-centre domain: `au` (`zohorecruit.com.au`), `ca`, `cn` (`zohorecruit.com.cn`), `eu`, `in`, `jp` or `sa`. Absent on every other ATS. |
+| `board` | yes | The board id, as it appears in the board's URL. Ashby ids keep their case (`AlephAlpha`, `DeepL`). Where the board is the company's subdomain on the ATS's host, the id is that one label, lowercase: `recruitee`, `breezy`, `bamboohr`, `pinpoint`, `applicantpro`, `hibob` (`<id>.careers.hibob.com`), `hirehive`, `homerun`, `jazzhr` (`<id>.applytojob.com`), `keka`, `personio` (`<id>.jobs.personio.de` or `.com`, see `region`), `prevueaps`, `schoolspring`, `taleez`, `teamtailor`, `trakstar` (`<id>.hire.trakstar.com`), `turbohire` and `zoho-recruit` (`<id>.zohorecruit.com`); all but the first four (`recruitee`, `breezy`, `bamboohr`, `pinpoint`) are one DNS label of at most 63 characters; those four are not limited yet. The subdomains an ATS keeps for itself, as its provider in `providers/` lists them (`www`, `api` and the like), are not board ids. Workday: `tenant/wdN/site`, with the site in the case of the careers page's canonical link (`<link rel="canonical">`), for example `nvidia/wd5/NVIDIAExternalCareerSite`. Numeric-only ids, placeholders and characters outside `A-Z a-z 0-9 . _ -` are rejected. |
 | `workday_host` | workday only | `jobs` for `https://<tenant>.<wdN>.myworkdayjobs.com/<site>`, `site` for `https://<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>`. |
 | `careers_url` | yes | The canonical board URL. It must be exactly the URL built from `ats`, `region`, `board` and `workday_host` (`buildBoardUrl` in `lib/ats-board-url.mjs`, the same function the ATS discovery uses). It is the registry's unique key. |
 | `name` | yes | The employer's name, up to 80 characters. No URL, email address, phone number or @handle. |
@@ -94,7 +94,7 @@ One board per line, one JSON object per line:
 | `board` | yes | The board id, as in [the row table](#a-row). Workday: `tenant/wdN/site`. |
 | `name` | yes | The employer's name, up to 80 characters. No URL, email address, phone number or @handle. |
 | `website` | no | The employer's registrable domain (`example.com`). |
-| `region` | no | Greenhouse and Lever only: `eu` for a board on `job-boards.eu.greenhouse.io` or `jobs.eu.lever.co`. Without it, the board is on the US host. |
+| `region` | no | Greenhouse and Lever: `eu` for a board on `job-boards.eu.greenhouse.io` or `jobs.eu.lever.co`. Without it, the board is on the US host. Personio: `com` for a board on `<id>.jobs.personio.com`. Zoho Recruit: the data-centre domain, as in [the row table](#a-row). Without it, a Personio board is on `.jobs.personio.de` and a Zoho Recruit board on `zohorecruit.com`. |
 | `workday_host` | no | Workday only: `site` for a board on `<wdN>.myworkdaysite.com/recruiting/<tenant>/<site>`. Without it, the board is on `<tenant>.<wdN>.myworkdayjobs.com/<site>`. |
 
 Any other key is an error. Each board appears once in the inbox. A board
@@ -121,8 +121,12 @@ node seeds/employers-validate.mjs
 The list is a CSV with a `url` column (and optionally `name` and `website`),
 or plain text with one board URL per line. The importer reads each URL back
 to its ATS and board, writes the canonical form, and splits the result into
-files of 5,000. A URL it does not recognise, a duplicate, or a line with an
-invalid name or website goes to `boards.csv.rejected.csv` with the reason,
+files of 5,000. For an ATS whose board is a subdomain, it reads any URL on
+the board's host (the board, a posting), and also `<id>.recruiterbox.com`
+(Trakstar), `feed.homerun.co/<id>` (Homerun) and
+`www.applicantpro.com/openings/<id>/…` (ApplicantPro). A URL it does not
+recognise, a duplicate, or a line with an invalid name or website goes to
+`boards.csv.rejected.csv` with the reason,
 and never into the inbox. Without a name column, it makes each name from the
 board id: check those names before you open the pull request. It makes no
 network request.
@@ -153,6 +157,8 @@ What does not get in:
 
 - boards on an ATS outside the list above (more ATS will follow, each with its
   own board format);
+- a board on the employer's own domain, even when an ATS in the list serves
+  it: a row points at the board's address on the ATS's host;
 - job aggregators and reposting sites (`data-static/aggregator-domains.txt`);
 - lists taken from sites that need a login, or from LinkedIn or Indeed, even
   as hints;
