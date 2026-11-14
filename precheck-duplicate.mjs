@@ -11,11 +11,11 @@
  *        [--req JR-1234] [--url https://...] [--json]
  *
  * Candidates are ranked strongest first, reusing the repo's own matchers:
- *   1. url / req   the same posting URL (normalizeUrl(), or the posting id that
- *                  canonicalJobKey() extracts, so a Greenhouse id on another host or
- *                  a LinkedIn slug URL still matches; never its URL-shaped key,
- *                  which lowercases a path that may be case-sensitive), or the
- *                  same requisition ID
+ *   1. url / req   the same posting URL (normalizeUrl(), or another spelling that
+ *                  canonicalJobKey() reads as the same posting: an id it extracts,
+ *                  like a Greenhouse id on another host or a LinkedIn slug URL, or
+ *                  an ATS form like a Lever `/apply` page; never letter case alone
+ *                  or a query it drops), or the same requisition ID
  *                  (REQ_NUMBER_RE via extractReqNumber) at the same or a parent
  *                  company. A bare req ID with an unrelated company never counts.
  *                  IDs are compared after normReq(), so JR9727 == JR-9727 == 9727.
@@ -171,14 +171,21 @@ export function companyRelation(a, b) {
   return null;
 }
 
+function samePosting(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes('://')) return true;
+  const na = normalizeUrl(a);
+  const nb = normalizeUrl(b);
+  return Boolean(na && nb) && new URL(na).search === new URL(nb).search && na.toLowerCase() !== nb.toLowerCase();
+}
+
 /**
  * Rank tracker rows that could be the same opening as the candidate posting.
  * Pure: takes parsed rows, returns candidates.
  */
 export function findDuplicateCandidates(rows, { company = '', title = '', req = '', url = '' } = {}) {
   const wantUrl = normalizeUrl(url);
-  const wantJob = canonicalJobKey(url);
-  const wantId = wantJob.includes('://') ? '' : wantJob;
   const wantReq = normReq(req);
   const cleanTitle = stripLocationSuffix(title);
   const wantTitleKey = cleanTitle ? titleIdentityKey(cleanTitle) : '';
@@ -186,7 +193,7 @@ export function findDuplicateCandidates(rows, { company = '', title = '', req = 
   for (const row of rows) {
     const rel = companyRelation(company, row.company);
     let reason = null;
-    if (wantUrl && (normalizeUrl(row.url) === wantUrl || (wantId && canonicalJobKey(row.url) === wantId))) {
+    if (wantUrl && (normalizeUrl(row.url) === wantUrl || samePosting(url, row.url))) {
       reason = 'url';
     } else if (wantReq && rel && normReq(extractReqNumber(row.notes)) === wantReq) {
       reason = 'req';

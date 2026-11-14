@@ -48,6 +48,8 @@ try {
     { num: 5, date: '2026-04-01', company: 'Acme', role: 'Data Engineer', status: 'Applied', notes: '', url: 'https://boards.greenhouse.io/acme/jobs/4001' },
     { num: 6, date: '2026-04-02', company: 'Globex', role: 'Product Manager', status: 'Applied', notes: '', url: 'https://www.linkedin.com/jobs/view/4100000001' },
     { num: 7, date: '2026-04-03', company: 'Initech', role: 'Analyst', status: 'Applied', notes: '', url: 'https://jobs.example.test/openings/AbC' },
+    { num: 8, date: '2026-04-04', company: 'Hooli', role: 'Designer', status: 'Applied', notes: '', url: 'https://jobs.lever.co/hooli/5ac21346-8e0c-4494-8e7a-3eb92ff77902' },
+    { num: 9, date: '2026-04-05', company: 'Vandelay', role: 'Buyer', status: 'Applied', notes: '', url: 'https://careers.vandelay.example/job?ref=1' },
   ];
   const urlHits = (url) => findDuplicateCandidates(spelled, { url }).map((c) => `${c.num}:${c.reason}`).join(',');
   const hits = [
@@ -57,8 +59,10 @@ try {
     urlHits('https://job-boards.greenhouse.io/acme/jobs/4002'),
     urlHits('https://www.linkedin.com/jobs/view/4100000002'),
     urlHits('https://jobs.example.test/openings/abc'),
+    urlHits('https://jobs.lever.co/hooli/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply'),
+    urlHits('https://careers.vandelay.example/job?ref=2'),
   ];
-  if (hits.join('|') === '5:url|5:url|6:url|||') pass('another spelling of the same posting is a URL match; another id, or a path in another case, is not');
+  if (hits.join('|') === '5:url|5:url|6:url||||8:url|') pass('another spelling of the same posting is a URL match; another id, a path in another case or another ?ref= is not');
   else fail(`same-posting spellings: ${JSON.stringify(hits)}`);
 
   // 2. Repost under a new title but the same requisition ID.
