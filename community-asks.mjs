@@ -5,7 +5,7 @@
  *
  * career-ops never phones home, so the only signals the maintainers get are
  * the ones people choose to give. It asks for them in words, rarely, and at
- * the right moment (AGENTS.md → "Community asks"):
+ * the right moment (modes/_community-asks.md):
  *
  *   star       after the first saved evaluation report
  *   manifesto  after five reports, at least seven days after the star ask

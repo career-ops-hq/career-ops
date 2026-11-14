@@ -9,7 +9,13 @@ Run `node update-system.mjs check --force` and parse the JSON output. `--force` 
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop. If the JSON carries a `detail` field, show it verbatim after that sentence: it is a fixed-English diagnostic naming what failed (for example `ENOENT` when curl is not installed, or a proxy or TLS error), and that is what the user needs to fix it.
 - If `no-remote-version`: Tell the user "Couldn't determine the latest career-ops release right now. Try again later." and stop.
+- If `managed-by-plugin`: career-ops runs as a Claude Code plugin, and `apply` and `rollback` refuse. Tell the user that Claude updates the plugin: from the career-ops entry under `/plugin` → **Installed** (**Update now**), or, for a plugin added in Claude desktop, with **Check for updates** under **Customize → Plugins**. Stop.
+- If `worktree-without-main`: this is a linked git worktree, and an update installs in the checkout that has `main` checked out, which `update-system.mjs` could not find. Tell the user and stop.
 - If `update-available`: Continue to Step 2.
+
+From a linked git worktree, `check`, `apply` and `rollback` run in the checkout that has `main` checked out, so the update lands on `main`. After an update applied that way, suggest `git merge main` in the worktree.
+
+**Installing the latest `main` instead of the release (checkout only; a plugin install refuses).** `check` reports a release only, never commits merged to `main` between releases. When the user asks for the latest `main`, run `node update-system.mjs apply --channel main --confirm`. That is a one-off: the choice is not saved, and the session-start check still looks only at releases, so staying on `main` means running `node update-system.mjs check --channel main` and that `apply` again.
 
 ## Step 2 — Show What Changed
 
@@ -123,7 +129,7 @@ If the user says "rollback" or runs `/career-ops update rollback`:
 - Exception: `modes/_profile.md` may be edited **only** in Step 4.7, and **only** after the user explicitly confirms each individual rename/removal. Never batch-edit without per-change consent.
 - User-specific customizations (archetypes, scoring weights, narrative) belong in `modes/_profile.md` or `config/profile.yml`, never in `modes/_shared.md`
 - CLAUDE.md's local additions (everything after the two-line `@AGENTS.md` header) MUST be saved before apply and checked immediately after — on both the success AND failure path (Step 4.2, Step 4.4). Restore them only when they are no longer in CLAUDE.md. `apply` keeps a CLAUDE.md this install changed unless `--force` is given, and appending the saved content to a file that still has it duplicates the additions on every update.
-- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `AGENTS.md` → "Celebrating a hire (the Hired Wall)".
+- After a successful apply, `node hired-share.mjs --status` may report a hire that was never asked about, or one marked "later" more than 30 days ago. That earns **at most ONE** gentle mention of the Hired Wall, then the answer is respected — never a scheduled reminder. Cadence and wording: `modes/_community-asks.md` → "Celebrating a hire (the Hired Wall)".
 - Never trim the staged-but-uncommitted notice or its recovery commands (Step 4.8).
 - If anything goes wrong, tell the user to run `node update-system.mjs rollback`
 - Keep the output concise — users don't want walls of text during an update

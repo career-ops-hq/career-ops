@@ -177,7 +177,7 @@ if (existsSync(PATHS.profileYml)) {
     const rawModesDir = profile && profile.language && profile.language.modes_dir;
     if (rawModesDir) {
       const candidates = Array.isArray(rawModesDir) ? rawModesDir : [rawModesDir];
-      // AGENTS.md "Output Language vs Market Modes": the FIRST declared entry
+      // modes/_markets.md "Multiple simultaneous target markets": the FIRST declared entry
       // is always primary. Resolve IT first, before touching the rest — an
       // unusable primary falls back to the DEFAULT evaluation mode, and must
       // NEVER silently promote a later declared market into the primary slot
@@ -406,7 +406,7 @@ const ofertaPrompt = resolvedOfertaRel === CANONICAL_OFERTA_REL
 // agent has all declared candidates' vocabulary/legal-concept context, not just
 // the primary one. It must pick per-JD by market signal (hiring-entity
 // jurisdiction, currency, benefits/legal vocabulary), never by JD language alone
-// — see AGENTS.md "Output Language vs Market Modes".
+// — see modes/_markets.md "Multiple simultaneous target markets".
 for (const extraDir of extraModesDirs) {
   const extraLabel = join(extraDir, '_shared.md').replace(/\\/g, '/');
   const extraContent = readFile(join(CODE_ROOT, extraDir, '_shared.md'), extraLabel);

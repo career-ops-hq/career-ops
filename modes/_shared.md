@@ -55,7 +55,7 @@ All User Layer files (such as `cv.md`, `config/profile.yml`, `modes/_profile.md`
 
 **Resolution:** Read `spend_tier` from `config/profile.yml`. If the key is absent, default to `standard` (back-compat for existing profiles). Any value other than the three below is treated as invalid -- fall back to `standard` and note the issue to the user once.
 
-**Tier -> model mapping (the only place model/provider names appear in this logic, one row per CLI -- see the Headless / Batch Mode table in `AGENTS.md` for the canonical CLI list):**
+**Tier -> model mapping (the only place model/provider names appear in this logic, one row per CLI -- see the headless command table in `modes/_headless.md` for the canonical CLI list):**
 
 | CLI | economy | standard | premium | Extended thinking |
 |-----|---------|----------|---------|--------------------|
@@ -271,7 +271,7 @@ After detecting archetype, read `modes/_profile.md` for the user's specific fram
 7. Be direct and actionable -- no fluff
 8. Native tech English for generated text. Short sentences, action verbs, no passive voice.
 8b. Case study URLs in PDF Professional Summary (recruiter may only read this).
-9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `{DATA_ROOT}/batch/tracker-additions/`: a header row of column labels, then one data row (see AGENTS.md, "TSV Format for Tracker Additions"). The header is what lets `merge-tracker.mjs` resolve fields by name instead of guessing which column is score and which is status.
+9. **Tracker additions as TSV** -- NEVER edit applications.md directly. Write TSV in `{DATA_ROOT}/batch/tracker-additions/`: a header row of column labels, then one data row (read `modes/_tracker-tsv.md` before writing one). The header is what lets `merge-tracker.mjs` resolve fields by name instead of guessing which column is score and which is status.
 10. **Include `**URL:**` in every report header.**
 
 ### Tools
