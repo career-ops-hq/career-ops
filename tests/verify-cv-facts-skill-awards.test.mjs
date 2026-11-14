@@ -49,6 +49,40 @@ test('a sourced tool on the skills line passes', () => {
   assert.equal(result.verdict, 'pass', JSON.stringify(result.unsupportedFacts));
 });
 
+test('a Title Case phrase of plain words warns', () => {
+  const result = verifyFacts(skillLine('status notes, Distributed Systems'), options);
+  assert.equal(result.verdict, 'warn', JSON.stringify(result));
+  assert.deepEqual(result.unsupportedFacts, []);
+  assert.equal(result.advisoryFacts.some((fact) => fact.kind === 'tool' && fact.value === 'distributed systems'), true);
+});
+
+test('the same Title Case phrase passes when the source names it', () => {
+  const backed = join(tmp, 'cv-phrase.md');
+  writeFileSync(backed, `${readSource()}\nDistributed Systems\n`);
+  const named = verifyFacts(skillLine('Distributed Systems'), { ...options, sourcePaths: [backed] });
+  assert.equal(named.verdict, 'pass', JSON.stringify(named));
+  const mixed = verifyFacts(skillLine('Distributed Systems, Latency Tuning'), { ...options, sourcePaths: [backed] });
+  assert.equal(mixed.verdict, 'warn', JSON.stringify(mixed.unsupportedFacts));
+  assert.equal(mixed.advisoryFacts.some((fact) => fact.value === 'distributed systems'), false);
+  assert.equal(mixed.advisoryFacts.some((fact) => fact.value === 'latency tuning'), true);
+});
+
+test('a competency tag that is a plain Title Case phrase warns', () => {
+  const result = verifyFacts('<span class="competency-tag">Distributed Systems</span>', options);
+  assert.equal(result.verdict, 'warn');
+  assert.equal(result.unsupportedFacts.length, 0);
+  assert.equal(result.advisoryFacts.some((fact) => fact.kind === 'tool' && fact.value === 'distributed systems'), true);
+});
+
+test('a digit or a product mark on the skills line still blocks', () => {
+  const versioned = verifyFacts(skillLine('GPT-4'), options);
+  assert.equal(versioned.verdict, 'block');
+  assert.equal(versioned.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'gpt-4'), true);
+  const dotted = verifyFacts(skillLine('Node.js'), options);
+  assert.equal(dotted.verdict, 'block');
+  assert.equal(dotted.unsupportedFacts.some((fact) => fact.kind === 'tool' && fact.value === 'node.js'), true);
+});
+
 test('a competency tag the source never names blocks', () => {
   const result = verifyFacts('<span class="competency-tag">Kubernetes</span>', options);
   assert.equal(result.verdict, 'block');

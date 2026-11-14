@@ -714,6 +714,17 @@ function looksToolShaped(rawValue) {
   return trimmed.split(/\s+/).every(word => /^[\p{Lu}]/u.test(word));
 }
 
+/** A Title Case phrase of plain words, with no digit. "Distributed Systems"
+ *  is posting vocabulary, so the skills check warns on it. A product token is
+ *  one word, or it carries a digit or a mark (".", "+", "#", "/"). */
+function plainTitlePhrase(rawValue) {
+  const trimmed = String(rawValue).trim();
+  if (/\d/.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length < 2) return false;
+  return words.every(word => /^[\p{L}]+(?:[-'’][\p{L}]+)*$/u.test(word));
+}
+
 /**
  * Keep likely technology names while dropping ordinary prose fragments.
  *
@@ -1236,9 +1247,11 @@ export function factClaims(text, sourceNormalized = null) {
 // them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
 // about titles, because reframing one is sometimes the candidate's call, and a
 // second check that blocked on the same field would overrule that choice.
-// A skills line is not one claim. skillToolClaims reads each token, and only
-// a tool-shaped token the sources do not contain blocks. Lowercase wording
-// stays unchecked so a skill can be reworded into the posting's vocabulary.
+// A skills line is not one claim. skillToolClaims reads each token. A single
+// capitalised name, or a token with a digit or a product mark, blocks when no
+// source contains it. A Title Case phrase of more than one plain word
+// ("Distributed Systems") warns: it is posting vocabulary, so generation
+// continues. Lowercase wording stays unchecked.
 //
 // Templates with section partials (#2183) may use other class names, and a
 // markdown CV has no markup to read, so neither is covered.
@@ -1370,13 +1383,13 @@ export function structuredFieldClaims(text) {
  *
  * The whole line is not a claim: "status notes, agendas, Kubernetes" may
  * reword the first items and still invent the last. "and" and "or" split a
- * token the way a comma does. A token blocks only when it looks like a
- * product name (Title Case, or a digit such as "n8n") and no source contains
- * that name. Lowercase items are left alone. A LaTeX skills row is read the
- * same way as an HTML skill item.
+ * token the way a comma does. A single capitalised name, or a token with a
+ * digit or a product mark, blocks when no source contains it. A Title Case
+ * phrase of more than one plain word warns instead. Lowercase items are left
+ * alone. A LaTeX skills row is read the same way as an HTML skill item.
  *
  * @param {string} text generated HTML or LaTeX
- * @returns {{kind: string, value: string}[]}
+ * @returns {{kind: string, value: string, blocking: boolean}[]}
  */
 const LATEX_SKILL_ROW_RE = /^\s*(?:\\textbf\{(?:[^{}]|\{[^{}]*\})*\}\{: \})?\{((?:[^{}]|\{[^{}]*\})*)\}\s*\\\\/gm;
 
@@ -1408,7 +1421,7 @@ function pushSkillTokens(claims, seen, text) {
     const value = normalizeFact(trimmed);
     if (!value || seen.has(value)) continue;
     seen.add(value);
-    claims.push({ kind: 'tool', value });
+    claims.push({ kind: 'tool', value, blocking: !plainTitlePhrase(trimmed) });
   }
 }
 
@@ -3456,9 +3469,10 @@ export function verifyFacts(targetText, {
   const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const associations = structuredAssociationClaims(targetText, sourceTexts, config);
+  const skillClaims = skillToolClaims(targetText);
   const namedFacts = [
     ...factClaims(targetText, sourceLookup),
-    ...skillToolClaims(targetText),
+    ...skillClaims.filter(claim => claim.blocking),
     ...delegatedAuthorshipClaims(targetText, sourceText),
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);
@@ -3491,6 +3505,9 @@ export function verifyFacts(targetText, {
     ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
     // A drift whose only new verb is ambiguous ("and automated reporting").
     ...driftFacts.filter(({ blocking }) => !blocking),
+    // A multi-word Title Case skill ("Distributed Systems"). The same unsourced
+    // test as a blocking tool: the phrase in cv.md word for word is not a finding.
+    ...skillClaims.filter(claim => !claim.blocking).filter(unsourced),
   ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
