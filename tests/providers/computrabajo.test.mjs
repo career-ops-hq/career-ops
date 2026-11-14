@@ -117,6 +117,7 @@ test('fetch() enforces the 3-page / 15-posting crawl caps and paces with the sha
   assert.equal(calls.length, 3);
   assert.equal(jobs.length, 4);
   assert.equal(slept.length, 2, 'a pause between pages, none before the first');
+  assert.equal(jobs.truncated, undefined, 'a walk that reached a short page is complete, so unmarked');
   assert.ok(slept.every((ms) => ms >= 2000 && ms <= 5000));
 
   const warn = console.warn;
@@ -128,6 +129,28 @@ test('fetch() enforces the 3-page / 15-posting crawl caps and paces with the sha
     assert.equal(out.length, 15);
     assert.equal(capped.calls.length, 1);
     assert.match(warnings.join('\n'), /crawl limit/);
+    // Partly read, so scan.mjs must log it partial, not reachable.
+    assert.deepEqual(out.truncated, { fetched: 15, reason: 'page-cap' });
+  } finally {
+    console.warn = warn;
+  }
+});
+
+test('a full page that reaches max_jobs is a cap stop even when its last cards repeat earlier ids', async () => {
+  // 15 new ids, then 5 that repeat them (featured postings recur): the 15th new
+  // posting is the last one the page adds, and the board has more pages.
+  const ids = Array.from({ length: 15 }, (_, i) => `R${i}`);
+  const full = page(...ids.map((id) => card(id)), ...ids.slice(0, 5).map((id) => card(id)));
+  const warn = console.warn;
+  const warnings = [];
+  console.warn = (m) => warnings.push(m);
+  try {
+    const capped = makeCtx({ 1: full, 2: page(card('NEXT')) });
+    const jobs = await provider.fetch({ name: 'X', careers_url: BASE }, capped.ctx);
+    assert.equal(jobs.length, 15);
+    assert.equal(capped.calls.length, 1);
+    assert.match(warnings.join('\n'), /crawl limit/);
+    assert.deepEqual(jobs.truncated, { fetched: 15, reason: 'page-cap' });
   } finally {
     console.warn = warn;
   }
@@ -166,6 +189,7 @@ test('a challenge on a later page keeps the earlier pages and warns', async () =
     const jobs = await provider.fetch({ name: 'X', careers_url: BASE }, makeCtx({ 1: page(card('L1')), 2: challenge }).ctx);
     assert.equal(jobs.length, 1);
     assert.match(warnings.join('\n'), /anti-bot challenge on page 2/);
+    assert.deepEqual(jobs.truncated, { fetched: 1, reason: 'challenge' });
   } finally {
     console.warn = warn;
   }
@@ -180,6 +204,7 @@ test('a page-1 fetch error is thrown; a later one keeps the earlier pages', asyn
   try {
     const jobs = await provider.fetch({ name: 'X', careers_url: BASE }, makeCtx({ 1: page(card('E1')), 2: boom }).ctx);
     assert.equal(jobs.length, 1);
+    assert.deepEqual(jobs.truncated, { fetched: 1, reason: 'fetch-error' });
   } finally {
     console.warn = warn;
   }
@@ -187,8 +212,9 @@ test('a page-1 fetch error is thrown; a later one keeps the earlier pages', asyn
 
 test('health probe: ctx.maxPages 1 makes exactly one request and propagates a rejection unwrapped', async () => {
   const probe = makeCtx({ 1: page(card('H1')), 2: page(card('H2')) }, { maxPages: 1 });
-  await provider.fetch({ name: 'X', careers_url: BASE }, probe.ctx);
+  const probed = await provider.fetch({ name: 'X', careers_url: BASE }, probe.ctx);
   assert.equal(probe.calls.length, 1);
+  assert.equal(probed.truncated, undefined, 'a probe reads one page by design and stays unmarked');
 
   class ProbePageBudgetReached extends Error {}
   const sentinel = new ProbePageBudgetReached('budget');
