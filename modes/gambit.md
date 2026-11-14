@@ -267,8 +267,11 @@ send: nothing is in flight until the candidate says so.
 | `skip` | `SKIP` | No evidenced need: not pursued |
 
 When the candidate confirms they sent the pitch (after `send` or `hold`), record
-it then with `node set-status.mjs --report {###} Speculative`; never write
-`Speculative` for a pitch that has not been sent.
+it then with `node set-status.mjs --report {###} Speculative --expect-status Evaluated`;
+never write `Speculative` for a pitch that has not been sent. If the command stops
+because the row is no longer `Evaluated` (it already moved on, e.g. to `Applied` or
+`Interview`), keep that later status: tell the candidate and do not retry with
+another `--expect-status` or with `--force`.
 
 Write the addition to `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`
 in the format AGENTS.md gives under "TSV Format for Tracker Additions": a header
