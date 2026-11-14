@@ -19,8 +19,8 @@
  * lib/ats-board-url.mjs. A URL is accepted only when building the board URL
  * from those coordinates and reading it again gives the same coordinates, so
  * what lands in the inbox is exactly the board the URL named, in its
- * canonical form. Job posting links, legacy hosts and locale prefixes are read
- * back to their board.
+ * canonical form. Job posting links, legacy hosts, feed URLs and locale
+ * prefixes are read back to their board.
  *
  * The boards go to <out>/<date>-<login>.ndjson, or to -001.ndjson,
  * -002.ndjson, … when there are more than 5,000. A URL that is not a board on
@@ -36,7 +36,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { BOARD_ATS, REGIONAL_BOARD_URL_BUILDERS, buildBoardUrl } from '../lib/ats-board-url.mjs';
+import { BOARD_ATS, DNS_LABEL_ATS, REGIONAL_BOARD_URL_BUILDERS, SUBDOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import { INBOX_DIR, INBOX_MAX_LINES, parseInboxName } from './employers-inbox.mjs';
 import {
@@ -74,9 +74,43 @@ const SUBDOMAIN_HOSTS = Object.freeze({
   'breezy.hr': 'breezy',
   'bamboohr.com': 'bamboohr',
   'pinpointhq.com': 'pinpoint',
+  'applicantpro.com': 'applicantpro',
+  'careers.hibob.com': 'hibob',
+  'hirehive.com': 'hirehive',
+  'homerun.co': 'homerun',
+  'applytojob.com': 'jazzhr',
+  'keka.com': 'keka',
+  'prevueaps.ca': 'prevueaps',
+  'schoolspring.com': 'schoolspring',
+  'taleez.com': 'taleez',
+  'teamtailor.com': 'teamtailor',
+  // Trakstar Hire, and its legacy Recruiterbox host for the same client.
+  'hire.trakstar.com': 'trakstar',
+  'recruiterbox.com': 'trakstar',
+  'turbohire.co': 'turbohire',
 });
-// The vendor's own subdomains: never a company board.
+/**
+ * ATS whose board is the company's subdomain on one of several hosts: the ATS,
+ * and the region that host is (none on the default host).
+ * @type {Readonly<Record<string, [string, string|null]>>}
+ */
+const REGION_SUBDOMAIN_HOSTS = Object.freeze({
+  'jobs.personio.de': ['personio', null],
+  'jobs.personio.com': ['personio', 'com'],
+  'zohorecruit.com': ['zoho-recruit', null],
+  'zohorecruit.com.au': ['zoho-recruit', 'au'],
+  'zohorecruit.ca': ['zoho-recruit', 'ca'],
+  'zohorecruit.com.cn': ['zoho-recruit', 'cn'],
+  'zohorecruit.eu': ['zoho-recruit', 'eu'],
+  'zohorecruit.in': ['zoho-recruit', 'in'],
+  'zohorecruit.jp': ['zoho-recruit', 'jp'],
+  'zohorecruit.sa': ['zoho-recruit', 'sa'],
+});
+// The vendor's own subdomains: never a company board. Applied to the subdomain
+// ATS admitted first; the others (DNS_LABEL_ATS) refuse the subdomains their
+// provider names (SUBDOMAIN_RESERVED_LABELS), here and in the validator alike.
 const VENDOR_SUBDOMAINS = new Set(['www', 'app', 'api', 'help', 'support', 'status', 'blog', 'docs', 'careers', 'jobs', 'developers', 'marketplace']);
+const VENDOR_SUBDOMAINS_ATS = new Set(SUBDOMAIN_ATS.filter((ats) => !DNS_LABEL_ATS.includes(ats)));
 
 const WORKDAY_JOBS_HOST_RE = /^([a-z0-9][a-z0-9_-]*)\.(wd[0-9]{1,3})\.myworkdayjobs\.com$/;
 const WORKDAY_SITE_HOST_RE = /^(wd[0-9]{1,3})\.myworkdaysite\.com$/;
@@ -113,12 +147,35 @@ function readCoords(u) {
     if (segs[0] !== 'companies' || !segs[1]) return { error: 'a JOIN board is join.com/companies/<company>' };
     return { ats: 'join', board: segs[1] };
   }
+  // Homerun's feed of a board: feed.homerun.co/<company>. These two aliases are
+  // read from the path as their providers read it, so an empty segment
+  // (feed.homerun.co//acme) is not skipped over.
+  if (host === 'feed.homerun.co') {
+    const slug = u.pathname.split('/')[1];
+    if (!slug) return { error: 'a Homerun feed URL is feed.homerun.co/<company>' };
+    return { ats: 'homerun', board: slug.toLowerCase() };
+  }
+  // ApplicantPro's legacy posting links: www.applicantpro.com/openings/<company>/jobs/<id>.
+  if (host === 'www.applicantpro.com' && segs[0]?.toLowerCase() === 'openings') {
+    const m = /^\/openings\/([^/]+)(?:\/|$)/i.exec(u.pathname);
+    if (!m) return { error: 'an ApplicantPro openings URL is www.applicantpro.com/openings/<company>/…' };
+    return { ats: 'applicantpro', board: m[1].toLowerCase() };
+  }
+  if ((host === 'taleez.com' || host === 'www.taleez.com') && segs[0] === 'apply') {
+    return { error: 'a Taleez job link (taleez.com/apply/<job>) does not name the company; use <company>.taleez.com' };
+  }
   for (const [suffix, ats] of Object.entries(SUBDOMAIN_HOSTS)) {
     if (host === suffix || !host.endsWith(`.${suffix}`)) continue;
     const label = host.slice(0, -(suffix.length + 1));
     if (label.includes('.')) return { error: `${host} is not a ${ats} board: the board is <company>.${suffix}` };
-    if (VENDOR_SUBDOMAINS.has(label)) return { error: `${host} is ${ats}'s own site, not a company board` };
+    if (VENDOR_SUBDOMAINS_ATS.has(ats) && VENDOR_SUBDOMAINS.has(label)) return { error: `${host} is ${ats}'s own site, not a company board` };
     return { ats, board: label };
+  }
+  for (const [suffix, [ats, region]] of Object.entries(REGION_SUBDOMAIN_HOSTS)) {
+    if (host === suffix || !host.endsWith(`.${suffix}`)) continue;
+    const label = host.slice(0, -(suffix.length + 1));
+    if (label.includes('.')) return { error: `${host} is not a ${ats} board: the board is <company>.${suffix}` };
+    return region ? { ats, region, board: label } : { ats, board: label };
   }
   const jobs = WORKDAY_JOBS_HOST_RE.exec(host);
   if (jobs) {
@@ -277,7 +334,7 @@ export function normalizeWebsite(value) {
 function inboxLine(coords, name, website) {
   /** @type {any} */
   const line = { ats: coords.ats };
-  if (Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, coords.ats)) line.region = coords.region;
+  if (Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, coords.ats) || coords.region !== undefined) line.region = coords.region;
   line.board = coords.board;
   if (coords.ats === 'workday') line.workday_host = coords.workday_host;
   line.name = name;

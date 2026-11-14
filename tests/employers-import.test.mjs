@@ -25,6 +25,8 @@ import {
 } from '../seeds/employers-import.mjs';
 import { inboxCareersUrl } from '../seeds/employers-inbox.mjs';
 import { inboxLineProblems } from '../seeds/employers-validate.mjs';
+import applicantpro from '../providers/applicantpro.mjs';
+import homerun from '../providers/homerun.mjs';
 
 const IMPORTER = join(ROOT, 'seeds', 'employers-import.mjs');
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
@@ -75,6 +77,28 @@ test('every ATS, region and Workday host form round-trips through its builder', 
     { ats: 'breezy', board: 'acme' },
     { ats: 'bamboohr', board: 'acme' },
     { ats: 'pinpoint', board: 'acme' },
+    { ats: 'applicantpro', board: 'acme' },
+    { ats: 'hibob', board: 'acme-641e1b39232b' },
+    { ats: 'hirehive', board: 'acme' },
+    { ats: 'homerun', board: 'acme' },
+    { ats: 'jazzhr', board: 'acme' },
+    { ats: 'keka', board: 'acme' },
+    { ats: 'personio', board: 'acme-gmbh' },
+    { ats: 'personio', region: 'com', board: 'acme-gmbh' },
+    { ats: 'prevueaps', board: 'acme' },
+    { ats: 'schoolspring', board: 'acme' },
+    { ats: 'taleez', board: 'acme' },
+    { ats: 'teamtailor', board: 'acme' },
+    { ats: 'trakstar', board: 'acme' },
+    { ats: 'turbohire', board: 'acme' },
+    { ats: 'zoho-recruit', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'au', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'ca', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'cn', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'eu', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'in', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'jp', board: 'acme' },
+    { ats: 'zoho-recruit', region: 'sa', board: 'acme' },
     { ats: 'workday', board: 'acme/wd5/External_Careers', workday_host: 'jobs' },
     { ats: 'workday', board: 'acme/wd103/Careers', workday_host: 'site' },
   ];
@@ -112,6 +136,29 @@ const VARIANTS = [
   ['https://acme.breezy.hr/p/abc', { ats: 'breezy', board: 'acme' }],
   ['https://acme.bamboohr.com/careers/12', { ats: 'bamboohr', board: 'acme' }],
   ['https://acme.pinpointhq.com/postings/1', { ats: 'pinpoint', board: 'acme' }],
+  ['https://acme.applicantpro.com/jobs/3456789', { ats: 'applicantpro', board: 'acme' }],
+  ['https://www.applicantpro.com/openings/acme/jobs/3456789', { ats: 'applicantpro', board: 'acme' }],
+  ['https://www.applicantpro.com/OPENINGS/Acme/jobs/3456789', { ats: 'applicantpro', board: 'acme' }],
+  ['https://acme-641e1b39232b.careers.hibob.com/jobs/2f9c1d1e-0000-4000-8000-000000000000/apply', { ats: 'hibob', board: 'acme-641e1b39232b' }],
+  ['https://acme.hirehive.com/backend-engineer-x1y2z3', { ats: 'hirehive', board: 'acme' }],
+  ['https://acme.homerun.co/backend-engineer', { ats: 'homerun', board: 'acme' }],
+  ['https://feed.homerun.co/Acme', { ats: 'homerun', board: 'acme' }],
+  ['https://acme.applytojob.com/apply/AbC123/Backend-Engineer', { ats: 'jazzhr', board: 'acme' }],
+  ['https://acme.keka.com/careers/jobdetails/12345', { ats: 'keka', board: 'acme' }],
+  ['https://acme-gmbh.jobs.personio.de/job/123456?language=en', { ats: 'personio', board: 'acme-gmbh' }],
+  ['https://ACME-GMBH.jobs.personio.com/', { ats: 'personio', region: 'com', board: 'acme-gmbh' }],
+  ['https://acme-gmbh.jobs.personio.com/job/123456?language=de', { ats: 'personio', region: 'com', board: 'acme-gmbh' }],
+  ['https://acme.prevueaps.ca/jobs/1234/backend-engineer', { ats: 'prevueaps', board: 'acme' }],
+  ['https://acme.schoolspring.com/job?id=1', { ats: 'schoolspring', board: 'acme' }],
+  ['https://Acme.taleez.com/', { ats: 'taleez', board: 'acme' }],
+  ['https://acme.teamtailor.com/jobs/12345-backend-engineer', { ats: 'teamtailor', board: 'acme' }],
+  ['https://acme.hire.trakstar.com/jobs/fk0abcd', { ats: 'trakstar', board: 'acme' }],
+  ['https://acme.recruiterbox.com/jobs/fk0abcd', { ats: 'trakstar', board: 'acme' }],
+  ['https://acme.turbohire.co/job/publicjobs/abc', { ats: 'turbohire', board: 'acme' }],
+  ['https://acme.zohorecruit.com/jobs/Careers/1234000000001/Backend-Engineer', { ats: 'zoho-recruit', board: 'acme' }],
+  ['https://acme.zohorecruit.eu/jobs/Emplois', { ats: 'zoho-recruit', region: 'eu', board: 'acme' }],
+  ['https://Acme.ZohoRecruit.com.au/recruit/Portal.na', { ats: 'zoho-recruit', region: 'au', board: 'acme' }],
+  ['acme.zohorecruit.in', { ats: 'zoho-recruit', region: 'in', board: 'acme' }],
 ];
 
 for (const [url, coords] of VARIANTS) {
@@ -141,6 +188,29 @@ const REJECTS = [
   ['https://acme.wd5.myworkdayjobs.com/en-US', /is a locale/],
   ['https://wd5.myworkdaysite.com/acme/careers', /recruiting\/<tenant>\/<site>/],
   ['https://jobs.ashbyhq.com/acme%20inc', /characters outside/],
+  ['https://www.teamtailor.com/en', /"www" is a placeholder/],
+  ['https://acme.na.teamtailor.com/jobs/1', /the board is <company>\.teamtailor\.com/],
+  ['https://acme.eu.jobs.personio.de/', /the board is <company>\.jobs\.personio\.de/],
+  ['https://jobs.personio.de/', /not a board host/],
+  ['https://feeds.applicantpro.com/', /"feeds" is one of applicantpro's own subdomains/],
+  ['https://accounts.hirehive.com/login', /"accounts" is one of hirehive's own subdomains/],
+  ['https://feed.homerun.co/', /feed\.homerun\.co\/<company>/],
+  ['https://static.homerun.co/app.js', /"static" is one of homerun's own subdomains/],
+  ['https://mail.keka.com/', /"mail" is one of keka's own subdomains/],
+  // Trakstar's API names the client in a query, but it is the API, not a board
+  // address: only <id>.hire.trakstar.com and <id>.recruiterbox.com are read.
+  ['https://jsapi.recruiterbox.com/v1/openings?client_name=acme', /"jsapi" is one of trakstar's own subdomains/],
+  // The provider reads www.applicantpro.com/openings/…, not the bare domain.
+  ['https://applicantpro.com/openings/acme/jobs/1', /not a board host/],
+  ['https://aide.taleez.com/', /"aide" is one of taleez's own subdomains/],
+  ['https://taleez.com/apply/backend-engineer-abc', /does not name the company/],
+  ['https://app.turbohire.co/', /"app" is one of turbohire's own subdomains/],
+  ['https://www.zohorecruit.com/', /"www" is a placeholder/],
+  ['https://acme.personio.de/', /not a board host/],
+  [`https://${'a'.repeat(64)}.teamtailor.com/`, /at most 63 characters/],
+  ['https://acme.zohorecruit.de/jobs/Careers', /not a board host/],
+  ['https://acme.portal.zohorecruit.eu/', /the board is <company>\.zohorecruit\.eu/],
+  ['https://12345.teamtailor.com/', /numeric-only/],
 ];
 
 for (const [url, why] of REJECTS) {
@@ -148,6 +218,31 @@ for (const [url, why] of REJECTS) {
     const r = parseBoardUrl(url);
     assert.ok('error' in r, JSON.stringify(r));
     assert.match(r.error, why);
+  });
+}
+
+// The aliases are read from the path the way their providers read it: an empty
+// segment is not skipped, so a URL the provider refuses is refused here too.
+const ALIAS_PROVIDERS = { homerun, applicantpro };
+const ALIASES = [
+  ['https://feed.homerun.co/acme', 'homerun', 'acme'],
+  ['https://www.applicantpro.com/openings/acme/jobs/1', 'applicantpro', 'acme'],
+  ['https://www.applicantpro.com/Openings/Acme', 'applicantpro', 'acme'],
+  ['https://feed.homerun.co//acme', 'homerun', null],
+  ['https://www.applicantpro.com//openings/acme/jobs/1', 'applicantpro', null],
+  ['https://www.applicantpro.com/openings//acme/jobs/1', 'applicantpro', null],
+];
+for (const [url, ats, board] of ALIASES) {
+  test(`${url}: ${board ? `board ${board}` : 'refused'}, as the ${ats} provider reads it`, () => {
+    const parsed = parseBoardUrl(url);
+    const detected = ALIAS_PROVIDERS[ats].detect({ name: 'Acme', careers_url: url });
+    if (board) {
+      assert.equal(parsed.board, board, JSON.stringify(parsed));
+      assert.ok(detected, `${ats}.detect() refuses ${url}`);
+    } else {
+      assert.ok('error' in parsed, JSON.stringify(parsed));
+      assert.equal(detected, null, `${ats}.detect() reads ${url}`);
+    }
   });
 }
 
@@ -207,7 +302,7 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     [3, 'the same board as line 2'],
     [5, 'name contains an email address'],
     [6, 'website "not a domain" is not a domain name'],
-    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, workday)'],
+    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, workday)'],
   ]);
   assert.equal(r.derivedNames, 1);
   assert.equal(r.rewritten, 2);
@@ -215,6 +310,43 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     assert.deepEqual(inboxLineProblems(line, new Set()), []);
     assert.ok(inboxCareersUrl(line));
   }
+});
+
+test('importList: a Personio or Zoho Recruit region is written only off the default host; an alias host is a duplicate', () => {
+  const r = importList([
+    'https://acme.zohorecruit.com/jobs/Careers',
+    'https://acme.zohorecruit.eu/jobs/Careers',
+    'https://ACME.zohorecruit.com/jobs/Careers/123/Engineer',
+    'https://acme-gmbh.jobs.personio.de/',
+    'https://acme-gmbh.jobs.personio.com/job/1',
+    'https://acme.hire.trakstar.com/',
+    'https://acme.recruiterbox.com/jobs/2',
+    'https://feed.homerun.co/acme',
+    'https://acme.homerun.co/',
+  ].join('\n'), { aggregatorDomains: new Set() });
+  assert.deepEqual(r.lines, [
+    { ats: 'zoho-recruit', board: 'acme', name: 'Acme' },
+    { ats: 'zoho-recruit', region: 'eu', board: 'acme', name: 'Acme' },
+    { ats: 'personio', board: 'acme-gmbh', name: 'Acme Gmbh' },
+    { ats: 'personio', region: 'com', board: 'acme-gmbh', name: 'Acme Gmbh' },
+    { ats: 'trakstar', board: 'acme', name: 'Acme' },
+    { ats: 'homerun', board: 'acme', name: 'Acme' },
+  ]);
+  // Personio's .de and .com hosts are two boards; Trakstar's and Homerun's other addresses are the same board.
+  assert.deepEqual(r.rejected.map((x) => [x.line, x.reason]), [
+    [3, 'the same board as line 1'],
+    [7, 'the same board as line 6'],
+    [9, 'the same board as line 8'],
+  ]);
+  assert.deepEqual(r.lines.map((l) => inboxCareersUrl(l)), [
+    'https://acme.zohorecruit.com/jobs/Careers',
+    'https://acme.zohorecruit.eu/jobs/Careers',
+    'https://acme-gmbh.jobs.personio.de',
+    'https://acme-gmbh.jobs.personio.com',
+    'https://acme.hire.trakstar.com',
+    'https://acme.homerun.co',
+  ]);
+  for (const line of r.lines) assert.deepEqual(inboxLineProblems(line, new Set()), []);
 });
 
 test('chunkInbox: one file up to 5,000 lines, then numbered parts', () => {
@@ -246,7 +378,7 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
     assert.equal(readFileSync(inbox, 'utf8').split('\n').filter(Boolean).length, known.length + 1);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
       + `${known.length + 2},https://nope.example/jobs,`
-      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, workday)"\n');
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);

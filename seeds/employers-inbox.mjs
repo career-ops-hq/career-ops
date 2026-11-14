@@ -39,6 +39,9 @@ export const INBOX_LINE_REQUIRED = Object.freeze(['ats', 'board', 'name']);
  * What an inbox line leaves out. Greenhouse and Lever boards are on the US
  * host unless the line says `"region":"eu"`; a Workday board is on the
  * <tenant>.<wdN>.myworkdayjobs.com host unless it says `"workday_host":"site"`.
+ * A Personio board is on <tenant>.jobs.personio.de and a Zoho Recruit board
+ * on <tenant>.zohorecruit.com unless the line names its region, and the row
+ * then has no region either.
  */
 export const DEFAULT_REGION = 'us';
 export const DEFAULT_WORKDAY_HOST = 'jobs';
