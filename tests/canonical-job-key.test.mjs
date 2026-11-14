@@ -89,6 +89,7 @@ const SAME = [
       'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2',
       'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application',
       'https://jobs.ashbyhq.com/ashby/7458D4E9-DA2E-47BD-98CB-ADFDA43D42B2/application/?utm_source=li',
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application//',
     ],
     'https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2',
   ],

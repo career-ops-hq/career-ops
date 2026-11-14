@@ -307,7 +307,7 @@ export function canonicalJobKey(raw) {
   if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
   if (u.hostname === "jobs.ashbyhq.com") {
-    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/?$/i, "$1");
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/*$/i, "$1");
   }
 
   for (const key of [...u.searchParams.keys()]) {
