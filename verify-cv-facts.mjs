@@ -384,12 +384,43 @@ const NOUN_SYNONYMS = new Map([
 //
 // Currency codes are matched case-sensitively: lowercase "eur" or "gbp" in prose
 // is not a currency. A bare "pound(s)" is left out because it is also a weight.
+//
+// Other currencies (#fact-gate-currencies). Only USD/EUR/GBP used to be read, so
+// an amount in the currency of any other market the project ships modes for
+// ("PLN 99m", "CHF 2m", "99 mln zł") was not a claim at all and passed the gate
+// unchecked. CURRENCY_CODES is a closed list of ISO 4217 codes for those
+// markets plus common neighbours; each folds onto its own lowercase code in the
+// claim key ("PLN 7.4m" -> "pln7.4m"), so amounts in two currencies never
+// compare equal. LOCAL_CURRENCY_UNITS are written-out local forms that follow
+// the number. Bare "kr" is left out on purpose: it is SEK, NOK, DKK and ISK
+// alike, and folding it onto one of them would make an amount in another match.
+// LOCAL_MAGNITUDES are the local abbreviations of thousand/million/billion used
+// in front of those units ("7,4 mln zł", "2 Mio. CHF"); they live in their own
+// map so SPELLED_MAGNITUDES, which the count extractor also reads, is unchanged.
+const CURRENCY_CODES = [
+  'PLN', 'CHF', 'SEK', 'NOK', 'DKK', 'ISK', 'CZK', 'HUF', 'RON', 'BGN', 'TRY', 'RUB', 'UAH',
+  'JPY', 'CNY', 'RMB', 'TWD', 'HKD', 'KRW', 'INR', 'IDR', 'SGD', 'VND', 'AUD', 'CAD', 'NZD',
+  'BRL', 'MXN', 'ARS', 'CLP', 'COP', 'AED', 'SAR', 'QAR', 'KWD', 'EGP', 'ZAR',
+];
+const LOCAL_CURRENCY_UNITS = new Map([['zł', 'pln'], ['zl', 'pln'], ['złotych', 'pln'], ['kč', 'czk'], ['ft', 'huf'], ['lei', 'ron']]);
+const LOCAL_MAGNITUDES = new Map([['tys', 'k'], ['tys.', 'k'], ['mln', 'm'], ['mld', 'b'], ['mio', 'm'], ['mio.', 'm'], ['mrd', 'b'], ['mrd.', 'b']]);
+const CODE_ALT = CURRENCY_CODES.join('|');
+const LOCAL_UNIT_ALT = String.raw`zł|zl|złotych|Kč|Ft|lei`;
+const LOCAL_MAG_ALT = String.raw`(?:\s?(?:tys\.?|mln|mld|[Mm]io\.?|[Mm]rd\.?)(?![\p{L}]))`;
+// A decimal comma ("7,4", "12,5") is one number, not two. Only a comma followed
+// by one or two digits is read as decimal; ",250" stays a thousands group, the
+// same split normalizeClaim already makes.
+const NUM = String.raw`\d[\d,.]*`;
 const MAGNITUDE_ALT = String.raw`(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))`;
 const SIMPLE_CLAIM_PATTERNS = [
-  /\b\d+(?:\.\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
-  new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB])?`, 'gu'),
+  /\b\d+(?:[.,]\d+)?[^\S\n]?(?:%|(?:percent|per\s?cent|pct)\b)/gi,
+  // The suffix needs the same no-letter guard as MAGNITUDE_ALT: without it the
+  // "b" of "$40 bonus" or "$300,000 budget" was read as billion ("$40b").
+  new RegExp(String.raw`(?<![\w$€£])[$€£]\s?\d[\d,.]*(?:\s?(?:thousand|million|billion)\b|\s?[kKmMbB](?![\p{L}]))?`, 'gu'),
   new RegExp(String.raw`(?:\b(?:USD|EUR|GBP)|\bUS\$)\s?\d[\d,.]*${MAGNITUDE_ALT}?`, 'gu'),
   new RegExp(String.raw`\b\d[\d,.]*${MAGNITUDE_ALT}?\s?-?\s?(?:(?:USD|EUR|GBP)\b|(?:[Dd]ollars?|[Ee]uros?)\b)`, 'gu'),
+  new RegExp(String.raw`\b(?:${CODE_ALT})\s?${NUM}(?:${MAGNITUDE_ALT}|${LOCAL_MAG_ALT})?`, 'gu'),
+  new RegExp(String.raw`\b${NUM}(?:${MAGNITUDE_ALT}|${LOCAL_MAG_ALT})?\s?-?\s?(?:(?:${CODE_ALT})\b|(?:${LOCAL_UNIT_ALT})(?![\p{L}]))`, 'gu'),
   /\b\d+(?:\.\d+)?\s?x\b/gi,
   /\b\d+(?:\.\d+)?\s?-?\s?fold\b/gi,
 ];
@@ -411,18 +442,23 @@ const CURRENCY_SYMBOLS = new Map([
  * @returns {string}
  */
 function canonicalMetric(raw) {
-  const claim = normalizeClaim(raw);
+  // Decimal comma first, before normalizeClaim turns "7,4" into "7 4".
+  const claim = normalizeClaim(String(raw).replace(/(\d),(\d{1,2})(?!\d)/g, '$1.$2'));
   const percent = /^(\d+(?:\.\d+)?) ?(?:%|percent|per ?cent|pct)$/.exec(claim);
   if (percent) return `${percent[1]}%`;
   const multiplier = /^(\d+(?:\.\d+)?) ?(?:x|-? ?fold)$/.exec(claim);
   if (multiplier) return `${multiplier[1]}x`;
-  const amount = String.raw`(\d[\d.]*)(?: ?(thousand|million|billion|[kmb]))?`;
-  const lead = new RegExp(String.raw`^(\$|€|£|us\$|usd|eur|gbp) ?${amount}$`).exec(claim);
-  const trail = lead ? null : new RegExp(String.raw`^${amount} ?-? ?(usd|eur|gbp|dollars?|euros?)$`).exec(claim);
+  const codes = CURRENCY_CODES.map(c => c.toLowerCase()).join('|');
+  const units = [...LOCAL_CURRENCY_UNITS.keys()].join('|');
+  const mags = String.raw`thousand|million|billion|tys\.?|mln|mld|mio\.?|mrd\.?|[kmb]`;
+  const amount = String.raw`(\d[\d.]*)(?: ?(${mags}))?`;
+  const lead = new RegExp(String.raw`^(\$|€|£|us\$|usd|eur|gbp|${codes}) ?${amount}$`, 'u').exec(claim);
+  const trail = lead ? null : new RegExp(String.raw`^${amount} ?-? ?(usd|eur|gbp|dollars?|euros?|${codes}|${units})$`, 'u').exec(claim);
   if (!lead && !trail) return claim;
   const [symbol, number, magnitude] = lead ? [lead[1], lead[2], lead[3]] : [trail[3], trail[1], trail[2]];
-  const suffix = magnitude ? (SPELLED_MAGNITUDES.get(magnitude) ?? magnitude) : '';
-  return `${CURRENCY_SYMBOLS.get(symbol)}${number}${suffix}`;
+  const suffix = magnitude ? (SPELLED_MAGNITUDES.get(magnitude) ?? LOCAL_MAGNITUDES.get(magnitude) ?? magnitude) : '';
+  const key = CURRENCY_SYMBOLS.get(symbol) ?? LOCAL_CURRENCY_UNITS.get(symbol) ?? symbol;
+  return `${key}${number}${suffix}`;
 }
 
 // Spelled-out numbers, rewritten as digits before the claim patterns run, so
