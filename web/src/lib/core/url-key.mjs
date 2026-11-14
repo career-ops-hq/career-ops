@@ -318,6 +318,9 @@ export function canonicalJobKey(raw) {
   if (out.pathname.length > 1) {
     out.pathname = out.pathname.toLowerCase().replace(/\/+$/, "") || "/";
   }
+  if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, "$1");
+  }
   return out.toString();
 }
 
