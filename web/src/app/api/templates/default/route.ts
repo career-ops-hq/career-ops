@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import fs from "node:fs";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup, resolveUserFileWriteTarget } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { readJsonObject } from "@/lib/json-body";
 import { assertSelectableTemplate, parseKind, profileWithTemplate, userTemplatesDir } from "@/lib/template-gallery.mjs";
@@ -39,7 +39,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "config/profile.yml could not be read." }, { status: 500 });
   }
   try {
-    atomicWriteWithBackup(file, profileWithTemplate(source, kind, name));
+    atomicWriteWithBackup(resolveUserFileWriteTarget(file), profileWithTemplate(source, kind, name));
   } catch (e) {
     // A profile that does not parse, or is not a mapping, is the user's to fix.
     return NextResponse.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 409 });

@@ -4,7 +4,7 @@ import path from "node:path";
 import * as yaml from "js-yaml";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup, resolveUserFileWriteTarget } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { isMapping } from "@/lib/portals-config.mjs";
 import { firstProfileText, patchProfileText } from "@/lib/profile-yaml-edit.mjs";
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
     const text =
       patchProfileText(source, proposed as Parameters<typeof patchProfileText>[1], merged) ??
       yaml.dump(merged, { lineWidth: 100, noRefs: true });
-    atomicWriteWithBackup(file, text);
+    atomicWriteWithBackup(resolveUserFileWriteTarget(file), text);
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : "write failed" }, { status: 500 });
   }

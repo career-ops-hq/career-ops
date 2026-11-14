@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import fs from "node:fs";
-import { atomicWriteWithBackup } from "@/lib/core/safe-write";
+import { atomicWriteWithBackup, resolveUserFileWriteTarget } from "@/lib/core/safe-write";
 import { profileWithTemplate } from "@/lib/template-gallery.mjs";
 import { renameTemplateAndFollow } from "@/lib/template-files.mjs";
 import { failure, manageContext, text } from "../manage";
@@ -18,7 +18,8 @@ export async function POST(req: Request) {
   const to = text(ctx.body.to);
   try {
     const { wasDefault } = await renameTemplateAndFollow(ctx.codeRoot, { kind: ctx.kind, name, to, userDir: ctx.userDir, profilePath: ctx.profilePath }, () => {
-      atomicWriteWithBackup(ctx.profilePath, profileWithTemplate(fs.readFileSync(ctx.profilePath, "utf8"), ctx.kind, to));
+      const profile = resolveUserFileWriteTarget(ctx.profilePath);
+      atomicWriteWithBackup(profile, profileWithTemplate(fs.readFileSync(profile, "utf8"), ctx.kind, to));
     });
     return NextResponse.json({ ok: true, name: to, wasDefault });
   } catch (e) {
