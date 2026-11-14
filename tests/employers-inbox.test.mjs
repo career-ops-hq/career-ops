@@ -12,7 +12,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -154,8 +154,16 @@ test('a pull request that only adds an inbox file passes --base against the regi
 }));
 
 test('the registry without inbox/ is valid: the directory is optional', () => {
-  const { errors } = validateRegistry({ root: ROOT, today: TODAY });
-  assert.deepEqual(errors, []);
+  // A copy with no inbox/ at all. The real tree has one while contributions wait, and
+  // its files carry the dates they were made on, which the fixed TODAY knows nothing of.
+  const dir = mkdtempSync(join(tmpdir(), 'co-employers-inbox-'));
+  try {
+    copyEmployerRegistry(dir);
+    assert.equal(existsSync(join(dir, INBOX_DIR)), false);
+    assert.deepEqual(validate(dir).errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('bad lines are errors on their own line, and the rest of the file is still read', () => withInbox({
