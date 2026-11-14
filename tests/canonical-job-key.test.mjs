@@ -91,6 +91,16 @@ const SAME = [
     ],
     'https://jobs.example.com/j/7',
   ],
+  [
+    'lever posting page and its apply form',
+    [
+      'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
+      'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply',
+      'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply?lever-origin=applied&lever-source=LinkedIn',
+      'https://JOBS.LEVER.CO/Acme/5AC21346-8E0C-4494-8E7A-3EB92FF77902/apply/',
+    ],
+    'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
+  ],
 ];
 
 const DIFFERENT = [
@@ -105,6 +115,8 @@ const DIFFERENT = [
   ['https://jobs.smartrecruiters.com/Acme/12345678-1234-4abc-8def-1234567890ab', 'https://jobs.smartrecruiters.com/Acme/12345678-9999-4abc-8def-1234567890ab'],
   ['https://jobs.lever.co/acme/111', 'https://jobs.lever.co/acme/222'],
   ['https://jobs.example.com/careers#/jobs/123', 'https://jobs.example.com/careers#/jobs/456'],
+  ['https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77903'],
+  ['https://jobs.example.com/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.example.com/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902'],
 ];
 
 test('variants of one posting share one key, on the CLI and the web copy', () => {
