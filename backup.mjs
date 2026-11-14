@@ -39,6 +39,7 @@ import {
   accessSync, closeSync, constants as fsConstants, copyFileSync, existsSync, lstatSync, mkdirSync, openSync,
   readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, utimesSync, writeFileSync,
 } from 'fs';
+import { randomUUID } from 'node:crypto';
 import { homedir, platform as osPlatform } from 'os';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
@@ -530,7 +531,8 @@ export function runBackup({ dataRoot, dest, dryRun = false, includeContacts = fa
     }
     if (unchanged(file, source, target)) { result.unchanged++; return; }
     if (dryRun) { result.copied++; result.bytes += file.size; return; }
-    const part = `${target}.part`;
+    // Keep overlapping copies from renaming or cleaning up each other's file.
+    const part = join(dirname(target), `.career-ops-${randomUUID()}.part`);
     try {
       mkdirSync(dirname(target), { recursive: true });
       copyFileSync(source, part);
