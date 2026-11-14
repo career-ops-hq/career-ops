@@ -73,6 +73,9 @@ function parseCv(text, source) {
   const result = { candidate: {}, summary: [], experiences: [], projects: [], education: [], certifications: [], skills: [] };
   let section = null;
   let entity = null;
+  // How the current entry was opened: 'heading' (a ### line), 'line' (a
+  // non-bullet line with no heading above it) or 'bullet' (a leading bullet).
+  let entityOrigin = null;
   const addFact = (collection, value, line) => {
     const fact = { id: stableId(collection, value, source, entity?.label ?? ''), text: value,
       evidence: { source, line, quote: lines[line - 1].trim() }, review_status: 'needs_review' };
@@ -93,27 +96,41 @@ function parseCv(text, source) {
     if (heading) {
       const title = heading[2].trim();
       const found = classifyHeading(title);
-      if (found) { section = found; entity = null; return; }
+      if (found) { section = found; entity = null; entityOrigin = null; return; }
       if (section && ['experiences', 'projects', 'education'].includes(section)) {
         entity = { id: stableId(section, title, source), label: title,
           evidence: { source, line: lineNo, quote: raw.trim() }, facts: [] };
         result[section].push(entity);
+        entityOrigin = 'heading';
       }
       return;
     }
     if (!section) return;
-    const value = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '').replace(/^\*\*(.+?)\*\*:?\s*/, '$1: ').trim();
+    const unbulleted = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '');
+    // A line that is bold from end to end (`**Senior ML Engineer**`) is a title,
+    // not a `**Label:** value` pair, so it gets no trailing colon.
+    const wholeBold = unbulleted.match(/^\*\*(.+?)\*\*$/);
+    const value = (wholeBold ? wholeBold[1] : unbulleted.replace(/^\*\*(.+?)\*\*:?\s*/, '$1: ')).trim();
     if (!value) return;
     if (section === 'summary') addFact(section, value, lineNo);
     else if (section === 'skills') {
       for (const skill of value.split(/[,;|]/).map((s) => s.trim()).filter(Boolean)) addFact(section, skill, lineNo);
     } else if (section === 'certifications') addFact(section, value, lineNo);
     else if (['experiences', 'projects', 'education'].includes(section)) {
-      if (/^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(raw) && entity) addFact(section, value, lineNo);
+      const isBullet = /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(raw);
+      // An entry opened by a heading owns every line under it: the title and
+      // dates lines become its facts, not entries of their own (#6782). A
+      // bullet never adopts the bullets after it, so a section with no entry
+      // headings reads one entry per bullet.
+      const attach = isBullet
+        ? entity && entityOrigin !== 'bullet'
+        : entity && entityOrigin === 'heading';
+      if (attach) addFact(section, value, lineNo);
       else {
         entity = { id: stableId(section, value, source), label: value,
           evidence: { source, line: lineNo, quote: raw.trim() }, facts: [] };
         result[section].push(entity);
+        entityOrigin = isBullet ? 'bullet' : 'line';
       }
     }
   });
