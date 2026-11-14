@@ -4313,6 +4313,17 @@ async function check() {
     console.log(JSON.stringify({ status: 'not-a-git-checkout', local: localVersion() }));
     return;
   }
+  // A checkout git cannot read: git missing, or refusing the directory (a
+  // container running git as a user other than the checkout's owner gets
+  // "detected dubious ownership"). Both channels would answer without the
+  // local commit, up-to-date included, while apply() fails here.
+  try {
+    gitQuiet('rev-parse', 'HEAD');
+  } catch (err) {
+    const detail = String(err.stderr || '').trim().split(/\r?\n/)[0] || err.message;
+    console.log(JSON.stringify({ status: 'checkout-unreadable', local: localVersion(), detail }));
+    return;
+  }
 
   console.log(JSON.stringify(await checkStatus(process.argv, process.env)));
 }
