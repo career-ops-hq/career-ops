@@ -525,7 +525,8 @@ const GREENHOUSE_BOARD_HOSTS = new Set([
  * unambiguous id.
  *
  * Board hosts (`boards`, `job-boards`, the EU twins, `boards-api`) contribute
- * the id at the end of `/jobs/{id}`. Any http(s) URL contributes `?gh_jid=`,
+ * the id at the end of `/jobs/{id}`, or as `token` on the `/embed/job_app`
+ * form. Any http(s) URL contributes `?gh_jid=`,
  * which is how a company careers page embeds the same posting. The id is
  * global on Greenhouse, so the company slug is not part of the key.
  *
@@ -539,7 +540,9 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get('token') : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get('gh_jid');
   const queryId = query && /^\d+$/.test(query) ? query : null;
