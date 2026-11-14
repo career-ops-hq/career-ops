@@ -90,7 +90,7 @@ test('an alert email keeps the title and company above the job link', async () =
       const row = readFileSync(join(root, 'data', 'pipeline.md'), 'utf8')
         .split('\n')
         .find((line) => line.includes(`/jobs/view/${id}`));
-      assert.equal(row, `- [ ] https://www.linkedin.com/jobs/view/${id} | Example Labs | Platform Engineer`);
+      assert.equal(row, `- [ ] https://www.linkedin.com/jobs/view/${id} | Example Labs | Platform Engineer | source: linkedin-import`);
     });
   } finally {
     rmSync(root, { recursive: true, force: true });
