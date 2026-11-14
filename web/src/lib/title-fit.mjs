@@ -8,8 +8,10 @@
  *
  * CONTRACT (same posture as jd-similarity.mjs): this is deliberately a
  * RECOMMENDATION layer. It annotates offers with a coarse band so the user can
- * decide what to evaluate first. It NEVER gates, filters, orders, or replaces
- * the holistic evaluation score — the card tooltip says exactly that.
+ * decide what to evaluate first. It filters or orders offers only when the
+ * user picks a fit filter or the Fit sort (results-view.mjs), and it NEVER
+ * replaces the holistic evaluation score — the card tooltip says it is not an
+ * evaluation.
  *
  * Why token overlap instead of reusing firstMatch(): the existing `matched`
  * chip is a case-insensitive SUBSTRING test, so a `platform engineer` chip can
