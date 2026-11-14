@@ -39,6 +39,29 @@ function readSlice(file) {
 }
 
 /**
+ * The on-disk object to merge onto. A missing file may be created. A file
+ * that does not parse is left untouched: replacing it would keep only this
+ * run's keys.
+ * @param {string} file
+ * @returns {Record<string, unknown>}
+ */
+function readSliceForSave(file) {
+  if (!existsSync(file)) return {};
+  let data;
+  try {
+    data = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (err) {
+    const error = new Error(`provider-id cache ${path.basename(file)} is unreadable; leaving it unchanged`);
+    error.cause = err;
+    throw error;
+  }
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error(`provider-id cache ${path.basename(file)} is unreadable; leaving it unchanged`);
+  }
+  return data;
+}
+
+/**
  * Open the store rooted at `dir`.
  *
  * @param {string} dir - Directory holding one `<provider id>.json` per provider.
@@ -91,7 +114,7 @@ export function openProviderIdCache(dir) {
         try {
           mkdirSync(path.dirname(s.file), { recursive: true });
           await withPipelineLock(s.file, () => {
-            const merged = readSlice(s.file);
+            const merged = readSliceForSave(s.file);
             for (const [key, value] of changes) {
               if (value === DELETED) delete merged[key];
               else merged[key] = value;
