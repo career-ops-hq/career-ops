@@ -254,12 +254,24 @@ async function doImport(args) {
       for (const item of approved[key]) {
         if (!('facts' in item)) continue;
         const identity = entityEvidenceKey(item);
-        const prior = existingItems.find((candidate) => !migratedIds.has(candidate.id) && 'facts' in candidate && entityEvidenceKey(candidate) === identity);
+        const sameHeading = existingItems.filter((candidate) => 'facts' in candidate && evidenceKey(candidate) === evidenceKey(item));
+        const exact = sameHeading.find((candidate) => entityEvidenceKey(candidate) === identity);
+        const factEvidence = new Set(item.facts.map(evidenceKey));
+        const overlapping = sameHeading.filter((candidate) => candidate.facts.some((fact) => factEvidence.has(evidenceKey(fact))));
+        // Content-derived IDs can move between same-heading jobs when facts
+        // are added. Match their evidence before allowing an ID to be reused.
+        const prior = exact ?? (overlapping.length === 1 ? overlapping[0] : undefined);
+        const duplicateHeading = sameHeading.length > 1 || approved[key].filter((candidate) => evidenceKey(candidate) === evidenceKey(item)).length > 1;
+        if ((!exact && overlapping.length > 1) || (prior && migratedIds.has(prior.id))
+            || (!prior && duplicateHeading && existingItems.some((candidate) => candidate.id === item.id))) {
+          throw new Error(`Import rejected: ambiguous ${key} identity for "${item.label}"; existing profile was not changed.`);
+        }
         if (!prior) continue;
         reidentified.set(item.id, prior);
         migratedIds.add(prior.id);
       }
       const byId = new Map(existingItems.filter((item) => !migratedIds.has(item.id)).map((item) => [item.id, item]));
+      const targetIds = new Map([...reidentified].map(([id, prior]) => [id, byId.has(id) ? prior.id : id]));
       for (const [id, prior] of reidentified) {
         const incoming = approved[key].find((item) => item.id === id);
         const incomingFactsByEvidence = new Map((incoming?.facts ?? []).map((fact) => [evidenceKey(fact), fact]));
@@ -267,12 +279,15 @@ async function doImport(args) {
           const fresh = incomingFactsByEvidence.get(evidenceKey(fact));
           return fresh ? { ...fact, id: fresh.id } : fact;
         });
-        byId.set(id, { ...prior, id, facts });
+        const targetId = targetIds.get(id);
+        if (byId.has(targetId)) throw new Error(`Import rejected: ambiguous ${key} identity; existing profile was not changed.`);
+        byId.set(targetId, { ...prior, id: targetId, facts });
       }
       for (const item of approved[key]) {
-        if (!byId.has(item.id)) byId.set(item.id, item);
+        const targetId = targetIds.get(item.id) ?? item.id;
+        if (!byId.has(targetId)) byId.set(targetId, { ...item, id: targetId });
         else if ('facts' in item) {
-          const old = byId.get(item.id);
+          const old = byId.get(targetId);
           const facts = new Map((old.facts ?? []).map((fact) => [fact.id, fact]));
           for (const fact of item.facts ?? []) {
             const existingFact = facts.get(fact.id);
@@ -280,10 +295,10 @@ async function doImport(args) {
               ? { ...existingFact, ...(editedIds.has(fact.id) ? { text: fact.text } : {}), evidence: fact.evidence, review_status: fact.review_status }
               : fact);
           }
-          byId.set(item.id, { ...old, ...(editedIds.has(item.id) ? { label: item.label } : {}), evidence: item.evidence, review_status: item.review_status, facts: [...facts.values()] });
+          byId.set(targetId, { ...old, ...(editedIds.has(item.id) ? { label: item.label } : {}), evidence: item.evidence, review_status: item.review_status, facts: [...facts.values()] });
         }
-        else byId.set(item.id, {
-          ...byId.get(item.id),
+        else byId.set(targetId, {
+          ...byId.get(targetId),
           ...(editedIds.has(item.id) ? { text: item.text } : {}),
           evidence: item.evidence,
           review_status: item.review_status,
