@@ -425,6 +425,28 @@ ok('REGRESSION: two employer-board URLs are still proof of two distinct openings
   assert.equal(rows.length, 2, 'employer-controlled URLs still block the fuzzy tier');
 });
 
+ok('one Greenhouse posting on boards. and job-boards.greenhouse.io stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://boards.greenhouse.io/acme/jobs/7001',
+    'https://job-boards.greenhouse.io/acme/jobs/7001');
+  assertMerged(rows, 'one Greenhouse id on its old and current board host');
+});
+
+ok('a re-evaluation of the same report updates the row across two spellings of one posting', () => {
+  const env = makeEnv();
+  try {
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Applied | ❌ | [1](reports/1-acme.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |',
+    ]);
+    addTsv(env, '1-acme.tsv', ['1', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[1](reports/1-acme.md)', 're-eval', 'https://careers.acme.example/jobs?gh_jid=7001']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected the row to be UPDATED through the report number, got ${rows.length} rows`);
+    assert.ok(rows[0].includes('4.1/5'), 're-eval score written through');
+  } finally { cleanup(env); }
+});
+
 ok('UNCHANGED: an addition with no URL cannot claim a row whose posting is known', () => {
   const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', '');
   assert.equal(rows.length, 2, 'an absent key stays UNKNOWN, so the unkeyed addition inserts');
