@@ -29,7 +29,9 @@
 import { readFileSync, existsSync, statSync  } from 'fs';
 import { join, isAbsolute, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveUserPath } from './path-resolver.mjs';
+
+export { resolveUserPath };
 import { extractSkills } from './skill-extract.mjs';
 import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
 
@@ -721,29 +723,6 @@ function refuseNoSkills(sourceLabel) {
   process.exit(1);
 }
 
-/**
- * A relative report, CV or JD-text path, resolved the way the modes write it.
- * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
- * root, which is not the process's working directory when the user layer lives
- * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT).
- *
- * A bare relative path therefore always means the data root, whether or not
- * the file is there. Falling back to the working directory when the data root
- * lacks the file would score a stale copy left in the checkout (say, from
- * before the user layer moved out) instead of saying the report is missing.
- * A path that starts with `./` or `../` names the working directory on
- * purpose, so it resolves there. With no data root, the working directory is
- * used, as before.
- *
- * @param {string} arg
- * @param {string} root
- * @returns {string}
- */
-export function resolveUserPath(arg, root) {
-  if (isAbsolute(arg)) return arg;
-  if (!root || /^\.\.?(?:[\\/]|$)/.test(arg)) return join(process.cwd(), arg);
-  return join(root, arg);
-}
 
 /**
  * Resolve keywords + provenance for any MatchInput.

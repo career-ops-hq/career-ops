@@ -326,3 +326,27 @@ export function resolveBatchStatePaths(rootDir) {
   const dataRoot = resolve(rootDir, 'batch', 'batch-state.tsv');
   return dataRoot === checkout ? [checkout] : [checkout, dataRoot];
 }
+
+/**
+ * A relative report, CV or JD-text path, resolved the way the modes write it.
+ * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
+ * root, which is not the process's working directory when the user layer lives
+ * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT).
+ *
+ * A bare relative path therefore always means the data root, whether or not
+ * the file is there. Falling back to the working directory when the data root
+ * lacks the file would score a stale copy left in the checkout (say, from
+ * before the user layer moved out) instead of saying the report is missing.
+ * A path that starts with `./` or `../` names the working directory on
+ * purpose, so it resolves there. With no data root, the working directory is
+ * used, as before.
+ *
+ * @param {string} arg
+ * @param {string} root
+ * @returns {string}
+ */
+export function resolveUserPath(arg, root) {
+  if (isAbsolute(arg)) return arg;
+  if (!root || /^\.\.?(?:[\\/]|$)/.test(arg)) return join(process.cwd(), arg);
+  return join(root, arg);
+}
