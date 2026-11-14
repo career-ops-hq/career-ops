@@ -75,6 +75,17 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
   );
 
+  // taleez.parseTaleezResponse — for…of over the site's jobs[]; slug feeds the posting URL.
+  const { parseTaleezResponse } = await load('taleez.mjs');
+  check(
+    'taleez.parseTaleezResponse',
+    () => parseTaleezResponse(
+      { jobs: [{ id: 1, label: 'Bad Slug', slug: `${LONE}bad` }, { id: 2, label: 'Good Slug', slug: 'ok-2' }] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://taleez.com/apply/ok-2',
+  );
+
   // hibob.parseHibobJobAds — for…of over jobAdDetails; id feeds the posting URL.
   const { parseHibobJobAds } = await load('hibob.mjs');
   check(
@@ -480,6 +491,7 @@ try {
     'platsbanken.mjs',
     'polymer.mjs',
     'remote-com.mjs',
+    'taleez.mjs',
     'talentlink.mjs',
     'techinasia.mjs',
     'thehub.mjs',

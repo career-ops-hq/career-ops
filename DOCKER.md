@@ -106,16 +106,39 @@ Nothing important is stored inside the container. `./cops down` is safe.
 
 ## Updating
 
-Career-ops updates work the same as native:
-
 ```bash
-./cops update:check
-./cops update
+./cops update:check   # is a newer release out?
+./cops update         # apply it
+./cops rollback       # undo the last update
 ```
 
-If `package.json` deps change, run `./cops rebuild` once. It rebuilds the image
-and recreates the `node_modules` volume from it, so the container picks up the
-new packages.
+`./cops` runs each command as the owner of the project directory as the
+container sees it. With Docker Engine's default (rootful) install on Linux that
+is your own user, so git accepts the checkout and the files an update writes
+stay yours. Where the directory looks root-owned inside the container (rootless
+Docker or Docker Desktop on Windows, for example), commands run as root, which
+is what git expects there.
+
+If you used an older `./cops` on Linux, run `sudo chown -R "$USER" .` once: it
+ran every command as root, and writing to the files it left root-owned fails
+with `Permission denied`.
+
+On `main`, an update ends with a git commit, and the container does not see
+your global git config. Set a name and email for this project once, from the
+project directory on the host, or the update stops at the commit with
+`Author identity unknown`:
+
+```bash
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
+
+An update runs `npm install` inside the container, into the `node_modules`
+volume. When it runs as your user, it prints `playwright install skipped`: the
+image already ships Chromium, and the browser comes with the image, not with
+the update. If an update changes `package.json` deps (Playwright included), run
+`./cops rebuild` once. It rebuilds the image and recreates the `node_modules`
+volume from it, so the container picks up the new packages.
 
 ## Troubleshooting
 
@@ -125,11 +148,10 @@ new packages.
 container's. Always go through `./cops`. That includes a script an AI CLI on
 the host ran for you: run it again with `./cops node <script>`.
 
-**Permission errors on generated files** — the container runs as root by
-default. If host files end up root-owned, either:
-- run `sudo chown -R "$USER" .` once, or
-- add `user: "${UID}:${GID}"` to `docker-compose.yml` (export `UID`/`GID`
-  in your shell first).
+**Permission errors on generated files** — `./cops` writes files as the owner of
+the project directory. Files created by an older `./cops`, which ran everything
+as root, can still be root-owned on the host. Run `sudo chown -R "$USER" .`
+once to take them back.
 
 **Slow first build** — base image is ~1.5 GB. Subsequent builds reuse layers
 and finish in seconds.

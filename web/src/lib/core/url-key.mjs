@@ -231,7 +231,9 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get("token") : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get("gh_jid");
   const queryId = query && /^\d+$/.test(query) ? query : null;
@@ -304,6 +306,10 @@ export function canonicalJobKey(raw) {
   const smartRecruiters = smartRecruitersJobId(u);
   if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
+  if (u.hostname === "jobs.ashbyhq.com") {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/*$/i, "$1");
+  }
+
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();
     if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
@@ -315,6 +321,12 @@ export function canonicalJobKey(raw) {
   const out = new URL(normalized);
   if (out.pathname.length > 1) {
     out.pathname = out.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  }
+  if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, "$1");
+  }
+  if (out.hostname === "apply.workable.com") {
+    out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, "/j/$1");
   }
   return out.toString();
 }

@@ -176,6 +176,21 @@ try {
   check('Associate Counsel, Office of the General Counsel', 'entry');
   check('Associate Counsel - Office of General Counsel', 'entry');
 
+  // ── "Lead generation" and "senior living" name the work, not the level ──
+  check('Lead Generation Specialist', 'mid');
+  check('Lead Gen Representative', 'mid');
+  check('Lead-Generation Executive', 'mid');
+  check('Senior Living Sales Counselor', 'mid');
+  check('Intern Program, Lead Generation', 'intern');
+  check('Senior Lead Generation Specialist', 'senior');
+  check('Lead Generation Team Lead', 'senior');
+  check('Senior Living Community Director', 'senior');
+  check('Lead Generation Intern', 'intern');
+  check('Lead Generalist', 'senior');
+  check('Lead Gene Therapy Scientist', 'senior');
+  check('Lead Gen AI Engineer', 'senior');
+  check('Lead Gen-AI Engineer', 'senior');
+
 } catch (error) {
   fail(`classify-tier.mjs tests could not run: ${error.message}`);
 }
