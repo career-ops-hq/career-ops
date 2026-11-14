@@ -31,6 +31,7 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_URL = 'https://www.jobs.cz/prace/';
 const POSTING_URL_BASE = 'https://www.jobs.cz/rpd/';
@@ -146,6 +147,7 @@ export default {
     /** @type {Map<string, any>} */
     const byUrl = new Map();
     const errors = [];
+    let laterPageFailed = false;
 
     for (const keyword of keywords) {
       let total = 0;
@@ -161,7 +163,10 @@ export default {
           if (probing) throw err;
           const message = (err && /** @type {Error} */ (err).message) || err;
           if (page === 1) errors.push([keyword, message]);
-          else console.error(`⚠️  jobscz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
+          else {
+            laterPageFailed = true;
+            console.error(`⚠️  jobscz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
+          }
           break;
         }
 
@@ -192,6 +197,12 @@ export default {
       console.error(`⚠️  jobscz: "${keyword}" page 1 failed (${message}) — keyword skipped`);
     }
 
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    // Part of the board was never read: a keyword failed on page 1 while another
+    // answered, or a later page failed. scan.mjs takes a board's health from the
+    // returned array, so the result says so; unmarked, the board is logged
+    // reachable as if fully read.
+    if (errors.length || laterPageFailed) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

@@ -231,12 +231,51 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get("token") : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get("gh_jid");
   const queryId = query && /^\d+$/.test(query) ? query : null;
   if (pathId && queryId && pathId !== queryId) return null;
   return pathId || queryId;
+}
+
+const SR_POSTING_ID = String.raw`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)`;
+const SR_PAGE_PATH = new RegExp(String.raw`^/([^/]+)/${SR_POSTING_ID}(?:-[^/]*)?/?$`, "i");
+const SR_API_PATH = new RegExp(String.raw`^/v1/companies/([^/]+)/postings/${SR_POSTING_ID}/?$`, "i");
+
+/**
+ * SmartRecruiters' posting id with its company, or null when this URL is not a
+ * SmartRecruiters posting.
+ *
+ * A public posting page is `jobs.smartrecruiters.com/{company}/{id}-{title-slug}`.
+ * The title slug is cosmetic and is not spelled one way: the scanner rebuilds
+ * it from the posting title (providers/smartrecruiters.mjs strips a trailing
+ * hyphen), while the page SmartRecruiters links to can keep one after a title
+ * that ends in punctuation, e.g. `...-analyst-m-f-d-` for "Analyst (m/f/d)".
+ * Keyed on the full URL, the one posting came back as new on every scan. The
+ * numeric id is the posting. The company stays in the key because the API
+ * addresses a posting under its company (`/v1/companies/{company}/postings/{id}`),
+ * so the id is not shown to be global the way Greenhouse's is.
+ *
+ * The API also addresses a posting by its UUID. A UUID is read whole, before
+ * the numeric form, so one whose first group is all digits is not cut down
+ * to that group and collapsed with another posting. A UUID key and a numeric
+ * key for the same posting stay two keys: a visible duplicate, not a silent
+ * merge.
+ *
+ * @param {URL} url - Hostname already folded.
+ * @returns {string|null}
+ */
+function smartRecruitersJobId(url) {
+  let match = null;
+  if (url.hostname === "jobs.smartrecruiters.com") {
+    match = url.pathname.match(SR_PAGE_PATH);
+  } else if (url.hostname === "api.smartrecruiters.com") {
+    match = url.pathname.match(SR_API_PATH);
+  }
+  return match ? `${match[1].toLowerCase()}/${match[2].toLowerCase()}` : null;
 }
 
 function indeedJobId(url) {
@@ -264,6 +303,13 @@ export function canonicalJobKey(raw) {
   const greenhouse = greenhouseJobId(u);
   if (greenhouse) return `greenhouse:${greenhouse}`;
 
+  const smartRecruiters = smartRecruitersJobId(u);
+  if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
+
+  if (u.hostname === "jobs.ashbyhq.com") {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/*$/i, "$1");
+  }
+
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();
     if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
@@ -275,6 +321,12 @@ export function canonicalJobKey(raw) {
   const out = new URL(normalized);
   if (out.pathname.length > 1) {
     out.pathname = out.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  }
+  if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, "$1");
+  }
+  if (out.hostname === "apply.workable.com") {
+    out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, "/j/$1");
   }
   return out.toString();
 }

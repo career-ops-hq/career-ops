@@ -5,7 +5,7 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { atomicWriteWithBackup } from "@/lib/core/safe-write";
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { readJsonObject } from "@/lib/json-body";
-import { assertSelectableTemplate, parseKind, profileWithTemplate } from "@/lib/template-gallery.mjs";
+import { assertSelectableTemplate, parseKind, profileWithTemplate, userTemplatesDir } from "@/lib/template-gallery.mjs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
   const codeRoot = resolveCodeRoot(process.cwd(), process.env);
   const root = careerOpsRoot();
   try {
-    await assertSelectableTemplate(codeRoot, name, kind);
+    await assertSelectableTemplate(codeRoot, name, kind, { userDir: userTemplatesDir(root) });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "unknown template" }, { status: 422 });
   }

@@ -555,6 +555,10 @@ test('every repo-scanning guard enumerates through the shared definition', () =>
     // Walked the working tree until #5307, so a plugin installed into the
     // gitignored plugins.local/ was graded as repository source.
     'tests/help-flag-handled.test.mjs',
+    // Walked the working tree and read every file it listed, so a fixture
+    // another suite created and removed in plugins.local/ mid-scan threw
+    // ENOENT (#6836).
+    'tests/pipeline-lock.test.mjs',
   ]) {
     const src = readFileSync(join(ROOT, caller), 'utf-8');
     assert.match(

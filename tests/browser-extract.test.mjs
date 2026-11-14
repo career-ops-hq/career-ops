@@ -291,15 +291,16 @@ try {
     fail(`normalizeAshbyJob work model => ${JSON.stringify([ashbyHybrid, ashbyRemoteOnly])}`);
   }
 
-  // isListed:false is Ashby's "served but delisted" signal, the counterpart of
-  // Workday's canApply:false, and must reach the JD text.
+  // isListed:false means "available by direct link", not closed: it must reach
+  // the JD text but never set 'closed'.
   const delisted = normalizeAshbyJob(
     { jobs: [{ id: 'x', title: 'X', descriptionPlain: 'Body', isListed: false }] },
     'x',
     'https://jobs.ashbyhq.com/acme/x',
   );
   if (delisted && delisted.text.includes('Not currently listed (isListed: false)')) {
-    pass('normalizeAshbyJob surfaces isListed: false');
+    if (delisted.closed === undefined) pass('normalizeAshbyJob notes isListed: false without marking the posting closed');
+    else fail(`normalizeAshbyJob marked an unlisted posting closed: ${JSON.stringify(delisted)}`);
   } else {
     fail(`normalizeAshbyJob isListed => ${JSON.stringify(delisted)}`);
   }

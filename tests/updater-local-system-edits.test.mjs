@@ -873,3 +873,152 @@ const PATHS = ['modes/', 'generate-cover-letter.mjs'];
     fail(`#22 expected [], got ${JSON.stringify(atRisk)}`);
   }
 }
+
+// ── 23. An update delivered the file, then the install took a NEWER upstream version ──
+//    An update installs v2. The install then takes upstream's v3 of that file
+//    ahead of the next release, in its own commit (a fix it needed early).
+//    Upstream ships v4. The worktree differs from what the update delivered,
+//    so the file is a candidate, and because an update commit changed it, the
+//    "did upstream publish this content" check of case 22 never runs for it.
+//    The file is reported, preserved, and the next update commit does not
+//    change it, so v2 stays the reference and the file is pinned on every
+//    later update: it stops receiving upstream changes. Its content is
+//    upstream's own, published after the version the update delivered.
+//
+//    The direction is what separates this from case 17: there the install
+//    went back to a version OLDER than the delivered one, which is a choice
+//    the user made and stays reported (#3129).
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'take upstream pdf.md ahead of the release');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 0) {
+    pass('a newer upstream version taken after an update is not reported');
+  } else {
+    fail(`#23 expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 24. ...and a local edit on top of that newer version is still the user's ──
+//    Case 23 drops a file only when its exact content is a newer upstream
+//    version. Editing it afterwards makes content upstream never shipped, which
+//    is the #2337 case and has to stay reported.
+{
+  const repo = makeRepo();
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v3 plus a local fix\n');
+  repo.g('commit', '-qam', 'take upstream pdf.md and fix it');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('a local edit on top of a newer upstream version is still reported (#2337)');
+  } else {
+    fail(`#24 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+/**
+ * Upstream history for cases 25 and 26: a side branch writes v1 from the
+ * shared base, the main line writes v2, the install takes the v2 update, and
+ * upstream then merges the side branch with a conflict resolved to v3. The
+ * merge leaves v1 and v2 on two lines of history, so their order in a log
+ * listing says nothing about which one upstream published later.
+ * `sideFirst` puts the side branch as the merge's first parent.
+ */
+function sideBranchMerge(repo, { sideFirst }) {
+  const file = join(repo.dir, 'modes', 'pdf.md');
+  repo.g('checkout', '-q', '-b', 'side', 'upstream');
+  writeFileSync(file, 'shipped pdf v1\n');
+  repo.g('commit', '-qam', 'side: pdf v1');
+  repo.g('checkout', '-q', 'upstream');
+  writeFileSync(file, 'shipped pdf v2\n');
+  repo.g('commit', '-qam', 'upstream: pdf v2');
+  repo.g('checkout', '-q', 'main');
+  replayUpdate(repo, '2');
+  repo.g('checkout', '-q', sideFirst ? 'side' : 'upstream');
+  try {
+    repo.g('merge', '-q', '--no-ff', '-m', 'merge', sideFirst ? 'upstream' : 'side');
+  } catch {
+    // The conflict is the point: the merge resolves it to content of its own.
+  }
+  writeFileSync(file, 'shipped pdf v3\n');
+  repo.g('add', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'merge side, pdf v3');
+  if (sideFirst) repo.g('branch', '-f', 'upstream', 'side');
+  repo.g('checkout', '-q', 'main');
+}
+
+// ── 25. A revert to a side branch's OLDER version stays reported ──
+//    The install reverts to v1, which upstream published on a branch that
+//    never contained the delivered v2. Upstream did not publish v1 after v2,
+//    so it is the user's choice and stays reported, as in case 17, whichever
+//    side the merge took as its first parent (#6891 review).
+for (const sideFirst of [false, true]) {
+  const repo = makeRepo();
+  sideBranchMerge(repo, { sideFirst });
+  writeFileSync(join(repo.dir, 'modes', 'pdf.md'), 'shipped pdf v1\n');
+  repo.g('commit', '-qam', 'go back to the side branch pdf.md');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  const label = sideFirst ? 'side branch first' : 'main line first';
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass(`a revert to an older side-branch version is still reported (${label})`);
+  } else {
+    fail(`#25 (${label}) expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 26. ...while the version the merge itself created is newer ──
+//    v3 exists only as the merge's resolution, which descends from the commit
+//    that published v2. Taking it ahead of a release is case 23 again.
+for (const sideFirst of [false, true]) {
+  const repo = makeRepo();
+  sideBranchMerge(repo, { sideFirst });
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'take the merged pdf.md ahead of the release');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  const label = sideFirst ? 'side branch first' : 'main line first';
+  if (atRisk.length === 0) {
+    pass(`a newer version created by an upstream merge is not reported (${label})`);
+  } else {
+    fail(`#26 (${label}) expected [], got ${JSON.stringify(atRisk)}`);
+  }
+}
+
+// ── 27. A newer upstream version with a local mode change stays reported ──
+//    The content matches upstream's v3 but the install made the file
+//    executable, which upstream never shipped. Clearing it would let the next
+//    update reset the mode without a backup (#6891 review). The mode is set in
+//    the index with core.fileMode off, so the worktree's own mode bits never
+//    enter the case and it runs the same on Windows.
+{
+  const repo = makeRepo();
+  repo.g('config', 'core.fileMode', 'false');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v2\n');
+  replayUpdate(repo, '2');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v3\n');
+  repo.g('checkout', 'upstream', '--', 'modes/pdf.md');
+  repo.g('update-index', '--chmod=+x', 'modes/pdf.md');
+  repo.g('commit', '-qm', 'take upstream pdf.md and make it executable');
+  upstreamChange(repo, 'modes/pdf.md', 'shipped pdf v4\n');
+
+  const atRisk = locallyModifiedSystemFiles(PATHS, 'upstream', repo.ctx);
+  if (atRisk.length === 1 && atRisk[0] === 'modes/pdf.md') {
+    pass('a newer upstream version with a local mode change is still reported');
+  } else {
+    fail(`#27 expected ['modes/pdf.md'], got ${JSON.stringify(atRisk)}`);
+  }
+}

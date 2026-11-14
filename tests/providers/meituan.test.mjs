@@ -244,6 +244,35 @@ try {
     fail(`meituan.fetch() partial results on failure: ${JSON.stringify(blipJobs.map(j => j.title))}`);
   }
 
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 1) {
+    pass('meituan.fetch() marks the board partial when a later request fails');
+  } else {
+    fail(`meituan.fetch() a later request fails: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
+
+  const whole = mkCtx(() => ({ data: { page: { totalCount: 1 }, list: [mkJob(9, '全读岗位')] } }));
+  const wholeJobs = await meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI', '大模型'] }, whole.ctx);
+  if (wholeJobs.length === 1 && wholeJobs.truncated === undefined) {
+    pass('meituan.fetch() leaves the board unmarked when every request answers');
+  } else {
+    fail(`meituan.fetch() whole board: ${wholeJobs.length} jobs, truncated = ${JSON.stringify(wholeJobs.truncated)}`);
+  }
+
+  // A page that stays empty through every retry while the total reports more
+  // leaves the rest unread too, for a different reason than a failed request.
+  const stuck = mkCtx((_call, n) => (n === 1
+    ? { data: { page: { totalCount: 120 }, list: Array.from({ length: 100 }, (_, i) => mkJob(8000 + i, `岗位S${i}`)) } }
+    : { data: { page: { totalCount: 120 }, list: [] } }));
+  const { result: stuckJobs } = await captureConsoleErrors(() =>
+    meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'] }, stuck.ctx));
+  if (stuckJobs.length === 100 && stuckJobs.truncated?.reason === 'source-reports-more' && stuckJobs.truncated.fetched === 100) {
+    pass('meituan.fetch() marks the board partial when a page stays empty while the total reports more');
+  } else {
+    fail(`meituan.fetch() empty page under a larger total: ${stuckJobs.length} jobs, truncated = ${JSON.stringify(stuckJobs.truncated)}`);
+  }
+
   const zeroThenBlip = mkCtx(({ keywords }) => {
     if (keywords === '大模型') throw new Error('HTTP 503');
     return { data: { page: { totalCount: 0 }, list: [] } };

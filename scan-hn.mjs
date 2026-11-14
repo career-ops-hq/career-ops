@@ -17,6 +17,7 @@ import { readFileSync, existsSync } from 'fs';
 import { loadYaml } from './lib/yaml-document.mjs';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
+import { makeHttpCtx } from './providers/_http.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -140,7 +141,10 @@ async function main() {
 
   console.log(`🔍 Fetching latest HN Hiring data...`);
   
-  const ctx = { fetchJson: async (url) => (await fetch(url)).json() };
+  // The same HTTP context scan.mjs hands every provider: timeout, 10 MB body cap,
+  // a non-2xx guard with the status in the error, and the redirect option the
+  // provider passes (hackernews asks for redirect:'error').
+  const ctx = makeHttpCtx();
   const rawJobs = await hnProvider.fetch({ name: 'HN' }, ctx);
 
   const newOffers = [];

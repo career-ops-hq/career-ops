@@ -26,6 +26,7 @@
 import { randomUUID } from 'crypto';
 import { sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_HOST = 'talent.alibaba.com';
 const API = `https://${API_HOST}/position/search`;
@@ -169,7 +170,9 @@ export default {
           // can legitimately match 0 jobs, so seen.size is not the signal.
           if (!succeededOnce) throw err;
           console.error(`  ⚠ alibaba: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
         }
         succeededOnce = true;
         const { jobs, total } = parseAlibabaResponse(json, entry.name || '阿里巴巴');

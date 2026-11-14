@@ -71,6 +71,10 @@ export function UsageMeter() {
 
   // Real plan limits when the Claude CLI answered; otherwise the token estimate.
   const planRows = data.plan?.rows ?? [];
+  const tokens5h = data.window5h?.tokens ?? 0;
+  const tokens7d = data.window7d?.tokens ?? 0;
+  // A zero estimate still paints a 2% bar. Hide it until a plan or any tokens exist.
+  if (planRows.length === 0 && tokens5h === 0 && tokens7d === 0) return null;
   const rows = planRows.length
     ? planRows.map((r) => ({
         label: planLabel(r.label),

@@ -190,6 +190,34 @@ async function isLiveWithNoOpenings(origin, ctx) {
 }
 
 /**
+ * The posting's ATS-native identity: the tenant subdomain the board was fetched
+ * at and the job's `id` from the payload, never parsed out of a URL. BambooHR
+ * ids are positive integers, but the list payload carries them either as a
+ * number or as a decimal string, so both are accepted in their one canonical
+ * decimal form (no leading zeros, no sign, no padding) and give the same
+ * posting_id. Returns undefined for anything else (an empty, padded or
+ * non-decimal id, or a tenant that is empty), so that row falls back to URL
+ * dedup. Exported for unit tests.
+ *
+ * @param {string | null | undefined} tenant
+ * @param {unknown} id
+ * @returns {{ats_provider: 'bamboohr', board_slug: string, posting_id: string} | undefined}
+ */
+export function bamboohrListingIdentity(tenant, id) {
+  if (typeof tenant !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(tenant)) return undefined;
+  let postingId;
+  if (typeof id === 'number') {
+    if (!Number.isSafeInteger(id) || id <= 0) return undefined;
+    postingId = String(id);
+  } else if (typeof id === 'string' && /^[1-9][0-9]*$/.test(id)) {
+    postingId = id;
+  } else {
+    return undefined;
+  }
+  return { ats_provider: 'bamboohr', board_slug: tenant, posting_id: postingId };
+}
+
+/**
  * Parse a BambooHR `/careers/list` response. Exported for unit tests.
  *
  * BambooHR returns:
@@ -202,15 +230,26 @@ async function isLiveWithNoOpenings(origin, ctx) {
  *   `/careers/` and collapse distinct postings together).
  * - location: join `city` + `state`; append "Remote" when `isRemote` is truthy.
  *   BambooHR's `isRemote` is `1`/`true` when set and `null` otherwise.
+ * - listingIdentity: `bamboohr` / tenant / payload `id`, when the id has a
+ *   canonical decimal form (see bamboohrListingIdentity); absent otherwise.
  *
  * @param {any} json
  * @param {string} companyName
  * @param {string} origin  e.g. "https://acme.bamboohr.com"
- * @returns {Array<{title: string, url: string, company: string, location: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>}
  */
 export function parseBambooHRResponse(json, companyName, origin) {
-  const rows = json?.result;
-  if (!Array.isArray(rows)) return [];
+  // { result: [] } is an empty board (a live tenant with no openings answers
+  // { meta, result: [] }). Any other envelope ({}, { error }, a bare string)
+  // is a changed or failing API and must not read as a board with no open
+  // roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const rows = json && Array.isArray(json.result) ? json.result : null;
+  if (!rows) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`bamboohr: unexpected response for ${companyName} — expected result[], got: [${got}]`);
+  }
+  let tenant = null;
+  try { tenant = new URL(origin).hostname.replace(/\.bamboohr\.com$/, ''); } catch { /* no identity */ }
   return rows
     .filter(j => j && j.jobOpeningName && String(j.id ?? '').trim().length > 0)
     .map(j => {
@@ -223,10 +262,12 @@ export function parseBambooHRResponse(json, companyName, origin) {
       // null; the trailing .filter(Boolean) removes it.
       const encodedId = safeEncodeURIComponent(id);
       if (encodedId === null) return null;
+      const listingIdentity = bamboohrListingIdentity(tenant, j.id);
       return {
         title: String(j.jobOpeningName),
         url: `${origin}/careers/${encodedId}`,
         company: companyName,
+        ...(listingIdentity ? { listingIdentity } : {}),
         location,
       };
     })

@@ -3,6 +3,7 @@
 
 import { sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Meituan careers provider — posts to the public zhaopin.meituan.com JSON API
 // (no auth, no browser, no special headers). Verified 2026-07 by capturing the
@@ -128,6 +129,9 @@ export default {
     const seen = new Map();
     let firstRequest = true;
     let succeededOnce = false;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'source-reports-more' | null} */
+    let partialReason = null;
 
     for (const keyword of keywords) {
       let total = 0;
@@ -155,7 +159,9 @@ export default {
             // can legitimately match 0 jobs, so seen.size is not the signal.
             if (!succeededOnce) throw err;
             console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-            return [...seen.values()];
+            // The rest of the board was never read: the result says so, so scan.mjs
+            // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
           }
           const parsed = parseMeituanResponse(json, entry.name || '美团');
           succeededOnce = true;
@@ -167,6 +173,7 @@ export default {
         if (!jobs) {
           if (total && (pageNo - 1) * PAGE_SIZE < total) {
             console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} still empty after ${EMPTY_RETRIES} retries — keeping the ${seen.size} jobs collected so far`);
+            partialReason ??= 'source-reports-more';
           }
           break;
         }
@@ -184,6 +191,8 @@ export default {
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };

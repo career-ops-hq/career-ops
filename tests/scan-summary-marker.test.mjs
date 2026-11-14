@@ -87,15 +87,41 @@ test('the title is the only thing that varies between scanners', () => {
 // `'━'.repeat(45)` would also match stats.mjs and weekly-digest.mjs, which
 // build the same rule for unrelated tables, and would fail the day either of
 // those is touched.
+//
+// The scanner list is discovered, not hand-written: scan-dayforce.mjs landed
+// after the marker with a hand-rolled banner and no marker, and a fixed list
+// had no way to notice. A new top-level scanner now fails here until it is
+// given a title below, which is the prompt to wire it to the helper.
+const SCANNER_TITLES = {
+  'scan.mjs': 'Portal Scan',
+  'scan-ats-full.mjs': 'Reverse ATS Scan',
+  'scan-dayforce.mjs': 'Dayforce Scan',
+  'scan-hn.mjs': 'HN Scan',
+  'scan-interamt.mjs': 'Interamt Scan',
+  'scan-seek.mjs': 'SEEK NZ Scan',
+  'scan-topdev.mjs': 'TopDev Scan',
+};
+// Top-level scan-*.mjs files that are not scanners and print no summary.
+const NOT_SCANNERS = new Set(['scan-local-lib.mjs']);
+
+test('every top-level scanner has a known summary title', async () => {
+  const { readdirSync } = await import('node:fs');
+  const found = readdirSync(new URL('..', import.meta.url))
+    .filter((f) => f === 'scan.mjs' || /^scan-.+\.mjs$/.test(f))
+    .filter((f) => !NOT_SCANNERS.has(f))
+    .sort();
+  for (const file of found) {
+    assert.ok(
+      Object.hasOwn(SCANNER_TITLES, file),
+      `${file} looks like a scanner: print its summary with printScanSummaryHeader() and add it to SCANNER_TITLES, or list it in NOT_SCANNERS if it prints no summary`,
+    );
+  }
+  assert.deepEqual(Object.keys(SCANNER_TITLES).sort(), found, 'SCANNER_TITLES names only files that exist');
+});
+
 test('every scanner imports the module and prints the header', async () => {
   const { readFileSync } = await import('node:fs');
-  const scanners = [
-    ['scan.mjs', 'Portal Scan'],
-    ['scan-ats-full.mjs', 'Reverse ATS Scan'],
-    ['scan-interamt.mjs', 'Interamt Scan'],
-    ['scan-hn.mjs', 'HN Scan'],
-  ];
-  for (const [file, title] of scanners) {
+  for (const [file, title] of Object.entries(SCANNER_TITLES)) {
     const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf-8');
     assert.match(src, /from '\.\/lib\/scan-summary-marker\.mjs'/, `${file} imports the module`);
     assert.ok(

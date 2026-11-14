@@ -7,7 +7,7 @@ import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 import { parseReport } from "@/lib/format";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { applyPostingUrl } from "@/lib/posting-url.mjs";
-import { answerCopyItems, cvCopyFields, indexedPdf, PORTAL_TIPS, reportNumberFor } from "@/lib/apply-checklist.mjs";
+import { answerCopyItems, indexedPdf, pasteCopyFields, PORTAL_TIPS, reportNumberFor, tailoredResumeText } from "@/lib/apply-checklist.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "@/lib/apply/unsupported-ats.mjs";
 import { readCvDiskState } from "@/lib/read-cv-disk";
 import { ApplyChecklist } from "@/components/apply-checklist";
@@ -51,7 +51,6 @@ export default async function ApplyPage({
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     cvText = null;
   }
-  const fields = cvText == null ? { work: [], education: "" } : cvCopyFields(cvText);
 
   let indexText = "";
   const indexPath = await resolvePdfIndexPath();
@@ -68,6 +67,10 @@ export default async function ApplyPage({
   const resume = resumeHit
     ? { relativePath: resumeHit.relativePath, downloadHref: `/api/cv-pdf?n=${reportNum}` }
     : null;
+  const fields = pasteCopyFields(
+    resumeHit ? tailoredResumeText(indexText, resumeHit.relativePath, root, (abs: string) => fs.readFileSync(abs, "utf8")) : null,
+    cvText,
+  );
   const cover = coverHit
     ? { relativePath: coverHit.relativePath, downloadHref: `/api/cv-pdf?n=${reportNum}&kind=cover` }
     : null;
@@ -94,7 +97,8 @@ export default async function ApplyPage({
       answers={answers}
       work={fields.work}
       education={fields.education}
-      cvMissing={cvText == null}
+      workEmpty={fields.workEmpty}
+      educationEmpty={fields.educationEmpty}
       tips={PORTAL_TIPS}
       trackerNum={app?.n ?? null}
       reportNum={reportNum}

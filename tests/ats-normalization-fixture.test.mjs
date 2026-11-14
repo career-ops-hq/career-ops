@@ -32,11 +32,15 @@ try {
     const key = keyCell.replace(/`/g, '');
     seenKeys.add(key);
 
-    // The sample has to carry the character the row names. Only the first
-    // codepoint list counts; "(also ...)" names variants the row doesn't show.
+    // The sample has to carry every character the row names. A row naming two
+    // curly double quotes still passes `some` when an editor turns one of them
+    // into ASCII, and that is the drift this test exists to catch. Only the
+    // first codepoint list counts; "(also ...)" names variants the row doesn't show.
+    const codepoint = (ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
     const named = [...codepoints.split('(')[0].matchAll(/U\+([0-9A-F]{4,6})/g)].map((m) => String.fromCodePoint(parseInt(m[1], 16)));
-    if (named.length && !named.some((ch) => sample.includes(ch))) {
-      fail(`${name}: the sample line no longer contains ${codepoints.split('(')[0].trim()} — an editor replaced it`);
+    const missing = named.filter((ch) => !sample.includes(ch));
+    if (missing.length) {
+      fail(`${name}: the sample line no longer contains ${missing.map(codepoint).join(' / ')} — an editor replaced it`);
       continue;
     }
 

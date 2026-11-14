@@ -265,7 +265,7 @@ for (const path of rootLayoutTrackerProbes) {
 // rule — a later pattern, so it wins. A future fixture must land the same way,
 // which a rule ordered after that negation would silently break.
 const trackedFixtureProbes = [
-  'test-fixtures/upgrade/state-v1.16/data/applications.md',
+  'test-fixtures/upgrade/state-v1.18/data/applications.md',
   'test-fixtures/upgrade/state-v1.18/data/follow-ups.md',
   'test-fixtures/upgrade/state-v1.20/data/applications.md',   // the next one, not yet written
 ];

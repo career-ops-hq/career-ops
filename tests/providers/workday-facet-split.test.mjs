@@ -133,6 +133,22 @@ try {
     fail('trueTotalFromFacets() should return null for empty/absent facets');
   }
 
+  // Workday counts facets disjunctively: an APPLIED facet's counts describe the
+  // board without that filter. Measured on Nvidia 2026-11-07: slice
+  // jobFamilyGroup=X & workerSubType=Regular reported total 1594 while its own
+  // jobFamilyGroup facet summed to 2308 and workerSubType to 1780.
+  const NVIDIA_SLICE_FACETS = [
+    { facetParameter: 'jobFamilyGroup', values: [{ id: 'x', count: 1594 }, { id: 'y', count: 714 }] },
+    { facetParameter: 'workerSubType', values: [{ id: 'reg', count: 1594 }, { id: 'int', count: 186 }] },
+    { facetParameter: 'timeType', values: [{ id: 'ft', count: 1594 }] },
+  ];
+  const sliceTrue = trueTotalFromFacets(NVIDIA_SLICE_FACETS, { exclude: ['jobFamilyGroup', 'workerSubType'] });
+  if (sliceTrue === 1594) {
+    pass('trueTotalFromFacets() ignores the facets a slice already applies (disjunctive counts)');
+  } else {
+    fail(`trueTotalFromFacets(Nvidia slice, exclude applied) returned ${sliceTrue}, expected 1594`);
+  }
+
   // A facet whose values carry no counts tells us nothing about board size —
   // summing them would report 0 and read as "empty board".
   const uncounted = trueTotalFromFacets([
@@ -365,6 +381,39 @@ try {
     pass('workday.fetch() re-splits a still-clamped slice on a second, not-yet-applied facet');
   } else {
     fail(`nested split issued ${JSON.stringify([...new Set(nestedCalls)])}, expected jobFamily=a x timeType slices`);
+  }
+
+  // A slice whose only "big" count is its own applied facet (disjunctive) is
+  // complete: it must not re-split and must not be tagged truncated.
+  const DISJ = {
+    '': {
+      total: 20,
+      facets: [{ facetParameter: 'jobFamily', values: [{ id: 'a', count: 2600 }, { id: 'b', count: 100 }] }],
+      tag: 'unfaceted',
+    },
+    'jobFamily=a': {
+      total: 20,
+      facets: [
+        { facetParameter: 'jobFamily', values: [{ id: 'a', count: 2600 }, { id: 'b', count: 100 }] },
+        { facetParameter: 'timeType', values: [{ id: 'p', count: 10 }, { id: 'f', count: 10 }] },
+      ],
+      tag: 'a',
+    },
+    'jobFamily=b': { total: 20, facets: [], tag: 'b' },
+  };
+  const disjCalls = [];
+  const disjJobs = await captureConsoleErrors(() => workday.fetch(ENTRY, mkCtx(async (_url, opts) => {
+    const body = JSON.parse(opts.body);
+    const key = sliceKey(body.appliedFacets);
+    disjCalls.push(key);
+    const res = DISJ[key];
+    if (!res) throw new Error(`unexpected slice ${JSON.stringify(key)}`);
+    return { total: res.total, facets: res.facets, jobPostings: postings(res.tag, body.offset) };
+  }, { includeUndated: true }))).then((r) => r.result);
+  if (!disjCalls.some((k) => k.includes('timeType')) && disjJobs.workdayTruncated === undefined) {
+    pass('workday.fetch() does not read a slice\'s own (disjunctive) facet counts as a clamp');
+  } else {
+    fail(`disjunctive slice: calls ${JSON.stringify([...new Set(disjCalls)])}, workdayTruncated=${disjJobs.workdayTruncated}`);
   }
 
   if (nestedJobs.length === 100) {

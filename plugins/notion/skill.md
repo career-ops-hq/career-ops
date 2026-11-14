@@ -23,6 +23,7 @@ truth — Notion is an additive mirror.
 A "Career Ops" parent page in Notion containing an "Applications" database with
 Company / Role / Status / Score / URL properties, shared with your internal
 integration. Put `NOTION_ACCESS_TOKEN` + `NOTION_PARENT_PAGE_ID` in `.env`.
+Step-by-step setup: `docs/NOTION_SETUP.md`.
 
 ## Data it produces
 

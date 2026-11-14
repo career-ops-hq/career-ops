@@ -46,6 +46,7 @@ check('canonical keeps the practice-session omission rule', /practice-session fi
 // and a locale-phrased ORDER statement that backslash escaping comes first)
 const locales = [
   ['de', /Backslashes zuerst escapen/, /innere doppelte Anführungszeichen/, /zwei Zeichen/, /Backslashes zuerst escapen, dann innere/],
+  ['id', /escape backslash/, /tanda kutip ganda di dalamnya/, /dua karakter/, /escape backslash terlebih dahulu sebelum meng-escape tanda kutip ganda/],
   ['es', /barras invertidas/, /comillas dobles internas/, /dos caracteres/, /barras invertidas antes que las comillas dobles internas/],
   ['it', /barre rovesciate/, /virgolette doppie interne/, /due caratteri/, /prima le barre rovesciate e poi le virgolette/],
   ['ja', /バックスラッシュをエスケープ/, /内側のダブルクォート/, /2 文字/, /より先にバックスラッシュをエスケープ/],
