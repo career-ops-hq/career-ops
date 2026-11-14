@@ -164,7 +164,7 @@ function firstMatches(segments, test, limit = 2, focus = null) {
 // or a placeholder ("Reports to: TBD", "Reports to: N/A").
 // A label form counts too: "Reports to: Head of X", "Reporting to – X", "Reports to - X",
 // with or without Markdown emphasis ("**Reports to:** X", "Reports to: **X**").
-const REPORTS_TO = /(?<![A-Za-z0-9])(?:reports?|reporting)\s+(?:directly\s+)?to[*_]*(?:\s*[:–—][*_]*\s*|\s+-\s*|\s+)[*_]*(?:(?:the|our|a|an)\s+)?(?!(?:the|our|a|an|n\/a|tb[dca]|none|unknown)(?![A-Za-z0-9]))[A-Za-z][\w&/'-]*/i;
+const REPORTS_TO = /(?<![A-Za-z0-9])(?:reports?|reporting)\s+(?:directly\s+)?to[*_]*(?:\s*[:–—][*_]*\s*|\s+-\s*|\s+)[*_]*(?:(?:the|our|a|an)\s+)?(?!(?:the|our|a|an|n\/a|tb[dca]|none|unknown)(?![\p{L}\p{M}0-9]))\p{L}[\p{L}\p{M}\w&/'-]*/iu;
 // A named department or team: "in the Education Department", "Department of Finance", "Student Services Team".
 const NAMED_DEPARTMENT = /\b(?:in|within|of|for|from)\s+(?:the\s+)?[\w&\s-]{2,40}?\b(?:department|division|team|group|office|unit)\b|\b[A-Z][\w&-]+\s+(?:Department|Division|Team|Group|Office|Unit)\b|\b(?:department|division)\s+of\s+[A-Z]\w+/i;
 const SUPERVISOR_WORD = /\b(?:supervisor|line\s+manager|manager|director|head\s+of|team\s+lead|lead)\b/i;

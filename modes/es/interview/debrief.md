@@ -22,7 +22,7 @@ Después de una entrevista real, captura qué se preguntó, evalúa qué funcion
 6. **Banco de historias** en `interview-prep/story-bank.md` — agregar nuevas historias si surgieron
 7. **CV** en `cv.md` + `article-digest.md` (si está presente) — para fundamentar las respuestas sugeridas en la experiencia real
 8. **Afirmaciones retractadas** en `interview-prep/retracted-claims.md` (si está presente) — barrera estricta (hard gate); nunca uses una afirmación retractada en una respuesta sugerida, incluso si el candidato la dijo en la entrevista
-9. **Archivo de preparación específico del rol** — para adjuntar las notas del análisis; corrige en el lugar cualquier hecho existente que la entrevista contradiga directamente (ver Step 1b)
+9. **Archivo de preparación específico del rol** — para adjuntar las notas del análisis (o reemplazar la entrada de esta ronda en una repetición, ver Step 1d); corrige en el lugar cualquier hecho existente que la entrevista contradiga directamente (ver Step 1b)
 
 ---
 
@@ -52,6 +52,8 @@ Si la memoria está incompleta, haz preguntas dirigidas:
 - "¿El entrevistador hizo preguntas de seguimiento (follow-up) sobre algo? — eso generalmente significa que querían más."
 
 Establece el marcador de fuente explícito: **`input_source: recall`**.
+
+**Formato y tono (ambas rutas, una pregunta corta, opcional).** Pregunta una sola vez: "Una rápida sobre cómo se sintió la ronda: ¿qué formato tuvo (recruiter screen / 1:1 / panel / group / take-home review), cuántas personas había en la llamada, cómo describirías el tono (relaxed-conversational / structured-formal / rapid-fire / adversarial) y qué tan cómodo te sentiste (1-5, o unas pocas palabras tuyas)?" Si una transcripción muestra el formato, el número de personas o el tono, ofrécelos como sugerencia para que los confirme. **Nunca infieras ni rellenes la comodidad por el candidato**: es su valoración subjetiva, así que regístrala solo con sus propias palabras y omítela si la salta. Si salta toda la pregunta, no escribas ninguno de los cuatro valores.
 
 Sea cual sea la ruta que produjo los datos de pregunta/respuesta, los Steps 2 en adelante operan sobre ellos de forma idéntica — el análisis honesto, el cierre de carencias y las actualizaciones del banco de preguntas/banco de historias no distinguen entre un análisis con `input_source: transcript` y uno con `input_source: recall`. El marcador en sí se sigue llevando sin cambios para que el Step 9 pueda leerlo.
 
@@ -90,6 +92,17 @@ Mientras capturas lo que se preguntó, captura también lo que el entrevistador 
 - **Las afirmaciones del candidato quedan fuera del alcance.** Aquí solo van las declaraciones del entrevistador sobre el rol, no nada de lo que el candidato dijo sobre sí mismo.
 
 Lleva la lista al Step 6 y al Step 8, y al Step 9 solo cuando la entrada sea una transcripción.
+
+---
+
+## Step 1d — Check for an Earlier Debrief of This Round
+
+Antes de guardar nada (Step 8 y Step 9 dependen de la respuesta), comprueba si este análisis repite uno ya guardado. En cuanto conozcas la empresa, el rol, el tipo de ronda y la fecha (pregunta si no), lista todos los archivos de sesión existentes para ellos en `interview-prep/sessions/`: el nombre base `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` y cualquier variante `-2`, `-3`, ..., incluso cuando falte el propio nombre base.
+
+- **Ningún archivo:** busca en `interview-prep/{company-slug}-{role-slug}.md` una entrada `## Round [N] Debrief — [YYYY-MM-DD]` para esta ronda y fecha, la que deja una ejecución anterior que se detuvo después del Step 8. Si existe, pregunta si este análisis la repite; si la respuesta es sí, el Step 8 reemplaza esa entrada. Si no, es una ronda nueva y el Step 8 agrega. En ambos casos, el Step 9 escribe el nombre base.
+- **Uno o más archivos:** nunca sobrescribas en silencio. Muestra los archivos con el `interviewer_role` y la primera pregunta de cada uno, y pregunta al candidato si este análisis repite uno de ellos o es una ronda distinta. Lista también como opción adicional cualquier entrada `## Round [N] Debrief — [YYYY-MM-DD]` de esta fecha en el archivo de preparación que no corresponda a ninguno de los archivos (la deja una ejecución que se detuvo después del Step 8): si el candidato la elige, el Step 8 reemplaza esa entrada y el Step 9 escribe el siguiente contador libre. Muestra cada una de esas entradas con sus líneas `**Interviewer:**` y `**Round type:**`, para que el candidato distinga la entrada interrumpida de un análisis terminado de otro tipo de ronda en la misma fecha.
+  - **Repetición:** anota el archivo que elija el candidato. El Step 8 reemplaza la entrada de esa ronda en el archivo de preparación en lugar de agregar una segunda, y el Step 9 actualiza en su sitio el archivo elegido según su regla de repetición.
+  - **Ronda distinta:** el Step 8 agrega como siempre, y el Step 9 escribe el siguiente contador libre (`-2`, `-3`, ...) antes de `.md`.
 
 ---
 
@@ -175,7 +188,7 @@ Sé honesto. Un rango de probabilidad con un razonamiento claro es más útil qu
 
 ## Step 8 — Save Debrief
 
-Agrega a `interview-prep/{company-slug}-{role-slug}.md`:
+Agrega a `interview-prep/{company-slug}-{role-slug}.md`. **Si el Step 1d confirmó una repetición**, reemplaza en su lugar la entrada `## Round [N] Debrief — [YYYY-MM-DD]` existente de esa ronda (el encabezado y todo hasta el siguiente encabezado `## `), para que una entrevista conserve una sola entrada; agrega solo cuando el archivo no tenga ninguna entrada para esa ronda y fecha.
 
 ```markdown
 ## Round [N] Debrief — [YYYY-MM-DD]
@@ -203,17 +216,26 @@ Agrega a `interview-prep/{company-slug}-{role-slug}.md`:
 **Timeline:** [cualquier fecha o plazo mencionado]
 **Other candidates:** [si se revelaron]
 **Next steps:** [lo que el entrevistador dijo que sucede a continuación y para cuándo]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (solo los campos que el candidato respondió; elimina por completo las viñetas sin respuesta, sin marcadores de posición ni valores inferidos)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [número]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5, o una frase corta, con las propias palabras del candidato]
 ```
 
-**Si se declaró verbalmente una cifra de compensación en esta ronda** (el candidato dio una cifra concreta, no solo "se habló de compensación"), añade una línea `stated` a `data/salary-observations.tsv` (crea el archivo si no existe; formato según `docs/SCRIPTS.md` → salary-gap) con el tracker#, la fecha de esta ronda, el monto/moneda, fuente `user`, una nota breve, la etiqueta de la ronda y el nombre del entrevistador. Esto es lo que permite que `interview/plan` se lo recuerde al candidato antes de la siguiente ronda — ver Inputs #9 ahí.
+**Si se declaró verbalmente una cifra de compensación en esta ronda** (el candidato dio una cifra concreta, no solo "se habló de compensación"), añade una línea `stated` a `data/salary-observations.tsv` (crea el archivo si no existe; formato según `docs/SCRIPTS.md` → salary-gap) con el tracker#, la fecha de esta ronda, el monto/moneda, fuente `user`, una nota breve, la etiqueta de la ronda y el nombre del entrevistador. Esto es lo que permite que `interview/plan` se lo recuerde al candidato antes de la siguiente ronda — ver Inputs #9 ahí. En una repetición, omite la línea si el archivo ya tiene una fila `stated` con el mismo tracker#, ronda, fecha, monto y moneda.
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-Después del análisis, escribe también una transcripción de la sesión legible por máquina en `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Este es un registro estructurado de la ronda para modos de análisis posteriores; los turnos etiquetados por hablante permiten a un consumidor leer cualquier lado sin tener que volver a inferir quién habló. El contrato completo vive en `interview-prep/sessions/README.md`.
+Después del análisis, escribe también una transcripción de la sesión legible por máquina en `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Usa la respuesta del Step 1d, nunca una sobrescritura silenciosa: sin archivo previo, escribe el nombre base; para una ronda distinta, escribe el siguiente contador libre (`-2`, `-3`, ...) antes de `.md`; para una repetición, actualiza en su sitio el archivo que eligió el candidato. Consulta la sección "File names" del README. Este es un registro estructurado de la ronda para modos de análisis posteriores; los turnos etiquetados por hablante permiten a un consumidor leer cualquier lado sin tener que volver a inferir quién habló. El contrato completo vive en `interview-prep/sessions/README.md`.
 
-**Comprueba el marcador `input_source` establecido en el Step 1.** Si es `input_source: transcript`, omite la reconstrucción: no regeneres la transcripción a partir de la salida del Step 1/Step 2 — eso sería una copia con más pérdida de la fuente real de la que proviene. En su lugar, guarda la transcripción original directamente, ligeramente normalizada para ajustarse al esquema de abajo (etiquetas de hablante, front-matter, etiquetas de competencia de la evaluación del Step 2). Si es `input_source: recall`, reconstruye la transcripción a partir de la salida del Step 1/Step 2 como antes — el recuerdo nunca tiene un original verbatim que preservar.
+**Comprueba el marcador `input_source` establecido en el Step 1.** Si es `input_source: transcript`, omite la reconstrucción: no regeneres la transcripción a partir de la salida del Step 1/Step 2 — eso sería una copia con más pérdida de la fuente real de la que proviene. En su lugar, guarda la transcripción original directamente, ligeramente normalizada para ajustarse al esquema de abajo (etiquetas de hablante, front-matter, etiquetas de competencia de la evaluación del Step 2). Si es `input_source: recall`, reconstruye la transcripción a partir de la salida del Step 1/Step 2 como antes — un archivo nuevo de recuerdo no tiene un original verbatim que preservar.
+
+**Regla de repetición (el Step 1d confirmó una repetición).** El archivo elegido puede contener turnos verbatim de un análisis anterior hecho con transcripción, y nada en él lo indica. Con `input_source: transcript`, la transcripción reemplaza los turnos y `stated_priorities` del archivo. Con `input_source: recall`, conserva los turnos y `stated_priorities` existentes del archivo tal como están, y agrega solo lo que aportó la ejecución de recuerdo: preguntas que le faltan al archivo (como nuevos turnos `## Q` en el orden de la entrevista), etiquetas de competencia en respuestas que no tienen ninguna, y las claves de formato y tono que el candidato dio en esta ejecución. Nunca reescribas un turno existente a partir del recuerdo.
 
 Formato:
 
@@ -225,9 +247,13 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [rol, si se conoce]
 source: debrief
-stated_priorities:        # solo entrada de transcripción; omitir si no se declaró ninguna o para entrada de recuerdo (Step 1c)
-  - speaker: [nombre o rol, o "unknown"]
+stated_priorities:        # se escribe solo desde entrada de transcripción; omitir si no se declaró ninguna (Step 1c); una repetición de recuerdo conserva la lista existente
+  - speaker: "[nombre o rol, o unknown]"
     quote: "[cita textual breve, entre comillas dobles]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # opcional (Step 1)
+people_on_call: [número]                                              # opcional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # opcional
+candidate_comfort: "[1-5, o una frase corta con las propias palabras del candidato]"      # opcional
 ---
 
 ## Q1
@@ -245,7 +271,8 @@ Reglas para la transcripción:
 - **Etiqueta cada respuesta.** En la línea directamente arriba de cada línea `**Candidate:**`, emite `<!-- competency: tag[, tag...] -->` — en minúsculas (lowercase-kebab-case), separado por comas para respuestas con múltiples competencias (ej. `system-design`, `people-leadership`, `incident-response`). Ya evaluaste cada respuesta en el Step 2, así que etiqueta a partir de esa evaluación en lugar de volver a leer. Las etiquetas son de formato libre; elige la competencia que la pregunta realmente evaluó.
 - **Reconstruye el turno del candidato fielmente.** Usa lo que el candidato informó haber dicho en el Step 1, no una respuesta idealizada. La "respuesta correcta/completa" del Step 2 pertenece al archivo de análisis, nunca a la transcripción — la transcripción registra lo que sucedió.
 - **`source: debrief`.**
-- **`stated_priorities` va en el front matter** (Step 1c), como una lista YAML de elementos `speaker` + `quote`, para que los scripts e `interview/plan` puedan leerlo sin analizar el cuerpo. Pon cada `quote` entre comillas dobles para que el front matter siga siendo YAML válido y vuelva a parsearse exactamente como se dijo: al escapar manualmente, escapa las barras invertidas antes que las comillas dobles internas, de modo que un `\n` literal en la cita quede como dos caracteres en lugar de convertirse en un salto de línea. La ronda y la fecha de cada elemento son los propios `round` y `date` del archivo. Omite el campo cuando no se declaró nada y siempre que `input_source: recall`. Nunca pongas prioridades en un archivo de sesión de práctica, ya que esos no tienen un entrevistador real.
+- **`stated_priorities` va en el front matter** (Step 1c), como una lista YAML de elementos `speaker` + `quote`, para que los scripts e `interview/plan` puedan leerlo sin analizar el cuerpo. Pon cada `quote` entre comillas dobles para que el front matter siga siendo YAML válido y vuelva a parsearse exactamente como se dijo: al escapar manualmente, escapa las barras invertidas antes que las comillas dobles internas, de modo que un `\n` literal en la cita quede como dos caracteres en lugar de convertirse en un salto de línea. La ronda y la fecha de cada elemento son los propios `round` y `date` del archivo. Pon también cada `speaker` entre comillas dobles y escápalo igual que `quote` (primero las barras invertidas, luego las comillas dobles internas): un valor como `Hiring Manager: Jane` contiene dos puntos y sin comillas es YAML inválido. Omite el campo cuando no se declaró nada, y nunca lo escribas desde `input_source: recall`: un archivo nuevo de recuerdo no lo lleva, y una repetición de recuerdo conserva sin cambios la lista existente del archivo elegido. Nunca pongas prioridades en un archivo de sesión de práctica, ya que esos no tienen un entrevistador real.
+- **`format`, `people_on_call`, `tone` y `candidate_comfort` son claves opcionales del front matter** que llevan los valores del Step 1 / Step 8, para que los modos posteriores puedan leerlos sin analizar prosa. Escribe solo las claves que el candidato respondió; omite el resto y nunca escribas `candidate_comfort` si el candidato no lo dio. Pon `candidate_comfort` entre comillas dobles (puede ser texto libre); al escapar manualmente, escapa las barras invertidas antes que las comillas dobles internas, como con `quote`. Los archivos de sesión de práctica no las llevan.
 - El archivo de sesión aterriza en un directorio ignorado por git (los nombres/empresas reales nunca entran en el control de versiones); escríbelo sin censurar.
 
 ---

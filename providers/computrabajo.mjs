@@ -27,6 +27,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const MAX_PAGES = 3; // also the hard cap: a typo cannot turn one entry into a ban-prone crawl
 const DEFAULT_MAX_JOBS = 15;
@@ -154,10 +155,10 @@ export default {
       // Newest first (the board's own "Fecha" sort). Employers can pay Computrabajo to
       // feature a posting ("Empleo destacado"), and those cards are interleaved in every
       // sort order; a `by=` the user put in their URL wins.
-      // robots.txt disallows `/ofertas-de-trabajo/*by=`, so no sort is sent there, not even one from the URL.
-      if (pageUrl.pathname.startsWith('/ofertas-de-trabajo/')) {
-        pageUrl.searchParams.delete('by');
-      } else if (!pageUrl.searchParams.has('by')) {
+      // `/ofertas-de-trabajo/` used to drop the sort because robots.txt disallowed
+      // `*by=` there; rule 6 changed in #6691 (robots.txt no longer gates a provider),
+      // so the sort is sent on every path (#6694).
+      if (!pageUrl.searchParams.has('by')) {
         pageUrl.searchParams.set('by', 'publicationtime');
       }
       pageUrl.searchParams.set('p', String(page));
@@ -207,12 +208,22 @@ export default {
         }
         jobs.push({ title: card.title, url: card.url, company: card.company, location: card.location });
       }
+      // A full page that brought the walk to max_jobs is a cap stop even when its
+      // last cards repeat ids already seen (featured postings recur): the inner
+      // loop only sees the cap when another new id follows. As in magneto.mjs.
+      if (!probing && stopReason === 'complete' && cards.length >= OBSERVED_PAGE_SIZE && jobs.length >= maxJobs) stopReason = 'cap';
       if (stopReason === 'cap' || fresh === 0 || jobs.length >= maxJobs) break;
       if (page === maxPages && !probing && cards.length >= OBSERVED_PAGE_SIZE) stopReason = 'cap';
     }
 
     if (stopReason === 'cap') {
       console.warn(`[computrabajo] ${entry.name}: stopped at the provider's crawl limit (${maxPages} page(s), ${maxJobs} posting(s)); the search has more results. Narrow the search URL to see them.`);
+    }
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs). stopReason
+    // already says why the walk stopped; it drives the marker as themuse.mjs does.
+    if (!probing && stopReason !== 'complete') {
+      markTruncated(jobs, stopReason === 'cap' ? 'page-cap' : stopReason, { fetched: jobs.length });
     }
     return jobs;
   },

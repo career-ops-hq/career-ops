@@ -109,7 +109,7 @@ directory.
    commit we approved.
 
 Broadly-useful, low/zero-key plugins may be shipped **bundled** in `plugins/`
-(e.g. `apify`, `gmail`, `notion`). Bundled plugins are **reference seeds**:
+(e.g. `apify`, `gmail`, `notion`; the Notion setup is in [NOTION_SETUP.md](NOTION_SETUP.md)). Bundled plugins are **reference seeds**:
 reviewed in-tree, always present, and a working example to copy — kept minimal
 and stable on purpose, **not** a home for ongoing feature work.
 

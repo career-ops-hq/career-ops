@@ -510,6 +510,21 @@ export const extractApplyControls = ({ postingId, postingSegment, pageUrl, idPat
     }
   };
 
+  // A sticky sub-nav can hold the posting's only Apply control as an in-page
+  // anchor: Shopify's careers page puts "Apply now" -> #apply in a <nav>, so
+  // every live posting read no_apply_control. A bare "#apply..." href in the
+  // chrome is that control, unless its label is a skip link ("Skip to apply"),
+  // which is the site's own accessibility shortcut and stays chrome. Only the
+  // bare fragment counts: the same link spelled with the page's address, and
+  // any other fragment, keep the chrome rule above.
+  const isOwnApplyAnchor = (element) => {
+    const href = element.getAttribute('href') || '';
+    if (!/^#apply/i.test(href)) return false;
+    const label = [element.innerText, element.getAttribute('aria-label'), element.getAttribute('title')]
+      .filter(Boolean).join(' ');
+    return !/\bskip\b/i.test(label);
+  };
+
   // A design-system button is a custom element: UKG Pro (UltiPro) renders
   // Apply as <ukg-button>Apply now</ukg-button>, with no role on it. The
   // native <button> inside its shadow root has no text of its own (the
@@ -523,7 +538,7 @@ export const extractApplyControls = ({ postingId, postingSegment, pageUrl, idPat
 
   return candidates
     .filter((element) => {
-      if (element.closest('nav, header, footer') && !linksToPosting(element)) return false;
+      if (element.closest('nav, header, footer') && !linksToPosting(element) && !isOwnApplyAnchor(element)) return false;
       if (element.closest('[aria-hidden="true"]')) return false;
 
       const style = window.getComputedStyle(element);

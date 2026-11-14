@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
-import { scoreTone, legitimacyTone, parseReport } from "@/lib/format";
+import { legitimacyTone, parseReport } from "@/lib/format";
 import {
   APPLY_LINE,
   applyCtaQuiet,
@@ -160,7 +160,6 @@ export function ReportView({
                   <p className="pb-1 text-xs text-muted">Apply line is {APPLY_LINE.toFixed(1)}</p>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
                   {line && <Badge tone={recommended ? "good" : line === "Below the apply line" ? "muted" : "warn"}>{line}</Badge>}
                   {decision && <Badge tone="info">{decision}</Badge>}
                   {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}

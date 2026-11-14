@@ -11,6 +11,7 @@
  */
 
 import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { normalizeWorkplaceType } from './providers/_workplace-type.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { tmpdir } from 'os';
@@ -221,10 +222,14 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'scan_history',
   'preferred_languages',
   'interamt_searches',
+  'topdev_searches',
+  'seek_searches',
+  'hn_hiring',
   'dayforce_boards',
   'location_filter',
   'country_eligibility_filter',
   'salary_filter',
+  'workplace_filter',
   'experience_filter',
   'portal_prune_quiet_days',
   'max_posting_age_days',
@@ -252,6 +257,19 @@ export function portalTopLevelTypos(config) {
   return found;
 }
 
+function unknownFieldMessage(key, allowed) {
+  const suggestion = nearestKey(key, allowed, 2);
+  if (suggestion) return `unknown key "${key}" — did you mean "${suggestion}"?`;
+  return `unknown key "${key}" — expected one of ${allowed.join(', ')}`;
+}
+
+function rejectUnknownFields(block, path, allowed, errors) {
+  for (const key of Object.keys(block)) {
+    if (allowed.includes(key)) continue;
+    add(errors, `${path}.${key}`, unknownFieldMessage(key, allowed));
+  }
+}
+
 export async function validatePortalsConfig(config, { providerIds = new Set() } = {}) {
   const errors = [];
   const warnings = [];
@@ -273,6 +291,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
     if (!isObject(config.title_filter)) {
       add(errors, 'title_filter', 'title_filter must be an object');
     } else {
+      rejectUnknownFields(config.title_filter, 'title_filter', TITLE_FILTER_FIELDS, errors);
       warnBareStringKeywords(config.title_filter, 'title_filter', warnings);
       validateKeywordList(config.title_filter.positive, 'title_filter.positive', errors);
       validateKeywordList(config.title_filter.negative, 'title_filter.negative', errors);
@@ -294,11 +313,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       // matches every title on every board — the exact outcome this key
       // exists to prevent. An unknown field is therefore an error, while
       // `positive: []` stays valid as a deliberate choice.
-      for (const key of Object.keys(config.title_filter_full)) {
-        if (!TITLE_FILTER_FIELDS.includes(key)) {
-          add(errors, `title_filter_full.${key}`, `unknown title_filter_full field - expected one of ${TITLE_FILTER_FIELDS.join(', ')}`);
-        }
-      }
+      rejectUnknownFields(config.title_filter_full, 'title_filter_full', TITLE_FILTER_FIELDS, errors);
       warnBareStringKeywords(config.title_filter_full, 'title_filter_full', warnings);
       validateKeywordList(config.title_filter_full.positive, 'title_filter_full.positive', errors);
       validateKeywordList(config.title_filter_full.negative, 'title_filter_full.negative', errors);
@@ -370,11 +385,7 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
           add(errors, `field_filters.${field}`, `field_filters.${field} must be an object`);
           continue;
         }
-        for (const key of Object.keys(block)) {
-          if (!FIELD_FILTER_FIELDS.includes(key)) {
-            add(errors, `field_filters.${field}.${key}`, `unknown field_filters field - expected one of ${FIELD_FILTER_FIELDS.join(', ')}`);
-          }
-        }
+        rejectUnknownFields(block, `field_filters.${field}`, FIELD_FILTER_FIELDS, errors);
         // Stricter than title_filter on purpose: a bare-string list is dropped
         // by buildTitleFilter, and a block with no keyword at all matches every
         // posting. title_filter keeps that leniency for existing configs;
@@ -504,6 +515,31 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       }
       if (ef.concurrency !== undefined && (!Number.isInteger(ef.concurrency) || ef.concurrency < 1 || ef.concurrency > 16)) {
         add(errors, 'experience_filter.concurrency', 'must be an integer from 1 to 16 when set');
+      }
+    }
+  }
+
+  if (config.workplace_filter !== undefined) {
+    if (!isObject(config.workplace_filter)) {
+      add(errors, 'workplace_filter', 'workplace_filter must be an object');
+    } else {
+      const wf = config.workplace_filter;
+      rejectUnknownFields(wf, 'workplace_filter', ['allow', 'include_unknown'], errors);
+      if (wf.include_unknown !== undefined && typeof wf.include_unknown !== 'boolean') {
+        add(errors, 'workplace_filter.include_unknown', 'must be a boolean when set');
+      }
+      if (wf.allow !== undefined) {
+        if (!Array.isArray(wf.allow)) {
+          add(errors, 'workplace_filter.allow', 'workplace_filter.allow must be an array');
+        } else {
+          for (let i = 0; i < wf.allow.length; i++) {
+            const v = wf.allow[i];
+            const norm = typeof v === 'string' ? normalizeWorkplaceType(v) : undefined;
+            if (!norm) {
+              add(errors, `workplace_filter.allow[${i}]`, `invalid workplace type "${v}" — must be one of: remote, hybrid, onsite`);
+            }
+          }
+        }
       }
     }
   }

@@ -114,10 +114,11 @@ test('the CLI reads the user layer under CAREER_OPS_ROOT', () => {
   }
 });
 
-test('a pre-v1.18 three-column history still counts', () => {
-  // CodeRabbit on #2731: upgrades keep the legacy url / date / title rows
-  // byte-identical (test-fixtures/upgrade/state-v1.16), and read by the current
-  // column order their title was empty, so the audit saw zero offers.
+test('a three-column history still counts', () => {
+  // CodeRabbit on #2731: a headerless url / date / title row, read by the
+  // current column order, had an empty title, so the audit saw zero offers.
+  // No release is known to have written that layout (#6707); the reader stays
+  // tolerant of it anyway.
   const tsv = [
     'https://boards.example.test/acme/jobs/12345\t2026-06-19\tSenior Platform Engineer',
     'https://boards.example.test/globex/jobs/67890\t2026-06-24\tStaff DevOps Engineer',

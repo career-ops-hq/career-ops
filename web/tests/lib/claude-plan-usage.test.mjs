@@ -68,3 +68,14 @@ test("falls through a missing binary to the next, and to null when none answer",
   const none = await readPlanUsage({ candidates: ["claude"], exec: (_b, _a, _o, cb) => cb(new Error("x")) });
   assert.equal(none, null);
 });
+
+test("closes the child's stdin so the CLI does not wait 3s for piped input", async () => {
+  let ended = false;
+  const exec = (_b, _a, _o, cb) => {
+    cb(null, JSON.stringify({ result: SAMPLE }));
+    return { stdin: { end: () => { ended = true; } } };
+  };
+  const got = await readPlanUsage({ candidates: ["claude"], exec });
+  assert.equal(got.rows.length, 3);
+  assert.equal(ended, true);
+});

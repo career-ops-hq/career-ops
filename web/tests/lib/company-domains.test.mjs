@@ -103,5 +103,5 @@ test("the cache key version was bumped for this resolver change", () => {
   // expires and misses are stored as an empty sentinel, so without a bump every
   // warm install keeps serving the permanent "no logo" this change exists to
   // fix — to exactly the companies it fixes it for.
-  assert.notEqual(COMPANY_KEY_VERSION, "v3", "companyDomains() changed while COMPANY_KEY_VERSION stayed at v3");
+  assert.notEqual(COMPANY_KEY_VERSION, "v5", "the route's candidate list changed while COMPANY_KEY_VERSION stayed at v5");
 });

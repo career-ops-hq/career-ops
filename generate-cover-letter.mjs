@@ -501,46 +501,149 @@ function collectInputText(value) {
   return [];
 }
 
-/** Parse a payload, run the fact gate, and render the cover-letter PDF. */
-async function main() {
-  const { values: args } = parseArgs({
-    options: {
-      payload: { type: "string" },
-      out:     { type: "string" },
-      format:  { type: "string" },
-      country: { type: "string" },
-      report:  { type: "string" },
-      help:    { type: "boolean", short: "h" },
-    },
-    strict: false,
-  });
+/** A cover letter is one page by convention; a CV's default budget is 2. */
+export const DEFAULT_COVER_MAX_PAGES = 1;
 
-  if (args.help || !args.payload) {
-    console.log(`
-Usage:
-  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN]
-
-  --payload   Path to the JSON payload file (required)
-  --out       Override output path from payload (optional)
-  --format    Override output PDF page format (letter|a4). Defaults to
-              config/profile.yml page_format, then letter.
-  --country   Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
-              only when page_format is "auto". Defaults to the payload's country.
-  --report    Link the PDF to a tracker report number in data/pdf-index.tsv
-`);
-    process.exit(args.help ? 0 : 1);
+/**
+ * The writing check a CV gets, applied to a letter, as notes and never as a stop.
+ *
+ * generate-pdf.mjs refuses a CV that carries stock wording the candidate never
+ * wrote ("spearheaded", "leveraged"). A letter went through the fact gate only,
+ * so a draft could keep that wording and the long dashes cover mode bans, and
+ * nothing said so. A letter is not refused here: it quotes the posting, and a
+ * posting uses words a candidate would not choose. The notes name the words and
+ * the PDF still builds.
+ *
+ * Wording is allowed when cv.md, voice-dna.md, cv-facts.json or the candidate's
+ * own answers for this letter already use it. Read before the ATS pass, which
+ * replaces long dashes and would hide them.
+ *
+ * @param {string} html - The letter's HTML before the ATS text pass.
+ * @param {{root?: string, payload?: object}} [options]
+ * @returns {Promise<string[]>} One note per kind of finding; empty when clean.
+ */
+export async function coverLetterVoiceNotes(html, { root = getCareerOpsRoot(), payload = {} } = {}) {
+  const { voiceIssues, candidateOwnWords } = await import("./cv-voice.mjs");
+  const cvPath = join(root, "cv.md");
+  const cv = existsSync(cvPath) ? readFileSync(cvPath, "utf-8") : "";
+  const ownWords = [cv, candidateOwnWords(root), ...letterInputTexts(payload)].join("\n");
+  const issues = voiceIssues(html, ownWords);
+  const notes = [];
+  const phrases = [...new Set(issues.filter((issue) => issue.kind === "banned-phrase").map((issue) => issue.value))];
+  if (phrases.length) {
+    notes.push(
+      `Voice check warning for cover letter: ${phrases.map((phrase) => `"${phrase}"`).join(", ")}. `
+      + "That wording is not in your CV or your own words, and it reads as stock text. The PDF still builds.",
+    );
   }
+  const dashes = [...new Set(issues.filter((issue) => issue.kind === "em-dash").map((issue) => issue.value))];
+  if (dashes.length) {
+    notes.push(
+      `Voice check warning for cover letter: ${dashes.map((dash) => `an ${dash}`).join(", ")}. `
+      + "Cover mode bans long dashes. The PDF replaces them, but the draft and any text you paste elsewhere keep them.",
+    );
+  }
+  return notes;
+}
+
+const USAGE = `
+Usage:
+  node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN] [--max-pages N] [--strict-pages]
+
+  --payload       Path to the JSON payload file (required)
+  --out           Override output path from payload (optional)
+  --format        Override output PDF page format (letter|a4). Defaults to
+                  config/profile.yml page_format, then letter.
+  --country       Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
+                  only when page_format is "auto". Defaults to the payload's country.
+  --report        Link the PDF to a tracker report number in data/pdf-index.tsv
+  --max-pages     Preferred letter length in pages (default: ${DEFAULT_COVER_MAX_PAGES})
+  --strict-pages  Fail instead of warning when the letter is longer than --max-pages
+`;
+
+/**
+ * Parse and validate the CLI flags.
+ *
+ * Strict on purpose (#6373). With `strict: false` an unknown flag (a typo, or
+ * --max-pages / --strict-pages, which this script did not declare) was dropped
+ * without a word, and a string flag given no value swallowed the next flag:
+ * `--report --out x.pdf` set report to "--out" and wrote the PDF to the
+ * default path. Every case is now an error that names the flag.
+ *
+ * @param {string[]} argv
+ * @returns {{ ok: true, args: object } | { ok: false, error: string }}
+ */
+export function parseCoverArgs(argv) {
+  let values;
+  try {
+    ({ values } = parseArgs({
+      args: argv,
+      options: {
+        payload:        { type: "string" },
+        out:            { type: "string" },
+        format:         { type: "string" },
+        country:        { type: "string" },
+        report:         { type: "string" },
+        "max-pages":    { type: "string" },
+        "strict-pages": { type: "boolean" },
+        help:           { type: "boolean", short: "h" },
+      },
+      strict: true,
+      allowPositionals: false,
+    }));
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+  if (values.help) return { ok: true, args: values };
 
   // Supplied flags are validated like generate-pdf.mjs does. A typo that fell
   // through to the profile or the payload would print a letter on the wrong sheet.
   // `auto` is a profile or payload value, never a sheet, so --format rejects it.
-  if (args.format !== undefined && !normalizePageFormat(args.format)) {
-    console.error(`Invalid format "${args.format}". Use: ${[...PAGE_FORMATS].join(", ")}`);
+  if (values.format !== undefined && !normalizePageFormat(values.format)) {
+    return { ok: false, error: `Invalid format "${values.format}". Use: ${[...PAGE_FORMATS].join(", ")}` };
+  }
+  if (values.country !== undefined && !pageFormatForCountry(values.country)) {
+    return { ok: false, error: `Invalid country "${values.country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.` };
+  }
+  // Checked as typed, not trimmed: `--report=' 42 '` is not a report number.
+  if (values.report !== undefined && !/^\d+$/.test(values.report)) {
+    return { ok: false, error: `Invalid --report "${values.report}". Use a numeric report number, e.g. --report=42.` };
+  }
+  // An empty --out= would otherwise be read as "not given" by main(), which
+  // then writes to the payload's own destination: a flag the caller typed,
+  // silently ignored.
+  if (values.out !== undefined && values.out.trim() === "") {
+    return { ok: false, error: 'Invalid --out "". Give a path inside output/, e.g. --out output/acme-cover.pdf.' };
+  }
+  const maxPagesInput = values["max-pages"];
+  const maxPages = maxPagesInput === undefined ? DEFAULT_COVER_MAX_PAGES : Number(maxPagesInput);
+  if (!Number.isInteger(maxPages) || maxPages < 1) {
+    return { ok: false, error: `Invalid --max-pages "${maxPagesInput}". Use a positive integer, e.g. --max-pages=1.` };
+  }
+  return {
+    ok: true,
+    args: {
+      ...values,
+      report: values.report,
+      maxPages,
+      strictPages: Boolean(values["strict-pages"]),
+    },
+  };
+}
+
+/** Parse a payload, run the fact gate, and render the cover-letter PDF. */
+async function main() {
+  const parsed = parseCoverArgs(process.argv.slice(2));
+  if (!parsed.ok) {
+    console.error(parsed.error);
+    console.error(USAGE);
     process.exit(1);
   }
-  if (args.country !== undefined && !pageFormatForCountry(args.country)) {
-    console.error(`Invalid country "${args.country}". Use a two-letter ISO 3166-1 code, e.g. --country=DE.`);
-    process.exit(1);
+  const args = parsed.args;
+
+  if (args.help || !args.payload) {
+    console.log(USAGE);
+    process.exit(args.help ? 0 : 1);
   }
 
   const payloadPath = resolve(args.payload);
@@ -594,6 +697,12 @@ Usage:
       console.error(`CV fact check warning: cover letter`);
       printFactWarnings(factCheck, console.error);
     }
+    // The wording check a CV gets, as notes only: a note never stops the PDF.
+    try {
+      for (const note of await coverLetterVoiceNotes(html, { payload })) console.error(note);
+    } catch (err) {
+      console.error(`Voice check skipped: ${err.message}`);
+    }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
     const { normalizeTextForATS, reportAtsReplacements, renderHtmlToPdf } = await import("./generate-pdf.mjs");
@@ -611,19 +720,28 @@ Usage:
       console.error(`CV fact check warning: cover letter`);
       printFactWarnings(printedWarnings, console.error);
     }
-    await renderHtmlToPdf(printed, outputPath, {
+    const result = await renderHtmlToPdf(printed, outputPath, {
       // Passed through unresolved. renderHtmlToPdf ranks it against the user's
       // config/profile.yml, so a cover letter and its CV cannot end up on
       // different paper because only one of them carried a flag.
       format: args.format,
       country: args.country || payload.country,
       reportNum: args.report,
+      maxPages: args.maxPages,
+      strictPages: args.strictPages,
       // Declared, never inferred: this script always renders a cover letter, and
       // the manifest must not file it as the report's CV (#3887).
       kind: 'cover',
       inputPath: payloadPath,
     });
-    console.log(`\nCover letter PDF: ${payload.output_path}`);
+    // A render over a warn-only page budget returns the sibling draft it
+    // wrote instead and leaves the output path as it was (#6377); saying the
+    // PDF is there would hand over a file that was never written.
+    if (result.draftPath) {
+      console.log(`\nCover letter over its page budget: nothing was written to ${payload.output_path}; the draft is ${result.draftPath}. Trim and rerun.`);
+    } else {
+      console.log(`\nCover letter PDF: ${payload.output_path}`);
+    }
   } catch (err) {
     console.error("ERROR generating cover letter PDF:");
     console.error(err.message);

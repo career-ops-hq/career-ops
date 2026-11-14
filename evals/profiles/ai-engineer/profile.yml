@@ -1,0 +1,61 @@
+# Pinned synthetic eval profile (evals/record-claude.mjs).
+# Fictional candidate — mirrors examples/cv-example.md. Never real user data.
+# Frozen on purpose: changing it changes every recorded score, so re-record
+# all fixtures in the same commit if you edit anything here.
+candidate:
+  full_name: "Alex Chen"
+  email: "alex@example.com"
+  location: "Austin, TX"
+  linkedin: "linkedin.com/in/alexchen"
+  portfolio_url: "https://alexchen.dev"
+  github: "github.com/alexchen"
+
+target_roles:
+  primary:
+    - "Senior ML Engineer"
+    - "Staff AI Engineer"
+    - "ML Platform Lead"
+  archetypes:
+    - name: "AI Platform / LLMOps"
+      level: "Senior/Staff"
+      fit: "primary"
+    - name: "Agentic / Automation"
+      level: "Senior"
+      fit: "secondary"
+    - name: "AI Forward Deployed"
+      level: "Senior"
+      fit: "adjacent"
+
+narrative:
+  headline: "ML platform engineer who ships production ML at fintech scale"
+  superpowers:
+    - "Production ML platforms (registry, feature store, CI/CD for models)"
+    - "Real-time inference systems (50ms p99)"
+    - "LLM evaluation tooling"
+  proof_points:
+    - name: "FraudShield"
+      hero_metric: "500+ GitHub stars"
+    - name: "Fraud detection at TechFin"
+      hero_metric: "99.7% precision, $2M/year saved"
+
+compensation:
+  target_range: "$180K-220K"
+  currency: "USD"
+  minimum: "$160K"
+  location_flexibility: "Remote (US) preferred; hybrid in Austin OK"
+
+location:
+  country: "United States"
+  city: "Austin"
+  timezone: "CST"
+  visa_status: "US citizen"
+  authorized_in: ["United States"]
+  needs_sponsorship: false
+
+language:
+  output: en
+
+spend_tier: standard
+
+cv:
+  output_format: "html"

@@ -1,6 +1,6 @@
 {
   "name": "@career-ops/web",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "description": "Official web experience for career-ops — local-first.",
   "scripts": {
@@ -19,15 +19,15 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "js-yaml": "^5.4.1",
-    "lucide-react": "^1.8.0",
+    "lucide-react": "^1.68.0",
     "next": "16.4.1",
-    "pdfjs-dist": "^6.4.299",
+    "pdfjs-dist": "^6.5.438",
     "playwright-core": "^1.61.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
     "react-markdown": "^10.0.0",
     "remark-gfm": "^4.0.0",
-    "tailwind-merge": "^3.5.0"
+    "tailwind-merge": "^3.7.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",

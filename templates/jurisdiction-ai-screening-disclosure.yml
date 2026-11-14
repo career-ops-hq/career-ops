@@ -203,18 +203,15 @@ jurisdictions:
     enforcement_notes: >-
       Original date: the AI Act text as adopted set high-risk Annex III
       obligations (including recruitment/employment AI) to apply from
-      2026-08-02 per Article 113. In May 2026, EU institutions reached a
-      provisional political agreement on a "Digital Omnibus" package that
-      defers high-risk obligations for stand-alone Annex III systems to
-      2027-12-02. This delay is PROVISIONAL as of this row's as_of date — it
-      takes full legal effect only once formally adopted and published in the
-      EU's Official Journal, which multiple sources expect to happen before
-      2026-08-02 (i.e. before the original date would otherwise have arrived),
-      but is not yet 100% finalized law. Re-verify against the as_of date
-      before relying on this as settled. National market-surveillance
-      authorities enforce per member state once obligations apply.
+      2026-08-02 per Article 113. Regulation (EU) 2026/1744 (the "Digital
+      Omnibus on AI"), signed 2026-07-08, published in the Official Journal
+      on 2026-07-24 and in force since 2026-07-27, deferred the stand-alone
+      Annex III high-risk obligations to 2027-12-02. The deferral is final
+      law. The Article 50 transparency rules and the prohibitions kept their
+      original dates. National market-surveillance authorities enforce per
+      member state once obligations apply.
     sources:
       - "Regulation (EU) 2024/1689 — official text (EUR-Lex)"
       - "European Commission — AI Act regulatory framework policy page (digital-strategy.ec.europa.eu)"
-      - "Reporting on the May 2026 Digital Omnibus provisional agreement deferring stand-alone Annex III high-risk obligations to 2027-12-02"
-    as_of: "2026-08-14"
+      - "Regulation (EU) 2026/1744 (Digital Omnibus on AI) — Official Journal L, 2026-07-24 (EUR-Lex, eur-lex.europa.eu/eli/reg/2026/1744/oj)"
+    as_of: "2026-11-11"
