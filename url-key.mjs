@@ -514,7 +514,8 @@ export function relatePostingLanguageKeys(a, b) {
  * spellings fold (a Lever `/apply` form, an Ashby `/application` tab). The
  * query must match unless the key is an extracted id, so the wider tracking
  * list canonicalJobKey() drops (`ref`, `source`) is never evidence of one
- * posting here.
+ * posting here. Nor is letter case alone: canonicalJobKey() lowercases every
+ * path, and a generic site's path can be case-sensitive.
  *
  * @param {string} a
  * @param {string} b
@@ -523,7 +524,8 @@ export function relatePostingLanguageKeys(a, b) {
 function sameJobSpelling(a, b) {
   const job = canonicalJobKey(a);
   if (!job || job !== canonicalJobKey(b)) return false;
-  return !job.includes('://') || new URL(a).search === new URL(b).search;
+  if (!job.includes('://')) return true;
+  return new URL(a).search === new URL(b).search && a.toLowerCase() !== b.toLowerCase();
 }
 
 const SAME_JOB_TRACKING = [

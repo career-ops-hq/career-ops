@@ -203,7 +203,8 @@ export function postingUrlRelation(rawA, rawB) {
 
 /**
  * Two normalizeUrl() keys that canonicalJobKey() reads as one posting; the
- * query must match unless the key is an extracted id.
+ * query must match unless the key is an extracted id, and letter case alone
+ * never counts.
  *
  * @param {string} a
  * @param {string} b
@@ -212,7 +213,8 @@ export function postingUrlRelation(rawA, rawB) {
 function sameJobSpelling(a, b) {
   const job = canonicalJobKey(a);
   if (!job || job !== canonicalJobKey(b)) return false;
-  return !job.includes("://") || new URL(a).search === new URL(b).search;
+  if (!job.includes("://")) return true;
+  return new URL(a).search === new URL(b).search && a.toLowerCase() !== b.toLowerCase();
 }
 
 const SAME_JOB_TRACKING = [
