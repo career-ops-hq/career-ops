@@ -110,6 +110,10 @@ export default {
   files itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
+  When the source lists distinct places before joining, set `locations`
+  (string[], places without appended "Remote" or work models; omit when empty).
+  When the source has a dedicated country code field (Lever), set `country`
+  (trimmed, as given; omit when absent or null).
   When the payload has a dedicated field for them, also set `requisitionId`
   (the employer's requisition id — never the posting id, which changes on
   every re-release; `coerceId` from `_ids.mjs`) and `language` (the posting
@@ -120,7 +124,18 @@ export default {
   with a `language` / `lang` / `locale` param returns one Job per version,
   each with `language` set, the posting's own default language first — the
   URL dedup relies on that order, and never reads a candidate's language from
-  its URL (`_types.js`, `language`; reference `providers/personio.mjs`). See
+  its URL (`_types.js`, `language`; reference `providers/personio.mjs`).
+  When the payload carries a stable per-posting id, also return
+  `listingIdentity: { ats_provider, board_slug, posting_id }`: the provider
+  id, the board namespace the provider already resolved (company slug,
+  account slug, tenant subdomain), and the payload's own posting id, never
+  parsed out of a URL and never a requisition id. All three are strings,
+  never trimmed or case-folded (an integer id in its decimal form, a string
+  id never coerced from a number); omit the key when any part is missing, empty, padded or
+  carries a control character, so the row falls back to URL dedup. scan.mjs
+  dedups on it next to the URL, so one posting reached at two URLs is one
+  row (`_types.js`, `listingIdentity`; references `providers/lever.mjs`,
+  `providers/join.mjs`; schema in `docs/listing-fingerprint.md`). See
   `_types.js` for the full list of optional fields.
   Populate `description` **only** when the list payload carries it for free
   (no extra per-job request — the scanner is zero-token). The one exception
@@ -144,7 +159,10 @@ export default {
   job can be done ("can be done remotely anywhere in the United States"),
   put only that statement in `eligibilityText`, which
   `country_eligibility_filter` reads and no other filter does. Reference:
-  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. When the
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. The same
+  statement can also fill `location` when the payload has no location
+  field (`locationFromClause` in the same file); leave `location` empty
+  rather than guessing "Remote" when the blurb says nothing. When the
   blurb can mention visa sponsorship, put it in `visaText`, which only
   `visa_filter` reads. The whole blurb may go there, since `visa_filter`
   matches nothing but its sponsorship keywords. Reference:
@@ -727,6 +745,14 @@ went through them. Must cover:
   container to type-check, the throwing fixture must carry the listing
   signal (a detail-page href in the HTML) with zero rows parsed, and the
   `[]` fixture must carry neither (`itviec.mjs`).
+- `listingIdentity` (if the provider sets it): `fetch()` returns the exact
+  triple from the fixture's payload id (as `tests/providers/lever.test.mjs`
+  asserts it), a row whose id is missing or unusable carries no
+  `listingIdentity` key, and the same posting at a second URL is already
+  seen (`markOfferSeen` on one row, `isOfferSeen` on the other, from
+  `scan.mjs`). Pick a second URL that URL dedup alone would treat as new;
+  a variation it already normalizes away proves nothing about the identity
+  (`tests/providers/join.test.mjs`).
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
   when the source reports more pages; `ctx.maxPages` stops it earlier. For a
   provider that fans out over several query/category passes behind one shared
@@ -832,6 +858,10 @@ provider whose tuning needs differ from the shared default
 - [ ] A config-derived URL segment (`locale`, `office`) is
       `encodeURIComponent`'d once outside the row loop — escaped, and loud
       (throws) on a broken value — not `safeEncodeURIComponent` + drop.
+- [ ] If the payload carries a stable posting id, each row returns
+      `listingIdentity` (provider id, resolved board namespace, payload
+      posting id, all strings, never trimmed or case-folded), and omits it when any part is
+      missing or unusable — never parsed out of a URL, never a requisition id.
 - [ ] Pagination has its own `DEFAULT_MAX_PAGES` — the page count is never
       decided by the source alone (`pageCount` / `total`).
 - [ ] Pagination honors `ctx.maxPages` when present, skips `fetchDetails`

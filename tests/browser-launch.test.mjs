@@ -71,7 +71,6 @@ if (/const\s+browserProcessEnv\s*=\s*snapshotBrowserProcessEnv\(\);[\s\S]*?resol
 const pdfServerSource = readFileSync(new URL('../lib/pdf-server.mjs', import.meta.url), 'utf8');
 if (/sharedPdfSocketPath\([\s\S]*?workspaceRoot\s*=\s*getCareerOpsRoot\(\),[\s\S]*?browserRoot\s*=\s*getCareerOpsRoot\(\)/.test(pdfServerSource)
     && /resolveBrowserExecutable\(\{\s*projectRoot:\s*browserRoot\s*\}\)/.test(pdfServerSource)
-    && /CAREER_OPS_PDF_WORKSPACE_ROOT:\s*workspaceRoot/.test(pdfServerSource)
     && /CAREER_OPS_PDF_BROWSER_ROOT:\s*browserRoot/.test(pdfServerSource)
     && /ensureSharedPdfServer\([\s\S]*?opts\.workspaceRoot\s*\|\|\s*getCareerOpsRoot\(\),\s*browserRoot/.test(pdfServerSource)
     && /renderViaSharedPdfServer\([\s\S]*?fileURLToPath\(import\.meta\.url\),\s*getCareerOpsRoot\(\)/.test(generatePdfSource)

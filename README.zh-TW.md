@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -28,7 +29,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 建立，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders">700+ 位貢獻者</a>參與</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 建立，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.zh-TW.md#builders">800+ 位貢獻者</a>參與</p>
 
 <p align="center">
 <strong>幾個月投出去的履歷，全都石&#8288;沉&#8288;大&#8288;海。</strong><br>
@@ -280,7 +281,7 @@ npm i -g @santifer/career-ops
 
 ## 使用方式
 
-把職缺連結或職缺描述貼到你的 AI CLI 中。career-ops 會檢查附有連結的職缺是否仍在徵才（貼上的文字沒有可檢查的連結），對照你的履歷評分，撰寫報告，客製化你的履歷（預設為 PDF），並在你的追蹤表中新增一列。大多數日子這樣就夠了。其餘一切都是依名稱呼叫的模式。如果無法讀取某則職缺，流程會停下並請你貼上文字。
+把職缺連結或職缺描述貼到你的 AI CLI 中。career-ops 會檢查附有連結的職缺是否仍在徵才（貼上的文字沒有可檢查的連結），對照你的履歷評分，撰寫報告，客製化你的履歷（預設為 PDF），並在你的追蹤表中新增一列。大多數日子這樣就夠了。其餘一切都是依名稱呼叫的模式。如果無法讀取某則職缺，流程會停下並請你貼上文字或分享螢幕截圖。
 
 ### 如何呼叫模式
 

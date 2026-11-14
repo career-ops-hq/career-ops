@@ -4,6 +4,7 @@
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
 import { intInRange } from './_config-utils.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // VDAB (Flanders' public employment service) provider — hits the public
 // vindeenjob search API directly (the same endpoint vdab.be's own frontend
@@ -318,6 +319,11 @@ export default {
       throw new Error(`vdab: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
 
-    return [...byId.values()].map(({ id, ...job }) => job);
+    const jobs = [...byId.values()].map(({ id, ...job }) => job);
+    // A keyword that failed was never read, so the board is only partly read.
+    // scan.mjs takes a board's health from the returned array: unmarked, it
+    // logs the board reachable as if every keyword had answered.
+    if (errors.length) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

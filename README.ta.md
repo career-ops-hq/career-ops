@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> உருவாக்கியது,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders">700+ பங்களிப்பாளர்களுடன்</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;<a href="https://github.com/santifer"><strong>@santifer</strong></a> உருவாக்கியது,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ta.md#builders">800+ பங்களிப்பாளர்களுடன்</a></p>
 
 <p align="center">
 <strong>மாதக்கணக்கில் CV அனுப்பினேன், பதில் மௌனம்&nbsp;மட்டுமே.</strong><br>
@@ -278,7 +279,7 @@ npm i -g @santifer/career-ops
 
 ## Usage
 
-உங்கள் AI CLI-இல் ஒரு வேலை URL-ஐயோ விவரத்தையோ ஒட்டுங்கள். இணைப்புடன் உள்ள வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா என career-ops சரிபார்க்கும் (ஒட்டிய உரைக்குச் சரிபார்க்க இணைப்பு இல்லை), உங்கள் CV-க்கு எதிராக மதிப்பெண் இடும், ஒரு report எழுதும், உங்கள் CV-ஐ ஏற்றவாறு தயாரிக்கும் (இயல்பாக PDF), உங்கள் tracker-இல் ஒரு வரியைச் சேர்க்கும். பெரும்பாலான நாட்களுக்கு இது போதும். மற்றதெல்லாம் பெயர் சொல்லிக் கேட்கும் mode-கள். ஒரு வேலை அறிவிப்பைப் படிக்க முடியாவிட்டால், pipeline நின்று உரையை ஒட்டச் சொல்லும்.
+உங்கள் AI CLI-இல் ஒரு வேலை URL-ஐயோ விவரத்தையோ ஒட்டுங்கள். இணைப்புடன் உள்ள வேலை அறிவிப்பு இன்னும் திறந்திருக்கிறதா என career-ops சரிபார்க்கும் (ஒட்டிய உரைக்குச் சரிபார்க்க இணைப்பு இல்லை), உங்கள் CV-க்கு எதிராக மதிப்பெண் இடும், ஒரு report எழுதும், உங்கள் CV-ஐ ஏற்றவாறு தயாரிக்கும் (இயல்பாக PDF), உங்கள் tracker-இல் ஒரு வரியைச் சேர்க்கும். பெரும்பாலான நாட்களுக்கு இது போதும். மற்றதெல்லாம் பெயர் சொல்லிக் கேட்கும் mode-கள். ஒரு வேலை அறிவிப்பைப் படிக்க முடியாவிட்டால், pipeline நின்று உரையை ஒட்டவோ ஒரு திரைப்பிடிப்பைப் பகிரவோ சொல்லும்.
 
 ### ஒரு mode-ஐக் கேட்பது எப்படி
 

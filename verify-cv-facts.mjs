@@ -1518,6 +1518,45 @@ function factStatements(text) {
     .filter(Boolean);
 }
 
+/**
+ * A line that opens its own block: list item, ordered item, heading, table row
+ * (leading pipe, as lib/cv-markdown.mjs parses them), quote, HTML tag, or a
+ * thematic break. The bullet markers mirror LIST_MARKER_RE so a Unicode-
+ * bulleted list keeps each item a separate statement.
+ */
+const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)|^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u;
+/** A line that closes its block: heading, table row, bold-only label, or an explicit hard break. */
+const BLOCK_END_RE = /^\s*(?:#|\|)|^\s*\*\*[^*]+\*\*\s*$|(?:\\|\s{2}|>)$/u;
+
+/**
+ * Join soft-wrapped continuation lines in Markdown source so a bullet or
+ * paragraph that spans several physical lines reads as one statement. A line
+ * continues the previous one unless it opens its own block, the previous line
+ * closes one, or either line is blank.
+ *
+ * This runs on source text only. In generated text a newline separates
+ * elements, so factStatements keeps splitting on every newline there; joining
+ * soft wraps in generated text regresses the "a phrase spanning two statements
+ * is not a claim" self-test.
+ */
+function joinSoftWraps(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  return lines
+    .map((line, i) => {
+      if (i === 0) return line;
+      const prev = lines[i - 1];
+      const soft = line.trim() && prev.trim()
+        && !BLOCK_START_RE.test(line) && !BLOCK_END_RE.test(prev);
+      return soft ? ` ${line.trim()}` : `\n${line}`;
+    })
+    .join('');
+}
+
+/** factStatements for source documents: soft-wrapped lines are one statement. */
+function sourceStatementsOf(text) {
+  return factStatements(joinSoftWraps(text));
+}
+
 /** Return conservative content tokens used only to link a rewrite to its source statement. */
 function attributionTokens(text) {
   return normalizeFact(text)
@@ -1538,7 +1577,7 @@ function attributionTokens(text) {
  * third-party execution evidence rather than candidate direct-work evidence.
  */
 export function delegatedAuthorshipClaims(targetText, sourceText) {
-  const sourceStatements = factStatements(sourceText);
+  const sourceStatements = sourceStatementsOf(sourceText);
   const directSources = sourceStatements
     .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
     .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
@@ -2106,7 +2145,15 @@ export function scopeInflationClaims(targetText, sourceText, language = 'en') {
       // candidate did, so it is no evidence that the source is weaker.
       const linked = overlaps.filter(({ shared, source }) => profile.accuses(shared, tokens) && !source.heading);
       if (!linked.length) continue;
-      const vouched = overlaps.some(({ overlap, source }) => overlap > 0 && source.tier >= opening.tier);
+            const vouched = overlaps.some(({ shared, source }) => {
+        if (!shared.length || source.tier < opening.tier) return false;
+
+        if (language === 'zh' && source.tier === Infinity && !source.heading) {
+          return profile.accuses(shared, tokens);
+        }
+
+        return true;
+      });
       if (vouched) continue;
 
       const closest = linked.reduce((best, next) => (next.overlap > best.overlap ? next : best));
@@ -2498,7 +2545,7 @@ function parseSwaps(entries = []) {
 export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], allowFacts = [] } = {}) {
   const swaps = parseSwaps(allowSwaps);
   const declared = driftKeySet(allowFacts.map(fact => String(fact).trim()).filter(fact => !/\s/u.test(fact)));
-  const sources = factStatements(sourceText)
+  const sources = sourceStatementsOf(sourceText)
     .map(stripListMarker)
     .filter(statement => !HEADING_RE.test(statement))
     .map((statement) => {
@@ -3049,7 +3096,7 @@ export function auditClaims(targetText, sourceText, config = {}) {
 export function loadFactConfig(path) {
   const keys = ['allow_metrics', 'allow_facts', 'allow_swaps', 'forbidden_phrases', 'warn_phrases'];
   if (!existsSync(path)) return { missing: true, config: Object.fromEntries(keys.map(key => [key, []])) };
-  const config = JSON.parse(readFileSync(path, 'utf-8'));
+  const config = JSON.parse(readFileSync(path, 'utf-8').replace(/^\uFEFF/, ''));
   for (const key of keys) {
     if (config[key] == null) config[key] = [];
     else if (!Array.isArray(config[key])) throw new Error(`${key} must be an array in ${path}`);
@@ -3299,7 +3346,10 @@ export function verifyFacts(targetText, {
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
   const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
-  const sourceText = sourceTexts.join('\n');
+  // Separate files with a blank line, not a bare newline: a file with no
+  // trailing newline would otherwise soft-wrap into the next file's opening
+  // line when the drift and authorship checks join soft wraps.
+  const sourceText = sourceTexts.join('\n\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
@@ -4179,6 +4229,21 @@ function runSelfTest() {
     zhAdoptionOf('服务十万用户。', '支撑了十万用户的访问。'), []);
   equal('zh: an English adoption phrase is not read on the zh path',
     zhAdoptionOf('Used daily across the engineering org.', '开发了内部工具。'), []);
+
+    equal('zh: a generic Skills clause cannot vouch for a scope upgrade',
+    zhScopeOf('主导了计费系统迁移。',
+      '参与了计费系统迁移。\n熟悉分布式系统。'),
+    ['主导了计费系统迁移']);
+
+  equal('zh: one shared bigram is not enough for unranked vouching',
+    zhScopeOf('主导了计费系统迁移。',
+      '参与了计费系统迁移。\n熟悉日志系统。'),
+    ['主导了计费系统迁移']);
+
+  equal('zh: a sufficiently matching unranked clause still vouches',
+    zhScopeOf('主导了计费系统迁移。',
+      '参与了计费系统迁移。\n熟悉计费系统迁移。'),
+    []);
 
   console.log(`verify-cv-facts self-test: ${passed} passed, ${failed} failed`);
   return failed ? 1 : 0;

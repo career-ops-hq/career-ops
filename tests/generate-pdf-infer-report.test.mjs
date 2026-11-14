@@ -20,6 +20,7 @@ const cases = [
   ['four digits are not a report number', 'output/cv-ana-1234-acme.pdf', undefined, null],
   ['directories are ignored', 'output/run-123-x/cv.pdf', 'output/run-123-x/cv.html', null],
   ['ATS variant is never inferred', 'output/cv-ana-042-acme-ats-2026-10-30.pdf', 'output/cv-ana-042-acme-ats.html', null],
+  ['dot ATS suffix is never inferred', 'output/cv-ana-042-acme-2026-10-30.ats.pdf', 'output/cv-web-042.ats.html', null],
   ['nothing to read', undefined, undefined, null],
 ];
 for (const [label, out, inp, want] of cases) {

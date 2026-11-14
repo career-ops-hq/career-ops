@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;作成者: <a href="https://github.com/santifer"><strong>@santifer</strong></a>、&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ja.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ja.md#builders">700+ のコントリビューター</a>と共に</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;作成者: <a href="https://github.com/santifer"><strong>@santifer</strong></a>、&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ja.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ja.md#builders">800+ のコントリビューター</a>と共に</p>
 
 <p align="center">
 <strong>何か月も履歴書を送り続けて、返&#8288;事&#8288;は&#8288;沈&#8288;黙。</strong><br>
@@ -278,7 +279,7 @@ npm i -g @santifer/career-ops
 
 ## 使い方
 
-求人の URL または説明文を AI CLI に貼り付けます。career-ops は、リンク付きの求人がまだ掲載中かを確認し（貼り付けたテキストには確認できるリンクがありません）、あなたの CV に照らしてスコアを付け、レポートを書き、CV を調整して（既定では PDF）、トラッカーに 1 行追加します。ほとんどの日はこれで足ります。それ以外はすべて、名前を指定して呼び出すモードです。求人を読み取れない場合、パイプラインは止まってテキストの貼り付けを求めます。
+求人の URL または説明文を AI CLI に貼り付けます。career-ops は、リンク付きの求人がまだ掲載中かを確認し（貼り付けたテキストには確認できるリンクがありません）、あなたの CV に照らしてスコアを付け、レポートを書き、CV を調整して（既定では PDF）、トラッカーに 1 行追加します。ほとんどの日はこれで足ります。それ以外はすべて、名前を指定して呼び出すモードです。求人を読み取れない場合、パイプラインは止まってテキストの貼り付けかスクリーンショットの共有を求めます。
 
 ### モードの呼び出し方
 

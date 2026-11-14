@@ -498,8 +498,13 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
       throw new Error('Missing SCORE_SUMMARY block from model output');
     }
 
-    const company = summary.company || 'unknown';
-    const role = summary.role || 'unknown';
+    const company = summary.company.trim();
+    const role = summary.role.trim();
+    // The tracker treats a matching URL as authoritative and can replace the
+    // existing company and role. Leave incomplete evaluations pending for retry.
+    if (!company || !role || company.toLowerCase() === 'unknown' || role.toLowerCase() === 'unknown') {
+      throw new Error('SCORE_SUMMARY requires a company and role before saving the evaluation');
+    }
     const score = summary.score || 'unknown';
     const archetype = summary.archetype || 'unknown';
     const legitimacy = parseLegitimacy(summary.legitimacy || 'unknown');

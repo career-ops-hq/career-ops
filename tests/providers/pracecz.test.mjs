@@ -234,6 +234,14 @@ try {
     else fail(`pracecz.fetch() requested pages ${JSON.stringify(pages)}`);
   }
 
+  {
+    // A configured max_pages below the cap still truncates, and says so.
+    const { calls, ctx } = stub(fullPage(400));
+    const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx));
+    if (calls.length === 2 && text.includes('truncated at max_pages=2')) pass('pracecz.fetch() stops at max_pages and warns that the search was truncated');
+    else fail(`max_pages=2: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+  }
+
     {
       const { calls, ctx } = stub(fullPage(999999));
       await pracecz.fetch({
@@ -277,6 +285,9 @@ try {
       });
       if (fetched.length === 40 && text.includes('pracecz')) pass('pracecz.fetch() keeps page-1 jobs and warns when page 2 fails');
       else fail(`page-2 failure: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
+      // The board was only partly read, so scan.mjs must log it partial, not reachable.
+      if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 40) pass('pracecz.fetch() marks the board partial when a later page fails');
+      else fail(`page-2 failure truncated = ${JSON.stringify(fetched.truncated)}`);
     }
 
     {
@@ -290,6 +301,8 @@ try {
       });
       if (fetched.length === 1 && text.includes('page 1 failed')) pass('pracecz.fetch() keeps the other keywords and warns when one keyword fails on page 1');
       else fail(`one keyword failing: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
+      if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 1) pass('pracecz.fetch() marks the board partial when one keyword fails and another answers');
+      else fail(`one keyword failing truncated = ${JSON.stringify(fetched.truncated)}`);
     }
 
     {
@@ -306,6 +319,8 @@ try {
       const fetched = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['a', 'b'] } }, stub(() => page([item()])).ctx);
       if (fetched.length === 1) pass('pracecz.fetch() dedups an offer returned for two keywords');
       else fail(`pracecz.fetch() returned ${fetched.length} rows for one shared offer`);
+      if (fetched.truncated === undefined) pass('pracecz.fetch() leaves a board unmarked when every keyword answers');
+      else fail(`fully read board was marked: ${JSON.stringify(fetched.truncated)}`);
     }
 
     {

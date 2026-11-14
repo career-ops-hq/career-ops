@@ -22,7 +22,7 @@
 6. **Story bank** в `interview-prep/story-bank.md` — добавить новые истории, если они всплыли
 7. **CV** в `cv.md` + `article-digest.md` (если есть) — чтобы привязать suggested answers к реальному опыту
 8. **Retracted claims** в `interview-prep/retracted-claims.md` (если есть) — hard gate; никогда не используй retracted claim в suggested answer, даже если кандидат сказал его на интервью
-9. **Role-specific prep file** — добавить notes debrief; исправить на месте любое существующее утверждение, которое интервью напрямую опровергает (см. Step 1b)
+9. **Role-specific prep file** — добавить notes debrief (или при повторе заменить запись этого раунда, см. Step 1d); исправить на месте любое существующее утверждение, которое интервью напрямую опровергает (см. Step 1b)
 
 ---
 
@@ -52,6 +52,8 @@
 - "Спрашивал ли интервьюер уточнения по чему-то — обычно это значит, что он хотел больше деталей?"
 
 Установи явный source marker: **`input_source: recall`**.
+
+**Формат и тон (оба пути, один короткий вопрос, можно пропустить).** Спроси один раз: "Коротко о том, как ощущался раунд: какой был формат (recruiter screen / 1:1 / panel / group / take-home review), сколько человек было на звонке, как бы ты описал тон (relaxed-conversational / structured-formal / rapid-fire / adversarial) и насколько комфортно ты себя чувствовал (1-5 или пара своих слов)?" Если transcript показывает формат, число участников или тон, предложи их как вариант для подтверждения. **Никогда не додумывай и не заполняй комфорт за кандидата**: это его субъективная оценка, поэтому записывай её только его собственными словами и не записывай, если он её пропустил. Если он пропустил весь вопрос, не записывай ни одно из четырёх значений.
 
 Какой бы путь ни дал данные по вопросам/ответам, Steps 2 onward работают одинаково — честная оценка, закрытие пробелов и обновление question-bank/story-bank не различают `input_source: transcript` и `input_source: recall`. Сам marker всё равно сохраняется, чтобы Step 9 мог его прочитать.
 
@@ -90,6 +92,17 @@
 - **Candidate claims are out of scope.** Сюда относятся только утверждения интервьюера о роли, а не то, что кандидат говорил о себе.
 
 Перенеси этот список в Step 6 и Step 8, а в Step 9 — только для transcript input.
+
+---
+
+## Step 1d — Check for an Earlier Debrief of This Round
+
+Прежде чем что-либо сохранять (от ответа зависят и Step 8, и Step 9), проверь, не повторяет ли этот debrief уже сохранённый. Как только известны компания, роль, тип раунда и дата (спроси, если нет), перечисли все существующие session-файлы для них в `interview-prep/sessions/`: базовое имя `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` и любые варианты `-2`, `-3`, ..., даже если самого базового имени нет.
+
+- **Файла нет:** проверь, есть ли в `interview-prep/{company-slug}-{role-slug}.md` запись `## Round [N] Debrief — [YYYY-MM-DD]` для этого раунда и даты: её оставляет предыдущий запуск, остановившийся после Step 8. Если есть, спроси, повторяет ли её этот debrief; при ответе «да» Step 8 заменяет эту запись. Иначе это новый раунд, и Step 8 дописывает. В обоих случаях Step 9 пишет базовое имя.
+- **Один файл или больше:** никогда не перезаписывай молча. Покажи файлы с `interviewer_role` и первым вопросом каждого и спроси кандидата, повторяет ли этот debrief один из них или это отдельный раунд. Также перечисли как ещё один вариант любую запись `## Round [N] Debrief — [YYYY-MM-DD]` с этой датой в prep-файле, которой не соответствует ни один из файлов (её оставляет запуск, остановившийся после Step 8): если кандидат выберет её, Step 8 заменяет эту запись, а Step 9 пишет следующий свободный счётчик. Покажи каждую такую запись с её строками `**Interviewer:**` и `**Round type:**`, чтобы кандидат отличил прерванную запись от завершённого debrief другого типа раунда с той же датой.
+  - **Повтор:** запомни файл, который выбрал кандидат. Step 8 заменяет запись этого раунда в prep-файле, а не дописывает вторую, а Step 9 обновляет выбранный файл на месте по своему правилу повтора.
+  - **Отдельный раунд:** Step 8 дописывает как обычно, а Step 9 пишет следующий свободный счётчик (`-2`, `-3`, ...) перед `.md`.
 
 ---
 
@@ -175,7 +188,7 @@
 
 ## Step 8 — Save Debrief
 
-Добавь в `interview-prep/{company-slug}-{role-slug}.md`:
+Добавь в `interview-prep/{company-slug}-{role-slug}.md`. **Если Step 1d подтвердил повтор**, вместо этого замени существующую запись `## Round [N] Debrief — [YYYY-MM-DD]` этого раунда (заголовок и всё до следующего заголовка `## `), чтобы у одного интервью осталась одна запись; дописывай, только если в файле нет записи для этого раунда и даты.
 
 ```markdown
 ## Round [N] Debrief — [YYYY-MM-DD]
@@ -203,17 +216,26 @@
 **Timeline:** [any dates or deadlines mentioned]
 **Other candidates:** [if disclosed]
 **Next steps:** [what the interviewer said happens next and by when]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (list only the fields the candidate answered; drop unanswered bullets entirely, with no placeholders and no inferred values)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [number]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5, or a short phrase, in the candidate's own words]
 ```
 
-**Если в этом раунде была озвучена сумма компенсации вслух** (сказал кандидат, а не просто "comp came up"), добавь одну строку `stated` в `data/salary-observations.tsv` (создай файл, если его нет; формат как в `docs/SCRIPTS.md` → salary-gap) с tracker#, датой раунда, суммой/валютой, source `user`, короткой заметкой, round label и именем интервьюера. Это то, что позволяет `interview/plan` напоминать кандидату об этом перед следующим раундом — см. Inputs #9 там.
+**Если в этом раунде была озвучена сумма компенсации вслух** (сказал кандидат, а не просто "comp came up"), добавь одну строку `stated` в `data/salary-observations.tsv` (создай файл, если его нет; формат как в `docs/SCRIPTS.md` → salary-gap) с tracker#, датой раунда, суммой/валютой, source `user`, короткой заметкой, round label и именем интервьюера. Это то, что позволяет `interview/plan` напоминать кандидату об этом перед следующим раундом — см. Inputs #9 там. При повторе пропусти строку, если в файле уже есть строка `stated` с тем же tracker#, раундом, датой, суммой и валютой.
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-После debrief также напиши machine-readable session transcript в `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Это структурированная запись раунда для downstream analysis modes; speaker-labelled turns позволяют читать обе стороны без повторного вывода, кто говорил. Полный контракт находится в `interview-prep/sessions/README.md`.
+После debrief также напиши machine-readable session transcript в `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Используй ответ из Step 1d, никогда не перезаписывай молча: если раньше файла не было, пиши базовое имя; для отдельного раунда запиши следующий свободный счётчик (`-2`, `-3`, ...) перед `.md`; при повторе обнови на месте файл, выбранный кандидатом. раздел "File names" в README. Это структурированная запись раунда для downstream analysis modes; speaker-labelled turns позволяют читать обе стороны без повторного вывода, кто говорил. Полный контракт находится в `interview-prep/sessions/README.md`.
 
-**Проверь marker `input_source`, установленный в Step 1.** Если `input_source: transcript`, пропусти reconstruction: не пересоздавай transcript из Step 1/Step 2 output — это менее точная копия того, что уже было в реальном источнике. Вместо этого сохрани оригинальный transcript напрямую, слегка нормализованный под schema ниже (speaker labels, front-matter, competency tags из Step 2). Если `input_source: recall`, реконструируй transcript из Step 1/Step 2 output как обычно — recall никогда не имеет verbatim original для сохранения.
+**Проверь marker `input_source`, установленный в Step 1.** Если `input_source: transcript`, пропусти reconstruction: не пересоздавай transcript из Step 1/Step 2 output — это менее точная копия того, что уже было в реальном источнике. Вместо этого сохрани оригинальный transcript напрямую, слегка нормализованный под schema ниже (speaker labels, front-matter, competency tags из Step 2). Если `input_source: recall`, реконструируй transcript из Step 1/Step 2 output как обычно — у нового файла из recall нет verbatim original для сохранения.
+
+**Правило повтора (Step 1d подтвердил повтор).** Выбранный файл может содержать verbatim-реплики из более раннего debrief по transcript, и ничто в нём на это не указывает. При `input_source: transcript` transcript заменяет реплики и `stated_priorities` файла. При `input_source: recall` сохрани существующие реплики и `stated_priorities` файла ровно такими, какие они есть, и добавь только то, что дал запуск по памяти: вопросы, которых нет в файле (новыми репликами `## Q` в порядке интервью), competency-теги у ответов без тегов и ключи формата и тона, которые кандидат дал в этом запуске. Никогда не переписывай существующую реплику по памяти.
 
 Формат:
 
@@ -225,9 +247,13 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
-stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
-  - speaker: [name or role, or "unknown"]
+stated_priorities:        # written from transcript input only; omit if none were stated (Step 1c); a recall re-run keeps the existing list
+  - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [number]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      # optional
 ---
 
 ## Q1
@@ -245,7 +271,8 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **Тэгируй каждый ответ.** На строке непосредственно над каждой строкой `**Candidate:**` добавь `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case, через запятую для нескольких компетенций (например, `system-design`, `people-leadership`, `incident-response`). Ты уже оценил каждый ответ в Step 2, поэтому тэгируй исходя из этой оценки, а не перечитывай заново. Теги неформальны; выбирай компетенцию, которую действительно проверял вопрос.
 - **Восстанавливай реплику кандидата точно.** Используй то, что кандидат, по его словам, сказал в Step 1, а не идеализированный ответ. "Correct/complete answer" из Step 2 относится к debrief file и никогда не попадает в transcript — transcript фиксирует то, что реально произошло.
 - **`source: debrief`.**
-- **`stated_priorities` идёт во front matter** (Step 1c) как YAML-список элементов `speaker` + `quote`, чтобы скрипты и `interview/plan` могли читать его, не разбирая тело файла. Бери каждый `quote` в двойные кавычки, чтобы front matter оставался валидным YAML и после разбора возвращал ровно сказанное: при ручном экранировании экранируй сначала обратные слэши, а уже потом внутренние двойные кавычки — тогда литеральный `\n` в цитате останется двумя символами, а не превратится в перенос строки. Round и date элемента — это собственные `round` и `date` файла. Не добавляй поле, если ничего не было названо, а при `input_source: recall` не добавляй его никогда. Никогда не записывай приоритеты в файл practice-сессии, потому что там нет реального интервьюера.
+- **`stated_priorities` идёт во front matter** (Step 1c) как YAML-список элементов `speaker` + `quote`, чтобы скрипты и `interview/plan` могли читать его, не разбирая тело файла. Бери каждый `quote` в двойные кавычки, чтобы front matter оставался валидным YAML и после разбора возвращал ровно сказанное: при ручном экранировании экранируй сначала обратные слэши, а уже потом внутренние двойные кавычки — тогда литеральный `\n` в цитате останется двумя символами, а не превратится в перенос строки. Round и date элемента — это собственные `round` и `date` файла. Каждый `speaker` тоже бери в двойные кавычки и экранируй так же, как `quote` (сначала обратные слэши, потом внутренние двойные кавычки): значение вроде `Hiring Manager: Jane` содержит двоеточие и без кавычек является невалидным YAML. Не добавляй поле, если ничего не было названо, и никогда не записывай его из `input_source: recall`: новый файл из recall его не получает, а повтор по recall оставляет существующий список выбранного файла без изменений. Никогда не записывай приоритеты в файл practice-сессии, потому что там нет реального интервьюера.
+- **`format`, `people_on_call`, `tone` и `candidate_comfort` — необязательные ключи front matter** со значениями из Step 1 / Step 8, чтобы downstream modes могли читать их, не разбирая прозу. Записывай только те ключи, на которые кандидат ответил; остальные пропускай и никогда не записывай `candidate_comfort`, если кандидат его не назвал. Бери `candidate_comfort` в двойные кавычки (это может быть свободный текст); при ручном экранировании экранируй сначала обратные слэши, а уже потом внутренние двойные кавычки, как для `quote`. В файлах practice-сессий их нет.
 - Файл сессии попадает в gitignored directory (реальные имена и компании не попадают в систему контроля версий); сохраняй его без обезличивания.
 
 ---

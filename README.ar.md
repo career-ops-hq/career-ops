@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;أنشأه <a href="https://github.com/santifer"><strong>@santifer</strong></a>، بمشاركة&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders">&#8294;700+&#8297; مساهم</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;أنشأه <a href="https://github.com/santifer"><strong>@santifer</strong></a>، بمشاركة&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ar.md#builders">&#8294;800+&#8297; مساهم</a></p>
 
 <p align="center" dir="rtl">
 <strong>أشهر من إرسال السير الذاتية إلى&nbsp;الصمت.</strong><br>
@@ -278,7 +279,7 @@ npm i -g @santifer/career-ops
 
 ## الاستخدام
 
-الصق رابط وظيفة أو وصفها في واجهة الذكاء الاصطناعي لديك. يتحقق career-ops من أن الوظيفة ذات الرابط ما زالت متاحة (النص الملصوق ليس له رابط للتحقق منه)، ويقيّمها مقابل سيرتك الذاتية، ويكتب تقريرًا، ويكيّف سيرتك الذاتية (بصيغة PDF افتراضيًا)، ويضيف صفًا إلى متتبّعك. هذا يكفي في معظم الأيام. وكل ما عدا ذلك وضع تطلبه باسمه. إذا تعذّرت قراءة الإعلان، يتوقف خط المعالجة ويطلب منك لصق النص.
+الصق رابط وظيفة أو وصفها في واجهة الذكاء الاصطناعي لديك. يتحقق career-ops من أن الوظيفة ذات الرابط ما زالت متاحة (النص الملصوق ليس له رابط للتحقق منه)، ويقيّمها مقابل سيرتك الذاتية، ويكتب تقريرًا، ويكيّف سيرتك الذاتية (بصيغة PDF افتراضيًا)، ويضيف صفًا إلى متتبّعك. هذا يكفي في معظم الأيام. وكل ما عدا ذلك وضع تطلبه باسمه. إذا تعذّرت قراءة الإعلان، يتوقف خط المعالجة ويطلب منك لصق النص أو مشاركة لقطة شاشة.
 
 ### كيف تطلب وضعًا
 

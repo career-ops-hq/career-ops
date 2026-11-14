@@ -323,6 +323,22 @@
 #   max: 0
 #   currency: "USD"
 
+# -- Workplace filter (optional) --
+# Filter scanned jobs by workplace model (remote | hybrid | onsite).
+# Set only from the provider's dedicated field (Ashby, Lever).
+#
+# Semantics:
+#   - allow: list of allowed workplace types ('remote', 'hybrid', 'onsite')
+#   - include_unknown: whether jobs with no workplaceType pass (default: true)
+#   - If this entire block is absent, workplace type is not filtered (default behavior)
+#
+# Example: target remote or hybrid roles, dropping postings that don't state workplace type
+# workplace_filter:
+#   allow:
+#     - remote
+#     - hybrid
+#   include_unknown: false
+
 # Read-only portal housekeeping: `node stats.mjs --prune --summary`.
 # Uses exact-lowercase company names, scan history and recent health evidence.
 # First health observation is a lower bound, not the date config was added.
@@ -1315,6 +1331,7 @@ search_queries:
 #   recruitee       <slug>.recruitee.com
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
+#   taleez          <tenant>.taleez.com                 (or api: field)
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
@@ -1504,6 +1521,10 @@ search_queries:
 #
 # - name: Example Breezy Co
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
+#   enabled: true
+#
+# - name: Example Taleez Co
+#   careers_url: https://exampleco.taleez.com             # any <tenant>.taleez.com careers site
 #   enabled: true
 #
 # - name: Example Deel Board Co
@@ -2258,8 +2279,10 @@ search_queries:
 #   provider: jobspresso
 #   enabled: true
 #
-# - name: The Muse                        # board-wide public jobs API
+# - name: The Muse                        # board-wide search page (server-rendered HTML)
 #   provider: themuse
+#   location: Germany                     # optional: narrows the search (country or city)
+#   posted: 30                            # optional: 1, 7 or 30 (days) — keeps the run small
 #   enabled: true
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
@@ -2306,11 +2329,16 @@ search_queries:
 #
 # - name: Welcome to the Jungle           # global board via WTTJ's public Algolia index
 #   provider: wttj
-#   wttj:
-#     queries: ["ai engineer", "data platform engineer"]  # REQUIRED — the board is global,
-#                                 # so explicit searches must be configured; each query is a
-#                                 # separate Algolia search, results deduped across queries
-#     max_hits: 100        # optional per-query hit cap (default 100, max 200)
+#   wttj:                       # REQUIRED: the board is global; narrow it with
+#                               # `filters`, `queries`, or both
+#     filters: "offices.country_code:FR AND contract_type:full_time"
+#                               # Algolia filter, applied server-side (recommended,
+#                               # max 1000 chars); with it, `queries` is optional
+#     queries: ["ai engineer", "data platform engineer"]
+#                               # each query is a separate Algolia search,
+#                               # results deduped across queries
+#     max_hits: 100             # optional per-query hit cap (default 100;
+#                               # max 200, or 1000 with filters)
 #   enabled: true
 #
 # - name: Agentic Engineering Jobs        # AI-agent engineering roles (SSR HTML, one fetch)
@@ -3048,6 +3076,11 @@ tracked_companies:
     careers_url: https://jobs.lever.co/pigment
     notes: "Paris FR / NYC / London. AI-powered FP&A planning platform."
     enabled: true
+
+  - name: Diabeloop
+    careers_url: https://diabeloop.taleez.com
+    notes: "Grenoble FR. AI-driven automated insulin delivery (closed-loop algorithm) — Taleez careers site."
+    enabled: false   # live Taleez board, no open posting when added (2026-11-13)
 
   - name: Diabolocom
     careers_url: https://jobs.eu.lever.co/diabolocom
@@ -3991,11 +4024,12 @@ job_boards:
     notes: "Swiss startup job platform (newest SSR page)"
 
   # ── CryptocurrencyJobs (Web3 / crypto) ─────────────────────────────
-  # Curated Web3/crypto job board. Public RSS feed, zero-auth, 100% remote
-  # listings. The feed URL is hardcoded in the provider — no careers_url
-  # or api field needed.
+  # Curated Web3/crypto job board. Public RSS feed, zero-auth, mostly
+  # remote listings; some are limited to a region or based in a city. The
+  # feed URL is hardcoded in the provider — no careers_url or api field
+  # needed.
 
-  # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, all-remote)
+  # - name: CryptocurrencyJobs             # curated Web3/crypto board (RSS, mostly remote)
   #   provider: cryptocurrencyjobs
   #   enabled: true
 

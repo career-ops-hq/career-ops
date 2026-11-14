@@ -1,6 +1,7 @@
 import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
+import { pickComboboxOption } from "./option-match.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 export type { ApplyIssue };
@@ -218,6 +219,9 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
   return false;
 }
 
+export const LOGIN_WALL_MESSAGE =
+  "This page wants you to sign in or create an account first. Open it directly, log in, then paste the actual application-form URL here.";
+
 /** When extraction yields 0 fields, classify WHY so we abort with the RIGHT
  *  message (bot-challenge vs login wall vs closed posting vs unsupported). */
 export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue> {
@@ -241,7 +245,7 @@ export async function classifyEmpty(page: Page, url: string): Promise<ApplyIssue
     return { level: "block", code: "bot-challenge", message: "This page is asking you to verify you're human before showing the form. Open it directly in your browser, complete the check, then paste the URL back here." };
   }
   if (sig.hasPassword || /\/(login|sign-?in|register|sign-?up|auth|account|mfa|2fa)(\/|$|\?)/.test(u)) {
-    return { level: "block", code: "login-wall", message: "This page wants you to sign in or create an account first. Open it directly, log in, then paste the actual application-form URL here." };
+    return { level: "block", code: "login-wall", message: LOGIN_WALL_MESSAGE };
   }
   if (/no longer accepting|position has been filled|posting is closed|no longer available|this (job|position|posting) (is |has )?(closed|expired|been filled)/.test(sig.body) || /not found|no longer|removed|closed/.test(sig.t)) {
     return { level: "block", code: "expired", message: "This job posting is closed or expired — it's no longer accepting applications." };
@@ -307,22 +311,46 @@ export async function multiStepInfo(page: Page): Promise<ApplyIssue | null> {
   return ms ? { level: "info", code: "multi-step", message: "This form has more than one step — after this page, you'll continue on the real form." } : null;
 }
 
+/** True when the displayed combobox text is the option fill would click. */
+export function comboboxDisplayMatches(actual: string, intended: string): boolean {
+  return pickComboboxOption([actual], intended) === 0;
+}
+
 /** READ THE REAL FORM BACK after filling: did every answer land? required fields
  *  still empty? any validation error visible? — the self-verification a blind
  *  selector script can't do. Returns warnings to show BEFORE the human submits. */
 export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Record<string, string>): Promise<ApplyIssue[]> {
   const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
-  type R = { mismatches: string[]; requiredEmpty: string[]; valErrors: string[] };
+  type Combo = { label: string; intended: string; actual: string; required: boolean };
+  type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[]; comboboxes: Combo[] };
+  let readFailed = false;
   const res = await frame
     .evaluate(
       ({ meta, answers }): R => {
         const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const checkedWord = (s: string | null | undefined) => /^(true|yes|1|on|checked)$/.test(norm(s));
         const mismatches: string[] = [];
         const requiredEmpty: string[] = [];
+        const unverified: string[] = [];
+        const comboboxes: { label: string; intended: string; actual: string; required: boolean }[] = [];
+        const note = (label: string, intended: string | undefined, actual: string, required: boolean) => {
+          if (intended && intended.trim()) {
+            if (norm(actual) !== norm(intended)) mismatches.push(label);
+          } else if (required && !norm(actual)) {
+            requiredEmpty.push(label);
+          }
+        };
         for (const f of meta) {
           const intended = answers[f.id];
           const el = document.querySelector(`[data-co-field="${f.id}"]`) as HTMLElement | null;
-          if (!el) continue;
+          if (!el) {
+            // A file field is filled from the CV path, not from the answer map.
+            // Any other field we meant to fill, and every required field, has
+            // to be read back. A missing element is unverified either way.
+            const answered = f.type !== "file" && typeof intended === "string" && intended.trim();
+            if (f.required || answered) unverified.push(f.label);
+            continue;
+          }
           if (f.type === "file") {
             // confirm a file actually landed on the input (the CV attach can fail
             // silently on a custom dropzone). Only warn if the field is required.
@@ -331,29 +359,57 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             if (f.required && !has) requiredEmpty.push(f.label);
             continue;
           }
-          let actual = "";
           if (f.type === "checkbox") {
-            actual = (el as HTMLInputElement).checked ? "true" : "";
-          } else if (f.type === "radio") {
+            const on = (el as HTMLInputElement).checked;
+            if (intended && intended.trim() && checkedWord(intended) !== on) mismatches.push(f.label);
+            // An intended "false" matches an unchecked box, so the mismatch
+            // branch stays quiet. A required box still has to be checked.
+            if (f.required && !on) requiredEmpty.push(f.label);
+            continue;
+          }
+          if (f.type === "radio") {
             const grp = Array.from(document.querySelectorAll(`[data-co-field="${f.id}"]`)) as HTMLInputElement[];
-            actual = grp.some((r) => r.checked) ? "checked" : "";
-          } else if (f.combobox) {
-            // react-select keeps the chosen value in a sibling .select__single-value
-            // (the tagged input stays empty). Read leniently: only conclude "empty"
-            // when a placeholder is visibly shown — otherwise assume OK (never a
-            // false "didn't land" warning).
+            const chosen = grp.find((r) => r.checked);
+            const actual = chosen ? (chosen.getAttribute("data-co-option") || chosen.value || "") : "";
+            const matches = !!(intended && intended.trim() && chosen && (norm(actual) === norm(intended) || norm(chosen.value) === norm(intended)));
+            if (intended && intended.trim()) {
+              if (!matches) mismatches.push(f.label);
+            } else if (f.required && !chosen) requiredEmpty.push(f.label);
+            continue;
+          }
+          if (f.combobox) {
+            // react-select keeps the chosen value in a sibling .select__single-value.
+            // The tagged input stays empty. A visible placeholder means empty.
+            // No value and no placeholder means we cannot see the choice.
+            // Whole-word comparison happens in Node: this callback cannot import
+            // the fill matcher, and exact equality flags "Springfield, IL" when
+            // the answer was "Springfield".
             const shell = el.closest('[class*="select-shell" i], [class*="select__container" i], [class*="select__control" i], [class*="value-container" i]') || el.parentElement?.parentElement || el.parentElement;
             const sv = shell?.querySelector('.select__single-value, [class*="single-value" i], [class*="singleValue" i], [class*="multi-value" i]');
             const ph = shell?.querySelector('.select__placeholder, [class*="placeholder" i]');
             const svText = (sv?.textContent || "").trim();
-            if (svText) actual = svText; // a value is shown
-            else if (ph && (ph as HTMLElement).offsetParent !== null) actual = ""; // placeholder visible → empty
-            else actual = intended || "ok"; // can't read reliably → don't flag
-          } else {
-            actual = (el as HTMLInputElement).value || "";
+            const intendedText = typeof intended === "string" ? intended : "";
+            if (svText) comboboxes.push({ label: f.label, intended: intendedText, actual: svText, required: f.required });
+            else if (ph && (ph as HTMLElement).offsetParent !== null) comboboxes.push({ label: f.label, intended: intendedText, actual: "", required: f.required });
+            else if (f.required || intendedText.trim()) unverified.push(f.label);
+            continue;
           }
-          if (intended && intended.trim() && !norm(actual)) mismatches.push(f.label);
-          else if (f.required && !norm(actual) && !(intended && intended.trim())) requiredEmpty.push(f.label);
+          if ((el as HTMLSelectElement).tagName === "SELECT") {
+            const sel = el as HTMLSelectElement;
+            const opt = sel.selectedOptions?.[0];
+            // "Choose…" uses an ellipsis, not three ASCII periods. An empty
+            // value with that label used to count as a filled select.
+            const blankish = (part: string) => !part || /^(?:please\s+select|select|choose)(?:\.{3}|…)?$|^--$/i.test(part);
+            const value = (sel.value || "").replace(/\s+/g, " ").trim();
+            const texts = [value, opt?.textContent, opt?.value]
+              .map((part) => (part || "").replace(/\s+/g, " ").trim())
+              .filter((part) => !blankish(part));
+            if (intended && intended.trim()) {
+              if (!texts.some((part) => norm(part) === norm(intended))) mismatches.push(f.label);
+            } else if (f.required && (blankish(value) || texts.length === 0)) requiredEmpty.push(f.label);
+            continue;
+          }
+          note(f.label, intended, (el as HTMLInputElement).value || "", f.required);
         }
         const errSel = '[aria-invalid="true"], [role="alert"], [class*="error" i]:not([class*="clear" i]):not([class*="error-free" i])';
         const valErrors: string[] = [];
@@ -361,15 +417,29 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
           const txt = (e.textContent || "").replace(/\s+/g, " ").trim();
           if (txt && txt.length > 2 && txt.length < 160 && e.offsetParent !== null) valErrors.push(txt);
         }
-        return { mismatches, requiredEmpty, valErrors: Array.from(new Set(valErrors)).slice(0, 5) };
+        return { mismatches, requiredEmpty, unverified, valErrors: Array.from(new Set(valErrors)).slice(0, 5), comboboxes };
       },
       { meta, answers },
     )
-    .catch(() => ({ mismatches: [], requiredEmpty: [], valErrors: [] }) as R);
+    .catch(() => {
+      readFailed = true;
+      return { mismatches: [], requiredEmpty: [], unverified: meta.map((f) => f.label), valErrors: [], comboboxes: [] } as R;
+    });
+
+  for (const box of res.comboboxes ?? []) {
+    const intended = box.intended.trim();
+    if (intended) {
+      if (!comboboxDisplayMatches(box.actual, intended)) res.mismatches.push(box.label);
+    } else if (box.required && !box.actual.trim()) {
+      res.requiredEmpty.push(box.label);
+    }
+  }
 
   const out: ApplyIssue[] = [];
   if (res.mismatches.length) out.push({ level: "warn", code: "fill-mismatch", message: `These answers didn't seem to land on the real form — check them: ${res.mismatches.slice(0, 4).join(", ")}${res.mismatches.length > 4 ? "…" : ""}.` });
   if (res.requiredEmpty.length) out.push({ level: "warn", code: "required-empty", labels: res.requiredEmpty, message: `Required and still empty — you'll need to fill ${res.requiredEmpty.length > 1 ? "these" : "this"}: ${res.requiredEmpty.slice(0, 4).join(", ")}${res.requiredEmpty.length > 4 ? "…" : ""}.` });
+  if (res.unverified.length) out.push({ level: "warn", code: "fill-unverified", message: `Couldn't read these back, so they are not counted as pre-filled: ${res.unverified.slice(0, 4).join(", ")}${res.unverified.length > 4 ? "…" : ""}.` });
+  else if (readFailed) out.push({ level: "warn", code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." });
   for (const v of res.valErrors) out.push({ level: "warn", code: "validation", message: `The form flagged: “${v}”.` });
   return out;
 }

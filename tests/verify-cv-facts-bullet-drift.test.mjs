@@ -114,6 +114,61 @@ check('-ing list nouns in later clauses are not read as verbs',
   check('one shared non-verb word is still not an anchor',
     bulletDriftClaims(ul('Built it using a 3CX'), '- Ran it on 3CX.\n').length === 0, null);
 }
+// #6889: a soft-wrapped bullet or paragraph in cv.md is one statement on the
+// source side, so a verbatim or reworded CV bullet does not read a continuation
+// line's verb as drift. A new block (next list item, heading) still breaks.
+{
+  const wrappedBullet = '### Acme Corp\n\n'
+    + '- Migrated the previous service desk tool for the operations team across the\n'
+    + '  organization, established the CMDB through Discovery and its business services\n';
+  const verbatim = ul('Migrated the previous service desk tool for the operations team across the organization, established the CMDB through Discovery and its business services');
+  check('a verbatim copy of a wrapped source bullet does not flag "established"',
+    bulletDriftClaims(verbatim, wrappedBullet).length === 0, bulletDriftClaims(verbatim, wrappedBullet));
+
+  const wrappedParagraph = 'Joined the platform team as its sole engineer for the operations group the day the vendor\n'
+    + 'contract was signed, built the initial foundation.\n';
+  const paraCopy = ul('Joined the platform team as its sole engineer for the operations group the day the vendor contract was signed, built the initial foundation.');
+  check('a verbatim copy of a wrapped source paragraph does not flag "built"',
+    bulletDriftClaims(paraCopy, wrappedParagraph).length === 0, bulletDriftClaims(paraCopy, wrappedParagraph));
+
+  // jwwoody's variant: a reworded bullet must not anchor to the continuation
+  // line and flag its own opening verb, which the source bullet also uses.
+  const wrappedReworded = '### Acme Corp\n**Software Engineer**\n\n'
+    + '- Contributed across the wider backend service layer: signed-URL generation, livestream access\n'
+    + '  rules and HLS asset endpoints in the media service.\n';
+  const reworded = ul('Contributed endpoints for signed URLs, livestream access rules and video assets to our backend media services.');
+  check('a reworded CV bullet does not flag the source bullet\'s own opening verb',
+    !bulletDriftClaims(reworded, wrappedReworded).some(claim => claim.added.includes('contributed')),
+    bulletDriftClaims(reworded, wrappedReworded));
+
+  // Guard: a new list item after a wrapped bullet stays its own statement, so a
+  // later bullet's verb cannot vouch for an unrelated CV bullet. If the wrap
+  // swallowed the next item, "led" below would be vouched and the drift lost.
+  const wrappedThenEntry = '- Supported the pricing team on the 2024\n'
+    + '  repricing analysis end to end\n'
+    + '- Led the migration of reporting to Snowflake\n';
+  check('a new list item after a wrapped bullet stays its own statement',
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), wrappedThenEntry).some(claim => claim.added.includes('led')),
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), wrappedThenEntry));
+
+  // Unicode bullet markers (LIST_MARKER_RE recognises • ‣ ◦ ⁃ ∙) also open a
+  // block, so consecutive •-items are not merged and a later item's verb does
+  // not vouch across the boundary.
+  const unicodeBullets = '• Supported the pricing team on the 2024 repricing analysis\n'
+    + '• Led the migration of reporting to Snowflake\n';
+  check('a Unicode-bulleted list item stays its own statement',
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), unicodeBullets).some(claim => claim.added.includes('led')),
+    bulletDriftClaims(ul('Led the 2024 repricing analysis'), unicodeBullets));
+
+  // A thematic break (---, ***, ___) is a block boundary, so statements on
+  // either side are not merged and a verb below the rule does not vouch above.
+  const thematicBreak = 'Presented the Q3 product roadmap\n'
+    + '---\n'
+    + 'Led the migration of reporting to Snowflake\n';
+  check('a thematic break keeps the statements on either side separate',
+    bulletDriftClaims(ul('Led the Q3 product roadmap'), thematicBreak).some(claim => claim.added.includes('led')),
+    bulletDriftClaims(ul('Led the Q3 product roadmap'), thematicBreak));
+}
 // Review on #6630: an opening modifier from the JD is not a verb, so it warns.
 {
   const [modifier] = drift(ul('Scalable ETL pipeline built in Python for finance reporting'));
@@ -201,6 +256,21 @@ try {
 
   check('verifyFacts passes the source bullet verbatim',
     run(ul('Used Kafka for event ingestion in the billing service')).verdict === 'pass', null);
+
+  // Source files are joined before the drift check reads them. A file with no
+  // trailing newline must not soft-wrap into the next file's opening line, or a
+  // verb from the second file would vouch for a bullet anchored in the first.
+  // fileA deliberately has no trailing newline.
+  {
+    const fileA = join(tmp, 'a.md');
+    const fileB = join(tmp, 'b.md');
+    writeFileSync(fileA, '- Supported the pricing team on the 2024 repricing analysis');
+    writeFileSync(fileB, 'Presented the migration of reporting to Snowflake\n');
+    write();
+    const across = verifyFacts(ul('Presented the 2024 repricing analysis'), { sourcePaths: [fileA, fileB], configPath: config });
+    check('a verb in a second source file does not vouch across the file boundary',
+      across.unsupportedFacts.some(claim => claim.kind === 'drift' && claim.added.includes('presented')), across);
+  }
 
   write({ allow_swaps: ['used -> led'] });
   check('allow_swaps in cv-facts.json clears the block',

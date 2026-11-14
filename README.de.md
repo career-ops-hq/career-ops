@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -28,7 +29,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Erstellt von <a href="https://github.com/santifer"><strong>@santifer</strong></a>, mit&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders">700+ Mitwirkenden</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Erstellt von <a href="https://github.com/santifer"><strong>@santifer</strong></a>, mit&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.de.md#builders">800+ Mitwirkenden</a></p>
 
 <p align="center">
 <strong>Monatelang Lebensläufe ins Leere&nbsp;geschickt.</strong><br>
@@ -280,7 +281,7 @@ Siehe [docs/SETUP.md](docs/SETUP.md) für die vollständige Einrichtungsanleitun
 
 ## Nutzung
 
-Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst. Lässt sich eine Stelle nicht lesen, hält die Pipeline an und bittet dich, den Text einzufügen.
+Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst. Lässt sich eine Stelle nicht lesen, hält die Pipeline an und bittet dich, den Text einzufügen oder einen Screenshot zu teilen.
 
 ### Einen Modus anfordern
 

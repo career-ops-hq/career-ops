@@ -80,14 +80,39 @@ export function parsePdfManifestRows(indexText) {
  */
 export function pdfIndexEntryForReport(indexText, reportNumber, kind = "cv") {
   if (!Number.isInteger(reportNumber)) return { found: false, path: null, html: null };
+  const entry = pdfIndexEntriesByReport(indexText, kind).get(reportNumber);
+  return entry ? { found: true, ...entry } : { found: false, path: null, html: null };
+}
+
+/** Every report's entry in one pass: report number -> { path, html }, under
+ *  the same rule as pdfIndexEntryForReport (the first row of the wanted kind
+ *  wins; an empty path stays null). A list page that needs the answer for
+ *  every tracker row reads and parses the manifest once with this instead of
+ *  once per row. */
+export function pdfIndexEntriesByReport(indexText, kind = "cv") {
   const wanted = kind === "cover" ? "cover" : "cv";
-  const rows = parsePdfManifestRows(indexText);
-  for (const row of rows) {
-    if (!/^\d+$/.test(row.reportId) || Number(row.reportId) !== reportNumber) continue;
-    if (row.kind !== wanted) continue;
-    return { found: true, path: row.pdf || null, html: row.html || null };
+  const entries = new Map();
+  for (const row of parsePdfManifestRows(indexText)) {
+    if (!/^\d+$/.test(row.reportId) || row.kind !== wanted) continue;
+    const n = Number(row.reportId);
+    if (!entries.has(n)) entries.set(n, { path: row.pdf || null, html: row.html || null });
   }
-  return { found: false, path: null, html: null };
+  return entries;
+}
+
+/** The members of `reports` whose manifest entry has a path that
+ *  `isContained(path)` accepts. `entries` is pdfIndexEntriesByReport's map;
+ *  `isContained` is the caller's filesystem containment check, so this rule
+ *  stays testable without a filesystem. It is called only for requested
+ *  reports that have a path: a manifest row for a report that is not asked
+ *  about costs nothing. */
+export function readyReportNumbers(entries, reports, isContained) {
+  const ready = new Set();
+  for (const n of reports) {
+    const entry = entries.get(n);
+    if (entry?.path && isContained(entry.path)) ready.add(n);
+  }
+  return ready;
 }
 
 /** Resolve the exact PDF path recorded for a report in pdf-index.tsv. */

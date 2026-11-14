@@ -114,7 +114,9 @@ test('"Confidencial" and the board\'s own name become ?, never the entry name', 
 test('pagination stops on a page with no new ids and honours max_pages', async () => {
   const p1 = page(card(1), card(2));
   const repeat = makeCtx({ 1: p1, 2: p1 });
-  assert.equal((await provider.fetch({ name: 'X', careers_url: BASE }, repeat.ctx)).length, 2);
+  const repeated = await provider.fetch({ name: 'X', careers_url: BASE }, repeat.ctx);
+  assert.equal(repeated.length, 2);
+  assert.equal(repeated.truncated, undefined, 'a board that ran out of new ids is complete, so unmarked');
   assert.equal(repeat.calls.length, 2);
 
   const walk = makeCtx({ 1: page(card(1)), 2: page(card(2)), 3: page(card(3)) });
@@ -136,6 +138,8 @@ test('a page-1 fetch error is thrown; a later one keeps the earlier pages', asyn
     await assert.rejects(provider.fetch({ name: 'X', careers_url: BASE }, makeCtx({ 1: boom }).ctx), /HTTP 503/);
     const jobs = await provider.fetch({ name: 'X', careers_url: BASE }, makeCtx({ 1: page(card(1)), 2: boom }).ctx);
     assert.equal(jobs.length, 1);
+    // Partly read, so scan.mjs must log it partial, not reachable.
+    assert.deepEqual(jobs.truncated, { fetched: 1, reason: 'fetch-error' });
   } finally {
     console.warn = warn;
   }
@@ -143,8 +147,9 @@ test('a page-1 fetch error is thrown; a later one keeps the earlier pages', asyn
 
 test('health probe: ctx.maxPages 1 makes exactly one request and propagates a rejection unwrapped', async () => {
   const probe = makeCtx({ 1: page(card(1)), 2: page(card(2)) }, { maxPages: 1 });
-  await provider.fetch({ name: 'X', careers_url: BASE }, probe.ctx);
+  const probed = await provider.fetch({ name: 'X', careers_url: BASE }, probe.ctx);
   assert.equal(probe.calls.length, 1);
+  assert.equal(probed.truncated, undefined, 'a probe reads one page by design and stays unmarked');
 
   const sentinel = new Error('budget');
   const failing = makeCtx({ 1: sentinel }, { maxPages: 1 });
@@ -164,6 +169,7 @@ test('default limits: five full pages of 20 reach max_jobs 100 and warn that the
     assert.equal(jobs.length, 100);
     assert.equal(calls.length, 5);
     assert.equal(warnings.filter((w) => /the search has more results/.test(w)).length, 1);
+    assert.deepEqual(jobs.truncated, { fetched: 100, reason: 'page-cap' });
   } finally {
     console.warn = warn;
   }

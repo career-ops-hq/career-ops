@@ -22,7 +22,7 @@
 6. **故事库**，位于 `interview-prep/story-bank.md` — 若挖出新故事则追加
 7. **简历**，位于 `cv.md` + `article-digest.md`（如存在）— 把建议答案锚定在真实经历上
 8. **已撤回主张**，位于 `interview-prep/retracted-claims.md`（如存在）— 硬门禁；即使候选人在面试里说了，也绝不把已撤回主张写进建议答案
-9. **岗位专属准备文件** — 追加复盘笔记；面试直接推翻的既有事实，原地修正（见 Step 1b）
+9. **岗位专属准备文件** — 追加复盘笔记（若为重跑，则替换本轮条目，见 Step 1d）；面试直接推翻的既有事实，原地修正（见 Step 1b）
 
 ---
 
@@ -52,6 +52,8 @@
 - "面试官有没有追问什么——那通常意味着他们想听更多？"
 
 设置明确的来源标记：**`input_source: recall`**。
+
+**形式与氛围（两条路径通用，一个简短问题，可跳过）。** 只问一次："简单问一下这一轮的感受：是什么形式（recruiter screen / 1:1 / panel / group / take-home review），通话里有几个人，你会怎么形容氛围（relaxed-conversational / structured-formal / rapid-fire / adversarial），你自己感觉有多自在（1-5，或用你自己的几个词）？"如果转录能看出形式、人数或氛围，就作为建议提出、请候选人确认。**绝不替候选人推断或填写自在程度**：这是候选人的主观感受，只用其本人的原话记录；若跳过就不写。若整道题都跳过，四个值一个都不写。
 
 无论问答数据来自哪条路径，Step 2 及之后的处理完全相同——诚实评估、补齐短板、题库/故事库更新都不区分 `input_source: transcript` 与 `input_source: recall` 的复盘。标记本身仍原样带下去，供 Step 9 读取。
 
@@ -90,6 +92,17 @@
 - **候选人的主张不在范围内。** 这里只收面试官关于岗位的表态，不收候选人关于自己说的任何内容。
 
 把这份清单带入 Step 6 与 Step 8，并且仅在记录稿输入时带入 Step 9。
+
+---
+
+## Step 1d — Check for an Earlier Debrief of This Round
+
+在保存任何内容之前（Step 8 和 Step 9 都取决于这个答案），先确认这次复盘是否在重跑一场已保存的复盘。一旦知道公司、岗位、轮次类型和日期（不知道就问），列出 `interview-prep/sessions/` 中与之对应的所有已有场次文件：基础文件名 `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` 以及任何 `-2`、`-3`、... 变体，即使基础文件名本身已不存在。
+
+- **没有文件：** 检查 `interview-prep/{company-slug}-{role-slug}.md` 中是否有本轮、本日期的 `## Round [N] Debrief — [YYYY-MM-DD]` 条目，那是之前一次在 Step 8 之后中断的运行留下的。若有，问这次复盘是否在重跑它；若是，由 Step 8 替换该条目。否则就是新的一轮，Step 8 照常追加。两种情况下 Step 9 都写基础文件名。
+- **有一个或多个文件：** 绝不静默覆盖。列出这些文件，附上各自的 `interviewer_role` 和第一道题，问候选人这次复盘是重跑其中某一场，还是另一轮。另外，把准备文件中本日期、且与任何文件都对不上的 `## Round [N] Debrief — [YYYY-MM-DD]` 条目（在 Step 8 之后中断的运行会留下）也列为一个选项：若候选人选中它，由 Step 8 替换该条目，Step 9 写下一个空闲编号。展示每个这样的条目时附上其 `**Interviewer:**` 与 `**Round type:**` 行，让候选人能把中断的条目与同一日期其他轮次类型的已完成复盘区分开。
+  - **重跑：** 记下候选人选中的文件。Step 8 替换准备文件中该轮的条目，而不是再追加一条；Step 9 按其重跑规则就地更新选中的文件。
+  - **另一轮：** Step 8 照常追加，Step 9 在 `.md` 前写下一个空闲编号（`-2`、`-3`、...）。
 
 ---
 
@@ -175,7 +188,7 @@
 
 ## Step 8 — Save Debrief
 
-追加到 `interview-prep/{company-slug}-{role-slug}.md`：
+追加到 `interview-prep/{company-slug}-{role-slug}.md`。**若 Step 1d 确认是重跑**，改为替换该轮已有的 `## Round [N] Debrief — [YYYY-MM-DD]` 条目（从标题到下一个 `## ` 标题之前的全部内容），让一场面试只保留一个条目；只有文件中没有该轮、该日期的条目时才追加。
 
 ```markdown
 ## Round [N] Debrief — [YYYY-MM-DD]
@@ -203,17 +216,26 @@
 **Timeline:** [提到的任何日期或截止日期]
 **Other candidates:** [若有披露]
 **Next steps:** [面试官说的下一步是什么、何时完成]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** （只列出候选人回答过的字段；未回答的条目整行删掉，不留占位符，也不填推断值）
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [人数]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5，或一句简短描述，用候选人自己的话]
 ```
 
-**若本轮口头报出了薪酬数字**（候选人给了具体数字，而不只是"提到了薪酬"），且本轮对应的 tracker# **已知**：向 `data/salary-observations.tsv` 追加一行 `stated`（文件不存在则创建；格式见 `docs/SCRIPTS.md` → salary-gap），写入该 tracker#、本轮日期、金额/币种、来源 `user`、简短备注、轮次标签与面试官姓名。这能让 `interview/plan` 在下一轮前提醒候选人——见该模式 Inputs #9。若 tracker# 尚不可用，**跳过追加**——不要写入不完整或可能错绑的行；等 tracker# 明确后再补记。
+**若本轮口头报出了薪酬数字**（候选人给了具体数字，而不只是"提到了薪酬"），且本轮对应的 tracker# **已知**：向 `data/salary-observations.tsv` 追加一行 `stated`（文件不存在则创建；格式见 `docs/SCRIPTS.md` → salary-gap），写入该 tracker#、本轮日期、金额/币种、来源 `user`、简短备注、轮次标签与面试官姓名。这能让 `interview/plan` 在下一轮前提醒候选人——见该模式 Inputs #9。若 tracker# 尚不可用，**跳过追加**——不要写入不完整或可能错绑的行；等 tracker# 明确后再补记。 若为重跑，且文件中已有 tracker#、轮次、日期、金额和币种都相同的 `stated` 行，则跳过这一行。
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-复盘之后，再把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
+复盘之后，再把机器可读的场次记录写到 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`。使用 Step 1d 的答案，绝不静默覆盖：没有已有文件就写基础文件名；另一轮就在 `.md` 前写下一个空闲编号（`-2`、`-3`、...）；重跑就就地更新候选人选中的文件。见 README 的 "File names" 一节。这是给下游分析模式用的结构化记录；带说话人标签的回合让消费者不必再推断谁在说。完整约定见 `interview-prep/sessions/README.md`。
 
-**检查 Step 1 设置的 `input_source` 标记。** 若为 `input_source: transcript`，跳过重建：不要从 Step 1/Step 2 的输出重新生成记录——那只会是它所来自的真实来源的一份更有损的副本。改为直接保存原始记录稿，并轻度规范化以符合下方 schema（说话人标签、front matter、按 Step 2 评估打的 competency 标签）。若为 `input_source: recall`，照旧从 Step 1/Step 2 的输出重建记录——回忆从来没有可保留的逐字原稿。
+**检查 Step 1 设置的 `input_source` 标记。** 若为 `input_source: transcript`，跳过重建：不要从 Step 1/Step 2 的输出重新生成记录——那只会是它所来自的真实来源的一份更有损的副本。改为直接保存原始记录稿，并轻度规范化以符合下方 schema（说话人标签、front matter、按 Step 2 评估打的 competency 标签）。若为 `input_source: recall`，照旧从 Step 1/Step 2 的输出重建记录——新的回忆文件没有可保留的逐字原稿。
+
+**重跑规则（Step 1d 确认是重跑）。** 选中的文件可能保存着之前一次基于记录稿的复盘留下的逐字回合，而文件里没有任何标记说明这一点。若为 `input_source: transcript`，用记录稿替换文件的回合与 `stated_priorities`。若为 `input_source: recall`，原样保留文件已有的回合与 `stated_priorities`，只补充这次回忆带来的新内容：文件中缺少的问题（按面试顺序作为新的 `## Q` 回合）、尚无标签的回答的 competency 标签，以及候选人本次给出的形式与氛围字段。绝不根据回忆改写已有的回合。
 
 格式：
 
@@ -225,9 +247,13 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
-stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
-  - speaker: [name or role, or "unknown"]
+stated_priorities:        # written from transcript input only; omit if none were stated (Step 1c); a recall re-run keeps the existing list
+  - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
+people_on_call: [number]                                              # optional
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # optional
+candidate_comfort: "[1-5, or a short phrase in the candidate's own words]"      # optional
 ---
 
 ## Q1
@@ -245,7 +271,8 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **给每次作答打标签。** 在每行 `**Candidate:**` 正上方输出 `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case，多能力用逗号分隔（例如 `system-design`、`people-leadership`、`incident-response`）。你在 Step 2 已评估过每次作答，按那次评估打标签，而不是重读。标签是自由形式；选该题实际考察的能力。
 - **忠实重建候选人回合。** 用候选人在 Step 1 报告说过的内容，而不是理想化答案。Step 2 的"correct/complete answer"属于复盘文件，绝不要进记录——记录记的是发生了什么。
 - **`source: debrief`。**
-- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。每个 `speaker` 也用双引号包裹，并按 `quote` 的方式转义（先转义反斜杠、再转义内部双引号）：像 `Hiring Manager: Jane` 这样的值含冒号，不加引号就是非法 YAML。没有表态时省略该字段，且绝不根据 `input_source: recall` 写入：新的回忆文件不写该字段，回忆重跑则原样保留选中文件已有的列表。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`format`、`people_on_call`、`tone`、`candidate_comfort` 是可选的 front matter 键**，承载 Step 1 / Step 8 的值，让下游模式不必解析正文就能读取。只写候选人回答过的键，其余省略；候选人没给出时绝不写 `candidate_comfort`。`candidate_comfort` 用双引号包裹（可能是自由文本）；手工转义时与 `quote` 一样，先转义反斜杠、再转义内部双引号。练习场次文件不带这些键。
 - 场次文件落在 gitignore 目录（真实姓名/公司永不进版本库）；写入时不要脱敏。
 
 ---

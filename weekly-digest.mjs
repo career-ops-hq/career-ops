@@ -104,7 +104,7 @@ function inRange(dateStr, from, to) {
  * @param {string} content - Raw session file text.
  */
 export function parseSessionFile(content) {
-  const text = String(content ?? '').replace(/\r\n/g, '\n');
+  const text = String(content ?? '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
   const match = text.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!match) return null;
   let front;

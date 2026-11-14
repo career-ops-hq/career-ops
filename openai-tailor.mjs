@@ -359,9 +359,18 @@ try {
   // reasoning, and then this is the only explanation the user gets. A reply
   // cut off at the cap is a CV without its last sections, and saving it would
   // hand that to generate-pdf as the tailored CV, so nothing is saved.
-  if (data.choices?.[0]?.finish_reason === 'length') {
+  const finishReason = data.choices?.[0]?.finish_reason;
+  if (finishReason === 'length') {
     console.error(`❌  The reply stopped at the ${maxTokens}-token output cap, so the tailored CV is cut short. Nothing was saved.`);
     console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
+    process.exit(1);
+  }
+  // Any other stated reason than "stop" is a reply that did not finish: a
+  // content filter or a provider error mid-generation leaves a partial CV,
+  // which must not reach generate-pdf as the tailored one. openai-eval refuses
+  // the same replies (#3949). A server that omits finish_reason is not refused.
+  if (finishReason != null && finishReason !== 'stop') {
+    console.error(`❌  The reply ended with finish_reason "${String(finishReason).slice(0, 40)}", not "stop", so the tailored CV may be incomplete. Nothing was saved.`);
     process.exit(1);
   }
   if (!tailoredHtml) {

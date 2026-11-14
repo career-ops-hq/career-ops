@@ -174,7 +174,7 @@ export default {
         payload = null; // fall through to the markdown feed
       }
       if (payload && Array.isArray(payload.jobs)) {
-        return parseWorkableWidget(payload, entry.name);
+        return parseWorkableWidget(payload, entry.name, slug);
       }
 
       // Fallback: legacy markdown feed (small accounts only — see header note).
@@ -247,6 +247,36 @@ function toPlainText(html) {
   ).replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 
+// Opaque board and posting ids, per docs/listing-fingerprint.md: a nonempty
+// string with no surrounding whitespace and no ASCII controls. Anything else
+// is not an id. Numbers are not coerced, and nothing is trimmed or case-folded.
+function opaqueListingId(value) {
+  if (typeof value !== 'string' || value === '' || value !== value.trim()) return undefined;
+  if (/[\u0000-\u001f\u007f]/u.test(value)) return undefined;
+  return value;
+}
+
+/**
+ * The posting's ATS-native identity: the account slug the board was already
+ * resolved at, and the widget payload's `shortcode`, never a token parsed out
+ * of a URL. Returns undefined unless the shortcode is a clean opaque string
+ * and the slug is an account slug this provider would resolve, so an unusable
+ * shortcode or slug leaves that row on URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} shortcode
+ * @returns {{ats_provider: 'workable', board_slug: string, posting_id: string} | undefined}
+ */
+export function workableListingIdentity(slug, shortcode) {
+  const board = opaqueListingId(slug);
+  const postingId = opaqueListingId(shortcode);
+  // The slug is the account namespace resolveWorkableSlug already accepted.
+  // A string that could not be that namespace is not a board_slug.
+  if (!board || !SLUG_RE.test(board) || !postingId) return undefined;
+  return { ats_provider: 'workable', board_slug: board, posting_id: postingId };
+}
+
 /**
  * Parse the widget API payload. Exported for unit tests.
  *
@@ -273,14 +303,24 @@ function toPlainText(html) {
  * it does not fan out, it just prints the primary location and drops the rest
  * at the source, so nothing is left in its rows to accumulate.
  *
+ * listingIdentity belongs to the folded posting, not to each location row.
+ * It is attached once, after the fold, from the first entry's `shortcode`
+ * (the same entry that supplies every non-location field) and the account
+ * slug the caller already resolved. A sibling does not get its own identity,
+ * and a shortcode is never read out of the URL. No slug, or a shortcode that
+ * is missing, padded, numeric or carrying a control character, leaves
+ * listingIdentity off so the scan keeps URL dedup.
+ *
  * @param {any} payload — parsed JSON body of the widget endpoint
  * @param {string} companyName — value to write into job.company
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
+ * @param {string} [boardSlug] Account slug the board was already resolved at.
+ *   Callers with no namespace (the public XML feed) omit it and get no identity.
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>}
  */
-export function parseWorkableWidget(payload, companyName) {
+export function parseWorkableWidget(payload, companyName, boardSlug) {
   if (!payload || !Array.isArray(payload.jobs)) return [];
   const jobs = [];
-  /** @type {Map<string, {job: any, locations: Set<string>, tele: boolean}>} */
+  /** @type {Map<string, {job: any, locations: Set<string>, tele: boolean, shortcode: unknown}>} */
   const byUrl = new Map();
   for (const raw of payload.jobs) {
     const title = typeof raw?.title === 'string' ? raw.title.trim() : '';
@@ -316,19 +356,23 @@ export function parseWorkableWidget(payload, companyName) {
     if (Number.isFinite(stamp)) job.postedAt = stamp;
 
     jobs.push(job);
-    byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele });
+    byUrl.set(url, { job, locations: new Set(location ? [location] : []), tele, shortcode: raw?.shortcode });
   }
 
   // A Set iterates in insertion order, so the joined cell follows payload order
   // and a single-location posting re-joins to the exact string it already had.
   // Remote is appended once, after the join, and only when no place already
   // says it — an empty-place row already contributed the word "Remote".
-  for (const { job, locations, tele } of byUrl.values()) {
+  // Identity is applied here, on the merged posting, from the first entry's
+  // shortcode. Siblings contributed locations only.
+  for (const { job, locations, tele, shortcode } of byUrl.values()) {
     let location = [...locations].join(LOCATION_SEPARATOR);
     if (tele && !/remote/i.test(location)) {
       location = location ? `${location}${LOCATION_SEPARATOR}Remote` : 'Remote';
     }
     job.location = location;
+    const listingIdentity = workableListingIdentity(boardSlug, shortcode);
+    if (listingIdentity) job.listingIdentity = listingIdentity;
   }
   return jobs;
 }

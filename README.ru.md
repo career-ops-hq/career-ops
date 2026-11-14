@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a> при участии&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders">700+ контрибьюторов</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Создано <a href="https://github.com/santifer"><strong>@santifer</strong></a> при участии&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ru.md#builders">800+ контрибьюторов</a></p>
 
 <p align="center">
 <strong>Месяцы отправки резюме в&nbsp;тишину.</strong><br>
@@ -278,7 +279,7 @@ npm i -g @santifer/career-ops
 
 ## Использование
 
-Вставьте URL или описание вакансии в ваш ИИ-CLI. career-ops проверяет, что вакансия по ссылке ещё открыта (у вставленного текста нет ссылки для проверки), оценивает её по вашему резюме, пишет отчёт, адаптирует ваше резюме (по умолчанию в PDF) и добавляет строку в трекер. Этого хватает в большинство дней. Всё остальное — режимы, которые вы вызываете по названию. Если вакансию не удаётся прочитать, пайплайн останавливается и просит вставить текст.
+Вставьте URL или описание вакансии в ваш ИИ-CLI. career-ops проверяет, что вакансия по ссылке ещё открыта (у вставленного текста нет ссылки для проверки), оценивает её по вашему резюме, пишет отчёт, адаптирует ваше резюме (по умолчанию в PDF) и добавляет строку в трекер. Этого хватает в большинство дней. Всё остальное — режимы, которые вы вызываете по названию. Если вакансию не удаётся прочитать, пайплайн останавливается и просит вставить текст или поделиться скриншотом.
 
 ### Как вызвать режим
 

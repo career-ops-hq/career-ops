@@ -395,6 +395,22 @@ try {
     fail(`mokahr.fetch() partial results on failure: ${JSON.stringify(blipJobs.map(j => j.title))}`);
   }
 
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (blipJobs.truncated?.reason === 'fetch-error' && blipJobs.truncated.fetched === 1) {
+    pass('mokahr.fetch() marks the board partial when a later request fails');
+  } else {
+    fail(`mokahr.fetch() a later request fails: truncated = ${JSON.stringify(blipJobs.truncated)}`);
+  }
+
+  const whole = mkCtx(() => ({ success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('e9', '全读岗位')] } }));
+  const wholeJobs = await mokahr.fetch({ name: 'Example Labs', careers_url: MOKA_URL, keywords: ['AI', '大模型'] }, whole.ctx);
+  if (wholeJobs.length === 1 && wholeJobs.truncated === undefined) {
+    pass('mokahr.fetch() leaves the board unmarked when every request answers');
+  } else {
+    fail(`mokahr.fetch() whole board: ${wholeJobs.length} jobs, truncated = ${JSON.stringify(wholeJobs.truncated)}`);
+  }
+
   const softFail = mkCtx(({ keyword }) => (keyword === '大模型'
     ? { success: false, code: 102, msg: '参数错误。{0}' }
     : { success: true, data: { jobStats: { total: 0 }, jobs: [mkJob('e8', '幸存岗位2')] } }));
@@ -403,6 +419,14 @@ try {
     pass('mokahr.fetch() treats an in-band success:false as a blip once jobs are collected');
   } else {
     fail(`mokahr.fetch() success:false blip: ${JSON.stringify(softFailJobs.map(j => j.title))}`);
+  }
+
+  // Read only in part, so the result says so: scan.mjs logs the board partial
+  // instead of reachable (ADDING_A_PROVIDER.md, lib/board-truncation.mjs).
+  if (softFailJobs.truncated?.reason === 'fetch-error' && softFailJobs.truncated.fetched === 1) {
+    pass('mokahr.fetch() marks the board partial when a later request answers success:false');
+  } else {
+    fail(`mokahr.fetch() a later request answers success:false: truncated = ${JSON.stringify(softFailJobs.truncated)}`);
   }
 
   let firstFailThrew = false;

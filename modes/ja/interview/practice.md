@@ -134,7 +134,7 @@
 
 ### Write Session Transcript
 
-サマリーのあと、機械可読なセッション記録を書き出す。出力先は `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`（企業固有のセッションでなければ company/role のスラグに `practice` を使う）。これは下流の分析モードのための、そのラウンドの構造化された記録である。発話者ラベル付きのやり取りにより、読み手はどちらが話したかを推測し直さずにどちらの側でも読める。契約の全文は `interview-prep/sessions/README.md` にある。
+サマリーのあと、機械可読なセッション記録を書き出す。出力先は `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`（企業固有のセッションでなければ company/role のスラグに `practice` を使う）。そのファイルがすでに存在する場合は上書きせず、README の「File names」セクションのとおり、次の空き番号（`-2`、`-3`、...）を `.md` の前に付ける。これは下流の分析モードのための、そのラウンドの構造化された記録である。発話者ラベル付きのやり取りにより、読み手はどちらが話したかを推測し直さずにどちらの側でも読める。契約の全文は `interview-prep/sessions/README.md` にある。
 
 書式：
 

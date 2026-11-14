@@ -134,7 +134,7 @@ Jaga feedback tetap ringkas. Satu atau dua hal yang perlu dipertajam per jawaban
 
 ### Write Session Transcript
 
-Setelah summary, tulis machine-readable session transcript ke `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (gunakan `practice` sebagai company/role slug jika ini bukan sesi untuk perusahaan tertentu). Ini merupakan catatan terstruktur dari round untuk downstream analysis modes; speaker-labelled turns memungkinkan consumer membaca kedua sisi tanpa perlu menyimpulkan ulang siapa yang berbicara. Kontrak lengkapnya terdapat di `interview-prep/sessions/README.md`.
+Setelah summary, tulis machine-readable session transcript ke `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (gunakan `practice` sebagai company/role slug jika ini bukan sesi untuk perusahaan tertentu). Jika file tersebut sudah ada, jangan menimpanya: tambahkan counter bebas berikutnya (`-2`, `-3`, ...) sebelum `.md`, seperti dijelaskan di bagian "File names" README. Ini merupakan catatan terstruktur dari round untuk downstream analysis modes; speaker-labelled turns memungkinkan consumer membaca kedua sisi tanpa perlu menyimpulkan ulang siapa yang berbicara. Kontrak lengkapnya terdapat di `interview-prep/sessions/README.md`.
 
 Format:
 

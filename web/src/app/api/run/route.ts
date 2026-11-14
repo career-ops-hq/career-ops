@@ -11,10 +11,12 @@ import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsFo
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
-import { createCvEnvelopeFilter, type CvEnvelope } from "@/lib/cv-envelope.mjs";
+import { materializeTailoredCv, withSharedPdfPath } from "@/lib/cv-from-json.mjs";
+import { saveBuiltCv } from "@/lib/pdf-run-save.mjs";
+import { createCvEnvelopeFilter } from "@/lib/cv-envelope.mjs";
 import { createReportEnvelopeFilter } from "@/lib/report-envelope.mjs";
 import { persistEvaluation, evaluateRunOutcome, evaluationOutcomeEvent } from "@/lib/report-persist.mjs";
 import { buildPrompt, isShellSafeCompanyName } from "@/lib/run-prompts.mjs";
@@ -39,7 +41,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; ats?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
   const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
@@ -47,7 +49,17 @@ export async function POST(req: Request) {
   if (!input || !requestedCliId) {
     return new Response(JSON.stringify({ error: "input and cliId required" }), { status: 400 });
   }
-  const userData = careerOpsRoot();
+  let userData: string;
+  try {
+    userData = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return new Response(JSON.stringify({ error: unsafe }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
   if (!fs.existsSync(userData)) {
     return new Response(JSON.stringify({ error: dataFolderMissingMessage(userData) }), {
       status: 400,
@@ -192,9 +204,9 @@ export async function POST(req: Request) {
   const userTemplatesDir = dataRoot
     ? await resolveUserTemplatesDir(codeRoot, dataRoot)
     : undefined;
-  // The profile's page_format, read once HERE for the same reason: the worker
-  // fills {{PAGE_WIDTH}}, so the prompt has to name the sheet before the run, and
-  // the render below reuses this stance instead of reading the profile again.
+  // The profile's page_format, read once HERE: the prompt names the marker
+  // before the run, and the render below reuses this stance instead of reading
+  // the profile again.
   // The web used to let the agent pick, which overrode a4/letter and never
   // reached auto.
   const pageFormat: PageFormatSetting | undefined = dataRoot
@@ -452,8 +464,8 @@ export async function POST(req: Request) {
         for (const w of warnings) send({ type: "text", text: `⚠️ ${w}\n` });
       };
       /** Persist the emitted CV; streams the reason and returns false on failure. */
-      const saveCv = (paths: PdfPaths, envelope: CvEnvelope) => {
-        const written = writeCvHtml({ pdfPaths: paths, html: envelope.html });
+      const saveCv = (paths: PdfPaths, cv: { html: string }) => {
+        const written = writeCvHtml({ pdfPaths: paths, html: cv.html });
         if (!written.ok) send({ type: "error", msg: written.error.slice(0, 200) });
         return written.ok;
       };
@@ -558,23 +570,9 @@ export async function POST(req: Request) {
           close();
         }
       };
-      const renderPdf = async (paths: PdfPaths, envelope: CvEnvelope) => {
+      const renderPdf = async (paths: PdfPaths, format: "letter" | "a4", ats?: { html: string; finalPdf: string } | null) => {
         send({ type: "status", label: "Rendering PDF…" });
-        // renderAndMarkPdf is designed to resolve, never throw — but this is
-        // the one place nothing else awaits or catches this promise (cancel()
-        // only attaches a .finally for the write-token release), so an
-        // unexpected exception here must still close the stream instead of
-        // leaving it — and the write-token — open until process shutdown.
         try {
-          // The profile outranks the agent's pick, and auto maps the country it
-          // named, both through the core (core/page-format.mjs).
-          const sheet = await resolveRenderPageFormat(codeRoot, {
-            setting: pageFormat?.setting ?? null,
-            declared: envelope.format,
-            country: envelope.country,
-          });
-          sendWarnings(sheet.warnings);
-          const format = sheet.format;
           const result = await renderAndMarkPdf({
             spawnFn: spawn,
             execPath: process.execPath,
@@ -583,6 +581,7 @@ export async function POST(req: Request) {
             pdfPaths: paths,
             format,
             reportNum: paths.reportNum,
+            ats,
           });
           if (result.kind === "render-failed") {
             send({ type: "error", msg: result.error.slice(0, 1500) });
@@ -663,13 +662,59 @@ export async function POST(req: Request) {
             send({ type: "error", msg: "Internal error: the pdf run passed its gate with no CV to save — please report this." });
           } else {
             sendWarnings(envelope.warnings);
-            if (saveCv(pdfPaths, envelope)) {
-              // Tracked so cancel() can defer releasing writeToken until this
-              // settles; close() happens once rendering finishes, not here.
-              pdfRenderPromise = renderPdf(pdfPaths, envelope);
-              return;
-            }
-            // saveCv already streamed the specific reason.
+            // Tracked so cancel() can defer releasing writeToken until this
+            // settles. close() happens once rendering finishes, not here.
+            pdfRenderPromise = withSharedPdfPath(pdfPaths.html, async () => {
+              let scratchDir = "";
+              try {
+                // The profile outranks the agent's pick, and auto maps the
+                // country it named, both through the core (core/page-format.mjs).
+                // The builder copies this sheet onto the JSON payload so the
+                // HTML width and the PDF page are the same size.
+                const sheet = await resolveRenderPageFormat(codeRoot, {
+                  setting: pageFormat?.setting ?? null,
+                  declared: envelope.format,
+                  country: envelope.country,
+                });
+                sendWarnings(sheet.warnings);
+                await saveBuiltCv({
+                  build: async () => {
+                    const built = await materializeTailoredCv({
+                      envelope: { ...envelope, format: sheet.format },
+                      coreRoot: resolveCodeRoot(process.cwd(), process.env),
+                      dataRoot: careerOpsRoot(),
+                      cvTemplate,
+                      userTemplatesDir,
+                      reportFile: pdfPaths.reportFile,
+                      htmlPath: pdfPaths.html,
+                      finalPdf: pdfPaths.finalPdf,
+                      ats: body.ats === true,
+                    });
+                    if (built.ok && built.scratchDir) scratchDir = built.scratchDir;
+                    return built;
+                  },
+                  isClosed: () => closed,
+                  onError: (error) => send({ type: "error", msg: error.slice(0, 200) }),
+                  onWarnings: sendWarnings,
+                  save: (built) => saveCv(pdfPaths, { html: built.html }),
+                  render: (built) => renderPdf(pdfPaths, sheet.format, built.ats),
+                });
+              } catch (e) {
+                send({ type: "error", msg: `PDF rendering crashed unexpectedly: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) });
+              } finally {
+                // force:true only skips a missing dir. EPERM and EBUSY still throw,
+                // and a throw here used to skip close(), which holds the stream
+                // and the tracker-write guard after the PDF is already done.
+                try {
+                  if (scratchDir) fs.rmSync(scratchDir, { recursive: true, force: true });
+                } catch {
+                  // The run already reported its outcome. A leftover scratch dir is the smaller failure.
+                } finally {
+                  close();
+                }
+              }
+            });
+            return;
           }
           return close();
         }

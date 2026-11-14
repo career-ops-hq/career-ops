@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a>,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders">700+명의 기여자</a>와 함께</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;만든 사람: <a href="https://github.com/santifer"><strong>@santifer</strong></a>,&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.ko-KR.md#builders">800+명의 기여자</a>와 함께</p>
 
 <p align="center">
 <strong>몇 달 동안 이력서를 보내도 답&#8288;이&nbsp;없&#8288;었&#8288;습&#8288;니&#8288;다.</strong><br>
@@ -278,7 +279,7 @@ npm i -g @santifer/career-ops
 
 ## 사용법
 
-채용 공고 URL이나 설명을 AI CLI에 붙여 넣으세요. career-ops는 링크가 있는 공고가 아직 열려 있는지 확인하고(붙여 넣은 텍스트에는 확인할 링크가 없습니다), 이력서와 비교해 점수를 매기고, 리포트를 작성하고, 이력서를 맞춤 제작하고(기본은 PDF), 트래커에 한 줄을 추가합니다. 대부분의 날은 이것으로 충분합니다. 나머지는 모두 이름으로 요청하는 모드입니다. 공고를 읽을 수 없으면 파이프라인이 멈추고 텍스트를 붙여 넣어 달라고 요청합니다.
+채용 공고 URL이나 설명을 AI CLI에 붙여 넣으세요. career-ops는 링크가 있는 공고가 아직 열려 있는지 확인하고(붙여 넣은 텍스트에는 확인할 링크가 없습니다), 이력서와 비교해 점수를 매기고, 리포트를 작성하고, 이력서를 맞춤 제작하고(기본은 PDF), 트래커에 한 줄을 추가합니다. 대부분의 날은 이것으로 충분합니다. 나머지는 모두 이름으로 요청하는 모드입니다. 공고를 읽을 수 없으면 파이프라인이 멈추고 텍스트를 붙여 넣거나 스크린샷을 공유해 달라고 요청합니다.
 
 ### 모드 요청하는 방법
 
