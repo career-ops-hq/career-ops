@@ -104,3 +104,33 @@ test('scheduled baselines keep each source’s complete identity even when two s
   assert.deepEqual(scheduled.offers.map(o => o.sourceId), [first.id, second.id]);
   assert.equal(scheduled.unknownDates, 2);
 });
+
+
+test('website search and delivery honor the data root scan-history recheck window', async t => {
+  const root = fixture(t);
+  const source = await addMonitor(root, { url: 'https://boards.greenhouse.io/fixture-primary', autoMonitor: false }, preview);
+  fs.writeFileSync(path.join(root, 'portals.yml'), 'scan_history:\n  recheck_after_days: 30\n');
+  const { localToday } = await import('../lib/local-today.mjs');
+  const daysAgo = days => {
+    const date = new Date(`${localToday()}T12:00:00Z`);
+    date.setUTCDate(date.getUTCDate() - days);
+    return date.toISOString().slice(0, 10);
+  };
+  const old = job('reopened', { sourceId: source.id });
+  const recent = job('recent', { sourceId: source.id });
+  fs.writeFileSync(path.join(root, 'data/scan-history.tsv'), [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus',
+    `${old.url}\t${daysAgo(60)}\tgreenhouse\tAI student\tFixture employer\tadded`,
+    `${recent.url}\t${daysAgo(5)}\tgreenhouse\tAI student\tFixture employer\tadded`,
+    '',
+  ].join('\n'));
+  const result = await searchMonitorSources(root, [source.id], {}, {
+    fetchJobs: async () => ({ provider: 'greenhouse', jobs: [old, recent] }),
+  });
+  assert.deepEqual(result.offers.map(offer => offer.url), [old.url]);
+  const delivered = await deliverMonitorSearch(root, [old, recent]);
+  assert.equal(delivered.added, 1);
+  const pipeline = fs.readFileSync(path.join(root, 'data/pipeline.md'), 'utf8');
+  assert.ok(pipeline.includes(old.url));
+  assert.ok(!pipeline.includes(recent.url));
+});

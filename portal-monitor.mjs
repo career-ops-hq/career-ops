@@ -10,17 +10,27 @@ import { isIP } from 'node:net';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { linkedInJobId } from './lib/linkedin-url.mjs';
 import { postingKey } from './url-key.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { makeHttpCtx, sleep } from './providers/_http.mjs';
 import { isBlockedAddress } from './providers/_ip-guard.mjs';
-import { atomicWriteFile, appendToPipeline, loadSeenUrls, isOfferSeen, markOfferSeen, buildTitleFilter, buildLocationFilter, buildPostingAgeFilter } from './scan.mjs';
+import { atomicWriteFile, appendToPipeline, loadSeenUrls, scanHistoryPolicy, isOfferSeen, markOfferSeen, buildTitleFilter, buildLocationFilter, buildPostingAgeFilter } from './scan.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const DAY = 86_400_000;
 const ID = /^[a-f0-9-]{36}$/;
 const emptyStore = () => ({ version: 1, sources: [], notices: [] });
+
+function monitorHistoryPolicy(root) {
+  const portalsPath = process.env.CAREER_OPS_PORTALS || path.join(root, 'portals.yml');
+  let config;
+  try { config = loadYaml(fs.readFileSync(portalsPath, 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') return scanHistoryPolicy(); throw error; }
+  return scanHistoryPolicy(config);
+}
+
 export const monitorFile = root => path.join(root, 'data', 'portal-monitors.json');
 
 export function publicUrl(raw) {
@@ -139,7 +149,7 @@ export async function searchMonitorSources(root, websiteIds, filters = {}, optio
   const now = options.now ?? Date.now();
   const since = Number(filters.sinceDays);
   const ageMatch = buildPostingAgeFilter(Number.isInteger(since) && since > 0 ? since : 0, now);
-  const known = options.excludeSeen === false ? new Set() : loadSeenUrls({}, {
+  const known = options.excludeSeen === false ? new Set() : loadSeenUrls(monitorHistoryPolicy(root), {
     pipelinePath: process.env.CAREER_OPS_PIPELINE || path.join(root, 'data', 'pipeline.md'),
     applicationsPath: resolveTrackerPath(root),
     scanHistoryPath: process.env.CAREER_OPS_SCAN_HISTORY || path.join(root, 'data', 'scan-history.tsv'),
@@ -260,7 +270,7 @@ export async function removeMonitor(root, id) {
 
 async function appendUnseen(root, jobs) {
   const pipelinePath = process.env.CAREER_OPS_PIPELINE || path.join(root, 'data', 'pipeline.md');
-  const { seen } = loadSeenUrls({}, { pipelinePath, applicationsPath: resolveTrackerPath(root),
+  const { seen } = loadSeenUrls(monitorHistoryPolicy(root), { pipelinePath, applicationsPath: resolveTrackerPath(root),
     scanHistoryPath: process.env.CAREER_OPS_SCAN_HISTORY || path.join(root, 'data', 'scan-history.tsv') });
   const unseen = jobs.filter(job => {
     if (isOfferSeen(job, seen)) return false;
