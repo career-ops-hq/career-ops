@@ -62,7 +62,8 @@ T1–T6 below describe the implementation in `91bfc34a`, not verified readiness.
 The resume audit invalidated the earlier completion claims; they remain open
 until their corresponding recovery units have evidence.
 
-- [ ] T1 — Harden URL-based capture resolution and validate file boundaries.
+- [x] T1 — Harden URL-based capture resolution and validate file boundaries.
+      Closed by R2 in `9f3efd518d640b695708b3019896fc0bfac99651`.
 - [ ] T2 — Make capture idempotent and concurrent-safe; separate safe Git policy.
 - [ ] T3 — Harden the localhost receiver and optional evaluation launcher.
 - [ ] T4 — Verify the independent Chrome integration and durable failure feedback.
@@ -76,7 +77,7 @@ until their corresponding recovery units have evidence.
       preparation and 2+ non-trivial file triggers. Checks: focused Node runner,
       source syntax, and duplicate/concurrency runtime fixtures. Commit:
       `41788e7e4183caae5f21cd0c3748e126c7dc17e3` (384 authored lines).
-- [ ] R2 — Strict URL and capture-file boundary validation. Route: delegated direct;
+- [x] R2 — Strict URL and capture-file boundary validation. Route: delegated direct;
       preparation and 2+ non-trivial file triggers. Tests: TDD, focused capture
       suite. Acceptance: reject malformed/non-HTTP URLs, credentials, whitespace,
       control characters, backslashes and pipeline delimiters before writes; preserve
