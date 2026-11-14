@@ -16,7 +16,7 @@ Use the returned `missing` and `unpersonalized` fields to guide the user step by
 #### Step 0: Free Tier Check
 
 Only if the user mentions cost, pricing, budget, or free alternatives:
-> "career-ops works fully on Antigravity CLI's free tier — no API key or paid subscription needed. See [FREE_TIER.md](docs/FREE_TIER.md) for setup, daily limits, and batch tips."
+> "career-ops works fully on Antigravity CLI's free tier — no API key or paid subscription needed. See [FREE_TIER.md](../docs/FREE_TIER.md) for setup, daily limits, and batch tips."
 
 If the user is already on a paid plan (Claude Max, Google AI, etc.) or does not mention cost, skip this step silently.
 
@@ -146,4 +146,4 @@ Then confirm:
 Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
 
-If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring scan entrypoint for their CLI (`/career-ops scan`, `/skill:career-ops scan` on Pi, or the equivalent Codex prompt). If those aren't available, point them to [docs/AUTOMATION.md](docs/AUTOMATION.md) for copy-paste cron / launchd / Windows Task Scheduler recipes plus a zero-token triage-to-shortlist prompt, or remind them to run the scan mode periodically.
+If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring scan entrypoint for their CLI (`/career-ops scan`, `/skill:career-ops scan` on Pi, or the equivalent Codex prompt). If those aren't available, point them to [docs/AUTOMATION.md](../docs/AUTOMATION.md) for copy-paste cron / launchd / Windows Task Scheduler recipes plus a zero-token triage-to-shortlist prompt, or remind them to run the scan mode periodically.

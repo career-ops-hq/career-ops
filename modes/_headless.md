@@ -11,6 +11,7 @@ Headless worker command per CLI:
 | Pi | `pi -a -p "prompt"` |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
+| Gemini CLI | `gemini -p "prompt"` |
 | Qwen | `qwen -p "prompt"` |
 | Antigravity CLI | `agy -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |

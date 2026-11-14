@@ -6,6 +6,8 @@ When the user runs `/career-ops update`, execute this interactive update flow.
 
 Run `node update-system.mjs check --force` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
 
+**When the user asks for the latest `main` instead of the release** (checkout only; a plugin install refuses), run `node update-system.mjs check --force --channel main` instead, so an up-to-date release cannot end the flow, and follow Steps 2 to 4 with `main` as the target: Step 2 fetches `main` instead of the release tag, and Step 4 runs `node update-system.mjs apply --channel main --confirm` after the user confirms. The `check` without `--channel main` reports releases only, never commits merged to `main` between them. Following `main` is a one-off: the choice is not saved, and the session-start check still looks only at releases, so staying on `main` means running this flow again.
+
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop. If the JSON carries a `detail` field, show it verbatim after that sentence: it is a fixed-English diagnostic naming what failed (for example `ENOENT` when curl is not installed, or a proxy or TLS error), and that is what the user needs to fix it.
 - If `no-remote-version`: Tell the user "Couldn't determine the latest career-ops release right now. Try again later." and stop.
@@ -15,11 +17,9 @@ Run `node update-system.mjs check --force` and parse the JSON output. `--force` 
 
 From a linked git worktree, `check`, `apply` and `rollback` run in the checkout that has `main` checked out, so the update lands on `main`. After an update applied that way, suggest `git merge main` in the worktree.
 
-**Installing the latest `main` instead of the release (checkout only; a plugin install refuses).** `check` reports a release only, never commits merged to `main` between releases. When the user asks for the latest `main`, run `node update-system.mjs apply --channel main --confirm`. That is a one-off: the choice is not saved, and the session-start check still looks only at releases, so staying on `main` means running `node update-system.mjs check --channel main` and that `apply` again.
-
 ## Step 2 — Show What Changed
 
-Show the user what will change: the release `apply` installs, `career-ops-v{remote}`, not `main`. Run:
+Show the user what will change: the release `apply` installs, `career-ops-v{remote}`, not `main`. When the user asked for the latest `main` (Step 1), fetch `main` in place of `career-ops-v{remote}` below. Run:
 
 ```bash
 git fetch https://github.com/career-ops-hq/career-ops.git career-ops-v{remote} || {
@@ -79,7 +79,7 @@ Ask the user for confirmation:
 If yes:
 1. Capture the current commit as a run-specific pre-update baseline before apply runs, e.g. `PRE_UPDATE_REF=$(git rev-parse HEAD)`. Don't rely on `backup-pre-update-{local}` alone — `update-system.mjs apply` reuses that branch if it already exists, so it may point at an older snapshot.
 2. **Save local CLAUDE.md additions.** CLAUDE.md is a system file. When this install has changed it, `apply` keeps the local version by default: it lists CLAUDE.md under "Keeping your versions" and writes `CLAUDE.md.bak`. It replaces CLAUDE.md with the two-line template (`@AGENTS.md` + the local-additions comment) only with `--force`, or when it does not see the change as a local edit. Before applying, read the current CLAUDE.md and save everything after that two-line header, so step 4 can put it back if apply replaced the file. If CLAUDE.md has nothing beyond the two-line header, note that there is nothing to restore.
-3. Run `node update-system.mjs apply --confirm`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently.
+3. Run `node update-system.mjs apply --confirm` (with `--channel main` when the user asked for the latest `main`), capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently.
 4. **Restore local CLAUDE.md additions if apply removed them**, whether step 3 succeeded or failed. Re-read CLAUDE.md. If the content saved in step 2 is still in it, which is the default because `apply` kept your version, leave the file as it is: appending the content again would duplicate it, and every later update would add another copy. Only if the saved content is missing, append it after the two-line header.
 5. Now check the exit code captured in step 3:
    - If non-zero, treat apply as failed. Show the captured output and offer:
