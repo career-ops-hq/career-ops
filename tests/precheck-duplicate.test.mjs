@@ -47,6 +47,7 @@ try {
   const spelled = [
     { num: 5, date: '2026-04-01', company: 'Acme', role: 'Data Engineer', status: 'Applied', notes: '', url: 'https://boards.greenhouse.io/acme/jobs/4001' },
     { num: 6, date: '2026-04-02', company: 'Globex', role: 'Product Manager', status: 'Applied', notes: '', url: 'https://www.linkedin.com/jobs/view/4100000001' },
+    { num: 7, date: '2026-04-03', company: 'Initech', role: 'Analyst', status: 'Applied', notes: '', url: 'https://jobs.example.test/openings/AbC' },
   ];
   const urlHits = (url) => findDuplicateCandidates(spelled, { url }).map((c) => `${c.num}:${c.reason}`).join(',');
   const hits = [
@@ -55,8 +56,9 @@ try {
     urlHits('https://www.linkedin.com/jobs/view/product-manager-at-globex-4100000001'),
     urlHits('https://job-boards.greenhouse.io/acme/jobs/4002'),
     urlHits('https://www.linkedin.com/jobs/view/4100000002'),
+    urlHits('https://jobs.example.test/openings/abc'),
   ];
-  if (hits.join('|') === '5:url|5:url|6:url||') pass('another spelling of the same posting is a URL match; another id is not');
+  if (hits.join('|') === '5:url|5:url|6:url|||') pass('another spelling of the same posting is a URL match; another id, or a path in another case, is not');
   else fail(`same-posting spellings: ${JSON.stringify(hits)}`);
 
   // 2. Repost under a new title but the same requisition ID.
