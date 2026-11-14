@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { companySlug } from "@/lib/company-slug.mjs";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
@@ -182,6 +183,12 @@ export function ReportView({
                     Apply checklist
                   </Link>
                 )}
+                <Link
+                  href={`/output?company=${encodeURIComponent(companySlug(companyName)?.slug ?? "")}`}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-full border border-border px-3 py-1 text-xs font-medium text-muted transition-colors hover:border-brand/40 hover:text-brand-text max-sm:min-h-[44px]"
+                >
+                  Preparation files
+                </Link>
                 <MarkPdfReadyButton reportNum={reportNum} ready={disk.exists} trackerMarked={trackerMarkedPdf} />
                 <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={disk.exists} quiet={quietApply} />
                 {coverReady && (
