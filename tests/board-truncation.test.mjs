@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
-import { boardTruncation, markTruncated, describeTruncation } from '../lib/board-truncation.mjs';
+import { boardTruncation, markTruncated, describeTruncation, partialBoardsNote, partialRepeatHints } from '../lib/board-truncation.mjs';
 import { computeConsecutiveFailures, computePartialStreaks } from '../scan.mjs';
 import { computePortalStats } from '../stats.mjs';
 
@@ -49,6 +49,34 @@ test('summary fragment names counts when known', () => {
   assert.equal(describeTruncation('Apple', { reason: 'page-cap', fetched: 100, total: 340, source: 'truncated' }), 'Apple (page-cap, 100 of 340)');
   assert.equal(describeTruncation('Netflix', { reason: 'rate-limited', fetched: 100, source: 'truncated' }), 'Netflix (rate-limited, 100 read)');
   assert.equal(describeTruncation('X', { reason: 'incomplete', source: 'xTruncated' }), 'X (incomplete)');
+  assert.equal(
+    describeTruncation('Stripe', { reason: 'descriptions-omitted', fetched: 0, total: 3, source: 'truncated' }),
+    'Stripe (descriptions omitted, 0 of 3 with descriptions)',
+  );
+});
+
+test('a descriptions-only partial board does not use the unread-postings headline', () => {
+  const omitted = { reason: 'descriptions-omitted', fetched: 0, total: 3, source: 'truncated' };
+  const capped = { reason: 'page-cap', fetched: 100, total: 340, source: 'truncated' };
+  assert.equal(partialBoardsNote([omitted]), 'board(s) returned without some job descriptions');
+  assert.equal(partialBoardsNote([capped]), 'board(s) only PARTLY read — postings beyond the cut were not scanned');
+  assert.equal(partialBoardsNote([omitted, capped]), 'board(s) only PARTLY read — postings beyond the cut were not scanned');
+});
+
+test('a repeated descriptions-omitted board points at fetchDetails, not max_pages', () => {
+  const omitted = partialRepeatHints(['descriptions-omitted']);
+  assert.equal(omitted.length, 1);
+  assert.match(omitted[0], /greenhouse\.fetchDetails/);
+  assert.match(omitted[0], /when it is off/);
+  assert.match(omitted[0], /already on/);
+  assert.doesNotMatch(omitted[0], /max_pages/);
+  const capped = partialRepeatHints(['page-cap']);
+  assert.match(capped[0], /max_pages/);
+  assert.equal(capped.some((line) => /fetchDetails/.test(line)), false);
+  const mixed = partialRepeatHints(['descriptions-omitted', 'page-cap']);
+  assert.equal(mixed.length, 2);
+  assert.match(mixed[0], /fetchDetails/);
+  assert.match(mixed[1], /max_pages/);
 });
 
 test('a partial board is not a dead-board failure; it has its own streak', () => {

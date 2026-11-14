@@ -12,6 +12,7 @@ import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { intInRange } from './_config-utils.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // A board too big to read with every body inline (content=true) is read as the
 // plain list instead (#6560). With the entry's opt-in
@@ -373,7 +374,7 @@ export default {
       }
     }
 
-    return usable.map(/** @param {any} j */ (j) => {
+    const mapped = usable.map(/** @param {any} j */ (j) => {
       let location = j.location?.name || '';
       const raw = typeof j.location?.name === 'string' ? j.location.name.trim() : '';
       const workModel = isWorkModelOnly(raw);
@@ -412,5 +413,13 @@ export default {
         postedAt: toEpochMs(j.first_published),
       };
     });
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    if (!bodiesInline && !probing) {
+      const withBody = mapped.filter((job) => job.description).length;
+      if (withBody < mapped.length) {
+        markTruncated(mapped, 'descriptions-omitted', { fetched: withBody, total: mapped.length });
+      }
+    }
+    return mapped;
   },
 };
