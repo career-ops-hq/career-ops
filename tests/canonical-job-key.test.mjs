@@ -84,6 +84,16 @@ const SAME = [
     'smartrecruiters:acme/12345678-1234-4abc-8def-1234567890ab',
   ],
   [
+    'ashby posting page and its application tab',
+    [
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2',
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application',
+      'https://jobs.ashbyhq.com/ashby/7458D4E9-DA2E-47BD-98CB-ADFDA43D42B2/application/?utm_source=li',
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application//',
+    ],
+    'https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2',
+  ],
+  [
     'tracking params on an ordinary posting',
     [
       'https://jobs.example.com/j/7',
@@ -118,6 +128,8 @@ const DIFFERENT = [
   ['https://jobs.smartrecruiters.com/Acme/744000000000001-analyst', 'https://jobs.smartrecruiters.com/Other/744000000000001-analyst'],
   // Two UUIDs whose first group is all digits: not cut down to that group.
   ['https://jobs.smartrecruiters.com/Acme/12345678-1234-4abc-8def-1234567890ab', 'https://jobs.smartrecruiters.com/Acme/12345678-9999-4abc-8def-1234567890ab'],
+  ['https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application', 'https://jobs.ashbyhq.com/Ashby/86a60834-ba64-484d-9658-afa1bc97a957'],
+  ['https://careers.example.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application', 'https://careers.example.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2'],
   ['https://jobs.lever.co/acme/111', 'https://jobs.lever.co/acme/222'],
   ['https://jobs.example.com/careers#/jobs/123', 'https://jobs.example.com/careers#/jobs/456'],
   ['https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77903'],
