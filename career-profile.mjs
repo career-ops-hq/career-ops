@@ -76,6 +76,9 @@ function parseCv(text, source) {
   // How the current entry was opened: 'heading' (a ### line), 'line' (a
   // non-bullet line with no heading above it) or 'bullet' (a leading bullet).
   let entityOrigin = null;
+  // Indentation of the bullet that opened the current entry, so a deeper
+  // sub-bullet stays a fact of it instead of opening an entry of its own.
+  let entityIndent = 0;
   const addFact = (collection, value, line) => {
     const fact = { id: stableId(collection, value, source, entity?.label ?? ''), text: value,
       evidence: { source, line, quote: lines[line - 1].trim() }, review_status: 'needs_review' };
@@ -107,9 +110,10 @@ function parseCv(text, source) {
     }
     if (!section) return;
     const unbulleted = line.replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/, '');
-    // A line that is bold from end to end (`**Senior ML Engineer**`) is a title,
-    // not a `**Label:** value` pair, so it gets no trailing colon.
-    const wholeBold = unbulleted.match(/^\*\*(.+?)\*\*$/);
+    // A line that is one bold span from end to end (`**Senior ML Engineer**`) is
+    // a title, not a `**Label:** value` pair, so it gets no trailing colon. A
+    // line with a second bold span (`**Team**: **Data**`) is not one span.
+    const wholeBold = unbulleted.match(/^\*\*((?:(?!\*\*).)+)\*\*$/);
     const value = (wholeBold ? wholeBold[1] : unbulleted.replace(/^\*\*(.+?)\*\*:?\s*/, '$1: ')).trim();
     if (!value) return;
     if (section === 'summary') addFact(section, value, lineNo);
@@ -118,12 +122,13 @@ function parseCv(text, source) {
     } else if (section === 'certifications') addFact(section, value, lineNo);
     else if (['experiences', 'projects', 'education'].includes(section)) {
       const isBullet = /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(raw);
+      const indent = raw.match(/^\s*/)[0].length;
       // An entry opened by a heading owns every line under it: the title and
       // dates lines become its facts, not entries of their own (#6782). A
       // bullet never adopts the bullets after it, so a section with no entry
-      // headings reads one entry per bullet.
+      // headings reads one entry per top-level bullet.
       const attach = isBullet
-        ? entity && entityOrigin !== 'bullet'
+        ? entity && (entityOrigin !== 'bullet' || indent > entityIndent)
         : entity && entityOrigin === 'heading';
       if (attach) addFact(section, value, lineNo);
       else {
@@ -131,6 +136,7 @@ function parseCv(text, source) {
           evidence: { source, line: lineNo, quote: raw.trim() }, facts: [] };
         result[section].push(entity);
         entityOrigin = isBullet ? 'bullet' : 'line';
+        entityIndent = indent;
       }
     }
   });

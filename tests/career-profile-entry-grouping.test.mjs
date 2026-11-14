@@ -74,3 +74,31 @@ test('a non-bullet line with no heading above it still opens an entry that owns 
     { label: 'Eval Toolkit', facts: ['CI integration.'] },
   ]);
 });
+
+test('a line with more than one bold span keeps the label: value rewrite instead of the whole-bold title branch', () => {
+  const profile = importAll('## Projects\n- **FraudShield** - real-time **fraud detection**\n- **Team**: **Data**\n');
+  assert.deepEqual(profile.projects.map((project) => project.label), [
+    'FraudShield: - real-time **fraud detection**',
+    'Team: **Data**',
+  ]);
+});
+
+test('problem 2: an indented sub-bullet stays a fact of the bullet entry above it', () => {
+  const profile = importAll([
+    '## Projects',
+    '- **FraudShield** - fraud detection framework',
+    '  - 1.2k GitHub stars',
+    '## Education',
+    '- MS Computer Science, Example University (2018)',
+    '  - Thesis: graph anomaly detection',
+    '- BS Computer Science, Example College (2016)',
+    '',
+  ].join('\n'));
+  assert.deepEqual(shape(profile.projects), [
+    { label: 'FraudShield: - fraud detection framework', facts: ['1.2k GitHub stars'] },
+  ]);
+  assert.deepEqual(shape(profile.education), [
+    { label: 'MS Computer Science, Example University (2018)', facts: ['Thesis: graph anomaly detection'] },
+    { label: 'BS Computer Science, Example College (2016)', facts: [] },
+  ]);
+});
