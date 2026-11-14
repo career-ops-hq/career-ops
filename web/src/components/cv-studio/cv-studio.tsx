@@ -247,6 +247,20 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
     return () => window.removeEventListener("keydown", undoShortcut);
   }, [undo]);
 
+  const resetStudio = useCallback(() => {
+    recordEdit({ type: "reset" });
+    setSave({ kind: "idle" });
+    void send("POST", { op: "restore-full-pdf" }).then(async (r) => {
+      if (!r.ok) throw new Error("restore-full-pdf failed");
+      const body = (await r.json().catch(() => ({}))) as { restored?: boolean; reason?: string };
+      if (body.reason === "missing") {
+        setSave({ kind: "failed", error: "Reset cleared the preview. Apply still has the shortened PDF, because the full PDF is not on disk." });
+      }
+    }).catch(() => {
+      setSave({ kind: "failed", error: "Reset cleared the preview. Apply may still have the shortened PDF." });
+    });
+  }, [recordEdit, send]);
+
   const changed = doc.sections.flatMap((s) => s.items.flatMap((i) => i.bullets)).filter((b) => b.change !== "same").length;
   const pdfHref = `/api/cv-pdf?n=${encodeURIComponent(data.reportNum)}`;
 
@@ -266,7 +280,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
           <button type="button" onClick={undo} disabled={!canUndo} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand-text disabled:opacity-40">
             <Undo2 className="size-3.5" /> Undo
           </button>
-          <button onClick={() => recordEdit({ type: "reset" })} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand-text">
+          <button type="button" onClick={resetStudio} className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:border-brand/40 hover:text-brand-text">
             <RotateCcw className="size-3.5" /> Reset
           </button>
           <p role="status" className="text-xs text-muted">{editStatus}</p>
