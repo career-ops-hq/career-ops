@@ -187,7 +187,7 @@ test('Explore adds URLs, searches a saved website and schedules new-job notices 
   await page.getByText('Legacy fixture', { exact: false }).first().waitFor();
   await page.getByRole('button', { name: 'New Scheduled Scan' }).first().click();
   const dialog = page.getByRole('dialog', { name: 'Create Scheduled Scan' });
-  await dialog.getByLabel('Scan Engine').selectOption('portals');
+  await dialog.getByLabel('Where to check').selectOption('portals');
   await dialog.getByText(/This scan checks your configured companies and job boards/).waitFor();
   assert.equal(await dialog.getByRole('button', { name: 'Greenhouse', exact: true }).count(), 0);
   await dialog.getByLabel('Fictional careers').waitFor();
