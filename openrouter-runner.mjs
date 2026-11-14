@@ -396,6 +396,19 @@ export function buildCachedSystemMessage(systemPrompt) {
   };
 }
 
+// A reply that stopped for any reason other than "stop" is incomplete, the rule
+// openai-eval follows since #3949: cut off at max_tokens ("length"), filtered
+// ("content_filter"), or ended by a provider error ("error"). Its text can
+// still carry every block heading and the score line validateEvaluationResponse
+// checks, so it would be saved as the report. A reply with no finish_reason is
+// accepted: some servers omit the field, and nothing then says it stopped early.
+function assertReplyFinished(data) {
+  const reason = data.choices?.[0]?.finish_reason;
+  if (reason == null || reason === 'stop') return;
+  const hint = reason === 'length' ? ` (cut off at max_tokens ${MAX_TOKENS})` : '';
+  throw new Error(`Incomplete reply: finish_reason "${String(reason).slice(0, 40)}"${hint}`);
+}
+
 // ---------------------------------------------------------------------------
 // OpenRouter API call — automatic model rotation with fallback
 // ---------------------------------------------------------------------------
@@ -450,6 +463,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
       if (data.error) throw new Error(data.error.message);
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
+      assertReplyFinished(data);
       console.log('OK');
       const usage = normalizeOpenAIUsage(data.usage);
       return { content, usage };
@@ -524,6 +538,7 @@ async function callOpenRouter(systemPrompt, userMessage) {
 
       const content = data.choices?.[0]?.message?.content ?? '';
       if (!content) throw new Error('Empty response');
+      assertReplyFinished(data);
 
       const usage = normalizeOpenAIUsage(data.usage);
 
