@@ -1948,3 +1948,78 @@ export function copyEmployerRegistry(destDir) {
   const inbox = join(src, 'inbox');
   cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
 }
+
+/** Every row of the committed employer registry, parsed. */
+function employerRegistryRows() {
+  const boards = join(ROOT, 'employers', 'boards');
+  const rows = [];
+  if (!existsSync(boards)) return rows;
+  for (const ats of readdirSync(boards)) {
+    for (const file of readdirSync(join(boards, ats))) {
+      if (!file.endsWith('.ndjson')) continue;
+      for (const line of readFileSync(join(boards, ats, file), 'utf8').split('\n')) {
+        if (line.trim()) rows.push(JSON.parse(line));
+      }
+    }
+  }
+  return rows;
+}
+
+/** The ids of the committed contribution manifests. */
+function employerContributionIds() {
+  const dir = join(ROOT, 'employers', 'contributions');
+  return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => f.slice(0, -5)) : [];
+}
+
+/**
+ * The day the registry tests take as "today" when they validate a copy of the
+ * committed registry: noon UTC of the latest date the registry itself holds (a
+ * row's `added`, a contribution's `date`), and never before `floor`. A fixed day
+ * goes stale the first time a contribution is folded in after it: every row
+ * added later reads as "in the future", with nothing wrong in the data.
+ * It depends on the files only, never on the clock.
+ * @param {string} [floor] A YYYY-MM-DD date the result is never earlier than.
+ */
+export function employerRegistryToday(floor = '2026-11-11') {
+  let latest = floor;
+  const see = (date) => { if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date) && date > latest) latest = date; };
+  for (const row of employerRegistryRows()) see(row.added);
+  for (const id of employerContributionIds()) {
+    see(JSON.parse(readFileSync(join(ROOT, 'employers', 'contributions', `${id}.json`), 'utf8')).date);
+  }
+  return new Date(`${latest}T12:00:00Z`);
+}
+
+/**
+ * The latest day before employerRegistryToday() that no committed contribution
+ * is dated, as YYYY-MM-DD: a contribution id a test makes on it is free, so the
+ * fold keeps it as it is instead of adding -2.
+ */
+export function unusedEmployerContributionDay() {
+  const taken = new Set(employerContributionIds().map((id) => id.slice(0, 10)));
+  const day = employerRegistryToday();
+  do day.setUTCDate(day.getUTCDate() - 1); while (taken.has(day.toISOString().slice(0, 10)));
+  return day.toISOString().slice(0, 10);
+}
+
+/**
+ * A board id for `ats` that no committed row has, letter case aside: `board`
+ * itself, or `board` with the first number from 2 up that is free (on the
+ * tenant, for Workday). The registry grows with every fold, so a test that needs
+ * a new board cannot count on the one it names staying unknown. The number goes
+ * at the end, so the board stays in the same <initial>.ndjson file.
+ * @param {string} ats
+ * @param {string} board
+ */
+export function unlistedEmployerBoard(ats, board) {
+  const taken = new Set(employerRegistryRows().filter((r) => r.ats === ats).map((r) => String(r.board).toLowerCase()));
+  const numbered = (n) => {
+    if (n === 1) return board;
+    if (ats !== 'workday') return `${board}${n}`;
+    const [tenant, ...rest] = board.split('/');
+    return [`${tenant}${n}`, ...rest].join('/');
+  };
+  let n = 1;
+  while (taken.has(numbered(n).toLowerCase())) n++;
+  return numbered(n);
+}
