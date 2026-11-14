@@ -28,6 +28,8 @@ The helper reads the ATS's anonymous public API. If the host cannot pass argumen
 
 Do not continue to Block A until this gate is resolved. The snapshot captured here is reused by Block G's freshness signals.
 
+**Aggregator URL (#6166):** when the URL is an aggregator listing (LinkedIn, Indeed, Wellfound and the like, see AGENTS.md → **Aggregator Listings -- Confirm at the Employer**), run its zero-token first pass before Block A: write `{"url", "company", "title"}` from the posting (plus `"origin"` when the posting links to the employer, e.g. an "apply on company site" link) to a JSON file with your file tool and run `node confirm-at-employer.mjs --input <file> --json`, then act on the verdict as that section says. With an employer URL in hand (`employer_url`, or a `found` you confirmed as AGENTS.md says), that URL is the report's canonical `**URL:**` and the gate above applies to it.
+
 **Session title:** apply the router's **Session Title** rule (`SKILL.md`, #5303) in an interactive session when the host allows it: `Career-ops eval (fetching)` while the JD is read, `{Role}, {Company} (evaluating)` once a real JD gives the role and employer, and plain `{Role}, {Company}` when the evaluation is done. A gate that stops the run (liveness, blacklist, dealbreaker, agency) ends it on `(on hold)`. On an `auto-pipeline` handoff, `auto-pipeline` owns the title, so leave it. An undisclosed-employer agency posting is titled `{Role}, via {Agency}` only after the **Agency confirmation handoff** resolves.
 
 ## Local public facts reuse (#1025)
