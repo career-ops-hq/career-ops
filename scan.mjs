@@ -4582,6 +4582,44 @@ const KNOWN_FLAGS = [
 // form is self-contained and never needs this). --throttle is deliberately
 // excluded: only its bare and `--throttle=<ms>` forms are read below, so a
 // following token is never its value.
+const TRACKED_COMPANIES_ROW = '(tracked companies)';
+
+function newBoardStat() {
+  return { fetched: 0, source: 0, sourceDetail: {}, title: 0, location: 0, age: 0, other: 0, seen: 0, passed: 0, new: 0, error: false };
+}
+
+/**
+ * Print where every source's jobs went. Columns add up per row:
+ * fetched = source + title + location + age + other + seen + passed, and
+ * (with --verify) passed - new are the offers liveness verification dropped.
+ * @param {Map<string, ReturnType<typeof newBoardStat>>} stats
+ * @param {{verify?: boolean}} [opts]
+ */
+export function printBoardStats(stats, { verify = false } = {}) {
+  if (stats.size === 0) return;
+  const cols = ['fetched', 'source', 'title', 'location', 'age', 'other', 'seen'];
+  if (verify) cols.push('verify');
+  cols.push('new');
+  const value = (st, col) => (col === 'verify' ? st.passed - st.new : st[col]);
+  const rows = [...stats.entries()].sort((x, y) => y[1].new - x[1].new || x[0].localeCompare(y[0]));
+  const nameWidth = Math.max(6, ...rows.map(([name]) => name.length + (rows.some(([, st]) => st.error) ? 2 : 0)));
+  const total = newBoardStat();
+  for (const [, st] of rows) for (const col of Object.keys(total)) if (typeof total[col] === 'number') total[col] += st[col];
+  const line = (label, st) => `  ${label.padEnd(nameWidth)}${cols.map(col => String(value(st, col)).padStart(col === 'location' ? 9 : 8)).join('')}`;
+  console.log('\nPer source (each row: fetched = source + title + location + age + other + seen' + (verify ? ' + verify' : '') + ' + new):');
+  console.log(`  ${'Source'.padEnd(nameWidth)}${cols.map(col => col.padStart(col === 'location' ? 9 : 8)).join('')}`);
+  for (const [name, st] of rows) console.log(line(st.error ? `${name} ✗` : name, st));
+  console.log(line('Total', total));
+  const detail = rows.filter(([, st]) => st.source > 0);
+  if (detail.length > 0) {
+    console.log('\nDropped at the source (offers a provider dropped by its own settings):');
+    for (const [name, st] of detail) {
+      console.log(`  ${name}: ${Object.entries(st.sourceDetail).map(([reason, n]) => `${reason} ${n}`).join(', ')}`);
+    }
+  }
+  console.log('  other = tier, declared field, salary, content, country, visa, cooldown and blacklist; seen = already in your history');
+}
+
 const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
 
 const USAGE = `Usage:
@@ -5056,6 +5094,16 @@ async function main() {
     });
   }
 
+  // Per-source funnel for the run summary: where each source's jobs went.
+  // Every job board gets its own row; tracked companies share one.
+  const boardStats = new Map();
+  const offerStat = new Map(); // offer -> its source row, to count the offers that survive verification
+  const boardStat = (company) => {
+    const key = company._isBoard ? company.name : TRACKED_COMPANIES_ROW;
+    if (!boardStats.has(key)) boardStats.set(key, newBoardStat());
+    return boardStats.get(key);
+  };
+
   // Values providers resolve once and reuse on later scans (provider-id-cache.mjs).
   const idCaches = openProviderIdCache(path.join(DATA_ROOT, PROVIDER_ID_CACHE_DIR));
 
@@ -5073,6 +5121,7 @@ async function main() {
   const retriedTargets = new Set();
   const tasks = targets.map(company => async () => {
     let provider = company._provider;
+    const st = boardStat(company);
     const observation = { requests: 0, successfulResponses: 0, lastStatus: null };
     // includeUndated is deliberately ALWAYS true, independent of the window.
     // It does not mean "include undated postings in the results" — scan.mjs
@@ -5117,6 +5166,7 @@ async function main() {
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     const recordError = (err, { retryable = false } = {}) => {
       failedTargets++;
+      st.error = true;
       const entry = {
         company: company.name,
         error: err.message,
@@ -5149,6 +5199,13 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
+      // A provider that drops offers itself (JustJoin, NoFluffJobs settings)
+      // reports the counts on jobs.providerStats so they show in the summary.
+      const sourceDropped = jobs.providerStats?.dropped || {};
+      const sourceDroppedTotal = Object.values(sourceDropped).reduce((sum, n) => sum + n, 0);
+      st.fetched += jobs.length + sourceDroppedTotal;
+      st.source += sourceDroppedTotal;
+      for (const [reason, n] of Object.entries(sourceDropped)) st.sourceDetail[reason] = (st.sourceDetail[reason] || 0) + n;
       const truncation = boardTruncation(jobs);
       // Boards (job_boards: aggregators) too: unlike an empty result, which is
       // routine for a keyword search, a capped or failed walk is a real gap.
@@ -5206,6 +5263,7 @@ async function main() {
           if (blEntry) {
             if (!includeBlacklisted) {
               totalFilteredBlacklist++;
+              st.other++;
               continue;
             }
             annotatedBlacklisted++;
@@ -5244,16 +5302,19 @@ async function main() {
         }
         if (failedField === 'title') {
           totalFilteredTitle++;
+          st.title++;
           if (!dryRun) titleFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (failedField !== null) {
           totalFilteredDeclaredField++;
+          st.other++;
           continue;
         }
         if (sawAbsentField) totalPassedFieldAbsent++;
         if (classifyTier && companySkipTiers.includes(classifyTier(job.title))) {
           totalFilteredTier++;
+          st.other++;
           continue;
         }
         // job.title is passed so a role whose remoteness is stated in the title
@@ -5264,21 +5325,25 @@ async function main() {
         if (employerRejected || !locationFilter(job.location, job.url, job.title, job)) {
           if (!company._isBoard) employerLocationRejected.add(locationUrl);
           totalFilteredLocation++;
+          st.location++;
           if (!dryRun) locationFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!company._isBoard) employerLocationAccepted.add(locationUrl);
         if (!postingAgeFilter(job.postedAt)) {
           totalFilteredPostingAge++;
+          st.age++;
           if (!dryRun) ageFilteredOffers.push({ ...job, source: sourceName });
           continue;
         }
         if (!postedDateFilter(job.postedAt)) {
           totalFilteredPostedDate++;
+          st.age++;
           continue;
         }
         if (!salaryFilter(job.salary)) {
           totalFilteredSalary++;
+          st.other++;
           continue;
         }
         if (titleMissed) {
@@ -5290,14 +5355,17 @@ async function main() {
           totalRescuedByContent++;
         } else if (!contentFilter(job.description, matchedTitleKeywords(job.title, config.title_filter))) {
           totalFilteredContent++;
+          st.other++;
           continue;
         }
         if (!countryEligibilityFilter(countryEligibilityText(job))) {
           totalFilteredCountryEligibility++;
+          st.other++;
           continue;
         }
         if (!visaFilter(visaFilterText(job))) {
           totalFilteredVisa++;
+          st.other++;
           continue;
         }
         const dedupUrl = seenJobKey(job.url);
@@ -5316,6 +5384,7 @@ async function main() {
           );
           if (!newLanguageVersion) {
             totalDupes++;
+            st.seen++;
             continue;
           }
         }
@@ -5343,6 +5412,7 @@ async function main() {
           languages: seenCompanyRoleLanguages, locatedLanguages: locatedLanguagesByBase },
         requisition, dedupIncludeLanguage ? language : [])) {
           totalDupes++;
+          st.seen++;
           continue;
         }
         const cooldownResult = cooldownFilter(job);
@@ -5350,6 +5420,7 @@ async function main() {
           markOfferSeen(job, seenUrls);
           recordUrlVariant(seenUrlVariants, dedupUrl, language, job.title);
           totalFilteredCooldown++;
+          st.other++;
           cooldownOffers.push({
             job: { ...job, source: sourceName },
             status: cooldownResult.reason,
@@ -5385,6 +5456,8 @@ async function main() {
           careersUrlDomain,
         };
         newOffers.push(offerForVerification);
+        offerStat.set(offerForVerification, st);
+        st.passed++;
         if (verify) verifyDedupKeys.set(offerForVerification, {
           key, baseKey, requisition, language, newLanguageVersion,
         });
@@ -5693,6 +5766,12 @@ async function main() {
       console.log(`Blacklisted:           ${totalFilteredBlacklist} skipped (blacklist)`);
     }
   }
+  for (const offer of verifiedOffers) {
+    const owner = offerStat.get(offer);
+    if (owner) owner.new++;
+  }
+  printBoardStats(boardStats, { verify });
+
   if (experienceDropped.length > 0) {
     console.log(`\nRemoved by experience_filter (the JD's lowest stated requirement is above your band):`);
     for (const offer of experienceDropped) {
