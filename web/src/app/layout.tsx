@@ -4,6 +4,7 @@ import { inter, instrumentSerif, instrumentSerifItalic } from "@/lib/fonts";
 import { AppShell } from "@/components/app-shell";
 import { RouteProgressHost } from "@/components/route-progress-host";
 import { ThemeProvider } from "@/components/theme-provider";
+import { FontApplier } from "@/components/font-applier";
 import { readFollowupsEnabled } from "@/lib/followups-server";
 import "./globals.css";
 
@@ -41,6 +42,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="font-sans antialiased">
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <RouteProgressHost />
+        <FontApplier />
         <ThemeProvider>
           <AppShell followupsEnabled={followupsEnabled}>{children}</AppShell>
         </ThemeProvider>
