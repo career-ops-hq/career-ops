@@ -102,3 +102,11 @@ test('problem 2: an indented sub-bullet stays a fact of the bullet entry above i
     { label: 'BS Computer Science, Example College (2016)', facts: [] },
   ]);
 });
+
+test('problem 2: a tab-indented sub-bullet counts as deeper than a two-space bullet', () => {
+  const profile = importAll('## Projects\n  - Project A\n\t- Detail\n  - Project B\n');
+  assert.deepEqual(shape(profile.projects), [
+    { label: 'Project A', facts: ['Detail'] },
+    { label: 'Project B', facts: [] },
+  ]);
+});

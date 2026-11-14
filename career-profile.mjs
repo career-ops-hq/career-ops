@@ -122,7 +122,9 @@ function parseCv(text, source) {
     } else if (section === 'certifications') addFact(section, value, lineNo);
     else if (['experiences', 'projects', 'education'].includes(section)) {
       const isBullet = /^\s*(?:[-*+]\s+|\d+[.)]\s+)/.test(raw);
-      const indent = raw.match(/^\s*/)[0].length;
+      // Indentation in columns, with a tab advancing to the next 4-column stop
+      // as in CommonMark, so `\t- Detail` sits deeper than `  - Project A`.
+      const indent = [...raw.match(/^[ \t]*/)[0]].reduce((col, ch) => (ch === '\t' ? col + 4 - (col % 4) : col + 1), 0);
       // An entry opened by a heading owns every line under it: the title and
       // dates lines become its facts, not entries of their own (#6782). A
       // bullet never adopts the bullets after it, so a section with no entry
