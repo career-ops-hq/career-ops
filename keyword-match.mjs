@@ -171,28 +171,34 @@ function splitCvSkillTerms(text) {
 function cvHtmlSections(html) {
   const source = String(html || '');
   const output = [];
+  let heading = null;
+  const emit = text => (heading ? heading.parts : output).push(text);
+  const endHeading = () => {
+    if (!heading) return;
+    output.push(`\n${'#'.repeat(heading.level)} ${heading.parts.join('').replace(/\s+/g, ' ').trim()}\n`);
+    heading = null;
+  };
   let rawTag = null;
   let at = 0;
   while (at < source.length) {
     const open = source.indexOf('<', at);
     if (open === -1) {
-      if (!rawTag) output.push(source.slice(at));
+      if (!rawTag) emit(source.slice(at));
       break;
     }
-    if (!rawTag) output.push(source.slice(at, open));
+    if (!rawTag) emit(source.slice(at, open));
     if (!rawTag && source.startsWith('<!--', open)) {
       const end = /--!?>/g;
       end.lastIndex = open + 4;
       const match = end.exec(source);
       at = match ? end.lastIndex : source.length;
-      output.push(' ');
       continue;
     }
     // Only a name immediately after < or </ starts an element. In raw text,
     // unrelated < characters must not swallow the real closing tag later.
     const tag = /^<(\/?)([a-z][a-z0-9:-]*)(?=[\t\n\f\r />])/i.exec(source.slice(open));
     if (!tag) {
-      if (!rawTag) output.push('<');
+      if (!rawTag) emit('<');
       at = open + 1;
       continue;
     }
@@ -215,16 +221,20 @@ function cvHtmlSections(html) {
     at = end + 1;
     if (rawTag) {
       rawTag = null;
-      output.push(' ');
+      emit(' ');
     } else if (!closing && (name === 'script' || name === 'style')) {
       rawTag = name;
-      output.push(' ');
+      emit(' ');
     } else if (/^h[1-6]$/.test(name)) {
-      output.push(closing ? '\n' : `\n${'#'.repeat(Number(name[1]))} `);
-    } else if (name === 'br' || (closing && ['p', 'li', 'div', 'ul', 'ol', 'section'].includes(name))) {
-      output.push('\n');
-    } else output.push(' ');
+      endHeading();
+      if (!closing) heading = { level: Number(name[1]), parts: [] };
+    } else if (['br', 'p', 'li', 'div', 'ul', 'ol', 'section', 'article', 'header', 'footer', 'table', 'tr', 'td', 'th', 'dl', 'dt', 'dd', 'hr'].includes(name)) {
+      emit('\n');
+    }
+    // Inline tags contribute no separator: Post<strong>gre</strong>SQL is
+    // one word. Whitespace already present in the text is preserved.
   }
+  endHeading();
   return output.join('').split('\n').map(line => htmlToText(line)).join('\n');
 }
 
@@ -258,7 +268,9 @@ export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
     if (headingMarker) {
       const level = headingMarker[1].length;
       const heading = headingText(line, level);
-      if (/^(?:skills?|technical skills|core competencies|competencies)$/i.test(heading || '')) skillsLevel = level;
+      if (/^(?:skills?|technical skills|core competencies|competencies)$/i.test(heading || '')) {
+        skillsLevel = skillsLevel === null ? level : Math.min(skillsLevel, level);
+      }
       else if (skillsLevel !== null && level <= skillsLevel) skillsLevel = null;
       continue;
     }
@@ -274,6 +286,8 @@ export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
       if (key && !terms.has(key)) terms.set(key, term);
     }
   }
+  // The review is the opposite direction from coverage: is this CV term
+  // named within any one JD keyword? Do not join distinct JD keywords.
   return [...terms.values()].filter(term =>
     !keywords.some(keyword => keywordCount(term, keyword) > 0));
 }

@@ -127,3 +127,25 @@ test('HTML comments and unterminated raw-text elements cannot expose example ski
   }
   assert.deepEqual(coverage.cvTermsNotInJd([], '<h2>Skills</h2><!-- Hidden --!><p>Python</p>', { html: true }), ['Python']);
 });
+
+test('inline HTML markup preserves adjacent letters while block elements separate skills', () => {
+  const html = '<h2>Skills</h2><p>Post<strong>gre</strong>SQL</p><p>Type<em>Script</em></p><div>Terraform</div>';
+  assert.deepEqual(coverage.cvTermsNotInJd([], html, { html: true }), ['PostgreSQL', 'TypeScript', 'Terraform']);
+  assert.deepEqual(coverage.cvTermsNotInJd(['PostgreSQL', 'TypeScript'], html, { html: true }), ['Terraform']);
+});
+
+test('multiline HTML headings collapse whitespace without splitting the section name', () => {
+  const html = '<h2>\n <strong>Technical</strong>\n Skills\n</h2><p>Python</p><h2>\n Work\n Experience\n</h2><p>Rust</p>';
+  assert.deepEqual(coverage.cvTermsNotInJd([], html, { html: true }), ['Python']);
+});
+
+test('a nested recognized skill heading keeps its outer section boundary', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd([], '## Skills\n### Technical Skills\nPython\n### Tools\nTerraform\n## Experience\nRust'), ['Python', 'Terraform']);
+  const html = '<h2>Skills</h2><h3>Technical Skills</h3><p>Python</p><h3>Tools</h3><p>Terraform</p><h2>Experience</h2><p>Rust</p>';
+  assert.deepEqual(coverage.cvTermsNotInJd([], html, { html: true }), ['Python', 'Terraform']);
+});
+
+test('review searches each complete CV term within each JD keyword, not the reverse', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd(['Kubernetes'], '## Skills\nKubernetes orchestration'), ['Kubernetes orchestration']);
+  assert.deepEqual(coverage.cvTermsNotInJd(['Kubernetes orchestration'], '## Skills\nKubernetes'), []);
+});
