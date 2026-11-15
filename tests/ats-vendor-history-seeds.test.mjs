@@ -225,9 +225,13 @@ try {
     'https://api.gem.com/job_board/v0/acme',
     'https://app.jobvite.com/CompanyJobs/Xml.aspx?c=qAB',
     'https://app.mokahr.com/social-recruitment/acme',
+    'https://apply.workable.com/',
     'https://apply.workable.com/j/ABC123',
+    'https://ats.rippling.com/',
     'https://jobs.gem.com/',
+    'https://jobs.jobvite.com/',
     'https://jobs.jobvite.com/api/x',
+    'https://jobs.lever.co/',
     'https://join.com/acme',
     'https://jsapi.recruiterbox.com/v1/openings',
     'https://jsapi.recruiterbox.com/v1/openings?client_name=a.b',
@@ -240,6 +244,13 @@ try {
   ]) {
     assert.equal(atsBoardUrlOf(refused), null, refused);
   }
+  // These providers read only HTTPS boards, so an http:// posting link is
+  // upgraded rather than kept as a seed detect() refuses.
+  for (const [vendor, , , board] of sharedBoards) {
+    const http = board.replace(/^https:/, 'http:');
+    assert.equal(atsBoardUrlOf(http, vendor), board, http);
+  }
+  assert.equal(atsBoardUrlOf('http://jobs.jobvite.com/acme/job/123'), 'https://jobs.jobvite.com/acme');
   pass('postings on the newly known shared ATS hosts reduce to one board their provider detects');
 
   const trackerWithUrl = [

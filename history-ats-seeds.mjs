@@ -12,6 +12,16 @@ import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const WEB_URL_RE = /https?:\/\/[^\s|)>]+/i;
 
+// Vendors whose provider reads only HTTPS boards. Every one serves its boards
+// over HTTPS, so an http:// posting link is upgraded instead of becoming a seed
+// detect() refuses after it has taken a --limit slot.
+const HTTPS_VENDORS = new Set([
+  'adp-workforcenow', 'applicantpro', 'breezy', 'comeet', 'gem', 'homerun', 'jazzhr',
+  'jobvite', 'join', 'keka', 'mokahr', 'paylocity', 'personio', 'pinpoint', 'polymer',
+  'prevueaps', 'recruitee', 'rippling', 'schoolspring', 'taleez', 'teamtailor',
+  'trakstar', 'turbohire', 'workable', 'zoho-recruit',
+]);
+
 // Vendors whose provider reads the board from the tenant subdomain alone, so
 // every posting on one board reduces to the same origin.
 const TENANT_ORIGIN_VENDORS = new Set([
@@ -51,6 +61,7 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
   let u;
   try { u = new URL(rawUrl); } catch { return null; }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  if (HTTPS_VENDORS.has(vendor)) u.protocol = 'https:';
 
   const parts = u.pathname.split('/').filter(Boolean);
   if (vendor === 'greenhouse') {
@@ -64,8 +75,9 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
     // The Jobvite provider reads a board from jobs.jobvite.com/<slug> only; an
     // app.jobvite.com feed URL works as `api:`, never as a careers_url.
     if (vendor === 'jobvite' && u.hostname.toLowerCase() !== 'jobs.jobvite.com') return null;
-    if (parts[0] && FIRST_SEGMENT_VENDORS.get(vendor).has(parts[0].toLowerCase())) return null;
-    if (parts[0]) u.pathname = `/${parts[0]}`;
+    // A bare host names no board; the provider would refuse it.
+    if (!parts[0] || FIRST_SEGMENT_VENDORS.get(vendor).has(parts[0].toLowerCase())) return null;
+    u.pathname = `/${parts[0]}`;
   } else if (Object.hasOwn(BOARD_HOST_OF, vendor)) {
     if (u.hostname.toLowerCase() !== BOARD_HOST_OF[vendor] || !parts[0]) return null;
     u.pathname = `/${parts[0]}`;
