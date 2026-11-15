@@ -2541,9 +2541,8 @@ tracked_companies:
     enabled: true
 
   - name: Parloa
-    careers_url: https://job-boards.eu.greenhouse.io/parloa
-    api: https://boards-api.greenhouse.io/v1/boards/parloa/jobs
-    notes: "Berlin EMEA. Voice AI enterprise."
+    careers_url: https://jobs.ashbyhq.com/parloa
+    notes: "Berlin EMEA. Voice AI enterprise. Moved from Greenhouse to Ashby; greenhouse.io/parloa answers 404."
     enabled: true
 
   - name: Intercom
@@ -2973,9 +2972,8 @@ tracked_companies:
     enabled: true
 
   - name: GetYourGuide
-    careers_url: https://job-boards.greenhouse.io/getyourguide
-    api: https://boards-api.greenhouse.io/v1/boards/getyourguide/jobs
-    notes: "Berlin. Travel marketplace, ML & data platform roles."
+    careers_url: https://jobs.ashbyhq.com/GetYourGuide
+    notes: "Berlin. Travel marketplace, ML & data platform roles. Moved from Greenhouse to Ashby; greenhouse.io/getyourguide is live but empty."
     enabled: true
 
   - name: HelloFresh
