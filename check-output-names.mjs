@@ -41,6 +41,27 @@ const ARTIFACT_EXT = /\.(pdf|html|tex|md)$/i;
 // date. Earlier report-led names had no date (`921-acme-cv-jane.html`); those
 // are legacy and are not judged.
 const CLAIMS_STANDARD = /^\d+-.*\d{4}-\d{2}-\d{2}/;
+// generate-pdf.mjs keeps a render that ran over its page budget beside the
+// deliverable as `{name}.overflow.pdf`, then `.overflow-2.pdf` (modes/pdf.md).
+// A draft is renderer-owned and temporary, so it is not judged.
+const OVERFLOW_DRAFT = /\.overflow(-\d+)?\.pdf$/i;
+
+/**
+ * Read a name against its report. Either slug can contain `cv` or `cover`, so
+ * the report's slug anchors the split: the output name's company is the report
+ * slug or a hyphen-delimited leading part of it, tried longest first. A company
+ * longer than the report slug has no anchor and falls back to the plain parse.
+ */
+function parseAgainstReport(file, reportSlug) {
+  if (reportSlug) {
+    const parts = reportSlug.split('-');
+    for (let n = parts.length; n >= 1; n--) {
+      const hit = parseOutputName(file, { company: parts.slice(0, n).join('-') });
+      if (hit) return hit;
+    }
+  }
+  return parseOutputName(file);
+}
 
 /**
  * Report filenames glue the role onto the company with no delimiter
@@ -87,8 +108,11 @@ export function checkOutputNames(outputDir, reportsDir) {
       continue;
     }
     if (!ARTIFACT_EXT.test(file) || !CLAIMS_STANDARD.test(file)) continue;
+    if (OVERFLOW_DRAFT.test(file)) continue;
     checked++;
-    const parsed = parseOutputName(file);
+    const num = /^(\d{3,})-/.exec(file)?.[1];
+    const reportSlug = num ? slugFromReport(num, reportsDir) : null;
+    const parsed = parseAgainstReport(file, reportSlug);
     if (!parsed) {
       findings.push({
         file,
@@ -97,7 +121,7 @@ export function checkOutputNames(outputDir, reportsDir) {
       });
       continue;
     }
-    const slug = slugFromReport(parsed.report, reportsDir);
+    const slug = reportSlug;
     if (slug === null) {
       findings.push({ file, code: 'unknown-report', message: `no report numbered ${parsed.report} in reports/` });
     } else if (!companyMatches(parsed.company, slug)) {
@@ -122,12 +146,18 @@ function selfTest() {
     mkdirSync(join(dir, 'output'));
     writeFileSync(join(dir, 'reports', '024-zep-2026-11-07.md'), '# r\n');
     writeFileSync(join(dir, 'reports', '330-veeva-systems-2026-11-01.md'), '# r\n');
+    writeFileSync(join(dir, 'reports', '031-acme-cv-tools-2026-11-09.md'), '# r\n');
     const files = [
       '330-veeva-cv-david-gitman-2026-11-01.pdf',        // ok: shorter than the report slug
       '330-veeva-systems-cv-david-gitman-2026-11-01.pdf', // ok: equal
       '024-zep-cv-david-gitman-2026-11-07.pdf',   // ok
       '024-zep-cover-david-gitman-2026-11-07.pdf', // ok
       '024-zep-cv-david-gitman-2026-11-07-ats.html', // ok
+      '031-acme-cv-tools-cv-jane-smith-2026-11-09.pdf', // ok: kind token inside the company
+      '024-zep-cv-cover-dana-2026-11-07.pdf',     // ok: kind token inside the candidate
+      '024-zep-cv-david-gitman-2026-11-07.overflow.pdf', // renderer draft: not judged
+      '024-zep-cv-david-gitman-2026-11-07.overflow-2.pdf',
+      '024-zep-cv-avery_quinn-2026-11-07.pdf',    // not kebab-case: not standard
       '024-acme-cv-david-gitman-2026-11-07.pdf',  // slug mismatch
       '099-zep-cv-david-gitman-2026-11-07.pdf',   // unknown report
       '024-zep-resume-2026-11-07.pdf',            // not standard
@@ -144,13 +174,17 @@ function selfTest() {
     mkdirSync(join(dir, 'output', 'scratch'));      // flagged
     const { checked, findings } = checkOutputNames(join(dir, 'output'), join(dir, 'reports'));
     const codes = Object.fromEntries(findings.map((f) => [f.file, f.code]));
-    expect(checked === 8, `checked=${checked}`);
-    expect(findings.length === 5, `findings=${findings.length}`);
+    expect(checked === 11, `checked=${checked}`);
+    expect(findings.length === 6, `findings=${findings.length}`);
     expect(codes['scratch'] === 'unexpected-subdir', 'unexpected-subdir');
     expect(!('diagnostics' in codes), 'diagnostics allowed');
     expect(codes['024-acme-cv-david-gitman-2026-11-07.pdf'] === 'slug-mismatch', 'slug-mismatch');
     expect(codes['099-zep-cv-david-gitman-2026-11-07.pdf'] === 'unknown-report', 'unknown-report');
     expect(codes['024-zep-resume-2026-11-07.pdf'] === 'not-standard', 'not-standard');
+    expect(codes['024-zep-cv-avery_quinn-2026-11-07.pdf'] === 'not-standard', 'malformed slug');
+    expect(!('024-zep-cv-david-gitman-2026-11-07.overflow.pdf' in codes), 'overflow draft ignored');
+    expect(!('031-acme-cv-tools-cv-jane-smith-2026-11-09.pdf' in codes), 'kind token in company');
+    expect(!('024-zep-cv-cover-dana-2026-11-07.pdf' in codes), 'kind token in candidate');
     expect(!('github-evidence-2026-11-07.json' in codes) && !('github-evidence-2026-11-07.md' in codes), 'github-evidence exempt');
     expect(codes['github-evidence-2026-1-07.json'] === 'not-standard', 'github-evidence near-miss');
     expect(checkOutputNames(join(dir, 'missing'), join(dir, 'reports')).checked === 0, 'missing dir');
