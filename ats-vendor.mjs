@@ -30,6 +30,38 @@ export const ATS_HOST_PATTERNS = [
     id: 'oraclecloud',
     test: (h) => /(^|\.)oraclecloud(?:[1-9]|[1-9]\d)?\.com$/.test(h),
   },
+  // Each rule below copies the host check in providers/<id>.mjs. A provider
+  // that reads tenants from subdomains gets a suffix match; one that pins
+  // fixed hosts gets those hosts exactly, because the rest of that domain is
+  // the vendor's own site (adp.com also hosts the separate adp-myjobs board).
+  { id: 'workable', test: (h) => h === 'apply.workable.com' },
+  { id: 'recruitee', test: (h) => hostIs(h, 'recruitee.com') },
+  { id: 'breezy', test: (h) => hostIs(h, 'breezy.hr') },
+  { id: 'jazzhr', test: (h) => hostIs(h, 'applytojob.com') },
+  { id: 'teamtailor', test: (h) => hostIs(h, 'teamtailor.com') },
+  { id: 'personio', test: (h) => hostIs(h, 'jobs.personio.de') || hostIs(h, 'jobs.personio.com') },
+  { id: 'pinpoint', test: (h) => hostIs(h, 'pinpointhq.com') },
+  { id: 'jobvite', test: (h) => h === 'jobs.jobvite.com' || h === 'app.jobvite.com' },
+  { id: 'rippling', test: (h) => h === 'ats.rippling.com' },
+  { id: 'paylocity', test: (h) => h === 'recruiting.paylocity.com' },
+  { id: 'adp-workforcenow', test: (h) => h === 'workforcenow.adp.com' },
+  { id: 'mokahr', test: (h) => h === 'app.mokahr.com' || h === 'hire-r1.mokahr.com' },
+  { id: 'comeet', test: (h) => h === 'www.comeet.com' || h === 'www.comeet.co' },
+  { id: 'gem', test: (h) => h === 'jobs.gem.com' || h === 'api.gem.com' },
+  { id: 'polymer', test: (h) => h === 'jobs.polymer.co' || h === 'api.polymer.co' },
+  { id: 'homerun', test: (h) => hostIs(h, 'homerun.co') },
+  { id: 'join', test: (h) => h === 'join.com' },
+  { id: 'applicantpro', test: (h) => hostIs(h, 'applicantpro.com') },
+  { id: 'keka', test: (h) => hostIs(h, 'keka.com') },
+  { id: 'prevueaps', test: (h) => hostIs(h, 'prevueaps.ca') },
+  { id: 'schoolspring', test: (h) => hostIs(h, 'schoolspring.com') },
+  { id: 'taleez', test: (h) => hostIs(h, 'taleez.com') },
+  { id: 'trakstar', test: (h) => hostIs(h, 'hire.trakstar.com') || hostIs(h, 'recruiterbox.com') },
+  { id: 'turbohire', test: (h) => hostIs(h, 'turbohire.co') },
+  {
+    id: 'zoho-recruit',
+    test: (h) => /(^|\.)zohorecruit\.(?:com|ca|eu|in|com\.au|jp|sa|com\.cn)$/.test(h),
+  },
 ];
 
 export const KNOWN_ATS_VENDORS = Object.freeze(ATS_HOST_PATTERNS.map(({ id }) => id));

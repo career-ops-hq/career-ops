@@ -11,6 +11,30 @@ import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const WEB_URL_RE = /https?:\/\/[^\s|)>]+/i;
 
+// Vendors whose provider reads the board from the tenant subdomain alone, so
+// every posting on one board reduces to the same origin.
+const TENANT_ORIGIN_VENDORS = new Set([
+  'icims', 'bamboohr', 'recruitee', 'breezy', 'jazzhr', 'teamtailor', 'personio',
+  'pinpoint', 'applicantpro', 'keka', 'prevueaps', 'schoolspring', 'taleez',
+  'trakstar', 'turbohire', 'zoho-recruit',
+]);
+
+// Vendors whose provider reads the board slug from the first path segment.
+// A first segment in the set is a platform route, not a board (Workable's
+// `/j/<shortcode>` feed links name no company).
+const FIRST_SEGMENT_VENDORS = new Map([
+  ['lever', new Set()],
+  ['ashby', new Set()],
+  ['smartrecruiters', new Set()],
+  ['workable', new Set(['j', 'api'])],
+  ['jobvite', new Set(['api'])],
+  ['rippling', new Set(['api'])],
+]);
+
+// Vendors with exactly one board host: a URL on the vendor's other (API) host
+// carries no board slug in its path.
+const BOARD_HOST_OF = { gem: 'jobs.gem.com', polymer: 'jobs.polymer.co' };
+
 function webUrlFrom(value) {
   const match = String(value ?? '').match(WEB_URL_RE);
   return match?.[0] ?? null;
@@ -35,15 +59,62 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
       u.hostname = 'job-boards.greenhouse.io';
     }
     if (parts[0]) u.pathname = `/${parts[0]}`;
-  } else if (vendor === 'lever' || vendor === 'ashby' || vendor === 'smartrecruiters') {
+  } else if (FIRST_SEGMENT_VENDORS.has(vendor)) {
+    if (parts[0] && FIRST_SEGMENT_VENDORS.get(vendor).has(parts[0].toLowerCase())) return null;
     if (parts[0]) u.pathname = `/${parts[0]}`;
+  } else if (Object.hasOwn(BOARD_HOST_OF, vendor)) {
+    if (u.hostname.toLowerCase() !== BOARD_HOST_OF[vendor] || !parts[0]) return null;
+    u.pathname = `/${parts[0]}`;
+  } else if (vendor === 'join') {
+    if (parts[0] !== 'companies' || !parts[1]) return null;
+    u.pathname = `/companies/${parts[1]}`;
+  } else if (vendor === 'homerun') {
+    // feed.homerun.co/<slug> is the board feed; a tenant subdomain is the board.
+    if (u.hostname.toLowerCase() === 'feed.homerun.co') {
+      if (!parts[0]) return null;
+      u.pathname = `/${parts[0]}`;
+    } else {
+      u.pathname = '/';
+    }
+  } else if (vendor === 'mokahr') {
+    // The board is /<kind>/<orgId>/<siteId>; the posting itself sits in the hash.
+    if (parts.length < 3) return null;
+    u.pathname = `/${parts.slice(0, 3).join('/')}`;
+  } else if (vendor === 'paylocity') {
+    // Only a board URL names the company GUID; a posting URL carries a job id.
+    // Spelled the way the provider builds it, so letter case cannot split a board.
+    const guid = u.pathname.match(/^\/recruiting\/jobs\/all\/([^/]+)/i)?.[1];
+    if (!guid) return null;
+    u.pathname = `/Recruiting/Jobs/All/${guid.toLowerCase()}`;
+  } else if (vendor === 'adp-workforcenow') {
+    // The tenant lives in the query (cid, ccId, lang), which the generic
+    // cleanup below would drop; keep those three and nothing else.
+    const cid = u.searchParams.get('cid');
+    const ccId = u.searchParams.get('ccId');
+    if (!cid || !ccId) return null;
+    const lang = u.searchParams.get('lang');
+    const board = new URL(`${u.origin}/mascsr/default/mdf/recruitment/recruitment.html`);
+    board.searchParams.set('cid', cid);
+    board.searchParams.set('ccId', ccId);
+    if (lang) board.searchParams.set('lang', lang);
+    return board.href;
+  } else if (vendor === 'comeet') {
+    // The provider reads only the careers-api URL with its secret token, which
+    // a posting URL never carries.
+    return null;
   } else if (vendor === 'workday') {
     const withoutLocale = /^[a-z]{2}-[A-Z]{2}$/.test(parts[0] || '') ? parts.slice(1) : parts;
     if (withoutLocale[0]) u.pathname = `/${withoutLocale[0]}`;
   } else if (vendor === 'successfactors') {
     const endpointAt = parts.findIndex((part) => /^(?:job|search|tile-search-results|services)$/i.test(part));
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
-  } else if (vendor === 'icims' || vendor === 'bamboohr') {
+  } else if (TENANT_ORIGIN_VENDORS.has(vendor)) {
+    // www.applicantpro.com/openings/<tenant>/… is an alias of the tenant host.
+    if (vendor === 'applicantpro' && u.hostname.toLowerCase() === 'www.applicantpro.com') {
+      const tenant = parts[0]?.toLowerCase() === 'openings' ? parts[1]?.toLowerCase() : '';
+      if (!tenant || !/^[a-z0-9][a-z0-9-]*$/.test(tenant)) return null;
+      u.hostname = `${tenant}.applicantpro.com`;
+    }
     u.pathname = '/';
   } else if (vendor === 'hibob') {
     // Seeds are sampled under --limit before detect() runs, so a host the
