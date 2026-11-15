@@ -1597,9 +1597,9 @@ export function structuredAssociationClaims(targetText, sourceTexts, config = {}
   }));
   // Cover prose has no job classes. Reuse the employer reader rather than
   // treating the addressed company or a future plan as employment evidence.
-  const prose = removeBalancedElements(String(targetText), /<(div|section)\b[^>]*\bclass="[^"]*(?<![\w-])job(?![\w-])[^"]*"[^>]*>/gi);
+  const prose = removeBalancedElements(String(targetText), /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])job(?![\w-])[^"]*"[^>]*>/gi);
   for (const statement of factStatements(prose)) {
-    if (!metricClaims(statement).size) continue;
+    if (!metricClaims(statement).size || FORWARD_MARKER_RE.test(statement)) continue;
     const employers = factClaims(statement).filter(claim => claim.kind === 'employer');
     if (employers.length !== 1) continue;
     const matches = experience.filter(entry => sourceContainsFact(norm(entry.company), employers[0].value));

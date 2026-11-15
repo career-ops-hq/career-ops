@@ -173,3 +173,22 @@ test('the real cover CLI prints the advisory and still reaches the renderer', ()
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('truthful references to different employers keep their own metric context', () => {
+  const result = check('At Acme Corp, I cut duplicate records 92%. At Globex, I cut cloud spend 92%.');
+  assert.equal(result.verdict, 'pass', JSON.stringify(result));
+});
+
+test('a sentence mixing prior employment and a future plan stays outside prose association', () => {
+  const result = check('At Acme Corp, I led the team, and I will cut claim-form rendering 92%.');
+  assert.equal(result.verdict, 'pass', JSON.stringify(result));
+});
+
+test('a structured job is not checked a second time as cover prose', () => {
+  for (const tag of ['div', 'span']) {
+    const result = check(`<${tag} class="job"><div class="job-company">Acme Corp</div>
+      <ul><li>At Acme Corp, I cut cloud spend 92%.</li></ul></${tag}>`, { html: false });
+    assert.equal(contexts(result).length, 1, JSON.stringify(result));
+  }
+});
