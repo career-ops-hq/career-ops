@@ -53,9 +53,11 @@ export function seniorityFromTitle(title: string): Seniority | null {
 /** Whole days between an ISO date (YYYY-MM-DD) and now; null if unparseable. */
 export function daysSince(iso: string | undefined, now: number): number | null {
   if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const t = Date.parse(`${iso}T00:00:00Z`);
-  if (Number.isNaN(t)) return null;
-  return Math.floor((now - t) / 86_400_000);
+  const then = Date.parse(`${iso}T00:00:00Z`);
+  if (Number.isNaN(then)) return null;
+  const current = new Date(now);
+  const today = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
+  return Math.round((today - then) / 86_400_000);
 }
 
 // Freshness windows mirror the Explore "posted within" segmented control so the two
