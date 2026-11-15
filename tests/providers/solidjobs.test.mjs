@@ -245,20 +245,8 @@ try {
   if (wpScalar.length === 2) pass('solidjobs workplace accepts a single string');
   else fail(`solidjobs workplace: remote kept ${titles(wpScalar)}`);
 
-  if (wpRemote.providerStats?.dropped?.workplace === 2) pass('solidjobs counts workplace drops in providerStats');
-  else fail(`solidjobs providerStats is ${JSON.stringify(wpRemote.providerStats)}`);
-
-  if (Object.keys(wpRemote).join() === '0,1' && JSON.stringify(wpRemote).includes('providerStats') === false) {
-    pass('solidjobs providerStats is non-enumerable');
-  } else {
-    fail('solidjobs providerStats must not be enumerable');
-  }
-
-  if (wpOff.providerStats && wpOff.providerStats.dropped.workplace === undefined && wpOff.length === 4) {
-    pass('solidjobs attaches empty stats when the filter is off, list unchanged');
-  } else {
-    fail(`solidjobs unfiltered stats wrong: ${JSON.stringify(wpOff.providerStats)}`);
-  }
+  if (wpOff.length === 4) pass('solidjobs keeps every offer when workplace is not set');
+  else fail(`solidjobs unfiltered kept ${wpOff.length} offers`);
 } catch (e) {
   fail(`solidjobs provider tests crashed: ${e.message}`);
 }

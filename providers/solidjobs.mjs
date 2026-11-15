@@ -70,16 +70,11 @@ function matchesWorkplace(offer, wanted) {
  * @param {any[]} jobs
  * @param {{name: string}} entry
  * @param {Set<string>|null} [workplace]
- * @param {{dropped: Record<string, number>}} [stats]
  */
-export function parseSolidJobs(jobs, entry, workplace = null, stats) {
+export function parseSolidJobs(jobs, entry, workplace = null) {
   return jobs
     .filter(j => j && typeof j === 'object' && typeof j.url === 'string' && j.url.trim() !== '')
-    .filter(j => {
-      if (!workplace || matchesWorkplace(j, workplace)) return true;
-      if (stats) stats.dropped.workplace = (stats.dropped.workplace || 0) + 1;
-      return false;
-    })
+    .filter(j => !workplace || matchesWorkplace(j, workplace))
     .map(j => ({
       title: j.title || '',
       url: /** @type {string} */ (j.url || '').trim(),
@@ -123,11 +118,6 @@ export default {
       throw new Error(`solidjobs: unexpected API response — expected { jobs: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
     }
 
-    const stats = { dropped: {} };
-    const jobs = parseSolidJobs(json.jobs, entry, workplaceFilter(entry), stats);
-
-    // Read by scan.mjs for the per-source summary; not part of the job list.
-    Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
-    return jobs;
+    return parseSolidJobs(json.jobs, entry, workplaceFilter(entry));
   },
 };
