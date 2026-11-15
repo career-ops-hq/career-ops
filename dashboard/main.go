@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -287,6 +289,17 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case screens.PipelineGeneratePDFMsg:
 		return m, runGeneratePDF(msg)
 
+	case screens.PipelineQueueEvalMsg:
+		return m, runQueueEval(msg)
+
+	case screens.PipelineQueueEvalDoneMsg:
+		// Re-read the Inbox first, so the row's status cell shows what
+		// batch-input.tsv now records, then let the screen flash the outcome.
+		m.reloadPendingRows()
+		pm, cmd := m.pipeline.Update(msg)
+		m.pipeline = pm
+		return m, cmd
+
 	default:
 		if m.state == viewReport {
 			vm, cmd := m.viewer.Update(msg)
@@ -385,6 +398,58 @@ func runGeneratePDF(msg screens.PipelineGeneratePDFMsg) tea.Cmd {
 			return screens.PipelinePDFGeneratedMsg{Err: fmt.Sprintf("PDF generated but could not open: %v", err)}
 		}
 		return screens.PipelinePDFGeneratedMsg{Path: pdfAbs}
+	}
+}
+
+// queueEvalTimeout bounds a queue request. The script takes the batch-input
+// lock, which a running full sync can hold for a moment, and nothing else.
+var queueEvalTimeout = 30 * time.Second
+
+// runQueueEval queues one Inbox row (#5269) by running the checkout's
+// sync-batch-input.mjs with --url. It appends that row to batch-input.tsv and
+// nothing else: it starts no evaluation, and the dashboard never runs
+// batch/batch-runner.sh. --input and --state are left to the script's
+// defaults, beside batch-runner.sh in the checkout, because those are the
+// files the runner reads. --pipeline is the file the Inbox shows.
+func runQueueEval(msg screens.PipelineQueueEvalMsg) tea.Cmd {
+	return func() tea.Msg {
+		done := screens.PipelineQueueEvalDoneMsg{URL: msg.URL}
+		script, err := data.CheckoutScriptPath("sync-batch-input.mjs")
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		root, err := filepath.Abs(msg.CareerOpsPath)
+		if err != nil {
+			done.Err = err.Error()
+			return done
+		}
+		// The equals form keeps a value that starts with "-" from being read
+		// as a flag.
+		args := []string{script, "--url=" + msg.URL, "--pipeline=" + data.PendingPipelinePath(root)}
+		ctx, cancel := context.WithTimeout(context.Background(), queueEvalTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "node", args...)
+		cmd.Dir = filepath.Dir(script)
+		cmd.Env = append(cmd.Environ(), "CAREER_OPS_ROOT="+root)
+		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			done.Err = "sync-batch-input.mjs timed out; reload to check whether the row was queued"
+			return done
+		}
+		// The script's --url exit statuses (URL_EXIT in sync-batch-input.mjs):
+		// 3 nothing to queue, 4 not a Pending row it can read.
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == 3:
+			done.Already = true
+		case errors.As(err, &exitErr) && exitErr.ExitCode() == 4:
+			done.Unreadable = true
+		default:
+			done.Err = summarizeCmdError(err, out)
+		}
+		return done
 	}
 }
 

@@ -467,6 +467,56 @@ try {
     fail(`lever.fetch() inherited-name salaries = ${JSON.stringify([salaryRows[11]?.salary, salaryRows[12]?.salary])}`);
   }
 
+  // locations and country (#6910)
+  const locRows = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    {
+      fetchJson: async () => [
+        { text: 'Austin Role', hostedUrl: 'https://jobs.lever.co/acme/l1', country: 'US', categories: { location: 'Austin' } },
+        { text: 'Null Country', hostedUrl: 'https://jobs.lever.co/acme/l2', country: null, categories: { location: 'Austin' } },
+        { text: 'Missing Country', hostedUrl: 'https://jobs.lever.co/acme/l3', categories: { location: 'Austin' } },
+        { text: 'Multi Remote', hostedUrl: 'https://jobs.lever.co/acme/l4', categories: { location: 'Barcelona', allLocations: ['Barcelona', 'Madrid'] }, workplaceType: 'remote' },
+        { text: 'Bare Remote', hostedUrl: 'https://jobs.lever.co/acme/l5', categories: { location: 'Remote' } },
+        { text: 'London Remote', hostedUrl: 'https://jobs.lever.co/acme/l6', categories: { location: 'London', allLocations: ['London', 'Remote'] } },
+      ],
+    },
+  );
+  if (locRows[0]?.country === 'US'
+      && Array.isArray(locRows[0]?.locations)
+      && locRows[0]?.locations.length === 1
+      && locRows[0]?.locations[0] === 'Austin'
+      && locRows[0]?.location === 'Austin') {
+    pass('lever.fetch() maps country "US" and categories.location "Austin" to country "US", locations ["Austin"], location "Austin"');
+  } else {
+    fail(`lever.fetch() country/location row 0 = ${JSON.stringify(locRows[0])}`);
+  }
+
+  if (!('country' in locRows[1]) && !('country' in locRows[2])) {
+    pass('lever.fetch() omits country key when country is null or missing');
+  } else {
+    fail(`lever.fetch() null/missing country = ${JSON.stringify([locRows[1]?.country, locRows[2]?.country])}`);
+  }
+
+  if (locRows[3]?.location === 'Barcelona; Madrid; Remote'
+      && JSON.stringify(locRows[3]?.locations) === JSON.stringify(['Barcelona', 'Madrid'])) {
+    pass('lever.fetch() gives locations without "Remote" while location ends in "; Remote" on multi-location remote posting');
+  } else {
+    fail(`lever.fetch() multi-location remote = location: ${JSON.stringify(locRows[3]?.location)}, locations: ${JSON.stringify(locRows[3]?.locations)}`);
+  }
+
+  if (locRows[4]?.location === 'Remote' && !('locations' in locRows[4])) {
+    pass('lever.fetch() gives location "Remote" and omits locations when categories.location is "Remote"');
+  } else {
+    fail(`lever.fetch() bare remote = location: ${JSON.stringify(locRows[4]?.location)}, locations: ${JSON.stringify(locRows[4]?.locations)}`);
+  }
+
+  if (locRows[5]?.location === 'London; Remote'
+      && JSON.stringify(locRows[5]?.locations) === JSON.stringify(['London'])) {
+    pass('lever.fetch() gives location "London; Remote" and locations ["London"] when allLocations has "Remote"');
+  } else {
+    fail(`lever.fetch() London remote = location: ${JSON.stringify(locRows[5]?.location)}, locations: ${JSON.stringify(locRows[5]?.locations)}`);
+  }
+
 } catch (e) {
   fail(`lever provider tests crashed: ${e.message}`);
 }

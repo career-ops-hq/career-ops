@@ -80,6 +80,18 @@ test("parseCvEnvelope: an unrecognized format is dropped with a warning", () => 
   assert.match(result.warnings[0], /legal/);
 });
 
+test("parseCvEnvelope: a cv-json envelope can name a country and carry a payload", () => {
+  const payload = { candidate: { name: "Jane Doe" }, experience: [] };
+  const result = parseCvEnvelope(`<<cv-json country="DE">>\n${JSON.stringify(payload)}\n<</cv-json>>`);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, "json");
+  assert.equal(result.format, null);
+  assert.equal(result.country, "DE");
+  assert.equal(result.payload.candidate.name, "Jane Doe");
+  assert.equal(result.html, undefined);
+});
+
 test("parseCvEnvelope: reads the country an auto run declares", () => {
   // Given the marker the prompt asks for under page_format: auto
   const result = parseCvEnvelope(`<<cv-html country="DE">>\n${DOC}\n<</cv-html>>`);

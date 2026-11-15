@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
-import { keywordsInText, loadStudio, missingDataFolderMessage, renderEditedPdf, saveEdits } from "@/lib/cv-studio/server";
+import { keywordsInText, loadStudio, missingDataFolderMessage, recordPdfExport, renderEditedPdf, saveEdits } from "@/lib/cv-studio/server";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { parseEdits } from "@/lib/cv-studio/studio.mjs";
 import { createPutOrder } from "@/lib/cv-studio/put-order.mjs";
@@ -66,7 +66,13 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (!putOrder.accept(load.reportNum, body.tab, body.rev)) return NextResponse.json({ ok: true, superseded: true });
     saveEdits(load.reportNum, parsed.edits);
     const result = await renderEditedPdf(load, parsed.edits);
-    return result.ok ? NextResponse.json(result) : NextResponse.json({ error: result.error.slice(0, 600) }, { status: 422 });
+    if (result.ok) {
+      recordPdfExport(load.reportNum, null);
+      return NextResponse.json(result);
+    }
+    const error = result.error.slice(0, 600);
+    recordPdfExport(load.reportNum, { ok: false, error });
+    return NextResponse.json({ error }, { status: 422 });
   } finally {
     saving.delete(load.reportNum);
     releaseTrackerWrite(token);

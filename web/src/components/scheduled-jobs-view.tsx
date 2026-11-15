@@ -159,7 +159,7 @@ export function ScheduledJobsView() {
         <div>
           <div className="flex items-center gap-2.5">
             <CalendarClock className="size-6 text-brand-text" />
-            <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Scheduled Scans</h1>
+            <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Scheduled scans</h1>
           </div>
           <p className="mt-1.5 max-w-2xl text-sm text-muted">
             {SCHEDULED_SCANS_INTRO}
@@ -170,10 +170,10 @@ export function ScheduledJobsView() {
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
-            className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground shadow-lg transition-all hover:bg-brand-200"
+            className="inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
           >
             <CalendarPlus className="size-4" />
-            New Scheduled Scan
+            New scheduled scan
           </button>
           <button
             type="button"
@@ -181,7 +181,7 @@ export function ScheduledJobsView() {
             className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface/60 px-3.5 py-2 text-sm font-medium text-foreground transition-colors hover:bg-surface-hover"
           >
             <History className="size-4 text-brand-text" />
-            Run Logs ({store.runs.length})
+            Run logs ({store.runs.length})
           </button>
           <button
             type="button"
@@ -198,10 +198,10 @@ export function ScheduledJobsView() {
 
       {/* Stats Cards */}
       <div className="grid gap-3.5 sm:grid-cols-4">
-        <StatCard label="Active Scans" value={activeJobs.length} subtitle={`${jobsList.length} total jobs`} icon={<Zap className="size-4 text-emerald-500" />} />
-        <StatCard label="Executed Runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand-text" />} />
-        <StatCard label="Roles Discovered" value={totalRolesFound} subtitle="Pushed to pipeline" icon={<Sparkles className="size-4 text-amber-500" />} />
-        <StatCard label="Success Rate" value={successRate} subtitle={`${failedRuns} failed runs`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
+        <StatCard label="Active scans" value={activeJobs.length} subtitle={`${jobsList.length} total jobs`} icon={<Zap className="size-4 text-emerald-500" />} />
+        <StatCard label="Executed runs" value={totalRuns} subtitle={`${successRuns} successful`} icon={<Layers className="size-4 text-brand-text" />} />
+        <StatCard label="Roles discovered" value={totalRolesFound} subtitle="Pushed to pipeline" icon={<Sparkles className="size-4 text-amber-500" />} />
+        <StatCard label="Success rate" value={successRate} subtitle={`${failedRuns} failed runs`} icon={<CheckCircle2 className="size-4 text-emerald-500" />} />
       </div>
 
       {/* OS Task Scheduler Banner */}
@@ -261,7 +261,7 @@ export function ScheduledJobsView() {
               filterTab === "all" ? "bg-brand text-brand-foreground shadow" : "text-muted hover:text-foreground"
             }`}
           >
-            All Scans ({jobsList.length})
+            All scans ({jobsList.length})
           </button>
           <button
             type="button"
@@ -304,9 +304,9 @@ export function ScheduledJobsView() {
           <button
             type="button"
             onClick={() => setCreateModalOpen(true)}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-xs font-medium text-brand-foreground shadow"
+            className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-xs font-medium text-brand-foreground transition-colors hover:bg-brand-200"
           >
-            <CalendarPlus className="size-3.5" /> New Scheduled Scan
+            <CalendarPlus className="size-3.5" /> New scheduled scan
           </button>
         </div>
       ) : (
@@ -359,7 +359,7 @@ function StatCard({
   icon: React.ReactNode;
 }) {
   return (
-    <div className="co-rise flex items-center justify-between rounded-xl border border-border bg-surface/40 p-4 shadow-sm transition-all hover:border-brand/30 hover:shadow-md">
+    <div className="co-rise flex items-center justify-between rounded-xl border border-border bg-surface/40 p-4 shadow-sm transition-colors hover:border-brand/30">
       <div>
         <span className="text-xs font-medium text-muted">{label}</span>
         <div className="mt-1 text-2xl font-bold tracking-tight text-foreground">{value}</div>

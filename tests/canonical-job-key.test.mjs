@@ -36,6 +36,8 @@ const SAME = [
       'https://boards-api.greenhouse.io/v1/boards/acme/jobs/8028783',
       'https://careers.acme.example/positions/8028783?gh_jid=8028783&utm_medium=cpc&lever-origin=applied',
       'https://careers.other.example/open?gh_jid=8028783',
+      'https://boards.greenhouse.io/embed/job_app?for=acme&token=8028783',
+      'https://job-boards.greenhouse.io/embed/job_app?token=8028783&utm_source=li',
     ],
     'greenhouse:8028783',
   ],
@@ -73,6 +75,25 @@ const SAME = [
     'smartrecruiters:acme/744000000000042',
   ],
   [
+    'smartrecruiters posting addressed by its UUID, read whole',
+    [
+      'https://jobs.smartrecruiters.com/ACME/12345678-1234-4abc-8def-1234567890ab',
+      'https://jobs.smartrecruiters.com/acme/12345678-1234-4ABC-8DEF-1234567890AB-security-analyst',
+      'https://api.smartrecruiters.com/v1/companies/ACME/postings/12345678-1234-4abc-8def-1234567890ab',
+    ],
+    'smartrecruiters:acme/12345678-1234-4abc-8def-1234567890ab',
+  ],
+  [
+    'ashby posting page and its application tab',
+    [
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2',
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application',
+      'https://jobs.ashbyhq.com/ashby/7458D4E9-DA2E-47BD-98CB-ADFDA43D42B2/application/?utm_source=li',
+      'https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application//',
+    ],
+    'https://jobs.ashbyhq.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2',
+  ],
+  [
     'tracking params on an ordinary posting',
     [
       'https://jobs.example.com/j/7',
@@ -82,18 +103,50 @@ const SAME = [
     ],
     'https://jobs.example.com/j/7',
   ],
+  [
+    'lever posting page and its apply form',
+    [
+      'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
+      'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply',
+      'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply?lever-origin=applied&lever-source=LinkedIn',
+      'https://JOBS.LEVER.CO/Acme/5AC21346-8E0C-4494-8E7A-3EB92FF77902/apply/',
+    ],
+    'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
+  ],
+  [
+    'workable share link, the account page it redirects to, and the apply form',
+    [
+      'https://apply.workable.com/j/81B46579FE',
+      'https://apply.workable.com/acme/j/81B46579FE/',
+      'https://apply.workable.com/j/81B46579FE/apply',
+      'https://apply.workable.com/acme/j/81B46579FE/apply/?utm_source=linkedin',
+    ],
+    'https://apply.workable.com/j/81b46579fe',
+  ],
 ];
 
 const DIFFERENT = [
   ['https://boards.greenhouse.io/acme/jobs/8028783', 'https://boards.greenhouse.io/acme/jobs/8028784'],
   ['https://careers.acme.example/a?gh_jid=1', 'https://careers.acme.example/a?gh_jid=2'],
   ['https://boards.greenhouse.io/acme/jobs/1?gh_jid=1', 'https://boards.greenhouse.io/acme/jobs/1?gh_jid=2'],
+  ['https://boards.greenhouse.io/embed/job_app?for=acme&token=8028783', 'https://boards.greenhouse.io/embed/job_app?for=acme&token=8028784'],
+  ['https://boards.greenhouse.io/embed/job_app?token=1&gh_jid=1', 'https://boards.greenhouse.io/embed/job_app?token=1&gh_jid=2'],
+  ['https://boards.greenhouse.io/acme/jobs/8028783', 'https://careers.acme.example/embed/job_app?for=acme&token=8028783'],
   ['https://www.linkedin.com/jobs/view/4100000001', 'https://www.linkedin.com/jobs/view/4100000002'],
   ['https://www.indeed.com/viewjob?jk=aaa', 'https://www.indeed.com/viewjob?jk=bbb'],
   ['https://jobs.smartrecruiters.com/Acme/744000000000001-analyst', 'https://jobs.smartrecruiters.com/Acme/744000000000002-analyst'],
   ['https://jobs.smartrecruiters.com/Acme/744000000000001-analyst', 'https://jobs.smartrecruiters.com/Other/744000000000001-analyst'],
+  // Two UUIDs whose first group is all digits: not cut down to that group.
+  ['https://jobs.smartrecruiters.com/Acme/12345678-1234-4abc-8def-1234567890ab', 'https://jobs.smartrecruiters.com/Acme/12345678-9999-4abc-8def-1234567890ab'],
+  ['https://jobs.ashbyhq.com/Ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application', 'https://jobs.ashbyhq.com/Ashby/86a60834-ba64-484d-9658-afa1bc97a957'],
+  ['https://careers.example.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2/application', 'https://careers.example.com/ashby/7458d4e9-da2e-47bd-98cb-adfda43d42b2'],
   ['https://jobs.lever.co/acme/111', 'https://jobs.lever.co/acme/222'],
   ['https://jobs.example.com/careers#/jobs/123', 'https://jobs.example.com/careers#/jobs/456'],
+  ['https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77903'],
+  ['https://jobs.example.com/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply', 'https://jobs.example.com/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902'],
+  ['https://apply.workable.com/acme/j/81B46579FE/', 'https://apply.workable.com/acme/j/19A136F8E2/'],
+  ['https://apply.workable.com/acme/j/81B46579FE/apply', 'https://apply.workable.com/j/19A136F8E2'],
+  ['https://careers.example.com/acme/j/81B46579FE', 'https://careers.example.com/j/81B46579FE'],
 ];
 
 test('variants of one posting share one key, on the CLI and the web copy', () => {

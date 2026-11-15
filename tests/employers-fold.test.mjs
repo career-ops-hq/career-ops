@@ -15,7 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, copyEmployerRegistry } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry, employerRegistryToday, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
 import { listTree } from '../lib/walk-tree.mjs';
 
 import { applyFold, formatManifest, looseManifest, planFold } from '../seeds/employers-fold.mjs';
@@ -28,8 +28,8 @@ const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
 const { GITHUB_ACTIONS: _ga, GITHUB_STEP_SUMMARY: _gss, ...PLAIN_ENV } = process.env;
 const node = (script, args, cwd) => spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', env: PLAIN_ENV });
 
-const TODAY = new Date('2026-11-11T12:00:00Z');
-const DATE = '2026-11-10';
+const TODAY = employerRegistryToday();
+const DATE = unusedEmployerContributionDay();
 
 /** Every file under dir/employers, path → text. */
 function snapshot(dir) {
@@ -52,16 +52,28 @@ function withInbox(files, body) {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+/** An inbox line for a board the committed registry does not list (see unlistedEmployerBoard). */
+const unlisted = (line) => ({ ...line, board: unlistedEmployerBoard(line.ats, line.board) });
+/** The board file a line folds into, and whether the committed registry has it yet. */
+const boardFile = (line) => `employers/boards/${line.ats}/${line.board[0].toLowerCase()}.ndjson`;
+const isNewFile = (path) => !existsSync(join(ROOT, path));
+/** The row a fold wrote for `line`, read back from its board file. */
+const foldedRow = (dir, line) => readFileSync(join(dir, boardFile(line)), 'utf8').split('\n').filter(Boolean)
+  .map((l) => JSON.parse(l)).find((row) => row.board === line.board);
+
+// A recruitee initial with no board file yet, so that one write creates its file.
+const FREE_INITIAL = [...'abcdefghijklmnopqrstuvwxyz0123456789'].find((c) => isNewFile(`employers/boards/recruitee/${c}.ndjson`));
+
 const LOOSE = [
-  { ats: 'greenhouse', board: 'notion-labs', name: 'Notion Labs' }, // sorts inside greenhouse/n.ndjson
-  { ats: 'greenhouse', board: 'anthropic', name: 'Anthropic' }, // already listed
-  { ats: 'workday', board: 'acmeco/wd3/Careers', name: 'AcmeCo', website: 'acmeco.example' },
+  unlisted({ ats: 'greenhouse', board: 'notion-labs', name: 'Notion Labs' }), // sorts inside greenhouse/n.ndjson
+  { ats: 'greenhouse', board: 'anthropic', name: 'Anthropic' }, // already listed; rows are retired, never deleted
+  unlisted({ ats: 'workday', board: 'acmeco/wd3/Careers', name: 'AcmeCo', website: 'acmeco.example' }),
 ];
 const ORG = [
-  { ats: 'ashby', board: 'Aardvark', name: 'Aardvark' },
-  { ats: 'lever', region: 'eu', board: 'eurocorp', name: 'Eurocorp' },
+  unlisted({ ats: 'ashby', board: 'Aardvark', name: 'Aardvark' }),
+  unlisted({ ats: 'lever', region: 'eu', board: 'eurocorp', name: 'Eurocorp' }),
 ];
-const ORG2 = [{ ats: 'recruitee', board: 'tinyco', name: 'TinyCo' }];
+const ORG2 = [{ ats: 'recruitee', board: `${FREE_INITIAL}-tinyco`, name: 'TinyCo' }];
 const sheet = (over = {}) => formatManifest({
   id: `${DATE}-acme-hr`, contributor: 'acme-hr', on_behalf_of: 'Acme Inc.', signed_by: 'A founder of Acme',
   rows: 3, source: 'employer-list:acme', origin: 'The employer pages Acme keeps for its own job search product.',
@@ -86,11 +98,11 @@ test('dry run: the plan, and nothing written', () => withInbox(INBOX, (dir) => {
   assert.equal(plan.added, 5);
   assert.equal(plan.skipped, 1);
   assert.deepEqual(plan.writes.map((w) => [w.path, w.created, w.added]), [
-    ['employers/boards/ashby/a.ndjson', false, 1],
+    ['employers/boards/ashby/a.ndjson', isNewFile('employers/boards/ashby/a.ndjson'), 1],
     ['employers/boards/greenhouse/n.ndjson', false, 1],
-    ['employers/boards/lever/e.ndjson', true, 1],
-    ['employers/boards/recruitee/t.ndjson', true, 1],
-    ['employers/boards/workday/a.ndjson', true, 1],
+    ['employers/boards/lever/e.ndjson', isNewFile('employers/boards/lever/e.ndjson'), 1],
+    [boardFile(ORG2[0]), true, 1],
+    ['employers/boards/workday/a.ndjson', isNewFile('employers/boards/workday/a.ndjson'), 1],
     [`employers/contributions/${DATE}-acme-hr.json`, true, 0],
     [`employers/contributions/${DATE}-octocat.json`, true, 0],
     ['employers/CHANGELOG.md', false, 0],
@@ -117,13 +129,13 @@ test('apply: a valid registry, also against the one it started from, with the in
   for (const line of before['employers/boards/greenhouse/n.ndjson'].split('\n').filter(Boolean)) assert.ok(n.includes(line));
   assert.deepEqual(n.map((l) => JSON.parse(l).board), [...n.map((l) => JSON.parse(l).board)].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())));
   assert.ok(n.includes(JSON.stringify({
-    ats: 'greenhouse', region: 'us', board: 'notion-labs', careers_url: 'https://job-boards.greenhouse.io/notion-labs',
+    ats: 'greenhouse', region: 'us', board: LOOSE[0].board, careers_url: `https://job-boards.greenhouse.io/${LOOSE[0].board}`,
     name: 'Notion Labs', source: 'community', contribution: `${DATE}-octocat`, added: DATE,
   })));
-  const wd = JSON.parse(readFileSync(join(dir, 'employers/boards/workday/a.ndjson'), 'utf8'));
-  assert.equal(wd.careers_url, 'https://acmeco.wd3.myworkdayjobs.com/Careers');
+  const wd = foldedRow(dir, LOOSE[2]);
+  assert.equal(wd.careers_url, `https://${LOOSE[2].board.split('/')[0]}.wd3.myworkdayjobs.com/Careers`);
   assert.equal(wd.workday_host, 'jobs');
-  const eu = JSON.parse(readFileSync(join(dir, 'employers/boards/lever/e.ndjson'), 'utf8'));
+  const eu = foldedRow(dir, ORG[1]);
   assert.deepEqual([eu.source, eu.contribution], ['employer-list:acme', `${DATE}-acme-hr`]);
 
   // The organization's manifest moves as it was; the loose one credits the login.
@@ -151,15 +163,20 @@ test('idempotent and deterministic: a second fold changes nothing, and two copie
   assert.deepEqual(folded[0], folded[1]);
 });
 
+// A committed contribution id whose -2 is still free.
+const TAKEN = readdirSync(join(ROOT, 'employers/contributions')).map((f) => f.replace(/\.json$/, ''))
+  .sort().find((id) => !existsSync(join(ROOT, 'employers/contributions', `${id}-2.json`)));
+const [TAKEN_DATE, TAKEN_LOGIN] = [TAKEN.slice(0, 10), TAKEN.slice(11)];
+
 test('a taken contribution id gets -2, and an organization manifest is rewritten with the rows it really added', () => withInbox({
-  '2026-11-08-santifer.ndjson': [{ ats: 'ashby', board: 'Aardvark', name: 'Aardvark' }, { ats: 'ashby', board: 'langchain', name: 'LangChain' }],
-  '2026-11-08-santifer.json': sheet({ id: '2026-11-08-santifer', contributor: 'santifer', rows: 2, date: '2026-11-08' }),
+  [`${TAKEN}.ndjson`]: [unlisted({ ats: 'ashby', board: 'Aardvark', name: 'Aardvark' }), { ats: 'ashby', board: 'langchain', name: 'LangChain' }],
+  [`${TAKEN}.json`]: sheet({ id: TAKEN, contributor: TAKEN_LOGIN, rows: 2, date: TAKEN_DATE }),
 }, (dir) => {
   const { plan } = planFold({ root: dir, today: TODAY });
-  assert.deepEqual(plan.contributions.map((c) => [c.inboxId, c.id, c.added, c.skipped]), [['2026-11-08-santifer', '2026-11-08-santifer-2', 1, 1]]);
+  assert.deepEqual(plan.contributions.map((c) => [c.inboxId, c.id, c.added, c.skipped]), [[TAKEN, `${TAKEN}-2`, 1, 1]]);
   applyFold(plan, dir);
-  const m = JSON.parse(readFileSync(join(dir, 'employers/contributions/2026-11-08-santifer-2.json'), 'utf8'));
-  assert.deepEqual([m.id, m.rows, m.contributor, m.signed_by], ['2026-11-08-santifer-2', 1, 'santifer', 'A founder of Acme']);
+  const m = JSON.parse(readFileSync(join(dir, `employers/contributions/${TAKEN}-2.json`), 'utf8'));
+  assert.deepEqual([m.id, m.rows, m.contributor, m.signed_by], [`${TAKEN}-2`, 1, TAKEN_LOGIN, 'A founder of Acme']);
   assert.deepEqual(validateRegistry({ root: dir, base: ROOT, today: TODAY }).errors, []);
 }));
 
@@ -204,7 +221,7 @@ test('CLI: dry run by default, --apply writes, an empty inbox is a no-op, unknow
   assert.equal(node(FOLD, ['--force'], dir).status, 2);
 }));
 
-test('end to end: the 53 committed boards plus new ones, imported, validated, folded in a copy and validated again', () => {
+test('end to end: the committed boards plus new ones, imported, validated, folded in a copy and validated again', () => {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-e2e-'));
   try {
     copyEmployerRegistry(dir);
@@ -216,7 +233,8 @@ test('end to end: the 53 committed boards plus new ones, imported, validated, fo
     }
     assert.equal(urls.length, validateRegistry({ root: ROOT }).stats.rows);
     const list = join(dir, 'list.csv');
-    writeFileSync(list, ['url,name', ...urls.map((u) => `${u},`), 'https://jobs.lever.co/newco-one,Newco One', 'https://jobs.eu.lever.co/newco-two/abc,Newco Two'].join('\n'));
+    const [one, two] = [unlistedEmployerBoard('lever', 'newco-one'), unlistedEmployerBoard('lever', 'newco-two')];
+    writeFileSync(list, ['url,name', ...urls.map((u) => `${u},`), `https://jobs.lever.co/${one},Newco One`, `https://jobs.eu.lever.co/${two}/abc,Newco Two`].join('\n'));
     const imp = node(IMPORTER, [list, '--login', 'octocat', '--date', DATE], dir);
     assert.equal(imp.status, 0, imp.stderr);
 

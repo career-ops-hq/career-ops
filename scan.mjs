@@ -119,7 +119,7 @@ import { browserLaunchOptions, snapshotBrowserProcessEnv } from './lib/browser-l
 import { applyEntryResponseCap } from './lib/entry-response-cap.mjs';
 import { applyEntryTimeout } from './lib/entry-timeout.mjs';
 export { applyEntryResponseCap };
-import { boardTruncation, describeTruncation } from './lib/board-truncation.mjs';
+import { boardTruncation, describeTruncation, partialBoardsNote, partialRepeatHints } from './lib/board-truncation.mjs';
 
 export const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || path.join(DATA_ROOT, 'portals.yml');
 // An explicit override wins; otherwise the root fixed above, since the .env just
@@ -5945,15 +5945,18 @@ async function main() {
     console.log(`🟡 ${emptyTargets.length} target(s) live but empty: ${emptyTargets.join(', ')}`);
   }
   if (partialTargets.size > 0) {
+    const listed = [...partialTargets.values()];
     const parts = [...partialTargets].map(([company, t]) => describeTruncation(company, t));
-    console.log(`\n⚠️  ${partialTargets.size} board(s) only PARTLY read — postings beyond the cut were not scanned:`);
+    console.log(`\n⚠️  ${partialTargets.size} ${partialBoardsNote(listed)}:`);
     for (const p of parts) console.log(`   • ${p}`);
-    // A repeat is not a dead board: the board answers every run. The usual
-    // cause is a cap on the entry, which only the entry can change.
+    // A repeat is not a dead board: the board answers every run. The hint
+    // depends on why. Raising max_pages does not fetch descriptions a
+    // Greenhouse board left off.
     const repeated = [...partialTargets.keys()].filter((c) => (partialStreaks.get(c) || 0) >= STREAK_THRESHOLD);
     if (repeated.length > 0) {
       console.log(`   Partly read for ${STREAK_THRESHOLD}+ runs in a row: ${repeated.join(', ')}`);
-      console.log(`   For a page cap, raise max_pages on the entry or narrow its search; a fetch error or rate limit that repeats points at the board's host.`);
+      const reasons = repeated.map((c) => partialTargets.get(c)?.reason);
+      for (const line of partialRepeatHints(reasons)) console.log(`   ${line}`);
     }
   }
   if (unverifiedZeroTargets.length > 0) {

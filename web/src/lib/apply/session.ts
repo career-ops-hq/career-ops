@@ -157,7 +157,8 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
     if (hit.type) f.type = hit.type as ApplyField["type"];
     if (hit.options.length) f.options = hit.options;
     if (hit.required) f.required = true;
-    if (hit.type === "select") f.combobox = true;
+    // Do not mark a native select or a yes/no as a menu. A combobox keeps the
+    // flag the reader already set. Typing into a menu is only for that flag.
   }
 }
 
@@ -505,6 +506,8 @@ export async function fillSession(
   fieldsMeta: ApplyField[],
   cvPath?: string,
   cvUploadName?: string,
+  /** Answers to compare at read-back. Defaults to the map this call typed. */
+  readbackAnswers?: Record<string, string>,
 ): Promise<{ steps: FillStep[]; navigated: boolean; issues: ApplyIssue[] }> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found (it may have expired)");
@@ -657,7 +660,9 @@ export async function fillSession(
   })();
   // Read the real form back: did every answer actually land? any validation
   // error? — so we warn the user about silent divergence before the handoff.
-  const issues = await verifyFill(s.frame, fieldsMeta, answers).catch(() => [] as ApplyIssue[]);
+  const issues = await verifyFill(s.frame, fieldsMeta, readbackAnswers ?? answers).catch(() => [
+    { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." },
+  ] as ApplyIssue[]);
   return { steps, navigated: endPath !== startPath, issues };
 }
 

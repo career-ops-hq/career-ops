@@ -52,6 +52,7 @@ const DEFAULT_ATS_ALLOWLIST = [
   'join.com',
   'hirehive.com',
   'recruitmentplatform.com',
+  'taleez.com',
 ];
 
 /** @type {Record<string, number>} */

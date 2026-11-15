@@ -110,6 +110,10 @@ export default {
   files itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
+  When the source lists distinct places before joining, set `locations`
+  (string[], places without appended "Remote" or work models; omit when empty).
+  When the source has a dedicated country code field (Lever), set `country`
+  (trimmed, as given; omit when absent or null).
   When the payload has a dedicated field for them, also set `requisitionId`
   (the employer's requisition id — never the posting id, which changes on
   every re-release; `coerceId` from `_ids.mjs`) and `language` (the posting

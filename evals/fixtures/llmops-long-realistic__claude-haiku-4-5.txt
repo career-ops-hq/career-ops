@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5, rep 1, profile ai-engineer.
+# Report: 001-lumenfield-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 4.6
+ARCHETYPE: AI Platform / LLMOps
+ARCHETYPE_RAW: AI Platform / LLMOps Engineer
+LEGITIMACY: High Confidence
+DECISION: null
+WORK_AUTH: Not needed (US-based, US citizen)
+COST_USD: 0.3250467
+TURNS: 12
+CONTRACT: machine_summary=true jd_archive=true tracker=true
+SCHEMA_ISSUES: extra key score_dimension_cv_match; extra key score_dimension_north_star; extra key score_dimension_comp; extra key score_dimension_culture; extra key score_dimension_red_flags; extra key posting_date; extra key posting_freshness; extra key legitimacy; extra key culture_screen; missing legitimacy_tier; missing final_decision; missing hard_stops; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; work_auth "Not needed (US-based, US citizen)" not in enum; missing discard_reasons; missing via; missing company_confidential; missing reports_to; 10 requirement_importance row(s) off-schema (e.g. missing jd_signal); extra key risk_summary.posting_legitimacy; extra key risk_summary.employment_classification; extra key risk_summary.culture_screen; extra key risk_summary.interview_red_flags; extra key risk_summary.ai_claims_vs_infrastructure; missing risk_summary.legitimacy; missing risk_summary.classification; missing risk_summary.culture; missing risk_summary.interview_redflags; missing risk_summary.ai_infra; risk_summary.ai_screening_disclosure "— not evaluated (US no jurisdiction match for AI-screening disclosure requirements at posting time)" not in enum
+EXPECT_FAILURES: none
+---END_SUMMARY---

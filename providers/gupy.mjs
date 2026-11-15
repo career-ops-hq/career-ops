@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -411,6 +412,9 @@ export default {
     // freshest N pages of this keyword".
     let firstError = null;
     let succeededOnce = false;
+    // Why part of the board went unread, first cause first; null while it is
+    // whole. Set beside each warning below, so the two never disagree.
+    let partialReason = null;
 
     for (const keyword of keywords) {
       if (pagesAttempted >= pageBudget) break;
@@ -438,6 +442,7 @@ export default {
           if (probing) throw err;
           if (firstError === null) firstError = err;
           console.error(`⚠️  gupy: sweep "${keyword}" stopped at page ${page}: ${err?.message || String(err)}`);
+          partialReason ??= 'fetch-error';
           break;
         }
         succeededOnce = true;
@@ -475,6 +480,7 @@ export default {
           console.error(
             `⚠️  gupy: "${keyword}" truncated at max_pages=${maxPages} (${maxPages * PER_PAGE} postings read, feed has more); ${remedy}`,
           );
+          partialReason ??= 'page-cap';
         }
       }
     }
@@ -484,6 +490,9 @@ export default {
     // a quiet zero. Rethrows the ORIGINAL error: verify-portals reads
     // err.status and err.name to classify it.
     if (!succeededOnce && firstError !== null) throw firstError;
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(out, partialReason, { fetched: out.length });
     return out;
   },
 };

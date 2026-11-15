@@ -15,7 +15,7 @@
     "node": "^22.13.0 || >=23.4.0"
   },
   "dependencies": {
-    "@paper-design/shaders-react": "^0.0.80",
+    "@paper-design/shaders-react": "^0.0.82",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "js-yaml": "^5.4.1",
@@ -32,7 +32,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.2",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "25.9.5",
+    "@types/node": "26.6.6",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "postcss": "^8.5.18",

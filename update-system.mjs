@@ -4159,10 +4159,12 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // VERSION is release metadata, not a complete description of the system
   // tree. Compare the installed commit with main as well, so same-version
   // manifest/file drift is visible (#2630). A failed commit lookup is
-  // deliberately conservative: version checks still work offline/behind a
-  // restricted git transport. The main-ref lookup runs alongside the version
-  // sources, not after them: sequentially, a black-holed network paid the curl
-  // budget twice before the git fallback even started.
+  // deliberately conservative: drift can't be ruled out, so it is reported
+  // rather than up-to-date (#7095), while the version checks still work
+  // offline/behind a restricted git transport. The main-ref lookup runs
+  // alongside the version sources, not after them: sequentially, a
+  // black-holed network paid the curl budget twice before the git fallback
+  // even started.
   const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
     runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
     runCurlGet(RELEASES_API, [
@@ -4251,7 +4253,11 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // conservative (drift reported), matching the failed-commit-lookup policy
   // at the top of this function.
   let systemTreeDrift = false;
-  if (localCommit && remoteCommit && localCommit !== remoteCommit) {
+  if (localCommit && !remoteCommit) {
+    // main's commit is unknown (rate limit, filtered API host): nothing to
+    // compare against, so report drift instead of claiming up-to-date (#7095).
+    systemTreeDrift = true;
+  } else if (localCommit && localCommit !== remoteCommit) {
     try {
       // Same explicit refspec as apply() on this channel: `main` alone lets git
       // auto-follow a tag into FETCH_HEAD, and the diff below reads FETCH_HEAD
@@ -4311,6 +4317,17 @@ async function check() {
   // update-available would only lead the agent to offer an update that fails.
   if (outsideGitCheckout()) {
     console.log(JSON.stringify({ status: 'not-a-git-checkout', local: localVersion() }));
+    return;
+  }
+  // A checkout git cannot read: git missing, or refusing the directory (a
+  // container running git as a user other than the checkout's owner gets
+  // "detected dubious ownership"). Both channels would answer without the
+  // local commit, up-to-date included, while apply() fails here.
+  try {
+    gitQuiet('rev-parse', 'HEAD');
+  } catch (err) {
+    const detail = String(err.stderr || '').trim().split(/\r?\n/)[0] || err.message;
+    console.log(JSON.stringify({ status: 'checkout-unreadable', local: localVersion(), detail }));
     return;
   }
 

@@ -134,7 +134,7 @@ Mantenha o feedback conciso. Um ou dois pontos a aprimorar por resposta — não
 
 ### Write Session Transcript
 
-Após o resumo, escreva uma transcrição da sessão legível por máquina em `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (use `practice` para o slug de empresa/vaga se esta não foi uma sessão específica de uma empresa). Este é um registro estruturado da rodada para modos de análise posteriores; os turnos com identificação de quem fala permitem que um consumidor leia qualquer um dos lados sem reinferir quem falou. O contrato completo reside em `interview-prep/sessions/README.md`.
+Após o resumo, escreva uma transcrição da sessão legível por máquina em `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (use `practice` para o slug de empresa/vaga se esta não foi uma sessão específica de uma empresa). Se esse arquivo já existir, não o sobrescreva: adicione o próximo contador livre (`-2`, `-3`, ...) antes de `.md`, conforme descrito na seção "File names" do README. Este é um registro estruturado da rodada para modos de análise posteriores; os turnos com identificação de quem fala permitem que um consumidor leia qualquer um dos lados sem reinferir quem falou. O contrato completo reside em `interview-prep/sessions/README.md`.
 
 Formato:
 

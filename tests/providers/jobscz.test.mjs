@@ -230,6 +230,9 @@ try {
     });
     if (fetched.length === 30 && text.includes('jobscz')) pass('jobscz.fetch() keeps page-1 jobs and warns when page 2 fails');
     else fail(`page-2 failure: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
+    // The board was only partly read, so scan.mjs must log it partial, not reachable.
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 30) pass('jobscz.fetch() marks the board partial when a later page fails');
+    else fail(`page-2 failure truncated = ${JSON.stringify(fetched.truncated)}`);
   }
 
   {
@@ -243,6 +246,8 @@ try {
     });
     if (fetched.length === 1 && text.includes('page 1 failed')) pass('jobscz.fetch() keeps the other keywords and warns when one keyword fails on page 1');
     else fail(`one keyword failing: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 1) pass('jobscz.fetch() marks the board partial when one keyword fails and another answers');
+    else fail(`one keyword failing truncated = ${JSON.stringify(fetched.truncated)}`);
   }
 
   {
@@ -259,6 +264,8 @@ try {
     const fetched = await jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['a', 'b'] } }, stub(() => page([card()], 1)).ctx);
     if (fetched.length === 1) pass('jobscz.fetch() dedups an offer returned for two keywords');
     else fail(`jobscz.fetch() returned ${fetched.length} rows for one shared offer`);
+    if (fetched.truncated === undefined) pass('jobscz.fetch() leaves a board unmarked when every keyword answers');
+    else fail(`fully read board was marked: ${JSON.stringify(fetched.truncated)}`);
   }
 
   {

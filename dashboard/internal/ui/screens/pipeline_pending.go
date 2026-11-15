@@ -2,14 +2,15 @@ package screens
 
 // The Inbox tab (#5269): the Pending rows of data/pipeline.md, beside the
 // tracker tabs, with the first-pass rank and what the batch files record for
-// each row. It is read only. No key on this tab writes a file, and none skips,
-// queues, triages or evaluates a row.
+// each row. One key acts on a row: `e` queues it for evaluation through
+// sync-batch-input.mjs (pipeline_pending_queue.go). No key skips, triages or
+// evaluates a row, and the dashboard itself writes no file.
 //
-// Two things keep it that way. applyFilterAndSort leaves the tracker's row
-// list empty while the Inbox is active, so CurrentApp has nothing to return
-// and every tracker action has no row to act on. And handleKey sends every
-// key to handlePendingKey first, which lets through only the keys listed in
-// pendingSharedKeys and swallows the rest.
+// Two things keep tracker actions off this tab. applyFilterAndSort leaves the
+// tracker's row list empty while the Inbox is active, so CurrentApp has
+// nothing to return and every tracker action has no row to act on. And
+// handleKey sends every key to handlePendingKey first, which lets through only
+// the keys listed in pendingSharedKeys and swallows the rest.
 
 import (
 	"fmt"
@@ -67,7 +68,7 @@ func (m *PipelineModel) SetPendingRows(rows []data.PendingRow) {
 
 // leavePendingTab moves to ALL when the Inbox is active. Flows that write the
 // tracker (the discard reason picker, the hired flow) call it, so they never
-// run on the read-only tab.
+// run on the Inbox, which has no tracker rows.
 func (m *PipelineModel) leavePendingTab() {
 	if !m.onPendingTab() {
 		return
@@ -249,6 +250,9 @@ func (m PipelineModel) handlePendingKey(msg tea.KeyMsg) (next PipelineModel, cmd
 		}
 		target := row.URL
 		return m, func() tea.Msg { return PipelineOpenURLMsg{URL: target} }, true
+	case "e":
+		next, cmd := m.queuePendingRow()
+		return next, cmd, true
 	}
 	return m, nil, true
 }
@@ -301,19 +305,31 @@ func pendingRankText(row data.PendingRow) string {
 	return i18n.Current.InboxNotRanked
 }
 
+// pendingRankCell is the rank as the table shows it: the number alone, as the
+// tracker's FIT column shows a score, and the tracker's em dash for a row
+// with no rank. The preview keeps the "/5" and the "not ranked" wording.
+func pendingRankCell(row data.PendingRow) string {
+	if row.HasRank {
+		return fmt.Sprintf("%.1f", row.Rank)
+	}
+	return "—"
+}
+
 // pendingColWidths holds per-column cell budgets for the Inbox table. A zero
-// location or posted width means that column is hidden.
+// location or posted width means that column is hidden. The columns follow the
+// tracker's order (score, company, role, status, location, posted) and use its
+// company, location and posted widths.
 type pendingColWidths struct {
 	rank, company, role, loc, posted, status int
 }
 
 func (m PipelineModel) pendingColumnWidths() pendingColWidths {
-	rank := max(5, lipgloss.Width(i18n.Current.ColRank), lipgloss.Width(i18n.Current.InboxNotRanked))
+	rank := max(3, lipgloss.Width(i18n.Current.ColRank))
 	status := lipgloss.Width(i18n.Current.ColStatus)
 	for _, s := range pendingStatuses {
 		status = max(status, lipgloss.Width(pendingStatusLabel(s)))
 	}
-	c := pendingColWidths{rank: rank, company: 16, loc: 16, posted: 10, status: status}
+	c := pendingColWidths{rank: rank, company: 16, loc: 20, posted: 10, status: status}
 	roleFloor := 15
 	for {
 		segments := 4 // rank, company, role, status
@@ -357,6 +373,7 @@ func (m PipelineModel) renderPendingColumnHeader() string {
 		cell(i18n.Current.ColRank, cw.rank),
 		cell(i18n.Current.ColCompany, cw.company),
 		cell(i18n.Current.ColRole, cw.role),
+		cell(i18n.Current.ColStatus, cw.status),
 	}
 	if cw.loc > 0 {
 		segments = append(segments, cell(i18n.Current.ColLocation, cw.loc))
@@ -364,7 +381,6 @@ func (m PipelineModel) renderPendingColumnHeader() string {
 	if cw.posted > 0 {
 		segments = append(segments, cell(i18n.Current.ColPosted, cw.posted))
 	}
-	segments = append(segments, cell(i18n.Current.ColStatus, cw.status))
 	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
 	return padStyle.Render(" " + strings.Join(segments, " "))
 }
@@ -376,9 +392,11 @@ func (m PipelineModel) renderPendingLine(row data.PendingRow, selected bool) str
 		rankStyle = m.scoreStyle(row.Rank)
 	}
 	segments := []string{
-		rankStyle.Width(cw.rank).Render(truncateCells(pendingRankText(row), cw.rank)),
+		rankStyle.Width(cw.rank).Render(truncateCells(pendingRankCell(row), cw.rank)),
 		lipgloss.NewStyle().Foreground(m.theme.Text).Width(cw.company).Render(truncateCells(row.Company, cw.company)),
 		lipgloss.NewStyle().Foreground(m.theme.Subtext).Width(cw.role).Render(truncateCells(row.Role, cw.role)),
+		lipgloss.NewStyle().Foreground(m.pendingStatusColor(row.Status)).Width(cw.status).
+			Render(truncateCells(pendingStatusLabel(row.Status), cw.status)),
 	}
 	if cw.loc > 0 {
 		loc := row.Location
@@ -390,8 +408,6 @@ func (m PipelineModel) renderPendingLine(row data.PendingRow, selected bool) str
 	if cw.posted > 0 {
 		segments = append(segments, m.renderPostedCell(model.CareerApplication{PostedOn: row.Posted}, cw.posted))
 	}
-	segments = append(segments, lipgloss.NewStyle().Foreground(m.pendingStatusColor(row.Status)).Width(cw.status).
-		Render(truncateCells(pendingStatusLabel(row.Status), cw.status)))
 
 	line := " " + strings.Join(segments, " ")
 	padStyle := lipgloss.NewStyle().Padding(0, 2).MaxWidth(max(1, m.width)).MaxHeight(1)
@@ -503,6 +519,7 @@ func pendingHelpItems() []keyHelpItem {
 		{"s", i18n.Current.HelpSort},
 		{"r", i18n.Current.HelpRefresh},
 		{"o", i18n.Current.HelpOpenURL},
+		{"e", i18n.Current.HelpQueue},
 		{"p", i18n.Current.HelpProgress},
 		{"S", i18n.Current.HelpStats},
 		{"t", i18n.Current.HelpLanguage},
