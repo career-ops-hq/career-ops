@@ -111,6 +111,10 @@ const PAGE_DELAY_MS = 150; // polite pacing — full walks are >100 sequential r
 // Page size for the JSON fragment transport. 100 is honored live by both known
 // legacy tenants (UHG, Kaiser); the HTML page hard-codes 15.
 const FRAGMENT_RECORDS_PER_PAGE = 100;
+// The HTML ?p=N page size the site hard-codes (see the transport notes above).
+// A page with fewer rows is the board's natural end, even at the max_pages
+// boundary.
+const HTML_RECORDS_PER_PAGE = 15;
 
 // A user-supplied `max_jobs` is not otherwise bounded by anything but
 // `max_pages` (itself capped at MAX_PAGES): a garbage value here doesn't risk
@@ -507,6 +511,7 @@ export default {
     // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
     // failure here, keeps partials instead.
     let stoppedOnError = false;
+    let lastPageFull = false;
     let page = 1;
     for (; page <= effectiveMaxPages; page++) {
       if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
@@ -522,6 +527,8 @@ export default {
       }
       succeededOnce = true;
       if (rows.length === 0) break; // past the last page
+      // Raw rows, before dedup: a short page is the board's natural end.
+      lastPageFull = rows.length >= HTML_RECORDS_PER_PAGE;
 
       let fresh = 0;
       for (const row of rows) {
@@ -538,12 +545,13 @@ export default {
     if (stoppedOnError) {
       // The pages after the failure were never read: marked, as on the fragment path.
       markTruncated(result, 'fetch-error', { fetched: result.length });
-    } else if (!probing && (jobs.length > maxJobs || page > effectiveMaxPages)) {
+    } else if (!probing && (jobs.length > maxJobs || (page > effectiveMaxPages && lastPageFull))) {
       // Our own limit ended the walk with pages possibly left: a page pushed the
       // buffer past max_jobs (the slice drops the overshoot), or max_pages ran
-      // out before an empty or repeated page ended it. A cap stop, warned and
-      // marked as on the fragment path. An exact max_jobs match is not one: with
-      // no reported total, this path cannot tell it from a natural end.
+      // out on a full page. A cap stop, warned and marked as on the fragment
+      // path. A short last page at the max_pages boundary is the board's natural
+      // end, and an exact max_jobs match cannot be told from one (this path has
+      // no reported total), so neither is a cap.
       console.error(
         `⚠️  radancy: ${entry.name} truncated at ${result.length} jobs`
         + ' (max_pages/max_jobs reached) — raise max_jobs/max_pages on this entry for more',
