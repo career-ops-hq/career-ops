@@ -21,6 +21,7 @@
 
 import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'fs';
 import { join } from 'path';
+import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
 import { pass, fail } from './helpers.mjs';
 import { checkStatus, highestReleaseTag, curlGet, gitRemoteVersion } from '../update-system.mjs';
@@ -107,9 +108,12 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
   if (res.changelog === '') pass('the git path carries an empty changelog (modes/update.md renders the releases link for it)');
   else fail(`the git path carried changelog ${JSON.stringify(res.changelog)}`);
 
+  // Same version, but with curl blocked the main-ref lookup failed too, so
+  // check() cannot tell whether this checkout matches main (see test 10).
   const current = await run(MAIN, { curl: fakeCurl(), git: fakeGit({ ok: true, version: '1.33.0' }) });
-  if (current.status === 'up-to-date' && current.remote === '1.33.0') pass('curl blocked + git reachable + same version → up-to-date');
-  else fail(`curl blocked + git at the same version → ${JSON.stringify(current)}`);
+  if (current.status === 'update-available' && current.remote === '1.33.0' && current.reason === 'main-commit-unresolved') {
+    pass('curl blocked + git reachable + same version → update-available (main-commit-unresolved), since main\'s commit is unknown');
+  } else fail(`curl blocked + git at the same version → ${JSON.stringify(current)}`);
 }
 
 // ── 3. git reachable but no release tag → no-remote-version, never offline ──
@@ -231,5 +235,34 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
     pass(`gitRemoteVersion() surfaces git's own failure reason (detail: ${JSON.stringify(String(res.detail).slice(0, 60))})`);
   } else {
     fail(`gitRemoteVersion() against a .invalid host → ${JSON.stringify(res)}`);
+  }
+}
+
+// ── 10. --channel main never says up-to-date when main's commit is unknown ──
+// The drift check needs main's commit. When the ref lookup fails and the
+// versions match, check() used to return up-to-date, and modes/update.md
+// Step 1 then ended the flow before the main preview the user asked for.
+// This test runs inside a git checkout, so check() has a local commit.
+{
+  const sameVersion = { '/main/VERSION': '1.34.0\n' };
+  const unresolved = await run(MAIN, { curl: fakeCurl(sameVersion), git: fakeGit({ ok: true, version: '1.34.0' }), local: '1.34.0' });
+  if (unresolved.status === 'update-available' && unresolved.reason === 'main-commit-unresolved') {
+    pass('--channel main, same version, main-ref lookup failed → update-available (main-commit-unresolved), not up-to-date');
+  } else {
+    fail(`--channel main, same version, main-ref lookup failed → ${JSON.stringify(unresolved)}`);
+  }
+
+  // Control: main's commit resolves to this checkout's HEAD → still up-to-date,
+  // with no drift fetch (equal SHAs skip it).
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
+  const resolved = await run(MAIN, {
+    curl: fakeCurl({ ...sameVersion, '/git/ref/heads/main': JSON.stringify({ object: { sha: head } }) }),
+    git: fakeGit({ ok: true, version: '1.34.0' }),
+    local: '1.34.0',
+  });
+  if (resolved.status === 'up-to-date') {
+    pass('--channel main, same version, main resolves to HEAD → up-to-date');
+  } else {
+    fail(`--channel main, same version, main resolves to HEAD → ${JSON.stringify(resolved)}`);
   }
 }
