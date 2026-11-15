@@ -43,7 +43,29 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 - **Apply** — assisted form prefill with a hard rule inherited from the core:
   **it never submits for you** — you always press the button.
 - **Today / Analytics / CV / Config** — action queue, funnel + pipeline Sankey,
-  CV editing with preview, settings.
+  CV editing with preview, settings. In **CV**, use **Upload PDF / TeX** to
+  import a replacement, review the converted Markdown, then select **Update cv.md**.
+  Conversion uses your configured AI CLI; saving backs up the previous CV.
+
+### Full or focused evaluation
+
+Open **Evaluation options** below the pasted-URL form, or select sections when
+confirming **Score shortlist**. Full evaluation is the default. **Essentials**
+keeps a short job summary; you can also choose optional sections individually.
+Your selection is remembered in this browser.
+
+Every selection keeps the fit score, requirements and gaps, evidence confidence,
+basic posting checks, and the archived job description. Focused reports identify
+their scope in the report and tracker notes. Unselected research and drafting
+tasks are excluded from the request; missing research remains unknown evidence.
+Fewer sections can reduce token use, but there is no fixed saving. Estimates use
+your completed runs with the same selection.
+
+The `/api/run` evaluate request accepts `evaluationSections`, an array of IDs:
+`summary`, `strategy`, `research`, `customization`, `interview`, `application`,
+and `keywords`. Omitting it preserves the full evaluation; `[]` requests the
+required assessment without optional sections. Invalid selections return 400
+before starting an AI run.
 
 ## Safety
 
@@ -90,6 +112,56 @@ current user (never as root), and Windows and macOS need a logged-in session. Th
 `web/scripts/scheduled-jobs-runner.mjs`; it never evaluates roles, applies, or invokes
 an AI model. Job definitions and run history stay in the gitignored `data/`
 directory.
+
+## Run as a login service
+
+`npm start` serves the dashboard only while its terminal stays open. To keep it up
+across reboots and crashes, install it as a service of your own user, from the
+repository root:
+
+```sh
+node web/scripts/web-service.mjs install
+```
+
+It uses what each system already has, and runs as you, never as root:
+
+| | macOS | Linux | Windows |
+|---|---|---|---|
+| Mechanism | launchd LaunchAgent `io.career-ops.web` | `systemd --user` unit `career-ops-web.service` | Task Scheduler task `career-ops web` |
+| Starts | at login | at login (at boot after `loginctl enable-linger "$USER"`) | at logon |
+| Restarts | 30 s after it exits | 30 s after it exits | 30 s after a crash (the runner waits; Task Scheduler's own minimum is one minute and stays as the backstop) |
+| Log | `data/web-service.log` | `journalctl --user -u career-ops-web` | `data/web-service.log` |
+
+```sh
+node web/scripts/web-service.mjs status
+node web/scripts/web-service.mjs restart
+node web/scripts/web-service.mjs uninstall   # keeps the log
+node web/scripts/web-service.mjs install --dry-run   # print the definition, change nothing
+```
+
+- **Same bind as `npm start`.** Loopback only. The service adds no network exposure;
+  `CAREER_OPS_WEB_ALLOWED_HOSTS` is still the only way to widen it.
+- **Install and build happen only when needed.** The first start runs `npm ci` and
+  `npm run build`, which takes a few minutes. Every later start skips each step while
+  its inputs are unchanged: the install while `package-lock.json` and the Node version
+  are the same, the build while the checkout (its commit and any uncommitted change)
+  is the same. A restart with nothing changed answers in a few seconds. If an install
+  or build fails, the reason is in the log, and the service waits five minutes before
+  it tries again, so a broken build does not spin.
+- **After `git pull` or an update, run `restart`.** The running dashboard keeps serving
+  the old build until then; the restart rebuilds first, then serves the new one.
+- **Overrides are baked in when you install.** `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR`,
+  `CAREER_OPS_SCHEDULED_JOBS_PATH`, `CAREER_OPS_TRACKER`, `CAREER_OPS_PROFILE`, `CAREER_OPS_CODE_ROOT`,
+  `CAREER_OPS_WEB_ALLOWED_HOSTS` and `PORT` are carried into the service if they are set
+  in the shell that runs `install`. A service starts with an almost empty environment,
+  and without them the dashboard would read a different store than the CLI. Nothing else
+  is carried. Run `install` again after you change one.
+- **Do not run `npm start` or `npm run ui` on the same port while it is installed.** The
+  second server cannot bind and exits.
+- macOS needs a logged-in GUI session. Linux needs a systemd user session, which a normal
+  login has and `su`/`sudo` do not. On Windows the task runs in your interactive session,
+  so a console window for it stays open; closing it stops the dashboard until the next
+  logon or `restart`.
 
 ## Development
 

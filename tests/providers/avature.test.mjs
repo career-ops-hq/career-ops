@@ -55,6 +55,48 @@ try {
   if (parseArticles('<div>no articles</div>', origin).length === 0) pass('parseArticles returns [] when no articles present');
   else fail('parseArticles should return [] for markup with no articles');
 
+  // Deloitte USI renders `article--result` without the leading `article` class.
+  const bareResult = `
+    <article class="article--result " data-total="573">
+      <h3 class="article__header__text__title"><a href="https://usijobs.deloitte.com/en_US/careersUSI/JobDetail/USI-Data-Engineer/374504" class="link">Data Engineer</a></h3>
+    </article>`;
+  const bArts = parseArticles(bareResult, 'https://usijobs.deloitte.com');
+  if (bArts.length === 1 && bArts[0].id === '374504' && bArts[0].title === 'Data Engineer') pass('parseArticles reads an article--result card with no leading article class');
+  else fail(`parseArticles bare article--result wrong: ${JSON.stringify(bArts)}`);
+
+  // Protocol-relative (//host/...) hrefs must resolve like a browser does —
+  // string concatenation would produce "https://acme.avature.net//other/...".
+  // A href new URL cannot resolve is dropped instead of emitted broken.
+  const protocolRel = `
+    <article class="article article--result" id="article--1">
+      <h3 class="title"><a class="link" href="//jobs.acme-cdn.example/JobDetail?jobId=4242">Rel Host Engineer</a></h3>
+    </article>
+    <article class="article article--result" id="article--2">
+      <h3 class="title"><a class="link" href="//[bad/JobDetail?jobId=1">Broken Link</a></h3>
+    </article>`;
+  const pArts = parseArticles(protocolRel, origin);
+  const pOk = pArts.find((a) => a.id === '4242');
+  if (pOk && pOk.url === 'https://jobs.acme-cdn.example/JobDetail?jobId=4242') pass('parseArticles resolves a protocol-relative href against the page scheme');
+  else fail(`parseArticles protocol-relative url wrong: ${JSON.stringify(pOk && pOk.url)}`);
+  if (pArts.length === 1) pass('parseArticles drops an unresolvable href instead of emitting a broken URL');
+  else fail(`parseArticles returned ${pArts.length}, expected 1 (unresolvable href dropped)`);
+
+  // A href with its own non-http scheme stays absolute through new URL, so it
+  // would reach the pipeline as is: only http(s) links are job links.
+  const schemes = `
+    <article class="article article--result" id="article--1">
+      <h3 class="title"><a class="link" href="javascript:alert(1)//JobDetail?jobId=42">Script Link</a></h3>
+    </article>
+    <article class="article article--result" id="article--2">
+      <h3 class="title"><a class="link" href="data:text/html,x/JobDetail?jobId=43">Data Link</a></h3>
+    </article>
+    <article class="article article--result" id="article--3">
+      <h3 class="title"><a class="link" href="/careers/JobDetail?jobId=44">Real Link</a></h3>
+    </article>`;
+  const sArts = parseArticles(schemes, origin);
+  if (sArts.length === 1 && sArts[0].id === '44' && sArts[0].url.startsWith('https://')) pass('parseArticles drops javascript: and data: hrefs and keeps the http(s) one');
+  else fail(`parseArticles non-http schemes wrong: ${JSON.stringify(sArts.map((a) => a.url))}`);
+
   // Tenant markup variants: Siemens appends a position index to the result
   // class ("article--result 1"); Rohde & Schwarz renders the title anchor with
   // no class="link". Both must still parse. (Regressions found on live tenants.)
@@ -100,6 +142,34 @@ try {
   else fail(`parseArticles article--jobs card wrong: ${JSON.stringify(jArts)}`);
   if (j1 && j1.location === 'Argentina') pass('parseArticles extracts the icon-address location of an "article--jobs" card');
   else fail(`parseArticles article--jobs location wrong: ${JSON.stringify(j1 && j1.location)}`);
+
+  // Query-style links (Macquarie): `/JobDetail?jobId=<id>`, no slug segment.
+  // The path-only regex dropped every article, so the board read as empty.
+  const queryStyle = `
+    <article class="article article--result clearfix ">
+      <h3 class="article__header__text__title title title--02">
+        <a class="link" href="https://recruitment.macquarie.com/en_US/careers/JobDetail?jobId=24224">
+          Quality Engineer
+        </a>
+      </h3>
+      <a class="share" href="mailto:?body=https%3A%2F%2Frecruitment.macquarie.com%2Fen_US%2Fcareers%2FJobDetail%3FjobId%3D24224">Share</a>
+    </article>
+    <article class="article article--result">
+      <h3 class="title"><a class="link" href="/en_US/careers/JobDetail?lang=en&amp;jobId=24335">Platform Engineer</a></h3>
+    </article>`;
+  const qArts = parseArticles(queryStyle, 'https://recruitment.macquarie.com');
+  const q1 = qArts.find((a) => a.id === '24224');
+  if (qArts.length === 2 && q1 && q1.title === 'Quality Engineer' && q1.url === 'https://recruitment.macquarie.com/en_US/careers/JobDetail?jobId=24224') {
+    pass('parseArticles accepts query-style /JobDetail?jobId=<id> links (Macquarie)');
+  } else {
+    fail(`parseArticles missed query-style links: ${JSON.stringify(qArts)}`);
+  }
+  const q2 = qArts.find((a) => a.id === '24335');
+  if (q2 && q2.url === 'https://recruitment.macquarie.com/en_US/careers/JobDetail?lang=en&jobId=24335') {
+    pass('parseArticles extracts jobId when it is not the first query param');
+  } else {
+    fail(`parseArticles jobId extraction wrong: ${JSON.stringify(qArts.map((a) => a.id))}`);
+  }
 
   // Pagination key — default `jobOffset`, self-heals to `offset` for tenants
   // that ignore it (Siemens). Mock fetchText with an article-less page so
@@ -195,6 +265,14 @@ try {
   if (shortPageJobs.length === 3 && shortPageCtx.calls.length === 1) pass('avature.fetch() still stops after a short page of valid cards');
   else fail(`avature.fetch() returned ${shortPageJobs.length} jobs after ${shortPageCtx.calls.length} calls, expected 3 after 1`);
 
+  // A full page whose links are all dropped (non-http scheme) is not an empty or
+  // repeated page: the walk must go on to the next one instead of stopping there.
+  const scriptCard = (id) => `<article class="article article--result"><h3 class="title"><a class="link" href="javascript:void(0)//JobDetail?jobId=${id}">Role ${id}</a></h3></article>`;
+  const droppedPageCtx = mkPagedCtx([mkHtml([1, 2, 3, 4, 5, 6]), [7, 8, 9, 10, 11, 12].map(scriptCard).join(''), mkHtml([13, 14])]);
+  const droppedPageJobs = await avature.fetch({ name: 'X', api: base }, droppedPageCtx);
+  if (droppedPageJobs.length === 8 && droppedPageCtx.calls.length === 3) pass('avature.fetch() keeps paging past a full page whose links were all dropped');
+  else fail(`avature.fetch() returned ${droppedPageJobs.length} jobs after ${droppedPageCtx.calls.length} calls, expected 8 after 3`);
+
   // Self-heal must fire even when the inert primary key returns an EMPTY page 1
   // (not a repeat of page 0) — the empty-page break must not pre-empt the heal.
   const emptyP1Ctx = {
@@ -269,6 +347,15 @@ try {
     }
     if (threw) pass('assertParsedSomething() throws when JobDetail links are present but unparsed');
     else fail('a page still carrying JobDetail links must not be reported as empty');
+
+    let threwQuery = false;
+    try {
+      assertParsedSomething('<a href="/careers/JobDetail?jobId=123">Some Role</a>', 'https://acme.avature.net/careers/SearchJobs');
+    } catch {
+      threwQuery = true;
+    }
+    if (threwQuery) pass('assertParsedSomething() throws on unparsed query-style JobDetail links too');
+    else fail('a page carrying query-style JobDetail links must not be reported as empty');
 
     let threwOnEmpty = false;
     try {

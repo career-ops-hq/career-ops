@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -25,7 +26,9 @@ import { resolveProfileKeywords } from './_profile-keywords.mjs';
 //     page, free to read and apply to. A confidential posting carries
 //     "Confidencial" where the employer goes and is dropped. The portal
 //     endpoint no longer flags it with isConfidentialCareerPage, so the label
-//     is what identifies it (4 rows of a 500-row sample).
+//     is what identifies it (4 rows of a 500-row sample), together with
+//     Gupy's placeholder logo and a tenant subdomain that says so, for the
+//     confidential pages whose name is free text.
 //   - Rule 2: jobUrl is the posting on the employer's own <tenant>.gupy.io
 //     career page, the shortest path to the employer the payload offers.
 //   - Rule 3: results are ordered publishedDate-descending; the payload
@@ -103,6 +106,14 @@ const EARLY_STOP_MARGIN_MS = 2 * 86_400_000;
 // Policy rule 1). Matched whole, so an employer whose name merely contains
 // the word is kept.
 const CONFIDENTIAL_EMPLOYER = /^(?:empresa\s+)?confidencial$/i;
+
+// A confidential career page (careerPage.visibility "confidential" on the
+// posting page) is not flagged in the search payload, and its name is free
+// text ("Vagas Confidenciais", "Escritório de Advocacia"). Two signals the row
+// already carries mark most of them: the placeholder logo Gupy assigns such a
+// page, and a tenant subdomain that says so.
+const CONFIDENTIAL_LOGO_SUFFIX = '/confidencial_logo.png';
+const CONFIDENTIAL_TENANT = /confidencia/i;
 
 /** Hosts a Gupy posting URL is allowed to live on. */
 function isSafeGupyUrl(value) {
@@ -283,8 +294,10 @@ export function buildGupyLocation(j) {
  *                  the cross-listing fingerprint work without a second request.
  *   - postedAt:    `publishedDate` ISO → epoch ms (omitted when unparseable).
  *
- * A confidential posting (flagged `isConfidentialCareerPage`, or labelled
- * "Confidencial" where the employer goes) or one with a blank
+ * A confidential posting (flagged `isConfidentialCareerPage`, labelled
+ * "Confidencial" where the employer goes, carrying Gupy's placeholder
+ * `careerPageLogo`, or on a tenant whose subdomain says "confidencial") or one
+ * with a blank
  * `careerPageName` names no employer and is dropped (Source Indexing Policy
  * rule 1). scan.mjs copies `company` into the pipeline as-is, so an empty one
  * would reach it unattributed.
@@ -304,6 +317,10 @@ export function normalizeGupyApiJob(j) {
 
   const company = typeof j.careerPageName === 'string' ? j.careerPageName.trim() : '';
   if (!company || CONFIDENTIAL_EMPLOYER.test(company)) return null;
+  const logo = typeof j.careerPageLogo === 'string' ? j.careerPageLogo.trim() : '';
+  if (logo.endsWith(CONFIDENTIAL_LOGO_SUFFIX)) return null;
+  // rawUrl passed isSafeGupyUrl above, so this parse cannot throw.
+  if (CONFIDENTIAL_TENANT.test(new URL(rawUrl).hostname.split('.')[0])) return null;
 
   /** @type {{ title: string, url: string, company: string, location: string, description?: string, postedAt?: number }} */
   const job = {
@@ -321,6 +338,10 @@ export function normalizeGupyApiJob(j) {
 /** @type {Provider} */
 export default {
   id: 'gupy',
+
+  fetchHost() {
+    return API_HOST;
+  },
 
   detect(entry) {
     if (entry?.provider === 'gupy') return { url: API_BASE };
@@ -391,6 +412,9 @@ export default {
     // freshest N pages of this keyword".
     let firstError = null;
     let succeededOnce = false;
+    // Why part of the board went unread, first cause first; null while it is
+    // whole. Set beside each warning below, so the two never disagree.
+    let partialReason = null;
 
     for (const keyword of keywords) {
       if (pagesAttempted >= pageBudget) break;
@@ -418,6 +442,7 @@ export default {
           if (probing) throw err;
           if (firstError === null) firstError = err;
           console.error(`⚠️  gupy: sweep "${keyword}" stopped at page ${page}: ${err?.message || String(err)}`);
+          partialReason ??= 'fetch-error';
           break;
         }
         succeededOnce = true;
@@ -455,6 +480,7 @@ export default {
           console.error(
             `⚠️  gupy: "${keyword}" truncated at max_pages=${maxPages} (${maxPages * PER_PAGE} postings read, feed has more); ${remedy}`,
           );
+          partialReason ??= 'page-cap';
         }
       }
     }
@@ -464,6 +490,9 @@ export default {
     // a quiet zero. Rethrows the ORIGINAL error: verify-portals reads
     // err.status and err.name to classify it.
     if (!succeededOnce && firstError !== null) throw firstError;
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(out, partialReason, { fetched: out.length });
     return out;
   },
 };

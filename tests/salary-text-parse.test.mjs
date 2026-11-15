@@ -57,3 +57,9 @@ assert(compensationPeriod('Annual salary: 100k') === 'annual', 'annual label sti
 const report = (comp) => `## Machine Summary\n\n\`\`\`yaml\ncompany: "Acme"\nrole: "Engineer"\nadvertised_comp: "${comp}"\n\`\`\`\n`;
 assert(reportToObservation(report('OTE: 100k USD'), '001', '2026-10-28')?.observation?.currency === 'USD', 'label before the amount is not the currency');
 assert(reportToObservation(report('100k per year'), '001', '2026-10-28')?.observation?.currency === 'UNKNOWN', 'no code -> UNKNOWN');
+const labelledOther = reportToObservation(report('USD equivalent: 100k CAD'), '001', '2026-10-28')?.observation;
+assert(labelledOther?.parsed?.mid === 100000 && labelledOther?.currency === 'UNKNOWN', 'two different codes -> UNKNOWN, never the label\'s code');
+assert(reportToObservation(report('100k CAD - 120k CAD'), '001', '2026-10-28')?.observation?.currency === 'CAD', 'one code repeated is still that code');
+assert(reportToObservation(report('RMB 600k'), '001', '2026-10-28')?.observation?.currency === 'CNY', 'RMB reads as CNY');
+assert(reportToObservation(report('年薪 60-80 万人民币'), '001', '2026-10-28')?.observation?.currency === 'CNY', '人民币 reads as CNY');
+assert(reportToObservation(report('CNY 60-80 万人民币'), '001', '2026-10-28')?.observation?.currency === 'CNY', 'CNY and 人民币 agree');

@@ -10,8 +10,9 @@
 // and coverage contracts (validate-system-paths-coverage.mjs EXCLUDE_PREFIXES),
 // so lib/cli-flags.mjs and lib/is-main-module.mjs are out of reach by design.
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,8 +96,27 @@ try {
 //
 // NEXT_TELEMETRY_DISABLED in the env, not next.config.mjs alone: `next dev`'s
 // parent CLI process records its session event without ever loading the config.
+const webDir = dirname(fileURLToPath(import.meta.url));
+const painterScript = join(webDir, "..", "generate-pdf.mjs");
+if (existsSync(painterScript)) {
+  // Same cwd as the export child (the repo root), so a relative
+  // CAREER_OPS_TRACKER resolves to the same pdf-index.tsv in both.
+  const painter = spawn(process.execPath, [painterScript, "--pdf-server"], {
+    cwd: dirname(painterScript),
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: {
+      ...process.env,
+      CAREER_OPS_PDF_SHARED: "1",
+      CAREER_OPS_PDF_SERVER_PROCESS: "1",
+    },
+  });
+  painter.unref();
+}
+
 const result = spawnSync(process.execPath, [nextEntry, ...plan.argv], {
-  cwd: dirname(fileURLToPath(import.meta.url)),
+  cwd: webDir,
   env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
   stdio: "inherit",
 });

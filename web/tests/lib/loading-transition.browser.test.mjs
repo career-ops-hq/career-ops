@@ -89,7 +89,7 @@ test("loading transitions keep context and only latest requests settle Today", {
 
   await t.test("Follow-ups query transition retains page context", async (subtest) => {
     await page.goto(`${origin.origin}/followups`);
-    await page.locator("tbody tr").first().waitFor();
+    await page.locator('tbody[aria-busy="false"]').waitFor();
     const pending = gate();
     let held = false;
     subtest.after(async () => { pending.release(); await page.unrouteAll({ behavior: "wait" }); });
@@ -99,7 +99,7 @@ test("loading transitions keep context and only latest requests settle Today", {
     });
     await page.getByRole("button", { name: /^Company/ }).click();
     await until(() => held);
-    assert.equal(await heading.innerText(), "Follow-up Tracker");
+    assert.equal(await heading.innerText(), "Follow-ups");
     assert.equal(await page.getByPlaceholder("Search company or role…").isVisible(), true);
     assert.equal(await tab("ALL").isVisible(), true);
     assert.equal(await page.locator('tbody[aria-busy="true"]').count(), 1);

@@ -77,6 +77,39 @@ test('Arbeitsagentur confirms matching live detail but leaves 404 uncertain', as
   assert.equal(missing, null);
 });
 
+test('Arbeitsagentur sends the real reference number for every path spelling', async () => {
+  const detail = 'https://www.arbeitsagentur.de/jobsuche/jobdetail/';
+  const b64 = (refnr) => Buffer.from(refnr).toString('base64url');
+  for (const [path, refnr] of [
+    // The form the provider writes and the site's own search results use.
+    ['13319-900588%252F1_6041CS-S', '13319-900588/1_6041CS-S'],
+    // Hexadecimal digits can be lower case.
+    ['13319-900588%252f1_6041CS-S', '13319-900588/1_6041CS-S'],
+    // The detail page answers 404 to this form, but the API still finds the posting.
+    ['13319-900588%2F1_6041CS-S', '13319-900588/1_6041CS-S'],
+    // The form the provider writes.
+    ['17296-0008297%3A01-S', '17296-0008297:01-S'],
+    // A colon is also valid in a path without encoding.
+    ['17296-0008297:01-S', '17296-0008297:01-S'],
+    // A literal percent sign stays in the number, and the text after it is not decoded.
+    ['100%25-remote', '100%-remote'],
+    ['A%2541', 'A%41'],
+  ]) {
+    assert.ok(resolveAtsApi(detail + path).apiUrl.endsWith(`/jobdetails/${b64(refnr)}`), path);
+    const live = await withFetch(
+      async () => new Response(JSON.stringify({ referenznummer: refnr, stellenangebotsTitel: 'Engineer' })),
+      () => checkLivenessViaApi(detail + path),
+    );
+    assert.equal(live.result, 'active', path);
+    const other = await withFetch(
+      async () => new Response(JSON.stringify({ referenznummer: 'other', stellenangebotsTitel: 'Engineer' })),
+      () => checkLivenessViaApi(detail + path),
+    );
+    assert.equal(other, null, path);
+  }
+  assert.equal(resolveAtsApi(`${detail}100%-remote`), null);
+});
+
 test('We Work Remotely feed presence proves live, absence remains unknown', async () => {
   const rss = '<rss><channel><item><title>Acme: Engineer</title><link>https://weworkremotely.com/remote-jobs/acme-staff-engineer</link></item></channel></rss>';
   const live = await withFetch(async () => new Response(rss), () => checkLivenessViaApi(wwr));

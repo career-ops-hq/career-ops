@@ -34,6 +34,21 @@ fi
 # and the runner already spawns scans with process.execPath.
 NODE=$("$NODE" -e 'process.stdout.write(process.execPath)')
 
+# A Homebrew binary resolves to a path that names its version (.../Cellar/node/26.12.1_1/bin/node),
+# and `brew upgrade` deletes that folder, so every scheduled tick then fails with exit 127.
+# The opt symlink (.../opt/node/bin/node) follows the current version; use it when it is the same binary.
+case "$NODE" in
+  */Cellar/*/*/bin/node)
+    BREW_PREFIX=${NODE%%/Cellar/*}
+    BREW_FORMULA=${NODE#*/Cellar/}
+    BREW_FORMULA=${BREW_FORMULA%%/*}
+    STABLE="$BREW_PREFIX/opt/$BREW_FORMULA/bin/node"
+    if [ -x "$STABLE" ] && [ "$("$STABLE" -e 'process.stdout.write(process.execPath)' 2>/dev/null)" = "$NODE" ]; then
+      NODE=$STABLE
+    fi
+    ;;
+esac
+
 # Keep the runner on the same store as the web app: schedulers start with a minimal
 # environment, so bake in the path overrides that are set now.
 ENV_PREFIX=""

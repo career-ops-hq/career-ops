@@ -409,7 +409,12 @@ export function ExploreProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ offers: fresh }),
       });
-      const d = (await r.json()) as { added?: number };
+      const d = (await r.json()) as { added?: number; error?: string };
+      if (d.error || !r.ok) {
+        setError(d.error || `Couldn't add roles to Inbox (${r.status}).`);
+        return 0;
+      }
+      setError("");
       if (d.added && d.added > 0) {
         setAdded((s) => new Set([...s, ...fresh.map((o) => o.url)]));
         // The new inbox rows were written server-side. Invalidate the Next router

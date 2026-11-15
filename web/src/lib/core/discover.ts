@@ -1,6 +1,6 @@
-import fs from "node:fs";
 import path from "node:path";
 import { careerOpsRoot, readInbox, readApplications } from "@/lib/career-ops";
+import { cachedFileValue } from "@/lib/stat-file-cache.mjs";
 import { canon } from "@/lib/explore-ai";
 
 /**
@@ -15,16 +15,23 @@ export function assembleDedupContext(): { urls: Set<string>; lines: string[] } {
   const companies = new Set<string>();
   const roles = new Set<string>();
 
-  // scan-history.tsv col 0 = url (every URL ever surfaced)
+  const historyFile = path.join(careerOpsRoot(), "data", "scan-history.tsv");
+  let history: Set<string> | null = null;
   try {
-    const tsv = fs.readFileSync(path.join(careerOpsRoot(), "data", "scan-history.tsv"), "utf8");
-    const rows = tsv.split("\n");
-    for (let i = 1; i < rows.length; i++) {
-      const url = rows[i].split("\t")[0]?.trim();
-      if (url && /^https?:\/\//i.test(url)) urls.add(canon(url));
-    }
+    history = cachedFileValue(historyFile, "scan-canon-urls", (tsv) => {
+      const known = new Set<string>();
+      const rows = tsv.split("\n");
+      for (let i = 1; i < rows.length; i++) {
+        const url = rows[i].split("\t")[0]?.trim();
+        if (url && /^https?:\/\//i.test(url)) known.add(canon(url));
+      }
+      return known;
+    });
   } catch {
-    /* no history yet */
+    history = null;
+  }
+  if (history) {
+    for (const key of history) urls.add(key);
   }
 
   for (const j of readInbox()) {

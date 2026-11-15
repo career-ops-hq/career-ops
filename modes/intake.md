@@ -27,6 +27,9 @@ confirm.**
 - `config/profile.yml`, `cv.md`, `modes/_profile.md` — merge targets
 - `data/intake-state.json` — fingerprints of already-ingested sources
   (written by `intake.mjs --commit`, user layer)
+- `data/intake-snapshots/` — the extracted text of each committed source, the
+  baseline `intake.mjs --diff` compares against (written by `--commit`, user
+  layer)
 
 > **Symlinks inside `documents/` are followed.** Linking a master CV that lives
 > elsewhere is the point, so the scan reads through the link rather than
@@ -50,11 +53,29 @@ node intake.mjs            # JSON: per-source status + preview
 - Sources with `status: "ingested"` are already merged — **do not
   re-propose them.** Only `new` and `changed` sources carry new material.
 
-## Step 2 — Read the full text of each new or changed source
+## Step 2 — Read each new source in full, and what moved in each changed one
 
 ```bash
-node intake.mjs --text <path-relative-to-documents/>
+node intake.mjs --text <path-relative-to-documents/>   # new sources
+node intake.mjs --diff <path-relative-to-documents/>   # changed sources
 ```
+
+`--diff` prints a unified line diff against the text recorded at the last
+`--commit`: `-` lines were removed from the source, `+` lines were added, and
+each `@@` hunk header names the nearest Markdown heading above it (usually the
+`### Company` block), so you know which entry a change belongs to. Propose only
+from the `+` and `-` lines; the rest was already reviewed.
+
+Its first line says which case you got:
+
+- `intake: … is unchanged` — nothing to propose for that source.
+- `intake: … differs from its snapshot only in line endings or the final
+  newline` — the file was re-saved, not edited. Nothing to propose.
+- `intake: no snapshot to diff … against (reason); full text follows.` — the
+  source was committed before intake kept snapshots, or its snapshot is
+  missing or out of step with the ledger. Treat the rest of the output as the
+  full text, exactly as `--text` would print it. The next `--commit` writes
+  the snapshot, so this happens once per source.
 
 ## Step 3 — Map to proposals (read-before-write)
 
@@ -85,6 +106,10 @@ Rules (non-negotiable):
   show both side by side and let the user pick.
 - Additions only go to fields that are empty or explicitly confirmed for
   replacement.
+- **A removed line is a proposal too, never an automatic deletion.** A `-`
+  line in a `--diff` means the source no longer says it; it does not mean the
+  user wants it gone from `cv.md`. Offer the removal or rewording in the Step 4
+  table like any other change.
 
 ## Step 4 — Present and confirm
 
@@ -108,7 +133,9 @@ node intake.mjs --commit --all               # only if ALL were merged
    Never blanket-commit after a partial confirmation — a declined source
    must stay `new` so it is re-proposed next time. A bare `--commit` with no
    paths records nothing and exits nonzero: recording everything has to be
-   asked for explicitly.
+   asked for explicitly. Each recorded source's extracted text is also saved
+   to `data/intake-snapshots/`, and the next `--diff` compares against it, so
+   a change committed without being merged drops out of every later diff.
 
 3. Verify: `node doctor.mjs` should report the profile prerequisites
    satisfied.

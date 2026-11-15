@@ -1,5 +1,156 @@
 # Changelog
 
+## [0.18.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.17.0...web-v0.18.0) (2026-11-10)
+
+
+### Features
+
+* **cli:** Add Oh My Pi (omp) host support ([#5804](https://github.com/career-ops-hq/career-ops/issues/5804)) ([b273441](https://github.com/career-ops-hq/career-ops/commit/b273441036e8209a1ad125d4f800f09e22b55d3c))
+* **cv-facts:** block bullets whose verb drifted from their source bullet ([#1411](https://github.com/career-ops-hq/career-ops/issues/1411)) ([#6630](https://github.com/career-ops-hq/career-ops/issues/6630)) ([cb3e38c](https://github.com/career-ops-hq/career-ops/commit/cb3e38c7223ed3738e9ce4e044caf108ecc3c21b))
+* **cv-templates:** add renderLint, a warning for what the renderer silently drops ([#5943](https://github.com/career-ops-hq/career-ops/issues/5943)) ([40e0531](https://github.com/career-ops-hq/career-ops/commit/40e05312ba9b3dbfac92d1f52239f85882a12f62))
+* **linkedin:** add alert mail on the scan schedule ([#6112](https://github.com/career-ops-hq/career-ops/issues/6112)) ([51b16d3](https://github.com/career-ops-hq/career-ops/commit/51b16d38bc60e23898dc6b4577f748cb6dc6a264))
+* **scan:** keep a posting close date and show it in the pipeline ([#6597](https://github.com/career-ops-hq/career-ops/issues/6597)) ([6360bbb](https://github.com/career-ops-hq/career-ops/commit/6360bbb4439ec915cfbad4147257360fcd52763f))
+* **web:** browse CV templates on Config and choose the default ([#5945](https://github.com/career-ops-hq/career-ops/issues/5945)) ([290477e](https://github.com/career-ops-hq/career-ops/commit/290477eab6d6c19abecb2bedebe5af051d8bdedd))
+* **web:** cover-letter templates on Config, same gallery as the CV ([#5961](https://github.com/career-ops-hq/career-ops/issues/5961)) ([868f665](https://github.com/career-ops-hq/career-ops/commit/868f6658c844feb1925371c0751f76122407769d))
+* **web:** duplicate, rename and delete your own templates from the gallery ([#5962](https://github.com/career-ops-hq/career-ops/issues/5962)) ([4e7dadb](https://github.com/career-ops-hq/career-ops/commit/4e7dadb98774c8580f7dad26b49dbe3b5a7bf618))
+* **web:** put LinkedIn and the filters under the inbox list ([#6611](https://github.com/career-ops-hq/career-ops/issues/6611)) ([9c417d2](https://github.com/career-ops-hq/career-ops/commit/9c417d25284ddae7f4912b712c42edac6f0f7eef))
+* **web:** show real plan limits in the usage meter ([#6559](https://github.com/career-ops-hq/career-ops/issues/6559)) ([1aa939e](https://github.com/career-ops-hq/career-ops/commit/1aa939e20c8869c3c7b875145d3f2456b89316a8))
+* **web:** sort the inbox and what's new by fit ([#6601](https://github.com/career-ops-hq/career-ops/issues/6601)) ([fd5de43](https://github.com/career-ops-hq/career-ops/commit/fd5de4343c2587051ec519e3d1335ab8e7311ece))
+
+
+### Bug Fixes
+
+* **apply:** refuse Norwegian submit wording in the never-submit guard ([#6629](https://github.com/career-ops-hq/career-ops/issues/6629)) ([fdd1a45](https://github.com/career-ops-hq/career-ops/commit/fdd1a4522131fe4a903d2b36f5cc44dafc000df3))
+* **apply:** refuse Vietnamese submit wording inside a form in the never-submit guard ([#6661](https://github.com/career-ops-hq/career-ops/issues/6661)) ([a0c33a5](https://github.com/career-ops-hq/career-ops/commit/a0c33a51ce787a4b0f3c01d298238a4369c39677))
+* **dedup:** keep one row for one posting ([#6602](https://github.com/career-ops-hq/career-ops/issues/6602)) ([a0e4f0a](https://github.com/career-ops-hq/career-ops/commit/a0e4f0afe53a94883105f61fa92d29f42f11d80f))
+* name a missing data folder and fail unfinished doctor setup ([#6618](https://github.com/career-ops-hq/career-ops/issues/6618)) ([46f375f](https://github.com/career-ops-hq/career-ops/commit/46f375fa978803c53717aafbfb9294de59e8d92c))
+* **pdf:** keep a warn-only page-budget overflow off the output path and out of the manifest ([#6458](https://github.com/career-ops-hq/career-ops/issues/6458)) ([c48d13e](https://github.com/career-ops-hq/career-ops/commit/c48d13e6e052b4846070963ffad9629556ea5412))
+* **scan:** gate conditional workplace geography before Inbox admission ([#6484](https://github.com/career-ops-hq/career-ops/issues/6484)) ([14bfd95](https://github.com/career-ops-hq/career-ops/commit/14bfd9534b3ea98afabeff84b943d80616a4d62b))
+* **status:** map Lapsed to Discarded ([#6598](https://github.com/career-ops-hq/career-ops/issues/6598)) ([3031470](https://github.com/career-ops-hq/career-ops/commit/30314706aabdde3e150e27cf2554b97aad36957f))
+* **web:** a lost chat save no longer locks its own page out with 409 ([#6513](https://github.com/career-ops-hq/career-ops/issues/6513)) ([d7e9787](https://github.com/career-ops-hq/career-ops/commit/d7e97876a1d952c1c7912c72103b583bc77d9cef))
+* **web:** ask before marking an application Applied ([#6600](https://github.com/career-ops-hq/career-ops/issues/6600)) ([794981f](https://github.com/career-ops-hq/career-ops/commit/794981f318c05085792ca63c38db27adf83ff4d9))
+* **web:** avoid oversized evaluation prompts on Windows ([#6719](https://github.com/career-ops-hq/career-ops/issues/6719)) ([0c64497](https://github.com/career-ops-hq/career-ops/commit/0c644975943621e9281d8feb60e2b782d91ce57a))
+* **web:** count each Claude message once in the usage meter ([#6558](https://github.com/career-ops-hq/career-ops/issues/6558)) ([a8edc16](https://github.com/career-ops-hq/career-ops/commit/a8edc166cc9f93816e18ce6cce6824f766a4af64))
+* **web:** download the tailored CV and reveal it in the file manager ([#6596](https://github.com/career-ops-hq/career-ops/issues/6596)) ([b7703d5](https://github.com/career-ops-hq/career-ops/commit/b7703d5e5ecda5bc049b8a5272f7cac25c9fb2a7))
+* **web:** keep keyboard focus inside the follow-up and bug report dialogs ([#6079](https://github.com/career-ops-hq/career-ops/issues/6079)) ([c35c383](https://github.com/career-ops-hq/career-ops/commit/c35c38389bb6b77ec3067d1d246d67a54c1c098f))
+* **web:** keep QuickEvaluate on Today after setup ([#6669](https://github.com/career-ops-hq/career-ops/issues/6669)) ([24da28e](https://github.com/career-ops-hq/career-ops/commit/24da28e8307d19f3002cf32eb953ad990d71da95))
+* **web:** keep tailored CV experience in reverse chronology ([#6483](https://github.com/career-ops-hq/career-ops/issues/6483)) ([9e1d62b](https://github.com/career-ops-hq/career-ops/commit/9e1d62b827114de8907d35cdbf68316c17043ac2))
+* **web:** keep the version pill and Ask button inside the sidebar ([#6126](https://github.com/career-ops-hq/career-ops/issues/6126)) ([88c5fd3](https://github.com/career-ops-hq/career-ops/commit/88c5fd3647ee021b396c29c808e10e3fc943cedc))
+* **web:** label the insights rate as a share of applications sent ([#6137](https://github.com/career-ops-hq/career-ops/issues/6137)) ([dc24bc3](https://github.com/career-ops-hq/career-ops/commit/dc24bc366f597954eac81e4fdd4f84cc000007f9))
+* **web:** label the report archetype so it is not a second job title ([#6141](https://github.com/career-ops-hq/career-ops/issues/6141)) ([3259395](https://github.com/career-ops-hq/career-ops/commit/325939550333bf9903fe163f32f7903c0d80e92f))
+* **web:** link Today to the rest of the follow-ups ([#6115](https://github.com/career-ops-hq/career-ops/issues/6115)) ([2bad97a](https://github.com/career-ops-hq/career-ops/commit/2bad97a888ab0514aee24f27214172fb6e3852ec))
+* **web:** open the Studio from the HTML path stored in pdf-index ([#6550](https://github.com/career-ops-hq/career-ops/issues/6550)) ([da64912](https://github.com/career-ops-hq/career-ops/commit/da6491238330b035df86a25b7ea327cbdf7b01cc))
+* **web:** paste the tailored resume on the apply checklist ([#6776](https://github.com/career-ops-hq/career-ops/issues/6776)) ([545df87](https://github.com/career-ops-hq/career-ops/commit/545df87f0c9786709630b12ebb37745bf9b7be44))
+* **web:** polish Today, Pipeline load, and job 404s ([#6619](https://github.com/career-ops-hq/career-ops/issues/6619)) ([7567a05](https://github.com/career-ops-hq/career-ops/commit/7567a05e532b07355cac4f12a5c15d5e9111b053))
+* **web:** rank the week's matches before paging them ([#6783](https://github.com/career-ops-hq/career-ops/issues/6783)) ([d5b579a](https://github.com/career-ops-hq/career-ops/commit/d5b579a6c31a369f07f4da6492c4d897edd8d5c5))
+* **web:** read script-rendered JDs before the evaluate worker starts ([#6604](https://github.com/career-ops-hq/career-ops/issues/6604)) ([e56ab08](https://github.com/career-ops-hq/career-ops/commit/e56ab0833c00bc075c59f87fad026801b07bbf27))
+* **web:** refuse Workday, iCIMS, and UKG before opening a browser ([#6595](https://github.com/career-ops-hq/career-ops/issues/6595)) ([829ddc0](https://github.com/career-ops-hq/career-ops/commit/829ddc07fdca442ba7cf5ecb47b35b79bde75fa8))
+* **web:** show evaluation stops as unscored review outcomes ([#6496](https://github.com/career-ops-hq/career-ops/issues/6496)) ([8ed548b](https://github.com/career-ops-hq/career-ops/commit/8ed548b9d5594884fa2c0b5ed9861492d17c2ece))
+* **web:** show the CLI's own stderr when a run exits cleanly with no output ([#6579](https://github.com/career-ops-hq/career-ops/issues/6579)) ([d776aa9](https://github.com/career-ops-hq/career-ops/commit/d776aa917c4df689c1a031ecdc9cd75c1c10a959))
+* **web:** show the real PDF render failure, not the warnings printed before it ([#6624](https://github.com/career-ops-hq/career-ops/issues/6624)) ([d8f0ab5](https://github.com/career-ops-hq/career-ops/commit/d8f0ab551d5d4c1c19d073442ccd97751372b11e))
+* **web:** spill oversized agent prompts to a file instead of argv ([#6743](https://github.com/career-ops-hq/career-ops/issues/6743)) ([80033a1](https://github.com/career-ops-hq/career-ops/commit/80033a13641b058b4ecea425d2528e161713db1b))
+* **web:** stop printing the conversion rate on the volume funnel ([#6136](https://github.com/career-ops-hq/career-ops/issues/6136)) ([637e3f5](https://github.com/career-ops-hq/career-ops/commit/637e3f580ccb106a0257f292c158a44133f48931))
+* **web:** stop the CV review from saying it already saved ([#6108](https://github.com/career-ops-hq/career-ops/issues/6108)) ([2726d66](https://github.com/career-ops-hq/career-ops/commit/2726d6640f5b906f39d5cde453daad6b2c55d339))
+* **web:** the logo route's curated lookup guessed an un-folded domain first ([#6711](https://github.com/career-ops-hq/career-ops/issues/6711)) ([dff7000](https://github.com/career-ops-hq/career-ops/commit/dff70003b19322e86a745399df5f1e7e9d33ea1b))
+* **web:** undo the last CV Studio edit ([#6183](https://github.com/career-ops-hq/career-ops/issues/6183)) ([dc5e25e](https://github.com/career-ops-hq/career-ops/commit/dc5e25e384c1a24627a5972b0d11e642f9bdd610))
+
+
+### Performance Improvements
+
+* **web:** memoize tracker rows so one interaction re-renders only rows that changed ([#6058](https://github.com/career-ops-hq/career-ops/issues/6058)) ([e83160c](https://github.com/career-ops-hq/career-ops/commit/e83160c1705a44bcdb83b93be1f55757589662aa))
+* **web:** mount only the pipeline rows on screen ([#6093](https://github.com/career-ops-hq/career-ops/issues/6093)) ([aa0e77f](https://github.com/career-ops-hq/career-ops/commit/aa0e77fb909b8b0326318dcd9f8cee3f2ff471e7))
+* **web:** reuse the parsed tracker, inbox and scan history while the file is unchanged ([#6104](https://github.com/career-ops-hq/career-ops/issues/6104)) ([94a244e](https://github.com/career-ops-hq/career-ops/commit/94a244ed332cf5c9dbb02c62746fd5b0a25d455e))
+
+## [0.17.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.16.0...web-v0.17.0) (2026-11-05)
+
+
+### Features
+
+* **apply:** upload the tailored CV under a recruiter-facing file name ([#6399](https://github.com/career-ops-hq/career-ops/issues/6399)) ([#6478](https://github.com/career-ops-hq/career-ops/issues/6478)) ([a889bff](https://github.com/career-ops-hq/career-ops/commit/a889bff5951a46e900317790361ac9655a7c774c))
+* **cv:** reject stock resume wording the candidate did not write ([#6178](https://github.com/career-ops-hq/career-ops/issues/6178)) ([f9ba76b](https://github.com/career-ops-hq/career-ops/commit/f9ba76ba5dcab44cd47170439778c09b5f7e395a))
+* **linkedin:** paste job alerts without a Google account ([#6096](https://github.com/career-ops-hq/career-ops/issues/6096)) ([5f96824](https://github.com/career-ops-hq/career-ops/commit/5f9682406a80da0e1bede04a1e6b1347e6362561))
+* **reports:** write the Machine Summary as the last report section ([#6157](https://github.com/career-ops-hq/career-ops/issues/6157)) ([89cccea](https://github.com/career-ops-hq/career-ops/commit/89cccea4744fb27dc712cdff0bc0782b1c244a6b))
+* **scan:** optional years-of-experience filter read from the JD (closes [#6153](https://github.com/career-ops-hq/career-ops/issues/6153)) ([#6154](https://github.com/career-ops-hq/career-ops/issues/6154)) ([0c4b1e7](https://github.com/career-ops-hq/career-ops/commit/0c4b1e719bb760e2c210aa276b961a55e40f296e))
+* **web:** choose full or focused job evaluations ([#5917](https://github.com/career-ops-hq/career-ops/issues/5917)) ([5cc2b21](https://github.com/career-ops-hq/career-ops/commit/5cc2b2142d87702797f24e6cdc96fb74d851bf13))
+* **web:** import PDF and TeX CVs from the editor ([#6238](https://github.com/career-ops-hq/career-ops/issues/6238)) ([d0a1dfe](https://github.com/career-ops-hq/career-ops/commit/d0a1dfe7aadc5c2706fcee9b3c511a54da0f0f7f))
+* **web:** jump to any page or application with Ctrl+K ([#6084](https://github.com/career-ops-hq/career-ops/issues/6084)) ([c45f766](https://github.com/career-ops-hq/career-ops/commit/c45f766915bfd677df987feb4a651203bcab38df))
+* **web:** save a pipeline view, including a score floor ([#6103](https://github.com/career-ops-hq/career-ops/issues/6103)) ([34bff2e](https://github.com/career-ops-hq/career-ops/commit/34bff2e7f648524d3dea5eaf231a4e82e2886d6a))
+* **web:** set tracker status from the keyboard ([#6102](https://github.com/career-ops-hq/career-ops/issues/6102)) ([2a80eb4](https://github.com/career-ops-hq/career-ops/commit/2a80eb434b3a78d088c4e29977ebf9d21080f6f1))
+* **web:** show a tailored-resume column in the Pipeline table ([#6341](https://github.com/career-ops-hq/career-ops/issues/6341)) ([3604713](https://github.com/career-ops-hq/career-ops/commit/360471369351f68fafe1122c5726669422f916c2)), closes [#6338](https://github.com/career-ops-hq/career-ops/issues/6338)
+* **web:** skip and save inbox rows from the keyboard ([#6101](https://github.com/career-ops-hq/career-ops/issues/6101)) ([917d60b](https://github.com/career-ops-hq/career-ops/commit/917d60b5656e64c8f5097037b8e4501f2e8ed082))
+* **web:** undo a Skip or Applied from the Today decision cards ([#5769](https://github.com/career-ops-hq/career-ops/issues/5769)) ([47f236f](https://github.com/career-ops-hq/career-ops/commit/47f236f2fdfcdc2582ae3d7cccdf2ecd18471ddd))
+
+
+### Bug Fixes
+
+* **followups:** list the most overdue follow-up first within each urgency ([#6073](https://github.com/career-ops-hq/career-ops/issues/6073)) ([c75b240](https://github.com/career-ops-hq/career-ops/commit/c75b240b06104c0cbb28822c10b832b7f87b6bff))
+* **modes/tr:** write English report header labels and unfreeze is-ilani.md ([#3828](https://github.com/career-ops-hq/career-ops/issues/3828)) ([#5845](https://github.com/career-ops-hq/career-ops/issues/5845)) ([7d2588a](https://github.com/career-ops-hq/career-ops/commit/7d2588a0b0d30ef18f019bd78afd25195ef88ffb))
+* **rank:** run npm-installed agent CLIs on Windows ([#5787](https://github.com/career-ops-hq/career-ops/issues/5787)) ([1a03532](https://github.com/career-ops-hq/career-ops/commit/1a03532c65adea6f563fb9f8ebb0c3470aa29108))
+* remove evaluated jobs from the pending inbox ([#5906](https://github.com/career-ops-hq/career-ops/issues/5906)) ([b911da4](https://github.com/career-ops-hq/career-ops/commit/b911da438293af3396847ccba2be96319db7c21e))
+* **web/explore:** preserve posting dates when adding to pipeline ([#5690](https://github.com/career-ops-hq/career-ops/issues/5690)) ([b326f22](https://github.com/career-ops-hq/career-ops/commit/b326f22baa7ffce740a425e076df164137713c31))
+* **web:** a breakdown bucket nothing was submitted from shows no conversion rate ([#5875](https://github.com/career-ops-hq/career-ops/issues/5875)) ([1366774](https://github.com/career-ops-hq/career-ops/commit/136677488def5252b74fe73a3b98ac6eb3a47906))
+* **web:** add a Skip to content link for keyboard users ([#6063](https://github.com/career-ops-hq/career-ops/issues/6063)) ([0c91005](https://github.com/career-ops-hq/career-ops/commit/0c910052bd6057c591aa53385973c309ed194ebb))
+* **web:** announce why an analytics rate shows a dash ([#6239](https://github.com/career-ops-hq/career-ops/issues/6239)) ([d71716f](https://github.com/career-ops-hq/career-ops/commit/d71716f3bc32173f71415fea164994d7c46c0c58)), closes [#5969](https://github.com/career-ops-hq/career-ops/issues/5969)
+* **web:** count CV preview pages from the content ([#6180](https://github.com/career-ops-hq/career-ops/issues/6180)) ([2a0e05e](https://github.com/career-ops-hq/career-ops/commit/2a0e05e5e4e01559b5f52355139b5479ca2bc98e))
+* **web:** darken light-mode status text so it clears WCAG AA ([#6078](https://github.com/career-ops-hq/career-ops/issues/6078)) ([8629c18](https://github.com/career-ops-hq/career-ops/commit/8629c18525fd64cf93f8438efdbc470be34cff91))
+* **web:** declare the full NODE_ENGINES range in web's engines ([#5993](https://github.com/career-ops-hq/career-ops/issues/5993)) ([5ba0cda](https://github.com/career-ops-hq/career-ops/commit/5ba0cda1757ad0d2bf22e58058c04042abdf97c3))
+* **web:** disable automatic agent-rules generation in next.config.mjs ([#6150](https://github.com/career-ops-hq/career-ops/issues/6150)) ([6e795a7](https://github.com/career-ops-hq/career-ops/commit/6e795a78c2a5f508c1663c0649fed1810229dc53))
+* **web:** do not cache a failed logo lookup as a permanent miss ([#5903](https://github.com/career-ops-hq/career-ops/issues/5903)) ([60b8800](https://github.com/career-ops-hq/career-ops/commit/60b88000bc9dd95e5921d05b44d356c149cf819b))
+* **web:** do not flag an empty install as a CV with no skills ([#6046](https://github.com/career-ops-hq/career-ops/issues/6046)) ([d02c718](https://github.com/career-ops-hq/career-ops/commit/d02c718b8e38658e8487a2138de0fabef742a8fb))
+* **web:** explain a missing portals.yml before the health check ([#6109](https://github.com/career-ops-hq/career-ops/issues/6109)) ([ba97fbe](https://github.com/career-ops-hq/career-ops/commit/ba97fbe48204b75b1f7d4221b923542cca722c80))
+* **web:** hide Config choices that do not work yet ([#6122](https://github.com/career-ops-hq/career-ops/issues/6122)) ([f76924d](https://github.com/career-ops-hq/career-ops/commit/f76924d6091c07ebbf8759479f9b172141f30273))
+* **web:** keep CV edits and show when they are saved ([#6179](https://github.com/career-ops-hq/career-ops/issues/6179)) ([e922a6e](https://github.com/career-ops-hq/career-ops/commit/e922a6e26868d0c3f2b466a5988823abed9dd0bb))
+* **web:** keep cv preview header lines on their own lines ([#6068](https://github.com/career-ops-hq/career-ops/issues/6068)) ([1bf9bb9](https://github.com/career-ops-hq/career-ops/commit/1bf9bb94692a07b75ae270b2960defbc5df67bcd))
+* **web:** keep empty tracker copy when filters are active ([#6298](https://github.com/career-ops-hq/career-ops/issues/6298)) ([47f33a0](https://github.com/career-ops-hq/career-ops/commit/47f33a047342eb3a239a6d704db3017fda50f954))
+* **web:** keep pipeline and follow-up search in the URL ([#6060](https://github.com/career-ops-hq/career-ops/issues/6060)) ([3f409aa](https://github.com/career-ops-hq/career-ops/commit/3f409aa816916715f5049ad5bdf8677cf9451b81))
+* **web:** keep profile.yml comments on profile and cadence saves ([#5678](https://github.com/career-ops-hq/career-ops/issues/5678)) ([95813f3](https://github.com/career-ops-hq/career-ops/commit/95813f3fd4b8edf125047844f89c080bbd3feda8))
+* **web:** keep the app shell on unreadable and missing reports ([#6075](https://github.com/career-ops-hq/career-ops/issues/6075)) ([5e2c28f](https://github.com/career-ops-hq/career-ops/commit/5e2c28f873035429a92f3ebcb320c3c872071691))
+* **web:** keep the example person out of a first profile ([#6359](https://github.com/career-ops-hq/career-ops/issues/6359)) ([480b44b](https://github.com/career-ops-hq/career-ops/commit/480b44ba6ac5d7076377ceba4e26683f4d0454ce))
+* **web:** keep the follow-ups table in place while the cadence loads ([#6074](https://github.com/career-ops-hq/career-ops/issues/6074)) ([91fb762](https://github.com/career-ops-hq/career-ops/commit/91fb762e87aa1c651c34300ade59b3b8d807ba29))
+* **web:** keep the last CV Studio edit when you leave ([#6182](https://github.com/career-ops-hq/career-ops/issues/6182)) ([444d4e8](https://github.com/career-ops-hq/career-ops/commit/444d4e87fed01be6b8fad55e71081d775723678c))
+* **web:** keep your place when a Pipeline back link returns to the list ([#6072](https://github.com/career-ops-hq/career-ops/issues/6072)) ([dc2e2b7](https://github.com/career-ops-hq/career-ops/commit/dc2e2b7fc707d370205906bc64da8d6ee4de2227))
+* **web:** launch every remaining web child process without a console ([#5902](https://github.com/career-ops-hq/career-ops/issues/5902)) ([b802349](https://github.com/career-ops-hq/career-ops/commit/b802349868ca86b3c352af716d98ee16ffdc680c))
+* **web:** launch the six analytics routes with process.execPath and windowsHide ([#5900](https://github.com/career-ops-hq/career-ops/issues/5900)) ([91d0d07](https://github.com/career-ops-hq/career-ops/commit/91d0d07ba1978a17d3bc5c98d4fd1320c212fda4))
+* **web:** lead Today with the queue once there is work ([#6114](https://github.com/career-ops-hq/career-ops/issues/6114)) ([0a87359](https://github.com/career-ops-hq/career-ops/commit/0a873593316c9eeec54072233361b4a17114538a))
+* **web:** never overwrite an unreadable modes/_profile.md with a stub ([#5839](https://github.com/career-ops-hq/career-ops/issues/5839)) ([824dc51](https://github.com/career-ops-hq/career-ops/commit/824dc51b3f3c7935655f1fc254ff20a78f2a5ca9))
+* **web:** offer Generate when a marked CV has no file ([#6116](https://github.com/career-ops-hq/career-ops/issues/6116)) ([ef9006f](https://github.com/career-ops-hq/career-ops/commit/ef9006fa3665385095ece50263b55c004ee77106))
+* **web:** onboarding offers the assistant only when a CLI can run ([#6432](https://github.com/career-ops-hq/career-ops/issues/6432)) ([5236b3a](https://github.com/career-ops-hq/career-ops/commit/5236b3a99d1737f91458d413b7087bb9b0312275))
+* **web:** open CV Studio on the row's own report, not the row number's ([#6340](https://github.com/career-ops-hq/career-ops/issues/6340)) ([1772d4b](https://github.com/career-ops-hq/career-ops/commit/1772d4bbe75f087bc26b2541405c8d007da2883f))
+* **web:** paint brand text with the brand-text token ([#6081](https://github.com/career-ops-hq/career-ops/issues/6081)) ([de1ab91](https://github.com/career-ops-hq/career-ops/commit/de1ab9133a694991419a9031d8eedf3fc391db91))
+* **web:** persist the Config CLI pick from an effect, not the setCliId updater ([#6034](https://github.com/career-ops-hq/career-ops/issues/6034)) ([2d6d83b](https://github.com/career-ops-hq/career-ops/commit/2d6d83b02c6a22652791a306c2a661ada884a6fa))
+* **web:** pin the Homebrew opt path in the scan schedule so brew upgrade does not break it ([#6375](https://github.com/career-ops-hq/career-ops/issues/6375)) ([907422a](https://github.com/career-ops-hq/career-ops/commit/907422a91f62da3667bd03cc7e94c1b1b9fe26ac))
+* **web:** print reports without app chrome, collapsed sections or dark text ([#6067](https://github.com/career-ops-hq/career-ops/issues/6067)) ([3e0d298](https://github.com/career-ops-hq/career-ops/commit/3e0d2981fb57375809c533e89775e6e41410e48f))
+* **web:** read Node's bracketed error code as a scan failure cause ([#5996](https://github.com/career-ops-hq/career-ops/issues/5996)) ([4814e80](https://github.com/career-ops-hq/career-ops/commit/4814e80cfd40776af7aa525bfbc6ae354ebcfb47))
+* **web:** read report headers saved with Windows line endings ([#6052](https://github.com/career-ops-hq/career-ops/issues/6052)) ([19f1826](https://github.com/career-ops-hq/career-ops/commit/19f1826492bc9321a59bb3fe10fafeaea10a67dd))
+* **web:** recognise Chinese legitimacy tiers in the apply line and badge tone ([#5925](https://github.com/career-ops-hq/career-ops/issues/5925)) ([7383ee7](https://github.com/career-ops-hq/career-ops/commit/7383ee77abf520e8a1cd07980ce630abaaa95fa1))
+* **web:** refresh config consumers after same-tab saves ([#5807](https://github.com/career-ops-hq/career-ops/issues/5807)) ([a66df7f](https://github.com/career-ops-hq/career-ops/commit/a66df7fc78905da72c03a5379ac2cc871a317c1e))
+* **web:** refresh documents when job completes ([#6435](https://github.com/career-ops-hq/career-ops/issues/6435)) ([0184805](https://github.com/career-ops-hq/career-ops/commit/0184805d575f6e25eb780623b34e6e1087b157a9))
+* **web:** refuse a cadence save from a tab that loaded an older profile ([#6053](https://github.com/career-ops-hq/career-ops/issues/6053)) ([7b517c5](https://github.com/career-ops-hq/career-ops/commit/7b517c5ad6ff2e99143adc305d8bd3fb1e6c6319))
+* **web:** remove the grey strip on the right edge of every desktop page ([#6064](https://github.com/career-ops-hq/career-ops/issues/6064)) ([53604f6](https://github.com/career-ops-hq/career-ops/commit/53604f68fabfe0803f468d35823637b7b41d0ad0))
+* **web:** render CV studio preview markdown inside the page ([#6181](https://github.com/career-ops-hq/career-ops/issues/6181)) ([6292c19](https://github.com/career-ops-hq/career-ops/commit/6292c1967d2af786080ebfda88d6ca3647ad804e))
+* **web:** resolve custom CV templates from data root ([#6324](https://github.com/career-ops-hq/career-ops/issues/6324)) ([74054e6](https://github.com/career-ops-hq/career-ops/commit/74054e65e6778c7e2132c366275d98e9334e4e3f))
+* **web:** resolve the A-H evaluation modes of modes/sg and modes/vi ([#5707](https://github.com/career-ops-hq/career-ops/issues/5707)) ([0f8f93a](https://github.com/career-ops-hq/career-ops/commit/0f8f93a1a20eda9f0d42abcc5e22cfe754dffc4c))
+* **web:** run core scripts and read system files from the checkout, not the data root ([#4430](https://github.com/career-ops-hq/career-ops/issues/4430)) ([c6fec47](https://github.com/career-ops-hq/career-ops/commit/c6fec475f3208141a7265c08d25239646c5f7c57))
+* **web:** show a second posting with the same title in What's New ([#6148](https://github.com/career-ops-hq/career-ops/issues/6148)) ([f421868](https://github.com/career-ops-hq/career-ops/commit/f4218685548733173315ce499b4999a9da9efbf4))
+* **web:** show Open on the follow-up report link ([#6120](https://github.com/career-ops-hq/career-ops/issues/6120)) ([b74dbbf](https://github.com/career-ops-hq/career-ops/commit/b74dbbfd42837ac7116e35055e1de304ae807bb9))
+* **web:** show the quality-threshold reasoning when the core recommends no cutoff ([#5876](https://github.com/career-ops-hq/career-ops/issues/5876)) ([43066a4](https://github.com/career-ops-hq/career-ops/commit/43066a48a5d9a59fe7ceeed52a1db217f76d5579))
+* **web:** show unknown statuses instead of counting them as evaluated ([#6129](https://github.com/career-ops-hq/career-ops/issues/6129)) ([6b2507a](https://github.com/career-ops-hq/career-ops/commit/6b2507a8c4a1e824054078515f1ba210c92da0e7))
+* **web:** show what the tracker search filtered and how to undo it ([#6065](https://github.com/career-ops-hq/career-ops/issues/6065)) ([7396388](https://github.com/career-ops-hq/career-ops/commit/73963880fb2439d21435284e8bebea7a73981b63))
+* **web:** state the project Node floor (22.13) in web's engines ([#5928](https://github.com/career-ops-hq/career-ops/issues/5928)) ([3f7a280](https://github.com/career-ops-hq/career-ops/commit/3f7a2802642d010797e667ac300672c174b57d91))
+* **web:** tell an empty tracker apart from a search with no matches ([#6054](https://github.com/career-ops-hq/career-ops/issues/6054)) ([3e5df61](https://github.com/career-ops-hq/career-ops/commit/3e5df61561d50db1f21fe9085aa64b07a89b2b9d))
+* **web:** title the empty Documents page and name the next step ([#6121](https://github.com/career-ops-hq/career-ops/issues/6121)) ([148be0f](https://github.com/career-ops-hq/career-ops/commit/148be0f43cbb57f2f84c677a8f0dd18ccc838964))
+* **web:** treat a non-JSON rewrite response as a failed rewrite ([#6405](https://github.com/career-ops-hq/career-ops/issues/6405)) ([202befe](https://github.com/career-ops-hq/career-ops/commit/202befeac775cdb9d95e316da1712df7b6d1a13b))
+* **web:** treat a one-job CV as ready and lead first-run with setup files ([#6118](https://github.com/career-ops-hq/career-ops/issues/6118)) ([0ce892e](https://github.com/career-ops-hq/career-ops/commit/0ce892e19727164b54c9c5915b71db01daf77180))
+* **web:** use the visible label as the accessible name ([#6080](https://github.com/career-ops-hq/career-ops/issues/6080)) ([445c0d3](https://github.com/career-ops-hq/career-ops/commit/445c0d35c2043f1f1362cc27cee5342762c1b4f4))
+
+
+### Performance Improvements
+
+* **web:** keep one browser for dashboard PDF export ([#6177](https://github.com/career-ops-hq/career-ops/issues/6177)) ([7915e6e](https://github.com/career-ops-hq/career-ops/commit/7915e6e3129c07218ecec501761ccd92a7ce4476))
+* **web:** load the assistant's markdown renderer only when the console opens ([#6059](https://github.com/career-ops-hq/career-ops/issues/6059)) ([5f2824c](https://github.com/career-ops-hq/career-ops/commit/5f2824c6287a9a96cc957792d595566214ffc8bf))
+* **web:** send Explore only the fields it matches on ([#6089](https://github.com/career-ops-hq/career-ops/issues/6089)) ([91be704](https://github.com/career-ops-hq/career-ops/commit/91be7046af517b9abb98eef34ab231a05da0d884))
+* **web:** stop re-reading the tracker for every row on Search stats ([#6066](https://github.com/career-ops-hq/career-ops/issues/6066)) ([f69babb](https://github.com/career-ops-hq/career-ops/commit/f69babb8800cd8f7d9e342984345baa99803654c))
+
 ## [0.16.0](https://github.com/career-ops-hq/career-ops/compare/web-v0.15.0...web-v0.16.0) (2026-10-23)
 
 

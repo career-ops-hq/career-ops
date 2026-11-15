@@ -16,7 +16,7 @@ import { openTrackerTransaction } from '../tracker-utils.mjs';
 import { parseStatusLog } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
 import { daysBetween, isoMinusDays, noteTag, classifyRows } from '../close-stale.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'close-stale.mjs');
@@ -257,7 +257,7 @@ test('bad --days / --today / unknown flags fail without touching the tracker', (
     const before = readFileSync(tracker, 'utf-8');
     for (const args of [['--days', '0'], ['--days', 'abc'], ['--days', '-5'], ['--today', '2026-13-45'], ['--confirm', '--dryrun'], ['--json', '--summary']]) {
       const r = run(root, args);
-      assert.notEqual(r.status, 0, describeSpawn(r, `${args.join(' ')} must fail`));
+      assert.ok(exitedNonZero(r), describeSpawn(r, `${args.join(' ')} must fail`));
       assert.equal(readFileSync(tracker, 'utf-8'), before);
     }
   });

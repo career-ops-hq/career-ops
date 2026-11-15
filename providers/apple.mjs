@@ -106,10 +106,27 @@ export function parseHydration(html) {
   }
 }
 
+/**
+ * A city arrives as a bare `Cupertino` with `countryName` beside it, and a
+ * location filter that names a country has only this string to match. Level 1
+ * entries are the country already, in a shorter spelling: `United States`
+ * against `United States of America`.
+ *
+ * @param {any} l
+ */
+function placeOf(l) {
+  const name = l?.name;
+  const country = l?.countryName;
+  // Only two strings are joined. Anything else passes through as it did before
+  // the join, where name.includes() would throw and fail the whole page.
+  if (typeof name !== 'string' || typeof country !== 'string') return name;
+  return name && country && l.level !== 1 && !name.includes(country) ? `${name}, ${country}` : name;
+}
+
 /** @param {any} r */
 function locationOf(r) {
   const names = (Array.isArray(r.locations) ? r.locations : [])
-    .map((/** @type {any} */ l) => l?.name)
+    .map(placeOf)
     .filter(Boolean);
   const uniq = [...new Set(names)];
   if (uniq.length) return uniq.join('; ');
@@ -133,6 +150,12 @@ function urlOf(r) {
   return `${BASE}/en-us/details/${id}/${slug}${team ? `?team=${team}` : ''}`;
 }
 
+// Each search row carries a `type`, "REQ" or "PIPE". It is only in the
+// hydration data, not in the visible job text, and the posting does not say
+// what PIPE means, so the note claims no more than the label. It is a hint on
+// the pipeline entry; nothing is filtered on it.
+const PIPE_NOTE = 'Apple labels this posting PIPE: it may be a talent pipeline, not a specific opening';
+
 /** @param {any} r @param {string} company @returns {Job|null} */
 function toJob(r, company) {
   const url = urlOf(r);
@@ -148,6 +171,7 @@ function toJob(r, company) {
     // survives a title edit, which the URL does not (#4076's Job.externalId).
     ...(externalId ? { externalId } : {}),
     ...(Number.isNaN(posted) ? {} : { postedAt: posted }),
+    ...(r.type === 'PIPE' ? { note: PIPE_NOTE } : {}),
   };
 }
 
@@ -263,6 +287,10 @@ export default {
       console.error(`⚠️  apple: ${entry.name} hit the ${maxPages}-page cap on at least one search — raise max_pages on this entry for more`);
     }
 
-    return [...byUrl.values()];
+    const result = [...byUrl.values()];
+    // Canonical partial-read signal (lib/board-truncation.mjs): scan.mjs logs
+    // this board `partial` instead of `reachable`.
+    if (truncated) /** @type {any} */ (result).truncated = { reason: 'page-cap', fetched: result.length };
+    return result;
   },
 };

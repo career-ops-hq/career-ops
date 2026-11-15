@@ -18,6 +18,9 @@ equal(issueFilter('Paris, France'), false, 'the out-of-region control still fail
 // The same compiler serves all four tiers. Each row pairs a real standalone
 // match with an embedded match that must fail. Non-Latin keyword edges need
 // boundaries too; astral letters must be read as code points, not code units.
+// Han and kana edges are the exception and are covered in
+// tests/location-filter-cjk.test.mjs: those scripts put no separator between
+// words, so 東京 has to match 東京都.
 const boundaryCases = [
   ['al,', 'Huntsville, AL, United States', 'Montréal, Quebec, Canada'],
   ['montr', 'Montr', 'Montréal'],
@@ -27,8 +30,6 @@ const boundaryCases = [
   ['cafe\u0301', '(Cafe\u0301)', 'Cafe\u0301teria'],
   ['é', '(É)', 'Pré'],
   ['é', '(É)', 'Évry'],
-  ['東京', '(東京)', '新東京'],
-  ['東京', '(東京)', '東京都'],
   ['𐐀', '(𐐀)', 'x𐐀'],
   ['𐐀', '(𐐀)', '𐐀x'],
   ['al,', 'AL, United States', '𐐀al,'],

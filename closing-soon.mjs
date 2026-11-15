@@ -11,8 +11,8 @@
  * go in a separate `overdue` group; rows where a closing marker was found but
  * no date could be read go in `unparsed`, so nothing is silently dropped.
  *
- * Zero LLM, read-only: nothing is ever written to the tracker or any other
- * file, and no tracker column or schema is involved (issue #5412).
+ * Zero LLM. The report only reads. It writes nothing, and no tracker
+ * column is added (issue #5412).
  *
  * Recognized dates, each introduced by `closes`, `closing date`, `closing`,
  * `deadline` or `apply by` (optionally followed by `:`, `on`, `by`, `is` and a
@@ -447,8 +447,8 @@ const USAGE = `Usage:
   node closing-soon.mjs --interviews <path>     # a different active-interviews.md (needs --clashes)
   node closing-soon.mjs --help                  # show this message
 
-Read-only: reads Notes (and jds/ captures when Notes have no closing marker)
-and never writes to the tracker or any other file.`;
+The report reads Notes (and jds/ captures when Notes have no closing marker)
+and writes nothing.`;
 
 function fail(message) {
   console.error(message);
@@ -494,7 +494,10 @@ if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-  if (hasFlag(args, '--json') && hasFlag(args, '--summary')) fail('Choose one of --json or --summary.');
+
+  if (hasFlag(args, '--json') && hasFlag(args, '--summary')) {
+    fail('Choose one of --json or --summary.');
+  }
 
   const valueOf = (flag) => (hasFlag(args, flag) ? flagValue(args, flag) : null);
 
@@ -535,6 +538,7 @@ if (isMainModule(import.meta.url)) {
   } catch (err) {
     fail(err.message);
   }
+
 
   const dataRoot = getCareerOpsRoot();
   const trackerPath = valueOf('--tracker') || resolveTrackerPath(dataRoot);

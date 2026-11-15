@@ -561,7 +561,7 @@ Kết thúc phần thân báo cáo bằng khối `## Risk Summary` ngay sau kh�
 
 **Chỉ tổng hợp, không phán đoán mới.** Mỗi dòng trích hoặc liên kết đến kết luận đã có của tín hiệu nguồn. Bản tóm tắt không bao giờ chấm lại, đổi trọng số hay ghi đè -- nếu một dòng trông sai, sửa ở tín hiệu nguồn, không phải ở đây.
 
-Ba trạng thái mỗi dòng: `✅ {kết luận rõ}` / `⚠️ {phát hiện}` / `— not evaluated`. **`— not evaluated` là trạng thái hạng nhất:** khi một tín hiệu không chạy được, nêu rõ thay vì bỏ dòng, để một bản tóm tắt toàn ✅ đáng tin. **Ngoại lệ có tên:** dòng Interview red flags hiển thị trường hợp chưa đánh giá là `— no interview sessions yet`; dòng AI-screening disclosure có thể hiển thị `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` và `— no jurisdiction match`, ánh xạ lần lượt tới `corroborating_only` và `no_match` trong `risk_summary`. Đây không phải trạng thái thứ tư.
+Ba trạng thái mỗi dòng: `✅ {kết luận rõ}` / `⚠️ {phát hiện}` / `— not evaluated`. **`— not evaluated` là trạng thái hạng nhất:** khi một tín hiệu không chạy được, nêu rõ thay vì bỏ dòng, để một bản tóm tắt toàn ✅ đáng tin. **Ngoại lệ có tên:** dòng Interview red flags hiển thị trường hợp chưa đánh giá là `— no interview sessions yet`; dòng AI-screening disclosure có thể hiển thị `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` và `— no jurisdiction match`, ánh xạ lần lượt tới `corroborating_only` và `no_match` trong `risk_summary`. Đây không phải trạng thái thứ tư. File redflags có marker chưa xác minh là trạng thái `— not evaluated` thông thường, không thuộc ngoại lệ này: file tồn tại, nên dòng không được nói là chưa có buổi phỏng vấn nào.
 
 **Tên dòng, tiêu đề `| Signal | Status |` và các từ trạng thái là chuỗi cố định, không dịch**: trường `risk_summary` của Machine Summary phụ thuộc vào chúng.
 
@@ -570,7 +570,7 @@ Ba trạng thái mỗi dòng: `✅ {kết luận rõ}` / `⚠️ {phát hiện}`
 | Posting legitimacy | Tầng đánh giá Block G | `✅ High Confidence`, hoặc `⚠️ {tầng} — {lý do một dòng}` với Proceed with Caution / Suspicious |
 | Employment classification | Tín hiệu phân loại việc làm trong Block G | `✅ clear` khi kiểm tra đã chạy và không thấy gì; `⚠️ contractor-style language: "{cụm trích}"` khi cờ kích hoạt; `— not evaluated` khi không chạy được |
 | Culture screen | Trường Culture screen ở Block A | `✅ pass`, hoặc `⚠️ caution — {bằng chứng}` / `⚠️ fail — {bằng chứng}`; `— not evaluated` nếu chưa sàng lọc |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md` (từ mode `interview-redflag`) | **Tham chiếu chéo, không sao chép:** nếu file tồn tại, hiển thị mức cảnh báo hiện tại cùng liên kết tương đối `[{level}](../interview-prep/{company-slug}-redflags.md)`; nếu không `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md` (từ mode `interview-redflag`) | **Tham chiếu chéo, không sao chép:** nếu file tồn tại, hiển thị mức cảnh báo hiện tại cùng liên kết tương đối `[{level}](../interview-prep/{company-slug}-redflags.md)`; nếu không `— no interview sessions yet`. **File chưa xác minh:** nếu file chứa marker `<!-- career-ops:redflags-unverified -->` (mode `interview-redflag` giữ lại file này mà không có buổi phỏng vấn thật nào làm căn cứ), không bao giờ hiển thị mức cảnh báo của nó: ghi `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)`, và `risk_summary.interview_redflags` là `not_evaluated`. Tìm marker, không dựa vào câu chữ của ghi chú: ghi chú được viết bằng ngôn ngữ đầu ra của người dùng. |
 | AI claims vs. infrastructure | Kiểm tra lệch AI/hạ tầng trong Block G, khi có | Nếu báo cáo có kiểm tra này, phản chiếu kết luận (`✅ consistent` / `⚠️ {phát hiện}`); nếu không `— not evaluated` |
 | AI-screening disclosure | Tín hiệu công bố sàng lọc AI trong Block G (Signal 15), khi có | Nếu báo cáo có kiểm tra: `✅ discloses AI use` khi (a) kích hoạt, `ℹ️ {jurisdiction_name} requires disclosure; posting is silent` khi chỉ (b), `— no jurisdiction match` khi không bên nào kích hoạt vì khu vực không có dòng bảng; nếu không `— not evaluated` |
 
@@ -688,9 +688,6 @@ Lưu bản đánh giá đầy đủ vào `reports/{###}-{company-slug}-{YYYY-MM-
 
 ---
 
-## Machine Summary
-(YAML fence cho script phía sau -- xem yêu cầu bên dưới)
-
 ## A) Role Summary
 (nội dung đầy đủ block A)
 
@@ -721,7 +718,7 @@ Lưu bản đánh giá đầy đủ vào `reports/{###}-{company-slug}-{YYYY-MM-
 ## Score Evidence
 (năm chiều chấm điểm, trạng thái bằng chứng và nguồn, câu hỏi chưa giải quyết, tầng evidence-confidence và ưu tiên xác minh)
 
-## H) Draft Application Answers
+## H) Draft Application Answers (draft)
 (chỉ khi điểm >= 4.5 -- bản nháp trả lời cho form ứng tuyển)
 
 ---
@@ -734,11 +731,14 @@ Lưu bản đánh giá đầy đủ vào `reports/{###}-{company-slug}-{YYYY-MM-
 
 ## Job Description (archived verbatim)
 (toàn văn tin tuyển dụng, dán nguyên văn — xem yêu cầu bên dưới)
+
+## Machine Summary
+(YAML fence cho script phía sau -- xem yêu cầu bên dưới)
 ```
 
 **Tiêu đề phần và nhãn header giữ nguyên tiếng Anh.** `## Machine Summary`, dấu `(lead)` và `## Risk Summary` (cả hai lần xuất hiện), các nhãn `**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:**`, `**Legitimacy:**`, `**Work Auth:**`, `**PDF:**` và các tiêu đề `## A)`-`## H)` được script và giao diện web đọc theo tên; dịch chúng sẽ làm mất trường trong trình xem một cách âm thầm. Nhãn `**Quyết định:**` là ngoại lệ. Nội dung bên dưới tiêu đề viết bằng `{language.output}`.
 
-**Machine Summary (bắt buộc):** mọi báo cáo mang một YAML fence `## Machine Summary` ngay sau header -- cùng schema, tên field chính xác và quy tắc với khối "Machine Summary" trong `batch/batch-prompt.md` (không nhân đôi schema ở đây; file đó là nguồn sự thật). Nó gồm `advertised_comp`: con số lương của chính JD **nguyên văn** (ví dụ `"25-35 triệu"`), hoặc `null` khi JD không nêu -- không bao giờ ước lượng, không bao giờ thay bằng dữ liệu thị trường đã nghiên cứu. Key này gieo quan sát lương công bố mà `node salary-gap.mjs` đọc. Nó cũng gồm `risk_summary`: khối Risk Summary phản chiếu dạng map, và `requirement_importance`: bảng Block B phản chiếu từng dòng, mang tầng bằng chứng, mức quan trọng và match của mỗi dòng (`[]` khi JD không cho ra danh sách yêu cầu dùng được). Giới hạn `inferred` từ cổng Block B cũng áp dụng trong YAML -- `importance` không bao giờ là `critical` hoặc `high` khi `evidence: inferred`. Các key YAML và giá trị enum giữ nguyên tiếng Anh.
+**Machine Summary (bắt buộc):** mọi báo cáo mang một YAML fence `## Machine Summary` ở cuối báo cáo, sau `## Job Description (archived verbatim)` -- cùng schema, tên field chính xác và quy tắc với khối "Machine Summary" trong `batch/batch-prompt.md` (không nhân đôi schema ở đây; file đó là nguồn sự thật). Nó gồm `advertised_comp`: con số lương của chính JD **nguyên văn** (ví dụ `"25-35 triệu"`), hoặc `null` khi JD không nêu -- không bao giờ ước lượng, không bao giờ thay bằng dữ liệu thị trường đã nghiên cứu. Key này gieo quan sát lương công bố mà `node salary-gap.mjs` đọc. Nó cũng gồm `risk_summary`: khối Risk Summary phản chiếu dạng map, và `requirement_importance`: bảng Block B phản chiếu từng dòng, mang tầng bằng chứng, mức quan trọng và match của mỗi dòng (`[]` khi JD không cho ra danh sách yêu cầu dùng được). Giới hạn `inferred` từ cổng Block B cũng áp dụng trong YAML -- `importance` không bao giờ là `critical` hoặc `high` khi `evidence: inferred`. Các key YAML và giá trị enum giữ nguyên tiếng Anh.
 
 **Lưu trữ JD (bắt buộc, #2789):** mọi báo cáo PHẢI mang mục `## Job Description (archived verbatim)` với toàn văn tin dán nguyên trạng -- không bao giờ tóm tắt hay diễn giải. Header `**URL:**` đơn thuần không phải bản lưu: nó là con trỏ trực tiếp sẽ hỏng khi tin bị đóng hoặc gỡ -- việc này thường xảy ra trong những tuần giữa lúc nộp đơn và vòng phỏng vấn sau, và không còn cách khôi phục yêu cầu gốc. Đây là cơ chế chính, không phải dự phòng. Nếu JD rất dài, ghi nó bằng `archive-posting.mjs --report={num}` và thay vì văn bản, đặt trong mục này **chính xác** câu `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` -- `check-jd-archive.mjs` chỉ công nhận câu con trỏ chuẩn này khi nó truy ngược về đúng số báo cáo qua `findCaptureForReport`; mục chỉ gồm câu này mới được coi là con trỏ, nếu thêm văn xuôi khác sẽ bị coi là chính văn bản lưu trữ.
 

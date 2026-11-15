@@ -10,6 +10,7 @@
 import { pass, fail } from './helpers.mjs';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 // Pin the shipped domain list, then take a FRESH module instance.
 //
@@ -226,6 +227,44 @@ ok('Indeed: jk (and vjk on a results page) is the posting id, the region host is
     { domain: 'indeed.com', id: 'abc123' });
   assert.deepEqual(aggregatorPostingId('https://www.indeed.com/jobs?q=marketing&vjk=abc123'),
     { domain: 'indeed.com', id: 'abc123' });
+});
+ok('Himalayas: company slug + job slug is the posting id; the feed\'s utm params are not', () => {
+  // The feed's guid is /companies/{companySlug}/jobs/{jobSlug}; its applicationLink
+  // is the same URL plus ?utm_source=api. Both are one posting.
+  const id = { domain: 'himalayas.app', id: 'acme/product-manager' };
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager'), id);
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager?utm_source=api'), id);
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager/'), id);
+  // Same company, another job slug: another posting (Himalayas suffixes a
+  // repeated title with a number rather than reusing the slug).
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager-6458775437'),
+    { domain: 'himalayas.app', id: 'acme/product-manager-6458775437' });
+  // Same job slug, another company: another posting.
+  assert.notEqual(aggregatorPostingId('https://himalayas.app/companies/globex/jobs/product-manager').id, id.id);
+});
+ok('Himalayas: anything the liveness resolver refuses stays UNKNOWN', () => {
+  for (const u of [
+    'https://himalayas.app/companies/acme',                              // company page
+    'https://himalayas.app/jobs/product-manager',                        // not a posting path
+    'https://himalayas.app/companies/acme/jobs/product-manager?ref=x',   // non-tracking param
+    'https://www.himalayas.app/companies/acme/jobs/product-manager',     // host the resolver does not accept
+  ]) assert.equal(aggregatorPostingId(u), null, u);
+});
+ok('Jobicy: the leading number of /jobs/{id}-{slug} is the posting id', () => {
+  // Every feed item's url carries its numeric `id` this way.
+  assert.deepEqual(aggregatorPostingId('https://jobicy.com/jobs/161691-product-manager-auth'),
+    { domain: 'jobicy.com', id: '161691' });
+  assert.deepEqual(aggregatorPostingId('https://www.jobicy.com/jobs/161691-product-manager-auth/'),
+    { domain: 'jobicy.com', id: '161691' });
+  // A slug-only path or a bare number is not the feed's shape: UNKNOWN.
+  assert.equal(aggregatorPostingId('https://jobicy.com/jobs/senior-ai-engineer'), null);
+  assert.equal(aggregatorPostingId('https://jobicy.com/jobs/161691'), null);
+});
+ok('the updater ships himalayas-posting.mjs, which url-key.mjs now imports', () => {
+  // url-key.mjs is a system file: an upgraded install whose updater had no entry
+  // for the resolver would check out a url-key.mjs that cannot load.
+  const manifest = readFileSync(fileURLToPath(new URL('../lib/update-manifest.mjs', import.meta.url)), 'utf-8');
+  for (const f of ['himalayas-posting.mjs', 'lib/is-main-module.mjs']) assert.ok(manifest.includes(`'${f}'`), f);
 });
 ok('no extractable id is UNKNOWN, never a guessed one', () => {
   // An aggregator whose id shape this module does not yet know, a URL on a

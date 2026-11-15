@@ -41,6 +41,27 @@ test("Analytics rebase retains Progress, Search stats and core Insights", {
         ["/analytics", "/analytics?view=insights", "/analytics?view=search-stats"]);
     });
   }
+  await t.test("funnel bars are the share of tracked roles and print no conversion rate", async () => {
+    const response = await page.goto(`${origin.origin}/analytics`);
+    assert.equal(response.status(), 200);
+    const panel = page.locator("section").filter({ has: page.getByRole("heading", { name: "Pipeline progress", exact: true }) });
+    const bars = panel.getByRole("img");
+    await bars.first().waitFor();
+    const rows = await bars.evaluateAll((els) => els.map((el) => ({
+      label: el.getAttribute("aria-label"),
+      width: el.firstElementChild?.style.width,
+      count: el.nextElementSibling?.textContent,
+    })));
+    assert.ok(rows.length >= 2, JSON.stringify(rows));
+    assert.match(rows[0].label, /^Tracked: \d+$/);
+    const tracked = Number(rows[0].count);
+    assert.ok(tracked > 0, JSON.stringify(rows));
+    for (const row of rows) {
+      assert.doesNotMatch(row.label, /percent/);
+      assert.match(row.count, /^\d+$/, `funnel row prints only its count: ${JSON.stringify(row)}`);
+      assert.ok(Math.abs(parseFloat(row.width) - (Number(row.count) / tracked) * 100) < 0.01, JSON.stringify(row));
+    }
+  });
   await t.test("Search stats still renders and links to core Insights", async () => {
     const response = await page.goto(`${origin.origin}/analytics?view=search-stats&tab=progress`);
     assert.equal(response.status(), 200);

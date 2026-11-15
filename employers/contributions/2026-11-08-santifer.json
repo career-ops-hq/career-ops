@@ -1,0 +1,15 @@
+{
+  "id": "2026-11-08-santifer",
+  "contributor": "santifer",
+  "signed_by": "Santiago Fernández de Valderrama",
+  "rows": 53,
+  "source": "community",
+  "origin": "Hand-picked from employer boards already named in this repository (templates/portals.example.yml, and the Workday provider and discovery tests), and each board was checked live on 2026-11-08.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": ["ODbL-1.0", "CC0-1.0"],
+  "attribution": "First boards, hand-picked by @santifer",
+  "date": "2026-11-08"
+}

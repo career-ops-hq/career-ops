@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,15 +21,19 @@ function withMarket(market, fn) {
   const root = mkdtempSync(join(tmpdir(), "lang-eval-mode-"));
   mkdirSync(join(root, "config"));
   writeFileSync(join(root, "config", "profile.yml"), `language:\n  modes_dir: modes/${market}\n`);
-  cpSync(join(REPO_ROOT, "modes", market), join(root, "modes", market), { recursive: true });
-  const prev = { root: process.env.CAREER_OPS_ROOT, profile: process.env.CAREER_OPS_PROFILE };
+  // A split layout: the profile is the user's (data root) and the market's modes
+  // are system files, read from the checkout. The data root deliberately has no modes/.
+  const prev = { root: process.env.CAREER_OPS_ROOT, code: process.env.CAREER_OPS_CODE_ROOT, profile: process.env.CAREER_OPS_PROFILE };
   process.env.CAREER_OPS_ROOT = root;
+  process.env.CAREER_OPS_CODE_ROOT = REPO_ROOT;
   delete process.env.CAREER_OPS_PROFILE;
   try {
     return fn();
   } finally {
     if (prev.root === undefined) delete process.env.CAREER_OPS_ROOT;
     else process.env.CAREER_OPS_ROOT = prev.root;
+    if (prev.code === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = prev.code;
     if (prev.profile !== undefined) process.env.CAREER_OPS_PROFILE = prev.profile;
     rmSync(root, { recursive: true, force: true });
   }

@@ -43,6 +43,7 @@
  *   node tracker.mjs query [--status Applied] [--company acme] [--role designer] [--csv]
  *                          [--since 2026-01-01] [--min-score 4] [--id N] [--limit 20] [--json]
  *   node tracker.mjs history --id N             # status transitions: the ledger's, plus changes only a sync saw
+ *   node tracker.mjs history N                  # same read; one bare tracker number
  *   node tracker.mjs export [--out FILE] [--force]  # inverse: applications.db → markdown (stdout by default)
  *                                               # --force: write even when columns would be dropped
  *   node tracker.mjs delete --num N [--dry-run] # remove one application row from applications.md + reindex
@@ -56,6 +57,7 @@ import { createHash } from 'crypto';
 import { dirname, resolve, join, basename } from 'path';
 import { pathToFileURL, fileURLToPath } from 'url';
 import { format } from 'util';
+import { performance } from 'node:perf_hooks';
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { loadYaml } from './lib/yaml-document.mjs';
@@ -64,6 +66,7 @@ import {
 } from './tracker-parse.mjs';
 import {
   canonicalizeTrackerPath, openTrackerTransaction, writeFileAtomic, loadCanonicalStates,
+  companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
 import { parseStatusLog, foldObservations } from './funnel-velocity.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -132,6 +135,9 @@ class TrackerExit extends Error {
 // variant of #3500: that one looked for this file under the data root, this one
 // looked for it under whatever directory the shell happened to be in.
 const CODEBASE_ROOT = dirname(fileURLToPath(import.meta.url));
+// Debug-only timing output, gated behind CAREER_OPS_DEBUG=1 so normal runs are
+// unchanged and no new stderr appears for users.
+const DEBUG = process.env.CAREER_OPS_DEBUG === '1';
 const STATES_PATH = join(CODEBASE_ROOT, 'templates/states.yml');
 const HEADER = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |';
 const SEPARATOR = '|---|------|---------|------|-------|--------|-----|--------|-------|';
@@ -187,6 +193,14 @@ async function loadSqlite(ctx) {
 
 export function openDb(DatabaseSync, path = defaultDbPath()) {
   mkdirSync(dirname(path) || '.', { recursive: true });
+  // No file yet, or an empty one: SQLite reads both as a database with no
+  // schema. Looked at before the open, which creates the file.
+  let isNewDb;
+  try {
+    isNewDb = statSync(path).size === 0;
+  } catch (err) {
+    isNewDb = err?.code === 'ENOENT';
+  }
   const db = new DatabaseSync(path);
   // A schema step can throw against a db some other version or tool left
   // behind (an `applications` table without `status` fails the index below).
@@ -200,6 +214,21 @@ export function openDb(DatabaseSync, path = defaultDbPath()) {
     // once — and the default busy_timeout of 0 makes any overlap fail instantly.
     db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON'); // SQLite ignores REFERENCES without this
+    // A new index gets its whole schema in ONE transaction. Run statement by
+    // statement, the six below are six commits, and every commit flushes the
+    // rollback journal and the database to disk: 18 to 24 synchronous flushes,
+    // depending on the platform, before a single row is indexed. On a slow disk
+    // that is most of what building an index costs. On windows-latest, whose
+    // %TEMP% is on the slow C: drive, it is what now and then kept the writers
+    // in tests/tracker-writer-lock.test.mjs that rebuild the index running past
+    // the harness's 10s budget, while the writers that never open SQLite (one
+    // flush each) always made it (#5514). An existing index keeps the
+    // statement-by-statement path: each IF NOT EXISTS is then a no-op that
+    // writes and flushes nothing, and a statement that does migrate an old
+    // index still waits out a busy lock, which it would not do inside a
+    // transaction that began as a read. A throw before the COMMIT is rolled
+    // back by the close in the catch below.
+    if (isNewDb) db.exec('BEGIN IMMEDIATE');
     db.exec(`
       CREATE TABLE IF NOT EXISTS applications (
         id      INTEGER PRIMARY KEY,
@@ -233,6 +262,7 @@ export function openDb(DatabaseSync, path = defaultDbPath()) {
       CREATE INDEX IF NOT EXISTS idx_apps_company ON applications(company);
       CREATE INDEX IF NOT EXISTS idx_events_app ON status_events(app_id);
     `);
+    if (isNewDb) db.exec('COMMIT');
     // CREATE TABLE IF NOT EXISTS leaves a db built by an older version alone, so
     // a column added after the fact has to be migrated in explicitly. Cheap and
     // idempotent; the rows are refilled by the next sync either way.
@@ -700,9 +730,12 @@ function reportDiagnostics(diag, ctx) {
 }
 
 function syncIndex(db, states, ctx) {
+  const rebuildStarted = performance.now();
   const { apps, diag, layout } = parseTracker(states, ctx);
+  const parsedAt = performance.now();
   const ledger = readLedger(states, ctx);
   const timelines = foldObservations(ledger.observations);
+  const ledgeredAt = performance.now();
   const observationsByNum = new Map();
   for (const obs of ledger.observations) {
     if (!observationsByNum.has(obs.num)) observationsByNum.set(obs.num, []);
@@ -762,6 +795,11 @@ function syncIndex(db, states, ctx) {
   } catch (err) {
     db.exec('ROLLBACK');
     throw err;
+  }
+  const committedAt = performance.now();
+  if (DEBUG) {
+    ctx.error(`tracker.mjs sync: indexed ${apps.length} applications in ${Math.round(committedAt - rebuildStarted)}ms `
+      + `(parse ${Math.round(parsedAt - rebuildStarted)}ms, ledger ${Math.round(ledgeredAt - parsedAt)}ms, write ${Math.round(committedAt - ledgeredAt)}ms)`);
   }
   return { apps, diag, ledger };
 }
@@ -884,8 +922,12 @@ async function query(args, ctx) {
     if (!canonical) { ctx.error(`Error: unknown status "${status}". Canonical: ${states.labels.join(', ')}`); throw new TrackerExit(1); }
     where.push('status = ?'); params.push(canonical);
   }
+  // Applied in JS after the other predicates. SQL LIKE misses a row when the
+  // query only adds a legal suffix ("Acme Labs, Inc." vs "Acme Labs"). The
+  // suffix rule is the same one set-status uses. A word that is not a
+  // corporate form still has to be a substring, so "Acme Robotics" does not
+  // match "Acme Labs".
   const company = flagValue(args, '--company');
-  if (company) { where.push('company LIKE ?'); params.push(`%${company}%`); }
   const role = flagValue(args, '--role');
   if (role) { where.push('role LIKE ?'); params.push(`%${role}%`); }
   const since = flagValue(args, '--since');
@@ -910,9 +952,21 @@ async function query(args, ctx) {
   let sql = 'SELECT id, date, company, role, score, status, pdf, report, notes FROM applications'
     + (where.length ? ' WHERE ' + where.join(' AND ') : '') + ' ORDER BY id DESC';
   const limit = parseInt(flagValue(args, '--limit') || '0', 10);
-  if (limit > 0) { sql += ' LIMIT ?'; params.push(limit); }
+  // Limit after the company filter. A SQL LIMIT taken first can hide the
+  // suffix match behind a page of unrelated substring hits, or drop it when
+  // the LIKE matches nothing.
+  if (!company && limit > 0) { sql += ' LIMIT ?'; params.push(limit); }
 
-  const rows = db.prepare(sql).all(...params);
+  let rows = db.prepare(sql).all(...params);
+  if (company) {
+    const needle = company.toLowerCase();
+    rows = rows.filter((r) => {
+      const cell = String(r.company ?? '');
+      if (cell.toLowerCase().includes(needle)) return true;
+      return companiesMatchIgnoringCorporateForm(cell, company);
+    });
+    if (limit > 0) rows = rows.slice(0, limit);
+  }
   if (args.includes('--json')) {
     ctx.log(JSON.stringify(rows, null, 2));
   } else if (args.includes('--csv')) {
@@ -926,12 +980,52 @@ async function query(args, ctx) {
   }
 }
 
+// One tracker number: `--id N`, `--id=N`, or a single bare number. find.mjs and
+// set-status.mjs already take the bare form. A second token, or a number next
+// to --id, is a usage error so the wrong row is never printed.
+function historyId(args, ctx) {
+  const positional = [];
+  let hasIdFlag = false;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (typeof arg !== 'string' || arg === '') continue;
+    if (arg === '--id') {
+      hasIdFlag = true;
+      // The operand is not a second selector. A missing one falls through to
+      // the positive-integer check (the CLI already rejects it).
+      if (args[i + 1] !== undefined && !String(args[i + 1]).startsWith('--')) i += 1;
+      continue;
+    }
+    if (arg.startsWith('--id=')) {
+      hasIdFlag = true;
+      continue;
+    }
+    if (arg.startsWith('-')) continue;
+    positional.push(arg);
+  }
+  if (hasIdFlag && positional.length > 0) {
+    ctx.error(`Error: history takes either --id N or one tracker number, not both (${positional.join(' ')})`);
+    throw new TrackerExit(1);
+  }
+  if (!hasIdFlag && positional.length > 1) {
+    ctx.error(`Error: history takes one tracker number, got ${positional.join(' ')}. Example: node tracker.mjs history --id 318`);
+    throw new TrackerExit(1);
+  }
+  const idRaw = hasIdFlag ? flagValue(args, '--id') : positional[0];
+  const id = parseApplicationId(idRaw);
+  if (id === null) {
+    const got = idRaw == null ? '' : ` Got "${idRaw}".`;
+    ctx.error(`Error: history requires --id N (a positive integer).${got} Example: node tracker.mjs history 318`);
+    throw new TrackerExit(1);
+  }
+  return id;
+}
+
 async function history(args, ctx) {
+  const id = historyId(args, ctx);
   const DatabaseSync = await loadSqlite(ctx);
   const db = ctx.openDb(DatabaseSync);
   ensureFresh(db, loadStates(ctx), ctx);
-  const id = parseApplicationId(flagValue(args, '--id'));
-  if (id === null) { ctx.error('Error: history requires --id N (a positive integer)'); throw new TrackerExit(1); }
   const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(id);
   if (!app) { ctx.error(`Error: no application with id ${id}`); throw new TrackerExit(1); }
   ctx.log(`#${app.id} ${app.company} — ${app.role}`);
@@ -1239,6 +1333,7 @@ const SUBCOMMAND_FLAGS = {
     known: ['--id', '--help', '-h'],
     valueFlags: ['--id'],
     usage: 'Usage: node tracker.mjs history --id N\n'
+      + '  a bare number is the same read: node tracker.mjs history N\n'
       + '  status transitions from status-log.tsv, plus changes only a sync saw',
   },
   export: {

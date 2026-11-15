@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { careerOpsRoot, rootScript, trackerCanDelete } from "@/lib/career-ops";
+import { rootScript, trackerCanDelete } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { isTrackerWriting } from "@/lib/core/run-registry";
 import { parseOrphanReport } from "@/lib/tracker-delete-output.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
       try {
         // windowsHide: see api/doctor/route.ts — a stale inherited console
         // kills every child with 0xC0000142 on Windows; never inherit one.
-        child = spawn(process.execPath, args, { cwd: careerOpsRoot(), env: process.env, windowsHide: true });
+        child = spawn(process.execPath, args, { cwd: resolveCodeRoot(process.cwd(), process.env), env: process.env, windowsHide: true });
       } catch (e) {
         resolve({ code: 1, err: e instanceof Error ? e.message : "failed to start tracker.mjs" });
         return;

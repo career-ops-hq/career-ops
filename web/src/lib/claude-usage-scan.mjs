@@ -56,7 +56,12 @@ export function createUsageScanner({ root, now = Date.now, fs = fsPromises }) {
       const u = d?.message?.usage;
       const ts = d?.timestamp ? Date.parse(d.timestamp) : NaN;
       if (!u || Number.isNaN(ts)) continue;
-      entry.events.push({ ts, tokens: claudeUsageTokens(u) });
+      // Claude Code writes one API message several times (a line per streamed
+      // content block, and again when a session is resumed or forked), each
+      // carrying the same message id and requestId. Key it so it is counted once.
+      const id = d.message?.id;
+      const key = id ? `${id}:${d.requestId ?? ""}` : null;
+      entry.events.push({ ts, tokens: claudeUsageTokens(u), key });
     }
   }
 
@@ -148,6 +153,16 @@ export function createUsageScanner({ root, now = Date.now, fs = fsPromises }) {
     let t7 = 0;
     let m5 = 0;
     let m7 = 0;
+    // One event per message and window: the copies differ only in how far the
+    // streamed usage had got, so keep the largest copy that falls inside the
+    // window. Picked per window, so a large copy outside the 5-hour window
+    // does not hide a smaller copy inside it.
+    const by7 = new Map();
+    const by5 = new Map();
+    const keep = (map, e) => {
+      const prev = map.get(e.key);
+      if (!prev || e.tokens > prev.tokens) map.set(e.key, e);
+    };
     for (const [file, entry] of files) {
       if (!present.has(file)) {
         files.delete(file); // gone, or untouched for over a week
@@ -155,13 +170,27 @@ export function createUsageScanner({ root, now = Date.now, fs = fsPromises }) {
       }
       entry.events = entry.events.filter((e) => e.ts >= w7);
       for (const e of entry.events) {
-        t7 += e.tokens;
-        m7 += 1;
-        if (e.ts >= w5) {
-          t5 += e.tokens;
-          m5 += 1;
+        if (!e.key) {
+          // No id to match copies on: counted as before.
+          t7 += e.tokens;
+          m7 += 1;
+          if (e.ts >= w5) {
+            t5 += e.tokens;
+            m5 += 1;
+          }
+          continue;
         }
+        keep(by7, e);
+        if (e.ts >= w5) keep(by5, e);
       }
+    }
+    for (const e of by7.values()) {
+      t7 += e.tokens;
+      m7 += 1;
+    }
+    for (const e of by5.values()) {
+      t5 += e.tokens;
+      m5 += 1;
     }
     return { window5h: { tokens: t5, messages: m5 }, window7d: { tokens: t7, messages: m7 }, computedAt: t };
   }

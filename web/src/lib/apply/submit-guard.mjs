@@ -49,8 +49,11 @@
  *             name?: string, title?: string, alt?: string }} ElementFacts
  */
 
-// Whitespace-collapsed, uncapped: what the guard classifies on.
-const collapse = (s) => (s || "").replace(/\s+/g, " ").trim();
+// Whitespace-collapsed, uncapped: what the guard classifies on. NFC, because the
+// terms below are written precomposed and a label can arrive decomposed: a
+// Vietnamese «Nộp» typed with a combining-mark keyboard is n, o, U+0323,
+// U+0302, p, which the precomposed term would never match.
+const collapse = (s) => (s || "").normalize("NFC").replace(/\s+/g, " ").trim();
 // The 80-char cap is for the snapshot line the planner reads, never for the
 // decision: a submit term past the cap must still be seen by the guard.
 const clean = (s) => collapse(s).slice(0, 80);
@@ -141,6 +144,13 @@ const SUBMIT_TERMS = [
   "जमा करें", "सबमिट",
   // da
   "indsend", "send ansøgning",
+  // nb (and nn, where the spelling is the same or adds senda): "Send søknad"
+  // and "Send inn" file the application on Webcruiter, Jobbnorge, Easycruit,
+  // Visma Talent and Teamtailor's Norwegian forms. The bare "send" in
+  // IN_FORM_TERMS already catches both inside a form; they are here because
+  // a form-less ATS renders them outside one, the same reason as Danish
+  // "send ansøgning". "fullfør" mirrors English "finish".
+  "send(e|a)? søknad(en)?", "send(e|a)? inn", "fullfør( søknad(en)?)?",
   // tr
   "gönder", "başvur",
 ];
@@ -159,11 +169,24 @@ const SUBMIT_TERMS = [
 // <form>. The cost is a control like Indeed NL's bare "Versturen" on its
 // phone-confirmation step, which is refused too: the loop stops there and
 // the person clicks it, which is the side this guard errs on.
+//
+// Norwegian "søk" is both "apply" and "search", so it can only live here: in
+// the global tier it would refuse every site search button in Norway. Outside
+// a form, "Søk på stillingen", "Søk nå" (nn "Søk no") and "Søk her" are the
+// way in, like "Apply for this job". Inside a form the bare verb is held, so
+// it covers those phrases too, and a search form's "Søk" button is refused
+// with them: the lost click this guard accepts. The `\p{L}` boundaries keep
+// it off "Søknad", "Søker" and "Søkeord".
 const IN_FORM_TERMS = [
   "apply( now| for this job)?",
   "postuler", "candidati", "candidatar(-se|-me)?", "solliciteren", "solliciteer", "aplikuj", "bewerben",
-  "postular(me|se)?", "відгукнутися", "lamar", "आवेदन करें", "ansøg",
+  "postular(me|se)?", "відгукнутися", "lamar", "आवेदन करें", "ansøg", "søk",
   "send",
+  // vi: «nộp» (file, submit), «ứng tuyển» (apply), «gửi» (send). In this tier
+  // only, like "apply": CareerViet opens the application from the posting page
+  // with «Nộp đơn ứng tuyển» (the Apply control liveness-core.mjs reads, #4832),
+  // so outside a form these words are the way in. Inside one they file it.
+  "nộp", "ứng tuyển", "gửi",
 ];
 
 // The same two tiers for Japanese, Chinese and Korean, matched as substrings:

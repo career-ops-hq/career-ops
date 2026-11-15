@@ -22,7 +22,15 @@ import { chromium } from 'playwright';
 import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
-import { appendToPipeline, appendToScanHistory, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import {
+  appendToPipeline,
+  appendToScanHistory,
+  appendUnrecordedToScanHistory,
+  BROWSER_PROCESS_ENV,
+  DATA_ROOT as SCAN_DATA_ROOT,
+  PORTALS_PATH,
+  SCAN_HISTORY_PATH,
+} from './scan.mjs';
 import { createAdmissionGate } from './lib/admission-gate.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -30,6 +38,7 @@ import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { scanHistoryDataLines } from './lib/scan-history-columns.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 // ── Config ───────────────────────────────────────────────────────────
 
@@ -298,7 +307,10 @@ async function main() {
   // blacklist, location or date skip that is meant to be revisited later.
   const handledThisRun = new Set();
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunchOptions(
+    { headless: true },
+    { projectRoot: SCAN_DATA_ROOT, processEnv: BROWSER_PROCESS_ENV },
+  ));
   const context = await browser.newContext({ locale: 'de-DE', timezoneId: 'Europe/Berlin' });
   const page = await context.newPage();
 
@@ -351,10 +363,12 @@ async function main() {
   if (!DRY_RUN) {
     if (newOffers.length > 0) await appendToPipeline(newOffers);
     if (newOffers.length > 0) await appendToScanHistory(newOffers, date, 'added');
-    if (titleSkipped.length > 0) await appendToScanHistory(titleSkipped, date, 'skipped_title');
-    if (locationSkipped.length > 0) await appendToScanHistory(locationSkipped, date, 'skipped_location');
-    if (dateSkipped.length > 0) await appendToScanHistory(dateSkipped, date, 'skipped_date');
-    if (dupeSkipped.length > 0) await appendToScanHistory(dupeSkipped, date, 'skipped_dup');
+    // Every search hands the same skipped postings back, so each is recorded
+    // once per status, not once per run (#2695, as scan.mjs records its own).
+    await appendUnrecordedToScanHistory(titleSkipped, date, 'skipped_title');
+    await appendUnrecordedToScanHistory(locationSkipped, date, 'skipped_location');
+    await appendUnrecordedToScanHistory(dateSkipped, date, 'skipped_date');
+    await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
   // Summary

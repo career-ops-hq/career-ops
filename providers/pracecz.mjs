@@ -36,11 +36,13 @@
 import { fetchTextWithRetry, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_URL = 'https://www.prace.cz/nabidky/';
 const POSTING_URL_BASE = 'https://www.prace.cz/nabidka/';
 const PAGE_SIZE = 40;
 const DEFAULT_MAX_PAGES = 10;
+const MAX_PAGES_CAP = 1500; // hard ceiling even for a user override
 const INTER_PAGE_DELAY_MS = 1000;
 const NOT_FOUND = 'pracecz: currentPageItems/totalItems not found — page markup changed?';
 
@@ -170,12 +172,18 @@ export default {
     }
 
     const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
-    const configured = Number.isInteger(entry?.max_pages) && entry.max_pages > 0 ? entry.max_pages : DEFAULT_MAX_PAGES;
+
+    const configured =
+      Number.isInteger(entry?.max_pages) && entry.max_pages > 0
+        ? Math.min(entry.max_pages, MAX_PAGES_CAP)
+        : DEFAULT_MAX_PAGES;
+
     const maxPages = probing ? Math.min(configured, ctx.maxPages) : configured;
 
     /** @type {Map<string, Job>} */
     const byId = new Map();
     const errors = [];
+    let laterPageFailed = false;
 
     for (const keyword of keywords) {
       let total = 0;
@@ -191,7 +199,10 @@ export default {
           if (probing) throw err;
           const message = (err && /** @type {Error} */ (err).message) || err;
           if (page === 1) errors.push([keyword, message]);
-          else console.error(`⚠️  pracecz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
+          else {
+            laterPageFailed = true;
+            console.error(`⚠️  pracecz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
+          }
           break;
         }
 
@@ -225,6 +236,12 @@ export default {
       console.error(`⚠️  pracecz: "${keyword}" page 1 failed (${message}) — keyword skipped`);
     }
 
-    return [...byId.values()];
+    const jobs = [...byId.values()];
+    // Part of the board was never read: a keyword failed on page 1 while another
+    // answered, or a later page failed. scan.mjs takes a board's health from the
+    // returned array, so the result says so; unmarked, the board is logged
+    // reachable as if fully read.
+    if (errors.length || laterPageFailed) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

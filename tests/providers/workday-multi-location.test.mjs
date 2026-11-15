@@ -19,7 +19,7 @@ console.log('\nProvider — workday multi-location placeholders');
 
 const workdayModule = await import(pathToFileURL(join(ROOT, 'providers/workday.mjs')).href);
 const workday = workdayModule.default;
-const { isMultiLocationPlaceholder, locationsFromDetail, postedAtFromDetail } = workdayModule;
+const { isMultiLocationPlaceholder, locationsFromDetail, postedAtFromDetail, parseWorkdayResponse } = workdayModule;
 
 const ENTRY = { name: 'CrowdStrike', careers_url: 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers' };
 const JOB_BASE = 'https://crowdstrike.wd5.myworkdayjobs.com/crowdstrikecareers';
@@ -68,11 +68,11 @@ const mkCtx = (fetchJson, extra = {}) => ({
 // Every one of these was observed live except the negatives, which are the
 // boundary this regex has to hold: a real place may contain a digit and the
 // word "Locations" without being a count.
-for (const yes of ['3 Locations', '51 Locations', '2 locations', ' 4 Locations ', '1 Location']) {
+for (const yes of ['3 Locations', '51 Locations', '2 locations', ' 4 Locations ', '1 Location', '5 Locations · Remote', '3 Locations · Remote']) {
   if (isMultiLocationPlaceholder(yes)) pass(`isMultiLocationPlaceholder(${JSON.stringify(yes)})`);
   else fail(`isMultiLocationPlaceholder(${JSON.stringify(yes)}) should be true`);
 }
-for (const no of ['USA - Austin, TX', '100 Locations Plaza', 'Locations', '3 Locations, TX', '', null, undefined, 51]) {
+for (const no of ['USA - Austin, TX', '100 Locations Plaza', 'Locations', '3 Locations, TX', 'USA - Austin, TX · Remote', '100 Locations Plaza · Remote', '', null, undefined, 51]) {
   if (!isMultiLocationPlaceholder(no)) pass(`isMultiLocationPlaceholder(${JSON.stringify(no)}) is false`);
   else fail(`isMultiLocationPlaceholder(${JSON.stringify(no)}) should be false`);
 }
@@ -786,4 +786,94 @@ for (const [label, detailImpl] of [
   } else {
     fail(`deduplicated placeholder location was ${JSON.stringify(dupeJob?.location)}`);
   }
+}
+
+// --- remoteType "Fully Remote" ----------------------------------------------
+// The list endpoint's remoteType is a workplace flag, not a place. "Fully
+// Remote" with a city must still say Remote, or a Remote allow-list drops it.
+// "Partially Remote" is hybrid and stays city-only. A "N Locations" count
+// that is also fully remote must stay a placeholder so the detail GET runs,
+// and the resolved places must keep the Remote marker.
+{
+  const ops = {
+    title: 'Ops Lead',
+    externalPath: '/job/Bend-OR/Ops-Lead_R9',
+    postedOn: 'Posted Today',
+  };
+  const locOf = (extra) => parseWorkdayResponse(
+    { jobPostings: [{ ...ops, ...extra }] },
+    ENTRY,
+  )[0];
+
+  const fully = locOf({ locationsText: 'Bend, OR', remoteType: 'Fully Remote' });
+  const partial = locOf({ locationsText: 'Bend, OR', remoteType: 'Partially Remote' });
+  const inPerson = locOf({ locationsText: 'Bend, OR', remoteType: 'In Person' });
+  const already = locOf({ locationsText: 'Remote', remoteType: 'Fully Remote' });
+  const absent = locOf({ locationsText: 'Bend, OR' });
+  const padded = locOf({ locationsText: 'Bend, OR', remoteType: '  fully remote  ' });
+  const counted = locOf({ locationsText: '5 Locations', remoteType: 'Fully Remote' });
+
+  const got = {
+    fully: fully?.location,
+    partial: partial?.location,
+    inPerson: inPerson?.location,
+    already: already?.location,
+    absent: absent?.location,
+    padded: padded?.location,
+    counted: counted?.location,
+    countedPlaceholder: isMultiLocationPlaceholder(counted?.location),
+    leaked: fully != null && Object.prototype.hasOwnProperty.call(fully, 'remoteType'),
+  };
+  if (got.fully === 'Bend, OR · Remote'
+      && got.partial === 'Bend, OR'
+      && got.inPerson === 'Bend, OR'
+      && got.already === 'Remote'
+      && got.absent === 'Bend, OR'
+      && got.padded === 'Bend, OR · Remote'
+      && got.counted === '5 Locations · Remote'
+      && got.countedPlaceholder === true
+      && got.leaked === false) {
+    pass('parseWorkdayResponse keeps Fully Remote on the location and leaves Partially Remote as the city');
+  } else {
+    fail(`workday remoteType locations = ${JSON.stringify(got)}`);
+  }
+
+  const remoteJobs = await workday.fetch(ENTRY, mkCtx(async (url) => {
+    if (url.endsWith('/jobs')) {
+      return {
+        total: 1,
+        jobPostings: [{ ...ops, locationsText: '5 Locations', remoteType: 'Fully Remote' }],
+      };
+    }
+    if (url.endsWith('/job/Bend-OR/Ops-Lead_R9')) {
+      return { jobPostingInfo: { location: 'Bend, OR', additionalLocations: [], startDate: '2026-09-04' } };
+    }
+    throw new Error(`unexpected url ${url}`);
+  }));
+  const resolved = remoteJobs.find((j) => j.url.endsWith('/job/Bend-OR/Ops-Lead_R9'));
+  if (resolved?.location === 'Bend, OR · Remote' && !Object.prototype.hasOwnProperty.call(resolved, 'remoteType')) {
+    pass('workday.fetch() keeps Fully Remote after a placeholder resolves to a city');
+  } else {
+    fail(`resolved fully-remote placeholder was ${JSON.stringify(resolved?.location)}`);
+  }
+}
+
+// A count the list already marks remote with no space before the separator is
+// still a placeholder, and the resolved city keeps the marker.
+{
+  const tight = await workday.fetch(ENTRY, mkCtx(async (url) => {
+    if (url.endsWith('/jobs')) {
+      return {
+        total: 1,
+        jobPostings: [{ title: 'Ops Lead', externalPath: '/job/Bend-OR/Ops-Lead_R10', postedOn: 'Posted Today', locationsText: '5 Locations· Remote' }],
+      };
+    }
+    if (url.endsWith('/job/Bend-OR/Ops-Lead_R10')) {
+      return { jobPostingInfo: { location: 'Bend, OR', additionalLocations: [], startDate: '2026-09-04' } };
+    }
+    throw new Error(`unexpected url ${url}`);
+  }));
+  const job = tight.find((j) => j.url.endsWith('/job/Bend-OR/Ops-Lead_R10'));
+  if (job?.location === 'Bend, OR · Remote') pass('workday.fetch() keeps Remote on "5 Locations· Remote" after it resolves');
+  else fail(`"5 Locations· Remote" resolved to ${JSON.stringify(job?.location)}`);
 }

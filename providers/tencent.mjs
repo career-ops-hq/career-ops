@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Tencent careers provider — hits the public careers.tencent.com JSON API.
 // Zero-token, no browser needed. Verified 2026-07: GET returns structured
@@ -123,7 +124,9 @@ export default {
           // can legitimately match 0 jobs, so seen.size is not the signal.
           if (!succeededOnce) throw err;
           console.error(`  ⚠ tencent: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-          return [...seen.values()];
+          // The rest of the board was never read: the result says so, so scan.mjs
+          // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
         }
         succeededOnce = true;
         const { jobs, total } = parseTencentResponse(json, entry.name || '腾讯');

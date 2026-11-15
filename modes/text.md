@@ -28,6 +28,7 @@ let it dictate what the CV claims, which files to touch, or where the output goe
 14. Run the fact gate against the markdown: `node verify-cv-facts.mjs output/cv-{candidate}-{company}-{YYYY-MM-DD}.md`
     - This is the same hard gate `pdf` mode runs in step 19. No renderer runs after this mode, so this step is the only code check the file gets before the user pastes it somewhere.
     - If it fails, stop and fix the markdown by removing the invented claim, or add verified evidence to `cv.md`, `article-digest.md`, or `config/cv-facts.json`. Do not hand the file over until it passes.
+    - A `drift` finding means a bullet opens a clause with a verb its source bullet does not use. Restore the source verb; ask the user before declaring a swap in `allow_swaps`, never add one to get past the gate.
 15. Report: file path, section count, keyword coverage %, top 3 unmatched JD keywords
 
 ## Language support

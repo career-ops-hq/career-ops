@@ -548,3 +548,62 @@ test("isSubmitControl: a CJK term on a fillable field is not a submit control", 
   // Then it stays fillable: the wording tiers are held to clickables
   assert.equal(isSubmitControl(facts), false);
 });
+
+test("isSubmitControl: Norwegian «Send søknad» and «Send inn» are refused even outside a form", () => {
+  // Given the final buttons of Webcruiter, Jobbnorge and Teamtailor's Norwegian
+  // forms, rendered by a form-less ATS. The bare in-form "send" would miss them
+  // there; the nb global terms do not.
+  for (const text of ["Send søknad", "Send søknaden", "SEND SØKNAD", "Send inn", "Send inn søknaden", "Sende inn", "Fullfør søknaden"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), true, text);
+    assert.equal(isSubmitControl(el({ inForm: true, text })), true, `${text} inside a form`);
+  }
+});
+
+test("isSubmitControl: Norwegian «Søk» is the way in outside a form and the final button inside one", () => {
+  // Given "søk", which means "search" as well as "apply": the entry links and
+  // a site search button outside a form stay clickable
+  for (const text of ["Søk på stillingen", "Søk nå", "Søk no", "Søk her", "Søk"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), false, `${text} outside a form`);
+    assert.equal(isSubmitControl(el({ inForm: false, text })), false, `${text} button outside a form`);
+    assert.equal(isSubmitControl(el({ inForm: true, text })), true, `${text} inside a form`);
+  }
+  // And a search field labelled "Søk" stays fillable inside a form
+  assert.equal(isSubmitControl({ tag: "input", type: "search", inForm: true, placeholder: "Søk" }), false);
+});
+
+test("IN_FORM_RX: Norwegian «søk» matches the verb, not the words built on it", () => {
+  for (const text of ["Søknad", "Søknaden din", "Søker", "Søkeord", "Mine søknader"]) {
+    assert.equal(IN_FORM_RX.test(text), false, text);
+    assert.equal(SUBMIT_RX.test(text), false, text);
+  }
+  assert.equal(SUBMIT_RX.test("Søk"), false);
+  assert.equal(IN_FORM_RX.test("SØK NÅ"), true);
+});
+
+test("isSubmitControl: Vietnamese «Nộp đơn ứng tuyển» is the way in outside a form and the final button inside one", () => {
+  // Given CareerViet's Apply control on the posting page, and the same words on
+  // the buttons of an application form
+  for (const text of ["NỘP ĐƠN ỨNG TUYỂN", "Nộp đơn ứng tuyển", "Ứng tuyển ngay", "Nộp hồ sơ", "Gửi CV"]) {
+    assert.equal(isSubmitControl(el({ tag: "a", type: "", inForm: false, text })), false, `${text} outside a form`);
+    assert.equal(isSubmitControl(el({ inForm: false, text })), false, `${text} button outside a form`);
+    assert.equal(isSubmitControl(el({ inForm: true, text })), true, `${text} inside a form`);
+  }
+});
+
+test("isSubmitControl: a Vietnamese label written with combining marks is read like the precomposed one", () => {
+  // Given «Nộp đơn» as n, o, U+0323, U+0302, p ... (NFD), which a combining-mark
+  // keyboard produces and the precomposed term does not match as written
+  const decomposed = "Nộp đơn".normalize("NFD");
+  assert.notEqual(decomposed, "Nộp đơn");
+  assert.equal(isSubmitControl(el({ inForm: true, text: decomposed })), true);
+  assert.equal(isSubmitControl(el({ inForm: true, aria: "Ứng tuyển".normalize("NFD") })), true);
+});
+
+test("IN_FORM_RX: Vietnamese terms match whole words, not syllables of other words", () => {
+  // «nộp» and «gửi» are single syllables; a label only refers to them when they
+  // stand as their own word, which the \p{L} boundaries keep.
+  for (const text of ["Tiếp tục", "Quay lại", "Lưu hồ sơ", "Xem việc làm"]) {
+    assert.equal(IN_FORM_RX.test(text), false, text);
+  }
+  assert.equal(SUBMIT_RX.test("Nộp đơn"), false, "outside the in-form tier");
+});

@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Sparkles, Check, Circle, CircleDashed } from "lucide-react";
-import { readSavedCliId } from "@/lib/saved-cli";
+import { readSavedCliId, resolveCliId } from "@/lib/saved-cli";
+import { PREREQS } from "@/lib/home/onboarding-checklist.mjs";
+import { setupPanelLabel, setupPanelMode } from "@/lib/home/setup-panel.mjs";
 
 // The "profile that grows while you talk": a live checklist of the four setup
 // prerequisites plus the eight personalization sections, read from the same
@@ -14,27 +16,14 @@ import { readSavedCliId } from "@/lib/saved-cli";
 type Doctor = { available: boolean; onboardingNeeded: boolean; missing: string[] };
 type Section = { id: string; heading: string; state: "filled" | "template" | "missing" };
 
-// The same four keys /api/doctor reports in `missing`, so the panel cannot
-// count itself done while doctor still says onboarding is incomplete.
-// modes/_profile.md has no `ask` of its own: when it is absent its eight
-// sections are all "missing", and the personalization line below asks for them.
-const PREREQS: { key: string; label: string; ask?: string }[] = [
-  { key: "cv.md", label: "Your CV", ask: "my CV" },
-  { key: "config/profile.yml", label: "Profile — target roles, comp, location", ask: "my profile (target roles, comp, location)" },
-  { key: "modes/_profile.md", label: "Personalization file" },
-  { key: "portals.yml", label: "Companies and roles to scan", ask: "the roles and companies to scan" },
-];
-
-// Same reader the rest of the app uses, so "configured" cannot mean one thing
-// here and another in Config (an empty-string cliId is not configured).
-function hasCli(): boolean {
-  return !!readSavedCliId();
-}
 
 export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   const [doctor, setDoctor] = useState<Doctor | null>(null);
   const [sections, setSections] = useState<Section[] | null>(null);
-  const [cli, setCli] = useState(true);
+  // null while resolveCliId() is in flight: the action shows, disabled, so it
+  // neither flashes nor opens an assistant that has no CLI to send with.
+  const [cli, setCli] = useState<boolean | null>(null);
+  const [optionalOpen, setOptionalOpen] = useState(false);
 
   const refetch = useCallback(() => {
     fetch("/api/doctor").then((r) => r.json()).then(setDoctor).catch(() => {});
@@ -44,11 +33,18 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   }, []);
 
   useEffect(() => {
-    setCli(hasCli());
+    // The same check a Run makes, so "configured" cannot mean one thing here and
+    // another when the assistant starts: a saved id counts only while it is
+    // installed (#4012), and an empty one never does.
+    let live = true;
+    // The assistant sends with the saved id, so a pick that could not be
+    // saved (blocked storage) does not count either.
+    resolveCliId().then((id) => { if (live) setCli(!!id && readSavedCliId() === id); });
     refetch();
     window.addEventListener("co-onboarding-changed", refetch);
     window.addEventListener("co-job-done", refetch);
     return () => {
+      live = false;
       window.removeEventListener("co-onboarding-changed", refetch);
       window.removeEventListener("co-job-done", refetch);
     };
@@ -59,42 +55,63 @@ export function OnboardingProgress({ compact = false }: { compact?: boolean }) {
   if (!doctor.available) return null;
 
   const missing = new Set(doctor.missing);
-  const generic = sections.filter((s) => s.state !== "filled");
-  const prereqDone = PREREQS.filter((p) => !missing.has(p.key)).length;
-  const total = PREREQS.length + sections.length;
-  const done = prereqDone + (sections.length - generic.length);
-  if (done === total) return null; // fully personalized: the panel has done its job
+  // Required files still open: the full checklist. Required files done, with
+  // optional sections left: one link, so a full queue is not sitting under "4/12".
+  const panel = setupPanelMode({ missing: doctor.missing, sections, compact });
+  if (panel.mode === "hidden") return null;
+  if (panel.mode === "link" && !optionalOpen) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOptionalOpen(true)}
+        className="text-sm font-medium text-muted underline-offset-2 hover:text-brand-text hover:underline"
+      >
+        {setupPanelLabel(panel)}
+      </button>
+    );
+  }
 
-  const asks = [
-    ...PREREQS.filter((p) => missing.has(p.key)).flatMap((p) => (p.ask ? [p.ask] : [])),
-    ...(generic.length ? [`my personalization (${generic.map((s) => s.heading.replace(/^## Your /, "").toLowerCase()).join(", ")})`] : []),
-  ];
+  const { showSections, done, total, asks } = panel;
   const kickoff = `Let's finish setting me up. Still to do: ${asks.join("; ")}. Walk me through it like a recruiter building my brief — one or two things at a time, propose what you infer from my CV, and let me confirm each piece. Don't ask for anything already on file.`;
+  const visibleSections = panel.mode === "link" ? sections.filter((s) => s.state !== "filled") : sections;
 
   return (
     <aside className={`rounded-2xl border border-border bg-surface/40 ${compact ? "p-4" : "p-5"}`} aria-label="Setup progress">
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-medium text-foreground">Your profile, as it takes shape</h2>
-        <span className="font-mono text-xs text-muted">{done}/{total}</span>
+        <h2 className="text-sm font-medium text-foreground">
+          {panel.mode === "link" ? "Optional profile details" : "Your profile, as it takes shape"}
+        </h2>
+        {panel.mode === "checklist" ? (
+          <span className="font-mono text-xs text-muted">{done}/{total}</span>
+        ) : (
+          <button type="button" onClick={() => setOptionalOpen(false)} className="text-xs text-muted hover:text-foreground">
+            Hide
+          </button>
+        )}
       </div>
-      <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
-        <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${Math.round((done / total) * 100)}%` }} />
-      </div>
+      {panel.mode === "checklist" && (
+        <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-surface-hover">
+          <div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${Math.round((done / total) * 100)}%` }} />
+        </div>
+      )}
 
       <ul className="mt-4 space-y-1.5 text-sm">
-        {PREREQS.map((p) => (
+        {panel.mode === "checklist" && PREREQS.map((p) => (
           <Row key={p.key} state={missing.has(p.key) ? "missing" : "filled"} label={p.label} />
         ))}
-        <li className="pt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-faint">personalization — what evaluations score against</li>
-        {sections.map((s) => (
+        {showSections && panel.mode === "checklist" && (
+          <li className="pt-2 font-mono text-[10px] uppercase tracking-[0.18em] text-faint">personalization — what evaluations score against</li>
+        )}
+        {showSections && visibleSections.map((s) => (
           <Row key={s.id} state={s.state} label={s.heading.replace(/^## Your /, "")} />
         ))}
       </ul>
 
-      {cli ? (
+      {cli !== false ? (
         <button
+          disabled={cli === null}
           onClick={() => window.dispatchEvent(new CustomEvent("co-assistant", { detail: { message: kickoff } }))}
-          className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200"
+          className="mt-4 inline-flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-sm font-medium text-brand-foreground transition-colors hover:bg-brand-200 disabled:cursor-wait disabled:opacity-60"
         >
           <Sparkles className="size-4" /> Continue with the assistant
         </button>
@@ -113,7 +130,7 @@ function Row({ state, label }: { state: "filled" | "template" | "missing"; label
   const hint = state === "template" ? "still the example" : state === "missing" ? "not yet" : "";
   return (
     <li className={`flex items-center gap-2 ${tone}`}>
-      <Icon className={`size-3.5 shrink-0 ${state === "filled" ? "text-brand" : "text-faint"}`} aria-hidden />
+      <Icon className={`size-3.5 shrink-0 ${state === "filled" ? "text-brand-text" : "text-faint"}`} aria-hidden />
       <span className="truncate">{label}</span>
       {hint && <span className="ml-auto shrink-0 text-[11px] text-faint">{hint}</span>}
     </li>

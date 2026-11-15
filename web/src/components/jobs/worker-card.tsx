@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Check, X, Loader2, AlertTriangle } from "lucide-react";
+import { Check, X, Loader2, AlertTriangle, CirclePause } from "lucide-react";
 import type { Job } from "@/components/jobs/job-store";
-import { workerIdentity, workerState } from "@/lib/worker-feedback.mjs";
+import { workerIdentity } from "@/lib/worker-feedback.mjs";
+import { evaluationGateForJob, jobStateLabel } from "@/lib/job-gate.mjs";
 import { jobErrorHint } from "@/lib/job-error-hint.mjs";
 import { cn } from "@/lib/cn";
 import { isFencingNotice } from "@/lib/cli-fencing.mjs";
@@ -64,13 +65,14 @@ function useElapsed(running: boolean, startedAt: number): number {
 // visually identical. TONE + pillTone live here (the canonical source).
 
 export const TONE = {
-  good: { bar: "bg-emerald-500/70", chip: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400", icon: "text-emerald-500" },
-  warn: { bar: "bg-amber-500/70", chip: "bg-amber-500/15 text-amber-700 dark:text-amber-400", icon: "text-amber-500" },
+  good: { bar: "bg-emerald-500/70", chip: "bg-emerald-500/15 text-emerald-800 dark:text-emerald-400", icon: "text-emerald-500" },
+  warn: { bar: "bg-amber-500/70", chip: "bg-amber-500/15 text-amber-800 dark:text-amber-400", icon: "text-amber-500" },
   bad: { bar: "bg-red-400/70", chip: "bg-red-500/15 text-red-700 dark:text-red-400", icon: "text-red-400" },
   muted: { bar: "bg-zinc-400/50", chip: "bg-surface-hover text-muted", icon: "text-zinc-400" },
 } as const;
 
 export function pillTone(j: Job): keyof typeof TONE {
+  if (j.status === "gated" || evaluationGateForJob(j)) return "warn";
   if (j.status === "error") return "bad";
   if (j.status === "done") return j.result?.tone ?? "muted";
   return "muted";
@@ -85,23 +87,26 @@ export function WorkerCard({
   variant?: "tray" | "inline";
   trailing?: React.ReactNode;
 }) {
+  const gate = evaluationGateForJob(job);
   const tone = TONE[pillTone(job)];
   const running = job.status === "running";
   const elapsed = useElapsed(running, job.startedAt);
   const rawLast = job.steps[job.steps.length - 1]?.label;
   const last = rawLast ? humanizeStep(rawLast) : undefined;
-  const bottom = job.status === "done" && job.result?.summary ? job.result.summary : last;
+  const bottom = gate?.message || (job.status === "done" && job.result?.summary ? job.result.summary : last);
   const inline = variant === "inline";
-  const hasScore = job.result?.score != null;
+  const hasScore = job.status === "done" && job.result?.score != null;
   const errorHint = jobErrorHint(job);
   const fencing = fencingNotice(job);
-  const tokens = job.status === "done" ? job.cost?.tokens ?? 0 : 0;
+  const tokens = job.status === "done" || job.status === "gated" ? job.cost?.tokens ?? 0 : 0;
 
   return (
     <div role="group" aria-label={workerIdentity(job)} className={cn(inline && "rounded-xl border border-border bg-surface/60 p-2.5")}>
       <div className="flex items-center gap-2">
         {job.status === "running" ? (
-          <Loader2 className="size-3 shrink-0 animate-spin text-brand" />
+          <Loader2 className="size-3 shrink-0 animate-spin text-brand-text" />
+        ) : gate || job.status === "gated" ? (
+          <CirclePause className="size-3 shrink-0 text-amber-500" />
         ) : job.status === "error" ? (
           <AlertTriangle className={cn("size-3 shrink-0", tone.icon)} />
         ) : (
@@ -124,7 +129,7 @@ export function WorkerCard({
         )}
       </div>
       <div className={cn("mt-1 text-muted", inline ? "text-xs" : "text-[10px]")}>
-        {job.subtitle && <span>{job.subtitle} · </span>}{workerState(job.status)}
+        {job.subtitle && <span>{job.subtitle} · </span>}{jobStateLabel(job)}
       </div>
       <div className={cn("mt-1.5 w-full overflow-hidden rounded-full bg-surface-hover", inline ? "h-1.5" : "h-1")}>
         {job.status === "running" ? (
@@ -139,12 +144,12 @@ export function WorkerCard({
         </div>
       )}
       {errorHint && (
-        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+        <div className={cn("mt-1 text-amber-800 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {errorHint.text}
         </div>
       )}
       {fencing && (
-        <div className={cn("mt-1 text-amber-700 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
+        <div className={cn("mt-1 text-amber-800 dark:text-amber-400", inline ? "text-xs" : "text-[10px]")}>
           {fencing}
         </div>
       )}

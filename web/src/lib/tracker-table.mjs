@@ -42,7 +42,7 @@ const WEB_FIELD = {
  */
 export const WEB_FIELD_NAMES = Object.values(WEB_FIELD);
 
-/** @type {Map<string, {mtimeMs: number, size: number, aliases: Record<string, string>}>} */
+/** @type {Map<string, {mtimeNs: bigint, ctimeNs: bigint, size: bigint, aliases: Record<string, string>}>} */
 const aliasCache = new Map();
 
 /** Canonical fields detectColumnMap needs to recognize a header row. */
@@ -54,8 +54,8 @@ const REQUIRED_FIELDS = ["num", "company", "role", "score", "status"];
  * `rootDir` is normally the data root so a complete external checkout keeps
  * using its own matching system files. A data-only root has no alias table;
  * `fallbackRootDir` then points at the checkout that runs the web app. Cache
- * entries remain keyed by the resolved file's mtime+size, and failures are
- * never cached so a recovered primary file is picked up immediately.
+ * entries remain keyed by the resolved file's nanosecond mtime/ctime and size.
+ * Failures are never cached so a recovered primary file is picked up immediately.
  * @param {string} rootDir - primary career-ops root.
  * @param {string} [fallbackRootDir] - running system checkout.
  * @returns {Record<string, string>}
@@ -65,11 +65,11 @@ export function loadHeaderAliases(rootDir, fallbackRootDir) {
   for (const [i, root] of roots.entries()) {
     const file = path.resolve(root, "tracker-aliases.json");
     try {
-      const { mtimeMs, size } = fs.statSync(file);
+      const { mtimeNs, ctimeNs, size } = fs.statSync(file, { bigint: true });
       const cached = aliasCache.get(file);
       /** @type {Record<string, string>} */
       let aliases;
-      if (cached && cached.mtimeMs === mtimeMs && cached.size === size) {
+      if (cached && cached.mtimeNs === mtimeNs && cached.ctimeNs === ctimeNs && cached.size === size) {
         aliases = cached.aliases;
       } else {
         const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -78,7 +78,7 @@ export function loadHeaderAliases(rootDir, fallbackRootDir) {
           continue;
         }
         aliases = parsed;
-        aliasCache.set(file, { mtimeMs, size, aliases });
+        aliasCache.set(file, { mtimeNs, ctimeNs, size, aliases });
       }
       // A table that cannot map the required columns (e.g. `{}`) would push
       // detectColumnMap onto the legacy positions and misread Via-style
@@ -233,4 +233,37 @@ export function parseApplications(md, rootDir, systemRootDir) {
     }
   }
   return rows;
+}
+
+/**
+ * Why a tracker read produced the rows it did.
+ *
+ * `missing` is no file (the caller passes null). A new install is an empty
+ * list, and the file must not be created here. `empty` is a blank file or a
+ * real tracker table with no data rows. `malformed` is bytes that are not a
+ * tracker table; callers must leave the file alone. `rows` is at least one
+ * application.
+ *
+ * @param {string | null | undefined} md
+ * @param {string} [rootDir]
+ * @param {string} [systemRootDir]
+ * @returns {"missing" | "empty" | "malformed" | "rows"}
+ */
+export function classifyTracker(md, rootDir, systemRootDir) {
+  if (md == null) return "missing";
+  const text = String(md).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  if (parseApplications(text, rootDir, systemRootDir).length > 0) return "rows";
+  if (!text.trim()) return "empty";
+  const lines = text.split("\n");
+  if (detectHeader(lines, loadHeaderAliases(rootDir, systemRootDir))) return "empty";
+  // Alias table missing: a header whose first cell is the number column is
+  // still an empty tracker, not a damaged file.
+  const legacyHeader = lines.some((raw) => {
+    const line = raw.trim();
+    if (!line.startsWith("|")) return false;
+    const cells = trackerCells(line);
+    return cells.length >= 8 && /^(#|num)$/i.test(cells[0] ?? "");
+  });
+  if (legacyHeader) return "empty";
+  return "malformed";
 }

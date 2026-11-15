@@ -68,7 +68,73 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   // output at all; the same spawn with windowsHide (CREATE_NO_WINDOW) succeeds.
   // Nothing spawned here needs a console, so never inherit one. Set after the
   // caller's options so no caller can opt back in. No-op on POSIX (#3809).
-  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true });
+  // POSIX: a detached child leads its own group, so Stop can signal that
+  // group. A normal child shares the server's group, and signalling that
+  // group would kill the server. Windows has no such group kill here, and
+  // detached would open a console, so it stays off there.
+  const detached = process.platform !== "win32";
+  // windowsHide stays in this call. The launch census reads the argument
+  // text, and a variable would look like the child can inherit the console.
+  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true, detached });
   child.stdin?.end();
+  armCliStop(child, { ...options, windowsHide: true, detached });
   return child;
+}
+
+// A CLI can trap SIGTERM and keep writing after Stop. The routes only call
+// kill("SIGTERM"). Follow it with SIGKILL. The child is detached on POSIX,
+// so it leads its own group and the group goes too.
+const CLI_STOP_GRACE_MS = 5_000;
+
+/**
+ * @param {import("node:child_process").ChildProcess} child
+ * @param {import("node:child_process").SpawnOptionsWithoutStdio} [options]
+ */
+function armCliStop(child, options) {
+  if (typeof child.kill !== "function") return;
+  const originalKill = child.kill.bind(child);
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let force = null;
+
+  const signal = (name) => {
+    if (options?.detached && child.pid && process.platform !== "win32") {
+      try {
+        process.kill(-child.pid, name);
+        return true;
+      } catch {
+        // The group is already gone. Try the child itself.
+      }
+    }
+    try {
+      return originalKill(name);
+    } catch {
+      return false;
+    }
+  };
+
+  child.kill = (code) => {
+    const name = code == null ? "SIGTERM" : code;
+    if (name === "SIGKILL" || name === 9) {
+      if (force) clearTimeout(force);
+      force = null;
+      return signal("SIGKILL");
+    }
+    const sent = signal(name);
+    if ((name === "SIGTERM" || name === 15) && sent && !force) {
+      force = setTimeout(() => {
+        force = null;
+        signal("SIGKILL");
+      }, CLI_STOP_GRACE_MS);
+      force.unref?.();
+      child.once?.("exit", () => {
+        // A detached Stop signals the group. The leader can die from SIGTERM
+        // while a descendant that ignores it is still in the group. Clearing
+        // the timer here would leave that descendant running.
+        if (options?.detached) return;
+        if (force) clearTimeout(force);
+        force = null;
+      });
+    }
+    return sent;
+  };
 }

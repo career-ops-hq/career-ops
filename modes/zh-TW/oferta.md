@@ -215,7 +215,7 @@
 
 **只做彙整，不產生新判斷。** 每一列都引用來源訊號已經得出的結論。摘要絕不重新評分、重新加權或推翻原判斷 —— 如果某一列看起來有問題，應當修正來源訊號，而不是改這裡。
 
-每列三種狀態：`✅ {明確結論}` / `⚠️ {發現的問題}` / `— not evaluated`。**`— not evaluated` 是一等狀態：** 某個訊號無法執行時必須明確寫出該列，而不是省略，這樣全 ✅ 的摘要才可信。**特例：** 面試紅旗一列的未評估情況渲染為 `— no interview sessions yet`（同一「未評估」概念針對該列的更具體表述 —— 交叉參照檢查確實執行了，只是沒有找到紅旗檔案），並非第四種狀態。
+每列三種狀態：`✅ {明確結論}` / `⚠️ {發現的問題}` / `— not evaluated`。**`— not evaluated` 是一等狀態：** 某個訊號無法執行時必須明確寫出該列，而不是省略，這樣全 ✅ 的摘要才可信。**特例：** 面試紅旗一列的未評估情況渲染為 `— no interview sessions yet`（同一「未評估」概念針對該列的更具體表述 —— 交叉參照檢查確實執行了，只是沒有找到紅旗檔案），並非第四種狀態。帶有未核實標記的紅旗檔案屬於一般的 `— not evaluated` 狀態，不適用此特例：檔案存在，所以該列不能說沒有面試 session。
 
 列標籤、`| Signal | Status |` 表頭與狀態詞皆為固定字面量，請勿翻譯：Machine Summary 的 `risk_summary` 欄位依賴它們。
 
@@ -224,7 +224,7 @@
 | Posting legitimacy | Block G 的評級 | `✅ High Confidence`；Proceed with Caution / Suspicious 渲染為 `⚠️ {tier} — {一句話原因}` |
 | Employment classification | Block G 內的僱用性質訊號 | 檢查已執行且無異常時 `✅ clear`；標記觸發時 `⚠️ contractor-style language: "{引用原文}"`；無法執行時 `— not evaluated` |
 | Culture screen | Block A 的文化篩查欄位 | `✅ pass`，或 `⚠️ caution — {證據}` / `⚠️ fail — {證據}`；未做篩查時 `— not evaluated` |
-| Interview red flags | `interview-prep/{company-slug}-redflags.md`（來自 `interview-redflag` 模式） | **交叉參照，不是複製：** 檔案存在時寫出其目前警告等級並附相對連結 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相對於 `reports/`）；否則 `— no interview sessions yet` |
+| Interview red flags | `interview-prep/{company-slug}-redflags.md`（來自 `interview-redflag` 模式） | **交叉參照，不是複製：** 檔案存在時寫出其目前警告等級並附相對連結 —— `[{level}](../interview-prep/{company-slug}-redflags.md)`（相對於 `reports/`）；否則 `— no interview sessions yet`。**未經核實的檔案：** 若檔案包含標記 `<!-- career-ops:redflags-unverified -->`（`interview-redflag` 在沒有任何真實面試 session 支撐的情況下保留了該檔案），絕不寫出其警告等級：渲染為 `— not evaluated: [unverified analysis](../interview-prep/{company-slug}-redflags.md)`，`risk_summary.interview_redflags` 為 `not_evaluated`。只認標記，不認註記文字：註記以使用者的輸出語言書寫。 |
 | AI claims vs. infrastructure | Block G 中的 AI／基礎設施一致性檢查（若存在） | 本報告包含該檢查時鏡射其結論（`✅ consistent` / `⚠️ {發現}`）；否則 `— not evaluated`。該檢查一旦存在此列自動啟用，無順序相依 |
 
 區塊格式：
@@ -297,7 +297,7 @@
 ## Risk Summary
 (每個風險訊號一列，順序固定 —— 見上文 Risk Summary 一節)
 
-## H) 開放式問題擬答草稿
+## H) 開放式問題擬答草稿 (draft)
 (僅在綜合評分 >= 4.5 且應徵表單有問答框時產生)
 
 ---
@@ -310,7 +310,12 @@
 
 ## Job Description (archived verbatim)
 （職缺描述全文，逐字貼上——見下方要求）
+
+## Machine Summary
+（供下游腳本讀取的 YAML 區塊——見下方要求）
 ```
+
+**Machine Summary（必要）：** 報告末尾、`## Job Description (archived verbatim)` 之後的 YAML 區塊。腳本依標題而非位置尋找它，所以放在最後，不擋在讀者與 Block A 之間。schema、欄位的確切名稱與規則以 `batch/batch-prompt.md` 為準（唯一來源，這裡不重複）。標題 `## Machine Summary` 與欄位名稱維持英文。其中包括 `advertised_comp`（職缺描述中寫明的薪資數字，原樣照錄，沒有則為 `null`）、`risk_summary`（Risk Summary 區塊轉成的對應表）與 `requirement_importance`（Block B 逐列對應；職缺描述沒有可用的要求清單時為 `[]`）。
 
 **JD 存檔（必要，#2789）：** 每份報告都必須包含 `## Job Description (archived verbatim)` 一節，原樣貼上職缺描述全文，不得摘要或改寫。該標題維持英文，因為 `check-jd-archive.mjs` 依名稱尋找它。`**URL:**` 不是存檔：職缺關閉後連結就會失效，原始要求也再也找不回來。該節第一行寫來源上可見的刊登日期（`Posted: {日期或頁面上顯示的相對時間}`，確實沒有時寫 `Posted: not visible in source`），不要用報告檔案本身的時間代替。若 JD 過長或無法完整引用，用 `archive-posting.mjs` (下方命令) 存檔，並在該節中**只**寫這一句：`See jds/{filename} for the full archive (archive-posting.mjs --report={num}).`。不得以改寫代替原文；完整規則見 `modes/oferta.md` 的 **JD archival**。
 

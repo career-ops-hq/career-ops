@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildHtml } from '../generate-cover-letter.mjs';
 import { assertFacts, verifyFacts } from '../verify-cv-facts.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const COVER_PDF_REGISTER = pathToFileURL(join(ROOT, 'tests', 'fixtures', 'cover-pdf-register.mjs')).href;
@@ -215,7 +215,7 @@ function coverPayload(opening, extra = {}) {
 test('generate-cover-letter counts user_inputs as a source for this letter', () => {
   const blocked = runCover(coverPayload(PLAN));
   assert.match(blocked.text, /6 months/, blocked.text);
-  assert.notEqual(blocked.status, 0, describeSpawn(blocked));
+  assert.ok(exitedNonZero(blocked), describeSpawn(blocked, 'expected a non-zero exit'));
 
   const passed = runCover(coverPayload(PLAN, { user_inputs: [PLAN] }));
   assert.equal(passed.status, 0, describeSpawn(passed));
@@ -233,13 +233,13 @@ test('generate-cover-letter counts an answers object as a source', () => {
 test('generate-cover-letter still blocks a number the candidate did not supply', () => {
   const blocked = runCover(coverPayload(INVENTED, { user_inputs: [PLAN], answers: { approach: PLAN } }));
   assert.match(blocked.text, /9 months/, blocked.text);
-  assert.notEqual(blocked.status, 0, describeSpawn(blocked));
+  assert.ok(exitedNonZero(blocked), describeSpawn(blocked, 'expected a non-zero exit'));
 });
 
 test('the letter body is not a source for itself', () => {
   const blocked = runCover(coverPayload(PLAN, { user_inputs: ['I will start by reading the incident reviews.'] }));
   assert.match(blocked.text, /6 months/, blocked.text);
-  assert.notEqual(blocked.status, 0, describeSpawn(blocked));
+  assert.ok(exitedNonZero(blocked), describeSpawn(blocked, 'expected a non-zero exit'));
 });
 
 test('cover mode tells the agent to pass those answers through as sources', () => {

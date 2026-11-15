@@ -58,7 +58,7 @@ test("request feedback is transition-only, quiet when closed and user-navigated"
   const input = page.getByRole("textbox", { name: "Message to assistant", exact: true });
   const status = page.getByRole("status", { name: "Assistant request status", exact: true });
   const latest = page.getByRole("group", { name: "Latest assistant reply", exact: true });
-  const open = page.getByRole("button", { name: "Open assistant", exact: true });
+  const open = page.getByRole("button", { name: "Ask the assistant", exact: true });
   async function until(check) {
     for (let i = 0; i < 200; i++) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 25)); }
     assert.fail("expected UI state not reached");
@@ -242,7 +242,7 @@ test("request feedback is transition-only, quiet when closed and user-navigated"
   await until(async () => (await status.innerText()) === "Reply ready.");
   const beforeWorkerFinish = (await notices()).length;
   worker.end(JSON.stringify({ type: "done", tokens: 10 }) + "\n");
-  await page.getByText("10 tokens", { exact: true }).first().waitFor();
+  await page.getByText("10 tokens", { exact: true }).filter({ visible: true }).first().waitFor();
   assert.equal((await notices()).length, beforeWorkerFinish, "worker completion belongs to #5083");
   await until(() => saved?.messages.some((m) => m.parts.some((p) => p.type === "text" && p.text.trim() === "Worker launched.")));
   await page.reload(); await open.waitFor(); await tabTo(open); await page.keyboard.press("Enter");

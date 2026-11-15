@@ -1,3 +1,5 @@
+import { evaluationGateForJob, jobStateLabel } from "./job-gate.mjs";
+
 /** @typedef {{ id: string, title: string, subtitle?: string, status: string }} Worker */
 
 /** @param {Pick<Worker, 'title' | 'subtitle'>} job */
@@ -7,12 +9,12 @@ export function workerIdentity(job) {
 
 /** @param {string} status */
 export function workerState(status) {
-  return status === "done" ? "Completed" : status === "error" ? "Failed" : "Running";
+  return status === "gated" ? "Needs review" : status === "done" ? "Completed" : status === "error" ? "Failed" : "Running";
 }
 
 /** Stable during timer/tool updates; includes the visible task identity. @param {Worker} job */
 export function workerDetailsLabel(job) {
-  return `Open worker: ${workerIdentity(job)} — ${workerState(job.status)}`;
+  return `Open worker: ${workerIdentity(job)} — ${jobStateLabel(job)}`;
 }
 
 /** @param {Worker[]} jobs @param {number} total */
@@ -20,7 +22,8 @@ export function workerBatchSummary(jobs, total = jobs.length) {
   const counts = [
     ["running", jobs.filter((j) => j.status === "running").length],
     ["completed", jobs.filter((j) => j.status === "done").length],
-    ["failed", jobs.filter((j) => j.status === "error").length],
+    ["needs review", jobs.filter((j) => j.status === "gated" || evaluationGateForJob(j)).length],
+    ["failed", jobs.filter((j) => j.status === "error" && !evaluationGateForJob(j)).length],
     ["unavailable", Math.max(0, total - jobs.length)],
   ];
   return counts.filter(([, count]) => count).map(([state, count]) => `${count} ${state}`).join(", ");
@@ -43,7 +46,7 @@ export function createWorkerFeedback(publish, { schedule = setTimeout, cancel = 
   return {
     /** @param {Worker} job */
     push(job) {
-      if (disposed || !["done", "error"].includes(job.status)) return;
+      if (disposed || !["done", "error", "gated"].includes(job.status)) return;
       const key = `${job.id}:${job.status}`;
       if (seen.has(key)) return;
       seen.add(key);
@@ -57,7 +60,7 @@ export function createWorkerFeedback(publish, { schedule = setTimeout, cancel = 
         pending = [];
         timer = undefined;
         publish(batch.length <= 3
-          ? batch.map((j) => `${workerIdentity(j)}: ${workerState(j.status).toLowerCase()}.`).join(" ")
+          ? batch.map((j) => `${workerIdentity(j)}: ${jobStateLabel(j).toLowerCase()}.`).join(" ")
           : `${batch.length} workers: ${workerBatchSummary(batch)}. Open Worker history for details.`);
       }, delay);
     },

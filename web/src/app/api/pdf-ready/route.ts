@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { rootScript } from "@/lib/career-ops";
+import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { coreScriptHttp } from "@/lib/core-script-result.mjs";
 import { readJsonObject } from "@/lib/json-body";
 import { markTrackerReady } from "@/lib/pdf-render.mjs";
@@ -22,7 +23,7 @@ export async function POST(req: Request) {
   if (!report) {
     return NextResponse.json({ error: "report must be a report number" }, { status: 400 });
   }
-  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, root: path.dirname(rootScript("mark-pdf-ready")), reportNum: report });
+  const mark = await markTrackerReady({ spawnFn: spawn, execPath: process.execPath, coreRoot: path.dirname(rootScript("mark-pdf-ready")), reportNum: report });
   if (!mark.ok && !mark.data) console.error(`/api/pdf-ready: ${mark.stderr}`);
   if (mark.code === null) return NextResponse.json({ error: FALLBACK }, { status: 500 });
   const mapped = coreScriptHttp({ code: mark.code, parsed: mark.data, fallback: FALLBACK });

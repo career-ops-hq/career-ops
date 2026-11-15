@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { firstMarkdownLinkTarget, postingHref, postingLabel, readTrackerUrl, resolvePostingUrl } from "../../src/lib/posting-url.mjs";
-import { extractCellUrl, firstLinkTarget } from "../../../tracker-parse.mjs";
+import { applyPostingUrl, firstMarkdownLinkTarget, postingHref, postingLabel, readTrackerUrl, resolvePostingUrl, soleMarkdownLinkTarget } from "../../src/lib/posting-url.mjs";
+import { extractCellUrl, firstLinkTarget, soleMarkdownLink } from "../../../tracker-parse.mjs";
 
 test("readTrackerUrl returns the href and leaves a non-link cell unchanged", () => {
   const workday = "https://jobs.example.com/Engineer_(Remote)";
@@ -32,6 +32,48 @@ test("resolvePostingUrl prefers the tracker cell", () => {
   );
   assert.equal(resolvePostingUrl("—", "https://jobs.example.com/report"), "https://jobs.example.com/report");
   assert.equal(resolvePostingUrl("", ""), "");
+});
+
+test("applyPostingUrl prefers the tracker cell, then the report", () => {
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://jobs.example.com/tracker"),
+    "https://jobs.example.com/tracker",
+  );
+  assert.equal(applyPostingUrl("", "https://jobs.example.com/tracker"), "https://jobs.example.com/tracker");
+  assert.equal(applyPostingUrl("not a link", ""), "");
+  assert.equal(applyPostingUrl("", "—", "https://jobs.example.com/apply"), "https://jobs.example.com/apply");
+  assert.equal(
+    applyPostingUrl("", "https://jobs.example.com/tracker", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/tracker",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "—", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/report",
+  );
+});
+
+test("applyPostingUrl skips a tracker URL with no host", () => {
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "[board](https://)"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("", "https://", "https://jobs.example.com/apply"),
+    "https://jobs.example.com/apply",
+  );
+  assert.equal(applyPostingUrl("not a link", "https://", "https://"), "");
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "https://user:pass@jobs.example.com/secret"),
+    "https://jobs.example.com/report",
+  );
+  assert.equal(
+    applyPostingUrl("https://jobs.example.com/report", "[job](https://jobs.example.com/Software\\ Engineer)"),
+    "https://jobs.example.com/Software Engineer",
+  );
 });
 
 test("readTrackerUrl keeps a value that is already a URL", () => {
@@ -82,4 +124,22 @@ test("link targets match tracker-parse.mjs, escaped angle brackets included", ()
     assert.equal(readTrackerUrl(cell), extractCellUrl(cell), cell);
   }
   assert.equal(firstMarkdownLinkTarget("[1](<../reports/001-a\\>>)"), "../reports/001-a>");
+});
+
+test("soleMarkdownLinkTarget reads a cell that is exactly one link, as tracker-parse.mjs does", () => {
+  const cells = [
+    "[1](../reports/001-acme-(berlin)-2026-10-01.md)",
+    "  [1](<../reports/001 acme.md>)  ",
+    "[1](../reports/001-a.md), [2](../reports/002-b.md)",
+    "see [1](../reports/001-a.md)",
+    "[1](../reports/001-a.md) (moved)",
+    "—",
+    "",
+  ];
+  for (const cell of cells) {
+    assert.equal(soleMarkdownLinkTarget(cell), soleMarkdownLink(cell)?.target ?? null, cell);
+  }
+  assert.equal(soleMarkdownLinkTarget("[1](../reports/001-a.md), [2](../reports/002-b.md)"), null);
+  assert.equal(soleMarkdownLinkTarget(" [1](../reports/001-a.md) "), "../reports/001-a.md");
+  assert.equal(soleMarkdownLinkTarget(undefined), null);
 });

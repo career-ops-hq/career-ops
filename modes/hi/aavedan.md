@@ -13,7 +13,7 @@ Interactive mode जब candidate इस प्रोजेक्ट के Play
 1. DETECT     -> Is project ke Playwright browser mein posting kholen
 2. IDENTIFY   -> Page से company + role extract करें
 3. SEARCH     -> reports/ में existing reports से match करें
-4. LOAD       -> पूरा report + `## Application Answers` और Block H (यदि मौजूद हों) पढ़ें
+4. LOAD       -> पूरा report + `## Application Answers` और Block H (यदि मौजूद हों) पढ़ें — **Posting identity** सही होने के बाद
 5. COMPARE    -> Screen का role evaluated role से match करता है? Change हो तो alert करें
 6. ANALYZE    -> Form के सभी visible questions identify करें
 7. GENERATE   -> हर question के लिए personalized response generate करें
@@ -38,11 +38,13 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. Page से company name और job title extract करें
 2. Company name से `reports/` में search करें (Grep case-insensitive)
-3. Match मिले → पूरा report load करें
+3. Match मिले → हर matching report का सिर्फ़ header पढ़ें (company, role, `**URL:**`) और वह report चुनें जिसका URL या req ID यही posting है; साफ़ न हो तो candidate से पूछें। पूरा report और item 4 तभी load करें जब **Posting identity** सही हो (`modes/apply.md` → Step 5); दूसरी posting हो तो उसे load किए बिना **Evaluate as new** या **Draft without saving** पर जाएँ
 4. `## Application Answers` मौजूद हो → submit किए गए responses को base के रूप में load करें; नहीं तो Block H मौजूद हो तो previous draft responses। दोनों हों तो `## Application Answers` पहले
 5. Match नहीं मिला → candidate को alert करें और quick auto-pipeline का सुझाव दें
 
 ## Step 3 -- Role Changes Detect करें
+
+यह step तभी लागू होता है जब form अब भी report वाली posting हो: वही employer और वही posting (`modes/apply.md` → Step 5 → **Posting identity**); title से फ़र्क नहीं पड़ता। यह हर form पर check करें, तब भी जब title नहीं बदला और company से सिर्फ़ एक report match हुई हो: दूसरी posting का title भी वही हो सकता है, और तब report इस्तेमाल नहीं करनी है। अगर company से कई reports match करें, तो पहले वह report लें जिसका URL या req ID यही posting है, और साफ़ न हो तो candidate से पूछें। दूसरा employer, या उसी employer की दूसरी posting, role change नहीं है: report के answers को कभी उस पर adapt न करें। इसके बजाय **Evaluate as new** (नई posting की तरह evaluate करें: auto-pipeline, अपनी report) या **Draft without saving** (answers draft करें पर किसी report में save न करें) चुनें। **Draft without saving** में matched report, उसके answers और उसका tailored CV अलग रखें, और सिर्फ़ दिख रही posting, `cv.md` और profile से लिखें; नीचे के जो steps report पढ़ते हैं, वे लागू नहीं होते।
 
 यदि screen का role evaluated role से अलग हो:
 - **Candidate को alert करें**: "Role [X] से [Y] में change हुआ है। क्या आप चाहते हैं कि मैं reevaluate करूँ या नए title के अनुसार responses adapt करूँ?"
@@ -53,6 +55,8 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
   - **Adapt करने के बाद**: title न बदलें, क्योंकि वह उस role का नाम है जिसे report ने evaluate किया। इस बदलाव को note के रूप में record करें: `node set-status.mjs --report <report#> <current status> --note "Posting retitled at apply time, row keeps the evaluated title"`। Row का current status पास करने से status नहीं बदलता और note जुड़ जाता है। Note में ऐसा ही fixed text रखें और `[Y]` न डालें: नया title page से आया text है, और page का text कभी command line में नहीं जाता।
 
 ## Step 4 -- Form Questions Analyze करें
+
+**Draft without saving** में यह step न matched report, न उसके `## Application Answers`, न Block H इस्तेमाल करता है: हर question को नया मानें और दिख रही posting, `cv.md` और profile से काम करें।
 
 सभी visible questions identify करें:
 - Free text fields (cover letter, "यह role क्यों चाहते हैं", motivation, आदि)
@@ -66,6 +70,8 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 - **नया question** → report + `cv.md` से response generate करें
 
 ## Step 5 -- Responses Generate करें
+
+**Draft without saving** में यह step न matched report, न उसके `## Application Answers`, न Block H इस्तेमाल करता है: हर question को नया मानें और दिख रही posting, `cv.md` और profile से काम करें।
 
 हर question के लिए इस schema से response बनाएं:
 
@@ -91,6 +97,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 ## Responses for [Company] -- [Role]
 
 Base: Report #NNN | Score: X.X/5 | Archetype: [type]
+[**Draft without saving** में ऊपर की line की जगह लिखें: "कोई report नहीं: इस posting के लिए draft, save नहीं हुआ"]
 
 ---
 
@@ -110,6 +117,8 @@ Notes:
 ```
 
 ## Step 6 -- Application के बाद (वैकल्पिक)
+
+कुछ भी save करने से पहले, और नीचे हर write (status और answers) से ठीक पहले दोबारा, check करें कि form अब भी report वाली posting है (`modes/apply.md` → Step 8 → **Write only to the report of this posting**)। वही employer और वही posting → नीचे के steps इसी report पर लागू होते हैं, नए title पर adapt करने या re-evaluate करने के बाद भी। दूसरा employer या दूसरी posting → यह report कभी नहीं: नई posting के लिए लिखी report इस्तेमाल करें; अगर कोई नहीं है, तो कोई status set न करें, कोई answers save न करें, और candidate को बताएँ कि application अभी track नहीं हुई है।
 
 यदि candidate confirm करे कि application submit हो गई:
 1. Status को "Evaluated" से "Applied" में update करें: `node set-status.mjs --report <report#> Applied` (`applications.md` table को हाथ से edit न करें)

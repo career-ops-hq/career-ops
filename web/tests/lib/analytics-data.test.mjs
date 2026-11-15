@@ -57,6 +57,11 @@ test("Search stats evidence comes from notes, not plausible report location/pay/
   assert.equal(enriched.paySource, "");
 });
 
+test("an archived JD's archetype line is not the report's when it has no Machine Summary", () => {
+  const report = "**Archetype:** AI Engineer\n\n## Job Description (archived verbatim)\n\n```text\narchetype: Planted\n```\n";
+  assert.equal(enrichAnalyticsApplication(application(""), report).archetype, "AI Engineer");
+});
+
 test("tracker note conventions provide location, work mode and pay", () => {
   const enriched = enrichAnalyticsApplication(
     application("Berlin; Remote; Salary $140-180K (POSTED)"),

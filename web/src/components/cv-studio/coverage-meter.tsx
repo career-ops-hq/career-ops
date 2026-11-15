@@ -20,7 +20,7 @@ export function CoverageMeter({ coverage, dropped }: { coverage: { present: stri
         <div className={cn("h-full rounded-full transition-[width] duration-300", bar)} style={{ width: `${coverage.pct ?? 0}%` }} />
       </div>
       {dropped.length > 0 && (
-        <p className="mt-2 text-xs text-amber-700 dark:text-amber-300" role="status">
+        <p className="mt-2 text-xs text-amber-800 dark:text-amber-300" role="status">
           Your edits removed {dropped.join(", ")}, which the tailored CV covered.
         </p>
       )}

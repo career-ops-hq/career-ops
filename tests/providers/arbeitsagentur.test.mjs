@@ -1,5 +1,5 @@
 // tests/providers/arbeitsagentur.test.mjs — moved verbatim from test-all.mjs (#1440).
-// Fixtures follow the v6 search shape (#2494): the response list is
+// Fixtures follow the search response shape: the response list is
 // `ergebnisliste`, and a posting carries `referenznummer` /
 // `stellenangebotsTitel` / `firma` / `stellenlokationen[]`.
 import { pass, fail, ROOT } from '../helpers.mjs';
@@ -8,7 +8,7 @@ import { pathToFileURL } from 'url';
 
 console.log('\nProvider — arbeitsagentur');
 
-/** One posting in the v6 search shape. */
+/** One posting in the search response shape. */
 const v6 = (referenznummer, stellenangebotsTitel, ort, extra = {}) => ({
   referenznummer,
   stellenangebotsTitel,
@@ -17,7 +17,7 @@ const v6 = (referenznummer, stellenangebotsTitel, ort, extra = {}) => ({
   ...extra,
 });
 
-/** A v6 search response. */
+/** A search response. */
 const page = (...jobs) => ({ ergebnisliste: jobs });
 
 try {
@@ -51,7 +51,7 @@ try {
     fail(`parseArbeitsagenturConfig sanitized = ${JSON.stringify(cfg)}`);
   }
 
-  // buildLocation — reads the v6 `stellenlokationen` array. The address `region`
+  // buildLocation — reads the `stellenlokationen` array. The address `region`
   // is an uppercase federal-state enum (BADEN_WUERTTEMBERG), not a display name,
   // so it is deliberately dropped rather than joined onto the city.
   if (buildLocation([{ adresse: { ort: 'Berlin', region: 'BERLIN', land: 'DEUTSCHLAND' } }]) === 'Berlin') {
@@ -89,11 +89,17 @@ try {
   // normalizeJob — happy path encodes the reference number into the detail URL
   const norm = normalizeJob(v6('10000-123/4 X', '  ML Engineer  ', 'Berlin', { firma: ' ACME ' }));
   if (norm && norm.title === 'ML Engineer' && norm.company === 'ACME'
-      && norm.url === 'https://www.arbeitsagentur.de/jobsuche/jobdetail/' + encodeURIComponent('10000-123/4 X')
+      && norm.url === 'https://www.arbeitsagentur.de/jobsuche/jobdetail/10000-123%252F4%20X'
       && norm.refnr === '10000-123/4 X') {
-    pass('normalizeJob trims fields and URL-encodes the reference number');
+    pass('normalizeJob trims fields and URL-encodes the reference number, with the slash encoded twice (/ → %2F → %252F)');
   } else {
     fail(`normalizeJob = ${JSON.stringify(norm)}`);
+  }
+  const colon = normalizeJob(v6('17296-0008297:01-S', 'ML Engineer', 'Berlin'));
+  if (colon && colon.url === 'https://www.arbeitsagentur.de/jobsuche/jobdetail/17296-0008297%3A01-S') {
+    pass('normalizeJob encodes characters other than the slash once');
+  } else {
+    fail(`normalizeJob colon = ${JSON.stringify(colon)}`);
   }
   if (normalizeJob({ stellenangebotsTitel: 'No refnr' }) === null && normalizeJob({ referenznummer: 'x', stellenangebotsTitel: '' }) === null) {
     pass('normalizeJob returns null without a reference number or title');
@@ -126,8 +132,6 @@ try {
   else fail(`aa.fetch() returned ${JSON.stringify(fetched)}`);
   if (sentApiKey === 'jobboerse-jobsuche') pass('aa.fetch() sends the X-API-Key header');
   else fail(`aa.fetch() X-API-Key = ${JSON.stringify(sentApiKey)}`);
-  // The v4 path is gone (404 as of 2026-08-04, #2494); pin the version so a
-  // silent revert can't reintroduce a dead endpoint.
   if (sentUrl && sentUrl.includes('/pc/v6/jobs')) pass('aa.fetch() queries the v6 jobs endpoint');
   else fail(`aa.fetch() endpoint = ${JSON.stringify(sentUrl)}`);
 
@@ -349,6 +353,25 @@ try {
   } else {
     fail(`aa.fetch() partial-success threw=${partialThrew}, result=${JSON.stringify(partial)}`);
   }
+  // ...but the failed keyword was never read, so the result says the board is
+  // partial: scan.mjs logs it partial instead of reachable (as #6820 did for
+  // platsbanken).
+  if (partial?.truncated?.reason === 'fetch-error' && partial.truncated.fetched === 0) {
+    pass('aa.fetch() marks the board partial (fetch-error) when one keyword fails and another answers');
+  } else {
+    fail(`aa.fetch() partial-success truncated = ${JSON.stringify(partial?.truncated)}`);
+  }
+
+  // Every keyword answering is a complete read: no mark.
+  const bothAnswer = await aa.fetch(
+    { name: 'AA', arbeitsagentur: { keywords: ['OK', 'ALSO'] } },
+    { fetchJson: async (url) => page(v6(new URL(url).searchParams.get('was'), 'ML Engineer', 'Berlin')) },
+  );
+  if (bothAnswer.length === 2 && bothAnswer.truncated === undefined) {
+    pass('aa.fetch() leaves a board unmarked when every keyword answers');
+  } else {
+    fail(`aa.fetch() all-answer result = ${bothAnswer.length} jobs, truncated=${JSON.stringify(bothAnswer.truncated)}`);
+  }
 
   // fetch() — Pass A succeeds with jobs, optional Pass B fails → Pass A jobs kept.
   const passBFail = await aa.fetch(
@@ -363,6 +386,11 @@ try {
     pass('aa.fetch() preserves primary (Pass A) results when the remote pass (Pass B) fails');
   } else {
     fail(`aa.fetch() Pass B failure dropped primary: ${JSON.stringify(passBFail)}`);
+  }
+  if (passBFail.truncated?.reason === 'fetch-error' && passBFail.truncated.fetched === 1) {
+    pass('aa.fetch() marks the board partial when the remote pass (Pass B) fails');
+  } else {
+    fail(`aa.fetch() Pass B failure truncated = ${JSON.stringify(passBFail.truncated)}`);
   }
 
   // angebotsart: default ARBEIT only; a list queries each type and merges.

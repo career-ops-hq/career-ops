@@ -35,6 +35,31 @@ test('stale tabs and deletes cannot overwrite newer messages', t => {
   assert.throws(() => deleteChat(root, id, 1), /another tab/);
   assert.equal(readChat(root, id).messages.length, 2);
 });
+test('a save whose response was lost does not lock its own page out (#6381)', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 });
+  // The page never saw revision 1, so it still sends 0 with its newer messages.
+  const next = [...messages, { role: 'assistant', content: 'Reply' }];
+  const saved = saveChat(root, id, { revision: 0, messages: next, writer: 'page-a', seq: 2 });
+  assert.equal(saved.revision, 2);
+  assert.equal(readChat(root, id).messages.length, 2);
+  // A delayed earlier request from the same page cannot undo its retry.
+  assert.throws(() => saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a', seq: 0 }), /Invalid save sequence/);
+  assert.throws(() => saveChat(root, id, { revision: 1, messages, writer: 'page-b', seq: 1 }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages: next, writer: 'page-a' }), /Save sequence required/);
+  assert.throws(() => saveChat(root, id, { revision: 1, messages }), /another tab/);
+  assert.throws(() => saveChat(root, id, { revision: 2, messages, writer: '../x' }), /Invalid writer/);
+  assert.equal(readChat(root, id).messages.length, 2);
+});
+test('a later save repeating the stored messages still outranks a delayed earlier save', t => {
+  const root = fixture(t), id = randomUUID();
+  saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 1 });
+  const next = [...messages, { role: 'assistant', content: 'Reply' }];
+  assert.equal(saveChat(root, id, { revision: 0, messages, writer: 'page-a', seq: 3 }).seq, 3);
+  assert.throws(() => saveChat(root, id, { revision: 0, messages: next, writer: 'page-a', seq: 2 }), /another tab/);
+  assert.equal(readChat(root, id).messages.length, 1);
+});
 test('migration retries do not duplicate a conversation or increment its revision', t => {
   const root = fixture(t), id = randomUUID();
   const first = saveChat(root, id, { revision: 0, messages });

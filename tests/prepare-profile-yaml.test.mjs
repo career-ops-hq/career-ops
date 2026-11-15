@@ -60,4 +60,43 @@ try {
     assert.match(scalars.stdout, /phone\s+5550100\n/);
     assert.ok(!scalars.stdout.includes('null'));
   });
+
+  // config/profile.example.yml keeps identity under candidate and uses the
+  // root location key for country, city, and timezone. Reading that mapping
+  // as the form value exits before any prefill is printed.
+  const nested = run([
+    'full_name: Pat Decoy',
+    'candidate:',
+    '  full_name: Avery Quinn',
+    '  location: "Denver, CO"',
+    'location:',
+    '  country: "United States"',
+    '  city: Denver',
+    '  timezone: MT',
+    '',
+  ].join('\n'));
+  check('candidate block wins over a root name and a location mapping', () => {
+    assert.equal(nested.status, 0, describeSpawn(nested));
+    assert.match(nested.stdout, /first_name\s+Avery\n/);
+    assert.match(nested.stdout, /last_name\s+Quinn\n/);
+    assert.ok(!nested.stdout.includes('Decoy'));
+    assert.ok(!nested.stderr.includes('must be a scalar'));
+  });
+
+  const exampleShape = run([
+    'candidate:',
+    '  full_name: Avery Quinn',
+    '  location: "Denver, CO"',
+    'location:',
+    '  country: "United States"',
+    '  city: Denver',
+    '  timezone: MT',
+    '',
+  ].join('\n'));
+  check('example profile shape prefills the candidate name', () => {
+    assert.equal(exampleShape.status, 0, describeSpawn(exampleShape));
+    assert.match(exampleShape.stdout, /first_name\s+Avery\n/);
+    assert.match(exampleShape.stdout, /last_name\s+Quinn\n/);
+    assert.ok(!exampleShape.stderr.includes('must be a scalar'));
+  });
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }

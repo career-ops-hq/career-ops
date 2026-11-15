@@ -444,6 +444,28 @@ export function killMsForKind(kind) {
   return 780_000;
 }
 
+/**
+ * The error for a run whose CLI gave us no assistant text, or null when it did.
+ *
+ * `stderrSnippet` is the first stderr line the runtime's classifier flagged. It is
+ * detail only: it never decides that the run failed, it just says why. It is
+ * appended on BOTH branches. A CLI can exit 0 and still do nothing: Antigravity
+ * prints "a tool required the "command" permission that headless mode cannot
+ * prompt for" to stderr, exits cleanly and writes nothing to stdout, and that
+ * line used to be dropped, leaving only "is it installed and authenticated?".
+ *
+ * With no snippet the text is exactly what it was before this existed.
+ *
+ * @param {{emittedText: boolean, sawError: boolean, cleanExit: boolean, stderrSnippet?: string | null}} state
+ * @returns {string | null}
+ */
+export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet }) {
+  if (emittedText || sawError) return null;
+  const detail = stderrSnippet ? ` (${stderrSnippet})` : "";
+  if (!cleanExit) return `The CLI exited with an error — is it installed and authenticated?${detail}`;
+  return `The CLI produced no output — is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;
+}
+
 // Message for a run the route stopped at its own time limit. It names the limit,
 // offers a re-run / Claude Code, and DELIBERATELY never says the CLI "didn't save
 // a report": a timeout and a CLI that couldn't write are different failures, and

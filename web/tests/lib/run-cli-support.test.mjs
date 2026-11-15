@@ -18,6 +18,7 @@ import {
   isFatalClaudeStderr,
   isFatalCodexStderr,
   isFatalGenericStderr,
+  noOutputError,
   parseClaudeEvent,
   parseCodexEvent,
   parseGrokEvent,
@@ -620,4 +621,53 @@ test("a timed-out run reads as a timeout, never as 'didn't save a report' (#3124
   assert.match(msg, /780s time limit/, "the message names the limit it hit");
   assert.match(msg, /re-run|Claude Code/i, "it offers a next step");
   assert.doesNotMatch(msg, /didn't save a report/i, "a timeout must not be blamed on the CLI's ability to write");
+});
+
+// A CLI can exit 0 and still do nothing. Antigravity prints the reason to stderr
+// ("a tool required the "command" permission that headless mode cannot prompt
+// for") and exits cleanly with an empty stdout. The route captured that line but
+// dropped it on the clean-exit branch, so the user saw only "is it installed and
+// authenticated?" for a CLI that was installed and signed in.
+const AGY_PERMISSION_LINE =
+  'jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied. Add an allow-rule under permissions.allow in settings.json (e.g. command(<target>)). Alternatively, re-run with --dangerously-skip-permissions to auto-approve all tools.';
+
+test("a clean exit with no output now carries the CLI's own stderr reason", () => {
+  const msg = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: true,
+    stderrSnippet: AGY_PERMISSION_LINE.slice(0, 200),
+  });
+  assert.match(msg, /^The CLI produced no output — is it installed and authenticated\? \(jetski: no output produced/);
+  assert.match(msg, /headless mode cannot prompt for/);
+  assert.ok(msg.endsWith("(career-ops is best on Claude Code.)"), "the Claude Code tip stays last");
+});
+
+test("with no stderr snippet the messages are exactly what they were before", () => {
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: true, stderrSnippet: null }),
+    "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)",
+  );
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: false }),
+    "The CLI exited with an error — is it installed and authenticated?",
+  );
+});
+
+test("a non-clean exit still appends the snippet", () => {
+  assert.equal(
+    noOutputError({ emittedText: false, sawError: false, cleanExit: false, stderrSnippet: "Error: connection refused" }),
+    "The CLI exited with an error — is it installed and authenticated? (Error: connection refused)",
+  );
+});
+
+test("no error when the CLI produced text or reported its own structured error", () => {
+  assert.equal(noOutputError({ emittedText: true, sawError: false, cleanExit: true, stderrSnippet: "Error: x" }), null);
+  assert.equal(noOutputError({ emittedText: false, sawError: true, cleanExit: false, stderrSnippet: "Error: x" }), null);
+});
+
+test("the generic stderr classifier flags the Antigravity permission line, so the snippet exists", () => {
+  // Without this the helper has nothing to append: the route only keeps a stderr
+  // line the classifier flags.
+  assert.equal(isFatalGenericStderr(AGY_PERMISSION_LINE), true);
 });

@@ -13,7 +13,7 @@
 1. 擷取 (DETECT)    → 用本專案的 Playwright 瀏覽器開啟職缺頁面
 2. 辨識 (IDENTIFY)  → 從頁面中擷取公司名稱與職缺名稱
 3. 搜尋 (SEARCH)    → 比對 reports/ 目錄下已儲存的評估報告
-4. 載入 (LOAD)      → 讀取對應的評估報告及 H 區的擬答草稿（若存在）
+4. 載入 (LOAD)      → 讀取對應的評估報告、`## Application Answers` 及 H 區的擬答草稿（若存在），在 **Posting identity** 成立之後
 5. 校準 (COMPARE)   → 比對畫面上的職缺是否與先前評估的完全一致。若有變動，提出提示
 6. 解析 (ANALYZE)   → 辨識頁面上所有可見的表單問題輸入框
 7. 產生 (GENERATE)  → 結合報告脈絡與履歷 cv.md，為每個問題產生客製草稿
@@ -42,13 +42,15 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 1. 從畫面或輸入的資訊中擷取公司名稱與職缺名稱。
 2. 在 `reports/` 目錄下搜尋對應的評估報告檔案（執行不分大小寫的模糊搜尋）。
-3. 若比對成功，載入完整的評估報告內容。
-4. 檢查報告中是否有「維度 H（開放式問題擬答草稿）」，若有，以它作為回答的基礎模板。
+3. 若比對成功，先只讀取每份相符報告的開頭資訊（公司、職缺、`**URL:**`），選出 URL 或 req ID 與本職缺一致的那一份；不確定時詢問求職者。只有在 **Posting identity** 成立之後（`modes/apply.md` → Step 5），才載入完整報告和第 4 項；若是不同職缺，則不載入，改走 **Evaluate as new** 或 **Draft without saving**。
+4. 若報告中有 `## Application Answers` 區段 → 以實際送出過的回答作為基礎；否則，若有「維度 H（開放式問題擬答草稿）」，以它作為回答的基礎模板。兩者皆有時，`## Application Answers` 優先。
 5. 若找不到任何歷史報告，告知求職者，並詢問是否要針對這個連結快速執行一次 `auto-pipeline` 自動評估流程。
 
 ---
 
 ## 步驟 3 — 檢核職缺一致性
+
+本步驟僅在表單仍是該報告對應的職缺時適用：同一雇主、同一職缺（`modes/apply.md` → Step 5 → **Posting identity**）；職缺名稱不列入判斷。即使職缺名稱沒有變動、且只有一份報告與該公司相符，也要對每個表單做這項檢查：另一個職缺可能使用相同的名稱，此時不得使用該報告。若有多份報告與該公司相符，先選 URL 或 req ID 與本職缺一致的那一份，不確定時詢問求職者。不同雇主，或同一雇主的另一個職缺，不屬於職缺變更：絕不要把該報告的回答改寫套用到它上面。應改為選擇 **Evaluate as new**（當成新職缺評估：auto-pipeline，產生獨立報告）或 **Draft without saving**（只草擬回答，不儲存到任何報告）。選擇 **Draft without saving** 時，把比對到的報告、其中的回答和客製履歷都放到一邊，只根據目前看到的職缺、`cv.md` 和個人檔案撰寫；下文中讀取報告的步驟此時不適用。
 
 如果表單上顯示的職缺細節（如職級、所屬部門）與歷史報告有出入：
 - **向求職者提出提示**：例如：「偵測到當前的職缺已從 [X] 變成 [Y]。需要我重新做一次快速評估，還是直接在現有話術的基礎上微調，適配新職缺？」
@@ -62,6 +64,8 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 ## 步驟 4 — 分析表單問答框
 
+選擇 **Draft without saving** 時，本步驟不使用比對到的報告、其中的 `## Application Answers` 或維度 H：把每個問題都當成新問題，只根據目前看到的職缺、`cv.md` 和個人檔案處理。
+
 定位並解析當前頁面上所有的表單輸入項目：
 - 開放式問答框（如「你為什麼想加入我們？」、「描述一次你解決棘手技術問題的經驗」等）。
 - 下拉選單（如求職管道、是否需要工作簽證支援等）。
@@ -70,12 +74,14 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 - 檔案上傳欄（上傳履歷 PDF、求職信 PDF）。
 
 對每個問題進行歸類：
-- **維度 H 中已有擬答** → 取出並依當前表單的細部要求潤飾。
+- **`## Application Answers` 或維度 H 中已有回答** → 取出並依當前表單的細部要求潤飾。
 - **新問題** → 依報告脈絡分析、STAR 故事及 `cv.md` 的量化指標現場撰寫。
 
 ---
 
 ## 步驟 5 — 產生客製答案
+
+選擇 **Draft without saving** 時，本步驟第 1 項的報告背景同樣不使用：比對到的報告屬於另一個職缺，只根據目前看到的職缺、`cv.md` 和個人檔案撰寫。
 
 產生每個問題的回答草稿時，必須嚴格遵守以下原則：
 
@@ -90,6 +96,7 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 ## [公司名稱] — [職缺名稱] 表單擬答草稿
 
 關聯報告: #NNN | 綜合評分: X.X/5 | 偵測到的個人檔案類型: [類型]
+[選擇 **Draft without saving** 時，把上面這一行換成：「無關聯報告：為目前職缺草擬，未儲存」]
 
 ---
 
@@ -105,16 +112,18 @@ Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` an
 
 投遞前提醒：
 - [此處填入需要求職者手動確認的個人資訊，例如期望薪資、最快到職日等]
-- [提醒求職者在此處上傳先前客製好的履歷 PDF]
+- [僅當已確認報告對應目前看到的職缺時，提醒求職者在此處上傳為該職缺客製的履歷 PDF；若選擇了 **Draft without saving**，或沒有與目前職缺對應的報告，則說明尚未選定相符的客製履歷，不要推薦為其他職缺客製的履歷]
 ```
 
 ---
 
 ## 步驟 6 — 投遞後動作
 
+儲存任何內容之前，以及在下面每一次寫入（狀態和回答）之前，都要再次確認表單仍是該報告對應的職缺（`modes/apply.md` → Step 8 → **Write only to the report of this posting**）。同一雇主、同一職缺 → 以下步驟都作用於這份報告，微調適配新職缺名稱或重新評估之後也一樣。不同雇主或不同職缺 → 絕不寫入這份報告：使用為新職缺產生的報告；若沒有，不設定任何狀態、不儲存回答，並告知求職者這次應徵尚未被記錄。
+
 當求職者確認已經成功按下「送出應徵／投遞」後，執行以下收尾與建檔工作：
 1. 使用規範的 CLI 將該職缺狀態更新為 `Applied`：`node set-status.mjs --report <report#> Applied`（不要手動編輯 `data/applications.md` 表格）。
-2. 將最終實際送出的表單回答歸檔，並更新到該報告的維度 H 區塊中，方便後續面試對照。
+2. 將最終實際送出的表單回答寫入該報告的 `## Application Answers` 區段，並標註 `**State:** submitted`（格式見 `modes/apply.md` → Step 8），方便後續面試對照。維度 H 保留為評估時的草稿，不做修改。
 3. 建議下一步行動：引導求職者使用 `/career-ops contacto` 指令，產生直達 LinkedIn 招募負責人的開發話術。
 
 ---

@@ -110,8 +110,10 @@ test('allowed roots are this checkout and the configured data root only', async 
   const previousData = process.env.CAREER_OPS_DATA_DIR;
   const data = scratch();
   try {
+    // Named rather than cleared: with both variables empty, a .career-ops-data
+    // marker in the checkout still names a data root.
     process.env.CAREER_OPS_ROOT = '';
-    process.env.CAREER_OPS_DATA_DIR = '';
+    process.env.CAREER_OPS_DATA_DIR = ROOT;
     assert.deepEqual(allowedRoots(), [ROOT]);
 
     process.env.CAREER_OPS_DATA_DIR = data;
@@ -271,7 +273,8 @@ test('apply instructions name the scope guard and stop telling agents to attach 
 test('check-path and launch-options stay inside the project browser', () => {
   const rootRun = spawnSync(NODE, [join(ROOT, 'apply-scope.mjs'), 'root'], {
     cwd: ROOT,
-    env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: '' },
+    // The data root is named for the same reason as in the allowedRoots test above.
+    env: { ...process.env, CAREER_OPS_ROOT: '', CAREER_OPS_DATA_DIR: ROOT },
     encoding: 'utf8',
   });
   assert.equal(rootRun.status, 0, describeSpawn(rootRun));

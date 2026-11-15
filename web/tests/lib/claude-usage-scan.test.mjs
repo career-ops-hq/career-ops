@@ -238,3 +238,35 @@ test("a missing projects directory is zero, not an error", async () => {
   const r = await scanner.compute();
   assert.deepEqual([r.window5h.tokens, r.window7d.tokens], [0, 0]);
 });
+
+test("a message logged several times, across files, is counted once", async () => {
+  const root = setup();
+  try {
+    const msg = (id, req, out) =>
+      JSON.stringify({ timestamp: new Date(NOW - HOUR).toISOString(), requestId: req, message: { id, usage: { input_tokens: 10, output_tokens: out } } }) + "\n";
+    // Streamed copies in one file grow; a resumed session repeats the message.
+    writeFileSync(join(root, "proj-a", "s1.jsonl"), msg("m1", "r1", 5) + msg("m1", "r1", 50) + msg("m2", "r2", 1));
+    writeFileSync(join(root, "proj-a", "s2.jsonl"), msg("m1", "r1", 50));
+    const r = await createUsageScanner({ root, now: () => NOW }).compute();
+    assert.equal(r.window5h.messages, 2);
+    assert.equal(r.window5h.tokens, 60 + 11);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the copy kept is the largest one inside each window", async () => {
+  const root = setup();
+  try {
+    const at = (ms, out) =>
+      JSON.stringify({ timestamp: new Date(NOW - ms).toISOString(), requestId: "r1", message: { id: "m1", usage: { input_tokens: 0, output_tokens: out } } }) + "\n";
+    // The largest copy is 6h old (outside 5h, inside 7d); a smaller copy is
+    // 1h old. The message still counts in both windows.
+    writeFileSync(join(root, "proj-a", "s1.jsonl"), at(6 * HOUR, 100) + at(HOUR, 40));
+    const r = await createUsageScanner({ root, now: () => NOW }).compute();
+    assert.deepEqual(r.window5h, { tokens: 40, messages: 1 });
+    assert.deepEqual(r.window7d, { tokens: 100, messages: 1 });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

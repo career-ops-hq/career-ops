@@ -22,7 +22,7 @@ Quando o candidato cola uma **URL** (não texto do JD), confirme que a vaga aind
 
 Não continue para o Bloco A até que este gate seja resolvido. O snapshot capturado aqui é reutilizado pelos sinais de frescor do Bloco G.
 
-**Título da sessão:** uma vez que um JD real é lido e o cargo e empregador são conhecidos, aplique a regra **Session Title** do router (`SKILL.md`, #5303): renomeie uma sessão interativa para `{Cargo}, {Empresa}` quando o host permitir. Em um handoff do `auto-pipeline` com empregador conhecido, isso já aconteceu no Step 0. Uma vaga de agência com empregador não revelado é intitulada `{Cargo}, via {Agência}` somente após o **Agency confirmation handoff** ser resolvido.
+**Título da sessão:** aplique a regra **Session Title** do router (`SKILL.md`, #5303) em uma sessão interativa quando o host permitir: `Career-ops eval (fetching)` enquanto o JD é lido, `{Cargo}, {Empresa} (evaluating)` assim que um JD real indica o cargo e o empregador, e apenas `{Cargo}, {Empresa}` quando a avaliação termina. Um gate que interrompe a execução (liveness, blacklist, dealbreaker, agência) termina em `(on hold)`. Em um handoff do `auto-pipeline`, o título é do `auto-pipeline`; não o altere. Uma vaga de agência com empregador não revelado é intitulada `{Cargo}, via {Agência}` somente após o **Agency confirmation handoff** ser resolvido.
 
 ## Local public facts reuse (#1025)
 
@@ -544,14 +544,14 @@ Feche o corpo do report com um bloco `## Risk Summary` diretamente após o bloco
 
 **Apenas agregação, zero julgamento novo.** Cada linha cita ou referencia o veredito já produzido por seu sinal de origem. O resumo nunca repontua, repondera ou sobrescreve — se uma linha parecer errada, a correção pertence ao sinal de origem, não aqui.
 
-Três estados por linha: `✅ {veredito claro}` / `⚠️ {achado}` / `— não avaliado`. **`— não avaliado` é um estado de primeira classe:** quando um sinal não pôde ser executado, diga isso explicitamente em vez de omitir a linha, para que um resumo todo-✅ possa ser confiável. **Exceção nomeada:** a linha Interview red flags renderiza seu caso não avaliado como `— sem sessões de entrevista ainda` — um fraseado documentado e mais específico do mesmo conceito "não avaliado" para aquela linha (a verificação de referência cruzada foi executada; não encontrou arquivo redflags), não um quarto estado livre flutuante.
+Três estados por linha: `✅ {veredito claro}` / `⚠️ {achado}` / `— não avaliado`. **`— não avaliado` é um estado de primeira classe:** quando um sinal não pôde ser executado, diga isso explicitamente em vez de omitir a linha, para que um resumo todo-✅ possa ser confiável. **Exceção nomeada:** a linha Interview red flags renderiza seu caso não avaliado como `— sem sessões de entrevista ainda` — um fraseado documentado e mais específico do mesmo conceito "não avaliado" para aquela linha (a verificação de referência cruzada foi executada; não encontrou arquivo redflags), não um quarto estado livre flutuante. Um arquivo redflags marcado como não verificado é o estado `— não avaliado` comum, não esta exceção: o arquivo existe, então a linha não deve dizer que não há sessões.
 
 | Sinal | Origem | Renderização da linha |
 |--------|--------|---------------|
 | Legitimidade da vaga | Tier de avaliação do Bloco G | `✅ High Confidence`, ou `⚠️ {tier} — {motivo em uma linha}` para Proceed with Caution / Suspicious |
 | Classificação de vínculo | Sinal de classificação de vínculo dentro do Bloco G | `✅ claro` quando a verificação rodou e não encontrou nada; `⚠️ linguagem de contratado: "{frase citada}"` quando a sinalização disparou; `— não avaliado` quando a verificação não pôde rodar |
 | Culture screen | Campo Culture screen no Bloco A | `✅ pass`, ou `⚠️ caution — {evidência}` / `⚠️ fail — {evidência}`; `— não avaliado` quando nenhum screen foi executado |
-| Red flags de entrevista | `interview-prep/{company-slug}-redflags.md` (do modo `interview-redflag`) | **Referência cruzada, não uma cópia:** se o arquivo existir, apresente seu nível de alerta atual mais um link relativo — `[{nível}](../interview-prep/{company-slug}-redflags.md)` (relativo a `reports/`); caso contrário `— sem sessões de entrevista ainda` |
+| Red flags de entrevista | `interview-prep/{company-slug}-redflags.md` (do modo `interview-redflag`) | **Referência cruzada, não uma cópia:** se o arquivo existir, apresente seu nível de alerta atual mais um link relativo — `[{nível}](../interview-prep/{company-slug}-redflags.md)` (relativo a `reports/`); caso contrário `— sem sessões de entrevista ainda`. **Arquivo não verificado:** se o arquivo contiver o marcador `<!-- career-ops:redflags-unverified -->` (o modo `interview-redflag` o manteve sem uma sessão de entrevista real que o sustente), nunca apresente seu nível de alerta: renderize `— não avaliado: [análise não verificada](../interview-prep/{company-slug}-redflags.md)`, e `risk_summary.interview_redflags` é `not_evaluated`. Procure o marcador, não o texto da nota, que é escrito no idioma de saída do usuário. |
 | Alegações de IA vs infraestrutura | Verificação de descompasso IA/infraestrutura no Bloco G, quando presente | Se este report contiver essa verificação, espelhe seu veredito (`✅ consistente` / `⚠️ {achado}`); caso contrário `— não avaliado`. A linha ativa automaticamente uma vez que a verificação existe — sem dependência de ordenação |
 | Divulgação de triagem por IA | Sinal de divulgação de triagem por IA no Bloco G (Sinal 15), quando presente | Se este report contiver essa verificação: `✅ divulga uso de IA` quando (a) disparou, `ℹ️ {nome_da_jurisdição} exige divulgação; a vaga está silenciosa` quando apenas (b) disparou (apenas corroborante, nunca um veredito de conformidade), `— sem correspondência de jurisdição` quando nenhum disparou porque a jurisdição do candidato não tem linha na tabela; caso contrário `— não avaliado`. A linha ativa automaticamente uma vez que a verificação existe — sem dependência de ordenação |
 | Contrato por prazo determinado | Sinal de divulgação de prazo determinado no Bloco G (Sinal 16) | `ℹ️ prazo determinado — "{frase citada}"` quando linguagem explícita de prazo fixo está presente; caso contrário `✅ sem prazo determinado divulgado`; `— não avaliado` apenas quando nenhum texto de JD estava disponível |
@@ -676,9 +676,6 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ---
 
-## Machine Summary
-(cerca YAML para scripts downstream — veja requisito abaixo)
-
 ## A) Resumo da Vaga
 (conteúdo completo do bloco A)
 
@@ -709,7 +706,7 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 ## Score Evidence
 (cinco dimensões de pontuação, status de evidência e fonte, questões não resolvidas, tier de confiança da evidência e prioridades de verificação)
 
-## H) Rascunhos de Respostas para Candidatura
+## H) Rascunhos de Respostas para Candidatura (draft)
 (apenas se score >= 4.5 — rascunhos de respostas para o formulário de candidatura)
 
 ---
@@ -722,9 +719,12 @@ Salvar avaliação completa em `reports/{###}-{company-slug}-{YYYY-MM-DD}.md`.
 
 ## Job Description (archived verbatim)
 (o texto completo da vaga, colado verbatim — veja requisito abaixo)
+
+## Machine Summary
+(cerca YAML para scripts downstream — veja requisito abaixo)
 ```
 
-**Machine Summary (obrigatório):** todo report carrega uma cerca YAML `## Machine Summary` diretamente após o cabeçalho — mesmo schema, nomes exatos de campos e regras do bloco "Machine Summary" em `batch/batch-prompt.md` (não duplique o schema aqui; aquele arquivo é a fonte da verdade). Inclui `advertised_comp`: o valor salarial do próprio JD **verbatim** (ex.: `"80-90k EUR"`), ou `null` quando o JD não declara nada — nunca estimado, nunca substituído por dados de mercado pesquisados. Esta chave alimenta a observação de salário anunciado lida por `node salary-gap.mjs`. Também inclui `risk_summary`: o bloco Risk Summary espelhado como um mapa (schema e valores de enum em `batch/batch-prompt.md`), e `requirement_importance`: a tabela do Bloco B espelhada linha por linha, carregando o tier de evidência, banda de importância e match de cada linha (`[]` quando o JD não gera lista de requisitos utilizável). O limite `inferred` do gate do Bloco B vale no YAML também — `importance` nunca é `critical` ou `high` quando `evidence: inferred`.
+**Machine Summary (obrigatório):** todo report carrega uma cerca YAML `## Machine Summary` no fim do report, após `## Job Description (archived verbatim)` — mesmo schema, nomes exatos de campos e regras do bloco "Machine Summary" em `batch/batch-prompt.md` (não duplique o schema aqui; aquele arquivo é a fonte da verdade). Inclui `advertised_comp`: o valor salarial do próprio JD **verbatim** (ex.: `"80-90k EUR"`), ou `null` quando o JD não declara nada — nunca estimado, nunca substituído por dados de mercado pesquisados. Esta chave alimenta a observação de salário anunciado lida por `node salary-gap.mjs`. Também inclui `risk_summary`: o bloco Risk Summary espelhado como um mapa (schema e valores de enum em `batch/batch-prompt.md`), e `requirement_importance`: a tabela do Bloco B espelhada linha por linha, carregando o tier de evidência, banda de importância e match de cada linha (`[]` quando o JD não gera lista de requisitos utilizável). O limite `inferred` do gate do Bloco B vale no YAML também — `importance` nunca é `critical` ou `high` quando `evidence: inferred`.
 
 **Arquivamento do JD (obrigatório, #2789):** todo report DEVE carregar uma seção `## Job Description (archived verbatim)` com o texto completo da vaga colado como está — nunca resumido, nunca parafraseado. Um cabeçalho `**URL:**` sozinho não é um arquivo: é um ponteiro vivo que apodrece quando a vaga fecha ou é removida, o que confiavelmente acontece em algum momento nas semanas entre a candidatura e uma rodada posterior de entrevista, e não há como recuperar os requisitos originais depois disso. Este é o mecanismo primário, não um fallback — o report é o único artefato garantido de ser escrito e rastreado, diferentemente de um arquivo separado `jds/`. Se o JD for muito longo, ou você não puder citá-lo na íntegra (limite de citação de ferramenta de fetch ou guarda de copyright), não o parafraseie. Capture-o por máquina com `archive-posting.mjs` pelo comando abaixo (`company` = o slug no nome do arquivo do report, incluindo `confidential-{agency-slug}`) (`fetch-jd.mjs` imprime o texto de uma vaga de ATS conhecido) e, no lugar do texto, coloque nesta seção **exatamente** `See jds/{filename} for the full archive (archive-posting.mjs --report={num}).` — `check-jd-archive.mjs` apenas credita esta frase de ponteiro canônica quando ela resolve de volta para o número daquele report via `findCaptureForReport`; uma captura `jds/{slug}.md` apenas com slug sem número de report não valida aqui. Este fraseado exato importa: a verificação apenas trata uma seção como ponteiro (exigindo resolução) quando a seção não é nada além desta frase — qualquer prosa adicional ao lado dela é lida como o próprio texto arquivado, não um ponteiro, então não misture os dois. Capturas apenas com slug permanecem válidas para `jd-skill-gap.mjs` executado standalone, fora de uma avaliação completa, onde não há report para vincular de volta. `check-jd-archive.mjs` valida que todo `reports/*.md` tem uma forma ou outra e está conectado em `test-all.mjs` — um report sem ambas é uma falha de teste. Uma reformulação não é um arquivo: `check-jd-archive.mjs` não credita...
 
@@ -790,13 +790,12 @@ O TSV carrega:
 **A linha que o merge escreve** (para referência; você escreve o TSV, não esta linha):
 
 ```markdown
-| # | Data | Empresa | Vaga | Score | Status | PDF | Report |
+| # | Data | Empresa | Vaga | Score | Status | PDF | Report | Notes |
 ```
 
-Com as colunas opcionais, que só aparecem num tracker que já as tenha: Notes ao final e Via (canal intermediário, #1596) após Empresa.
+Com a coluna opcional Via (canal intermediário, #1596) após Empresa:
 
 ```markdown
-| # | Data | Empresa | Vaga | Score | Status | PDF | Report | Notes |
 | # | Data | Empresa | Via | Vaga | Score | Status | PDF | Report | Notes |
 ```
 

@@ -39,6 +39,7 @@ import {
 import { dirname } from 'path';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { writeFileAtomic } from './tracker-utils.mjs';
+import { localToday } from './lib/local-today.mjs';
 
 const PATH = process.env.CAREER_OPS_INBOX || 'data/agent-inbox.md';
 
@@ -55,8 +56,12 @@ const HEADER = [
   '',
 ].join('\n');
 
-function stamp() {
-  return new Date().toISOString().slice(0, 16).replace('T', ' ');
+// Local date and time, the clock the person queuing the item is looking at.
+// toISOString() is UTC, and this stamp carries no zone marker, so a request
+// queued at 10:30 on the 18th east of Greenwich read "2026-08-17 20:30".
+function stamp(now = new Date()) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `${localToday(now)} ${p(now.getHours())}:${p(now.getMinutes())}`;
 }
 
 function ensureGitignored() {
@@ -300,19 +305,24 @@ function fail(msg) {
   process.exit(1);
 }
 
+const USAGE =
+  'Usage:\n' +
+  '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
+  '  node agent-inbox.mjs list [--all]\n' +
+  '  node agent-inbox.mjs resolve <n> [--expect "substring"] [--result "..."]\n' +
+  '\n' +
+  'Numbers are stable file positions: `list` shows gaps once items are\n' +
+  'resolved, and a batch of resolves read off one `list` stays correct.\n' +
+  '--expect aborts unless the target item contains that substring.\n';
+
 const cmd = process.argv[2];
 if (cmd === 'add') await add();
 else if (cmd === 'list') list();
 else if (cmd === 'resolve') await resolve();
+else if (cmd === undefined || cmd === '--help' || cmd === '-h') process.stdout.write(USAGE);
 else {
-  process.stdout.write(
-    'Usage:\n' +
-    '  node agent-inbox.mjs add "evaluate https://acme.com/jobs/42"\n' +
-    '  node agent-inbox.mjs list [--all]\n' +
-    '  node agent-inbox.mjs resolve <n> [--expect "substring"] [--result "..."]\n' +
-    '\n' +
-    'Numbers are stable file positions: `list` shows gaps once items are\n' +
-    'resolved, and a batch of resolves read off one `list` stays correct.\n' +
-    '--expect aborts unless the target item contains that substring.\n',
-  );
+  // A word that is not a subcommand (`ad` for `add`) queued nothing, so it must
+  // not exit 0: the callers that check the status read 0 as "queued".
+  process.stderr.write(`agent-inbox.mjs: unknown command "${cmd}"\n${USAGE}`);
+  process.exit(1);
 }

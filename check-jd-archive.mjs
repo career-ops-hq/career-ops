@@ -216,11 +216,19 @@ export function collectTemplatePlaceholders(modesDir) {
 // (modes/oferta.md), so an evaluator can fill that line in and leave the
 // placeholder under it. The line is dropped before the comparison, as
 // isPathOnlyPointer() does below.
+//
+// batch/batch-prompt.md carries a placeholder of its own, which clears
+// MIN_ARCHIVE_CHARS too. It is outside modes/ and braced rather than
+// parenthesized, so the collector never sees it, and batch-runner.sh rewrites
+// the {{JD_FILE}} inside it, so it can only be matched by shape. The template's
+// closing --- rule stays in the extracted section, so it is dropped first.
+const BATCH_TEMPLATE_PLACEHOLDER_RE = /^\{the JD text from .+ pasted here verbatim\}$/i;
 let templatePlaceholders = null;
 function isUnfilledTemplatePlaceholder(strippedSection) {
   templatePlaceholders ??= collectTemplatePlaceholders(join(CAREER_OPS, 'modes'));
   const withoutPostedLine = strippedSection.replace(POSTED_LINE_RE, '');
-  return templatePlaceholders.has(normalizePlaceholder(withoutPostedLine));
+  return templatePlaceholders.has(normalizePlaceholder(withoutPostedLine))
+    || BATCH_TEMPLATE_PLACEHOLDER_RE.test(withoutPostedLine.replace(/^-{3,}\s*$/gm, '').trim().replace(/\s+/g, ' '));
 }
 
 // modes/oferta.md documents a second legitimate shape for this section: a

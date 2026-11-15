@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="760" height="404" viewBox="0 0 760 404" font-family="-apple-system,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-labelledby="hiw-title">
-  <title id="hiw-title">Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), PDF (output/*.pdf), Tracker (data/applications.md)</title>
+  <title id="hiw-title">Bạn dán URL hoặc mô tả tin tuyển dụng → Archetype Detection (Phân loại: LLMOps / Agentic / PM / SA / FDE / Transformation) → A-H Evaluation (reads cv.md; Match, khoảng trống, nghiên cứu lương, câu chuyện STAR, độ tin cậy) → Report (reports/*.md), CV tùy chỉnh (PDF by default), Tracker (data/applications.md)</title>
   <rect width="760" height="404" rx="12" fill="#ffffff"/>
   <rect x="180" y="16" width="400" height="44" rx="22" fill="#ffffff" stroke="#DD7627" stroke-width="2"/>
   <text x="380" y="44" text-anchor="middle" font-size="15" font-weight="600" fill="#1f2328">Bạn dán URL hoặc mô tả tin tuyển dụng</text>
@@ -22,8 +22,8 @@
   <text x="160" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Report</text>
   <text x="160" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">reports/*.md</text>
   <rect x="280" y="324" width="200" height="64" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
-  <text x="380" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">PDF</text>
-  <text x="380" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">output/*.pdf</text>
+  <text x="380" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">CV tùy chỉnh</text>
+  <text x="380" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">PDF by default</text>
   <rect x="500" y="324" width="200" height="64" rx="10" fill="#fdf1e7" stroke="#DD7627"/>
   <text x="600" y="351" text-anchor="middle" font-size="16" font-weight="700" fill="#1f2328">Tracker</text>
   <text x="600" y="373" text-anchor="middle" font-size="13" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" fill="#59636e">data/applications.md</text>
