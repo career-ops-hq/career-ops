@@ -17,7 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-unlabeled-radios.html"));
 const PORT = 3165;
 
-test("unlabeled radios check Yes, and labeled radios keep their words", async () => {
+test("unlabeled radios check Yes, and labeled radios keep their words", async (t) => {
   const server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(html);
@@ -26,6 +26,7 @@ test("unlabeled radios check Yes, and labeled radios keep their words", async ()
     server.once("error", reject);
     server.listen(PORT, "127.0.0.1", resolve);
   });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   try {
     const page = await browser.newPage();
@@ -39,6 +40,9 @@ test("unlabeled radios check Yes, and labeled radios keep their words", async ()
     assert.deepEqual(auth.options, ["Yes", "No"]);
     assert.ok(rel);
     assert.deepEqual(rel.options, ["Yes", "No"]);
+    const visa = form.fields.find((f) => f.type === "radio" && f.label === "visa");
+    assert.ok(visa);
+    assert.deepEqual(visa.options, ["Yes", "No"]);
     const id = `fixture-${crypto.randomUUID()}`;
     globalThis.__coApplySessions.set(id, { id, frame: page.mainFrame(), page });
     try {
@@ -51,6 +55,5 @@ test("unlabeled radios check Yes, and labeled radios keep their words", async ()
     }
   } finally {
     await browser.close();
-    await new Promise((resolve) => server.close(resolve));
   }
 });
