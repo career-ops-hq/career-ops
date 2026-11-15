@@ -166,7 +166,7 @@ Two separate axes:
 
 > Write all human-facing output in `{language.output}` regardless of the language of these instructions or the job description. Keep market-specific terms from `language.modes_dir` when they are relevant, but explain them in the output language when needed.
 
-**Market mode sets.** `modes/` holds the English default. `modes/_markets.md` lists the market sets (`modes/de/`, `modes/fr/`, `modes/ja/` and the rest) with their evaluation and apply mode names, and covers a `modes_dir` list for a candidate running campaigns in several markets at once. A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
+**Market mode sets.** `modes/` holds the English default. `modes/_markets.md` lists the market sets (`modes/de/`, `modes/fr/`, `modes/ja/` and the rest) with their evaluation and apply mode names. When `language.modes_dir` is a list (a candidate running campaigns in several markets at once), read the multi-market section of `modes/_markets.md` before selecting an evaluation mode. A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
 1. User says "use {market} modes" → layer that dir on the English `modes/` canon: read each mode-loaded English file first, then that dir's version when it provides one, and English workflow rules win conflicts
 2. User sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → always use that dir
 3. You detect a JD written in that language → *suggest* switching (the set's directory is in `modes/_markets.md`)
