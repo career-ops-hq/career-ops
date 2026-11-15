@@ -3087,7 +3087,14 @@ export function requisitionIdForDedup(source) {
  * @returns {boolean}
  */
 export function isDistinctRequisition(seededRequisitions, candidateRequisitions) {
-  return unseenOnEveryRow(seededRequisitions, candidateRequisitions);
+  const forms = toRequisitionForms(candidateRequisitions);
+  // A row that names no requisition is still the same opening. A row that
+  // names one is a different opening when the seed named none: the `*` marker
+  // means "unknown", not "every id".
+  if (!(seededRequisitions instanceof Set) || seededRequisitions.size === 0 || forms.length === 0) return false;
+  const named = [...seededRequisitions].filter((form) => form !== ANY_REQUISITION);
+  if (named.length === 0) return true;
+  return forms.every((form) => !seededRequisitions.has(form));
 }
 
 /**

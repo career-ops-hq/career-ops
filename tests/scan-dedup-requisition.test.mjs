@@ -85,7 +85,9 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     [new Set(['ABC123-1', 'ABC123']), ['ABC123-1'], false, 'ambiguous note seeded both forms: the Lever title form hits one'],
     [new Set(['ABC123-1', 'ABC123']), ['ABC123-2'], true, 'ambiguous note seeded both forms: the Lever sibling hits neither'],
     [new Set(['JR25919']), 'JR25919', false, 'a bare string candidate is still accepted'],
-    [new Set(['JR25919', ANY_REQUISITION]), 'JR25853', false, 'an unlabelled seed keeps the duplicate'],
+    [new Set(['JR25919', ANY_REQUISITION]), 'JR25853', true, 'an unlabelled seed does not hide a different labelled id'],
+    [new Set([ANY_REQUISITION]), 'JR25853', true, 'a seed that named no requisition does not hide a later id'],
+    [new Set([ANY_REQUISITION]), null, false, 'a seed that named no requisition still hides a later row with no id'],
     [new Set(['JR25919']), null, false, 'an unlabelled candidate keeps the duplicate'],
     [undefined, 'JR25853', false, 'no seed data keeps the duplicate'],
   ];
@@ -214,9 +216,12 @@ for (const notes of ['JR 25919; applied', 'JR:25919; applied', 'JR #25919; appli
 
 for (const notes of ['Req #25919; applied', 'req 25919; applied']) {
   const { afterFirst, afterSecond } = runScanTwice(notes);
-  if (afterFirst.length === 0 && afterSecond.length === 0) {
-    pass(`e2e: ambiguous numeric note ${notes} retains conservative company/role dedup`);
-  } else fail(`e2e numeric note: ${JSON.stringify({notes, afterFirst, afterSecond})}`);
+  const both = afterFirst.length === 2
+    && afterFirst.some((line) => line.includes('_JR25919'))
+    && afterFirst.some((line) => line.includes('_JR25853'))
+    && afterSecond.length === 2;
+  if (both) pass(`e2e: a note with no requisition id lets both openings through once (${notes})`);
+  else fail(`e2e numeric note: ${JSON.stringify({notes, afterFirst, afterSecond})}`);
 }
 
 {
@@ -269,10 +274,14 @@ for (const notes of ['Req #25919; applied', 'req 25919; applied']) {
 {
   try {
     const { afterFirst, afterSecond } = runScanTwice('applied; hybrid unconfirmed');
-    if (afterFirst.length === 0 && afterSecond.length === 0) {
-      pass('e2e control: an unlabelled tracker row still suppresses every same-titled posting');
+    const both = afterFirst.length === 2
+      && afterFirst.some((line) => line.includes('_JR25919'))
+      && afterFirst.some((line) => line.includes('_JR25853'))
+      && afterSecond.length === 2;
+    if (both) {
+      pass('e2e control: an unlabelled tracker row does not hide later openings that name a requisition');
     } else {
-      fail(`e2e control: ${afterFirst.length} entries after run 1, ${afterSecond.length} after run 2 (want 0 and 0)`);
+      fail(`e2e control: ${afterFirst.length} entries after run 1, ${afterSecond.length} after run 2 (want both requisitions, once)`);
     }
   } catch (err) {
     fail(`e2e scan run (unlabelled tracker) failed: ${err.message}`);
@@ -318,19 +327,22 @@ for (const notes of ['Req #25919; applied', 'req 25919; applied']) {
     isDistinctRequisition(new Set(ids({ url: lever, text: 'JR-25919' })), ids({ url: lever, text: 'JR25919' })), true);
 
   // 5c. Numeric-only text (`Req #25919`) may have dropped a prefix, so it is
-  // no proof of a distinct requisition in either direction: as a candidate it
-  // yields no form, as a seed it records the wildcard. A numeric Workday URL
-  // tail is still usable — the URL is authoritative.
+  // not a requisition id. As a candidate it yields no form and stays a
+  // duplicate. As a seed it records only the wildcard, which does not hide a
+  // later row that names an id. A numeric Workday URL tail is still usable.
   for (const text of ['Req #25919', 'req 25919', 'req 25919-1']) {
     eq(`numeric-only note: "${text}" yields no form`, ids({ text }), []);
     eq(`numeric-only note: "${text}" as a candidate is never distinct`,
       isDistinctRequisition(new Set(['JR25919']), ids({ text })), false);
     const requisitions = new Map();
     collectSeenCompanyRoles({
-      applicationsText: `| Company | Role | Notes |\n|---|---|---|\n| Acme | Engineer | ${text} |\n`,
+      applicationsText: trackerWith(text, { company: 'Acme', role: 'Engineer' }),
     }, {}, undefined, { requisitionsByBase: requisitions });
-    eq(`numeric-only note: "${text}" as a seed keeps every same-titled posting a duplicate`,
-      isDistinctRequisition(requisitions.get(companyRoleDedupKey('Acme', 'Engineer')), ['JR25919']), false);
+    const seeded = requisitions.get(companyRoleDedupKey('Acme', 'Engineer'));
+    eq(`numeric-only note: "${text}" seeds only the wildcard`,
+      seeded instanceof Set && seeded.size === 1 && seeded.has(ANY_REQUISITION), true);
+    eq(`numeric-only note: "${text}" does not hide a later labelled id`,
+      isDistinctRequisition(seeded, ['JR25919']), true);
   }
   eq('numeric Workday URL tail is still a form', ids({ url: 'https://acme.wd1.myworkdayjobs.com/jobs/job/Engineer_25919' }), ['25919']);
 
@@ -374,12 +386,13 @@ ${workday.replace('London', 'New-York')}_JR200\t2026-09-22\tAcme\tEngineer\tAcme
       requisitions.get(companyRoleDedupKey('Acme', 'Engineer', undefined, 'New York')).add(ANY_REQUISITION);
       locatedRequisitions.get(baseKey).add(ANY_REQUISITION);
       eq('located keys: an unlabelled New York row does not poison London', matches('London', ['JR200']), false);
-      eq('located keys: an unlabelled located row does catch a locationless candidate', matches(undefined, ['JR300']), true);
+      eq('located keys: an unlabelled located row does not hide a later labelled id', matches(undefined, ['JR300']), false);
       seen.add(baseKey);
       requisitions.set(baseKey, new Set(['JR200']));
       eq('located keys: a locationless JR200 wildcard row catches London JR200', matches('London', ['JR200']), true);
       requisitions.set(baseKey, new Set([ANY_REQUISITION]));
-      eq('located keys: an unlabelled locationless row catches every city', matches('Paris', ['JR300']), true);
+      eq('located keys: an unlabelled locationless row does not hide a later labelled id', matches('Paris', ['JR300']), false);
+      eq('located keys: an unlabelled locationless row still hides a later row with no id', matches('Paris', []), true);
     }
   }
 }
