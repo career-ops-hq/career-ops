@@ -113,7 +113,10 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         );
         for (const c of Array.from(cands)) {
           const t = pure(c);
-          if (t && t.length > 2 && t.length < 160 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
+          // Keep a long title. clean() shortens what is shown, and the trailing
+          // star is read from this full text. A 160-character cut here would
+          // drop a star that sits past the cut.
+          if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }
       }
       return "";

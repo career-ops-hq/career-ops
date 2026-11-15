@@ -17,6 +17,8 @@ const html = readFileSync(join(here, "../fixtures/apply-star-required.html"), "u
 const PORT = 3165;
 const longStar = `${"A".repeat(160)} *`;
 const innerStar = `${"A".repeat(159)}* optional`;
+const longRadio = `${"B".repeat(160)} *`;
+const innerRadio = `${"C".repeat(159)}* and more`;
 
 test("a trailing star marks the field required", async (t) => {
   const pageHtml = html.replace("</form>", `
@@ -24,6 +26,16 @@ test("a trailing star marks the field required", async (t) => {
   <input id="long-star" name="long-star" type="text">
   <label for="inner-star">${innerStar}</label>
   <input id="inner-star" name="inner-star" type="text">
+  <div class="field">
+    <p class="question">${longRadio}</p>
+    <label><input type="radio" name="longq" value="1"> Yes</label>
+    <label><input type="radio" name="longq" value="0"> No</label>
+  </div>
+  <div class="field">
+    <p class="question">${innerRadio}</p>
+    <label><input type="radio" name="innerq" value="1"> Yes</label>
+    <label><input type="radio" name="innerq" value="0"> No</label>
+  </div>
 </form>`);
   const server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -53,6 +65,12 @@ test("a trailing star marks the field required", async (t) => {
     assert.equal(byLabel.Email, true);
     assert.equal(byLabel["A".repeat(160)], true);
     assert.equal(byLabel[`${"A".repeat(159)}*`], false);
+    const longQ = form.fields.find((f) => f.type === "radio" && f.label === "B".repeat(160));
+    const innerQ = form.fields.find((f) => f.type === "radio" && f.label === `${"C".repeat(159)}*`);
+    assert.ok(longQ);
+    assert.equal(longQ.required, true);
+    assert.ok(innerQ);
+    assert.equal(innerQ.required, false);
   } finally {
     try {
       await browser?.close();
