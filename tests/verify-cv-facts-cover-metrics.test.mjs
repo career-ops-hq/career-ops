@@ -162,7 +162,7 @@ test('the real cover CLI prints the advisory and still reaches the renderer', ()
     for (const key of Object.keys(env)) if (key.startsWith('CAREER_OPS_')) delete env[key];
     env.CAREER_OPS_ROOT = dir;
     const result = spawnSync(process.execPath, [
-      '--import', fileURLToPath(new URL('./fixtures/cover-pdf-register.mjs', import.meta.url)),
+      '--import', new URL('./fixtures/cover-pdf-register.mjs', import.meta.url).href,
       fileURLToPath(new URL('../generate-cover-letter.mjs', import.meta.url)), '--payload', payload,
     ], { cwd: dir, env, encoding: 'utf8', timeout: 30_000 });
     assert.equal(result.status, 0, result.stdout + result.stderr);
