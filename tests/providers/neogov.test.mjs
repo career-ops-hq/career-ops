@@ -146,6 +146,15 @@ try {
     await neogov.fetch({ ...entry, max_pages: 2 }, ctx);
     if (calls.length === 2) pass('neogov.fetch() honours entry.max_pages');
     else fail(`neogov.fetch() max_pages:2 made ${calls.length} calls`);
+    // a short page at the ceiling is the board's end, not a cap: no warning, no mark
+    calls = [];
+    warnings.length = 0;
+    const shortAtCeiling = await neogov.fetch({ ...entry, max_pages: 2 }, { fetchText: async (url) => { calls.push(url); return pageNo(url) === 1 ? pageOf(10, 10) : pageOf(20, 3); }, sleep: noSleep });
+    if (calls.length === 2 && shortAtCeiling.length === 13 && !warnings.some((w) => /raise max_pages/.test(w)) && shortAtCeiling.truncated === undefined) {
+      pass('neogov.fetch() treats a short page at the ceiling as the end of the board: no warning, no mark');
+    } else {
+      fail(`neogov.fetch() short page at the ceiling: ${calls.length} calls, ${shortAtCeiling.length} jobs, warnings ${JSON.stringify(warnings)}, truncated = ${JSON.stringify(shortAtCeiling.truncated)}`);
+    }
     calls = [];
     await neogov.fetch({ ...entry, max_pages: 1_000_000 }, ctx);
     if (calls.length === 200) pass('neogov.fetch() caps a user max_pages at MAX_PAGES_CAP (200)');

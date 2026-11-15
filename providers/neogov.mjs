@@ -98,6 +98,8 @@ export default {
     const jobs = [];
     const seen = new Set();
     let stoppedOnEmpty = false;
+    // A short page is the board's end, even when it is the last one the ceiling allows.
+    let lastPageFull = false;
     let pagesFetched = 0;
     for (let page = 1; page <= pagesToFetch; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -110,6 +112,7 @@ export default {
       });
       pagesFetched++;
       const found = parseNeogovPage(html, entry.name, t.origin);
+      lastPageFull = found.length >= PAGE_SIZE;
       // A page that adds nothing new is the end — or the site ignoring `page`
       // and repeating itself. Either way, stop instead of looping.
       let fresh = 0;
@@ -124,7 +127,7 @@ export default {
         break;
       }
     }
-    if (!stoppedOnEmpty && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
+    if (!stoppedOnEmpty && lastPageFull && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
       console.warn(`neogov: ${entry.name}: stopped at ${ceiling} pages (${ceiling * PAGE_SIZE} postings); raise max_pages on this entry`);
       // The same cut marks the result, so scan.mjs logs the board partial
       // instead of reachable (lib/board-truncation.mjs).
