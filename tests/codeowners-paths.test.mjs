@@ -200,3 +200,22 @@ ok('every CONTRIBUTING.md section the agent pointers name is a real heading', ()
     assert.deepEqual(missing, [], `${file} names sections CONTRIBUTING.md does not have: ${missing.join(', ')}`);
   }
 });
+
+// #7119: the PR template and the first-PR welcome comment told contributors
+// that bug fixes and docs never need an issue, which contradicted the
+// owner-reviewed rule above. Each must name the exception and link the
+// CONTRIBUTING.md section, and that anchor must exist.
+ok('the PR template and welcome bot name the owner-reviewed exception', () => {
+  const anchor = 'CONTRIBUTING.md#owner-reviewed-paths';
+  assert.ok(read('CONTRIBUTING.md').split('\n').includes('### Owner-reviewed paths'),
+    `${anchor} resolves to a heading`);
+  const template = read('.github/PULL_REQUEST_TEMPLATE.md');
+  const related = template.slice(template.indexOf('## Related issue'), template.indexOf('## Type of change'));
+  assert.ok(related.includes(anchor), 'the Related issue guidance links the owner-reviewed paths');
+  const issueFirst = template.split('\n').find(l => l.startsWith('- [ ]') && /issue first/.test(l));
+  assert.ok(issueFirst && issueFirst.includes(anchor), 'the issue-first checklist item links the owner-reviewed paths');
+  const noIssue = related.split('\n').find(l => l.includes('No issue needed'));
+  assert.ok(noIssue && /owner-reviewed path/.test(noIssue), 'the No issue needed line names the exception');
+  const welcome = read('.github/workflows/welcome.yml').split('\n').find(l => /related issue/i.test(l));
+  assert.ok(welcome && welcome.includes(anchor), 'the first-PR welcome comment links the owner-reviewed paths');
+});
