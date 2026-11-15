@@ -870,11 +870,17 @@ export function userFileWriteTarget(path) {
 export function appendLedgerRows(path, text) {
   let lead = '';
   let before = 0;
+  let existed = false;
   let fd;
   try {
     fd = openSync(path, 'r');
-  } catch {
-    fd = null; // no file yet: the append below creates it
+    existed = true;
+  } catch (err) {
+    // Only a missing file starts at size 0. Any other read failure, such as a
+    // ledger that is writable but not readable, must stop here. Treating it as
+    // missing would truncate the real file to empty when the append then fails.
+    if (err?.code !== 'ENOENT') throw err;
+    fd = null;
   }
   if (fd !== null) {
     try {
@@ -892,11 +898,22 @@ export function appendLedgerRows(path, text) {
   // appendFileSync can throw after the new bytes are already in the file, for
   // example when the close fails. The caller reports the failure and may retry,
   // which would record the same row again. Put the file back to the size it
-  // had before this append, then report the original error.
+  // had before this append. A truncate that itself fails is reported: hiding it
+  // would leave the caller believing the ledger was unchanged.
   try {
     appendFileSync(path, lead + text, 'utf-8');
   } catch (err) {
-    try { truncateSync(path, before); } catch { /* ENOENT or EACCES: nothing further to undo */ }
+    try {
+      truncateSync(path, before);
+    } catch (undoErr) {
+      if (undoErr?.code === 'ENOENT' && !existed) throw err;
+      const failure = new Error(
+        `${path}: the append failed (${err.code || err.message}) and the ledger could not be put back (${undoErr.code || undoErr.message})`,
+        { cause: err },
+      );
+      failure.code = undoErr.code;
+      throw failure;
+    }
     throw err;
   }
 }

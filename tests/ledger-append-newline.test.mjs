@@ -80,6 +80,53 @@ try {
     assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
   });
 
+  ok('a ledger that cannot be read is left untouched', () => {
+    const f = join(root, 'write-only.tsv');
+    writeFileSync(f, 'kept\n');
+    chmodSync(f, 0o222);
+    const denied = spawnSync(NODE, ['--input-type=module', '-e',
+      `import { appendLedgerRows } from '${href('tracker-utils.mjs')}'; appendLedgerRows(${JSON.stringify(f)}, 'new\\n');`], {
+      cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
+    });
+    chmodSync(f, 0o644);
+    assert.notEqual(denied.status, 0, 'a write-only ledger must fail before the append');
+    assert.match(`${denied.stderr}\n${denied.stdout}`, /EACCES/);
+    assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
+  });
+
+  ok('a failed restore is reported', () => {
+    const f = join(root, 'restore-fails.tsv');
+    writeFileSync(f, 'kept\n');
+    const child = spawnSync(NODE, ['--experimental-test-module-mocks', '--input-type=module', '-e', `
+      import { mock } from 'node:test';
+      import * as fs from 'node:fs';
+      const realAppend = fs.appendFileSync;
+      mock.module('fs', { namedExports: { ...fs,
+        appendFileSync(path, data, enc) {
+          realAppend(path, data, enc);
+          const err = new Error('close failed');
+          err.code = 'EIO';
+          throw err;
+        },
+        truncateSync() {
+          const err = new Error('truncate failed');
+          err.code = 'EIO';
+          throw err;
+        },
+      } });
+      const { appendLedgerRows } = await import('${href('tracker-utils.mjs')}');
+      try {
+        appendLedgerRows(${JSON.stringify(f)}, 'new\\n');
+        console.log('NO_THROW');
+      } catch (err) {
+        console.log('THREW ' + err.message);
+      }
+    `], { cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' } });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout, /could not be put back/);
+    assert.match(readFileSync(f, 'utf-8'), /^kept\nnew\n$/);
+  });
+
   ok('appendLedgerRows leaves a terminated, CRLF, empty or missing file alone', () => {
     const cases = {
       terminated: ['a\n', 'a\nx\n'],
