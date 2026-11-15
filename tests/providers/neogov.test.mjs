@@ -127,6 +127,8 @@ try {
     out = await neogov.fetch(entry, ctx);
     if (out.length === 10 && calls.length === 2) pass('neogov.fetch() stops when a page repeats what it already has (no runaway loop)');
     else fail(`neogov.fetch() repeating page: ${calls.length} calls, ${out.length} jobs`);
+    if (out.truncated === undefined) pass('neogov.fetch() leaves a board that stopped on a repeated page unmarked');
+    else fail(`neogov.fetch() repeating page was marked: ${JSON.stringify(out.truncated)}`);
 
     // every page brings new postings forever → the provider's OWN ceiling (30) stops it and warns
     calls = [];
@@ -137,6 +139,9 @@ try {
     else fail(`neogov.fetch() ceiling: ${calls.length} calls, ${out.length} jobs`);
     if (warnings.some((w) => /raise max_pages/.test(w))) pass('neogov.fetch() warns "raise max_pages" when its ceiling truncated the board');
     else fail(`neogov.fetch() ceiling warning missing: ${JSON.stringify(warnings)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (out.truncated?.reason === 'page-cap' && out.truncated.fetched === 300) pass('neogov.fetch() marks the board page-cap when its ceiling truncated it');
+    else fail(`neogov.fetch() ceiling cut: truncated = ${JSON.stringify(out.truncated)}`);
     calls = [];
     await neogov.fetch({ ...entry, max_pages: 2 }, ctx);
     if (calls.length === 2) pass('neogov.fetch() honours entry.max_pages');
@@ -149,11 +154,13 @@ try {
     // ctx.maxPages (health probe): one list request, and no max_pages blame
     calls = [];
     warnings.length = 0;
-    await neogov.fetch(entry, { ...ctx, maxPages: 1 });
+    const probed = await neogov.fetch(entry, { ...ctx, maxPages: 1 });
     if (calls.length === 1) pass('neogov.fetch() stops after ctx.maxPages (1) list request');
     else fail(`neogov.fetch() ctx.maxPages:1 made ${calls.length} calls`);
     if (!warnings.some((w) => /raise max_pages/.test(w))) pass('neogov.fetch() does not blame max_pages for a ctx.maxPages probe cap');
     else fail('neogov.fetch() warned about max_pages during a probe');
+    if (probed.truncated === undefined) pass('neogov.fetch() leaves the ctx.maxPages probe unmarked');
+    else fail(`neogov.fetch() probe was marked: ${JSON.stringify(probed.truncated)}`);
 
     // unwrapped rejection while probing
     class ProbeSentinel extends Error {}
