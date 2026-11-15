@@ -126,20 +126,17 @@ export function offerFilters(entry) {
 /**
  * @param {any} json
  * @param {{workplace: Set<string>|null, openToUkrainians: boolean, maxPolishLevel: number}} [filters]
- * @param {{dropped: Record<string, number>}} [stats] Counts offers dropped by each filter, first failing filter wins.
  */
-export function parseJustJoinResponse(json, filters = { workplace: null, openToUkrainians: false, maxPolishLevel: Infinity }, stats) {
+export function parseJustJoinResponse(json, filters = { workplace: null, openToUkrainians: false, maxPolishLevel: Infinity }) {
   if (!json || !Array.isArray(json.data)) {
     throw new Error(`justjoin: unexpected API response — expected { data: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
   return json.data
     .filter(offer => offer && typeof offer === 'object')
     .filter(offer => {
-      const drop = (reason) => { if (stats) stats.dropped[reason] = (stats.dropped[reason] || 0) + 1; return false; };
-      if (filters.workplace && !filters.workplace.has(String(offer.workplaceType || '').toLowerCase())) return drop('workplace');
-      if (filters.openToUkrainians && offer.isOpenToHireUkrainians !== true) return drop('open_to_ukrainians');
-      if (requiredPolishLevel(offer) > filters.maxPolishLevel) return drop('max_polish_level');
-      return true;
+      if (filters.workplace && !filters.workplace.has(String(offer.workplaceType || '').toLowerCase())) return false;
+      if (filters.openToUkrainians && offer.isOpenToHireUkrainians !== true) return false;
+      return requiredPolishLevel(offer) <= filters.maxPolishLevel;
     })
     .map(offer => {
       const slug = String(offer.slug || '').trim();
@@ -172,14 +169,13 @@ export default {
     if (!detectUrl(entry)) throw new Error('justjoin: careers_url or api must be a trusted justjoin.it URL');
 
     const filters = offerFilters(entry);
-    const stats = { dropped: {} };
     const jobs = [];
     let from = 0;
     const maxPages = Number(entry.max_pages || MAX_PAGES);
     for (let page = 0; page < maxPages; page++) {
       const url = buildApiUrl(entry, from);
       const json = await ctx.fetchJson(url, { redirect: 'error' });
-      const parsed = parseJustJoinResponse(json, filters, stats);
+      const parsed = parseJustJoinResponse(json, filters);
       jobs.push(...parsed);
 
       const next = json?.meta?.next?.cursor;
@@ -189,8 +185,6 @@ export default {
       from = Number(next);
       if (!Number.isFinite(from)) break;
     }
-    // Read by scan.mjs for the per-source summary; not part of the job list.
-    Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
     return jobs;
   },
 };

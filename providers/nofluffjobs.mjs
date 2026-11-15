@@ -130,9 +130,8 @@ export function workplaceFilter(entry) {
 /**
  * @param {any} json
  * @param {{remote: boolean, nonRemote: boolean}|null} [workplace]
- * @param {{dropped: Record<string, number>}} [stats]
  */
-export function parseNoFluffJobsResponse(json, workplace = null, stats) {
+export function parseNoFluffJobsResponse(json, workplace = null) {
   if (!json || !Array.isArray(json.postings)) {
     throw new Error(`nofluffjobs: unexpected API response — expected { postings: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
@@ -141,9 +140,7 @@ export function parseNoFluffJobsResponse(json, workplace = null, stats) {
     .filter(posting => {
       if (!workplace) return true;
       const isRemote = Boolean(posting.fullyRemote || posting.location?.fullyRemote);
-      const keep = isRemote ? workplace.remote : workplace.nonRemote;
-      if (!keep && stats) stats.dropped.workplace = (stats.dropped.workplace || 0) + 1;
-      return keep;
+      return isRemote ? workplace.remote : workplace.nonRemote;
     })
     .map(posting => {
       const title = String(posting.title || '').trim();
@@ -173,7 +170,6 @@ export default {
     if (!detectUrl(entry)) throw new Error('nofluffjobs: careers_url or api must be a trusted nofluffjobs.com URL');
 
     const workplace = workplaceFilter(entry);
-    const stats = { dropped: {} };
     const maxPages = Number(entry.max_pages || MAX_PAGES);
     const jobs = [];
     const seen = new Set();
@@ -189,7 +185,7 @@ export default {
         },
         redirect: 'error',
       });
-      for (const job of parseNoFluffJobsResponse(json, workplace, stats)) {
+      for (const job of parseNoFluffJobsResponse(json, workplace)) {
         if (seen.has(job.url)) continue;
         seen.add(job.url);
         jobs.push(job);
@@ -199,8 +195,6 @@ export default {
       if (json.postings.length === 0) break;
     }
 
-    // Read by scan.mjs for the per-source summary; not part of the job list.
-    Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
     return jobs;
   },
 };

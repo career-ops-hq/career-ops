@@ -2,7 +2,7 @@
 
 Some providers read optional settings from their entry in `portals.yml`, next to `name`, `careers_url` and `provider`. This page covers the settings of the Polish boards JustJoin.it and NoFluffJobs. For what each provider reads in general, see [Supported job boards](SUPPORTED_JOB_BOARDS.md).
 
-All settings below are **off by default**: an entry that sets none of them keeps every offer the board returns. These filters run inside the provider, before the global `title_filter`, `location_filter` and the rest. Offers they drop never reach those filters and are counted in the `source` column of the scan table (see the [per-source table](SCAN_SUMMARY_TABLE.md)).
+All settings below are **off by default**: an entry that sets none of them keeps every offer the board returns. These filters run inside the provider, before the global `title_filter`, `location_filter` and the rest. Offers they drop never reach those filters.
 
 ## JustJoin.it (`provider: justjoin`)
 
@@ -28,7 +28,6 @@ Behaviour worth knowing:
 - A Polish entry with a level the provider does not recognise counts as `C2`, so it is dropped under a strict limit rather than slipping through.
 - An unrecognised `max_polish_level` value (for example `B3`) turns the filter off without a warning.
 - `workplace` is matched against the board's value as is. A value outside `remote`, `hybrid`, `office` (a typo, say) matches no offer, so a list holding only such values drops every offer.
-- An offer is counted under the first filter it fails, in this order: `workplace`, `open_to_ukrainians`, `max_polish_level`.
 
 ## NoFluffJobs (`provider: nofluffjobs`)
 
