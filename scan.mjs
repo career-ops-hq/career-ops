@@ -5098,6 +5098,8 @@ async function main() {
   // Every job board gets its own row; tracked companies share one.
   const boardStats = new Map();
   const offerStat = new Map(); // offer -> its source row, to count the offers that survive verification
+  const urlStat = new Map(); // offer url -> its source row, for offers a later step copied or re-pointed
+  const statOf = (offer) => offerStat.get(offer) ?? urlStat.get(offer.url) ?? urlStat.get(offer.previousUrl);
   const boardStat = (company) => {
     const key = company._isBoard ? company.name : TRACKED_COMPANIES_ROW;
     if (!boardStats.has(key)) boardStats.set(key, newBoardStat());
@@ -5349,6 +5351,7 @@ async function main() {
         if (titleMissed) {
           if (!contentFilter(job.description, [], { titleMissed: true })) {
             totalFilteredTitle++;
+            st.title++;
             if (!dryRun) titleFilteredOffers.push({ ...job, source: sourceName });
             continue;
           }
@@ -5457,6 +5460,7 @@ async function main() {
         };
         newOffers.push(offerForVerification);
         offerStat.set(offerForVerification, st);
+        urlStat.set(offerForVerification.url, st);
         st.passed++;
         if (verify) verifyDedupKeys.set(offerForVerification, {
           key, baseKey, requisition, language, newLanguageVersion,
@@ -5569,6 +5573,7 @@ async function main() {
     // Keep the first accepted offer for each strong identity, and only then
     // publish the identity token to this run's dedup set. Rejected aliases do
     // not hide a later live URL.
+    const dedupInput = verifiedOffers;
     const countBeforeIdentityDedup = verifiedOffers.length;
     verifiedOffers = retainVerifiedListingIdentities(verifiedOffers, seenUrls, result.verificationStatusByOffer);
     totalDupes += countBeforeIdentityDedup - verifiedOffers.length;
@@ -5601,6 +5606,13 @@ async function main() {
       acceptedOffers.push(offer);
     }
     verifiedOffers = acceptedOffers;
+    // Offers dropped as duplicates after verification belong to `seen`, not `verify`.
+    const keptAfterDedup = new Set(acceptedOffers);
+    for (const offer of dedupInput) {
+      if (keptAfterDedup.has(offer)) continue;
+      const owner = statOf(offer);
+      if (owner) { owner.seen++; owner.passed--; }
+    }
   }
 
   // 5.6. Experience filter: read each new offer's stated years. Only a required
@@ -5617,6 +5629,11 @@ async function main() {
     });
     verifiedOffers = kept;
     experienceDropped = dropped;
+    // Experience rejections count under `other`, like the other declared-field filters.
+    for (const offer of dropped) {
+      const owner = statOf(offer);
+      if (owner) { owner.other++; owner.passed--; }
+    }
   }
 
   // 5.7. Cross-listing check (#1597): fingerprint each new offer's JD body and
@@ -5767,7 +5784,7 @@ async function main() {
     }
   }
   for (const offer of verifiedOffers) {
-    const owner = offerStat.get(offer);
+    const owner = statOf(offer);
     if (owner) owner.new++;
   }
   printBoardStats(boardStats, { verify });
