@@ -118,3 +118,55 @@ ok('the agent-behavior label fires on the router, not only on its symlinks', () 
     assert.ok(block.includes(`- ${glob}`), `${glob} missing from the agent-behavior globs`);
   }
 });
+
+// #4890: CONTRIBUTING.md lists the owner-reviewed paths so every contributor,
+// and every coding agent AGENTS.md points there, sees them; before that only
+// the Copilot instructions named any, as a hard stop that reviewers then cited
+// against linked-issue contributor PRs. The list is the CODEOWNERS entries
+// above the "Area owners" block, which route review and are not red lines.
+const codeowners = read('.github/CODEOWNERS');
+const areaMarker = codeowners.indexOf('── Area owners');
+const ownerReviewed = codeowners.slice(0, areaMarker).split('\n')
+  .map(l => l.trim())
+  .filter(l => l && !l.startsWith('#'))
+  .map(l => l.split(/\s+/)[0].replace(/^\//, ''));
+
+function contributingOwnerList() {
+  const lines = read('CONTRIBUTING.md').split('\n');
+  const start = lines.findIndex(l => /^#{2,3} Owner-reviewed paths\s*$/.test(l));
+  assert.ok(start !== -1, 'CONTRIBUTING.md has an "Owner-reviewed paths" heading');
+  let i = start + 1;
+  while (i < lines.length && !lines[i].startsWith('- ')) {
+    assert.ok(!lines[i].startsWith('#'), 'the section opens with its path list');
+    i++;
+  }
+  const paths = [];
+  for (; i < lines.length && lines[i].startsWith('- '); i++) {
+    paths.push(...[...lines[i].matchAll(/`([^`]+)`/g)].map(m => m[1]));
+  }
+  return paths;
+}
+
+ok('CONTRIBUTING.md lists exactly the owner-reviewed CODEOWNERS paths', () => {
+  assert.ok(areaMarker !== -1, 'CODEOWNERS still has its "Area owners" block');
+  assert.ok(ownerReviewed.includes('AGENTS.md') && !ownerReviewed.includes('tests/'), 'split at the area owners block');
+  const listed = contributingOwnerList();
+  const norm = (p) => p.replace(/\/$/, '');
+  const missing = ownerReviewed.filter(p => !listed.map(norm).includes(norm(p)));
+  const extra = listed.filter(p => !ownerReviewed.map(norm).includes(norm(p)));
+  assert.deepEqual(missing, [], `in CODEOWNERS but missing from CONTRIBUTING.md: ${missing.join(', ')}`);
+  assert.deepEqual(extra, [], `in CONTRIBUTING.md but not an owner-reviewed CODEOWNERS entry: ${extra.join(', ')}`);
+});
+
+ok('AGENTS.md sends an agent changing the repo to CONTRIBUTING.md', () => {
+  const bullet = read('AGENTS.md').split('\n').find(l => l.startsWith('- **Contributing:**'));
+  assert.ok(bullet, 'AGENTS.md has its Contributing bullet');
+  assert.ok(bullet.includes('`CONTRIBUTING.md`'), 'the Contributing bullet names CONTRIBUTING.md');
+});
+
+ok('copilot-instructions scopes its hard stop to unattended sessions', () => {
+  const doc = read('.github/copilot-instructions.md');
+  const section = doc.slice(doc.indexOf('## Files you must not touch'), doc.indexOf('## How to work'));
+  assert.ok(/unattended/.test(section), 'names the unattended case');
+  assert.ok(section.includes('`CONTRIBUTING.md`'), 'points attended sessions at CONTRIBUTING.md');
+});

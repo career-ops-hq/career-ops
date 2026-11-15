@@ -31,6 +31,26 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - Includes a clear description of what changed and why
 - Follows the existing code style and project philosophy (simple, minimal, quality over quantity)
 
+### Owner-reviewed paths
+
+[`.github/CODEOWNERS`](.github/CODEOWNERS) sends a change to any of these paths to a maintainer for review. A bad change here usually passes CI, so that review is the real check.
+
+- Repo docs and governance: `README*.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `ARCHITECTURE.md`, `.github/CODEOWNERS`
+- Coding-agent configuration: `.github/copilot-instructions.md`, `.github/agents/`
+- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`
+- Scoring and the data contract: `modes/_shared.md`, `DATA_CONTRACT.md`
+- The self-updater: `update-system.mjs`, `lib/update-manifest.mjs`, `updater-migration-tests.mjs`
+- Plugin governance: `plugins-registry/`, `validate-plugin-registry.mjs`, `plugin-install.mjs`, `plugin-audit.mjs`, `plugins/_engine.mjs`, `plugins/_lock.mjs`, `plugins/_net.mjs`, `plugins/_registry.mjs`, `.github/workflows/`, `docs/PLUGIN_REVIEW.md`
+- The employer registry: `employers/`, `seeds/employers-validate.mjs`, `lib/ats-board-url.mjs`
+- The web UI: `web/`
+
+What that means depends on who makes the change:
+
+- **A contributor**, working by hand or with a coding agent they are directing: for anything beyond a typo, open an issue first and link it from the PR, then expect a closer review. These paths are not off limits; several plugin-engine fixes landed this way.
+- **An unattended coding agent**, a session no person is watching (the Copilot cloud agent, for one): leave these paths alone. Stop and explain in the report why the task needs them, so a person can open the issue.
+
+The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/codeowners-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
+
 ## Quick Start
 
 1. For a new feature, a new mode or command, or an architecture change, open an issue to discuss your idea (see [Before Submitting a PR](#before-submitting-a-pr))

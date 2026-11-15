@@ -23,6 +23,8 @@ This repository is two things at once, and which one you are working on depends 
 
 If the task cannot be completed without touching one of these, stop and explain why in your report instead of doing it.
 
+This list is the hard stop for an unattended session, such as the Copilot cloud agent. In an attended session, where a person directs the work, the user layer is still off limits, but the control files and `web/` follow the owner-reviewed paths rule in `CONTRIBUTING.md` instead: a linked issue and a maintainer review. A reviewer should judge a contributor's pull request against `CONTRIBUTING.md`, not against this list.
+
 ## How to work
 
 - One problem per session. Smallest diff that fixes it. No drive-by refactors, no renames, no formatting sweeps, no new abstractions when an existing one fits.
