@@ -15,6 +15,13 @@ import (
 	"time"
 )
 
+func TestPreparationHasDistinctPriority(t *testing.T) {
+	if !(StatusPriority("Applied") < StatusPriority("Preparation") &&
+		StatusPriority("Preparation") < StatusPriority("Evaluated")) {
+		t.Fatal("Preparation must sort in its own group between Applied and Evaluated")
+	}
+}
+
 func TestTrackerLockDirMatchesNodeProtocol(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
 	_, trackerPath := writeTracker(t, insertedColumnTracker)

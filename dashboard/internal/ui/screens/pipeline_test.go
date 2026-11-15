@@ -25,6 +25,54 @@ func tabIndexForFilter(t *testing.T, filter string) int {
 	return -1
 }
 
+func TestPreparationStage(t *testing.T) {
+	apps := []model.CareerApplication{
+		{Company: "Acme", Status: "Evaluated"},
+		{Company: "Beta", Status: "Preparation"},
+		{Company: "Gamma", Status: "Applied"},
+		{Company: "Delta", Status: "Preparation"},
+	}
+	pm := NewPipelineModel(theme.NewTheme("catppuccin-mocha"), apps,
+		model.PipelineMetrics{Total: len(apps), ByStatus: map[string]int{"preparation": 2}}, t.TempDir(), 160, 40)
+	preparation := tabIndexForFilter(t, filterPreparation)
+	if preparation != tabIndexForFilter(t, filterEvaluated)+1 {
+		t.Fatal("Preparation tab must immediately follow Evaluated")
+	}
+	pm.activeTab = preparation
+	pm.applyFilterAndSort()
+	if len(pm.filtered) != 2 || pm.countForFilter(filterPreparation) != 2 {
+		t.Fatalf("Preparation tab must isolate and count both preparing jobs: %+v", pm.filtered)
+	}
+	for _, app := range pm.filtered {
+		if app.Status != "Preparation" {
+			t.Fatalf("unrelated status in Preparation tab: %+v", app)
+		}
+	}
+	pairs := getStatusPairs("")
+	if pairs[1].Canonical != "Preparation" || pairs[1].Display != "Preparation" {
+		t.Fatalf("picker must offer Preparation after Evaluated: %+v", pairs)
+	}
+	if getStatusPairs("preparation")[0].Canonical != "Preparation" {
+		t.Fatal("a preparing job must lead with its current status in the picker")
+	}
+	if pm.statusColorMap()["preparation"] != pm.theme.Yellow {
+		t.Fatal("Preparation must have its own status color")
+	}
+	if !strings.Contains(pm.renderMetrics(), "Preparation:2") {
+		t.Fatal("metrics must include the Preparation group")
+	}
+	pm.activeTab = tabIndexForFilter(t, filterAll)
+	pm.viewMode = "grouped"
+	pm.sortMode = sortCompany
+	pm.applyFilterAndSort()
+	want := []string{"Applied", "Preparation", "Preparation", "Evaluated"}
+	for i, app := range pm.filtered {
+		if app.Status != want[i] {
+			t.Fatalf("Preparation must remain a contiguous group between Applied and Evaluated: %+v", pm.filtered)
+		}
+	}
+}
+
 func TestWithReloadedDataPreservesStateAndSelection(t *testing.T) {
 	initialApps := []model.CareerApplication{
 		{

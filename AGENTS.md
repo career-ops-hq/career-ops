@@ -710,6 +710,7 @@ num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
 | State | When to use |
 |-------|-------------|
 | `Evaluated` | Report completed, pending decision |
+| `Preparation` | Preparing contacts, referrals, or documents before applying |
 | `Applied` | Application sent |
 | `Responded` | Company responded |
 | `Assessment` | Online assessment or asynchronous screening |
