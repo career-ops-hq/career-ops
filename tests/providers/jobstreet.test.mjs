@@ -57,6 +57,13 @@ try {
     fail(`parseJobstreetItem sg.jobstreet.com url was ${JSON.stringify(sgParsed && sgParsed.url)}`);
   }
 
+  const phParsed = parseJobstreetItem({ id: '95895472', title: 'Back-End Developer' }, 'https://ph.jobstreet.com', 'Co');
+  if (phParsed && phParsed.url === 'https://ph.jobstreet.com/job/95895472') {
+    pass('parseJobstreetItem builds /job/<id> for ph.jobstreet.com');
+  } else {
+    fail(`parseJobstreetItem ph.jobstreet.com url was ${JSON.stringify(phParsed && phParsed.url)}`);
+  }
+
   // parseJobstreetItem — appendWorkType is opt-in and suffixes the title
   const wtItem = { id: '1', title: 'Strategy Consultant', workTypes: ['Part time'] };
   const wtOff = parseJobstreetItem(wtItem, 'https://www.seek.com.au', 'Co');
@@ -241,6 +248,28 @@ try {
   );
   if (hkReached && hkJobs.length === 0) pass('jobstreet.fetch() accepts hk.jobsdb.com (HK-Main)');
   else fail('jobstreet.fetch() should accept hk.jobsdb.com and query it directly');
+
+  // fetch() — accepts the Philippines host (PH-Main)
+  let phReached = false;
+  const phJobs = await jobstreet.fetch(
+    {
+      name: 'Jobstreet PH',
+      provider: 'jobstreet',
+      api: 'https://ph.jobstreet.com/api/jobsearch/v5/search',
+      siteKey: 'PH-Main',
+      searchKeywords: 'backend developer',
+    },
+    {
+      transport: 'http',
+      fetchJson: async (url) => {
+        phReached = String(url).startsWith('https://ph.jobstreet.com/');
+        return { data: [], totalCount: 0 };
+      },
+      fetchText: async () => { throw new Error('should not be called'); },
+    },
+  );
+  if (phReached && phJobs.length === 0) pass('jobstreet.fetch() accepts ph.jobstreet.com (PH-Main)');
+  else fail('jobstreet.fetch() should accept ph.jobstreet.com and query it directly');
 
   // fetch() — handles non-array data field
   const badDataCtx = {

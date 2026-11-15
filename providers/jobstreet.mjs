@@ -46,6 +46,7 @@ import { fetchJsonWithRetry, sleep } from "./_http.mjs";
 //   ID-Main  → id.jobstreet.com (Indonesia)
 //   SG-Main  → sg.jobstreet.com (Singapore)
 //   MY-Main  → my.jobstreet.com (Malaysia)
+//   PH-Main  → ph.jobstreet.com (Philippines)
 //   AU-Main  → www.seek.com.au  (Australia — set api: https://www.seek.com.au/api/jobsearch/v5/search)
 //   NZ-Main  → www.seek.co.nz   (New Zealand)
 //   HK-Main  → hk.jobsdb.com    (Hong Kong)
@@ -83,6 +84,7 @@ const ALLOWED_JOBSTREET_HOSTS = new Set([
   "jobstreet.co.id",
   "sg.jobstreet.com",
   "my.jobstreet.com",
+  "ph.jobstreet.com",
   // SEEK's Hong Kong property keeps the JobsDB brand; same v5 search API.
   "hk.jobsdb.com",
   "www.seek.com.au",
@@ -96,7 +98,7 @@ const V5_SEARCH_PATH = "/api/jobsearch/v5/search";
 
 // Job-detail path by market. Only the Indonesian sites carry the `/id/` locale
 // prefix (https://id.jobstreet.com/id/job/<id>). Every other SEEK-platform host
-// — my/sg.jobstreet.com, www.seek.com.au, www.seek.co.nz — serves /job/<id> and
+// — my/sg/ph.jobstreet.com, www.seek.com.au, www.seek.co.nz — serves /job/<id> and
 // answers 404 on /id/job/<id> (verified against live ids, 2026-08-28). A global
 // switch either way breaks one market, which is why this is keyed on the host.
 const ID_LOCALE_HOSTS = new Set([
