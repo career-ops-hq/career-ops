@@ -2657,6 +2657,29 @@ function defaultCompanyNormalizer(name) {
   return String(name ?? '').trim().toLowerCase();
 }
 
+const LEGAL_SUFFIX_RES = LEGAL_SUFFIXES.map((suffix) => new RegExp(`\\s${suffix}$`));
+
+function companyStemForDedup(name) {
+  let key = String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const folded = key;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const re of LEGAL_SUFFIX_RES) {
+      if (re.test(key)) {
+        key = key.replace(re, '').trim();
+        changed = true;
+      }
+    }
+  }
+  return key || folded;
+}
+
 /**
  * Build a company-name canonicalizer from `config.company_aliases`.
  *
@@ -3006,7 +3029,7 @@ export function normalizeLocationForDedup(location) {
  * @returns {string} Stable dedupe key: `company::role`, or `company::role@@places`.
  */
 export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer, location = undefined) {
-  const base = `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+  const base = `${companyStemForDedup(canonicalize(company))}::${normalizeRoleForDedup(role)}`;
   const places = normalizeLocationForDedup(location);
   // `@@` and not a third `::`: normalizeTextKey strips punctuation, so neither
   // the role nor the location component can ever contain the separator, and a
