@@ -27,6 +27,40 @@ const RUNNER = path.join(SCRIPTS_DIR, "scheduled-jobs-runner.mjs");
 // The same three variables install-scan-schedule.sh carries.
 export const TASK_ENV = Object.freeze(["CAREER_OPS_ROOT", "CAREER_OPS_DATA_DIR", "CAREER_OPS_SCHEDULED_JOBS_PATH"]);
 
+const USAGE = `Usage:
+  node web/scripts/scheduled-jobs-task.mjs [--env KEY=VALUE]... [--log <path>] [runner args]
+  node web/scripts/scheduled-jobs-task.mjs --print-log-path
+
+Runs web/scripts/scheduled-jobs-runner.mjs once, as the Windows scan task does.
+  --env KEY=VALUE    set CAREER_OPS_ROOT, CAREER_OPS_DATA_DIR or
+                     CAREER_OPS_SCHEDULED_JOBS_PATH for the runner;
+                     an empty VALUE removes the variable
+  --log <path>       append the runner's stderr to this file (stdout is discarded)
+  --print-log-path   print scheduled-jobs.log beside the store this shell resolves
+  -h, --help         show this help
+`;
+
+/**
+ * The environment the runner starts with: the task's own, with the carried
+ * values on top. An empty carried value removes the variable, so a value saved
+ * in the user's environment cannot point the runner at a store the installer
+ * did not resolve. Windows matches variable names without regard to case.
+ *
+ * @param {NodeJS.ProcessEnv} base
+ * @param {Record<string, string>} carried
+ * @returns {NodeJS.ProcessEnv}
+ */
+export function runnerEnv(base, carried) {
+  const env = { ...base };
+  for (const [key, value] of Object.entries(carried)) {
+    for (const existing of Object.keys(env)) {
+      if (existing.toUpperCase() === key) delete env[existing];
+    }
+    if (value !== "") env[key] = value;
+  }
+  return env;
+}
+
 /**
  * Split the task's arguments into the carried environment, the log path and the
  * arguments that go on to the runner.
@@ -81,6 +115,11 @@ export function runTask(argv, options = {}) {
     stderr = (text) => process.stderr.write(text),
   } = options;
 
+  if (argv.includes("--help") || argv.includes("-h")) {
+    stdout(USAGE);
+    return 0;
+  }
+
   let parsed;
   try {
     parsed = parseTaskArgs(argv);
@@ -107,7 +146,7 @@ export function runTask(argv, options = {}) {
   try {
     const result = spawnSync(execPath, [runner, ...parsed.runnerArgs], {
       cwd: CODE_ROOT,
-      env: { ...env, ...parsed.env },
+      env: runnerEnv(env, parsed.env),
       stdio: ["ignore", "ignore", fd ?? "inherit"],
       windowsHide: true,
     });

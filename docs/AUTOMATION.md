@@ -167,7 +167,8 @@ Both installers carry `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR` and
 `CAREER_OPS_SCHEDULED_JOBS_PATH` into the job when they are set in the shell that
 runs them: the macOS and Linux installer writes them into the job's command, and
 the Windows installer passes them to `web/scripts/scheduled-jobs-task.mjs` as
-arguments. The web process must get the same values, for example in
+arguments, with an empty value for each one that is unset so a value saved in
+your Windows user environment cannot override it. The web process must get the same values, for example in
 `web/.env.local`, or the page reads a different store. Neither installer reads
 `web/.env.local`, so set the values in your shell when you install, for example
 `CAREER_OPS_ROOT=/path/to/data sh web/scripts/install-scan-schedule.sh`, or in

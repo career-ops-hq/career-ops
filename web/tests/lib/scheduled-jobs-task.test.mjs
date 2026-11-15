@@ -5,7 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseTaskArgs, runTask, TASK_ENV } from "../../scripts/scheduled-jobs-task.mjs";
+import { parseTaskArgs, runnerEnv, runTask, TASK_ENV } from "../../scripts/scheduled-jobs-task.mjs";
 
 const TASK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../scripts/scheduled-jobs-task.mjs");
 
@@ -73,6 +73,32 @@ test("runTask sets the carried variables over the task's own, discards stdout an
     assert.equal(code, 3);
     assert.equal(fs.readFileSync(log, "utf8"), "earlier\nroot=/carried args=--job,abc\n");
   });
+});
+
+test("runnerEnv removes a variable whose carried value is empty, whatever its case", () => {
+  assert.deepEqual(
+    runnerEnv({ Career_Ops_Root: "C:\\saved", CAREER_OPS_DATA_DIR: "C:\\saved-data", OTHER: "1" }, { CAREER_OPS_ROOT: "", CAREER_OPS_DATA_DIR: "D:\\data" }),
+    { CAREER_OPS_DATA_DIR: "D:\\data", OTHER: "1" },
+  );
+});
+
+test("runTask hands the runner no variable the installer left unset", () => {
+  withDir((dir) => {
+    const runner = fakeRunner(dir, "process.stderr.write(`root=${process.env.CAREER_OPS_ROOT ?? \"unset\"}\\n`);\n");
+    const log = path.join(dir, "scheduled-jobs.log");
+    const code = runTask(["--env", "CAREER_OPS_ROOT=", "--log", log], { runner, env: cleanEnv({ CAREER_OPS_ROOT: "/saved" }), ...quiet });
+    assert.equal(code, 0);
+    assert.equal(fs.readFileSync(log, "utf8"), "root=unset\n");
+  });
+});
+
+test("--help and -h print the usage and run nothing", () => {
+  for (const flag of ["--help", "-h"]) {
+    const result = spawnSync(process.execPath, [TASK, flag, "--env", "BOGUS=1"], { encoding: "utf8", env: cleanEnv() });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /^Usage:/);
+    assert.match(result.stdout, /--print-log-path/);
+  }
 });
 
 test("runTask creates the log folder", () => {

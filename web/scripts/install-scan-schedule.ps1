@@ -27,10 +27,10 @@ function ConvertTo-TaskArgument([string]$value) {
 
 # Keep the runner on the same store as the web app: the task gets only the user's
 # saved environment, so the path overrides set in this shell travel as arguments.
+# An unset one goes as an empty value, which removes a saved value of the same name.
 $envArgs = @()
 foreach ($name in @('CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR', 'CAREER_OPS_SCHEDULED_JOBS_PATH')) {
-  $value = [Environment]::GetEnvironmentVariable($name, 'Process')
-  if (-not $value) { continue }
+  $value = [string][Environment]::GetEnvironmentVariable($name, 'Process')
   Assert-TaskValue $name $value
   $envArgs += @('--env', "$name=$value")
 }
