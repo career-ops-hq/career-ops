@@ -314,8 +314,9 @@ func pendingURLKey(raw string) string {
 }
 
 // encodeAfterHost percent-encodes each space and non-ASCII byte after the
-// host of raw, with upper-case hex, as WHATWG href does in the path, query
-// and fragment. The host and an existing %XX are left as written.
+// host of raw, and each `"`, `'`, `<` and `>` in the query, with upper-case
+// hex, as WHATWG href does for an http(s) URL. The host and an existing %XX
+// are left as written.
 func encodeAfterHost(raw string) string {
 	i := strings.Index(raw, "://")
 	if i < 0 {
@@ -328,8 +329,15 @@ func encodeAfterHost(raw string) string {
 	start := i + 3 + end
 	var b strings.Builder
 	b.WriteString(raw[:start])
+	inQuery, inFragment := false, false
 	for j := start; j < len(raw); j++ {
-		if c := raw[j]; c == ' ' || c >= 0x80 {
+		c := raw[j]
+		if c == '#' {
+			inQuery, inFragment = false, true
+		} else if c == '?' && !inFragment {
+			inQuery = true
+		}
+		if c == ' ' || c >= 0x80 || (inQuery && strings.IndexByte(`"'<>`, c) >= 0) {
 			fmt.Fprintf(&b, "%%%02X", c)
 		} else {
 			b.WriteByte(c)

@@ -24,6 +24,14 @@
     "href": "https://jobs.example.jp/%E6%B1%82%E4%BA%BA?%E5%A0%B4%E6%89%80=%E6%9D%B1%E4%BA%AC"
   },
   {
+    "url": "https://jobs.example.fr/offres?location=L'Haÿ-les-Roses",
+    "href": "https://jobs.example.fr/offres?location=L%27Ha%C3%BF-les-Roses"
+  },
+  {
+    "url": "https://jobs.example.com/search?q=\"customer success\"&level=<senior>",
+    "href": "https://jobs.example.com/search?q=%22customer%20success%22&level=%3Csenior%3E"
+  },
+  {
     "url": "https://jobs.example.com/plain/1",
     "href": "https://jobs.example.com/plain/1"
   },
