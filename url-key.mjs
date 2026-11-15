@@ -351,6 +351,35 @@ export function normalizeUrl(raw) {
 // the same names.
 export const LANGUAGE_PARAMS = ['language', 'lang', 'locale'];
 
+/** Drop a language query from a known job fragment and report it.
+ *  promoteKnownFragmentIdentity copies that query onto the comparison URL,
+ *  which would put the language back into a key that just had it removed.
+ *  @param {URL} url
+ *  @returns {{language: string, script: string}}
+ */
+function stripFragmentLanguage(url) {
+  const match = /^#(!?)(\/jobs?\/[^/?#]+\/?)(?:\?([^#]*))?$/i.exec(url.hash);
+  if (!match?.[3]) return { language: '', script: '' };
+  const frag = new URLSearchParams(match[3]);
+  let language = '';
+  let script = '';
+  let removed = false;
+  for (const name of [...frag.keys()]) {
+    if (!LANGUAGE_PARAMS.includes(name.toLowerCase())) continue;
+    if (!language) {
+      const rawValue = frag.get(name);
+      language = languageSubtag(rawValue);
+      script = postingScript(rawValue);
+    }
+    frag.delete(name);
+    removed = true;
+  }
+  if (!removed) return { language: '', script: '' };
+  const rest = frag.toString();
+  url.hash = `#${match[1]}${match[2]}${rest ? `?${rest}` : ''}`;
+  return { language, script };
+}
+
 /**
  * The posting a URL names, apart from the language it asks for.
  *
@@ -377,6 +406,11 @@ export function postingLanguageKey(raw) {
       script = postingScript(raw);
     }
     u.searchParams.delete(name);
+  }
+  const fromFragment = stripFragmentLanguage(u);
+  if (!language && fromFragment.language) {
+    language = fromFragment.language;
+    script = fromFragment.script;
   }
   return { key: normalizeUrl(u.href), language, script };
 }

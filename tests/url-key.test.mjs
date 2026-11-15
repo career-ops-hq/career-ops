@@ -72,6 +72,16 @@ ok('a language query inside the fragment keeps two versions apart', () => {
     'https://jobs.example.com/careers#/jobs/123?lang=en',
     'https://jobs.example.com/careers#/jobs/123?lang=de'), 'distinct');
 });
+ok('lang in the fragment and lang in the query name the same job', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers?lang=en#/jobs/123'), 'same');
+});
+ok('a fragment language against the bare fragment job is one-sided', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers#/jobs/123'), 'one-sided-language');
+});
 ok('pre-existing internal fragment key is preserved beside promoted hash job ID', () => {
   assert.equal(
     normalizeUrl('https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id'),

@@ -145,6 +145,8 @@ test("web postingLanguageKey matches core: the language param leaves the key", (
     "https://acme.recruitee.com/o/qa-lead?lang=de",
     "https://acme.jobs.personio.de/job/1?language=en-GB&utm_source=x",
     "https://jobs.example.com/j/1?Locale=fr_CA&id=7",
+    "https://jobs.example.com/careers#/jobs/123?lang=en",
+    "https://jobs.example.com/careers?lang=en#/jobs/123",
     "https://acme.recruitee.com/o/a?lang=zh-Hant",
     "https://acme.recruitee.com/o/a?lang=English%20(US)",
     "",
