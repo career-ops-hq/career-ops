@@ -187,6 +187,35 @@ test("web postingUrlRelation matches core on every relation", () => {
   }
 });
 
+test("a trailing slash does not collapse two fragment jobs", () => {
+  assert.notEqual(
+    webKey("https://jobs.example.com/careers#/job/111/"),
+    webKey("https://jobs.example.com/careers#/job/222/"),
+  );
+  assert.equal(
+    webKey("https://jobs.example.com/careers#/job/111/"),
+    "https://jobs.example.com/careers?_career_ops_fragment_job_id=111",
+  );
+});
+
+test("a hashbang does not collapse two fragment jobs", () => {
+  assert.notEqual(
+    webKey("https://jobs.example.com/careers#!/job/111"),
+    webKey("https://jobs.example.com/careers#!/job/222"),
+  );
+  assert.equal(
+    webKey("https://jobs.example.com/careers#!/job/111"),
+    "https://jobs.example.com/careers?_career_ops_fragment_job_id=111",
+  );
+});
+
+test("a language query inside the fragment keeps two versions apart", () => {
+  assert.equal(webRelation(
+    "https://jobs.example.com/careers#/jobs/123?lang=en",
+    "https://jobs.example.com/careers#/jobs/123?lang=de",
+  ), "distinct");
+});
+
 test("web canonicalJobKey matches the CLI on Greenhouse, LinkedIn, and tracking variants", () => {
   const urls = [
     "https://boards.greenhouse.io/acme/jobs/8028783",

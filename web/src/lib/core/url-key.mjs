@@ -48,16 +48,25 @@ function foldHostname(host) {
  * Promote a known identity-bearing SPA fragment into a functional query key
  * before generic URL normalization drops the fragment. Most fragments are
  * presentation-only. The narrow exceptions are recognized `#/job/{id}` and
- * `#/jobs/{id}` routes; MokaHR keeps its established board-specific key.
+ * `#/jobs/{id}` routes, including a trailing slash and a `#!` prefix.
+ * A lang, language, or locale query inside that fragment is copied onto the
+ * comparison URL. MokaHR keeps its established board-specific key.
  *
  * @param {URL} url
  */
 export function promoteKnownFragmentIdentity(url) {
-  const match = /^#\/jobs?\/([^/?#]+)(?:\?[^#]*)?$/i.exec(url.hash);
+  const match = /^#!?\/jobs?\/([^/?#]+)\/?(?:\?([^#]*))?$/i.exec(url.hash);
   if (!match) return;
   let jobId;
   try { jobId = decodeURIComponent(match[1]); } catch { return; }
   if (!jobId) return;
+  if (match[2]) {
+    const frag = new URLSearchParams(match[2]);
+    for (const name of LANGUAGE_PARAMS) {
+      const value = frag.get(name);
+      if (value && !url.searchParams.has(name)) url.searchParams.append(name, value);
+    }
+  }
   if (url.hostname.toLowerCase() === "app.mokahr.com") {
     url.searchParams.append("mokahr_job_id", jobId);
     return;

@@ -54,6 +54,24 @@ ok('recognized hash-route job IDs stay distinct', () => {
     normalizeUrl('https://jobs.example.com/careers#/jobs/123'),
     normalizeUrl('https://jobs.example.com/careers#/jobs/456'));
 });
+ok('a trailing slash does not collapse two fragment jobs', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#/job/111/'),
+    normalizeUrl('https://jobs.example.com/careers#/job/222/'));
+  assert.equal(
+    normalizeUrl('https://jobs.example.com/careers#/job/111/'),
+    'https://jobs.example.com/careers?_career_ops_fragment_job_id=111');
+});
+ok('a hashbang does not collapse two fragment jobs', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#!/job/111'),
+    normalizeUrl('https://jobs.example.com/careers#!/job/222'));
+});
+ok('a language query inside the fragment keeps two versions apart', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers#/jobs/123?lang=de'), 'distinct');
+});
 ok('pre-existing internal fragment key is preserved beside promoted hash job ID', () => {
   assert.equal(
     normalizeUrl('https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id'),
