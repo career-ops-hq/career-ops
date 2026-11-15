@@ -64,7 +64,9 @@ export type DiscoveredOffer = {
   matchedKeyword?: string;
   /** free, zero-token triage hint computed at discovery time from the posting
    *  TITLE vs config/profile.yml target roles (#3260). Recommendation layer
-   *  only — never filters or orders anything; Evaluate gives the real A–F.
+   *  only — filters or orders results only when the user picks a fit filter or
+   *  the Fit sort, and never replaces the evaluation score; Evaluate gives the
+   *  real A–F.
    *  Scan offers only; AI offers already carry why + confidence. */
   fit?: { band: FitBand; score: number };
   /** optional free-text ranking signal preserved to pipeline.md by the canonical

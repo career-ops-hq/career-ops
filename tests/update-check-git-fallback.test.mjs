@@ -120,7 +120,7 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
   else fail(`the git path carried changelog ${JSON.stringify(res.changelog)}`);
 
   // Same version, but with curl blocked the main-ref lookup failed too, so a
-  // git checkout cannot tell whether it matches main (see test 10).
+  // git checkout cannot tell whether it matches main (#7095; see test 10).
   const current = await run(MAIN, { curl: fakeCurl(), git: fakeGit({ ok: true, version: '1.33.0' }) });
   const expectCurrent = HEAD
     ? current.status === 'update-available' && current.reason === 'main-commit-unresolved'
@@ -252,16 +252,20 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
   }
 }
 
-// ── 10. --channel main never says up-to-date when main's commit is unknown ──
-// The drift check needs main's commit. When the ref lookup fails and the
-// versions match, check() used to return up-to-date, and modes/update.md
-// Step 1 then ended the flow before the main preview the user asked for.
+// ── 10. --channel main never says up-to-date when main's commit is unknown (#7095) ──
+// The drift check needs main's commit. When the ref lookup fails (an API rate
+// limit, say) while VERSION and the release still answer at the same version,
+// check() used to return up-to-date, and modes/update.md Step 1 then ended the
+// flow before the main preview the user asked for.
 // Needs a git checkout, so check() has a local commit to compare.
 if (!HEAD) {
   console.log('  ⏭️  not a git checkout: skipping the unresolved-main-commit cases');
 } else {
-  const sameVersion = { '/main/VERSION': '1.34.0\n' };
-  const unresolved = await run(MAIN, { curl: fakeCurl(sameVersion), git: fakeGit({ ok: true, version: '1.34.0' }), local: '1.34.0' });
+  const sameVersion = {
+    '/main/VERSION': '1.34.0 # x-release-please-version\n',
+    '/releases/latest': JSON.stringify({ tag_name: 'career-ops-v1.34.0', body: '' }),
+  };
+  const unresolved = await run(MAIN, { curl: fakeCurl(sameVersion, 'HTTP 403'), git: fakeGit({ ok: true, version: '1.34.0' }), local: '1.34.0' });
   if (unresolved.status === 'update-available' && unresolved.reason === 'main-commit-unresolved') {
     pass('--channel main, same version, main-ref lookup failed → update-available (main-commit-unresolved), not up-to-date');
   } else {

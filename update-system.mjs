@@ -4160,10 +4160,10 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // tree. Compare the installed commit with main as well, so same-version
   // manifest/file drift is visible (#2630). A failed commit lookup in a git
   // checkout reports update-available (reason main-commit-unresolved), never
-  // up-to-date: the user asked for main, and an unknown main commit is not
-  // proof the install matches it. The main-ref lookup runs alongside the version
-  // sources, not after them: sequentially, a black-holed network paid the curl
-  // budget twice before the git fallback even started.
+  // up-to-date (#7095): the user asked for main, and an unknown main commit is
+  // not proof the install matches it. The main-ref lookup runs alongside the
+  // version sources, not after them: sequentially, a black-holed network paid
+  // the curl budget twice before the git fallback even started.
   const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
     runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
     runCurlGet(RELEASES_API, [
@@ -4275,11 +4275,11 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     }
   }
 
-  // In a git checkout, a failed main-ref lookup leaves drift unknown. Saying
-  // up-to-date would end the update flow before the main preview the user
-  // asked for, so report the conservative answer instead. With no checkout
-  // (localCommit empty) there is no drift check to run, and the version
-  // comparison alone decides, as before.
+  // In a git checkout, a failed main-ref lookup (rate limit, filtered API host)
+  // leaves drift unknown (#7095). Saying up-to-date would end the update flow
+  // before the main preview the user asked for, so report the conservative
+  // answer instead. With no checkout (localCommit empty) there is no drift
+  // check to run, and the version comparison alone decides, as before.
   const mainCommitUnresolved = Boolean(localCommit) && !remoteCommit;
 
   if (compareVersions(local, remote) >= 0 && !systemTreeDrift && !mainCommitUnresolved) {
