@@ -4,9 +4,10 @@
 // before running a cold WebSearch, so a prior interviewer or a contact from
 // an earlier, different-role application surfaces as an internal-referral
 // lead instead of being searched for again. This covers:
-//   - findContactsByCompany(): exact + normalized (case/punctuation-folded)
-//     matching, order (most-recently-listed first), no-match and
-//     empty/placeholder-query guards
+//   - findContactsByCompany(): exact, normalized (case/punctuation-folded)
+//     and corporate-form ("Acme" vs "Acme Inc.") matching, order
+//     (most-recently-listed first), no-match and empty/placeholder-query
+//     guards
 //   - the CLI: --company (JSON/--summary), missing operand, --self-test,
 //     --help, unknown flag
 //   - contacts.mjs's VALID_TYPES now accepting `internal-referral`
@@ -80,6 +81,32 @@ test('findContactsByCompany: "?" placeholder query never matches every row', () 
   assert.deepEqual(findContactsByCompany(contacts, '?'), []);
 });
 
+test('findContactsByCompany: a query with a legal suffix finds contacts saved without one', () => {
+  const { contacts } = parseContacts(FIXTURE);
+  // normalizeCompany() keys these as northwindroboticsgmbh vs northwindrobotics;
+  // companiesMatchIgnoringCorporateForm() accepts the pair.
+  const matches = findContactsByCompany(contacts, 'Northwind Robotics GmbH');
+  assert.deepEqual(matches.map((c) => c.name), ['Old Priya', 'Priya Shah']);
+});
+
+test('findContactsByCompany: a contact saved with a legal suffix surfaces for the bare name', () => {
+  const content = [
+    row(['Mara Lin', 'Northwind Robotics GmbH', 'interviewer', '', '', '', '', '021', '']),
+    row(['Sam Ito', 'Northwind Robotics', 'recruiter', '', '', '', '', '022', '']),
+  ].join('\n');
+  const { contacts } = parseContacts(content);
+  // OR-ed in one pass: the exact "Northwind Robotics" row does not hide the
+  // GmbH one, and file order (newest last) still decides the ranking.
+  const matches = findContactsByCompany(contacts, 'Northwind Robotics');
+  assert.deepEqual(matches.map((c) => c.name), ['Sam Ito', 'Mara Lin']);
+});
+
+test('findContactsByCompany: an extra token that is not a corporate form is a different company', () => {
+  const { contacts } = parseContacts(FIXTURE);
+  assert.deepEqual(findContactsByCompany(contacts, 'Northwind'), []);
+  assert.deepEqual(findContactsByCompany(contacts, 'Northwind Robotics Labs'), []);
+});
+
 // --- 2. internal-referral type (contacts.mjs VALID_TYPES) -------------------
 
 test('parseContacts: internal-referral is a recognized type, not flagged off-enum', () => {
@@ -126,6 +153,18 @@ test('CLI --company: JSON output lists matches at the queried company', () => {
     assert.equal(result.status, 0, describeSpawn(result));
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.company, 'Northwind Robotics');
+    assert.equal(parsed.total, 2);
+  } finally {
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('CLI --company: a corporate-form variant of the saved company still matches', () => {
+  const dataRoot = seedDataRoot();
+  try {
+    const result = runLookup(dataRoot, ['--company', 'Northwind Robotics, Inc.']);
+    assert.equal(result.status, 0, describeSpawn(result));
+    const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.total, 2);
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
