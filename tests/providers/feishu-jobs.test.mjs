@@ -259,6 +259,26 @@ try {
   } else {
     fail(`feishu-jobs.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
   }
+  // An empty page ends the board even when the planned walk reaches max_pages:
+  // no cap warning, no mark.
+  const exhaustedAtCap = mkCtx(({ offset }) => ({
+    code: 0,
+    data: { count: 500, job_post_list: offset === 0 ? Array.from({ length: 100 }, (_, i) => mkJob(String(9000 + i), `岗位S${i}`)) : [] },
+  }));
+  const exhaustedWarnings = [];
+  let exhaustedJobs = [];
+  const beforeExhausted = console.error;
+  console.error = (...args) => exhaustedWarnings.push(args.join(' '));
+  try {
+    exhaustedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 2 }, exhaustedAtCap.ctx);
+  } finally {
+    console.error = beforeExhausted;
+  }
+  if (exhaustedJobs.length === 100 && exhaustedJobs.truncated === undefined && !exhaustedWarnings.some((line) => line.includes('truncated at'))) {
+    pass('feishu-jobs.fetch() treats an empty page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`feishu-jobs.fetch() empty page at max_pages: ${exhaustedJobs.length} jobs, truncated = ${JSON.stringify(exhaustedJobs.truncated)}, warnings = ${JSON.stringify(exhaustedWarnings)}`);
+  }
 
   const probe = mkCtx(() => ({
     code: 0,

@@ -185,6 +185,9 @@ export default {
       let page = 1;
       let lastPage = 1;
       let total = 0;
+      // Raw rows of the last page read: an empty or short page is the end of
+      // the board, not a cap stop.
+      let lastRawRows = 0;
       while (page <= lastPage) {
         const batch = page === 1
           ? [1]
@@ -206,6 +209,7 @@ export default {
           const json = result.value;
           const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
           const parsed = parseFeishuJobsResponse(json, companyName, origin);
+          lastRawRows = sourcePage.length;
           if (sourcePage.length === 0) { exhausted = true; break; }
           for (const job of parsed.jobs) {
             if (!seen.has(job.url)) seen.set(job.url, job);
@@ -219,7 +223,7 @@ export default {
         page = batch[batch.length - 1] + 1;
       }
       const covered = Math.min(lastPage * PAGE_SIZE, total);
-      if (covered < total && lastPage === maxPages && probeMaxPages > entryMaxPages) {
+      if (covered < total && lastPage === maxPages && lastRawRows >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
         console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
         partialReason ??= 'page-cap';
       }

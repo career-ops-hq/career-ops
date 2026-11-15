@@ -203,6 +203,16 @@ try {
   } else {
     fail(`meituan.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
   }
+  // A short page is the board's natural end, even at max_pages and whatever the
+  // reported total says: no cap warning, no mark.
+  const shortAtCap = mkCtx(() => ({ data: { page: {}, list: [mkJob(9000, '岗位S0')] } }));
+  const { result: shortJobs, errors: shortErrors } = await captureConsoleErrors(() =>
+    meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'], max_pages: 1 }, shortAtCap.ctx));
+  if (shortJobs.truncated === undefined && !shortErrors.some((line) => String(line).includes('truncated at'))) {
+    pass('meituan.fetch() treats a short page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`meituan.fetch() short page at max_pages: truncated = ${JSON.stringify(shortJobs.truncated)}, warnings = ${JSON.stringify(shortErrors)}`);
+  }
 
   const probe = mkCtx(() => ({
     data: { page: { totalCount: 500 }, list: Array.from({ length: 100 }, (_, i) => mkJob(6000 + i, `岗位F${i}`)) },

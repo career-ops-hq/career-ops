@@ -203,6 +203,16 @@ try {
   } else {
     fail(`tencent.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
   }
+  // A short page is the board's natural end, even at max_pages and whatever the
+  // reported total says: no cap warning, no mark.
+  const shortAtCap = mkCtx(() => ({ Code: 200, Data: { Count: 500, Posts: Array.from({ length: 50 }, (_, i) => mkPost(9000 + i, `岗位S${i}`)) } }));
+  const { result: shortJobs, errors: shortErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, shortAtCap.ctx));
+  if (shortJobs.truncated === undefined && !shortErrors.some((line) => String(line).includes('truncated at'))) {
+    pass('tencent.fetch() treats a short page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`tencent.fetch() short page at max_pages: truncated = ${JSON.stringify(shortJobs.truncated)}, warnings = ${JSON.stringify(shortErrors)}`);
+  }
 
   const probe = mkCtx(() => ({
     Code: 200,

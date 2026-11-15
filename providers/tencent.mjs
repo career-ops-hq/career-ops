@@ -77,7 +77,7 @@ export function parseTencentResponse(json, companyName) {
       postedAt: parseCnDate(p.LastUpdateTime),
     });
   }
-  return { jobs, total };
+  return { jobs, total, rawCount: posts.length };
 }
 
 /** @type {Provider} */
@@ -132,7 +132,7 @@ export default {
           return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
         }
         succeededOnce = true;
-        const { jobs, total } = parseTencentResponse(json, entry.name || '腾讯');
+        const { jobs, total, rawCount } = parseTencentResponse(json, entry.name || '腾讯');
         if (jobs.length === 0) break;
 
         for (const job of jobs) {
@@ -142,7 +142,9 @@ export default {
         if (page * PAGE_SIZE >= total) break;
         // The page cap, not the board, ended this keyword. Stay quiet when the
         // cap is the health probe's, not max_pages.
-        if (page === maxPages && probeMaxPages > entryMaxPages) {
+        // A short page is the board's natural end, even at the cap: the cut needs
+        // a full page by the source's own row count, not the filtered jobs.
+        if (page === maxPages && rawCount >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
           console.error(`  ⚠ tencent: keyword "${keyword}" truncated at ${page * PAGE_SIZE} of ${total} postings — raise max_pages on this entry for complete coverage`);
           partialReason ??= 'page-cap';
         }

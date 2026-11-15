@@ -201,6 +201,16 @@ try {
   } else {
     fail(`alibaba.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
   }
+  // A short page is the board's natural end, even at max_pages and whatever the
+  // reported total says: no cap warning, no mark.
+  const shortAtCap = mkCtx(() => ({ success: true, content: { totalCount: 500, datas: Array.from({ length: 50 }, (_, i) => mkJob(9000 + i, `岗位S${i}`)) } }));
+  const { result: shortJobs, errors: shortErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, shortAtCap.ctx));
+  if (shortJobs.truncated === undefined && !shortErrors.some((line) => String(line).includes('truncated at'))) {
+    pass('alibaba.fetch() treats a short page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`alibaba.fetch() short page at max_pages: truncated = ${JSON.stringify(shortJobs.truncated)}, warnings = ${JSON.stringify(shortErrors)}`);
+  }
 
   const probe = mkCtx(() => ({
     success: true,
