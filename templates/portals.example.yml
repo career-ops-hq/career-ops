@@ -2541,9 +2541,8 @@ tracked_companies:
     enabled: true
 
   - name: Parloa
-    careers_url: https://job-boards.eu.greenhouse.io/parloa
-    api: https://boards-api.greenhouse.io/v1/boards/parloa/jobs
-    notes: "Berlin EMEA. Voice AI enterprise."
+    careers_url: https://jobs.ashbyhq.com/parloa
+    notes: "Berlin EMEA. Voice AI enterprise. Moved from Greenhouse to Ashby; greenhouse.io/parloa answers 404."
     enabled: true
 
   - name: Intercom
@@ -2687,15 +2686,13 @@ tracked_companies:
 
   - name: Dialpad
     careers_url: https://www.dialpad.com/careers
-    scan_method: websearch
-    scan_query: '"dialpad" "AI" "Solutions" OR "Engineer" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com'
+    api: https://boards-api.greenhouse.io/v1/boards/dialpad/jobs
     notes: "Voice AI for business comms."
     enabled: true
 
   - name: Gong
     careers_url: https://www.gong.io/careers
-    scan_method: websearch
-    scan_query: 'site:gong.io/careers "AI" OR "Solutions" OR "Architect"'
+    api: https://boards-api.greenhouse.io/v1/boards/gongio/jobs
     notes: "Revenue intelligence with voice AI."
     enabled: true
 
@@ -2906,6 +2903,9 @@ tracked_companies:
   - name: Shiji Group
     careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
     notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    # The board page carries every opening inline (about 2 MB) and takes 6-48s to
+    # arrive, so the 10s default aborts it on most runs. See timeout_ms above.
+    timeout_ms: 60000
     enabled: true
 
   - name: Remote
@@ -2973,9 +2973,8 @@ tracked_companies:
     enabled: true
 
   - name: GetYourGuide
-    careers_url: https://job-boards.greenhouse.io/getyourguide
-    api: https://boards-api.greenhouse.io/v1/boards/getyourguide/jobs
-    notes: "Berlin. Travel marketplace, ML & data platform roles."
+    careers_url: https://jobs.ashbyhq.com/GetYourGuide
+    notes: "Berlin. Travel marketplace, ML & data platform roles. Moved from Greenhouse to Ashby; greenhouse.io/getyourguide is live but empty."
     enabled: true
 
   - name: HelloFresh
