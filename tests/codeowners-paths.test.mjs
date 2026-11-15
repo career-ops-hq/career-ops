@@ -170,3 +170,33 @@ ok('copilot-instructions scopes its hard stop to unattended sessions', () => {
   assert.ok(/unattended/.test(section), 'names the unattended case');
   assert.ok(section.includes('`CONTRIBUTING.md`'), 'points attended sessions at CONTRIBUTING.md');
 });
+
+// Review on #7118: "docs go straight to a PR" contradicted the issue-first rule
+// for owner-reviewed paths (README*.md is one), so each direct-to-PR summary
+// has to carry the exception.
+ok('every direct-to-PR summary names the owner-reviewed exception', () => {
+  const contributing = read('CONTRIBUTING.md').split('\n').find(l => l.startsWith('**Going straight to a PR'));
+  const agents = read('AGENTS.md').split('\n').find(l => l.startsWith('- **Contributing:**'));
+  assert.ok(contributing && /owner-reviewed path/.test(contributing), 'CONTRIBUTING.md direct-to-PR paragraph');
+  assert.ok(agents && /straight to a PR, unless they change an owner-reviewed path/.test(agents), 'AGENTS.md Contributing bullet');
+});
+
+// The pointers name CONTRIBUTING.md sections so a repo-work agent reads the
+// rules it needs, not the whole file of human-facing prose. A renamed heading
+// would leave the pointer naming a section that no longer exists.
+ok('every CONTRIBUTING.md section the agent pointers name is a real heading', () => {
+  const headings = new Set(read('CONTRIBUTING.md').split('\n')
+    .filter(l => /^#{2,3} /.test(l)).map(l => l.replace(/^#+\s+/, '').trim()));
+  const pointers = {
+    'AGENTS.md': read('AGENTS.md').split('\n').find(l => l.startsWith('- **Contributing:**')),
+    '.github/copilot-instructions.md': read('.github/copilot-instructions.md').split('\n')
+      .find(l => l.includes('`CONTRIBUTING.md` sections')),
+  };
+  for (const [file, line] of Object.entries(pointers)) {
+    assert.ok(line, `${file} has a CONTRIBUTING.md sections pointer`);
+    const named = [...line.matchAll(/"([^"]+)"/g)].map(m => m[1]);
+    assert.ok(named.length >= 3, `${file} names its sections`);
+    const missing = named.filter(n => !headings.has(n));
+    assert.deepEqual(missing, [], `${file} names sections CONTRIBUTING.md does not have: ${missing.join(', ')}`);
+  }
+});
