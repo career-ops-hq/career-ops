@@ -5168,6 +5168,7 @@ async function main() {
     let sourceName = provider.id === 'local-parser' ? 'local-parser' : `${provider.id}-api`;
     const recordError = (err, { retryable = false } = {}) => {
       failedTargets++;
+      st.failures = (st.failures || 0) + 1;
       st.error = true;
       const entry = {
         company: company.name,
@@ -5201,8 +5202,9 @@ async function main() {
         throw new Error(`${provider.id}: fetch() did not return an array`);
       }
       totalFound += jobs.length;
-      // A provider that drops offers itself (JustJoin, NoFluffJobs settings)
-      // reports the counts on jobs.providerStats so they show in the summary.
+      // A provider that drops offers itself (for example through a `workplace`
+      // setting) may report the counts on jobs.providerStats so they show in the
+      // summary; providers that do not are shown with `source` 0.
       const sourceDropped = jobs.providerStats?.dropped || {};
       const sourceDroppedTotal = Object.values(sourceDropped).reduce((sum, n) => sum + n, 0);
       st.fetched += jobs.length + sourceDroppedTotal;
@@ -5501,6 +5503,10 @@ async function main() {
       const at = errors.indexOf(entry);
       if (at !== -1) errors.splice(at, 1);
       failedTargets--;
+      // The row stays marked failed only while a board in it still has a failure.
+      const retriedStat = boardStat(company);
+      retriedStat.failures = Math.max(0, (retriedStat.failures || 0) - 1);
+      retriedStat.error = retriedStat.failures > 0;
       await new Promise((r) => setTimeout(r, TRANSIENT_RETRY_GAP_MS));
       await tasks[targets.indexOf(company)]();
     }
