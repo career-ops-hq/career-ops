@@ -8,28 +8,28 @@ Default modes are in `modes/` (English). Market-specific mode sets (each include
 
 | Market | Dir | Evaluation / Apply | Local vocabulary (examples) |
 |--------|-----|--------------------|------------------------------|
-| German (DACH) | `modes/de/` | `angebot` / `bewerben` | 13. Monatsgehalt, Probezeit, Kündigungsfrist, AGG, Tarifvertrag |
-| Austria (English) | `modes/at/` | `offer` / `apply` | KV-Mindestgehalt, 14 Gehälter, Sonderzahlungen, Probemonat, All-in, Abfertigung Neu |
-| French (FR/BE/CH/LU) | `modes/fr/` | `offre` / `postuler` | CDI/CDD, SYNTEC, RTT, 13e mois, titres-restaurant, CSE |
 | Arabic (Middle East) | `modes/ar/` | `fursah` / `takdeem` | مكافأة نهاية الخدمة, التأمينات الاجتماعية, فترة التجربة |
-| Japanese (Japan) | `modes/ja/` | `kyujin` / `oubo` | 正社員, 賞与, みなし残業, 年俸制, 36協定 |
-| Turkish (Turkey) | `modes/tr/` | `is-ilani` / `basvuru` | SGK, kıdem tazminatı, brüt/net maaş, BES |
-| Hindi (India) | `modes/hi/` | `naukri` / `aavedan` | CTC vs. in-hand, PF/EPF, Notice period/buyout, ESOPs |
-| India (English) | `modes/in/` | `offer` / `apply` | CTC vs. in-hand, LPA, batch eligibility, CGPA/backlog cut-offs, notice period/buyout, bonds |
-| Spanish (ES/LatAm) | `modes/es/` | `oferta` / `aplicar` | Contrato indefinido, convenio, pagas extra, Seguridad Social |
-| Portuguese (BR/PT) | `modes/pt/` | `oferta` / `aplicar` | CLT, PJ, FGTS, 13º, férias, vale-refeição |
-| Italian (Italy) | `modes/it/` | `annuncio` / `candidarsi` | CCNL, tempo indeterminato, tredicesima |
-| Dutch (NL/BE) | `modes/nl/` | `vacature` / `solliciteren` | vakantiegeld, proeftijd, opzegtermijn, pensioen |
-| Polish (Poland) | `modes/pl/` | `oferta` / `aplikuj` | Umowa o pracę, B2B, ZUS, okres wypowiedzenia, urlop |
-| Danish (Denmark) | `modes/da/` | `oferta` / `apply` | løn, opsigelsesvarsel, ferie, overenskomst, A-kasse |
-| Norwegian, Bokmål (Norway) | `modes/nb/` | `stilling` / `soknad` | fast ansettelse, prøvetid, oppsigelsestid, tariffavtale, feriepenger, OTP |
-| Russian | `modes/ru/` | `oferta` / `apply` | ТК РФ, оклад, испытательный срок, самозанятый, ДМС |
-| Ukrainian (Ukraine) | `modes/ua/` | `oferta` / `apply` | ФОП, КЗпП, оклад, випробувальний термін |
+| Austria (English) | `modes/at/` | `offer` / `apply` | KV-Mindestgehalt, 14 Gehälter, Sonderzahlungen, Probemonat, All-in, Abfertigung Neu |
 | Chinese, Simplified | `modes/zh/` | `oferta` / `apply` | 五险一金, 试用期, 年终奖, 劳动合同, 竞业 |
 | Chinese, Traditional | `modes/zh-TW/` | `oferta` / `apply` | 勞保, 試用期, 年終獎金, 勞動契約, 特休 |
-| Korean (South Korea) | `modes/ko/` | `gonggo` / `jiwon` | 정규직, 계약직, 퇴직금, 연봉 |
+| Danish (Denmark) | `modes/da/` | `oferta` / `apply` | løn, opsigelsesvarsel, ferie, overenskomst, A-kasse |
+| Dutch (NL/BE) | `modes/nl/` | `vacature` / `solliciteren` | vakantiegeld, proeftijd, opzegtermijn, pensioen |
+| French (FR/BE/CH/LU) | `modes/fr/` | `offre` / `postuler` | CDI/CDD, SYNTEC, RTT, 13e mois, titres-restaurant, CSE |
+| German (DACH) | `modes/de/` | `angebot` / `bewerben` | 13. Monatsgehalt, Probezeit, Kündigungsfrist, AGG, Tarifvertrag |
+| Hindi (India) | `modes/hi/` | `naukri` / `aavedan` | CTC vs. in-hand, PF/EPF, Notice period/buyout, ESOPs |
+| India (English) | `modes/in/` | `offer` / `apply` | CTC vs. in-hand, LPA, batch eligibility, CGPA/backlog cut-offs, notice period/buyout, bonds |
 | Indonesian (Indonesia) | `modes/id/` | `lowongan` / `melamar` | THR, BPJS, PKWT, pesangon, UMR |
+| Italian (Italy) | `modes/it/` | `annuncio` / `candidarsi` | CCNL, tempo indeterminato, tredicesima |
+| Japanese (Japan) | `modes/ja/` | `kyujin` / `oubo` | 正社員, 賞与, みなし残業, 年俸制, 36協定 |
+| Korean (South Korea) | `modes/ko/` | `gonggo` / `jiwon` | 정규직, 계약직, 퇴직금, 연봉 |
+| Norwegian, Bokmål (Norway) | `modes/nb/` | `stilling` / `soknad` | fast ansettelse, prøvetid, oppsigelsestid, tariffavtale, feriepenger, OTP |
+| Polish (Poland) | `modes/pl/` | `oferta` / `aplikuj` | Umowa o pracę, B2B, ZUS, okres wypowiedzenia, urlop |
+| Portuguese (BR/PT) | `modes/pt/` | `oferta` / `aplicar` | CLT, PJ, FGTS, 13º, férias, vale-refeição |
+| Russian | `modes/ru/` | `oferta` / `apply` | ТК РФ, оклад, испытательный срок, самозанятый, ДМС |
 | Singapore (English) | `modes/sg/` | `offer` / `apply` | Employment Pass, COMPASS, S Pass, CPF, AWS, monthly SGD |
+| Spanish (ES/LatAm) | `modes/es/` | `oferta` / `aplicar` | Contrato indefinido, convenio, pagas extra, Seguridad Social |
+| Turkish (Turkey) | `modes/tr/` | `is-ilani` / `basvuru` | SGK, kıdem tazminatı, brüt/net maaş, BES |
+| Ukrainian (Ukraine) | `modes/ua/` | `oferta` / `apply` | ФОП, КЗпП, оклад, випробувальний термін |
 | Vietnamese (Vietnam) | `modes/vi/` | `tuyen-dung` / `ung-tuyen` | Gross vs Net, thử việc, BHXH/BHYT/BHTN, lương tháng 13, trợ cấp thôi việc |
 
 ## Multiple simultaneous target markets (#3793)

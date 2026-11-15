@@ -6,15 +6,15 @@ Headless worker command per CLI:
 
 | CLI | Command |
 |-----|---------|
+| Antigravity CLI | `agy -p "prompt"` |
 | Claude Code | `claude -p "prompt"` |
+| Codex | `codex exec "prompt"` |
+| Copilot CLI | `copilot -p "prompt"` |
+| Gemini CLI | `gemini -p "prompt"` |
+| Grok Build CLI | `grok -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
 | Pi | `pi -a -p "prompt"` |
-| Copilot CLI | `copilot -p "prompt"` |
-| Codex | `codex exec "prompt"` |
-| Gemini CLI | `gemini -p "prompt"` |
 | Qwen | `qwen -p "prompt"` |
-| Antigravity CLI | `agy -p "prompt"` |
-| Grok Build CLI | `grok -p "prompt"` |
 
 **Headless worker permissions — one rule for every entry point (#2876).** A worker never gets more write power headless than the web grants the same worker kind. The web's grant is the audited one: `WRITE_CAPABLE_TOOLS` and the per-kind deny lists in `web/src/lib/claude-invocation.mjs` (`pdf` has had no Bash since #2172 and must never regain it).
 - Never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--always-approve`, `--yolo`, `--full-auto`, …) to a new spawner. If a CLI has no per-tool deny list to express the restriction, withhold the write-capable workers from that CLI instead of auto-approving them.
