@@ -155,6 +155,17 @@ try {
     } else {
       fail(`neogov.fetch() short page at the ceiling: ${calls.length} calls, ${shortAtCeiling.length} jobs, warnings ${JSON.stringify(warnings)}, truncated = ${JSON.stringify(shortAtCeiling.truncated)}`);
     }
+    // fullness counts the cards the source sent: one untitled card on a full
+    // ten-card page does not make it short, so the cut is still warned and marked
+    calls = [];
+    warnings.length = 0;
+    const withBadCard = (start) => `<ul class="search-results-listing-container">${Array.from({ length: 9 }, (_, i) => item(start + i, `job-${start + i}`, `Job ${start + i}`, 'Vancouver, WA')).join('')}${item(start + 9, `job-${start + 9}`, '', 'Vancouver, WA')}</ul>`;
+    const malformedFull = await neogov.fetch({ ...entry, max_pages: 2 }, { fetchText: async (url) => { calls.push(url); return pageNo(url) === 1 ? pageOf(10, 10) : withBadCard(20); }, sleep: noSleep });
+    if (calls.length === 2 && malformedFull.length === 19 && warnings.some((w) => /raise max_pages/.test(w)) && malformedFull.truncated?.reason === 'page-cap' && malformedFull.truncated.fetched === 19) {
+      pass('neogov.fetch() still treats a full page with one malformed card as a cut: warned and marked');
+    } else {
+      fail(`neogov.fetch() full page with a malformed card: ${calls.length} calls, ${malformedFull.length} jobs, warnings ${JSON.stringify(warnings)}, truncated = ${JSON.stringify(malformedFull.truncated)}`);
+    }
     calls = [];
     await neogov.fetch({ ...entry, max_pages: 1_000_000 }, ctx);
     if (calls.length === 200) pass('neogov.fetch() caps a user max_pages at MAX_PAGES_CAP (200)');

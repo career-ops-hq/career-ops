@@ -112,7 +112,9 @@ export default {
       });
       pagesFetched++;
       const found = parseNeogovPage(html, entry.name, t.origin);
-      lastPageFull = found.length >= PAGE_SIZE;
+      // The cards the source sent, before malformed ones are dropped: one bad
+      // card must not make a full page look short.
+      lastPageFull = countNeogovCards(html) >= PAGE_SIZE;
       // A page that adds nothing new is the end — or the site ignoring `page`
       // and repeating itself. Either way, stop instead of looping.
       let fresh = 0;
@@ -139,6 +141,17 @@ export default {
 
 /** @param {string} s */
 const text = (s) => decodeEntities(String(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+
+/**
+ * How many job cards a list page carries as the source sent it, split the way
+ * parseNeogovPage splits it, before link-less, off-site or untitled items are
+ * dropped. Page fullness is read from this.
+ * @param {string} html
+ * @returns {number}
+ */
+export function countNeogovCards(html) {
+  return typeof html === 'string' ? html.split(/<li class="list-item"/i).length - 1 : 0;
+}
 
 /**
  * Parse one `/careers/home/index` HTML page. Exported for unit tests.
