@@ -57,6 +57,8 @@ try {
   const radJobs = await radancy.fetch({ name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' }, radCtx);
   if (radJobs.length === 3 && radCalls === 3) pass('radancy.fetch() paginates and stops on the first empty page');
   else fail(`radancy.fetch() returned ${radJobs.length} jobs after ${radCalls} calls`);
+  if (radJobs.truncated === undefined) pass('radancy.fetch() leaves an HTML walk that reached an empty page unmarked');
+  else fail(`radancy.fetch() natural HTML end was marked: ${JSON.stringify(radJobs.truncated)}`);
   if (radSeen[0]?.endsWith('?p=1') && radSeen[1]?.endsWith('?p=2')) pass('radancy.fetch() pages via ?p=N (1-based)');
   else fail(`radancy.fetch() paged wrong: ${JSON.stringify(radSeen)}`);
 
@@ -82,6 +84,54 @@ try {
   // Partly read, so the result says so: scan.mjs logs the board partial, not reachable.
   if (partialJobs.truncated?.reason === 'fetch-error' && partialJobs.truncated.fetched === 2) pass('radancy.fetch() marks the board partial when a later HTML page fails');
   else fail(`radancy.fetch() later HTML page failure: truncated = ${JSON.stringify(partialJobs.truncated)}`);
+
+  // The HTML walk can also stop at its own limits with pages left: past
+  // max_jobs (the slice drops the rows that crossed it) or at max_pages. Both
+  // are cap stops, marked page-cap and warned like the fragment path's. An
+  // exact max_jobs match cannot be told from a natural end on this path (no
+  // reported total), so it stays unmarked, as does the one-page health probe.
+  const htmlPage = (n) => '<html>' + card(String(5000 + n * 10 + 1), `Role ${n}a`, 'Berlin, Germany') + card(String(5000 + n * 10 + 2), `Role ${n}b`, 'Berlin, Germany') + '</html>';
+  const htmlWalk = async (entryExtra, ctxExtra = {}) => {
+    const calls = [];
+    const lines = [];
+    const origError = console.error;
+    console.error = (m) => lines.push(String(m));
+    try {
+      const jobs = await radancy.fetch(
+        { name: 'HtmlWalk', api: 'https://careers.munichre.com/en/search-jobs', ...entryExtra },
+        { sleep: async () => {}, fetchText: async (url) => { calls.push(url); return htmlPage(Number(new URL(url).searchParams.get('p'))); }, ...ctxExtra },
+      );
+      return { jobs, calls: calls.length, lines };
+    } finally {
+      console.error = origError;
+    }
+  };
+  const overshot = await htmlWalk({ max_jobs: 3 });
+  if (overshot.jobs.length === 3 && overshot.calls === 2 && overshot.jobs.truncated?.reason === 'page-cap' && overshot.jobs.truncated.fetched === 3
+      && overshot.lines.some((l) => /raise max_jobs\/max_pages/.test(l))) {
+    pass('radancy.fetch() marks the HTML walk page-cap and warns when max_jobs cuts a page');
+  } else {
+    fail(`radancy.fetch() HTML max_jobs overshoot: ${overshot.jobs.length} jobs, ${overshot.calls} pages, truncated = ${JSON.stringify(overshot.jobs.truncated)}, warnings ${JSON.stringify(overshot.lines)}`);
+  }
+  const pageCapped = await htmlWalk({ max_pages: 2 });
+  if (pageCapped.jobs.length === 4 && pageCapped.calls === 2 && pageCapped.jobs.truncated?.reason === 'page-cap' && pageCapped.jobs.truncated.fetched === 4
+      && pageCapped.lines.some((l) => /raise max_jobs\/max_pages/.test(l))) {
+    pass('radancy.fetch() marks the HTML walk page-cap and warns when max_pages ends it before an empty page');
+  } else {
+    fail(`radancy.fetch() HTML max_pages cut: ${pageCapped.jobs.length} jobs, ${pageCapped.calls} pages, truncated = ${JSON.stringify(pageCapped.jobs.truncated)}, warnings ${JSON.stringify(pageCapped.lines)}`);
+  }
+  const exactFit = await htmlWalk({ max_jobs: 2 });
+  if (exactFit.jobs.length === 2 && exactFit.calls === 1 && exactFit.jobs.truncated === undefined && exactFit.lines.length === 0) {
+    pass('radancy.fetch() leaves an HTML walk that exactly fills max_jobs unmarked and silent');
+  } else {
+    fail(`radancy.fetch() HTML exact max_jobs: ${exactFit.jobs.length} jobs, truncated = ${JSON.stringify(exactFit.jobs.truncated)}, warnings ${JSON.stringify(exactFit.lines)}`);
+  }
+  const probedHtml = await htmlWalk({}, { maxPages: 1 });
+  if (probedHtml.calls === 1 && probedHtml.jobs.truncated === undefined && probedHtml.lines.length === 0) {
+    pass('radancy.fetch() leaves a one-page HTML probe unmarked and silent');
+  } else {
+    fail(`radancy.fetch() HTML probe: ${probedHtml.calls} pages, truncated = ${JSON.stringify(probedHtml.jobs.truncated)}, warnings ${JSON.stringify(probedHtml.lines)}`);
+  }
 
   // A FIRST-page failure means the board is unreachable, not empty. It must
   // throw so scan/portal-health record a failure instead of "live but empty".

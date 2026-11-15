@@ -507,7 +507,8 @@ export default {
     // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
     // failure here, keeps partials instead.
     let stoppedOnError = false;
-    for (let page = 1; page <= effectiveMaxPages; page++) {
+    let page = 1;
+    for (; page <= effectiveMaxPages; page++) {
       if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       let rows;
       try {
@@ -534,8 +535,21 @@ export default {
       if (jobs.length >= maxJobs) break;
     }
     const result = jobs.slice(0, maxJobs);
-    // The pages after the failure were never read: marked, as on the fragment path.
-    if (stoppedOnError) markTruncated(result, 'fetch-error', { fetched: result.length });
+    if (stoppedOnError) {
+      // The pages after the failure were never read: marked, as on the fragment path.
+      markTruncated(result, 'fetch-error', { fetched: result.length });
+    } else if (!probing && (jobs.length > maxJobs || page > effectiveMaxPages)) {
+      // Our own limit ended the walk with pages possibly left: a page pushed the
+      // buffer past max_jobs (the slice drops the overshoot), or max_pages ran
+      // out before an empty or repeated page ended it. A cap stop, warned and
+      // marked as on the fragment path. An exact max_jobs match is not one: with
+      // no reported total, this path cannot tell it from a natural end.
+      console.error(
+        `⚠️  radancy: ${entry.name} truncated at ${result.length} jobs`
+        + ' (max_pages/max_jobs reached) — raise max_jobs/max_pages on this entry for more',
+      );
+      markTruncated(result, 'page-cap', { fetched: result.length });
+    }
     return result;
   },
 };
