@@ -204,7 +204,9 @@ decides the tracker status in Step 9):
 - (a) fails (the need is not evidenced) → **SKIP**: there is no honest pitch to
   make. Step 4b normally stops here before any document exists; if the need
   only falls apart now, say so, hand over the research, and do not save the
-  drafts as a send-ready package (Step 9 lists no documents for a SKIP).
+  drafts as a send-ready package. Delete the CV PDF and the cover letter that
+  Step 5 wrote to `output/` in this run (only those files), so a SKIP leaves
+  nothing in `output/` (Step 9 lists no documents for a SKIP).
 
 ## Step 9 — Save report + tracker
 
