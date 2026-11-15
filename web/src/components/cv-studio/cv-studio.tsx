@@ -9,7 +9,7 @@ import { CvPdfFileActions } from "@/components/cv-pdf-file-actions";
 import { pipelineQuery } from "@/lib/pipeline-navigation.mjs";
 import { arrange, renderBlocks, type BlockTree } from "@/lib/cv-studio/html-blocks.mjs";
 import { applyRecordedEdit, emptyEdits, isStudioUndoKey, resolveStudio, studioReducer, type StudioAction, type StudioDoc, type StudioEdits } from "@/lib/cv-studio/studio.mjs";
-import { editSaveStatus, inflightEdits, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
+import { editSaveStatus, inflightEdits, ownsStatus, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "@/lib/cv-studio/put-order.mjs";
 import { SectionCard } from "./section-card";
 import { CvPreview } from "./cv-preview";
 import { CoverageMeter } from "./coverage-meter";
@@ -127,6 +127,9 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   );
 
   const savedJsonRef = useRef(JSON.stringify(data.edits));
+  // The action that started last owns the notice. A save that returns after
+  // Reset still records its edits, and it does not put its notice back.
+  const statusEpoch = useRef(0);
   const autosaveUncertainRef = useRef(false);
   const savingJsonRef = useRef<string | null>(null);
   const postingJsonRef = useRef<string | null>(null);
@@ -195,7 +198,15 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   const editStatus = editSaveStatus(savedJsonRef.current, editsJson, savingJsonRef.current, postingJsonRef.current, autosaveUncertainRef.current, pdfRejected);
 
   const saveForApply = useCallback(async () => {
-    setSave({ kind: "saving" });
+    statusEpoch.current += 1;
+    const epoch = statusEpoch.current;
+    const publishStatus = (next: SaveState) => {
+      if (ownsStatus(epoch, statusEpoch.current)) setSave(next);
+    };
+    const publishRejected = (rejected: boolean) => {
+      if (ownsStatus(epoch, statusEpoch.current)) setPdfRejected(rejected);
+    };
+    publishStatus({ kind: "saving" });
     const sent = edits;
     const serialized = JSON.stringify(sent);
     // Save for apply writes this payload before it renders. Undo can put the
@@ -217,18 +228,18 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
       }
       if (shouldPutAfterPost(wrote, serialized, JSON.stringify(editsRef.current))) putEdits(editsRef.current, false);
       if (body.superseded) {
-        setSave({ kind: "failed", error: "A newer edit was saved while this one was sending. Save again to export the latest." });
+        publishStatus({ kind: "failed", error: "A newer edit was saved while this one was sending. Save again to export the latest." });
         return;
       }
       if (!r.ok || !body.pdf) {
-        setPdfRejected(true);
-        setSave({ kind: "failed", error: SAVE_ERRORS[body.error ?? ""] ?? body.error ?? "Saving failed." });
+        publishRejected(true);
+        publishStatus({ kind: "failed", error: SAVE_ERRORS[body.error ?? ""] ?? body.error ?? "Saving failed." });
       } else if (latestEdits.current !== sent) {
-        setPdfRejected(false);
-        setSave({ kind: "outdated", pdf: body.pdf });
+        publishRejected(false);
+        publishStatus({ kind: "outdated", pdf: body.pdf });
       } else {
-        setPdfRejected(false);
-        setSave({ kind: "saved", pdf: body.pdf, indexed: body.indexed === true, warnings: body.warnings ?? [] });
+        publishRejected(false);
+        publishStatus({ kind: "saved", pdf: body.pdf, indexed: body.indexed === true, warnings: body.warnings ?? [] });
       }
     } catch {
       // The response never arrived. The server may already have stored this
@@ -236,7 +247,7 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
       // later undo is measured against the write that may have landed.
       putEdits(editsRef.current, true);
       if (postingJsonRef.current === serialized) postingJsonRef.current = null;
-      setSave({ kind: "failed", error: "Saving failed. Is the dashboard still running?" });
+      publishStatus({ kind: "failed", error: "Saving failed. Is the dashboard still running?" });
     }
   }, [edits, putEdits, send]);
 
@@ -253,15 +264,23 @@ function Studio({ n, data }: { n: string; data: Loaded }) {
   }, [undo]);
 
   const resetStudio = useCallback(() => {
+    statusEpoch.current += 1;
+    const epoch = statusEpoch.current;
     recordEdit({ type: "reset" });
     setSave({ kind: "idle" });
     void send("POST", { op: "restore-full-pdf" }).then(async (r) => {
+      if (!ownsStatus(epoch, statusEpoch.current)) return;
       if (!r.ok) throw new Error("restore-full-pdf failed");
       const body = (await r.json().catch(() => ({}))) as { restored?: boolean; reason?: string };
+      if (!ownsStatus(epoch, statusEpoch.current)) return;
       if (body.reason === "missing") {
         setSave({ kind: "failed", error: "Reset cleared the preview. Apply still has the shortened PDF, because the full PDF is not on disk." });
+        return;
       }
+      setPdfRejected(false);
+      setSave({ kind: "idle" });
     }).catch(() => {
+      if (!ownsStatus(epoch, statusEpoch.current)) return;
       setSave({ kind: "failed", error: "Reset cleared the preview. Apply may still have the shortened PDF." });
     });
   }, [recordEdit, send]);
