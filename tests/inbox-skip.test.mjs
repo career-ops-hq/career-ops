@@ -93,6 +93,22 @@ try {
   check('the Pending heading is read in other languages (Offen / Verarbeitet)',
     germanResult.ok && germanResult.changed === 1 && germanResult.text.split('\n').includes(BETA_PROCESSED));
 
+  const tabHeading = ['## Pending', BETA_PENDING, '##\tProcessed', BETA_PROCESSED, ''].join('\n');
+  const tabResult = applyInboxSkip(tabHeading, BETA, true);
+  check('a `##<tab>` heading ends the Pending section',
+    tabResult.ok && tabResult.changed === 1 && tabResult.text.split('\n').includes(BETA_PROCESSED));
+
+  const processedOnly = ['## Processed', BETA_PROCESSED, ''].join('\n');
+  check('with no Pending heading, a row under Processed is still never matched',
+    applyInboxSkip(processedOnly, BETA, true).error === 'unmatched'
+      && applyInboxSkip(processedOnly.replace('- [ ]', '- [x]'), BETA, false).error === 'unmatched');
+
+  const checklist = [BETA_PENDING, '', '## Processed', BETA_PROCESSED, ''].join('\n');
+  const checklistResult = applyInboxSkip(checklist, BETA, true);
+  check('a file with no Pending heading is a checklist: rows above Processed still match',
+    checklistResult.ok && checklistResult.changed === 1
+      && checklistResult.text === [BETA_SKIPPED, '', '## Processed', BETA_PROCESSED, ''].join('\n'));
+
   const crlf = FIXTURE.replace(/\n/g, '\r\n');
   check('CRLF line endings are kept', applyInboxSkip(crlf, BETA, true).text === SKIPPED.replace(/\n/g, '\r\n'));
 

@@ -64,24 +64,32 @@ export function jobUrlFromRest(rest) {
   return postingUrl(rest.split("|")[0]);
 }
 
-function pendingRange(lines) {
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const t = lines[i].trim();
-    if (sectionKind(t) === "pending") {
-      start = i + 1;
-      continue;
-    }
-    if (start !== -1 && t.startsWith("## ")) {
-      return { start, end: i };
-    }
-  }
-  if (start !== -1) return { start, end: lines.length };
-  return null; // no Pending heading → every line is a candidate
-}
+// Any level-two heading ends a section, `##` then a space or a tab, as
+// sync-batch-input.mjs reads it.
+const SECTION_HEADING = /^##\s/;
 
-function inRange(i, range) {
-  return !range || (i >= range.start && i < range.end);
+/**
+ * Which lines a skip or undo may change: the first Pending section, up to
+ * the next `##` heading. A file with no Pending heading is a plain checklist,
+ * so every line is a candidate except those under a Processed heading.
+ *
+ * @param {string[]} lines
+ * @returns {boolean[]}
+ */
+function candidateLines(lines) {
+  const heads = lines.map((line) => line.trim());
+  const pending = heads.findIndex((t) => sectionKind(t) === "pending");
+  const ok = new Array(lines.length).fill(false);
+  if (pending !== -1) {
+    for (let i = pending + 1; i < lines.length && !SECTION_HEADING.test(heads[i]); i++) ok[i] = true;
+    return ok;
+  }
+  let underProcessed = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (SECTION_HEADING.test(heads[i])) underProcessed = sectionKind(heads[i]) === "processed";
+    else ok[i] = !underProcessed;
+  }
+  return ok;
 }
 
 /**
@@ -101,13 +109,13 @@ export function applyInboxSkip(text, url, done) {
   const lines = text.split(/\r?\n/);
   if (endedWithNl && lines[lines.length - 1] === "") lines.pop();
 
-  const range = pendingRange(lines);
+  const candidate = candidateLines(lines);
   const want = done ? "x" : " ";
   let matched = 0;
   let changed = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    if (!inRange(i, range)) continue;
+    if (!candidate[i]) continue;
     const m = lines[i].match(CHECKBOX_LINE);
     if (!m) continue;
     const rest = m[3];
