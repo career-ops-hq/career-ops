@@ -7,6 +7,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { hireHiveTenantOf } from './providers/hirehive.mjs';
 import { resolveHibobTenant } from './providers/hibob.mjs';
 import { resolveBoard as resolveTalentlinkBoard } from './providers/talentlink.mjs';
+import { extractClient as extractTrakstarClient } from './providers/trakstar.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const WEB_URL_RE = /https?:\/\/[^\s|)>]+/i;
@@ -14,8 +15,8 @@ const WEB_URL_RE = /https?:\/\/[^\s|)>]+/i;
 // Vendors whose provider reads the board from the tenant subdomain alone, so
 // every posting on one board reduces to the same origin.
 const TENANT_ORIGIN_VENDORS = new Set([
-  'icims', 'bamboohr', 'recruitee', 'breezy', 'jazzhr', 'teamtailor', 'personio',
-  'pinpoint', 'applicantpro', 'keka', 'prevueaps', 'schoolspring', 'taleez',
+  'applicantpro', 'bamboohr', 'breezy', 'icims', 'jazzhr', 'keka', 'personio',
+  'pinpoint', 'prevueaps', 'recruitee', 'schoolspring', 'taleez', 'teamtailor',
   'trakstar', 'turbohire', 'zoho-recruit',
 ]);
 
@@ -23,12 +24,12 @@ const TENANT_ORIGIN_VENDORS = new Set([
 // A first segment in the set is a platform route, not a board (Workable's
 // `/j/<shortcode>` feed links name no company).
 const FIRST_SEGMENT_VENDORS = new Map([
-  ['lever', new Set()],
   ['ashby', new Set()],
-  ['smartrecruiters', new Set()],
-  ['workable', new Set(['j', 'api'])],
   ['jobvite', new Set(['api'])],
+  ['lever', new Set()],
   ['rippling', new Set(['api'])],
+  ['smartrecruiters', new Set()],
+  ['workable', new Set(['api', 'j'])],
 ]);
 
 // Vendors with exactly one board host: a URL on the vendor's other (API) host
@@ -113,10 +114,10 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
   } else if (vendor === 'trakstar' && u.hostname.toLowerCase() === 'jsapi.recruiterbox.com') {
     // The openings API names the board in ?client_name=; the tenant host is
-    // the same board in the form the provider reads from a careers_url.
-    const client = u.searchParams.get('client_name')?.trim().toLowerCase();
-    if (u.pathname.replace(/\/$/, '') !== '/v1/openings' || !client || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(client)) return null;
-    return `https://${client}.hire.trakstar.com`;
+    // the same board in the form the provider reads from a careers_url. The
+    // provider's own parser applies its path, slug and reserved-label rules.
+    const client = extractTrakstarClient(rawUrl);
+    return client ? `https://${client}.hire.trakstar.com` : null;
   } else if (TENANT_ORIGIN_VENDORS.has(vendor)) {
     // www.applicantpro.com/openings/<tenant>/… is an alias of the tenant host.
     if (vendor === 'applicantpro' && u.hostname.toLowerCase() === 'www.applicantpro.com') {

@@ -49,7 +49,7 @@ const SHARED = [
   '3\thttps://jobs.jobvite.com/initech/job/oABC\tJobvite\t',
   '4\thttps://umbrella.zohorecruit.com.au/jobs/Careers/1\tZoho\t',
 ].join('\n') + '\n';
-for (const vendor of ['workable', 'breezy', 'jobvite', 'zohorecruit']) {
+for (const vendor of ['breezy', 'jobvite', 'workable', 'zohorecruit']) {
   eq(`"${vendor}" does not pick every posting on its shared ATS host`, idsForCompanies(SHARED, vendor), []);
 }
 eq('shared ATS hosts: the path still names the company', idsForCompanies(SHARED, 'acme'), ['1']);
