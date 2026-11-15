@@ -136,14 +136,17 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       const isCombobox = el.getAttribute("role") === "combobox";
       if (inReactSelect && tag === "input" && !isCombobox) continue;
 
-      const required = (el as HTMLInputElement).required || el.getAttribute("aria-required") === "true";
+      const domRequired = (el as HTMLInputElement).required || el.getAttribute("aria-required") === "true";
+      // A trailing star is the board's required mark. A star inside the sentence is not.
+      const requiredFor = (label: string) => domRequired || /\*\s*$/.test(label.trim());
       const nativeId = (el as HTMLElement).id || undefined;
       const nativeName = (el as HTMLInputElement).name || undefined;
       const fid = `co${n++}`;
 
       if (isCombobox) {
         el.setAttribute("data-co-field", fid);
-        fields.push({ id: fid, type: "select", combobox: true, label: clean(labelFor(el)), required, options: [], nativeId, nativeName });
+        const label = clean(labelFor(el));
+        fields.push({ id: fid, type: "select", combobox: true, label, required: requiredFor(label), options: [], nativeId, nativeName });
         continue;
       }
 
@@ -160,7 +163,8 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           r.setAttribute("data-co-field", fid);
           r.setAttribute("data-co-option", options[i] ?? String(i));
         });
-        fields.push({ id: fid, type: "radio", label: clean(groupLabel(el, options)) || name, required, options });
+        const radioLabel = clean(groupLabel(el, options)) || name;
+        fields.push({ id: fid, type: "radio", label: radioLabel, required: requiredFor(radioLabel), options });
         continue;
       }
 
@@ -168,16 +172,18 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
       if (tag === "select") {
         const options = Array.from((el as HTMLSelectElement).options).map((o) => clean(o.textContent)).filter((o) => o && !/^(select|choose|--)/i.test(o));
-        fields.push({ id: fid, type: "select", label: clean(labelFor(el)), required, options, nativeId, nativeName });
+        const selectLabel = clean(labelFor(el));
+        fields.push({ id: fid, type: "select", label: selectLabel, required: requiredFor(selectLabel), options, nativeId, nativeName });
         continue;
       }
       const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file", "password"].includes(itype) ? itype : "text";
       const ml = (el as HTMLInputElement).maxLength;
+      const label = clean(labelFor(el));
       fields.push({
         id: fid,
         type,
-        label: clean(labelFor(el)),
-        required,
+        label,
+        required: requiredFor(label),
         maxLength: ml && ml > 0 ? ml : undefined,
         value: (el as HTMLInputElement).value || undefined,
         nativeId,
