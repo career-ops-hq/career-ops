@@ -43,7 +43,7 @@ jobs:
       # The action installs the scanner wheel only after checking it against a
       # committed SHA-256 and its PyPI provenance. Move this pin with the
       # catalog's, not ahead of it: a newer scanner can score differently.
-      - uses: hashgraph-online/ai-plugin-scanner-action@c96833de5070fab4e564010b5ab6e3c3d7e07a3e # v1.2.806
+      - uses: hashgraph-online/ai-plugin-scanner-action@9b169fc65d09b24726b66d70b3563ab563158b58 # v1.2.816
         with:
           plugin_dir: "."
           min_score: 75
