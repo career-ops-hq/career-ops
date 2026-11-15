@@ -15,7 +15,7 @@
     "node": "^22.13.0 || >=23.4.0"
   },
   "dependencies": {
-    "@paper-design/shaders-react": "^0.0.80",
+    "@paper-design/shaders-react": "^0.0.82",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "js-yaml": "^5.4.1",
