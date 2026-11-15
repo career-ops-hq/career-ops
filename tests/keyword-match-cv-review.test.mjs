@@ -90,3 +90,22 @@ test('review keeps separators within parenthesized skill qualifiers intact', () 
     'Measurement (oscilloscope, spectrum analyzer)', 'Analysis (signals (FFT, DFT); noise)', 'Documentation',
   ]);
 });
+
+test('fence-looking code with a text suffix cannot close an example block', () => {
+  const text = '## Skills\n~~~text\n~~~still-code\nRust\n~~~\nTerraform';
+  assert.deepEqual(coverage.cvTermsNotInJd([], text), ['Terraform']);
+});
+
+test('skills at any ATX or HTML heading level stop at peer and ancestor sections', () => {
+  for (let level = 1; level <= 6; level++) {
+    const hashes = '#'.repeat(level);
+    assert.deepEqual(coverage.cvTermsNotInJd([], `${hashes} Skills\nTerraform\n${hashes} Education\nRust`), ['Terraform']);
+    assert.deepEqual(coverage.cvTermsNotInJd([], `<h${level}>Skills</h${level}><p>Terraform</p><h${level}>Education</h${level}><p>Rust</p>`, { html: true }), ['Terraform']);
+  }
+  assert.deepEqual(coverage.cvTermsNotInJd([], '# Skills\n## Languages\nRust\n# Education\nTerraform'), ['Rust']);
+});
+
+test('inline formatting is visible text, not part of a CV skill name', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd(['Python', 'Rust'], '## Skills\n`Python`, *Rust*, _Rust_, **Python**, C++, Node.js'), ['C++', 'Node.js']);
+  assert.deepEqual(coverage.cvTermsNotInJd([], '## Skills\n`Python`, *Rust*, _Rust_, **Python**'), ['Python', 'Rust']);
+});

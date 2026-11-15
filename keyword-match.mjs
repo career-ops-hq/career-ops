@@ -175,9 +175,10 @@ function splitCvSkillTerms(text) {
  * @returns {string[]}
  */
 export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
-  let text = String(cvText || '').replace(/<!--[\s\S]*?-->/g, '');
+  let text = String(cvText || '').replace(/<!--[\s\S]*?-->/g, ' ');
   if (html) {
-    text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
       .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi,
         (_, level, title) => `\n${'#'.repeat(Number(level))} ${htmlToText(title)}\n`)
       .replace(/<\/(?:p|li|div|ul|ol|section)\s*>|<br\s*\/?>/gi, '\n')
@@ -186,7 +187,7 @@ export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
     text = collapseMarkdownLinks(text);
   }
   const terms = new Map();
-  let inSkills = false;
+  let skillsLevel = null;
   let fence = null;
   for (const raw of text.split(/\r?\n/)) {
     const line = normalizePandocLine(raw).trim();
@@ -194,18 +195,24 @@ export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
     if (marker) {
       const run = marker[1].trim();
       if (!fence) fence = run;
-      else if (run[0] === fence[0] && run.length >= fence.length) fence = null;
+      else if (run[0] === fence[0] && run.length >= fence.length && !line.slice(run.length).trim()) fence = null;
       continue;
     }
     if (fence) continue;
-    const heading = headingText(line, 2);
-    if (heading !== null || headingText(line, 1) !== null) {
-      inSkills = heading !== null && /^(?:skills?|technical skills|core competencies|competencies)$/i.test(heading);
+    const headingMarker = /^(#{1,6})\s/.exec(line);
+    if (headingMarker) {
+      const level = headingMarker[1].length;
+      const heading = headingText(line, level);
+      if (/^(?:skills?|technical skills|core competencies|competencies)$/i.test(heading || '')) skillsLevel = level;
+      else if (skillsLevel !== null && level <= skillsLevel) skillsLevel = null;
       continue;
     }
-    if (!inSkills || /^#{3,6}\s/.test(line) || /^(?:[-*_]\s*){3,}$/.test(line)) continue;
-    const items = toPlainText(line.replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, ''))
-      .replace(/^[^:]+:\s*/, '');
+    if (skillsLevel === null || /^(?:[-*_]\s*){3,}$/.test(line)) continue;
+    const visible = line.replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, '')
+      .replace(/(?<!\\)(\*\*|__)/g, '')
+      .replace(/(`+)([^`]+)\1/g, '$2')
+      .replace(/(?<![\w\\])([*_])(?=\S)(.+?\S|\S)\1(?!\w)/g, '$2');
+    const items = toPlainText(visible).replace(/^[^:]+:\s*/, '');
     for (const item of splitCvSkillTerms(items)) {
       const term = item.trim();
       const key = normalizeText(term);
