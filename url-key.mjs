@@ -508,14 +508,15 @@ export function relatePostingLanguageKeys(a, b) {
   return a.language && b.language ? 'distinct' : 'one-sided-language';
 }
 
-const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com)$/;
 
 /**
  * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an id
  * it extracts (the same Greenhouse or SmartRecruiters id on two hosts), which
  * names the posting whatever the rest of the query says, or, with the same
  * query, one path on an ATS host whose spellings it folds (a Lever `/apply`
- * form, an Ashby `/application` tab, a Workable account page). Its other folds
+ * form, an Ashby `/application` tab, a Workable account page, a Workday locale
+ * prefix). Its other folds
  * are no evidence here: it lowercases every path, strips every trailing slash
  * and drops `ref` and `source`, and a generic site may tell pages apart by any
  * of those.
@@ -660,6 +661,9 @@ export function canonicalJobKey(raw) {
   }
   if (out.hostname === 'apply.workable.com') {
     out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, '/j/$1');
+  }
+  if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/[^/]+\/job\/)/, '');
   }
   return out.toString();
 }

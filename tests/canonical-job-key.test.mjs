@@ -123,6 +123,15 @@ const SAME = [
     ],
     'https://apply.workable.com/j/81b46579fe',
   ],
+  [
+    'workday posting with and without a locale before the site',
+    [
+      'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R123',
+      'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123',
+      'https://acme.wd5.myworkdayjobs.com/fr-FR/External/job/Remote-USA/Data-Engineer_R123/',
+    ],
+    'https://acme.wd5.myworkdayjobs.com/external/job/remote-usa/data-engineer_r123',
+  ],
 ];
 
 const DIFFERENT = [
@@ -147,6 +156,9 @@ const DIFFERENT = [
   ['https://apply.workable.com/acme/j/81B46579FE/', 'https://apply.workable.com/acme/j/19A136F8E2/'],
   ['https://apply.workable.com/acme/j/81B46579FE/apply', 'https://apply.workable.com/j/19A136F8E2'],
   ['https://careers.example.com/acme/j/81B46579FE', 'https://careers.example.com/j/81B46579FE'],
+  ['https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123', 'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R124'],
+  ['https://acme.wd5.myworkdayjobs.com/hr-ca/job/Remote/Analyst_R1', 'https://acme.wd5.myworkdayjobs.com/job/Remote/Analyst_R1'],
+  ['https://careers.example.com/en-US/External/job/Remote/Analyst_R1', 'https://careers.example.com/External/job/Remote/Analyst_R1'],
 ];
 
 test('variants of one posting share one key, on the CLI and the web copy', () => {
