@@ -166,9 +166,9 @@ export function computeCalibration(rows, journals, opts = {}) {
       verdict = { source: 'ledger', type: led.reachedOffer ? 'offer' : 'interview', reachedInterview: true, reachedOffer: !!led.reachedOffer };
     } else {
       const s = String(row.status || '').replace(/\*\*/g, '').trim().toLowerCase().replace(/\s+\d{4}-\d{2}-\d{2}.*$/, '');
-      if (TRACKER_TERMINAL[s]) verdict = { source: 'tracker', type: s, ...TRACKER_TERMINAL[s] };
+      if (closedNoResponse.get(row.num) === s) verdict = { source: 'ledger', type: 'no_response', ...JOURNAL_OUTCOMES.no_response };
+      else if (TRACKER_TERMINAL[s]) verdict = { source: 'tracker', type: s, ...TRACKER_TERMINAL[s] };
       else if (['applied', 'responded'].includes(s)) { inFlight.push(row.num); continue; }
-      else if (closedNoResponse.get(row.num) === s) verdict = { source: 'ledger', type: 'no_response', ...JOURNAL_OUTCOMES.no_response };
       else continue; // evaluated / discarded / skip with no stage history — outside calibration's population
     }
     if (!Number.isFinite(row.score) || row.score <= 0) { unscored.push(row.num); continue; }
@@ -455,15 +455,15 @@ function selfTest() {
   // A row in closedNoResponse resolves as no_response while its status is
   // unchanged. Ledger interview evidence outranks closedNoResponse.
   const closed = computeCalibration(
-    [mk(1, 4.2, 'Discarded'), mk(2, 4.2, 'SKIP'), mk(3, 4.2, 'Applied'), mk(4, 4.6, 'Discarded')],
+    [mk(1, 4.2, 'Discarded'), mk(2, 4.2, 'SKIP'), mk(3, 4.2, 'Applied'), mk(4, 4.6, 'Discarded'), mk(5, 4.2, 'Responded'), mk(6, 4.2, 'Responded')],
     new Map(),
     {
       minBandN: 1,
       reached: new Map([[4, { reachedInterview: true, reachedOffer: false }]]),
-      closedNoResponse: new Map([[1, 'discarded'], [2, 'skip'], [3, 'discarded'], [4, 'discarded']]),
+      closedNoResponse: new Map([[1, 'discarded'], [2, 'skip'], [3, 'discarded'], [4, 'discarded'], [5, 'responded']]),
     },
   );
-  t('closedNoResponse row resolves as no_response', closed.resolved === 3 && closed.inFlight === 1);
+  t('closedNoResponse row resolves as no_response', closed.resolved === 4 && closed.inFlight === 2);
   t('closedNoResponse row is a negative outcome', closed.bands.find((b) => b.band === '4.0-4.4')?.interviews === 0);
   t('ledger interview evidence outranks closedNoResponse', closed.bands.find((b) => b.band === '>=4.5')?.interviews === 1);
 
