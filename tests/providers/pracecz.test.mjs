@@ -237,9 +237,13 @@ try {
   {
     // A configured max_pages below the cap still truncates, and says so.
     const { calls, ctx } = stub(fullPage(400));
-    const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx));
+    let capped = [];
+    const text = await captureStderr(async () => { capped = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx); });
     if (calls.length === 2 && text.includes('truncated at max_pages=2')) pass('pracecz.fetch() stops at max_pages and warns that the search was truncated');
     else fail(`max_pages=2: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === capped.length && capped.length > 0) pass('pracecz.fetch() marks the board page-cap when max_pages truncates a keyword');
+    else fail(`max_pages=2 cut: ${capped.length} jobs, truncated = ${JSON.stringify(capped.truncated)}`);
   }
 
     {
@@ -259,9 +263,12 @@ try {
     }
     {
       const { calls, ctx } = stub(fullPage(400), { maxPages: 1 });
-      const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, ctx));
+      let probed = [];
+      const text = await captureStderr(async () => { probed = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, ctx); });
       if (calls.length === 1 && text === '') pass('pracecz.fetch() honors ctx.maxPages:1 with exactly one request and no warning');
       else fail(`ctx.maxPages=1: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+      if (probed.truncated === undefined) pass('pracecz.fetch() leaves the one-page probe unmarked');
+      else fail(`ctx.maxPages=1 probe was marked: ${JSON.stringify(probed.truncated)}`);
 
       const err = new Error('probe budget');
       let caught = null;
