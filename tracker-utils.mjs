@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync, truncateSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -869,6 +869,7 @@ export function userFileWriteTarget(path) {
  */
 export function appendLedgerRows(path, text) {
   let lead = '';
+  let before = 0;
   let fd;
   try {
     fd = openSync(path, 'r');
@@ -878,6 +879,7 @@ export function appendLedgerRows(path, text) {
   if (fd !== null) {
     try {
       const { size } = fstatSync(fd);
+      before = size;
       if (size > 0) {
         const last = Buffer.alloc(1);
         readSync(fd, last, 0, 1, size - 1);
@@ -887,7 +889,16 @@ export function appendLedgerRows(path, text) {
       closeSync(fd);
     }
   }
-  appendFileSync(path, lead + text, 'utf-8');
+  // appendFileSync can throw after the new bytes are already in the file, for
+  // example when the close fails. The caller reports the failure and may retry,
+  // which would record the same row again. Put the file back to the size it
+  // had before this append, then report the original error.
+  try {
+    appendFileSync(path, lead + text, 'utf-8');
+  } catch (err) {
+    try { truncateSync(path, before); } catch { /* ENOENT or EACCES: nothing further to undo */ }
+    throw err;
+  }
 }
 
 /**

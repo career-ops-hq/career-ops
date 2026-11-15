@@ -11,7 +11,7 @@
 // append on a fresh line; the other ledgers now do the same.
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import assert from 'node:assert';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -42,6 +42,42 @@ try {
     writeFileSync(f, 'a\tb\nc\td');
     node(`import { appendLedgerRows } from '${href('tracker-utils.mjs')}'; appendLedgerRows(${JSON.stringify(f)}, 'e\\tf\\n');`);
     assert.equal(readFileSync(f, 'utf-8'), 'a\tb\nc\td\ne\tf\n');
+  });
+
+  ok('a failed append puts the ledger back to the size it had before', () => {
+    const f = join(root, 'rollback.tsv');
+    writeFileSync(f, 'kept\n');
+    // A permission error fails before any byte is written, so the file staying
+    // put does not by itself show the rollback. The child below writes the new
+    // row and then throws, which is the close-failed case.
+    chmodSync(f, 0o444);
+    const denied = spawnSync(NODE, ['--input-type=module', '-e',
+      `import { appendLedgerRows } from '${href('tracker-utils.mjs')}'; appendLedgerRows(${JSON.stringify(f)}, 'new\\n');`], {
+      cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
+    });
+    chmodSync(f, 0o644);
+    assert.notEqual(denied.status, 0, 'a read-only ledger must fail the append');
+    assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
+
+    const child = spawnSync(NODE, ['--experimental-test-module-mocks', '--input-type=module', '-e', `
+      import { mock } from 'node:test';
+      import * as fs from 'node:fs';
+      const real = fs.appendFileSync;
+      mock.module('fs', { namedExports: { ...fs, appendFileSync(path, data, enc) {
+        real(path, data, enc);
+        throw new Error('close failed');
+      } } });
+      const { appendLedgerRows } = await import('${href('tracker-utils.mjs')}');
+      try {
+        appendLedgerRows(${JSON.stringify(f)}, 'new\\n');
+        console.log('NO_THROW');
+      } catch (err) {
+        console.log('THREW ' + err.message);
+      }
+    `], { cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' } });
+    assert.equal(child.status, 0, child.stderr);
+    assert.match(child.stdout, /THREW close failed/);
+    assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
   });
 
   ok('appendLedgerRows leaves a terminated, CRLF, empty or missing file alone', () => {
