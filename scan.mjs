@@ -2740,6 +2740,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'canada',
   'chicago',
   'copenhagen',
+  'distributed',
   'dublin',
   'emea',
   'eu',
@@ -2750,6 +2751,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'germany',
   'hamburg',
   'helsinki',
+  'hybrid',
   'india',
   'ireland',
   'italy',
@@ -2789,10 +2791,14 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'united kingdom',
   'united states',
   'us',
+  'u s',
   'usa',
+  'u s a',
   'vancouver',
   'vienna',
   'warsaw',
+  'wfh',
+  'work from home',
   'zurich',
 ]);
 
@@ -2904,6 +2910,13 @@ export function normalizeRoleForDedup(role) {
     const piped = title.match(/\s*\|\s*([^|]+?)\s*$/);
     if (piped && isRoleLocationSuffix(piped[1])) {
       title = title.slice(0, piped.index).trimEnd();
+      continue;
+    }
+    // "Engineer - Remote" and "Engineer, Remote". Only a known place or
+    // workplace tag, so "Engineer - Platform" keeps the team.
+    const trailed = title.match(/\s*[-–—,]\s+([^,|\-–—]+?)\s*$/);
+    if (trailed && isRoleLocationSuffix(trailed[1])) {
+      title = title.slice(0, trailed.index).trimEnd();
       continue;
     }
     break;
