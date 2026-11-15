@@ -130,7 +130,7 @@ export default {
     let firstRequest = true;
     let succeededOnce = false;
     // Why part of the board went unread, first cause first; null while it is whole.
-    /** @type {'source-reports-more' | null} */
+    /** @type {'source-reports-more' | 'page-cap' | null} */
     let partialReason = null;
 
     for (const keyword of keywords) {
@@ -187,6 +187,7 @@ export default {
         // cap is the health probe's, not max_pages.
         if (pageNo === maxPages && probeMaxPages > entryMaxPages) {
           console.error(`  ⚠ meituan: keyword "${keyword}" truncated at ${pageNo * PAGE_SIZE}${total ? ` of ${total}` : ''} postings — raise max_pages on this entry for complete coverage`);
+          partialReason ??= 'page-cap';
         }
       }
     }

@@ -235,10 +235,11 @@ try {
     data: { count: 500, job_post_list: Array.from({ length: 100 }, (_, i) => mkJob(String(5000 + i), `岗位E${i}`)) },
   }));
   const capWarnings = [];
+  let cappedJobs = [];
   const originalConsoleError = console.error;
   console.error = (...args) => capWarnings.push(args.join(' '));
   try {
-    await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
+    cappedJobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx);
   } finally {
     console.error = originalConsoleError;
   }
@@ -252,6 +253,12 @@ try {
   } else {
     fail(`feishu-jobs.fetch() truncation warnings = ${JSON.stringify(capWarnings)}`);
   }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedJobs.truncated?.reason === 'page-cap' && cappedJobs.truncated.fetched === 100) {
+    pass('feishu-jobs.fetch() marks the board page-cap when max_pages truncates it');
+  } else {
+    fail(`feishu-jobs.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
+  }
 
   const probe = mkCtx(() => ({
     code: 0,
@@ -264,6 +271,8 @@ try {
   } else {
     fail(`feishu-jobs.fetch() ctx.maxPages=1: ${probe.calls.length} requests, keyword=${JSON.stringify(probe.calls[0] && probe.calls[0].keyword)}`);
   }
+  if (probeJobs.truncated === undefined) pass('feishu-jobs.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`feishu-jobs.fetch() probe was marked: ${JSON.stringify(probeJobs.truncated)}`);
 
   const fractionalEntryLimit = mkCtx(() => ({
     code: 0,

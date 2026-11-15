@@ -184,7 +184,7 @@ try {
   const capped = mkCtx(() => ({
     data: { page: { totalCount: 500 }, list: Array.from({ length: 100 }, (_, i) => mkJob(5000 + i, `岗位E${i}`)) },
   }));
-  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+  const { result: cappedJobs, errors: cappedErrors } = await captureConsoleErrors(() =>
     meituan.fetch({ name: '美团', careers_url: MEITUAN_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('meituan.fetch() honors entry.max_pages');
@@ -196,6 +196,12 @@ try {
     pass('meituan.fetch() warns when max_pages truncates the board instead of stopping silently');
   } else {
     fail(`meituan.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
+  }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedJobs.truncated?.reason === 'page-cap' && cappedJobs.truncated.fetched === 100) {
+    pass('meituan.fetch() marks the board page-cap when max_pages truncates it');
+  } else {
+    fail(`meituan.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
   }
 
   const probe = mkCtx(() => ({
@@ -215,6 +221,8 @@ try {
   } else {
     fail(`meituan.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
   }
+  if (probeJobs.truncated === undefined) pass('meituan.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`meituan.fetch() probe was marked: ${JSON.stringify(probeJobs.truncated)}`);
 
   // A board whose reported total never runs out still stops at the
   // DEFAULT_MAX_PAGES runaway guard, and says so.

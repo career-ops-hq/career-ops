@@ -174,6 +174,9 @@ export default {
       return json;
     };
     let firstRequest = true;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'page-cap' | null} */
+    let partialReason = null;
 
     for (const keyword of keywords) {
       // Page 1 tells us the inventory size; the rest of the keyword's pages are
@@ -198,7 +201,7 @@ export default {
             console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
             // The rest of the board was never read: the result says so, so scan.mjs
             // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-            return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
+            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
           }
           const json = result.value;
           const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
@@ -218,9 +221,14 @@ export default {
       const covered = Math.min(lastPage * PAGE_SIZE, total);
       if (covered < total && lastPage === maxPages && probeMaxPages > entryMaxPages) {
         console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
+        partialReason ??= 'page-cap';
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    // A keyword max_pages cut is a page-cap stop: the warning above says so, and
+    // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };

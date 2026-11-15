@@ -184,7 +184,7 @@ try {
     Code: 200,
     Data: { Count: 500, Posts: Array.from({ length: 100 }, (_, i) => mkPost(3000 + i, `岗位C${i}`)) },
   }));
-  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+  const { result: cappedJobs, errors: cappedErrors } = await captureConsoleErrors(() =>
     tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('tencent.fetch() honors entry.max_pages');
@@ -196,6 +196,12 @@ try {
     pass('tencent.fetch() warns when max_pages truncates the board instead of stopping silently');
   } else {
     fail(`tencent.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
+  }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedJobs.truncated?.reason === 'page-cap' && cappedJobs.truncated.fetched === 100) {
+    pass('tencent.fetch() marks the board page-cap when max_pages truncates it');
+  } else {
+    fail(`tencent.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
   }
 
   const probe = mkCtx(() => ({
@@ -216,6 +222,8 @@ try {
   } else {
     fail(`tencent.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
   }
+  if (probeJobs.truncated === undefined) pass('tencent.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`tencent.fetch() probe was marked: ${JSON.stringify(probeJobs.truncated)}`);
 
   // The live whole board (2257 postings on 2026-10-12) outgrew the old 20-page default.
   const BOARD_SIZE = 2257;
