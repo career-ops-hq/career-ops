@@ -17,11 +17,12 @@
  *   node writing-profile.mjs --check F  Measure text file F against the profile
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { listTree } from './lib/walk-tree.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { writeFileAtomic } from './tracker-utils.mjs';
 import { stripMarkup } from './verify-cv-facts.mjs';
 
 export const PROFILE_VERSION = 1;
@@ -66,7 +67,7 @@ export function toParagraphs(text) {
 function sentencesOf(paragraphs) {
   const out = [];
   for (const paragraph of paragraphs) {
-    const pieces = paragraph.split(/(?<=[.!?])\s+(?=[\p{Lu}"'\u201C(\d])/u).map((s) => s.trim()).filter(Boolean);
+    const pieces = paragraph.split(/(?<=[.!?]["'\u201D\u2019)]*)\s+(?=[\p{Lu}"'\u201C(\d])/u).map((s) => s.trim()).filter(Boolean);
     // A greeting or a signature line is not a sentence of the writer's.
     if (pieces.length === 1 && !/[.!?]["'\u201D)]*$/.test(pieces[0]) && (pieces[0].match(WORD) ?? []).length < 5) continue;
     out.push(...pieces);
@@ -225,7 +226,8 @@ function main(argv) {
   }
   const profile = buildProfile(samples);
   mkdirSync(join(root, 'data'), { recursive: true });
-  writeFileSync(profilePath(root), `${JSON.stringify(profile, null, 2)}\n`);
+  // Replaced in one step, so a letter being built never reads half a file.
+  writeFileAtomic(profilePath(root), `${JSON.stringify(profile, null, 2)}\n`);
   if (profile.enough_samples) {
     console.log(`Wrote data/writing-profile.json from ${profile.sample_count} sample(s), ${profile.total_words} words.`);
   } else {

@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -27,6 +27,12 @@ test('measure counts sentences, contractions and first person', () => {
   assert.equal(m.longestSentenceWords, 4);
   assert.ok(m.contractionsPer100 > 20);
   assert.ok(m.firstPersonPer100 > 0);
+});
+
+test('a sentence that ends inside a closing quote still ends', () => {
+  const m = measure('"We shipped it." Then we went home. She said, "Fine." We left.');
+  assert.equal(m.sentences, 4);
+  assert.equal(m.longestSentenceWords, 4);
 });
 
 test('a possessive is not a contraction', () => {
@@ -103,6 +109,25 @@ test('the script writes data/writing-profile.json and loadProfile reads it', () 
     assert.equal(profile.sample_count, 1);
     assert.equal(profile.files[0].file, 'post.txt');
     assert.ok(readFileSync(join(dir, 'data', 'writing-profile.json'), 'utf8').endsWith('\n'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rebuilding the profile replaces it whole and leaves no temp file behind', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-wprofile-'));
+  try {
+    mkdirSync(join(dir, 'writing-samples'));
+    mkdirSync(join(dir, 'data'));
+    writeFileSync(join(dir, 'writing-samples', 'post.txt'), sample(10));
+    writeFileSync(join(dir, 'data', 'writing-profile.json'), '{old');
+    const run = spawnSync(process.execPath, [join(ROOT, 'writing-profile.mjs')], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(run.status, 0, describeSpawn(run));
+    assert.equal(loadProfile(dir).sample_count, 1);
+    assert.deepEqual(readdirSync(join(dir, 'data')), ['writing-profile.json']);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
