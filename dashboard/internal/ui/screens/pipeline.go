@@ -179,17 +179,18 @@ const (
 
 // Filter modes
 const (
-	filterAll        = "all"
-	filterEvaluated  = "evaluated"
-	filterApplied    = "applied"
-	filterInterview  = "interview"
-	filterResponded  = "responded"
-	filterAssessment = "assessment"
-	filterSkip       = "skip"
-	filterRejected   = "rejected"
-	filterDiscarded  = "discarded"
-	filterTop        = "top"
-	filterOther      = "other"
+	filterAll         = "all"
+	filterEvaluated   = "evaluated"
+	filterSpeculative = "speculative"
+	filterApplied     = "applied"
+	filterInterview   = "interview"
+	filterResponded   = "responded"
+	filterAssessment  = "assessment"
+	filterSkip        = "skip"
+	filterRejected    = "rejected"
+	filterDiscarded   = "discarded"
+	filterTop         = "top"
+	filterOther       = "other"
 )
 
 type pipelineTab struct {
@@ -202,6 +203,7 @@ func getPipelineTabs() []pipelineTab {
 		{filterPending, i18n.Current.TabInbox}, // #5269 (pipeline_pending.go)
 		{filterAll, i18n.Current.TabAll},
 		{filterEvaluated, i18n.Current.TabEvaluated},
+		{filterSpeculative, i18n.Current.TabSpeculative},
 		{filterInterview, i18n.Current.TabInterview},
 		{filterAssessment, i18n.Current.TabAssessment},
 		{filterResponded, i18n.Current.TabResponded},
@@ -264,6 +266,7 @@ type StatusPair struct {
 func getStatusPairs(currentNormalized string) []StatusPair {
 	base := []StatusPair{
 		{i18n.Current.StatusEvaluated, "Evaluated"},
+		{i18n.Current.StatusSpeculative, "Speculative"},
 		{i18n.Current.StatusApplied, "Applied"},
 		{i18n.Current.StatusResponded, "Responded"},
 		{i18n.Current.StatusAssessment, "Assessment"},
@@ -312,7 +315,10 @@ func (m PipelineModel) currentStatusPairs() []StatusPair {
 }
 
 // statusGroupOrder defines display order for grouped view.
-var statusGroupOrder = []string{"hired", "interview", "offer", "assessment", "responded", "applied", "evaluated", "skip", "rejected", "discarded"}
+// speculative sits just after evaluated: a gambit pitch is pre-application, so
+// it outranks nothing that has actually been sent, but it is live work and
+// belongs above skip/rejected/discarded.
+var statusGroupOrder = []string{"hired", "interview", "offer", "assessment", "responded", "applied", "evaluated", "speculative", "skip", "rejected", "discarded"}
 
 // PipelineModel implements the career pipeline dashboard screen.
 type PipelineModel struct {
@@ -2922,16 +2928,17 @@ func (m PipelineModel) scoreStyle(score float64) lipgloss.Style {
 
 func (m PipelineModel) statusColorMap() map[string]lipgloss.Color {
 	return map[string]lipgloss.Color{
-		"hired":      m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
-		"interview":  m.theme.Green,
-		"offer":      m.theme.Green,
-		"applied":    m.theme.Sky,
-		"responded":  m.theme.Blue,
-		"assessment": m.theme.Mauve,
-		"evaluated":  m.theme.Text,
-		"skip":       m.theme.Red,
-		"rejected":   m.theme.Subtext,
-		"discarded":  m.theme.Subtext,
+		"hired":       m.theme.Green, // terminal success — never uncoloured (default) like an unknown status
+		"interview":   m.theme.Green,
+		"offer":       m.theme.Green,
+		"applied":     m.theme.Sky,
+		"responded":   m.theme.Blue,
+		"assessment":  m.theme.Mauve,
+		"evaluated":   m.theme.Text,
+		"speculative": m.theme.Pink,
+		"skip":        m.theme.Red,
+		"rejected":    m.theme.Subtext,
+		"discarded":   m.theme.Subtext,
 	}
 }
 

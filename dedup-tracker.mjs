@@ -60,6 +60,10 @@ const STATUS_RANK = {
   // rejection to Evaluated, or delete the rejected row, on a title match.
   'rejected': 2,
   'evaluated': 2,
+  // A pitch that went out outranks a report that is still only evaluated, so a
+  // later evaluation of the same role cannot demote it. Below Applied: nothing
+  // has been submitted yet.
+  'speculative': 2.5,
   'applied': 3,
   'responded': 4,
   'assessment': 5,
