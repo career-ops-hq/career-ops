@@ -57,7 +57,10 @@ export function daysSince(iso: string | undefined, now: number): number | null {
   if (Number.isNaN(then)) return null;
   const current = new Date(now);
   const today = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
-  return Math.round((today - then) / 86_400_000);
+  const days = Math.round((today - then) / 86_400_000);
+  // A job-board posted_at is the UTC day. On a US evening that day is already
+  // tomorrow, so the raw difference is -1. The row is still today.
+  return days < 0 ? 0 : days;
 }
 
 // Freshness windows mirror the Explore "posted within" segmented control so the two
