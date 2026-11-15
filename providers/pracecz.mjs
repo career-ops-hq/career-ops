@@ -224,7 +224,10 @@ export default {
           total = totalItems;
           lastPage = Math.min(Math.ceil(total / PAGE_SIZE), maxPages);
         }
-        if (page === maxPages && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
+        // A short page is the board's natural end even when the total read on
+        // page 1 promised more (it can shrink mid-walk): the cut needs a full
+        // page, counted in the source's items before normalization drops any.
+        if (page === maxPages && items.length >= PAGE_SIZE && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
           console.error(`⚠️  pracecz: ${entryName} truncated at max_pages=${maxPages} (${rows} of ${total} offers for "${keyword}") — narrow the keyword, set pracecz.location, or raise max_pages`);
           partialReason ??= 'page-cap';
         }

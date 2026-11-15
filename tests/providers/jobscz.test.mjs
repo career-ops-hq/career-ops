@@ -126,8 +126,9 @@ try {
         { title: 'SW Technical Leader – Java', url: 'https://www.jobs.cz/rpd/2001471915/', company: 'JISR Institute, a.s.', location: 'Pardubice – Drozdice', postedAt: posted },
         { title: 'Java & Python Developer', url: 'https://www.jobs.cz/rpd/2/', company: 'JISR Institute, a.s.', location: 'Pardubice – Drozdice', postedAt: posted },
       ],
+      cardCount: 2,
     };
-    if (isDeepStrictEqual(got, want)) pass('parseJobsCzPage maps total, title, url, company, location and postedAt');
+    if (isDeepStrictEqual(got, want)) pass('parseJobsCzPage maps total, title, url, company, location and postedAt, and counts the cards the source sent');
     else fail(`parseJobsCzPage returned ${JSON.stringify(got)}`);
 
     if (got.jobs[1]?.title === 'Java & Python Developer') pass('parseJobsCzPage decodes entities in the title');
@@ -204,6 +205,15 @@ try {
     // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
     if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === capped.length && capped.length > 0) pass('jobscz.fetch() marks the board page-cap when max_pages truncates a keyword');
     else fail(`max_pages=2 cut: ${capped.length} jobs, truncated = ${JSON.stringify(capped.truncated)}`);
+    // A short last page ends the board even when the total read on page 1
+    // promised more: no warning, no mark.
+    const shrunk = stub((url) => (pageOf(url) === '1'
+      ? page(Array.from({ length: 30 }, (_, i) => card({ id: `1${String(i).padStart(3, '0')}` })), 400)
+      : page([card({ id: '2000' })], 31)));
+    let shrunkJobs = [];
+    const shrunkText = await captureStderr(async () => { shrunkJobs = await jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['x'] }, max_pages: 2 }, shrunk.ctx); });
+    if (shrunk.calls.length === 2 && shrunkJobs.length === 31 && shrunkJobs.truncated === undefined && !shrunkText.includes('truncated at max_pages')) pass('jobscz.fetch() treats a short last page as the end of the board, whatever page 1 reported');
+    else fail(`short last page: ${shrunkJobs.length} jobs, truncated = ${JSON.stringify(shrunkJobs.truncated)}, stderr ${JSON.stringify(shrunkText)}`);
   }
 
   {

@@ -121,7 +121,9 @@ export function parseJobsCzPage(html, nowMs = Date.now()) {
   }
   const digits = /Našli jsme\s+([\d\s]+?)\s*nabíd/.exec(text)?.[1].replace(/\D/g, '');
   if (!digits) throw new Error('jobscz: result count not found — page markup changed?');
-  return { total: Number(digits), jobs };
+  // cardCount is what the source sent, before cards without an id or a title
+  // are dropped: the page-fullness check reads it, not the jobs kept.
+  return { total: Number(digits), jobs, cardCount: cards.length };
 }
 
 /** @type {Provider} */
@@ -185,7 +187,9 @@ export default {
           total = parsed.total;
           lastPage = Math.min(Math.ceil(total / PAGE_SIZE), maxPages);
         }
-        if (page === maxPages && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
+        // A short page is the board's natural end even when the total read on
+        // page 1 promised more (it can shrink mid-walk): the cut needs a full page.
+        if (page === maxPages && parsed.cardCount >= PAGE_SIZE && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
           console.error(`⚠️  jobscz: ${entryName} truncated at max_pages=${maxPages} (${rows} of ${total} offers for "${keyword}") — narrow the keyword, set jobscz.location, or raise max_pages`);
           partialReason ??= 'page-cap';
         }

@@ -244,6 +244,15 @@ try {
     // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
     if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === capped.length && capped.length > 0) pass('pracecz.fetch() marks the board page-cap when max_pages truncates a keyword');
     else fail(`max_pages=2 cut: ${capped.length} jobs, truncated = ${JSON.stringify(capped.truncated)}`);
+    // A short last page ends the board even when the total read on page 1
+    // promised more: no warning, no mark.
+    const shrunk = stub((url) => (pageOf(url) === '1'
+      ? page(Array.from({ length: 40 }, (_, i) => item({ metadata: { advertId: `1-${i}`, publishedAt: '2026-10-20T15:36:43+02:00' } })), 400)
+      : page([item({ metadata: { advertId: '2-0', publishedAt: '2026-10-20T15:36:43+02:00' } })], 41)));
+    let shrunkJobs = [];
+    const shrunkText = await captureStderr(async () => { shrunkJobs = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, shrunk.ctx); });
+    if (shrunk.calls.length === 2 && shrunkJobs.length === 41 && shrunkJobs.truncated === undefined && !shrunkText.includes('truncated at max_pages')) pass('pracecz.fetch() treats a short last page as the end of the board, whatever page 1 reported');
+    else fail(`short last page: ${shrunkJobs.length} jobs, truncated = ${JSON.stringify(shrunkJobs.truncated)}, stderr ${JSON.stringify(shrunkText)}`);
   }
 
     {
