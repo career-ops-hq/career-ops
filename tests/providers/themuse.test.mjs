@@ -614,6 +614,28 @@ try {
     else fail(`themuse challenge: expected 1 fetchText call, got ${calls}`);
   }
 
+  // Search terms stay out of the message: a "network engineer" query must
+  // not turn a challenged 403 into a `network` classification.
+  {
+    let thrown = null;
+    try {
+      await themuse.fetch(
+        { name: 'X', provider: 'themuse', query: 'network engineer' },
+        { fetchText: challengedFetchText(), sleep: async () => {} },
+      );
+    } catch (e) { thrown = e; }
+    if (classifyFetchError(thrown) === 'auth' && !/network/i.test(thrown?.message ?? '')) {
+      pass('themuse challenge error keeps the search terms out of its message (a "network" query still classifies as auth)');
+    } else {
+      fail(`themuse challenge with a "network" query: classifyFetchError = ${classifyFetchError(thrown)}, message = ${JSON.stringify(thrown?.message)}`);
+    }
+    if (thrown?.url === 'https://www.themuse.com/search?q=network+engineer') {
+      pass('themuse challenge error carries the request URL on err.url');
+    } else {
+      fail(`themuse challenge error url = ${JSON.stringify(thrown?.url)}`);
+    }
+  }
+
   // Page 1 challenged, header not seen: the challenge page's own markers.
   {
     let thrown = null;

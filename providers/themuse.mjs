@@ -37,8 +37,10 @@
 // error that names the challenge. It never returns [], which would read
 // downstream as a healthy board with no jobs. The error keeps the HTTP
 // status, so verify-portals still classifies it from the status code. Its
-// message must not contain "network": classifyFetchError matches that word
-// before it reads the status (pinned in tests/providers/themuse.test.mjs).
+// message must not contain "network", in its own words or in the entry's
+// search terms, so the request URL stays out of it: classifyFetchError
+// matches that word before it reads the status (pinned in
+// tests/providers/themuse.test.mjs).
 
 import { sleep, fetchTextWithRetry } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
@@ -364,10 +366,13 @@ async function fetchSearchPage(ctx, url, retryPolicy) {
     if (!byHeader && !byBody) throw err;
     const signal = byHeader ? `cf-mitigated: ${cfMitigated}` : 'challenge page';
     const named = new Error(
-      `themuse: Cloudflare challenge (HTTP ${status}, ${signal}) on ${url}. The Muse is challenging non-browser requests from this IP address, and career-ops does not solve challenges. See the availability note for The Muse in docs/SUPPORTED_JOB_BOARDS.md.`,
+      `themuse: Cloudflare challenge (HTTP ${status}, ${signal}) on the /search page. The Muse is challenging non-browser requests from this IP address, and career-ops does not solve challenges. See the availability note for The Muse in docs/SUPPORTED_JOB_BOARDS.md.`,
       { cause: err },
     );
-    Object.assign(named, { status, challenge: true });
+    // The URL goes on its own field, not in the message: it carries the
+    // entry's search terms, and a query such as "network engineer" would make
+    // classifyFetchError read the message as a network failure.
+    Object.assign(named, { status, challenge: true, url });
     if (Number.isInteger(err.attempts)) Object.assign(named, { attempts: err.attempts });
     throw named;
   }
