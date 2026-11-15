@@ -32,6 +32,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
 import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
+import { headingText, normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
 
 // A normal path stays readable. A space or other shell syntax is quoted so the
 // example stays one argument.
@@ -143,6 +144,58 @@ export function keywordCount(keyword, text) {
   let total = 0;
   for (const term of expandTerms(keyword)) total += countOccurrences(term, text);
   return total;
+}
+
+/**
+ * CV skills not named by any JD keyword. This is a review list, never a score.
+ * Read explicit Skills / Core Competencies sections, not terms inferred from
+ * experience prose. Keep the CV's spelling, including non-vocabulary skills.
+ *
+ * @param {string[]} keywords
+ * @param {string} cvText - Markdown, or HTML when options.html is true.
+ * @param {{html?: boolean}} [options]
+ * @returns {string[]}
+ */
+export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
+  let text = String(cvText || '').replace(/<!--[\s\S]*?-->/g, '');
+  if (html) {
+    text = text.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi,
+        (_, level, title) => `\n${'#'.repeat(Number(level))} ${htmlToText(title)}\n`)
+      .replace(/<\/(?:p|li|div|ul|ol|section)\s*>|<br\s*\/?>/gi, '\n')
+      .split('\n').map(line => htmlToText(line)).join('\n');
+  } else {
+    text = collapseMarkdownLinks(text);
+  }
+  const terms = new Map();
+  let inSkills = false;
+  let fence = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizePandocLine(raw).trim();
+    const marker = /^(`{3,}|~{3,})/.exec(line);
+    if (marker) {
+      const run = marker[1].trim();
+      if (!fence) fence = run;
+      else if (run[0] === fence[0] && run.length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const heading = headingText(line, 2);
+    if (heading !== null || headingText(line, 1) !== null) {
+      inSkills = heading !== null && /^(?:skills?|technical skills|core competencies|competencies)$/i.test(heading);
+      continue;
+    }
+    if (!inSkills || /^#{3,6}\s/.test(line) || /^(?:[-*_]\s*){3,}$/.test(line)) continue;
+    const items = toPlainText(line.replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, ''))
+      .replace(/^[^:]+:\s*/, '');
+    for (const item of items.split(/[,;|]/)) {
+      const term = item.trim();
+      const key = normalizeText(term);
+      if (key && !terms.has(key)) terms.set(key, term);
+    }
+  }
+  return [...terms.values()].filter(term =>
+    !keywords.some(keyword => keywordCount(term, keyword) > 0));
 }
 
 /**
@@ -463,7 +516,7 @@ export function htmlToText(html) {
 /**
  * Render an analyzeCoverage() result as a ready-to-paste report section.
  *
- * @param {ReturnType<typeof analyzeCoverage>} result - Coverage result.
+ * @param {ReturnType<typeof analyzeCoverage> & {cvTermsNotInJd?: string[]}} result - Coverage result.
  * @param {string} [sourceLabel] - Human label for the scanned document.
  * @returns {string} Markdown block.
  */
@@ -488,6 +541,16 @@ export function formatCoverageMarkdown(result, sourceLabel, keywordNote) {
       'experience — reformulated from your background, never fabricated.',
     '',
   );
+  if (Array.isArray(result.cvTermsNotInJd)) {
+    out.push(
+      '### In your CV, not named in this JD (review, keep the differentiators)',
+      '',
+      result.cvTermsNotInJd.join(', ') || 'None found in the recognized skills / competencies sections.',
+      '',
+      'Informational only. These terms do not change coverage. Keep relevant strengths even when the JD does not name them.',
+      '',
+    );
+  }
   return out.join('\n');
 }
 
@@ -941,7 +1004,10 @@ async function runKeywordMatch(args) {
   const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : collapseMarkdownLinks(rawCv);
   const sourceLabel = cvArg ? basename(cvPath) : 'cv.md (base CV, before per-role tailoring)';
 
-  const result = analyzeCoverage(keywords, cvText);
+  const result = {
+    ...analyzeCoverage(keywords, cvText),
+    cvTermsNotInJd: cvTermsNotInJd(keywords, rawCv, { html: /\.html?$/i.test(cvPath) }),
+  };
   const payload = {
     ...result,
     keywordSource,

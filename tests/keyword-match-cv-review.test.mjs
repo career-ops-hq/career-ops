@@ -1,0 +1,84 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
+import * as coverage from '../keyword-match.mjs';
+
+const ROOT = fileURLToPath(new URL('../', import.meta.url));
+const cv = '# Example\n\n## Summary\nRust specialist.\n\n## Core Competencies\nStrategic planning | Stakeholder engagement\n\n## Skills\n- **Languages:** Python, Java, C++\n- **Infrastructure:** k8s; Terraform; AWS\n\n## Experience\nBuilt Rust services.\n';
+
+test('review list reads only the CV skills and competencies, preserving its terms', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd(['Python', 'Kubernetes', 'Amazon Web Services'], cv),
+    ['Strategic planning', 'Stakeholder engagement', 'Java', 'C++', 'Terraform']);
+});
+
+test('review matching shares coverage synonyms, plural forms and word boundaries', () => {
+  const text = '## Skills\nJava, JS, k8s, LLMs, C++, CI/CD, strategic planning';
+  assert.deepEqual(coverage.cvTermsNotInJd(['JavaScript', 'Kubernetes', 'large language models', 'C++', 'cicd', 'strategic planning'], text), ['Java']);
+});
+
+test('separate JD keywords cannot form a phrase across their boundary', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd(['Strategic', 'planning'], '## Skills\nStrategic planning'), ['Strategic planning']);
+});
+
+test('duplicate CV terms are listed once, keeping the first spelling', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd(['Python'], '## Skills\nTerraform, terraform\n- TERRAFORM\n## Core Competencies\nTerraform | Hiring'), ['Terraform', 'Hiring']);
+});
+
+test('Pandoc headings, nested skill headings and categories remain readable', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd(['Python'], '## **[Technical Skills]{.smallcaps}**\r\n### Languages\r\n- **Programming:** Python, Rust\r\n## Education\r\nTerraform'), ['Rust']);
+});
+
+test('link destinations, comments and fenced examples are not CV skill terms', () => {
+  const text = '## Skills\n[Python](https://example.invalid/terraform), Java\n<!-- Kubernetes -->\n```\nRust\n```\n## Experience\nAWS';
+  assert.deepEqual(coverage.cvTermsNotInJd(['Python'], text), ['Java']);
+});
+
+test('HTML review reads visible skill sections, not styles, attributes or other sections', () => {
+  const text = '<style>Terraform</style><h2>Summary</h2><p>Rust</p><h2>Skills</h2><ul><li><b>Languages:</b> Python, Java</li><li><a href="https://example.invalid/aws">k8s</a></li></ul><h2>Experience</h2><p>Terraform</p>';
+  assert.deepEqual(coverage.cvTermsNotInJd(['Python', 'Kubernetes'], text, { html: true }), ['Java']);
+});
+
+test('no skills section or an empty one produces no guessed terms', () => {
+  assert.deepEqual(coverage.cvTermsNotInJd([], 'Python and Rust in my career.'), []);
+  assert.deepEqual(coverage.cvTermsNotInJd([], '## Skills\n\n## Education\nPython'), []);
+});
+
+test('Markdown review is informational, not a precision score or a coverage change', () => {
+  const base = coverage.analyzeCoverage(['Python', 'Java'], 'Python');
+  const rendered = coverage.formatCoverageMarkdown({ ...base, cvTermsNotInJd: ['Terraform'] });
+  assert.match(rendered, /In your CV, not named in this JD \(review, keep the differentiators\)/);
+  assert.match(rendered, /Terraform/);
+  assert.match(rendered, /Informational only/);
+  assert.match(rendered, /ATS coverage: 50%/);
+  assert.deepEqual(coverage.analyzeCoverage(['Python', 'Java'], 'Python'), base);
+  assert.doesNotMatch(rendered, /precision.*\d|remove Terraform|delete Terraform/i);
+});
+
+test('real report CLI adds the same review list to JSON and Markdown without changing coverage or files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'keyword-cv-review-'));
+  try {
+    const report = join(dir, 'report.md');
+    const cvPath = join(dir, 'cv.md');
+    writeFileSync(report, '# Example\n\n## Keywords extracted\n\n- Python\n- Kubernetes\n- Go\n');
+    writeFileSync(cvPath, cv);
+    const run = flags => spawnSync(process.execPath, [join(ROOT, 'keyword-match.mjs'), report, '--cv', cvPath, ...flags], {
+      encoding: 'utf8', env: { ...process.env, CAREER_OPS_ROOT: dir }, timeout: 20000,
+    });
+    const json = run(['--json']);
+    assert.equal(json.status, 0, json.stderr);
+    const result = JSON.parse(json.stdout);
+    assert.deepEqual(result.cvTermsNotInJd, ['Strategic planning', 'Stakeholder engagement', 'Java', 'C++', 'Terraform', 'AWS']);
+    assert.deepEqual(result.present, ['Python', 'Kubernetes']);
+    assert.deepEqual(result.missing, ['Go']);
+    assert.equal(result.coveragePct, 67);
+    const markdown = run([]);
+    assert.equal(markdown.status, 0, markdown.stderr);
+    assert.match(markdown.stdout, /review, keep the differentiators/);
+    assert.match(markdown.stdout, /Strategic planning, Stakeholder engagement, Java, C\+\+, Terraform, AWS/);
+    assert.equal(readFileSync(cvPath, 'utf8'), cv);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
