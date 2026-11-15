@@ -109,3 +109,21 @@ test('inline formatting is visible text, not part of a CV skill name', () => {
   assert.deepEqual(coverage.cvTermsNotInJd(['Python', 'Rust'], '## Skills\n`Python`, *Rust*, _Rust_, **Python**, C++, Node.js'), ['C++', 'Node.js']);
   assert.deepEqual(coverage.cvTermsNotInJd([], '## Skills\n`Python`, *Rust*, _Rust_, **Python**'), ['Python', 'Rust']);
 });
+
+test('HTML raw-text end tags with whitespace, attributes or a slash do not leak script/style contents', () => {
+  for (const tag of ['script', 'style']) for (const ending of [`</${tag} ignored>`, `</${tag}\tignored='>'>`, `</${tag}/>`, `</${tag.toUpperCase()} >`]) {
+    assert.deepEqual(coverage.cvTermsNotInJd([], `<h2>Skills</h2><${tag}>Hidden, <h2>Experience</h2>${ending}<p>Python</p>`, { html: true }), ['Python']);
+  }
+});
+
+test('HTML tag attributes cannot forge skill headings or become skill terms', () => {
+  const html = `<h2>Skills</h2><p data-note=\" > <h2>Experience</h2>\">Python, Java</p><h2>Experience</h2><p>Rust</p>`;
+  assert.deepEqual(coverage.cvTermsNotInJd([], html, { html: true }), ['Python', 'Java']);
+});
+
+test('HTML comments and unterminated raw-text elements cannot expose example skills', () => {
+  for (const tail of ['<script>Hidden, Terraform', '<style>Hidden, Terraform', '<!-- Hidden, Terraform']) {
+    assert.deepEqual(coverage.cvTermsNotInJd([], `<h2>Skills</h2><p>Python</p>${tail}`, { html: true }), ['Python']);
+  }
+  assert.deepEqual(coverage.cvTermsNotInJd([], '<h2>Skills</h2><!-- Hidden --!><p>Python</p>', { html: true }), ['Python']);
+});

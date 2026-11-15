@@ -164,6 +164,70 @@ function splitCvSkillTerms(text) {
   return items;
 }
 
+// Read structure rather than delete selected HTML with filtering regexes. A
+// raw-text body ends at an appropriate end tag even when that tag has stray
+// attributes or a slash. Quotes in ordinary attributes can contain > and <.
+// This is a text extractor for local CVs, not an HTML sanitizer.
+function cvHtmlSections(html) {
+  const source = String(html || '');
+  const output = [];
+  let rawTag = null;
+  let at = 0;
+  while (at < source.length) {
+    const open = source.indexOf('<', at);
+    if (open === -1) {
+      if (!rawTag) output.push(source.slice(at));
+      break;
+    }
+    if (!rawTag) output.push(source.slice(at, open));
+    if (!rawTag && source.startsWith('<!--', open)) {
+      const end = /--!?>/g;
+      end.lastIndex = open + 4;
+      const match = end.exec(source);
+      at = match ? end.lastIndex : source.length;
+      output.push(' ');
+      continue;
+    }
+    // Only a name immediately after < or </ starts an element. In raw text,
+    // unrelated < characters must not swallow the real closing tag later.
+    const tag = /^<(\/?)([a-z][a-z0-9:-]*)(?=[\t\n\f\r />])/i.exec(source.slice(open));
+    if (!tag) {
+      if (!rawTag) output.push('<');
+      at = open + 1;
+      continue;
+    }
+    const closing = Boolean(tag[1]);
+    const name = tag[2].toLowerCase();
+    if (rawTag && (!closing || name !== rawTag)) {
+      at = open + 1;
+      continue;
+    }
+    let quote = null;
+    let end = open + tag[0].length;
+    for (; end < source.length; end++) {
+      const char = source[end];
+      if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") quote = char;
+      else if (char === '>') break;
+    }
+    if (end === source.length) break;
+    at = end + 1;
+    if (rawTag) {
+      rawTag = null;
+      output.push(' ');
+    } else if (!closing && (name === 'script' || name === 'style')) {
+      rawTag = name;
+      output.push(' ');
+    } else if (/^h[1-6]$/.test(name)) {
+      output.push(closing ? '\n' : `\n${'#'.repeat(Number(name[1]))} `);
+    } else if (name === 'br' || (closing && ['p', 'li', 'div', 'ul', 'ol', 'section'].includes(name))) {
+      output.push('\n');
+    } else output.push(' ');
+  }
+  return output.join('').split('\n').map(line => htmlToText(line)).join('\n');
+}
+
 /**
  * CV skills not named by any JD keyword. This is a review list, never a score.
  * Read explicit Skills / Core Competencies sections, not terms inferred from
@@ -175,17 +239,8 @@ function splitCvSkillTerms(text) {
  * @returns {string[]}
  */
 export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
-  let text = String(cvText || '').replace(/<!--[\s\S]*?-->/g, ' ');
-  if (html) {
-    text = text.replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-      .replace(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1\s*>/gi,
-        (_, level, title) => `\n${'#'.repeat(Number(level))} ${htmlToText(title)}\n`)
-      .replace(/<\/(?:p|li|div|ul|ol|section)\s*>|<br\s*\/?>/gi, '\n')
-      .split('\n').map(line => htmlToText(line)).join('\n');
-  } else {
-    text = collapseMarkdownLinks(text);
-  }
+  const text = html ? cvHtmlSections(cvText) : collapseMarkdownLinks(
+    String(cvText || '').replace(/<!--[\s\S]*?-->/g, ' '));
   const terms = new Map();
   let skillsLevel = null;
   let fence = null;
