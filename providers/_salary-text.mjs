@@ -164,6 +164,15 @@ export function parseAmount(raw) {
   const labelColon = firstDigit === -1 ? -1 : s.lastIndexOf(':', firstDigit);
   if (labelColon !== -1) s = s.slice(labelColon + 1).trim();
   s = s.split('•')[0].trim();
+  // A bracketed magnitude ("80–100 USD (in thousands)") scales the figure, so
+  // it is read before the note strip below, which would drop it and leave
+  // thousands read as units.
+  let scale = 1;
+  const magnitude = s.match(/\s*\(\s*(?:in\s+)?(thousands?|k|millions?|mm|mn)(?:\s+[A-Za-z]{3})?\s*\)\s*$/i);
+  if (magnitude) {
+    scale = /^(?:thousands?|k)$/i.test(magnitude[1]) ? 1000 : 1_000_000;
+    s = s.slice(0, magnitude.index).trim();
+  }
   // A trailing parenthetical with no digits is a note ("(note: negotiable)",
   // "(Spain)"), never part of the figure.
   s = s.replace(/\s*\([^()\d]*\)\s*$/, '').trim();
@@ -191,15 +200,18 @@ export function parseAmount(raw) {
   // symbol on both bounds: "$123,684—$254,644 USD") and a trailing ISO-4217
   // code (any case — "450k SEK", "80-90k eur"). Only a real code is stripped:
   // any three letters would turn "100k tax" into 100k, a qualifier read as
-  // salary data. A three-letter token also never eats the lone "k" magnitude
+  // salary data. RMB is not an ISO code but is the usual spelling of CNY, so
+  // it counts. A three-letter token also never eats the lone "k" magnitude
   // suffix ("80k").
   s = s.replace(/[€$£¥]/g, '')
-    .replace(/\s*([A-Za-z]{3})\s*$/, (token, code) => (isCurrencyCode(code) ? '' : token))
+    .replace(/\s*([A-Za-z]{3})\s*$/, (token, code) => (isCurrencyCode(code) || /^rmb$/i.test(code) ? '' : token))
     .trim();
   s = stripAnnual(s);
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(canonicalizeSeparators(numStr));
-    return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
+    // "80k (in thousands)" names two magnitudes; neither reading is safe.
+    if (Number.isNaN(n) || (kFlag && scale !== 1)) return null;
+    return n * (kFlag ? 1000 : scale);
   };
   const range = s.match(/^([\d.,]+)\s*(k)?\s*[-–—]\s*([\d.,]+)\s*(k)?$/i);
   if (range) {
