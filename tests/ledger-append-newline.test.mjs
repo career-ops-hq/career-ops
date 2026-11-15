@@ -11,7 +11,7 @@
 // append on a fresh line; the other ledgers now do the same.
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import assert from 'node:assert';
-import { chmodSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -49,13 +49,24 @@ try {
     writeFileSync(f, 'kept\n');
     // A permission error fails before any byte is written, so the file staying
     // put does not by itself show the rollback. The child below writes the new
-    // row and then throws, which is the close-failed case.
-    chmodSync(f, 0o444);
-    const denied = spawnSync(NODE, ['--input-type=module', '-e',
-      `import { appendLedgerRows } from '${href('tracker-utils.mjs')}'; appendLedgerRows(${JSON.stringify(f)}, 'new\\n');`], {
-      cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
-    });
-    chmodSync(f, 0o644);
+    // row and then throws, which is the close-failed case. The refusal is
+    // injected: chmod does not withhold read on Windows, and a privileged
+    // process can ignore the mode.
+    const denied = spawnSync(NODE, ['--experimental-test-module-mocks', '--input-type=module', '-e', `
+      import { mock } from 'node:test';
+      import * as fs from 'node:fs';
+      const realAppend = fs.appendFileSync;
+      mock.module('fs', { namedExports: { ...fs, appendFileSync(path, data, enc) {
+        if (String(path).endsWith('rollback.tsv')) {
+          const err = new Error('EACCES: permission denied');
+          err.code = 'EACCES';
+          throw err;
+        }
+        return realAppend(path, data, enc);
+      } } });
+      const { appendLedgerRows } = await import('${href('tracker-utils.mjs')}');
+      appendLedgerRows(${JSON.stringify(f)}, 'new\\n');
+    `], { cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' } });
     assert.ok(exitedNonZero(denied), describeSpawn(denied, 'a read-only ledger must fail the append'));
     assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
 
@@ -83,12 +94,23 @@ try {
   ok('a ledger that cannot be read is left untouched', () => {
     const f = join(root, 'write-only.tsv');
     writeFileSync(f, 'kept\n');
-    chmodSync(f, 0o222);
-    const denied = spawnSync(NODE, ['--input-type=module', '-e',
-      `import { appendLedgerRows } from '${href('tracker-utils.mjs')}'; appendLedgerRows(${JSON.stringify(f)}, 'new\\n');`], {
-      cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
-    });
-    chmodSync(f, 0o644);
+    // Open is refused here. chmod 0o222 still leaves the file readable on
+    // Windows, so a mode bit would not exercise this branch.
+    const denied = spawnSync(NODE, ['--experimental-test-module-mocks', '--input-type=module', '-e', `
+      import { mock } from 'node:test';
+      import * as fs from 'node:fs';
+      const realOpen = fs.openSync;
+      mock.module('fs', { namedExports: { ...fs, openSync(path, flag) {
+        if (String(path).endsWith('write-only.tsv')) {
+          const err = new Error('EACCES: permission denied');
+          err.code = 'EACCES';
+          throw err;
+        }
+        return realOpen(path, flag);
+      } } });
+      const { appendLedgerRows } = await import('${href('tracker-utils.mjs')}');
+      appendLedgerRows(${JSON.stringify(f)}, 'new\\n');
+    `], { cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' } });
     assert.ok(exitedNonZero(denied), describeSpawn(denied, 'a write-only ledger must fail before the append'));
     assert.match(`${denied.stderr}\n${denied.stdout}`, /EACCES/);
     assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
