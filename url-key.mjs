@@ -41,6 +41,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { linkedInCanonicalKey, linkedInPathJobId } from './lib/linkedin-url.mjs';
+import { resolveHimalayasPosting } from './himalayas-posting.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
 // this list literal and board-specific; see the RFC note above on why generic
@@ -189,9 +190,14 @@ function foldHostname(host) {
 // guessed regex that reads two spellings of one posting as two IDs splits that
 // posting into two rows, which is the failure direction this file exists to
 // avoid; a missing extractor merely leaves the pair UNKNOWN, i.e. exactly the
-// behaviour shipped for #3652. The two below are the shapes this repo already
+// behaviour shipped for #3652. LinkedIn and Indeed are the shapes this repo already
 // resolves in liveness-api.mjs (see its `linkedin` provider) and exercises in
 // tests/liveness-api-linkedin.test.mjs — not inferred from the URLs' looks.
+// Himalayas and Jobicy (#4469, part 2) are the boards the scanner itself emits
+// (providers/himalayas.mjs, providers/jobicy.mjs), checked against their own
+// feeds: every Himalayas `guid` is /companies/{companySlug}/jobs/{jobSlug} and
+// the feed's `applicationLink` is that URL plus utm params; every Jobicy `url`
+// is /jobs/{id}-{slug} where {id} equals the feed item's numeric `id`.
 //
 // Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
 // also Workable's employer-board shape, where it means something else.
@@ -206,6 +212,19 @@ const AGGREGATOR_POSTING_ID = {
     const jk = u.searchParams.get('jk') ?? u.searchParams.get('vjk');
     return jk && /^[\w-]+$/.test(jk) ? jk : null;
   },
+  // himalayas.app/companies/{companySlug}/jobs/{jobSlug}, parsed by the resolver
+  // the liveness check already uses (himalayas-posting.mjs). A job slug is unique
+  // within its company: a second posting with the same title gets a numeric suffix
+  // (`senior-security-engineer-6458775437`), so the pair is the posting identity.
+  // Anything that resolver refuses (another host label, a non-tracking query
+  // param, another path) stays UNKNOWN.
+  'himalayas.app': (u) => {
+    const posting = resolveHimalayasPosting(u.href);
+    return posting ? `${posting.companySlug}/${posting.jobSlug}` : null;
+  },
+  // jobicy.com/jobs/{id}-{slug}: the leading number is the feed's job `id`. A
+  // slug-only path carries no id and stays UNKNOWN.
+  'jobicy.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
 };
 
 /**
@@ -444,7 +463,8 @@ export function languageSubtag(value) {
  * What two posting URLs say about whether they name the same posting.
  *
  * - `'no-key'`: either side has no key — no evidence at all.
- * - `'same'`: the same page in the same language, or both without one.
+ * - `'same'`: the same page in the same language, or both without one. Two
+ *   spellings of one posting count as one page (sameJobSpelling()).
  * - `'distinct'`: two different pages, or the same page in two known,
  *   different languages — two language versions of one posting are kept as
  *   two tracker rows. Two known, different SCRIPTS of one language count here
@@ -477,7 +497,7 @@ export function postingUrlRelation(rawA, rawB) {
  */
 export function relatePostingLanguageKeys(a, b) {
   if (!a.key || !b.key) return 'no-key';
-  if (a.key !== b.key) return 'distinct';
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return 'distinct';
   if (a.language === b.language) {
     // One language, two scripts: two versions, not one page. Only when BOTH
     // sides actually state a script — `zh` vs `zh-Hant` stays 'same', because
@@ -486,6 +506,29 @@ export function relatePostingLanguageKeys(a, b) {
     return 'same';
   }
   return a.language && b.language ? 'distinct' : 'one-sided-language';
+}
+
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an id
+ * it extracts (the same Greenhouse or SmartRecruiters id on two hosts), which
+ * names the posting whatever the rest of the query says, or, with the same
+ * query, one path on an ATS host whose spellings it folds (a Lever `/apply`
+ * form, an Ashby `/application` tab, a Workable account page). Its other folds
+ * are no evidence here: it lowercases every path, strips every trailing slash
+ * and drops `ref` and `source`, and a generic site may tell pages apart by any
+ * of those.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes('://')) return true;
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [
@@ -506,7 +549,8 @@ const GREENHOUSE_BOARD_HOSTS = new Set([
  * unambiguous id.
  *
  * Board hosts (`boards`, `job-boards`, the EU twins, `boards-api`) contribute
- * the id at the end of `/jobs/{id}`. Any http(s) URL contributes `?gh_jid=`,
+ * the id at the end of `/jobs/{id}`, or as `token` on the `/embed/job_app`
+ * form. Any http(s) URL contributes `?gh_jid=`,
  * which is how a company careers page embeds the same posting. The id is
  * global on Greenhouse, so the company slug is not part of the key.
  *
@@ -520,13 +564,19 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get('token') : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get('gh_jid');
   const queryId = query && /^\d+$/.test(query) ? query : null;
   if (pathId && queryId && pathId !== queryId) return null;
   return pathId || queryId;
 }
+
+const SR_POSTING_ID = String.raw`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)`;
+const SR_PAGE_PATH = new RegExp(String.raw`^/([^/]+)/${SR_POSTING_ID}(?:-[^/]*)?/?$`, 'i');
+const SR_API_PATH = new RegExp(String.raw`^/v1/companies/([^/]+)/postings/${SR_POSTING_ID}/?$`, 'i');
 
 /**
  * SmartRecruiters' posting id with its company, or null when this URL is not a
@@ -542,17 +592,23 @@ function greenhouseJobId(url) {
  * addresses a posting under its company (`/v1/companies/{company}/postings/{id}`),
  * so the id is not shown to be global the way Greenhouse's is.
  *
+ * The API also addresses a posting by its UUID. A UUID is read whole, before
+ * the numeric form, so one whose first group is all digits is not cut down
+ * to that group and collapsed with another posting. A UUID key and a numeric
+ * key for the same posting stay two keys: a visible duplicate, not a silent
+ * merge.
+ *
  * @param {URL} url - Hostname already folded.
  * @returns {string|null}
  */
 function smartRecruitersJobId(url) {
   let match = null;
   if (url.hostname === 'jobs.smartrecruiters.com') {
-    match = url.pathname.match(/^\/([^/]+)\/(\d+)(?:-[^/]*)?\/?$/);
+    match = url.pathname.match(SR_PAGE_PATH);
   } else if (url.hostname === 'api.smartrecruiters.com') {
-    match = url.pathname.match(/^\/v1\/companies\/([^/]+)\/postings\/(\d+)\/?$/);
+    match = url.pathname.match(SR_API_PATH);
   }
-  return match ? `${match[1].toLowerCase()}/${match[2]}` : null;
+  return match ? `${match[1].toLowerCase()}/${match[2].toLowerCase()}` : null;
 }
 
 function indeedJobId(url) {
@@ -583,6 +639,10 @@ export function canonicalJobKey(raw) {
   const smartRecruiters = smartRecruitersJobId(u);
   if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
+  if (u.hostname === 'jobs.ashbyhq.com') {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/*$/i, '$1');
+  }
+
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();
     if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
@@ -594,6 +654,12 @@ export function canonicalJobKey(raw) {
   const out = new URL(normalized);
   if (out.pathname.length > 1) {
     out.pathname = out.pathname.toLowerCase().replace(/\/+$/, '') || '/';
+  }
+  if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, '$1');
+  }
+  if (out.hostname === 'apply.workable.com') {
+    out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, '/j/$1');
   }
   return out.toString();
 }

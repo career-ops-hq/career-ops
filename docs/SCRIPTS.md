@@ -29,7 +29,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
 | `node clean-markers.mjs` | `clean-markers.mjs` | Audit or strip invisible Unicode from generated text files (see [CLEAN_MARKERS.md](CLEAN_MARKERS.md)) |
-| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, never with `--provider` or a `--dest` inside a provider folder at its default location; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder) |
+| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, never with `--provider` or a `--dest` inside a provider folder at its default location; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder; `--include-claude-memory` also copies Claude Code's auto-memory for the checkout into `claude-memory/`, or from a folder you name with `--claude-memory-dir <dir>`) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
@@ -43,14 +43,17 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan` | `scan.mjs` | Zero-token portal scanner |
 | `npm run scan:full` | `scan-ats-full.mjs` | Reverse ATS discovery scanner |
 | `npm run scan:hn` | `scan-hn.mjs` | Hacker News "Who is hiring?" scanner, filtered by `hn_hiring.keywords` |
-| `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing |
-| `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing; `--tenant NAME` scans one board |
-| `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing; `--keyword TEXT` scans one keyword |
+| `npm run scan:interamt` | `scan-interamt.mjs` | Interamt.de scanner via Playwright (the board has no HTTP API). `--dry-run` writes nothing to the pipeline or scan history |
+| `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing to the pipeline or scan history; `--tenant NAME` scans one board |
+| `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing to the pipeline or scan history; `--keyword TEXT` scans one keyword |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
 | `sh web/scripts/uninstall-scan-schedule.sh` | `web/scripts/uninstall-scan-schedule.sh` | Remove the macOS launchd agent or Linux cron line for the scheduled-jobs queue worker |
+| `node web/scripts/web-service.mjs install` | `web/scripts/web-service.mjs` | Install the web dashboard as a login service for the current user (macOS launchd, Linux `systemd --user`, Windows Task Scheduler). It installs dependencies and builds only when the lockfile, Node version or checkout changed. `--dry-run` prints the definition and changes nothing |
+| `node web/scripts/web-service.mjs uninstall` | `web/scripts/web-service.mjs` | Stop and remove the web dashboard service (keeps the log). `restart` rebuilds first when the code changed, and `status` shows the service's state |
 | `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
+| `npm run harvest:buildlist` | `harvest-buildlist.mjs` | Resolve BuildList's company roster to scannable ATS boards |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 | `npm run tracker` | `tracker.mjs` | SQLite derived index over applications.md — sync/query/history/export |
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
@@ -388,7 +391,7 @@ npm run cv:verify-facts -- output/cv.html --source cv.md --source article-digest
 npm run cv:verify-facts -- --self-test
 ```
 
-PDF generation calls the same check, so a document that fails here fails there too.
+PDF generation runs the same check: a `block` verdict stops the PDF, and a `warn` stops it only with `--strict-fact-check`. With `--skip-fact-check`, or with no `cv.md` in the data root, the PDF path runs no check at all.
 
 Besides metrics, it blocks a bullet whose verb drifted from the source bullet it restates (#1411). Each rendered bullet (HTML `<li>`, markdown list item, LaTeX `\item` / `\resumeItem`) is anchored to the source statement that shares the most content words with it, and the two are compared word by word. Deleting words, reordering, changing a word's inflection, adding function words and adding JD keywords are allowed. A word that opens a clause, where a bullet says what the candidate did, must appear in that anchor in some inflection, so "Used Kafka for event ingestion" rendered as "Led a Kafka migration" blocks, while "Built a Python ETL pipeline" rendered as "Building Python ETL pipelines for FP&A reporting" passes. A true verb change is declared in `config/cv-facts.json`:
 
@@ -480,7 +483,7 @@ npm run keyword-match -- --self-test
 
 ## calibrate
 
-Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
+Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A row closed by `close-stale.mjs --confirm` counts as a `no_response` outcome until its status changes. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
 
 ```bash
 npm run calibrate
@@ -1036,6 +1039,7 @@ Possible JSON responses:
 | `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
+| `checkout-unreadable` | A git checkout whose commit git cannot read (git missing, no commit yet, or git refusing the directory, e.g. "detected dubious ownership"). Carries `detail`: the first line of the error. No version verdict, on either channel |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
 
@@ -1148,7 +1152,7 @@ Zero-token portal scanner. Runs configured local parsers for SSR/static career p
 
 `--rediscover-404` also recognizes authoritative API 404/410 verdicts: for a tracked company with a careers domain, it searches that domain and requires a confirmed live replacement before migrating the URL. Soft closure signals do not trigger rediscovery.
 
-`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Under the window a `skipped_dup` row lasts while any other scan-history row for the URL still pins it, whatever its own date, so a repeat sighting neither pins the URL nor restarts the clock. A `skipped_dup` row with no such row in scan-history ages out by its own `first_seen`, and a tracker or pipeline entry for that URL still pins it. Permanent invalid statuses such as blocked host and malformed URL remain permanent. The other writers of the pipeline apply the same window to the same history: `scan-ats-full.mjs`, `scan-dayforce.mjs`, and everything admitted through `lib/admission-gate.mjs` (`scan-interamt.mjs`, `scan-hn.mjs`, `openrouter-runner.mjs`). Plugin ingest goes through the gate too, but `plugins.mjs` first drops a posting that `pipeline.md` already lists, checked off or not, so for plugin ingest the window releases only a URL the pipeline does not list.
+`scan_history.recheck_after_days` in `portals.yml` lets old `added` and `skipped_expired` URLs become eligible for recheck after the configured number of days. If absent, scan-history dedup keeps the historical behavior and dedups forever. Under the window a `skipped_dup` row lasts while any other scan-history row for the URL still pins it, whatever its own date, so a repeat sighting neither pins the URL nor restarts the clock. A `skipped_dup` row with no such row in scan-history ages out by its own `first_seen`, and a tracker or pipeline entry for that URL still pins it. Permanent invalid statuses such as blocked host and malformed URL remain permanent. The other writers of the pipeline apply the same window to the same history: `scan-ats-full.mjs`, `scan-dayforce.mjs`, and everything admitted through `lib/admission-gate.mjs` (`scan-interamt.mjs`, `scan-hn.mjs`, `openrouter-runner.mjs`, plugin ingest). Plugin ingest drops a posting `pipeline.md` already lists only while the gate still holds it, so a checked-off entry the window released comes back there as it does in a scan.
 
 `scan_history.dedup_include_location` (optional, opt-in, default off) adds the posting location to the company+role dedup key. Off, two postings that share a company and a title are one role however many cities they name — the collapse that keeps an employer with one req per city from leaking a city variant into the pipeline on every scan. On, `Staff Engineer — London` and `Staff Engineer — Dublin` stay two entries instead of the scan keeping whichever one the ATS returned first. Turn it on when eligibility is location-bound (work authorization, relocation, an office to be near): `location_filter` cannot discriminate between two cities it both allows, so the arbitrary survivor may be the city the user cannot legally take. A configured `location_filter.workplace_policy` turns the same split on unless `dedup_include_location` is false. Sources that record no location (a tracker without a Location column, a processed pipeline row) still seed a key matching every city, so a role already applied to never resurfaces city by city.
 
@@ -1303,6 +1307,10 @@ the checkpoint was written (`title_filter` / `title_filter_full`,
 `domain_filter`). The error names the filter that changed; restore it to finish
 the sweep, or delete the checkpoint to start fresh.
 
+`--resume-if-compatible` continues the same way when the checkpoint matches.
+When it does not, the command warns and starts a fresh sweep. A scheduled full
+scan passes this flag so a leftover checkpoint cannot exit 1 on every later run.
+
 ### DNS pacing
 
 A full sweep resolves one hostname per Workday, iCIMS and BambooHR tenant — 25,205 distinct hostnames across the current datasets (3,781 Workday + 10,108 iCIMS + 11,316 BambooHR). Greenhouse, Lever, Ashby, Paylocity, join.com and Workable serve every board from a single hostname each, so they add only 6 more. Those per-tenant lookups are irreducible (nothing to cache: every hostname is distinct), and issued unpaced they trip the per-client rate limit on a resolver like Pi-hole, which then refuses queries for the whole machine — the scan reports thousands of misleading `fetch failed` lines while the boards themselves are fine (#2229).
@@ -1321,7 +1329,7 @@ CAREER_OPS_NO_DNS_CACHE=1 npm run scan:full            # no DNS cache AND no pac
 
 The cost is real: a full Workday + iCIMS + BambooHR sweep becomes DNS-bound at roughly 63 minutes (25,205 hostnames ÷ 400/min default pacing). Raise the ceiling if your resolver has the budget — but if you see `fetch failed` in bulk from one ATS section, suspect the resolver before the boards.
 
-**Exit codes:** `0` scan completed, `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
+**Exit codes:** `0` scan completed, or a `--json` stop whose result has `stoppedEarly: true` (read that flag before treating 0 as finished). `1` configuration error (no portals.yml, unknown `--ats` source) or fatal scan error.
 
 ---
 
@@ -1363,7 +1371,7 @@ Scans Dayforce (Ceridian) Recruiting boards listed under `dayforce_boards` in `p
 ```bash
 npm run scan:dayforce
 npm run scan:dayforce -- --dry-run
-npm run scan:dayforce -- --tenant gnghcm            # one configured tenant; the `--tenant=name` form is ignored
+npm run scan:dayforce -- --tenant gnghcm            # one configured tenant; `--tenant=name` is rejected as an unrecognized flag
 npm run scan:dayforce -- --debug                    # keep the browser visible
 ```
 
@@ -1390,6 +1398,38 @@ Runs without `--dry-run` write JSON under `output/` and a Markdown report under 
 Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
 
 **Exit codes:** `0` discovery completed, `1` invalid arguments or fatal runtime error.
+
+---
+
+## harvest:buildlist
+
+Turns [BuildList](https://buildlist.xyz)'s company roster into companies `scan.mjs` can read. BuildList indexes ~820 hard-tech startups (AI, robotics, aerospace, defense, energy), and every "Apply" link on it points at the company's own ATS — so its value here is the **company list**, not the job feed. Harvest once and the companies are yours; scanning never touches BuildList again.
+
+It reads the public sitemap and public company pages only (`robots.txt` disallows `/api/` for every agent), and **never writes `portals.yml`**: it writes a file for you to review and paste. It runs on your machine but reads a whole site, so it keeps to the pace rule 6 of the Source Indexing Policy (`CONTRIBUTING.md`) sets for the project's own indexing layer: one request at a time, at least a second apart, longer when `robots.txt` states a `Crawl-delay`, and a `Retry-After` is honoured. Every request is also checked against the live `robots.txt` first (`robots-check.mjs`, read once per run, fail-closed), so a changed policy stops the harvest instead of being ignored. A run fetches at most 2,000 company pages, whatever the sitemap lists; a full harvest of today's roster takes about 15 minutes.
+
+```bash
+npm run harvest:buildlist -- --out buildlist-portals.yml
+npm run harvest:buildlist -- --limit 25 --summary     # quick sample
+npm run harvest:buildlist -- --out buildlist-portals.yml --resume   # continue
+npm run harvest:buildlist -- --json                   # machine-readable
+npm run harvest:buildlist -- --self-test
+```
+
+**The output is `tracked_companies:` entries for every resolved board**, with no job-count test. That test (`discover-ats.mjs` admits a board only if it lists a job today) is right when a slug was *guessed*: an empty board is then indistinguishable from a wrong guess. Here the board is read off the page, so it is known-good and the job count is only today's weather. `tracked_companies` is a standing watch whose purpose is catching a role the day it opens, and `title_filter` still does the per-scan filtering on live postings. The list is not handed to `discover-ats.mjs`, because it probes a slug on every vendor in turn and keeps the first that answers: a Lever board named `initech` could come back as another company's Greenhouse board of the same name.
+
+**Why it reads the page instead of guessing the slug.** BuildList's URL slug is frequently not the ATS board id: `altos-labs` is Greenhouse `altoslabs`, `altana` is `altanaai`, `agility-robotics` is a Greenhouse embed. Feeding guessed slugs to `discover-ats.mjs` resolved 6 of 20 in testing. Each Apply link is read back to its board by `parseBoardUrl` (`seeds/employers-import.mjs`), the reverse of the `lib/ats-board-url.mjs` builders that `discover-ats.mjs` and the employer registry use, so a board comes out in the same canonical form: EU Greenhouse and Lever boards keep their region, Ashby ids keep their case, Workday boards keep their three coordinates, and a vendor's own pages (`www.greenhouse.io/…`, `jobs.ashbyhq.com/api/…`) are not boards. One exception to that shared rule: an Ashby board whose id holds a space (`jobs.ashbyhq.com/Hippocratic%20AI`) is live and answers only in that spelling, so it is kept, with the space encoded; the shared slug rule has no space in it.
+
+Boards it emits: Greenhouse (including links to the `boards-api` host and `?for=` embeds), Ashby, Lever, Rippling, Workable, SmartRecruiters, Join, Recruitee, Breezy, BambooHR, Pinpoint and Workday, plus Gem, iCIMS, Personio and Teamtailor, which `scan.mjs` reads but the registry does not cover. Comeet is listed as **manual follow-up**: its provider needs a careers-api URL carrying a secret `?token=` the public page never exposes.
+
+It skips companies `portals.yml` already tracks, by name **or** by board (`dedupeAgainstPortals` from `discover-ats.mjs`, with each existing `careers_url` read back to its canonical board, so an entry on a legacy host still matches), because a duplicate entry silently double-scans. A `portals.yml` that does not parse is reported on screen and in the output, not treated as empty. `--include-tracked` turns the skip off; `--portals-file` points at a different file (default: `portals.yml` in the data root, so a `CAREER_OPS_ROOT` override is honoured); `--disabled` stages entries as `enabled: false` so you can widen the scan gradually. When two BuildList companies link the same board (a parent and a subsidiary), it is emitted once and the other name is listed in a comment.
+
+**Interrupted runs.** With `--out`, progress is saved to `<file>.progress.json` every 25 companies, and kept while anything is left to do (pages that failed, or companies `--limit` did not reach). Run the same command with `--resume` to continue; a progress file that does not check out is ignored entry by entry, never trusted.
+
+**Guards.** `--out` refuses any file named `portals.yml` in any letter case, the file `--portals-file` names (followed through symlinks and hard links), and an `--out` whose progress file would land on it. An unrecognized flag or a malformed number (`--limit abc`) is an error, not a silent fallback to the default. `--summary` and `--json` print instead of writing, so they cannot be combined with `--out`.
+
+Company profile text (sector, description, HQ, headcount, funding) is BuildList's own editorial content, carried into the `notes:` field as context only. It is never a scoring input and never reaches generated user-facing content. Page text is untrusted: a board is emitted only when its link reads back to a valid board, names are quoted unless they are plainly a string, and control characters and line breaks are stripped from anything printed or written to a comment, so nothing read off a page can add or change an entry in the file you paste.
+
+**Exit codes:** `0` harvest completed, `1` invalid arguments or fatal runtime error.
 
 ---
 
@@ -2113,6 +2153,8 @@ Copies the User Layer to a backup folder. The file list is `USER_PATHS` in `upda
 
 Never copied: `.env` files, `data/cache/`, lock and temp files (except `plugins.lock`, which is yours), editor swap and autosave files of any file (vim `.name.swp`/`.swo`/`.swn`, emacs `#name#` and `.#name`, and `name~`), `.git/` and `node_modules/` folders inside nested checkouts, symlinks and anything under a symlinked folder, and anything outside the User Layer. `data/Connections.csv` (a LinkedIn export), `data/contacts.tsv` and `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) and their `.bak`/`.orig`/`.old`/`.save` copies such as `contacts.tsv.bak` (other people's contact details), are copied only with `--include-contacts` (their editor swap, autosave and lock files stay excluded even then), which cannot be combined with `--provider` or with a `--dest` inside a provider folder at its default location. A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder.
 
+Claude Code's auto-memory for the checkout is outside the data root, in `<config dir>/projects/<slug>/memory/`: the config dir is `CLAUDE_CONFIG_DIR` or `~/.claude`, and the slug is the checkout path with every non-alphanumeric character replaced by `-`. `--include-claude-memory` copies it to `claude-memory/` at the destination by the same rules as every other file (unchanged files skipped, nothing deleted, `.env` files, editor leftovers and symlinks left out). It works with `--provider` and with a synced `--dest`. Memory files are compared byte for byte before being skipped as unchanged (the size and time check alone is not enough for them). When the folder does not exist the run says so and carries on; a folder that exists but cannot be read is a failure. An empty `--claude-memory-dir` value is a usage error (exit `2`). From a linked git worktree the main checkout's folder is used, because Claude Code shares one memory folder per repository. If Claude Code keeps the memory somewhere else (a session started in another folder, a plugin install, or a Claude Code setting that moves it), name the folder with `--claude-memory-dir <dir>`: it implies the copy, and a folder that does not exist is then a failure (exit `1`). A destination that holds the memory folder, or sits inside it, is refused. If a fork declares its own `claude-memory` path in `config/local-paths.txt`, that path is backed up as usual and the memory copy is reported as failed instead of writing over it. The `--json` result reports the number of memory files as `claudeMemory`; they do not count towards the "nothing to back up" check on the data root.
+
 Nothing is chosen for you: pass `--dest` or `--provider`, or set `CAREER_OPS_BACKUP_DIR`.
 
 ```bash
@@ -2121,6 +2163,8 @@ node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; 
 node backup.mjs --provider google-drive --account work@example.com   # when several accounts are signed in
 node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
 node backup.mjs --dest ~/Backups/career-ops --include-contacts # also copy the four contact files
+node backup.mjs --dest ~/Backups/career-ops --include-claude-memory  # also copy Claude Code's auto-memory into claude-memory/
+node backup.mjs --dest ~/Backups/career-ops --claude-memory-dir ~/notes/claude-memory  # the same, from a memory folder you name
 node backup.mjs --dest ~/Backups/career-ops --dry-run             # print the counts and bytes that would be copied, copy nothing
 node backup.mjs --dest ~/Backups/career-ops --json                # machine-readable result
 ```

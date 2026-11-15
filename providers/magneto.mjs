@@ -25,6 +25,7 @@
 
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const DEFAULT_MAX_PAGES = 5;
 const MAX_PAGES_CAP = 20;
@@ -217,6 +218,12 @@ export default {
 
     if (stopReason === 'cap') {
       console.warn(`[magneto] ${entry.name}: stopped at max_pages ${maxPages} / max_jobs ${maxJobs}; the search has more results. Raise max_pages or max_jobs on this entry to read them.`);
+    }
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs). stopReason
+    // already says why the walk stopped; it drives the marker as themuse.mjs does.
+    if (!probing && stopReason !== 'complete') {
+      markTruncated(jobs, stopReason === 'cap' ? 'page-cap' : stopReason, { fetched: jobs.length });
     }
     return jobs;
   },

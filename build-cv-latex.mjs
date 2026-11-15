@@ -557,6 +557,10 @@ async function runSelfTest() {
 
   const substitutions = {
     NAME: escapeLatex(sample.name),
+    // The sample sets no page_format, so the self-test pins the project
+    // default instead of reading the user's profile: --test must not depend
+    // on config/profile.yml.
+    PAPER: 'letterpaper',
     CONTACT_LINE: escapeLatex(sample.contact_line),
     EMAIL_URL: emailUrl,
     EMAIL_DISPLAY: escapeLatex(emailDisplay),

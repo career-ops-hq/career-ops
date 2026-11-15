@@ -81,6 +81,22 @@ try {
   if (pArts.length === 1) pass('parseArticles drops an unresolvable href instead of emitting a broken URL');
   else fail(`parseArticles returned ${pArts.length}, expected 1 (unresolvable href dropped)`);
 
+  // A href with its own non-http scheme stays absolute through new URL, so it
+  // would reach the pipeline as is: only http(s) links are job links.
+  const schemes = `
+    <article class="article article--result" id="article--1">
+      <h3 class="title"><a class="link" href="javascript:alert(1)//JobDetail?jobId=42">Script Link</a></h3>
+    </article>
+    <article class="article article--result" id="article--2">
+      <h3 class="title"><a class="link" href="data:text/html,x/JobDetail?jobId=43">Data Link</a></h3>
+    </article>
+    <article class="article article--result" id="article--3">
+      <h3 class="title"><a class="link" href="/careers/JobDetail?jobId=44">Real Link</a></h3>
+    </article>`;
+  const sArts = parseArticles(schemes, origin);
+  if (sArts.length === 1 && sArts[0].id === '44' && sArts[0].url.startsWith('https://')) pass('parseArticles drops javascript: and data: hrefs and keeps the http(s) one');
+  else fail(`parseArticles non-http schemes wrong: ${JSON.stringify(sArts.map((a) => a.url))}`);
+
   // Tenant markup variants: Siemens appends a position index to the result
   // class ("article--result 1"); Rohde & Schwarz renders the title anchor with
   // no class="link". Both must still parse. (Regressions found on live tenants.)
@@ -248,6 +264,14 @@ try {
   const shortPageJobs = await avature.fetch({ name: 'X', api: base }, shortPageCtx);
   if (shortPageJobs.length === 3 && shortPageCtx.calls.length === 1) pass('avature.fetch() still stops after a short page of valid cards');
   else fail(`avature.fetch() returned ${shortPageJobs.length} jobs after ${shortPageCtx.calls.length} calls, expected 3 after 1`);
+
+  // A full page whose links are all dropped (non-http scheme) is not an empty or
+  // repeated page: the walk must go on to the next one instead of stopping there.
+  const scriptCard = (id) => `<article class="article article--result"><h3 class="title"><a class="link" href="javascript:void(0)//JobDetail?jobId=${id}">Role ${id}</a></h3></article>`;
+  const droppedPageCtx = mkPagedCtx([mkHtml([1, 2, 3, 4, 5, 6]), [7, 8, 9, 10, 11, 12].map(scriptCard).join(''), mkHtml([13, 14])]);
+  const droppedPageJobs = await avature.fetch({ name: 'X', api: base }, droppedPageCtx);
+  if (droppedPageJobs.length === 8 && droppedPageCtx.calls.length === 3) pass('avature.fetch() keeps paging past a full page whose links were all dropped');
+  else fail(`avature.fetch() returned ${droppedPageJobs.length} jobs after ${droppedPageCtx.calls.length} calls, expected 8 after 3`);
 
   // Self-heal must fire even when the inert primary key returns an EMPTY page 1
   // (not a repeat of page 0) — the empty-page break must not pre-empt the heal.

@@ -22,6 +22,7 @@ import { rejectPrivateOrInvalid, checkUrlLiveness, LIVENESS_CONTEXT_OPTIONS } fr
 import { isClosureEvidence } from './liveness-core.mjs';
 import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { replaceUserFile } from './tracker-utils.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { TSV_ADDITION_HEADER } from './tracker-parse.mjs';
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
@@ -497,8 +498,13 @@ export async function processOffer(browser, line, idx, _evaluate = evaluateWithR
       throw new Error('Missing SCORE_SUMMARY block from model output');
     }
 
-    const company = summary.company || 'unknown';
-    const role = summary.role || 'unknown';
+    const company = summary.company.trim();
+    const role = summary.role.trim();
+    // The tracker treats a matching URL as authoritative and can replace the
+    // existing company and role. Leave incomplete evaluations pending for retry.
+    if (!company || !role || company.toLowerCase() === 'unknown' || role.toLowerCase() === 'unknown') {
+      throw new Error('SCORE_SUMMARY requires a company and role before saving the evaluation');
+    }
     const score = summary.score || 'unknown';
     const archetype = summary.archetype || 'unknown';
     const legitimacy = parseLegitimacy(summary.legitimacy || 'unknown');
@@ -588,7 +594,9 @@ export async function finishPipelineBatch(pipelinePath, originals, results) {
     for (const url of unmatched) {
       console.error(`⚠️ pipeline.md changed during the run; left ${url} as it is`);
     }
-    writeFileSync(pipelinePath, text, 'utf-8');
+    // A rename onto the path itself would swap a symlink for a regular file
+    // and leave the inbox the scans share untouched.
+    replaceUserFile(pipelinePath, text);
   });
 }
 

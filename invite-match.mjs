@@ -46,6 +46,7 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './tracker-utils.mjs';
+import { inviteEvidence } from './lib/invite-evidence.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Sibling scripts live next to this file in the *code* checkout, which is a
@@ -734,16 +735,19 @@ function extractPanel(text) {
  * an invite (so unrelated text does not gain a spurious constraint).
  *
  * @param {string} text
+ * @param {{classification?: string}} [options] - the caller's final classification
+ *   (analyzeInvite's evidence pass can promote an email to `invite`); defaults to classifyEmail's.
  * @returns {Array<{key: string, tag: string, detail?: string}>}
  */
-export function extractConstraints(text) {
+export function extractConstraints(text, options = {}) {
   if (!text || typeof text !== 'string') return [];
   const out = [];
   const add = (key, detail) => out.push({ key, tag: `[constraint:${key}]`, ...(detail ? { detail } : {}) });
   for (const { key, test } of CONSTRAINT_DETECTORS) if (test(text)) add(key);
   const panel = extractPanel(text);
   if (panel) add('panel', panel.join('; '));
-  if (classifyEmail(text).classification === 'invite' && !statesDuration(text)) add('length-not-stated');
+  const classification = options.classification ?? classifyEmail(text).classification;
+  if (classification === 'invite' && !statesDuration(text)) add('length-not-stated');
   return out;
 }
 
@@ -996,11 +1000,25 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
     // unaffected.
     isAIInterviewer: isAIInterviewerPlatform(text),
   };
-  // Additive (#5732): top-level so every existing key keeps its shape.
-  const constraints = extractConstraints(text);
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
-  const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
+  const phrases = classifyEmail(text);
+  const { matchedPhrases, phraseStrength } = phrases;
+  // Evidence pass (#6167): a calendar invite, a booking link or a proposed time
+  // makes an invite of text the phrase list missed, and receipt or process
+  // wording with no such signal ("if there is a match, we will invite you")
+  // stops a confirmation reading as one. A rejection stays a rejection.
+  // A pasted email often keeps its headers: the Subject line is evidence too.
+  const subject = (String(text || '').match(/^[ \t]*(?:subject|betreff|тема)[ \t]*:[ \t]*(.+)$/im) || [])[1] || '';
+  const evidence = inviteEvidence({ subject: subject.trim(), text });
+  let classification = phrases.classification;
+  if (classification !== 'rejection') {
+    if (evidence.invite) classification = 'invite';
+    else if (classification === 'invite' && evidence.receipt) classification = 'unknown';
+  }
+  // Additive (#5732): top-level so every existing key keeps its shape. Read after
+  // the evidence pass, so a promoted invite still gets length-not-stated.
+  const constraints = extractConstraints(text, { classification });
   const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
   // Additive (#6092): appended last so every existing key keeps its position.
   // null unless the text is an invite and the draft was not suppressed.
@@ -1012,7 +1030,8 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
       readReport: options.readReport ?? (r => readReportHeader(r.report, [dirname(APPS_FILE), CAREER_OPS])),
     });
   }
-  return { ...result, clarificationDraft };
+  // Additive (#6167): appended last, after clarificationDraft.
+  return { ...result, clarificationDraft, inviteEvidence: evidence };
 }
 
 /**

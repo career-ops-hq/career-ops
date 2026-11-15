@@ -51,6 +51,7 @@
  *   node scan-ats-full.mjs --verbose            # log per-board fetch failures
  *   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
  *   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
+ *   node scan-ats-full.mjs --resume-if-compatible # resume when the checkpoint matches, otherwise start fresh
  *   node scan-ats-full.mjs --help               # print this usage block and exit
  */
 
@@ -171,24 +172,63 @@ export function loadCheckpoint(file = CHECKPOINT_PATH) {
   }
 }
 
+function validIndexList(value) {
+  return Array.isArray(value) && value.every((i) => Number.isInteger(i) && i >= 0);
+}
+
 function validCheckpointCurrent(cur) {
   return typeof cur === 'object'
     && typeof cur.name === 'string'
     && Number.isInteger(cur.resumeAt) && cur.resumeAt >= 0
     && Number.isInteger(cur.datasetLen) && cur.datasetLen >= 0
-    && (cur.deferred === undefined
-      || (Array.isArray(cur.deferred) && cur.deferred.every((i) => Number.isInteger(i) && i >= 0)));
+    && (cur.deferred === undefined || validIndexList(cur.deferred))
+    && (cur.retries === undefined || validIndexList(cur.retries));
+}
+
+// Explains specifically what settings differed between an existing checkpoint and
+// the current run options. Returns null when the settings are compatible.
+export function checkpointMismatch(cp, opts) {
+  if (!cp) return 'missing checkpoint';
+  const reasons = [];
+
+  if (opts?.shuffle) {
+    reasons.push('--shuffle is set (order is not reproducible)');
+  }
+
+  const cpAts = Array.isArray(cp.ats) ? cp.ats : [];
+  const optAts = Array.isArray(opts?.ats) ? opts.ats : [];
+  const added = optAts.filter((s) => !cpAts.includes(s));
+  const removed = cpAts.filter((s) => !optAts.includes(s));
+  if (added.length > 0 && removed.length > 0) {
+    reasons.push(`ATS sources differ (added: ${added.join(', ')}, removed: ${removed.join(', ')})`);
+  } else if (added.length > 0) {
+    reasons.push(`ATS sources differ (added: ${added.join(', ')})`);
+  } else if (removed.length > 0) {
+    reasons.push(`ATS sources differ (removed: ${removed.join(', ')})`);
+  } else if (JSON.stringify(cpAts) !== JSON.stringify(optAts)) {
+    reasons.push(`ATS sources order differed (was [${cpAts.join(', ')}], now [${optAts.join(', ')}])`);
+  }
+
+  const cpLimit = cp.limit ?? null;
+  const optLimit = (opts?.limit === Infinity || opts?.limit === undefined) ? null : opts.limit;
+  if (cpLimit !== optLimit) {
+    reasons.push(`limit changed (was ${cpLimit ?? 'none'}, now ${optLimit ?? 'none'})`);
+  }
+
+  const cpUndated = Boolean(cp.includeUndated);
+  const optUndated = Boolean(opts?.includeUndated);
+  if (cpUndated !== optUndated) {
+    reasons.push(`includeUndated changed (was ${cpUndated}, now ${optUndated})`);
+  }
+
+  return reasons.length > 0 ? reasons.join('; ') : null;
 }
 
 // A checkpoint written under different scan settings must not be resumed —
 // silently mixing sources, caps, or undated policy would corrupt the run's
 // semantics. --shuffle is never resumable: the sampled order isn't reproducible.
 export function checkpointCompatible(cp, opts) {
-  return Boolean(cp)
-    && !opts.shuffle
-    && JSON.stringify(cp.ats) === JSON.stringify(opts.ats)
-    && (cp.limit ?? null) === (opts.limit === Infinity ? null : opts.limit)
-    && cp.includeUndated === opts.includeUndated;
+  return Boolean(cp) && checkpointMismatch(cp, opts) === null;
 }
 
 // Flags are not the only settings a resume can mix. The portals.yml filters
@@ -224,6 +264,15 @@ function sortKeys(v) {
 export function changedFilterKeys(cp, fingerprints) {
   if (!cp?.filters) return [];
   return Object.keys(fingerprints).filter((k) => cp.filters[k] !== fingerprints[k]);
+}
+
+// The scheduled runner sets this. A timeout drops the handler's stdout, and
+// the fallback checkpoint write keeps the previous savedAt, so the run id
+// is what ties partialSave to the attempt that produced it.
+function currentScanRunId() {
+  const raw = process.env.CAREER_OPS_SCAN_RUN;
+  if (typeof raw !== 'string' || !/^[0-9]+-[1-9]-[0-9a-f-]{36}$/i.test(raw)) return null;
+  return raw;
 }
 
 // Never throws: this runs from parallelEach's `finally`, so an escaping error
@@ -282,6 +331,113 @@ async function saveProviderIdCacheBestEffort(idCaches) {
 // that drift so we can fail loudly instead.
 export function datasetFingerprint(list) {
   return createHash('sha1').update(JSON.stringify(list)).digest('hex').slice(0, 16);
+}
+
+/**
+ * A resume compares the checkpoint to the company list only when that list
+ * has a stable order. A source that restarts (the Workable feed) has no
+ * offset to validate, and reading its URL as JSON trips the feed's download
+ * limit, then fails the resume because the body is not a company array.
+ *
+ * @param {{ current?: { name?: string } } | null | undefined} checkpoint
+ * @param {Record<string, { restartOnResume?: boolean }> | null | undefined} sources
+ * @returns {boolean}
+ */
+export function checkpointComparesCompanyList(checkpoint, sources) {
+  const name = checkpoint?.current?.name;
+  const source = name ? sources?.[name] : null;
+  if (!source) return false;
+  return source.restartOnResume !== true;
+}
+
+/**
+ * Checkpoint fields for boards still waiting on a truncation retry.
+ * `deferred` is the subset the domain gate has not admitted. `retries`
+ * also includes an admitted partial response, which sits below the resume
+ * offset and would otherwise never be fetched again.
+ * @param {Map<object, number>} pendingRetries
+ * @param {Map<object, { index: number }>} deferred
+ */
+export function retryCheckpointFields(pendingRetries, deferred) {
+  return {
+    deferred: [...deferred.values()].map((item) => item.index),
+    retries: [...pendingRetries.values()],
+  };
+}
+
+/**
+ * Boards below the resume offset that still need a retry. A checkpoint
+ * written before `retries` existed stored only deferred indices; those
+ * stay retries. A board is deferred only when that checkpoint said so.
+ * @param {object[]} entriesAll
+ * @param {number} startAt
+ * @param {{ deferred?: number[], retries?: number[] } | null | undefined} current
+ */
+export function restorePendingRetries(entriesAll, startAt, current) {
+  const deferredSet = new Set(current?.deferred ?? []);
+  const indices = current?.retries ?? [...deferredSet];
+  const truncated = [];
+  const pendingRetries = new Map();
+  const deferred = new Map();
+  for (const index of indices) {
+    if (!Number.isInteger(index) || index < 0 || index >= startAt || !entriesAll[index]) continue;
+    const entry = entriesAll[index];
+    if (pendingRetries.has(entry)) continue;
+    truncated.push(entry);
+    pendingRetries.set(entry, index);
+    if (deferredSet.has(index)) deferred.set(entry, { index, jobs: null });
+  }
+  return { truncated, pendingRetries, deferred };
+}
+
+/**
+ * Companies and errors a stop should report. The sweep total is bumped by
+ * the whole list up front. Retired boards and the unfinished tail come back
+ * off until the source folds them in. Retry errors stay in the local count
+ * until that fold, so they are added here and not again afterwards.
+ *
+ * @param {{ phase?: string, totalCompaniesScanned?: number, totalErrors?: number, entries?: number, lastDone?: number, deadBoardsSkipped?: number, errors?: number }} [state]
+ * @returns {{ totalCompaniesScanned: number, totalErrors: number }}
+ */
+export function stoppedScanCounts({
+  phase = 'folded',
+  totalCompaniesScanned = 0,
+  totalErrors = 0,
+  entries = 0,
+  lastDone = 0,
+  deadBoardsSkipped = 0,
+  errors = 0,
+} = {}) {
+  if (phase === 'folded') return { totalCompaniesScanned, totalErrors };
+  const unfinished = Math.max(0, entries - lastDone);
+  const scanned = phase === 'retry'
+    ? totalCompaniesScanned - unfinished
+    : totalCompaniesScanned - unfinished - deadBoardsSkipped;
+  return {
+    totalCompaniesScanned: Math.max(0, scanned),
+    totalErrors: totalErrors + errors,
+  };
+}
+
+/**
+ * Finish one source. An outage bumped the scan total by the whole list, so
+ * the unattempted tail comes off before the phase is folded. A stop during
+ * the cache save then reports boards that were actually contacted.
+ *
+ * @param {{ totalCompaniesScanned?: number, entries?: number, lastDone?: number, resolverOutage?: boolean }} [state]
+ * @returns {{ totalCompaniesScanned: number, phase: 'folded' }}
+ */
+export function foldSourceScan({
+  totalCompaniesScanned = 0,
+  entries = 0,
+  lastDone = 0,
+  resolverOutage = false,
+} = {}) {
+  const unfinished = resolverOutage ? Math.max(0, entries - lastDone) : 0;
+  return {
+    totalCompaniesScanned: Math.max(0, totalCompaniesScanned - unfinished),
+    phase: 'folded',
+  };
 }
 
 // Dataset entries are external input destined for URL interpolation — reject
@@ -491,7 +647,7 @@ export const SOURCES = {
 const KNOWN_FLAGS = [
   '--since', '--limit', '--ats', '--seeds', '--history-seeds', '--probe-unknown-hosts', '--dry-run', '--liveness',
   '--verbose', '--md-out', '--json', '--include-undated', '--include-blacklisted',
-  '--shuffle', '--resume', '--help', '-h',
+  '--shuffle', '--resume', '--resume-if-compatible', '--help', '-h',
 ];
 
 // Flags that consume the next argv token as a value (space-separated form —
@@ -512,6 +668,7 @@ const USAGE = `Usage:
   node scan-ats-full.mjs --verbose            # log per-board fetch failures
   node scan-ats-full.mjs --md-out <dir>       # also write a dated markdown digest to <dir>
   node scan-ats-full.mjs --resume             # continue an interrupted sweep from its checkpoint
+  node scan-ats-full.mjs --resume-if-compatible # resume when it matches; otherwise start fresh
   node scan-ats-full.mjs --help               # print this usage block and exit`;
 
 export function parseArgs(argv) {
@@ -617,6 +774,7 @@ export function parseArgs(argv) {
     includeBlacklisted: args.includes('--include-blacklisted'),
     shuffle: args.includes('--shuffle'),
     resume: args.includes('--resume'),
+    resumeIfCompatible: args.includes('--resume-if-compatible'),
   };
 }
 
@@ -1083,6 +1241,30 @@ export function dedupTokenFor(job, provider) {
   return provider?.dedupKey?.(job) || seenJobKey(job.url);
 }
 
+/**
+ * Checkpoint offers the pipeline does not already hold. A Workday requisition
+ * key misses a URL that scan-history never recorded, so the URL key counts
+ * too. That requisition key is kept, or the other site of the same posting
+ * comes back as new.
+ *
+ * @param {object[] | null | undefined} offers
+ * @param {Set<string>} seenUrls
+ */
+export function unseenCheckpointOffers(offers, seenUrls) {
+  const fresh = [];
+  for (const offer of offers || []) {
+    const token = dedupTokenFor(offer, providerForSource(offer.source));
+    if (seenUrls.has(token)) continue;
+    const urlKey = seenJobKey(offer.url);
+    if (urlKey && seenUrls.has(urlKey)) {
+      seenUrls.add(token);
+      continue;
+    }
+    fresh.push(offer);
+  }
+  return fresh;
+}
+
 // Resolve an offer's provider from its recorded `source` string — shared by
 // the checkpoint-resume reseed below and by loadSeenUrls' extraTokensFor
 // hook. `source` is "{sourcesKey}-full" for the main sweep and
@@ -1524,26 +1706,60 @@ function isoDay(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
+export function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
+  const changed = changedFilterKeys(cp, filters);
+  const mismatch = checkpointMismatch(cp, opts);
+  if (!mismatch && changed.length === 0) return false;
+  const parts = [];
+  if (mismatch) parts.push(mismatch);
+  if (changed.length > 0) parts.push(`portals.yml ${changed.join(', ')}`);
+  const why = parts.join('; ');
+  if (freshOnMismatch) {
+    console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${why}). Starting a fresh sweep. The checkpoint will be overwritten.`);
+    return true;
+  }
+  if (mismatch && changed.length > 0) {
+    console.error(`Error: checkpoint was written with different settings (${mismatch}; portals.yml ${changed.join(', ')} changed) — rerun with matching flags and filters, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
+  } else if (mismatch) {
+    console.error(`Error: checkpoint was written with different settings (${mismatch}) — rerun with the original flags, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
+  } else {
+    console.error(`Error: portals.yml ${changed.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
+  }
+  return true;
+}
+
+// Set when main() settles (see exitWhenDrained at the end of this file). From
+// then on, the --json SIGTERM handler in main() leaves the result as it is.
+let mainSettled = false;
+
 async function main() {
   const opts = parseArgs(process.argv);
+  if (!existsSync(PORTALS_PATH)) {
+    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
+    process.exit(1);
+  }
+  const config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8'));
+  const filters = filterFingerprints(config);
   let checkpoint = null;
-  if (opts.resume) {
+  if (opts.resume || opts.resumeIfCompatible) {
     const cp = loadCheckpoint();
-    if (!cp) {
-      console.error(`Error: --resume passed but no checkpoint found at ${CHECKPOINT_PATH}.`);
-      process.exit(1);
+    if (opts.resume) {
+      if (!cp) {
+        console.error(`Error: --resume passed but no checkpoint found at ${CHECKPOINT_PATH}.`);
+        process.exit(1);
+      }
+      if (resumeRejected(cp, opts, filters)) process.exit(1);
+      checkpoint = cp;
+    } else if (cp && !resumeRejected(cp, opts, filters, { freshOnMismatch: true })) {
+      checkpoint = cp;
     }
-    if (!checkpointCompatible(cp, opts)) {
-      console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
-      process.exit(1);
-    }
-    checkpoint = cp;
   } else if (loadCheckpoint() && !opts.dryRun) {
     console.error(`⚠️  Unfinished sweep checkpoint found at ${CHECKPOINT_PATH} — pass --resume to continue it; this fresh run will overwrite it.`);
   }
   // Resume reuses the ORIGINAL cutoff so the date window stays consistent
-  // across the interruption instead of silently sliding forward.
-  const cutoff = checkpoint ? checkpoint.cutoffMs : Date.now() - opts.sinceDays * 86_400_000;
+  // across the interruption instead of silently sliding forward. A discarded
+  // checkpoint resets this below to the current --since window.
+  let cutoff = checkpoint ? checkpoint.cutoffMs : Date.now() - opts.sinceDays * 86_400_000;
   // In --json mode, stdout is reserved for the single machine-readable result,
   // so every human-facing line goes to stderr instead.
   const log = opts.json ? (...a) => console.error(...a) : (...a) => console.log(...a);
@@ -1560,11 +1776,6 @@ async function main() {
     else process.stdout.write(s);
   };
 
-  if (!existsSync(PORTALS_PATH)) {
-    console.error('Error: portals.yml not found. Run onboarding first — the reverse scan reuses its title_filter/location_filter.');
-    process.exit(1);
-  }
-  const config = loadYaml(readFileSync(PORTALS_PATH, 'utf-8'));
   const fullTitleFilterConfig = resolveTitleFilterConfig(config);
   // title_filter_overrides is independent of title_filter_full: it broadens
   // the net for specific companies on top of whichever title filter config
@@ -1591,12 +1802,6 @@ async function main() {
     process.exit(1);
   }
   const domainFilter = buildDomainFilter(config?.domain_filter);
-  const filters = filterFingerprints(config);
-  const changedFilters = changedFilterKeys(checkpoint, filters);
-  if (changedFilters.length) {
-    console.error(`Error: portals.yml ${changedFilters.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, or delete ${CHECKPOINT_PATH} to start fresh.`);
-    process.exit(1);
-  }
   if (!fullTitleFilterConfig?.positive?.length) {
     const key = config?.title_filter_full ? 'title_filter_full' : 'title_filter';
     console.error(`⚠️  portals.yml has no ${key}.positive — every fresh posting on every board will match. Consider adding keywords.`);
@@ -1681,8 +1886,38 @@ async function main() {
   // second time at this run's persist step. A match from a run that died
   // before persisting is in neither file, so it is not in seenUrls and stays.
   // Same token as the reseed below and the sweep's own dedup check.
-  const newOffers = (checkpoint?.offers || [])
-    .filter(o => !seenUrls.has(dedupTokenFor(o, providerForSource(o.source))));
+  // The company list is not known when settings and filters are checked. A
+  // scheduled resume has to drop the checkpoint before its offers and counters
+  // are copied, or a changed list exits 1 on every later run. --resume stays
+  // strict.
+  if (checkpointComparesCompanyList(checkpoint, SOURCES)) {
+    const sourceName = checkpoint.current.name;
+    const source = SOURCES[sourceName];
+    const loaded = await loadCompanyList(sourceName, source.dataset, source.parseDataset);
+    // A failed download with no cache is an empty list. That is not a new
+    // dataset. Comparing it discards the checkpoint, and the empty sweep
+    // then deletes the file and its unsaved offers.
+    if (loaded.status === 'empty' && checkpoint.current.datasetLen > 0) {
+      console.error(`⚠️  ${sourceName}: company list unavailable, so the checkpoint at ${CHECKPOINT_PATH} is unchanged.`);
+      process.exit(1);
+    }
+    const { list } = loaded;
+    const hashMismatch = checkpoint.current.datasetHash != null
+      && checkpoint.current.datasetHash !== datasetFingerprint(list);
+    if (checkpoint.current.datasetLen !== list.length || hashMismatch) {
+      if (opts.resume) {
+        console.error(`Error: ${sourceName} company dataset changed since the checkpoint — resume order is no longer valid. Delete ${CHECKPOINT_PATH} and rerun.`);
+        process.exit(1);
+      }
+      console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${sourceName} company list). Starting a fresh sweep. The checkpoint will be overwritten.`);
+      checkpoint = null;
+      // The discarded sweep's cutoff is not this run's --since window.
+      cutoff = Date.now() - opts.sinceDays * 86_400_000;
+      ctx.sinceMs = cutoff;
+    }
+  }
+
+  const newOffers = unseenCheckpointOffers(checkpoint?.offers, seenUrls);
   // Checkpointed matches were already deduped once — without re-seeding, a
   // resumed run re-scanning the in-flight overlap would duplicate them.
   // Reseed with the SAME token a fresh dedup check would produce (provider
@@ -1735,51 +1970,106 @@ async function main() {
   // we instead flush the matches collected up to this point as a well-formed but
   // PARTIAL result (`stoppedEarly: true`) so the caller can still surface those
   // roles. CLI/human runs keep the default terminate behavior (no handler).
+  // spawnSync with a timeout drops the JSON this handler writes to stdout.
   // Live deltas for the partial (stoppedEarly) report, so a mid-source SIGTERM
   // reports the work ACTUALLY done. totalCompaniesScanned is bumped by a whole
   // source's planned entries up front, and its errors fold into totalErrors only
-  // once it finishes — the handler applies the same correction the checkpoint uses.
-  let curEntries = 0;
-  let curDone = 0;
-  let curErrors = 0;
-  let curDeadSkipped = 0;
+  // once it finishes. The handler and the checkpoint both read stoppedScanCounts.
+  let writeStopCheckpoint = () => false;
+  const restingCounters = () => stoppedScanCounts({ totalCompaniesScanned, totalErrors });
+  let liveCounters = restingCounters;
   if (opts.json) {
     let flushed = false;
     process.on('SIGTERM', () => {
-      if (flushed) return;
+      // Once main() has settled, its complete result or its error is already
+      // out, the exit code is set, and the process is only waiting for its
+      // event loop to drain. A partial result then would be a second JSON
+      // document after the complete one and, without --dry-run, would save the
+      // same roles again. The handler returns instead of being removed: with no
+      // listener, the signal would kill the process, and the web's scheduled
+      // runner counts only exit 0 as a finished sweep.
+      if (flushed || mainSettled) return;
       flushed = true;
-      try {
-        const partial = filterBlacklistedOffers(newOffers, blacklist, {
-          includeBlacklisted: opts.includeBlacklisted,
-        }).offers.map((o) => ({
-          company: o.company,
-          title: o.title,
-          url: o.url,
-          location: o.location || null,
-          ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
-          postedAt: isoDay(o.postedAt),
-          dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
-          source: o.source,
-        }));
-        process.stdout.write(JSON.stringify({
-          date,
-          sources: opts.ats,
-          stoppedEarly: true,
-          companiesAvailable: totalCompaniesAvailable,
-          companiesScanned: Math.max(0, totalCompaniesScanned - (curEntries - curDone) - curDeadSkipped),
-          capHit,
-          datasetStatus,
-          postingsKept: partial.length,
-          postingsDroppedNoDate: droppedNoDate,
-          unreachableBoards: totalErrors + curErrors,
-          domainFilterActive: Boolean(domainFilter),
-          domainGatedBoards,
-          domainGatedPostings,
-          offers: partial,
-        }) + '\n', () => process.exit(0));
-      } catch {
-        process.exit(0);
-      }
+      void (async () => {
+        let saved = false;
+        let kept = [];
+        try {
+          kept = filterBlacklistedOffers(newOffers.slice(), blacklist, {
+            includeBlacklisted: opts.includeBlacklisted,
+          }).offers;
+          // --liveness verifies before any write. This stop cannot run that check.
+          if (!opts.dryRun && !opts.liveness && kept.length) {
+            if (!existsSync(PIPELINE_PATH)) {
+              mkdirSync(path.dirname(PIPELINE_PATH), { recursive: true });
+              writeFileSync(PIPELINE_PATH, '# Pipeline\n\n## Pendientes\n', 'utf-8');
+            }
+            await appendToPipeline(kept);
+            saved = true;
+          }
+        } catch {
+          saved = false;
+        }
+        if (saved) {
+          try {
+            await appendToScanHistory(kept, date);
+          } catch {
+            // pipeline.md already has the roles
+          }
+        }
+        try {
+          const runId = currentScanRunId();
+          const partialSave = {
+            saved,
+            postingsKept: kept.length,
+            ...(runId ? { runId } : {}),
+          };
+          // The stop write is the resume point. If it fails, a checkpoint
+          // already on disk still lets the next run continue. With neither,
+          // the report must not promise a resume.
+          let checkpointAvailable = false;
+          if (!opts.dryRun) {
+            checkpointAvailable = writeStopCheckpoint(partialSave) === true;
+            if (!checkpointAvailable) {
+              const existing = loadCheckpoint();
+              if (existing?.current) {
+                writeCheckpoint({ ...existing, partialSave });
+                checkpointAvailable = true;
+              }
+            }
+          }
+          const partial = kept.map((o) => ({
+            company: o.company,
+            title: o.title,
+            url: o.url,
+            location: o.location || null,
+            ...(o.geographyEvidence ? { geographyEvidence: o.geographyEvidence } : {}),
+            postedAt: isoDay(o.postedAt),
+            dateStatus: o.dateStatus || (o.postedAt ? 'dated' : 'unknown'),
+            source: o.source,
+          }));
+          const live = liveCounters();
+          process.stdout.write(JSON.stringify({
+            date,
+            sources: opts.ats,
+            stoppedEarly: true,
+            checkpointAvailable,
+            companiesAvailable: totalCompaniesAvailable,
+            companiesScanned: live.totalCompaniesScanned,
+            capHit,
+            datasetStatus,
+            postingsKept: partial.length,
+            postingsDroppedNoDate: droppedNoDate,
+            unreachableBoards: live.totalErrors,
+            domainFilterActive: Boolean(domainFilter),
+            domainGatedBoards,
+            domainGatedPostings,
+            saved,
+            offers: partial,
+          }) + '\n', () => process.exit(0));
+        } catch {
+          process.exit(0);
+        }
+      })();
     });
   }
 
@@ -1851,6 +2141,9 @@ async function main() {
   // Run-level, because resolverOutage below is per-source and long out of
   // scope by the time the checkpoint's fate is decided at the end of main().
   let stoppedByOutage = false;
+  // True only when the outage branch's own write succeeded. A failed write
+  // must not be reported as a resume point.
+  let outageCheckpointWritten = false;
 
   for (const name of opts.ats.filter((ats) => SOURCES[ats])) {
     const source = SOURCES[name];
@@ -1904,7 +2197,6 @@ async function main() {
     }
     const entries = entriesAll.slice(startAt);
     totalCompaniesScanned += entries.length;
-    curEntries = entries.length; curDone = 0; curErrors = 0; curDeadSkipped = 0;
     log(`\n⚙  ${name} — ${entriesAll.length} companies${status !== 'ok' ? ` (dataset: ${status})` : ''}${startAt ? ` — resuming at ${startAt}` : ''}`);
 
     // This source's slice of the provider id cache (provider-id-cache.mjs).
@@ -1923,21 +2215,50 @@ async function main() {
     // call returns to checkpoint where it actually stopped (#2283).
     let lastDone = 0;
     let lastResumeAt = 0;
-    const truncated = [];
     // The subset of `truncated` the gate deferred rather than admitted; the
     // retry needs to know which, see retryGateDecision. Each keeps its index in
     // entriesAll, so a checkpoint can carry it past the resume offset, and its
     // partial page, so a failed retry still has something to process.
-    const deferred = new Map();
-    // A board the interrupted run deferred sits below the resume offset, so
-    // the sweep never revisits it: it goes straight to the retry. Its partial
-    // page died with that run, so a failed retry has nothing to fall back to.
-    for (const index of checkpoint?.current?.name === name ? checkpoint.current.deferred ?? [] : []) {
-      if (index >= startAt || !entriesAll[index]) continue;
-      truncated.push(entriesAll[index]);
-      deferred.set(entriesAll[index], { index, jobs: null });
-    }
-    const deferredIndices = () => [...deferred.values()].map((d) => d.index);
+    // A board the interrupted run left for retry sits below the resume offset,
+    // so the sweep never revisits it. Gate-deferred boards are only part of
+    // that set: an admitted partial response is queued too, or the rest of
+    // the board is lost. Its partial page died with that run.
+    const restored = restorePendingRetries(
+      entriesAll,
+      startAt,
+      checkpoint?.current?.name === name ? checkpoint.current : null,
+    );
+    const truncated = restored.truncated;
+    const deferred = restored.deferred;
+    const pendingRetries = restored.pendingRetries;
+    let checkpointPhase = 'sweep';
+    liveCounters = () => stoppedScanCounts({
+      phase: checkpointPhase,
+      totalCompaniesScanned,
+      totalErrors,
+      entries: entries.length,
+      lastDone,
+      deadBoardsSkipped,
+      errors,
+    });
+    writeStopCheckpoint = (partialSave) => {
+      if (opts.dryRun) return false;
+      const live = liveCounters();
+      const counters = checkpointPhase === 'folded'
+        ? snapshotCounters()
+        : {
+            ...snapshotCounters(),
+            totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
+            totalCompaniesScanned: live.totalCompaniesScanned,
+            totalErrors: live.totalErrors,
+          };
+      return writeCheckpoint({
+        ...checkpointBase(),
+        ...(partialSave ? { partialSave } : {}),
+        current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, ...retryCheckpointFields(pendingRetries, deferred) },
+        counters,
+      });
+    };
     await parallelEach(entries, source.concurrency ?? CONCURRENCY, async (entry, idx) => {
       const deadBoard = boardKey(entry);
       if (shouldSkipDeadBoard(deadBoards, name, deadBoard)) {
@@ -1970,7 +2291,10 @@ async function main() {
           // sequential retry — 'structural' means the board hit a fixed bound
           // (facet-split slice/depth/page budget) that a repeat run reaches
           // again, paying the same expensive split for the same result.
-          if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) truncated.push(entry);
+          if (jobs.workdayTruncated === WORKDAY_TRUNCATED_REASON.TRANSIENT) {
+            truncated.push(entry);
+            pendingRetries.set(entry, startAt + idx);
+          }
           // Ahead of processJobs, deliberately: a gated board is not merely
           // quieter but CHEAPER, since provider.enrichDate() issues a per-job
           // detail request for undated providers (icims) and a board dropped
@@ -2022,7 +2346,6 @@ async function main() {
       }
     }, ({ done, resumeAt }) => {
       lastDone = done;
-      curDone = done; curErrors = errors; curDeadSkipped = deadBoardsSkipped;
       lastResumeAt = resumeAt;
       if (done % 200 === 0 || done === entries.length) {
         progress(`  ${done}/${entries.length} scanned, ${newOffers.length} total matches\r`);
@@ -2031,27 +2354,14 @@ async function main() {
         saveDeadBoardsBestEffort(deadBoards);
         // So a sweep that dies later keeps the ids it resolved so far.
         void saveProviderIdCacheBestEffort(idCaches);
-        writeCheckpoint({
-          ...checkpointBase(),
-          current: { name, resumeAt: startAt + resumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
-          counters: {
-            ...snapshotCounters(),
-            totalRetiredBoardsSkipped: totalRetiredBoardsSkipped + deadBoardsSkipped,
-            // totalCompaniesScanned was bumped by the FULL entries.length up
-            // front; a checkpoint must store only work actually attempted, or
-            // a resumed run (which re-adds its own slice) double-counts the
-            // completed portion in the final summary. Retired boards were not
-            // attempted and must not be counted as scanned either.
-            totalCompaniesScanned: totalCompaniesScanned - (entries.length - done) - deadBoardsSkipped,
-            totalErrors: totalErrors + errors,
-          },
-        });
+        writeStopCheckpoint();
       }
     }, () => resolverOutage);
     // parallelEach reports a completed callback even when a retired board was
     // skipped, so remove those entries from the live scan total after the
     // source pass. The retired count remains visible separately.
     totalCompaniesScanned -= deadBoardsSkipped;
+    checkpointPhase = 'retry';
     // Second chance for boards the parallel sweep truncated: retry alone on a
     // quiet line. Re-processing the full board is safe — seenUrls already
     // holds every match from the partial first pass.
@@ -2105,10 +2415,22 @@ async function main() {
           const partial = deferred.get(entry)?.jobs;
           if (partial && !retrySignal?.aborted) await processJobs(partial, name, source.provider, entry.name);
         }
+        pendingRetries.delete(entry);
+        deferred.delete(entry);
       }
     }
     totalErrors += errors;
     totalRetiredBoardsSkipped += deadBoardsSkipped;
+    // Correct the outage tail before the phase folds and before the cache
+    // save. A stop during that save reads the folded totals as they stand.
+    const folded = foldSourceScan({
+      totalCompaniesScanned,
+      entries: entries.length,
+      lastDone,
+      resolverOutage,
+    });
+    totalCompaniesScanned = folded.totalCompaniesScanned;
+    checkpointPhase = folded.phase;
     if (!opts.dryRun) {
       saveDeadBoardsBestEffort(deadBoards);
       await saveProviderIdCacheBestEffort(idCaches);
@@ -2117,14 +2439,6 @@ async function main() {
       // Deliberately before completedSources/checkpoint: this source did NOT
       // finish, and marking it done would make --resume skip the rest of it.
       stoppedByOutage = true;
-      // The counter was bumped by the FULL entries.length up front, but the
-      // breaker left entries.length - lastDone boards unattempted. Correct the
-      // live counter, not just the checkpoint payload: this run's own summary
-      // and --json would otherwise report companies nobody ever contacted as
-      // scanned. Correcting it here also gives the checkpoint the right figure
-      // for free — a resumed run re-adds its own slice, so a checkpoint holding
-      // the full slice makes the completed portion count twice.
-      totalCompaniesScanned -= entries.length - lastDone;
       // Pin the resume point here rather than leaving the last periodic write
       // to stand for it. That one fires every CHECKPOINT_EVERY companies, so
       // it can be up to 500 boards behind where the breaker actually stopped —
@@ -2134,10 +2448,13 @@ async function main() {
       if (!opts.dryRun) {
         checkpointWritten = writeCheckpoint({
           ...checkpointBase(),
-          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, deferred: deferredIndices() },
+          current: { name, resumeAt: startAt + lastResumeAt, datasetLen: list.length, datasetHash, ...retryCheckpointFields(pendingRetries, deferred) },
           counters: snapshotCounters(),
         });
+        outageCheckpointWritten = checkpointWritten;
       }
+      writeStopCheckpoint = () => false;
+      liveCounters = restingCounters;
       log(`\n  ⛔ stopped ${name}/${resolverOutageCompany}: ${RESOLVER_FAILURE_LIMIT} consecutive DNS failures.`);
       log(`     Your resolver is refusing queries — it may be rate-limiting this host.`);
       log(`     Lower CONCURRENCY, raise the resolver's per-client limit, or set`);
@@ -2149,12 +2466,13 @@ async function main() {
       break;
     }
     completedSources.add(name);
-    // Source finished and folded into the totals — clear the live deltas so a
-    // SIGTERM between sources reports the totals, not this source's slice twice.
-    curEntries = 0; curDone = 0; curErrors = 0; curDeadSkipped = 0;
+    // Source finished and folded into the totals. A stop between sources
+    // reports those totals, not this source's slice a second time.
     if (!opts.dryRun) {
       writeCheckpoint({ ...checkpointBase(), current: null, counters: snapshotCounters() });
     }
+    writeStopCheckpoint = () => false;
+    liveCounters = restingCounters;
     log(`\n  done (${errors} unreachable boards, ${deadBoardsSkipped} retired boards skipped)`);
   }
 
@@ -2285,6 +2603,7 @@ async function main() {
       // it a caller can't tell a stopped run from a complete one except by
       // stat'ing the checkpoint file itself.
       stoppedByOutage,
+      outageCheckpointWritten,
       datasetStatus,
       postingsKept: offers.length,
       postingsDroppedNoDate: droppedNoDate,
@@ -2331,24 +2650,37 @@ async function main() {
 
 // Only run main() when invoked directly, not when imported by tests.
 if (isMainModule(import.meta.url)) {
-  // Exit explicitly once main() returns. The watchdog now cancels a timed-out
-  // board's work, but a keep-alive socket a single-host pool still holds (or a
-  // request aborting just as the summary prints) can otherwise keep the event
-  // loop open for minutes past the summary (#5570). Flush stdout first so a
-  // piped summary is never truncated.
-  const flushAndExit = (code) => {
-    // Exit from a write-completion callback, queued after whatever is already
-    // buffered, so a piped summary flushes first. `writableLength > 0` is not a
-    // reliable "wait for drain" signal — `drain` only fires for a write that
-    // returned false (past the high-water mark), so bytes queued below it would
-    // never drain and the process would hang (the opposite of the intent).
+  // Once main() settles, set the exit code and let the process end on its own
+  // when the event loop drains. On Windows, calling process.exit() right away
+  // made the run abort: Node 23 and later assert in libuv when process.exit()
+  // runs right after a request, until the fix in 24.20.0 and 26.7.0
+  // (nodejs/node#56645), and the run ends with a crash code instead of 0 or 1.
+  // Measured 2026-11-13 on Node 24.14.1 with --limit 3 --dry-run: a Greenhouse
+  // sweep aborted 4 times out of 4, and so did one that failed after the sweep;
+  // an Ashby sweep aborted 3 times out of 4.
+  //
+  // The timer keeps #5570's guarantee: if something still holds the loop open
+  // after the summary (a keep-alive socket, or a request aborting just as the
+  // summary prints), the process exits anyway after EXIT_BACKSTOP_MS. unref()
+  // keeps the timer itself from holding the process open, so a run whose loop
+  // drains never waits for it.
+  const EXIT_BACKSTOP_MS = 5_000;
+  const exitWhenDrained = (code) => {
+    mainSettled = true;
     process.exitCode = code;
-    process.stdout.write('', () => process.exit(code));
+    setTimeout(() => {
+      // Exit from a write-completion callback, queued after whatever is already
+      // buffered, so a piped summary flushes first. `writableLength > 0` is not a
+      // reliable "wait for drain" signal — `drain` only fires for a write that
+      // returned false (past the high-water mark), so bytes queued below it would
+      // never drain and the process would hang (the opposite of the intent).
+      process.stdout.write('', () => process.exit(code));
+    }, EXIT_BACKSTOP_MS).unref();
   };
   main()
-    .then(() => flushAndExit(0))
+    .then(() => exitWhenDrained(0))
     .catch(err => {
       console.error('Fatal:', err.message);
-      flushAndExit(1);
+      exitWhenDrained(1);
     });
 }

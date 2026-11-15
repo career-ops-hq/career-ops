@@ -10,6 +10,14 @@ Two things this log deliberately is not: a ranking, and a promise. Rule 4 says i
 
 ---
 
+## Rules 4 and 6 changed (2026-11-12)
+
+**Rule 6.** Until 2026-11-12 the rule described one reader only: a provider on the job seeker's own machine, which builds no index. The project's shared listings layer (rule 5) does build one: it reads the public job pages of employers and serves a card for each posting, with a link to the employer's own page and without the text of the posting. The rule now says so, and says how that layer reads: only public pages, a user agent that says who it is, one request at a time per host at the pace the host asks for, and removal on request. A source's `robots.txt` is still not a gate. The reason given is no longer "it builds no index", which is true of a provider and is not true of the layer. What the layer honours instead is the operator's own request, which removes the source for good.
+
+**Rule 4.** The 40% cap was written for "a source", which left open whether a company that hosts its board on an applicant tracking system is the source, or the system is. It is the company: the cap is about who benefits from being listed. The share of each hosting system is published as a second figure, with no cap while the registry is being filled.
+
+---
+
 ## Rule 6 changed (2026-11-08)
 
 Until 2026-11-08, rule 6 made a source's `robots.txt` a gate: a `Disallow` covering the listing paths a provider reads was a stop. It no longer is. `robots.txt` is written for crawlers that index or copy a site; a provider reads a posting on one person's machine so that person can understand it and, if it fits, apply on the employer's page. What stays a stop: a login or a user account, a CAPTCHA, and an operator who asks career-ops not to read their source ([open an issue](https://github.com/career-ops-hq/career-ops/issues/new) to ask).

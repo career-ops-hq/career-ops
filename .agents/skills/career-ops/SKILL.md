@@ -3,7 +3,7 @@ name: career-ops
 description: "Open-source AI job search agent -- evaluate offers, generate CVs, scan portals, track applications. Use when the user pastes a job URL or JD, asks to scan portals, generate a CV/PDF, track applications, prepare for interviews, draft outreach/emails, or run any career-ops mode."
 arguments: mode
 user-invocable: true
-argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
+argument-hint: "[scan | discover | deep | pdf | ats | text | latex | latex-tex | cover | email | add | expand | eu-swe | oferta | ofertas | apply | triage | batch | tracker | agent-inbox | pipeline | contacto | gambit | training | project | interview-prep | interview | master-profile | intake | retro | interview/plan | interview/practice | interview/debrief | interview-redflag | patterns | calibrate | offer-prep | titles | upskill | followup | reply-watch | outcome | update]"
 license: MIT
 ---
 
@@ -61,6 +61,7 @@ Determine the mode from `$mode`:
 | `oferta` | `oferta` |
 | `ofertas` | `ofertas` |
 | `contacto` | `contacto` |
+| `gambit` | `gambit` |
 | `deep` | `deep` |
 | `interview-prep` | `interview-prep` |
 | `interview` | `interview` |
@@ -171,6 +172,7 @@ Available commands:
   /career-ops oferta    → Evaluation only: blocks A-G always, Block H at or above 4.5 (no auto PDF)
   /career-ops ofertas   → Compare and rank multiple offers
   /career-ops contacto  → LinkedIn power move: find contacts + draft message
+  /career-ops gambit {company} → CREATE-A-ROLE: research + role thesis + CV + cover letter + pitch package
   /career-ops deep      → Deep research prompt about company
   /career-ops interview-prep → Generate company-specific interview prep doc
   /career-ops interview    → Interactive profile/CV onboarding interview
@@ -228,7 +230,9 @@ Resolve `language.modes_dir` before applying the path shorthand below. With no s
 
 Read the resolved shared context (default `modes/_shared.md`) + `modes/_profile.md` (if exists) + `modes/_custom.md` (if exists) + the resolved selected mode file (default `modes/{mode}.md`). For an A-F evaluation, that selected file is the primary directory's evaluation mode; do not also load an evaluation file from a secondary directory.
 
-Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `apply`, `pipeline`, `scan`, `batch`
+Applies to: `auto-pipeline`, `oferta`, `ofertas`, `pdf`, `text`, `contacto`, `gambit`, `apply`, `pipeline`, `scan`, `batch`
+
+Run `gambit` here, in the interactive session, never in a worker, even though its research is heavy: its Step 3 checkpoint shows the candidate the role theses and waits for their choice before any document is generated, and a worker cannot ask the candidate anything.
 
 ### Standalone modes with profile and custom context
 

@@ -21,12 +21,15 @@
 //       max_hits: 100        # optional, per query; capped at 200, or 1000 with filters
 //     enabled: true
 //
-// Prefer `filters` over broad keyword queries. A keyword alone cannot narrow a
-// global board: it is Algolia's relevance ranking that decides which `max_hits`
-// results come back, so anything past the cap is invisible no matter how well it
-// matches the scanner's own title/location filters (those run afterwards, on what
-// already came back). Filtering server-side shrinks the result set instead of
-// re-ranking it, which is what makes a scan exhaustive rather than a sample.
+// Prefer `filters` over broad keyword queries. A keyword query keeps only jobs
+// that contain every query word (Algolia's default; this provider sends no
+// `removeWordsIfNoResults` or similar setting), so it drops a matching role
+// worded another way. On a global board it can still match more than `max_hits`
+// jobs, and anything past the cap never reaches the scanner's own title/location
+// filters (those run afterwards, on what already came back). `filters` narrows
+// the board server-side on structured fields such as country and contract type
+// instead of on wording. The cap still applies with `filters` (1000 per query),
+// so a scan returns every match up to `max_hits` and none past it.
 //
 // Useful faceted attributes on this index: offices.country_code, offices.state,
 // offices.city, contract_type, remote, experience_level_minimum,

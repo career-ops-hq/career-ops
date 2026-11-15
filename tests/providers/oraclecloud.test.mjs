@@ -581,15 +581,53 @@ try {
     try { return { result: await fn(), lines }; } finally { console.error = orig; }
   };
 
+  // No max_pages and a reported total: the default follows the total, so the
+  // whole board is read and nothing is cut.
   const defCount = { n: 0 };
   const def = await captureWarn(() => oc.fetch({ name: 'JPMC', careers_url: careers }, pagedCtx(7118, defCount)));
-  if (def.result.length === 5000 && defCount.n === 25) pass('oraclecloud.fetch() default behaviour unchanged: 25 pages, 5000 jobs');
-  else fail(`default cap: ${def.result.length} jobs in ${defCount.n} requests, expected 5000 in 25`);
-  if (def.lines.length === 1 && def.lines[0].includes('JPMC') && def.lines[0].includes('max_pages=25')
-      && def.lines[0].includes('5000 of 7118') && def.lines[0].includes('raise max_pages') && def.result.oraclecloudTruncated === true) {
-    pass('oraclecloud.fetch() warns (entry, max_pages, N of M, how to raise) and tags the array when the cap cuts the board');
+  if (def.result.length === 7118 && defCount.n === 36 && def.lines.length === 0 && !def.result.truncated) {
+    pass('oraclecloud.fetch() with no max_pages follows the reported total past 25 pages (7118 in 36), silently');
   } else {
-    fail(`truncation warning wrong: ${JSON.stringify(def.lines)}`);
+    fail(`default with total: ${def.result.length} jobs in ${defCount.n} requests, warnings ${JSON.stringify(def.lines)}`);
+  }
+
+  // An explicit max_pages is the user's cap: it is not raised, and a cut says so.
+  const expCount = { n: 0 };
+  const exp = await captureWarn(() => oc.fetch({ name: 'JPMC', careers_url: careers, max_pages: 25 }, pagedCtx(7118, expCount)));
+  if (exp.result.length === 5000 && expCount.n === 25 && exp.lines.length === 1 && exp.lines[0].includes('JPMC')
+      && exp.lines[0].includes('max_pages=25') && exp.lines[0].includes('5000 of 7118') && exp.lines[0].includes('raise max_pages')
+      && exp.result.oraclecloudTruncated === true) {
+    pass('oraclecloud.fetch() keeps an explicit max_pages, warns (entry, max_pages, N of M, how to raise) and tags the cut');
+  } else {
+    fail(`explicit cap: ${exp.result.length} jobs in ${expCount.n} requests, warnings ${JSON.stringify(exp.lines)}`);
+  }
+
+  // No max_pages and a total beyond HARD_MAX_PAGES: read up to the ceiling and
+  // report the cut the same way a max_pages cut is reported.
+  const bigCount = { n: 0 };
+  const big = await captureWarn(() => oc.fetch({ name: 'Huge', careers_url: careers }, pagedCtx(50000, bigCount)));
+  if (bigCount.n === mod.HARD_MAX_PAGES && big.result.length === mod.HARD_MAX_PAGES * 200
+      && big.lines.length === 1 && big.lines[0].includes('ceiling') && big.lines[0].includes(`of 50000`)
+      && big.result.truncated?.reason === 'page-cap' && big.result.truncated?.total === 50000) {
+    pass('oraclecloud.fetch() with no max_pages stops at HARD_MAX_PAGES on a huge board and reports the truncation');
+  } else {
+    fail(`auto-raise ceiling: ${bigCount.n} requests, ${big.result.length} jobs, warnings ${JSON.stringify(big.lines)}, truncated ${JSON.stringify(big.result.truncated)}`);
+  }
+
+  // No max_pages and no reported total: the 25-page default still bounds the walk.
+  const ntdCount = { n: 0 };
+  const ntd = await captureWarn(() => oc.fetch({ name: 'NoTotalDefault', careers_url: careers }, {
+    transport: 'http', sleep: async () => {}, fetchText: async () => {},
+    fetchJson: async (url) => {
+      const offset = Number(new URL(url).searchParams.get('offset') || 0);
+      ntdCount.n++;
+      return { items: [{ requisitionList: Array.from({ length: 200 }, (_, i) => ({ Id: String(offset + i), Title: `T${offset + i}` })) }] };
+    },
+  }));
+  if (ntdCount.n === 25 && ntd.result.length === 5000 && ntd.lines.length === 1 && ntd.lines[0].includes('total unknown')) {
+    pass('oraclecloud.fetch() keeps the 25-page default when the tenant reports no total');
+  } else {
+    fail(`no-total default: ${ntdCount.n} requests, ${ntd.result.length} jobs, ${JSON.stringify(ntd.lines)}`);
   }
 
   const optCount = { n: 0 };

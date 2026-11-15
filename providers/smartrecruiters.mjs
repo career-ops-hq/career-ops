@@ -146,6 +146,23 @@ function buildPostingDetailUrl(slug, id) {
   return `https://api.smartrecruiters.com/v1/companies/${slug}/postings/${encodeURIComponent(id)}`;
 }
 
+/**
+ * The posting's ATS-native identity: the configured company slug and the
+ * posting `id` from the payload, never parsed out of a URL. Exported for unit
+ * tests. Returns undefined unless both halves are clean nonempty strings (no
+ * surrounding whitespace, no control characters), the shape
+ * listing-fingerprint.mjs accepts, so an unusable id falls back to URL dedup.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'smartrecruiters', board_slug: string, posting_id: string} | undefined}
+ */
+export function smartRecruitersListingIdentity(slug, id) {
+  const clean = (v) => typeof v === 'string' && v !== '' && v === v.trim() && !/[\u0000-\u001f\u007f]/u.test(v);
+  if (!clean(slug) || !clean(id)) return undefined;
+  return { ats_provider: 'smartrecruiters', board_slug: /** @type {string} */ (slug), posting_id: /** @type {string} */ (id) };
+}
+
 function resolveApiUrl(entry) {
   const slug = resolveSlug(entry);
   return slug ? buildPostingsUrl(slug, 0) : null;
@@ -181,8 +198,10 @@ export default {
       if (total === null && Number.isSafeInteger(json?.totalFound) && json.totalFound >= 0) total = json.totalFound;
       const parsed = parseSmartRecruitersResponse(json, entry.name, slug);
       all.push(...parsed);
-      // A dropped malformed ID must not hide postings on subsequent pages.
-      if (!Array.isArray(json?.content) || json.content.length < SR_PAGE_SIZE) { ended = true; break; }
+      // A dropped malformed ID must not hide postings on subsequent pages, so the
+      // raw page decides; the parser above already threw on a page that is not
+      // { content: [...] }.
+      if (json.content.length < SR_PAGE_SIZE) { ended = true; break; }
     }
     // The cap ended the walk with postings still unread, or with no sign the
     // board ended when the API reports no total. Said out loud: a silently
@@ -220,10 +239,16 @@ export default {
       }
     }
 
-    // The numeric posting id drove the detail calls above; it is internal
-    // plumbing and must not leak into the pipeline's Job rows (vdab strips
-    // its id the same way).
-    const jobs = all.map(({ id, ...job }) => job);
+    // The raw posting id drove the detail calls above and stays out of the
+    // pipeline's Job rows (vdab strips its id the same way). The payload's own
+    // string id survives only as the posting half of the ATS-native identity
+    // scan.mjs dedups on (docs/listing-fingerprint.md), next to the configured
+    // board slug; a numeric payload id was coerced for the detail call and
+    // gets no identity.
+    const jobs = all.map(({ id, postingId, ...job }) => {
+      const listingIdentity = smartRecruitersListingIdentity(slug, postingId);
+      return listingIdentity ? { ...job, listingIdentity } : job;
+    });
     if (truncated) {
       // Canonical shape read by lib/board-truncation.mjs, so scan.mjs logs the
       // board as `partial` instead of `reachable`.
@@ -264,11 +289,17 @@ export default {
  * @param {any} json
  * @param {string} companyName
  * @param {string} [companySlug] Already-escaped URL.pathname segment from resolveSlug.
- * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, requisitionId?: string, language?: string}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, id?: string, postingId?: string, requisitionId?: string, language?: string}>}
  */
 export function parseSmartRecruitersResponse(json, companyName, companySlug) {
-  const items = json?.content;
-  if (!Array.isArray(items)) return [];
+  // { content: [] } is an empty page. Any other envelope ({}, { error }, a bare
+  // string) is a changed or failing API and must not read as a board with no
+  // open roles (ADDING_A_PROVIDER.md, "Defensive parsing"; #6906).
+  const items = json && Array.isArray(json.content) ? json.content : null;
+  if (!items) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+    throw new Error(`smartrecruiters: unexpected response for ${companyName} — expected content[], got: [${got}]`);
+  }
   return items.flatMap(j => {
     const loc = j.location || {};
     const fullLocation = loc.fullLocation || [loc.city, loc.region, loc.country].filter(Boolean).join(', ');
@@ -312,6 +343,10 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       location,
       company: companyName,
       id: typeof j.id === 'string' || typeof j.id === 'number' ? String(j.id) : undefined,
+      // The id exactly as the payload typed it, for the listing identity only:
+      // a numeric id is stringified above for the detail call, but identity
+      // ids are never coerced (docs/listing-fingerprint.md), so it gets none.
+      ...(typeof j.id === 'string' ? { postingId: j.id } : {}),
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),

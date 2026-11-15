@@ -15,6 +15,7 @@ import {
   buildSeekUrl, parseSeekPage, extractReduxJson,
   scanSeekSearch, loadSearches as seekSearches,
 } from '../scan-seek.mjs';
+import { PORTAL_TOP_LEVEL_KEYS, portalTopLevelTypos } from '../validate-portals.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -313,6 +314,17 @@ test('seek searches config: minimal { keyword, location? } schema plus optional 
     ],
   );
   assert.deepStrictEqual(seekSearches({}), []);
+});
+
+test('seek_searches is a registered portals.yml key, so a typo is reported', () => {
+  // Same class of bug as `tracked_companys` and the TopDev key: a valid list
+  // plus a `seek_searche` miss beside it used to validate clean, and the
+  // scanner would read the real list and silently ignore the extra search.
+  assert.ok(PORTAL_TOP_LEVEL_KEYS.includes('seek_searches'));
+  assert.deepStrictEqual(
+    portalTopLevelTypos({ seek_searches: [{ keyword: 'devops' }], seek_searche: [{ keyword: 'qa' }] }),
+    [{ key: 'seek_searche', suggestion: 'seek_searches' }],
+  );
 });
 
 // ── CLI ──────────────────────────────────────────────────────────────

@@ -193,12 +193,30 @@ export function postingUrlRelation(rawA, rawB) {
   const a = postingLanguageKey(rawA);
   const b = postingLanguageKey(rawB);
   if (!a.key || !b.key) return "no-key";
-  if (a.key !== b.key) return "distinct";
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return "distinct";
   if (a.language === b.language) {
     if (a.language && a.script && b.script && a.script !== b.script) return "distinct";
     return "same";
   }
   return a.language && b.language ? "distinct" : "one-sided-language";
+}
+
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an
+ * extracted id, whatever the rest of the query says, or one path on an ATS
+ * host whose spellings it folds, with the same query.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes("://")) return true;
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [
@@ -231,13 +249,19 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get("token") : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get("gh_jid");
   const queryId = query && /^\d+$/.test(query) ? query : null;
   if (pathId && queryId && pathId !== queryId) return null;
   return pathId || queryId;
 }
+
+const SR_POSTING_ID = String.raw`([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d+)`;
+const SR_PAGE_PATH = new RegExp(String.raw`^/([^/]+)/${SR_POSTING_ID}(?:-[^/]*)?/?$`, "i");
+const SR_API_PATH = new RegExp(String.raw`^/v1/companies/([^/]+)/postings/${SR_POSTING_ID}/?$`, "i");
 
 /**
  * SmartRecruiters' posting id with its company, or null when this URL is not a
@@ -253,17 +277,23 @@ function greenhouseJobId(url) {
  * addresses a posting under its company (`/v1/companies/{company}/postings/{id}`),
  * so the id is not shown to be global the way Greenhouse's is.
  *
+ * The API also addresses a posting by its UUID. A UUID is read whole, before
+ * the numeric form, so one whose first group is all digits is not cut down
+ * to that group and collapsed with another posting. A UUID key and a numeric
+ * key for the same posting stay two keys: a visible duplicate, not a silent
+ * merge.
+ *
  * @param {URL} url - Hostname already folded.
  * @returns {string|null}
  */
 function smartRecruitersJobId(url) {
   let match = null;
   if (url.hostname === "jobs.smartrecruiters.com") {
-    match = url.pathname.match(/^\/([^/]+)\/(\d+)(?:-[^/]*)?\/?$/);
+    match = url.pathname.match(SR_PAGE_PATH);
   } else if (url.hostname === "api.smartrecruiters.com") {
-    match = url.pathname.match(/^\/v1\/companies\/([^/]+)\/postings\/(\d+)\/?$/);
+    match = url.pathname.match(SR_API_PATH);
   }
-  return match ? `${match[1].toLowerCase()}/${match[2]}` : null;
+  return match ? `${match[1].toLowerCase()}/${match[2].toLowerCase()}` : null;
 }
 
 function indeedJobId(url) {
@@ -294,6 +324,10 @@ export function canonicalJobKey(raw) {
   const smartRecruiters = smartRecruitersJobId(u);
   if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
+  if (u.hostname === "jobs.ashbyhq.com") {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/*$/i, "$1");
+  }
+
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();
     if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
@@ -305,6 +339,12 @@ export function canonicalJobKey(raw) {
   const out = new URL(normalized);
   if (out.pathname.length > 1) {
     out.pathname = out.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  }
+  if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, "$1");
+  }
+  if (out.hostname === "apply.workable.com") {
+    out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, "/j/$1");
   }
   return out.toString();
 }

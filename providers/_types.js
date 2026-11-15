@@ -21,6 +21,20 @@
  * @property {string} company  May be empty when the source can't expose it
  *                             at the list-page level; populated downstream.
  * @property {string} location May be empty.
+ * @property {'remote' | 'hybrid' | 'onsite'} [workplaceType]
+ *                               Workplace model, populated ONLY when the source
+ *                               exposes a dedicated field (`ashby.mjs` and
+ *                               `lever.mjs` are producers; most providers omit it).
+ *                               Normalized to lowercase: 'remote' | 'hybrid' | 'onsite'.
+ *                               Never inferred from location text, title, or
+ *                               `isRemote`. Omitted when unknown or unspecified.
+ *                               Consumed by scan.mjs's opt-in `workplace_filter`.
+ * @property {string[]} [locations] Places as the source lists them, one per
+ *                               entry, before joining, without appended "Remote"
+ *                               or work models. Omitted when empty.
+ * @property {string} [country]  The source's country code when it exposes a
+ *                               dedicated field (Lever's `country`), trimmed but
+ *                               otherwise as given. Omitted when absent or null.
  * @property {string} [description] Job description text, populated ONLY when the
  *                               provider's list payload carries it for free (no
  *                               extra per-job request — the scanner is zero-token),
@@ -60,17 +74,26 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like scan-ats-full.mjs use it for recency
  *                               filtering.
- * @property {{min?: number, max?: number, currency?: string}} [salary]
+ * @property {{min?: number, max?: number, currency?: string, period?: string, posted?: {min?: number, max?: number}}} [salary]
  *                               Annualized compensation, attached ONLY when the
  *                               source exposes real figures — never inferred
  *                               (`ashby.mjs` is the reference shape; most
- *                               providers omit it). At least one of `min` / `max`
- *                               is present; most providers normalize both bounds
- *                               (filling a one-sided range from the other), but
- *                               some — e.g. `agentic-jobs.mjs` — leave the absent
- *                               bound off rather than coerce it. scan.mjs's
+ *                               providers omit it). `min` / `max` stay annualized;
+ *                               at least one of `min` / `max` is present; most
+ *                               providers normalize both bounds (filling a
+ *                               one-sided range from the other), but some —
+ *                               e.g. `agentic-jobs.mjs` — leave the absent bound
+ *                               off rather than coerce it. scan.mjs's
  *                               salary_filter reads `min ?? max` and tolerates
  *                               either bound alone.
+ *                               `period` is the normalized pay period string
+ *                               ('hour' | 'day' | 'week' | 'month' | 'year')
+ *                               when the source posts in a base unit; omitted for
+ *                               sub- or multi-unit intervals ('2 WEEK', '0.5 MONTH').
+ *                               `posted` holds the source's as-posted bounds in
+ *                               that period: never annualized, no one-sided fill
+ *                               (an absent bound stays absent), and omitted when
+ *                               `period` is absent or neither bound is given.
  *                               `currency` is the source's currency string,
  *                               upper-cased by most providers (`''` or absent
  *                               when the source gives none); it is not validated
@@ -86,9 +109,42 @@
  *                               Unique within that ATS, not across employers —
  *                               pair it with the source if you key on it. Not
  *                               read by the scanner, whose per-posting identity
- *                               is the URL. Left unset when the source exposes no
- *                               posting id — never filled with a requisition id,
- *                               which is shared by sibling postings.
+ *                               is the URL plus, where a provider sets it,
+ *                               `listingIdentity` below. Left unset when the
+ *                               source exposes no posting id — never filled
+ *                               with a requisition id, which is shared by
+ *                               sibling postings.
+ * @property {{ats_provider: string, board_slug: string, posting_id: string}} [listingIdentity]
+ *                               The posting's ATS-native identity
+ *                               (docs/listing-fingerprint.md): which ATS, which
+ *                               board on it, which posting on that board. Set it
+ *                               only when the payload carries a stable posting
+ *                               id; `git grep -l listingIdentity providers/`
+ *                               lists the providers that do (`lever.mjs` and
+ *                               `join.mjs` are short references).
+ *                               - `ats_provider`: a lowercase slug
+ *                                 (`/^[a-z][a-z0-9_-]*$/`), the provider's `id`.
+ *                               - `board_slug`: the full board namespace the
+ *                                 provider already resolved to fetch the board
+ *                                 (company slug, account slug, tenant subdomain).
+ *                               - `posting_id`: the posting's own id from the
+ *                                 payload, never parsed out of a URL and never a
+ *                                 requisition id (shared by sibling postings).
+ *                               All three are opaque strings: no trimming, case
+ *                               folding or decoding. A source whose ids are
+ *                               integers renders a safe integer in its one
+ *                               decimal form (`greenhouse.mjs`, `join.mjs`); a
+ *                               source whose ids are strings never coerces a
+ *                               stray number (`smartrecruiters.mjs`), since `1`
+ *                               and `"1"` must not become one listing.
+ *                               Omit the key when any part is missing, empty,
+ *                               padded or carries a control character: the row
+ *                               then falls back to URL dedup. scan.mjs uses the
+ *                               derived key as a dedup token next to the URL, so
+ *                               the same posting reached at two URLs is one row,
+ *                               and writes it to scan-history.tsv's
+ *                               `listing_key` column. The URL stays the
+ *                               primary dedup key.
  * @property {string} [requisitionId] The EMPLOYER's requisition id — the
  *                               schema.org/JobPosting `identifier` concept — from
  *                               wherever the ATS exposes it: a dedicated payload
@@ -112,7 +168,8 @@
  *                               Correct use: an ADVISORY grouping signal ("possible
  *                               repost / sibling req"), always paired with employer
  *                               and, where it matters, location. Per-posting
- *                               identity is the URL. scan.mjs's company+role dedup
+ *                               identity is the URL (and `listingIdentity`,
+ *                               where set). scan.mjs's company+role dedup
  *                               reads it only in the safe direction: two
  *                               same-titled postings with DIFFERENT ids are two
  *                               requisitions. Written to scan-history.tsv. The

@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -28,7 +29,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">700+ contribuidores</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Creado por <a href="https://github.com/santifer"><strong>@santifer</strong></a>, con&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.es.md#builders">800+ contribuidores</a></p>
 
 <p align="center">
 <strong>Meses mandando CVs al&nbsp;silencio.</strong><br>
@@ -280,7 +281,7 @@ Consulta [docs/SETUP.md](docs/SETUP.md) para la guía de instalación completa, 
 
 ## Uso
 
-Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto.
+Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto o compartas una captura de pantalla.
 
 ### Cómo pedir un modo
 
