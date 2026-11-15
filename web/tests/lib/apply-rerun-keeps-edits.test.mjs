@@ -25,8 +25,9 @@ test("a second fill keeps a salary the person changed by hand", async () => {
     server.once("error", reject);
     server.listen(PORT, "127.0.0.1", resolve);
   });
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  let browser;
   try {
+    browser = await chromium.launch({ channel: "chrome", headless: true });
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "domcontentloaded" });
     const { extractForm } = await import("../../src/lib/apply/extract.ts");
@@ -50,7 +51,7 @@ test("a second fill keeps a salary the person changed by hand", async () => {
       globalThis.__coApplySessions.delete(id);
     }
   } finally {
-    await browser.close();
+    await browser?.close();
     await new Promise((resolve) => server.close(resolve));
   }
 });

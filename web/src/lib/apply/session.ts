@@ -161,7 +161,7 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
   }
 }
 
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string> };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -641,8 +641,14 @@ export async function fillSession(
         const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
         if (liveType === "password") continue;
         const current = (await loc.inputValue().catch(() => "")).trim();
-        // A later run must leave a value the person already typed.
-        if (!current) await loc.fill(value);
+        // Remember only values this session wrote. A dashboard correction of one
+        // of those can replace it. A different value already on the form was
+        // typed there, so a later run leaves it.
+        const remembered = s.written?.get(fid);
+        if (!current || current === remembered) {
+          if (current !== value) await loc.fill(value);
+          (s.written ??= new Map()).set(fid, value);
+        }
       }
       ok = !gaveUp;
     } catch {
