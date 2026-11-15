@@ -183,10 +183,10 @@ function cvHtmlSections(html) {
   while (at < source.length) {
     const open = source.indexOf('<', at);
     if (open === -1) {
-      if (!rawTag) emit(source.slice(at));
+      if (!rawTag) emit(source.slice(at).replace(/\s+/g, ' '));
       break;
     }
-    if (!rawTag) emit(source.slice(at, open));
+    if (!rawTag) emit(source.slice(at, open).replace(/\s+/g, ' '));
     if (!rawTag && source.startsWith('<!--', open)) {
       const end = /--!?>/g;
       end.lastIndex = open + 4;

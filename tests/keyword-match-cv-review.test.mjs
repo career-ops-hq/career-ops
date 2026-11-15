@@ -149,3 +149,9 @@ test('review searches each complete CV term within each JD keyword, not the reve
   assert.deepEqual(coverage.cvTermsNotInJd(['Kubernetes'], '## Skills\nKubernetes orchestration'), ['Kubernetes orchestration']);
   assert.deepEqual(coverage.cvTermsNotInJd(['Kubernetes orchestration'], '## Skills\nKubernetes'), []);
 });
+
+test('HTML source whitespace stays within a skill term rather than creating a block boundary', () => {
+  const html = '<h2>Skills</h2><p>Machine\n Learning, Data\t\n Science</p><p>Deep\n<strong> Learning</strong></p>';
+  assert.deepEqual(coverage.cvTermsNotInJd([], html, { html: true }), ['Machine Learning', 'Data Science', 'Deep Learning']);
+  assert.deepEqual(coverage.cvTermsNotInJd(['Machine Learning', 'Data Science', 'Deep Learning'], html, { html: true }), []);
+});
