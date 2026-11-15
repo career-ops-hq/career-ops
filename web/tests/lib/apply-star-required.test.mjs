@@ -10,22 +10,39 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
+import { toolRequired } from "../../../tests/required-tools.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const html = readFileSync(join(here, "../fixtures/apply-star-required.html"));
+const html = readFileSync(join(here, "../fixtures/apply-star-required.html"), "utf8");
 const PORT = 3165;
+const longStar = `${"A".repeat(160)} *`;
+const innerStar = `${"A".repeat(159)}* optional`;
 
-test("a trailing star marks the field required", async () => {
+test("a trailing star marks the field required", async (t) => {
+  const pageHtml = html.replace("</form>", `
+  <label for="long-star">${longStar}</label>
+  <input id="long-star" name="long-star" type="text">
+  <label for="inner-star">${innerStar}</label>
+  <input id="inner-star" name="inner-star" type="text">
+</form>`);
   const server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(html);
+    res.end(pageHtml);
   });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(PORT, "127.0.0.1", resolve);
   });
-  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  let browser;
   try {
+    try {
+      browser = await chromium.launch({ channel: "chrome", headless: true });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      if (toolRequired("browser")) throw err;
+      t.skip(`system Chrome did not launch (${reason})`);
+      return;
+    }
     const page = await browser.newPage();
     await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "domcontentloaded" });
     const { extractForm } = await import("../../src/lib/apply/extract.ts");
@@ -34,8 +51,13 @@ test("a trailing star marks the field required", async () => {
     assert.equal(byLabel["Phone *"], true);
     assert.equal(byLabel["What is 2 * 3"], false);
     assert.equal(byLabel.Email, true);
+    assert.equal(byLabel["A".repeat(160)], true);
+    assert.equal(byLabel[`${"A".repeat(159)}*`], false);
   } finally {
-    await browser.close();
-    await new Promise((resolve) => server.close(resolve));
+    try {
+      await browser?.close();
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   }
 });
