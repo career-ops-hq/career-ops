@@ -923,12 +923,11 @@ try {
         : `Could not write the status log for #${target.num}, and could not put it back to ${oldStatus}; it now reads ${newStatus}`);
     }
   }
-  // A dashboard call that received the partial-success error above can retry
-  // the same Applied action. The tracker is already Applied, so there is no
-  // normal transition to log; append one correction observation only when the
-  // effective timeline does not already end at Applied. This is append-only
-  // and idempotent, and the correction source is folded by funnel-velocity.mjs
-  // onto the repaired stage.
+  // --repair-status-log is for a tracker that is already Applied while the
+  // ledger does not end at Applied. A failed append above puts the row back,
+  // so the retry is an ordinary transition and does not reach this branch.
+  // The correction is append-only and idempotent, and funnel-velocity.mjs
+  // folds that source onto the repaired stage.
   if (flags.repairStatusLog && !statusChanged && newStatus === 'Applied' && !flags.dryRun) {
     const logPath = statusLogPath(APPS_FILE);
     const timeline = [];
