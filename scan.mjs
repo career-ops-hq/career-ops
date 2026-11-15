@@ -3028,7 +3028,9 @@ export const ANY_REQUISITION = '*';
  * @returns {string[]} Canonical requisition IDs, as-labelled form first.
  */
 export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
-  const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  const trimmedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  // `*` is ANY_REQUISITION, the unknown marker, not a requisition ID.
+  const suppliedId = trimmedId === ANY_REQUISITION ? '' : trimmedId;
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
   let raws;

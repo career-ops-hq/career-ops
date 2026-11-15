@@ -64,6 +64,10 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     [{ url: 'https://careers.walmart.com/us/en/job/R-2593225' }, [], 'non-Workday URL is not parsed as a requisition'],
     [{ url: 'https://job-boards.greenhouse.io/acme/jobs/4244715009' }, [], 'generic board posting id is not a requisition'],
     [{ text: 'remote Canada; base CAD 140K' }, [], 'unlabelled note'],
+    [{ requisitionId: '*' }, [], 'a star id is the unknown marker, not a requisition'],
+    [{ requisitionId: ' * ' }, [], 'a padded star is the unknown marker'],
+    [{ requisitionId: '*', text: 'req JR25919' }, ['JR25919'], 'a star id falls through to labelled text'],
+    [{ requisitionId: 'JR25919' }, ['JR25919'], 'a supplied id is kept'],
   ];
   for (const [input, want, label] of cases) {
     const got = requisitionIdsForDedup(input);
@@ -87,6 +91,7 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     [new Set(['JR25919']), 'JR25919', false, 'a bare string candidate is still accepted'],
     [new Set(['JR25919', ANY_REQUISITION]), 'JR25853', true, 'an unlabelled seed does not hide a different labelled id'],
     [new Set([ANY_REQUISITION]), 'JR25853', true, 'a seed that named no requisition does not hide a later id'],
+    [new Set([ANY_REQUISITION]), requisitionIdsForDedup({ requisitionId: '*' }), false, 'a star id against an unlabelled seed is the same opening'],
     [new Set([ANY_REQUISITION]), null, false, 'a seed that named no requisition still hides a later row with no id'],
     [new Set(['JR25919']), null, false, 'an unlabelled candidate keeps the duplicate'],
     [undefined, 'JR25853', false, 'no seed data keeps the duplicate'],
