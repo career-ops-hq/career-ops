@@ -60,6 +60,9 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
     }
     if (parts[0]) u.pathname = `/${parts[0]}`;
   } else if (FIRST_SEGMENT_VENDORS.has(vendor)) {
+    // The Jobvite provider reads a board from jobs.jobvite.com/<slug> only; an
+    // app.jobvite.com feed URL works as `api:`, never as a careers_url.
+    if (vendor === 'jobvite' && u.hostname.toLowerCase() !== 'jobs.jobvite.com') return null;
     if (parts[0] && FIRST_SEGMENT_VENDORS.get(vendor).has(parts[0].toLowerCase())) return null;
     if (parts[0]) u.pathname = `/${parts[0]}`;
   } else if (Object.hasOwn(BOARD_HOST_OF, vendor)) {
@@ -108,6 +111,12 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
   } else if (vendor === 'successfactors') {
     const endpointAt = parts.findIndex((part) => /^(?:job|search|tile-search-results|services)$/i.test(part));
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
+  } else if (vendor === 'trakstar' && u.hostname.toLowerCase() === 'jsapi.recruiterbox.com') {
+    // The openings API names the board in ?client_name=; the tenant host is
+    // the same board in the form the provider reads from a careers_url.
+    const client = u.searchParams.get('client_name')?.trim().toLowerCase();
+    if (u.pathname.replace(/\/$/, '') !== '/v1/openings' || !client || !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(client)) return null;
+    return `https://${client}.hire.trakstar.com`;
   } else if (TENANT_ORIGIN_VENDORS.has(vendor)) {
     // www.applicantpro.com/openings/<tenant>/… is an alias of the tenant host.
     if (vendor === 'applicantpro' && u.hostname.toLowerCase() === 'www.applicantpro.com') {

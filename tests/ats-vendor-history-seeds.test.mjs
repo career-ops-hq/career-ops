@@ -210,6 +210,7 @@ try {
     ['schoolspring', 'https://acme.schoolspring.com/?jobid=1', 'https://acme.schoolspring.com/jobs/2', 'https://acme.schoolspring.com'],
     ['taleez', 'https://acme.taleez.com/offres/123', 'https://acme.taleez.com/offres/456', 'https://acme.taleez.com'],
     ['trakstar', 'https://acme.hire.trakstar.com/jobs/fk0abc', 'https://acme.hire.trakstar.com/jobs/fk0def', 'https://acme.hire.trakstar.com'],
+    ['trakstar', 'https://jsapi.recruiterbox.com/v1/openings?client_name=Acme&limit=50', 'https://jsapi.recruiterbox.com/v1/openings/?offset=100&client_name=acme', 'https://acme.hire.trakstar.com'],
     ['turbohire', 'https://acme.turbohire.co/job/123', 'https://acme.turbohire.co/job/456', 'https://acme.turbohire.co'],
     ['zoho-recruit', 'https://acme.zohorecruit.com/jobs/Careers/123/Backend', 'https://acme.zohorecruit.com/jobs/Careers/456', 'https://acme.zohorecruit.com'],
   ];
@@ -223,6 +224,10 @@ try {
   for (const refused of [
     'https://apply.workable.com/j/ABC123',
     'https://jobs.jobvite.com/api/x',
+    'https://app.jobvite.com/CompanyJobs/Xml.aspx?c=qAB',
+    'https://jsapi.recruiterbox.com/v1/openings',
+    'https://jsapi.recruiterbox.com/v1/other?client_name=acme',
+    'https://jsapi.recruiterbox.com/v1/openings?client_name=a.b',
     'https://recruiting.paylocity.com/Recruiting/Jobs/Details/123',
     'https://workforcenow.adp.com/mascsr/default/mdf/recruitment/recruitment.html?jobId=1',
     'https://www.comeet.com/jobs/acme/12.345/backend/67.890',
