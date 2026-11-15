@@ -640,7 +640,9 @@ export async function fillSession(
       } else {
         const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
         if (liveType === "password") continue;
-        await loc.fill(value);
+        const current = (await loc.inputValue().catch(() => "")).trim();
+        // A later run must leave a value the person already typed.
+        if (!current) await loc.fill(value);
       }
       ok = !gaveUp;
     } catch {
