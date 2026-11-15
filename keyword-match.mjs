@@ -146,6 +146,24 @@ export function keywordCount(keyword, text) {
   return total;
 }
 
+// A skill qualifier can itself be a list. Split only between skills so a
+// label such as "Measurement (oscilloscope, spectrum analyzer)" stays intact.
+function splitCvSkillTerms(text) {
+  const items = [];
+  let start = 0;
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth = Math.max(0, depth - 1);
+    else if (!depth && /[,;|]/.test(text[i])) {
+      items.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  items.push(text.slice(start));
+  return items;
+}
+
 /**
  * CV skills not named by any JD keyword. This is a review list, never a score.
  * Read explicit Skills / Core Competencies sections, not terms inferred from
@@ -188,7 +206,7 @@ export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
     if (!inSkills || /^#{3,6}\s/.test(line) || /^(?:[-*_]\s*){3,}$/.test(line)) continue;
     const items = toPlainText(line.replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, ''))
       .replace(/^[^:]+:\s*/, '');
-    for (const item of items.split(/[,;|]/)) {
+    for (const item of splitCvSkillTerms(items)) {
       const term = item.trim();
       const key = normalizeText(term);
       if (key && !terms.has(key)) terms.set(key, term);

@@ -82,3 +82,11 @@ test('real report CLI adds the same review list to JSON and Markdown without cha
     assert.equal(readFileSync(cvPath, 'utf8'), cv);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+test('review keeps separators within parenthesized skill qualifiers intact', () => {
+  const text = '## Skills\n**Lab:** Measurement (oscilloscope, spectrum analyzer), BGA rework; Analysis (signals (FFT, DFT); noise) | Documentation';
+  assert.deepEqual(coverage.cvTermsNotInJd(['BGA rework'], text), [
+    'Measurement (oscilloscope, spectrum analyzer)', 'Analysis (signals (FFT, DFT); noise)', 'Documentation',
+  ]);
+});
