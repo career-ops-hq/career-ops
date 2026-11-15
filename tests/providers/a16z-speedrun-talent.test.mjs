@@ -158,6 +158,9 @@ try {
   else fail(`live-shape pagination = ${JSON.stringify({ calls: liveShapeCalls, jobs: liveShape?.length })}`);
   if (liveWarnings.some((w) => w.includes('truncated at max_pages=2'))) pass('fetch() warns when max_pages truncates the live-shape feed');
   else fail(`live-shape truncation warning missing; captured = ${JSON.stringify(liveWarnings)}`);
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (liveShape.truncated?.reason === 'page-cap' && liveShape.truncated.fetched === 100) pass('fetch() marks the board page-cap when max_pages truncates the feed');
+  else fail(`live-shape cut: truncated = ${JSON.stringify(liveShape.truncated)}`);
 
   // #2547: total_pages outranks the short-page break. On a board that rotates
   // while a sweep runs, a page can legitimately come back 49/50 because a
@@ -193,6 +196,8 @@ try {
   // truncated: no false "raise max_pages" warning on a board read in full.
   if (rotWarnings.length === 0) pass('fetch() does not warn when max_pages exactly covers total_pages');
   else fail(`unexpected warning on a complete sweep = ${JSON.stringify(rotWarnings)}`);
+  if (rotated.truncated === undefined) pass('fetch() leaves a sweep that exactly covers total_pages unmarked');
+  else fail(`complete sweep was marked: ${JSON.stringify(rotated.truncated)}`);
 
   // Trusting total_pages is only safe because an empty page ends iteration
   // unconditionally: an OVER-reporting feed stops at the first empty response
