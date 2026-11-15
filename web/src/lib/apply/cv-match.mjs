@@ -47,9 +47,28 @@ export function isOverflowDraft(filenameLower) {
   return /\.overflow(-\d+)?\.pdf$/.test(filenameLower);
 }
 
+/**
+ * The kind (`cv` or `cover`) of a name in the standard layout
+ * `{NNN}-{company-slug}-{kind}-{candidate-slug}-{date}[-{variant}].{ext}`
+ * (lib/output-names.mjs, #6667), or null for any other name. A company or
+ * candidate slug can itself contain `cv` or `cover`, so when the caller knows
+ * the company `slug` the kind is the token right after `{NNN}-{slug}-`; with
+ * no match on that prefix it falls back to the first kind token.
+ */
+export function standardKind(filenameLower, slug) {
+  const m = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?\.[a-z0-9]+$/.exec(filenameLower);
+  if (!m) return null;
+  const head = m[1];
+  const after = slug && head.startsWith(`${slug}-`) ? head.slice(slug.length + 1) : null;
+  const probe = after ?? head.replace(/^.*?-(?=(cv|cover)-)/, '');
+  if (probe.startsWith('cv-')) return 'cv';
+  if (probe.startsWith('cover-')) return 'cover';
+  return null;
+}
+
 export function matchesTailoredCv(filenameLower, slug) {
-  if (!filenameLower.startsWith('cv-')) return false;
   if (isOverflowDraft(filenameLower)) return false;
+  if (!filenameLower.startsWith('cv-') && standardKind(filenameLower, slug) !== 'cv') return false;
   return hasToken(filenameLower, slug);
 }
 
@@ -67,7 +86,9 @@ export function matchesTailoredCv(filenameLower, slug) {
 export function matchesTailoredCover(filenameLower, slug) {
   if (filenameLower.startsWith('cv-')) return false;
   if (isOverflowDraft(filenameLower)) return false;
-  if (!hasToken(filenameLower, 'cover')) return false;
+  const kind = standardKind(filenameLower, slug);
+  if (kind === 'cv') return false;
+  if (kind !== 'cover' && !hasToken(filenameLower, 'cover')) return false;
   return hasToken(filenameLower, slug);
 }
 
