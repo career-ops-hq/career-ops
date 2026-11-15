@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 const href = (m) => pathToFileURL(join(ROOT, m)).href;
@@ -56,7 +56,7 @@ try {
       cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
     });
     chmodSync(f, 0o644);
-    assert.notEqual(denied.status, 0, 'a read-only ledger must fail the append');
+    assert.ok(exitedNonZero(denied), describeSpawn(denied, 'a read-only ledger must fail the append'));
     assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
 
     const child = spawnSync(NODE, ['--experimental-test-module-mocks', '--input-type=module', '-e', `
@@ -89,7 +89,7 @@ try {
       cwd: root, encoding: 'utf-8', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '' },
     });
     chmodSync(f, 0o644);
-    assert.notEqual(denied.status, 0, 'a write-only ledger must fail before the append');
+    assert.ok(exitedNonZero(denied), describeSpawn(denied, 'a write-only ledger must fail before the append'));
     assert.match(`${denied.stderr}\n${denied.stdout}`, /EACCES/);
     assert.equal(readFileSync(f, 'utf-8'), 'kept\n');
   });
