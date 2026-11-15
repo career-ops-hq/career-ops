@@ -128,6 +128,29 @@ try {
   } else {
     fail(`radancy.fetch() HTML short page at the boundary: ${shortAtBoundary.jobs.length} jobs, truncated = ${JSON.stringify(shortAtBoundary.jobs.truncated)}, warnings ${JSON.stringify(shortAtBoundary.lines)}`);
   }
+  // Fullness counts the cards the source sent: one malformed card (no title)
+  // does not make a full page short, so the cut is still marked.
+  const malformedCalls = [];
+  const malformedLines = [];
+  const errorBefore = console.error;
+  console.error = (m) => malformedLines.push(String(m));
+  let malformed;
+  try {
+    malformed = await radancy.fetch({ name: 'HtmlWalk', api: 'https://careers.munichre.com/en/search-jobs', max_pages: 1 }, {
+      sleep: async () => {},
+      fetchText: async (url) => {
+        malformedCalls.push(url);
+        return '<html>' + Array.from({ length: 14 }, (_, i) => card(String(7000 + i), `Role M${i}`, 'Berlin, Germany')).join('') + card('7099', '', 'Berlin, Germany') + '</html>';
+      },
+    });
+  } finally {
+    console.error = errorBefore;
+  }
+  if (malformed.length === 14 && malformedCalls.length === 1 && malformed.truncated?.reason === 'page-cap' && malformed.truncated.fetched === 14) {
+    pass('radancy.fetch() still marks a full HTML page page-cap when one of its 15 cards is malformed');
+  } else {
+    fail(`radancy.fetch() full page with a malformed card: ${malformed.length} jobs, truncated = ${JSON.stringify(malformed.truncated)}`);
+  }
   const exactFit = await htmlWalk({ max_jobs: 15 });
   if (exactFit.jobs.length === 15 && exactFit.calls === 1 && exactFit.jobs.truncated === undefined && exactFit.lines.length === 0) {
     pass('radancy.fetch() leaves an HTML walk that exactly fills max_jobs unmarked and silent');
@@ -723,7 +746,8 @@ try {
     fetchJson: async () => {
       capPage++;
       return {
-        results: `<section data-total-results="500" data-total-pages="5">${rowFor(capPage * 10 + 1)}${rowFor(capPage * 10 + 2)}</section>`,
+        // Full pages: a short page is the board's end and takes precedence over a cap.
+        results: `<section data-total-results="500" data-total-pages="5">${Array.from({ length: 100 }, (_, i) => rowFor(capPage * 1000 + i)).join('')}</section>`,
         hasJobs: true,
       };
     },
@@ -737,13 +761,33 @@ try {
     console.error = realConsoleError;
   }
   const genuineCapWarned = capWarnings.some((m) => /raise max_jobs\/max_pages/.test(m));
-  if (genuineCapJobs.length === 4 && capPage === 2 && genuineCapWarned) {
+  if (genuineCapJobs.length === 200 && capPage === 2 && genuineCapWarned) {
     pass('radancy.fetch() warns when max_pages caps the walk short of a larger source-reported totalPages');
   } else {
     fail(`radancy.fetch() genuine cap handling: jobs=${genuineCapJobs?.length} pages=${capPage} warned=${genuineCapWarned}`);
   }
-  if (genuineCapJobs.truncated?.reason === 'page-cap' && genuineCapJobs.truncated.fetched === 4) pass('radancy.fetch() marks the board partial when max_pages cuts the fragment walk');
+  if (genuineCapJobs.truncated?.reason === 'page-cap' && genuineCapJobs.truncated.fetched === 200) pass('radancy.fetch() marks the board partial when max_pages cuts the fragment walk');
   else fail(`radancy.fetch() max_pages cut: truncated = ${JSON.stringify(genuineCapJobs.truncated)}`);
+
+  // A short last fragment page is the board's end even at max_pages and with no
+  // data-total-pages to say so: no cap warning, no mark.
+  const shortFragmentWarnings = [];
+  console.error = (m) => shortFragmentWarnings.push(String(m));
+  let shortFragment;
+  try {
+    shortFragment = await radancy.fetch({ name: 'ShortFragment', careers_url: 'https://s.example/search-jobs', max_pages: 1 }, {
+      sleep: async () => {},
+      fetchJson: async () => ({ results: `<section>${rowFor(61)}${rowFor(62)}</section>`, hasJobs: true }),
+      fetchText: async () => { throw new Error('unused'); },
+    });
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (shortFragment.length === 2 && shortFragment.truncated === undefined && !shortFragmentWarnings.some((m) => /raise max_jobs\/max_pages/.test(m))) {
+    pass('radancy.fetch() treats a short last fragment page at max_pages as the end of the board');
+  } else {
+    fail(`radancy.fetch() short fragment page at max_pages: ${shortFragment.length} jobs, truncated = ${JSON.stringify(shortFragment.truncated)}, warnings ${JSON.stringify(shortFragmentWarnings)}`);
+  }
 
   // A mid-walk JSON fetch error must keep earlier pages and log why
   // pagination stopped, distinct from — and without — cap advice. Page 2

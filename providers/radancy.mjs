@@ -262,6 +262,21 @@ export function parseLegacyResults(html, origin) {
 }
 
 /**
+ * How many result cards a results page carries as the source sent it, before
+ * parseResults drops malformed or repeated ones: the modern list items, or the
+ * distinct job ids the legacy layouts put on their links. Page fullness is read
+ * from this, so one malformed card does not make a full page look short.
+ * @param {string} html
+ * @returns {number}
+ */
+export function countResultCards(html) {
+  if (typeof html !== 'string') return 0;
+  const modern = html.split(/<li class="search-results-list__item/).length - 1;
+  const ids = new Set([...html.matchAll(/data-job-id="([^"]+)"/gi)].map((m) => m[1]));
+  return Math.max(modern, ids.size);
+}
+
+/**
  * Parse one search-results page (or results fragment) into raw
  * {id, title, url, location} records. Tries the modern markup first so existing
  * tenants keep their exact behavior, then falls back to the legacy markup.
@@ -369,6 +384,9 @@ export default {
         const firstIsString = typeof first?.results === 'string';
         const firstHtml = firstIsString ? first.results : '';
         const firstRows = firstHtml ? parseResults(firstHtml, origin) : [];
+        // A short last page is the board's natural end and takes precedence over
+        // our caps: fullness counts the cards the source sent (100 requested).
+        let lastFragmentFull = countResultCards(firstHtml) >= FRAGMENT_RECORDS_PER_PAGE;
         // Proof of life only for a WELL-FORMED fragment response: a string
         // `results` — even "" (zero rows) — counts, but a missing/non-string
         // `results` or a response that crashes parsing leaves this false, so
@@ -418,6 +436,7 @@ export default {
               if (typeof json?.results !== 'string') {
                 throw new Error(`radancy: unexpected fragment response shape at page ${page} (results is not a string)`);
               }
+              lastFragmentFull = countResultCards(json.results) >= FRAGMENT_RECORDS_PER_PAGE;
               rows = json.results ? parseResults(json.results, origin) : [];
             } catch (err) {
               if (probing) throw err; // propagate ProbePageBudgetReached (or any rejection) unwrapped
@@ -448,7 +467,7 @@ export default {
           // (`max_pages`, or `ctx.maxPages` while probing) and the source
           // either gave no page count or claimed more pages than that.
           if (stopReason === 'complete' && page > lastPage && lastPage === effectiveMaxPages
-            && (totalPages == null || totalPages > effectiveMaxPages)) {
+            && (totalPages == null || totalPages > effectiveMaxPages) && lastFragmentFull) {
             stopReason = 'cap';
           }
           // `jobs.length >= maxJobs` alone isn't enough: a tenant whose real
@@ -462,7 +481,7 @@ export default {
           // lastPage`) — i.e. max_jobs itself is what kept a further page
           // from being tried, not a coincidence of how many rows fit.
           if (stopReason === 'complete'
-            && (jobs.length > maxJobs || (jobs.length === maxJobs && page <= lastPage))) {
+            && (jobs.length > maxJobs || (jobs.length === maxJobs && page <= lastPage && lastFragmentFull))) {
             stopReason = 'cap';
           }
 
@@ -512,12 +531,14 @@ export default {
     // failure here, keeps partials instead.
     let stoppedOnError = false;
     let lastPageFull = false;
+    let pageCards = 0;
     let page = 1;
     for (; page <= effectiveMaxPages; page++) {
       if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       let rows;
       try {
         const html = await fetchTextWithRetry(ctx, `${listUrl}?p=${page}`, { redirect: 'error', headers: { accept: 'text/html' } });
+        pageCards = countResultCards(html);
         rows = parseResults(html, origin);
       } catch (err) {
         if (probing) throw err; // propagate ProbePageBudgetReached (or any rejection) unwrapped
@@ -527,8 +548,9 @@ export default {
       }
       succeededOnce = true;
       if (rows.length === 0) break; // past the last page
-      // Raw rows, before dedup: a short page is the board's natural end.
-      lastPageFull = rows.length >= HTML_RECORDS_PER_PAGE;
+      // The cards the source sent, before parseResults drops any: a short page
+      // is the board's natural end.
+      lastPageFull = pageCards >= HTML_RECORDS_PER_PAGE;
 
       let fresh = 0;
       for (const row of rows) {
