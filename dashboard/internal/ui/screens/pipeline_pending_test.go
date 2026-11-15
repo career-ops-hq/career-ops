@@ -318,8 +318,9 @@ func TestInboxTrackerKeysDoNothing(t *testing.T) {
 	m := onInbox(t, newInboxModel(t, inboxRows()))
 	m, _ = press(m, "j")
 	before := m
-	// `e` queues the row and has its own tests (pipeline_pending_queue_test.go).
-	for _, k := range []string{"c", "d", "y", "D", "v", "C", "enter", "x", "u", "T", "i", "n", " "} {
+	// `e` queues the row, and `x` and `u` skip and undo; each has its own tests
+	// (pipeline_pending_queue_test.go, pipeline_pending_skip_test.go).
+	for _, k := range []string{"c", "d", "y", "D", "v", "C", "enter", "T", "i", "n", " "} {
 		after, cmds := press(m, k)
 		if cmds[0] != nil {
 			t.Errorf("%q returned a command on the Inbox", k)
