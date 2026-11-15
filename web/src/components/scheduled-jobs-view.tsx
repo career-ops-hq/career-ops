@@ -24,6 +24,7 @@ import { RunHistoryDrawer } from "./scheduled-scans/run-history-drawer";
 import type { ScheduledJob, JobRun } from "@/lib/scheduled-jobs";
 import { instrumentSerif } from "@/lib/fonts";
 import { updateScheduledJobRequest } from "@/lib/scheduled-job-client.mjs";
+import { scheduledScansBody } from "@/lib/scheduled-scans-phase.mjs";
 import { isSchedulerStatusPayload } from "@/lib/scheduled-scheduler-status.mjs";
 
 type Store = { jobs: ScheduledJob[]; runs: JobRun[] };
@@ -49,7 +50,8 @@ const OS_SCHEDULERS: Record<string, { title: string; install: string } | undefin
 export function ScheduledJobsView() {
   const [store, setStore] = useState<Store>({ jobs: [], runs: [] });
   const [scheduler, setScheduler] = useState<SchedulerStatus | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [filterTab, setFilterTab] = useState<"all" | "active" | "paused">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -60,6 +62,7 @@ export function ScheduledJobsView() {
 
   const loadData = async () => {
     setLoading(true);
+    setPhase("loading");
     setError(null);
     try {
       const [jobsResponse, schedulerResponse] = await Promise.all([
@@ -75,8 +78,10 @@ export function ScheduledJobsView() {
         runs: Array.isArray(resJobs.runs) ? resJobs.runs : [],
       });
       if (schedulerResponse.ok && isSchedulerStatusPayload(resScheduler)) setScheduler(resScheduler as SchedulerStatus);
+      setPhase("ready");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load scheduled scans.");
+      setPhase("error");
     } finally {
       setLoading(false);
     }
@@ -296,7 +301,9 @@ export function ScheduledJobsView() {
       </div>
 
       {/* Jobs Grid */}
-      {filteredJobs.length === 0 ? (
+      {scheduledScansBody(phase, store.jobs.length) === "loading" ? (
+        <p role="status" className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted">Loading scheduled scans…</p>
+      ) : scheduledScansBody(phase, store.jobs.length) === "error" ? null : filteredJobs.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-border p-12 text-center">
           <CalendarClock className="mx-auto size-8 text-faint" />
           <h2 className="mt-3 text-sm font-semibold text-foreground">No scheduled scans found</h2>
