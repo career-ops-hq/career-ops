@@ -23,9 +23,9 @@ const VERB_ED_BULLET_REGEX = /^[-*]\s+[A-Z][a-z]+ed\b/;
  */
 function visibleText(raw) {
   return raw
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<style\b[\s\S]*?<\/style[^>]*>/gi, ' ')
+    .replace(/<script\b[\s\S]*?<\/script[^>]*>/gi, ' ')
+    .replace(/<!--[\s\S]*?--!?>/g, ' ')
     .replace(/<li\b[^>]*>/gi, '\n- ')
     .replace(/<[^>]+>/g, ' ');
 }

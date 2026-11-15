@@ -61,6 +61,23 @@ test('HTML: ignores em-dashes in <style>, <script> and comments', () => {
   assert.equal(res.passed, true, res.warnings.join('; '));
 });
 
+test('HTML: end tags with spaces or attributes and --!> comments are still dropped', () => {
+  const sample = `<html><head>
+<style media="print">
+/* page margin — matches generate-pdf.mjs — keep in sync */
+</style >
+<script type="module">// helper — not CV text</script foo="bar">
+</head><body>
+<!-- section break — template note --!>
+<ul>
+  <li>Cut p99 API latency from 420ms to 110ms by moving session reads to Redis.</li>
+  <li>Built a GitHub Actions matrix that trimmed CI runtimes by 9 minutes.</li>
+</ul>
+</body></html>`;
+  const res = checkCvHumanTone(sample);
+  assert.equal(res.passed, true, res.warnings.join('; '));
+});
+
 test('HTML: <li> bullets count toward the <Verb>ed streak', () => {
   const sample = `<ul>
 <li>Deployed service B to prod.</li><li>Configured monitoring alerts.</li>
