@@ -2686,15 +2686,13 @@ tracked_companies:
 
   - name: Dialpad
     careers_url: https://www.dialpad.com/careers
-    scan_method: websearch
-    scan_query: '"dialpad" "AI" "Solutions" OR "Engineer" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com'
+    api: https://boards-api.greenhouse.io/v1/boards/dialpad/jobs
     notes: "Voice AI for business comms."
     enabled: true
 
   - name: Gong
     careers_url: https://www.gong.io/careers
-    scan_method: websearch
-    scan_query: 'site:gong.io/careers "AI" OR "Solutions" OR "Architect"'
+    api: https://boards-api.greenhouse.io/v1/boards/gongio/jobs
     notes: "Revenue intelligence with voice AI."
     enabled: true
 
