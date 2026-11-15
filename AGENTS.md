@@ -182,6 +182,7 @@ Two separate axes:
 | Asks to compare offers | `ofertas` |
 | Wants LinkedIn outreach | `contacto` — finds the hiring manager, recruiter or team peers and drafts a message within LinkedIn's connection-request limit |
 | Wants a formal application email | `email` — draft only; never sends, submits or clicks anything |
+| Wants to create/pitch a role that doesn't exist yet at a target company | `gambit` — records the pursuit as `Evaluated`, and as `Speculative` only after the user confirms the pitch was sent |
 | Asks for company research | `deep` |
 | Preps for interview at specific company | `interview-prep` |
 | Wants a time-blocked prep plan for an upcoming interview | `interview/plan` |
@@ -338,6 +339,7 @@ A new tracker row is one TSV file per evaluation at `{DATA_ROOT}/batch/tracker-a
 | State | When to use |
 |-------|-------------|
 | `Evaluated` | Report completed, pending decision |
+| `Speculative` | Create-a-role gambit pitch in flight (no posting yet) |
 | `Applied` | Application sent |
 | `Responded` | Company responded |
 | `Assessment` | Online assessment or asynchronous screening |
