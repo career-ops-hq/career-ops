@@ -23,12 +23,23 @@ import { mkdtempSync, writeFileSync, chmodSync, rmSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { tmpdir } from 'os';
+import { fileURLToPath } from 'url';
 import { pass, fail } from './helpers.mjs';
 import { checkStatus, highestReleaseTag, curlGet, gitRemoteVersion } from '../update-system.mjs';
 
 console.log('\n🧪 Testing update-check git fallback...');
 
 const MAIN = ['check', '--channel', 'main'];
+
+// The updater reads its own HEAD from the repository root, not from the
+// process working directory, so read it from the same place. '' when this is
+// not a git checkout (a tarball install): check() then has no local commit,
+// no drift check runs, and the version comparison alone decides.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
+let HEAD = '';
+try {
+  HEAD = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+} catch { /* not a git checkout */ }
 
 /**
  * A curlGet double. `answers` maps a URL substring to a body; any other URL
@@ -108,11 +119,14 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
   if (res.changelog === '') pass('the git path carries an empty changelog (modes/update.md renders the releases link for it)');
   else fail(`the git path carried changelog ${JSON.stringify(res.changelog)}`);
 
-  // Same version, but with curl blocked the main-ref lookup failed too, so
-  // check() cannot tell whether this checkout matches main (see test 10).
+  // Same version, but with curl blocked the main-ref lookup failed too, so a
+  // git checkout cannot tell whether it matches main (see test 10).
   const current = await run(MAIN, { curl: fakeCurl(), git: fakeGit({ ok: true, version: '1.33.0' }) });
-  if (current.status === 'update-available' && current.remote === '1.33.0' && current.reason === 'main-commit-unresolved') {
-    pass('curl blocked + git reachable + same version → update-available (main-commit-unresolved), since main\'s commit is unknown');
+  const expectCurrent = HEAD
+    ? current.status === 'update-available' && current.reason === 'main-commit-unresolved'
+    : current.status === 'up-to-date';
+  if (expectCurrent && current.remote === '1.33.0') {
+    pass(`curl blocked + git reachable + same version → ${current.status}${HEAD ? " (main-commit-unresolved), since main's commit is unknown" : ' (no git checkout)'}`);
   } else fail(`curl blocked + git at the same version → ${JSON.stringify(current)}`);
 }
 
@@ -242,8 +256,10 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
 // The drift check needs main's commit. When the ref lookup fails and the
 // versions match, check() used to return up-to-date, and modes/update.md
 // Step 1 then ended the flow before the main preview the user asked for.
-// This test runs inside a git checkout, so check() has a local commit.
-{
+// Needs a git checkout, so check() has a local commit to compare.
+if (!HEAD) {
+  console.log('  ⏭️  not a git checkout: skipping the unresolved-main-commit cases');
+} else {
   const sameVersion = { '/main/VERSION': '1.34.0\n' };
   const unresolved = await run(MAIN, { curl: fakeCurl(sameVersion), git: fakeGit({ ok: true, version: '1.34.0' }), local: '1.34.0' });
   if (unresolved.status === 'update-available' && unresolved.reason === 'main-commit-unresolved') {
@@ -254,9 +270,8 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
 
   // Control: main's commit resolves to this checkout's HEAD → still up-to-date,
   // with no drift fetch (equal SHAs skip it).
-  const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim();
   const resolved = await run(MAIN, {
-    curl: fakeCurl({ ...sameVersion, '/git/ref/heads/main': JSON.stringify({ object: { sha: head } }) }),
+    curl: fakeCurl({ ...sameVersion, '/git/ref/heads/main': JSON.stringify({ object: { sha: HEAD } }) }),
     git: fakeGit({ ok: true, version: '1.34.0' }),
     local: '1.34.0',
   });
