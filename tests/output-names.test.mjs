@@ -100,6 +100,41 @@ test('parseOutputName: legacy and malformed names are not standard', () => {
   }
 });
 
+test('parseOutputName: a known company resolves kind tokens inside either slug', () => {
+  const cases = [
+    { report: 24, company: 'acme-cv-tools', kind: 'cv', candidate: 'Jane Smith', date: DATE },
+    { report: 24, company: 'the-cv-centre', kind: 'cover', candidate: 'Avery Quinn', date: DATE },
+    { report: 24, company: 'acme', kind: 'cv', candidate: 'Cover Dana', date: DATE },
+    { report: 24, company: 'zep', kind: 'cover', candidate: 'Robin Cover Jones', date: DATE, variant: 'ats' },
+  ];
+  for (const c of cases) {
+    const name = buildOutputName(c);
+    const parsed = parseOutputName(name, { company: kebab(c.company) });
+    assert.ok(parsed, name);
+    assert.equal(parsed.company, kebab(c.company), name);
+    assert.equal(parsed.kind, c.kind, name);
+    assert.equal(parsed.candidate, kebab(c.candidate), name);
+    // Without the report's slug the same name is still ambiguous, never misread.
+    const bare = parseOutputName(name);
+    if (bare) assert.equal(bare.company, kebab(c.company), name);
+  }
+  // A name that does not start with the report's slug is not that report's artifact.
+  assert.equal(parseOutputName('024-other-cv-jane-smith-2026-11-07.pdf', { company: 'zep' }), null);
+});
+
+test('parseOutputName: both slugs must be kebab-case, and the date a real date', () => {
+  for (const name of [
+    '024-zep-cv-avery_quinn-2026-11-07.pdf',
+    '024-zep-cv-Jane Smith-2026-11-07.pdf',
+    '024-zep-cv-Avery-Quinn-2026-11-07.pdf',
+    '024-Zep-cv-avery-quinn-2026-11-07.pdf',
+    '024-zep-cv-avery-quinn-2026-13-45.pdf',
+  ]) {
+    assert.equal(parseOutputName(name), null, name);
+    assert.equal(parseOutputName(name, { company: name.split('-')[1] }), null, name);
+  }
+});
+
 function withReports(files, fn) {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-output-names-'));
   try {

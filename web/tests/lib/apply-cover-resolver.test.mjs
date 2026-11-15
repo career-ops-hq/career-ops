@@ -257,3 +257,23 @@ test('matchesTailoredCover: an over-budget draft beside the cover is never the c
   assert.equal(matchesTailoredCover('acme-vp-marketing-cover.overflow-2.pdf', 'acme'), false);
   assert.equal(matchesTailoredCover('acme-vp-marketing-cover.pdf', 'acme'), true);
 });
+
+test('matchers: report-leading names from lib/output-names.mjs (#6667)', async () => {
+  const { matchesTailoredCv, matchesTailoredCover } = await import('../../src/lib/apply/cv-match.mjs');
+  // The new layout: {NNN}-{company}-{kind}-{candidate}-{date}.pdf
+  assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07.pdf', 'zep'), true);
+  assert.equal(matchesTailoredCover('024-zep-cv-avery-quinn-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCover('024-zep-cover-avery-quinn-2026-11-07.pdf', 'zep'), true);
+  assert.equal(matchesTailoredCv('024-zep-cover-avery-quinn-2026-11-07.pdf', 'zep'), false);
+  // A candidate named "cover ..." does not turn a CV into a cover letter, and
+  // a company with "cv" in it does not turn a cover letter into a CV.
+  assert.equal(matchesTailoredCover('024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCv('024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'), true);
+  assert.equal(matchesTailoredCv('024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme-cv-tools'), false);
+  assert.equal(matchesTailoredCover('024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme-cv-tools'), true);
+  // Variants, drafts and other companies keep their existing behavior.
+  assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07-ats.pdf', 'zep'), true);
+  assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07.overflow.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCv('024-zepellin-cv-avery-quinn-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCv('cv-avery-quinn-zep-2026-11-07.pdf', 'zep'), true);
+});
