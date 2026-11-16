@@ -425,6 +425,13 @@ ok('REGRESSION: two employer-board URLs are still proof of two distinct openings
   assert.equal(rows.length, 2, 'employer-controlled URLs still block the fuzzy tier');
 });
 
+ok('one Workday posting with and without its /en-US/ locale stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Director-of-Marketing_R123',
+    'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Director-of-Marketing_R123');
+  assertMerged(rows, 'one Workday posting as the scanner stores it and as a browser shows it');
+});
+
 ok('one Greenhouse posting on boards. and job-boards.greenhouse.io stays ONE row', () => {
   const rows = mergeTwoWithUrls(
     'https://boards.greenhouse.io/acme/jobs/7001',
