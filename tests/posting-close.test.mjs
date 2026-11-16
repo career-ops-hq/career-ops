@@ -262,7 +262,11 @@ test('a greenhouse src query does not take the close day of the bare posting', (
   const text = historyRow({ url: board, closes_at: '2026-12-01' });
   const index = closeDatesByUrl(text);
   assert.equal(closeDateForUrl(index, `${board}?src=email`), '');
+  assert.equal(closeDateForUrl(index, `${board}?src=`), '');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=8028783'), '2026-12-01');
+  const encoded = closeDatesByUrl(historyRow({ url: `${board}?src=a%26b`, closes_at: '2026-12-01' }));
+  assert.equal(closeDateForUrl(encoded, `${board}?src=a&src=b`), '');
+  assert.equal(closeDateForUrl(encoded, `${board}?src=a%26b`), '2026-12-01');
 });
 
 test('two known language versions do not share a close day', () => {
