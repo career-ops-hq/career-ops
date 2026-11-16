@@ -1,10 +1,12 @@
-// The dashboard's Inbox tab (#5269) reads data/pipeline.md in Go. Two things
+// The dashboard's Inbox tab (#5269) reads data/pipeline.md in Go. Three things
 // it restates by hand must stay in step with the Node side:
 //
 // - the Pending/Processed headings, a Go copy of SECTION_PAIRS in
 //   lib/pipeline-sections.mjs, and the accent fold applied to them;
 // - the row grammar of the web inbox's parseInbox, held to it by one fixture
-//   that dashboard/internal/data/pending_test.go also reads.
+//   that dashboard/internal/data/pending_test.go also reads;
+// - the batch-input.tsv URL key, held to Node's `new URL(raw).href` by a
+//   second fixture the Go test reads.
 //
 // The web half runs only when web/src exists (a core-only install has none).
 import assert from 'node:assert/strict';
@@ -68,6 +70,17 @@ check('every heading in lib/pipeline-sections.mjs uses only letters the Go fold 
 });
 
 const fixtureDir = join(ROOT, 'dashboard', 'internal', 'data', 'testdata');
+
+check('pending-url-keys.json holds the href this Node gives each URL, as sync-batch-input.mjs writes it', () => {
+  // pending_test.go holds the Go key of each URL to this href, so a row of
+  // pipeline.md finds the batch-input.tsv line sync-batch-input.mjs wrote for it.
+  const cases = JSON.parse(readFileSync(join(fixtureDir, 'pending-url-keys.json'), 'utf8'));
+  assert.ok(cases.length > 0, 'the fixture lists no URLs');
+  for (const { url, href } of cases) {
+    assert.equal(new URL(url).href, href, `href of ${JSON.stringify(url)}`);
+  }
+});
+
 const webTable = join(ROOT, 'web', 'src', 'lib', 'pipeline-table.mjs');
 const webRank = join(ROOT, 'web', 'src', 'lib', 'core', 'inbox-rank.mjs');
 
