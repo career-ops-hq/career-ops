@@ -425,6 +425,12 @@ function assertPiArgvUnfenced(args) {
  * grep, find and ls alone. A writing worker keeps Pi's default tools: its record
  * grants writes and fetches, which is what those tools give.
  *
+ * Global extensions (`~/.pi/agent/extensions`) still load, and their tools are
+ * filtered by the same allowlist. One that registers its own tool under an
+ * allowed name, such as `read`, is code the user installed for every Pi run, as
+ * Claude's fenced runs still load the user's own settings and hooks. The fence
+ * restricts what the model is handed, not the user's own setup.
+ *
  * The flags go first. Pi's `-p` takes the element after it as the prompt, so
  * nothing may be spliced between `-p` and the prompt.
  *

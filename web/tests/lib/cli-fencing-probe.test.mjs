@@ -468,6 +468,26 @@ test("a Pi whose version cannot be read is refused", needsSpawnableStub, (t) => 
   assert.equal(spawnCount(), 2, "an unreadable version must be re-read, not cached");
 });
 
+test("a Pi probe that fails is refused even when it prints a version", needsSpawnableStub, (t) => {
+  // Given a launch that crashes: Node prints its own version to stderr and the
+  // process exits nonzero, so the output holds a version-shaped string that is
+  // not Pi's
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-version-crash-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const crashing = path.join(dir, "pi-crash.mjs");
+  fs.writeFileSync(crashing, '#!/usr/bin/env node\nprocess.stderr.write("Node.js v22.13.0\\n");\nprocess.exit(1);\n');
+  fs.chmodSync(crashing, 0o755);
+  // And a failing launch that prints a current-looking version on stdout
+  const failing = path.join(dir, "pi-fail.mjs");
+  fs.writeFileSync(failing, '#!/usr/bin/env node\nprocess.stdout.write("1.5.2\\n");\nprocess.exit(2);\n');
+  fs.chmodSync(failing, 0o755);
+
+  // Then neither passes: only a clean exit's stdout is read as the version
+  for (const bin of [crashing, failing]) {
+    assert.throws(() => assertPiVersionSupported(bin), /Could not read the version of Pi/, path.basename(bin));
+  }
+});
+
 test("a supported Pi is asked once, until the binary changes", needsSpawnableStub, (t) => {
   // Given a current Pi
   const { bin, versionFile, spawnCount } = stubPi(t, "1.5.2\n");

@@ -383,7 +383,7 @@ function launchIdentity(binPath, launch) {
  * starting it outside the project keeps that true for any build that does not.
  *
  * @param {string} binPath
- * @returns {string} The binary's output, or "" when it could not be read.
+ * @returns {string} The binary's stdout, or "" when it did not exit cleanly.
  */
 function readPiVersionSync(binPath) {
   let launch;
@@ -407,7 +407,11 @@ function readPiVersionSync(binPath) {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
   });
-  const output = result.error ? "" : `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  // Only a clean exit counts, and only stdout, where `pi --version` prints. A
+  // failed launch can still print a version-shaped string, such as Node's own
+  // "Node.js v22.13.0" on stderr when Pi's entry script crashes, and reading that
+  // as Pi's version would let any crash through the check.
+  const output = !result.error && result.status === 0 ? (result.stdout ?? "") : "";
   if (parseVersion(output)) piVersionCache.set(binPath, { identity, version: output });
   return output;
 }
