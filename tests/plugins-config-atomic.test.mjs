@@ -183,3 +183,124 @@ test('a link target applies ".." after a directory symlink inside it', async (t)
     rmSync(shared, { recursive: true, force: true });
   }
 });
+
+test('a backslash in a link target stays part of the file name', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows treats a backslash as a separator');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-slash-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const literal = join(config, 'team\\settings.yml');
+  const decoy = join(config, 'team', 'settings.yml');
+  try {
+    mkdirSync(join(config, 'team'), { recursive: true });
+    writeFileSync(decoy, 'decoy: true\n');
+    symlinkSync('team\\settings.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?slash=${Date.now()}`);
+    setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' });
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.match(readFileSync(literal, 'utf8'), /enabled: true/);
+    assert.equal(readFileSync(decoy, 'utf8'), 'decoy: true\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a missing intermediate link component does not choose another file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-missing-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  try {
+    mkdirSync(config);
+    symlinkSync('missing/../target.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?missing=${Date.now()}`);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ENOENT',
+    );
+    assert.equal(existsSync(join(config, 'target.yml')), false);
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a dangling directory link does not climb out with ".."', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-dangle-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const alias = join(config, 'alias');
+  try {
+    mkdirSync(config);
+    symlinkSync('no-such-dir', alias);
+    symlinkSync('alias/../target.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?dangle=${Date.now()}`);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ENOENT',
+    );
+    assert.equal(existsSync(join(config, 'target.yml')), false);
+    assert.equal(lstatSync(alias).isSymbolicLink(), true);
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a repeated directory link still reaches the final file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-repeat-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const alias = join(config, 'alias');
+  try {
+    mkdirSync(config);
+    symlinkSync('.', alias);
+    symlinkSync('alias/alias/target.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?repeat=${Date.now()}`);
+    setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' });
+    assert.equal(lstatSync(alias).isSymbolicLink(), true);
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.match(readFileSync(join(config, 'target.yml'), 'utf8'), /enabled: true/);
+    assert.match(readFileSync(link, 'utf8'), /enabled: true/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a non-directory step in a link target does not choose another file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-file-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  try {
+    mkdirSync(config);
+    writeFileSync(join(config, 'regular'), 'x');
+    symlinkSync('regular/../target.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?file=${Date.now()}`);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ENOTDIR',
+    );
+    assert.equal(existsSync(join(config, 'target.yml')), false);
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

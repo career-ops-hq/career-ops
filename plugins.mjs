@@ -518,20 +518,21 @@ function resolvedConfigFile(file) {
       if (err?.code === 'ENOENT') return current;
       throw err;
     }
-    current = resolveLinkTarget(path.dirname(current), link, seen);
+    current = resolveLinkTarget(path.dirname(current), link);
   }
 }
 
 /**
  * Walk one symlink target in filesystem order. ".." is applied after a
  * directory link, and a missing final file stays a missing final file.
+ * A missing or non-directory step fails the save instead of picking another file.
  *
  * @param {string} parentDir
  * @param {string} link
  * @param {Set<string>} seen
  * @returns {string}
  */
-function resolveLinkTarget(parentDir, link, seen) {
+function resolveLinkTarget(parentDir, link, expanding = new Set()) {
   let base = parentDir;
   try {
     base = realpathSync(parentDir);
@@ -541,7 +542,9 @@ function resolveLinkTarget(parentDir, link, seen) {
   const root = path.parse(path.isAbsolute(link) ? link : base).root;
   let current = path.isAbsolute(link) ? root : base;
   const body = path.isAbsolute(link) ? link.slice(root.length) : link;
-  const segments = body.split(/[/\\]/).filter((seg) => seg !== '' && seg !== '.');
+  // On POSIX a backslash is a filename character. Windows accepts both separators.
+  const separators = path.sep === '\\' ? /[/\\]/ : /\//;
+  const segments = body.split(separators).filter((seg) => seg !== '' && seg !== '.');
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (seg === '..') {
@@ -549,41 +552,40 @@ function resolveLinkTarget(parentDir, link, seen) {
       continue;
     }
     const next = path.join(current, seg);
+    const last = i === segments.length - 1;
     let st;
     try {
       st = lstatSync(next);
     } catch (err) {
       if (err?.code !== 'ENOENT') throw err;
-      return appendMissing(next, segments.slice(i + 1));
+      // A missing final file is created. A missing step in the middle is ENOENT,
+      // the same as the reader, so "missing/../target.yml" does not pick another file.
+      if (!last) throw Object.assign(new Error(`missing path component: ${next}`), { code: 'ENOENT' });
+      return next;
     }
-    const last = i === segments.length - 1;
     if (!last && st.isSymbolicLink()) {
-      if (seen.has(next)) return next;
-      seen.add(next);
-      current = resolveLinkTarget(path.dirname(next), readlinkSync(next), seen);
+      if (expanding.has(next)) throw Object.assign(new Error(`symlink cycle: ${next}`), { code: 'ELOOP' });
+      expanding.add(next);
       try {
-        current = realpathSync(current);
-      } catch (err) {
-        if (err?.code !== 'ENOENT') throw err;
-        return appendMissing(current, segments.slice(i + 1));
+        current = resolveLinkTarget(path.dirname(next), readlinkSync(next), expanding);
+        try {
+          current = realpathSync(current);
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err;
+          throw Object.assign(new Error(`dangling link: ${current}`), { code: 'ENOENT' });
+        }
+      } finally {
+        expanding.delete(next);
+      }
+      if (!lstatSync(current).isDirectory()) {
+        throw Object.assign(new Error(`not a directory: ${current}`), { code: 'ENOTDIR' });
       }
       continue;
     }
+    if (!last && !st.isDirectory()) {
+      throw Object.assign(new Error(`not a directory: ${next}`), { code: 'ENOTDIR' });
+    }
     current = next;
-  }
-  return current;
-}
-
-/**
- * @param {string} start
- * @param {string[]} segments
- * @returns {string}
- */
-function appendMissing(start, segments) {
-  let current = start;
-  for (const seg of segments) {
-    if (seg === '..') current = path.dirname(current);
-    else if (seg !== '.') current = path.join(current, seg);
   }
   return current;
 }
