@@ -47,28 +47,49 @@ export function isOverflowDraft(filenameLower) {
   return /\.overflow(-\d+)?\.pdf$/.test(filenameLower);
 }
 
+const STANDARD_NAME = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?\.[a-z0-9]+$/;
+
 /**
  * The kind (`cv` or `cover`) of a name in the standard layout
  * `{NNN}-{company-slug}-{kind}-{candidate-slug}-{date}[-{variant}].{ext}`
- * (lib/output-names.mjs, #6667), or null for any other name. A company or
- * candidate slug can itself contain `cv` or `cover`, so when the caller knows
- * the company `slug` the kind is the token right after `{NNN}-{slug}-`; with
- * no match on that prefix it falls back to the first kind token.
+ * (lib/output-names.mjs, #6667), or null when the name is not in that layout,
+ * or is ambiguous. A company or candidate slug can itself contain `cv` or
+ * `cover`, so the kind cannot always be read off the name alone:
+ *
+ *  - With the caller's company `slug`, the name must start `{NNN}-{slug}-`. The
+ *    slug may be only the front of the report's company slug (`veeva` for
+ *    `veeva-systems`), so what follows is read for its kind token. One token
+ *    gives the kind. Two or more is ambiguous (`acme` against
+ *    `acme-cv-tools-cover-jane`): null, since attaching nothing beats attaching
+ *    the wrong document.
+ *  - Without a slug the same single-token rule applies to the whole name.
+ *
+ * The slug is a prefix test, never a substring one, so a candidate called
+ * `Zep` is not the company `zep`.
  */
 export function standardKind(filenameLower, slug) {
-  const m = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?\.[a-z0-9]+$/.exec(filenameLower);
+  const m = STANDARD_NAME.exec(filenameLower);
   if (!m) return null;
   const head = m[1];
-  const after = slug && head.startsWith(`${slug}-`) ? head.slice(slug.length + 1) : null;
-  const probe = after ?? head.replace(/^.*?-(?=(cv|cover)-)/, '');
-  if (probe.startsWith('cv-')) return 'cv';
-  if (probe.startsWith('cover-')) return 'cover';
-  return null;
+  let rest = head;
+  if (slug) {
+    if (!head.startsWith(`${slug}-`)) return null;
+    rest = head.slice(slug.length + 1);
+  }
+  const kinds = rest.split('-').filter((part) => part === 'cv' || part === 'cover');
+  if (kinds.length !== 1) return null;
+  return kinds[0];
+}
+
+/** True when the name is in the standard layout, whatever its kind. */
+export function isStandardName(filenameLower) {
+  return STANDARD_NAME.test(filenameLower);
 }
 
 export function matchesTailoredCv(filenameLower, slug) {
   if (isOverflowDraft(filenameLower)) return false;
-  if (!filenameLower.startsWith('cv-') && standardKind(filenameLower, slug) !== 'cv') return false;
+  if (isStandardName(filenameLower)) return standardKind(filenameLower, slug) === 'cv';
+  if (!filenameLower.startsWith('cv-')) return false;
   return hasToken(filenameLower, slug);
 }
 
@@ -86,9 +107,8 @@ export function matchesTailoredCv(filenameLower, slug) {
 export function matchesTailoredCover(filenameLower, slug) {
   if (filenameLower.startsWith('cv-')) return false;
   if (isOverflowDraft(filenameLower)) return false;
-  const kind = standardKind(filenameLower, slug);
-  if (kind === 'cv') return false;
-  if (kind !== 'cover' && !hasToken(filenameLower, 'cover')) return false;
+  if (isStandardName(filenameLower)) return standardKind(filenameLower, slug) === 'cover';
+  if (!hasToken(filenameLower, 'cover')) return false;
   return hasToken(filenameLower, slug);
 }
 

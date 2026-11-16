@@ -265,12 +265,23 @@ test('matchers: report-leading names from lib/output-names.mjs (#6667)', async (
   assert.equal(matchesTailoredCover('024-zep-cv-avery-quinn-2026-11-07.pdf', 'zep'), false);
   assert.equal(matchesTailoredCover('024-zep-cover-avery-quinn-2026-11-07.pdf', 'zep'), true);
   assert.equal(matchesTailoredCv('024-zep-cover-avery-quinn-2026-11-07.pdf', 'zep'), false);
-  // A candidate named "cover ..." does not turn a CV into a cover letter, and
-  // a company with "cv" in it does not turn a cover letter into a CV.
-  assert.equal(matchesTailoredCover('024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'), false);
-  assert.equal(matchesTailoredCv('024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'), true);
+  // With the full company slug the kind is the token right after it, so a
+  // "cv" in the company or a "cover" in the candidate's name does not mislead.
   assert.equal(matchesTailoredCv('024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme-cv-tools'), false);
   assert.equal(matchesTailoredCover('024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme-cv-tools'), true);
+  // When the slug is only the front of the company, or the name carries two
+  // kind tokens, the kind is ambiguous: neither matcher claims the file.
+  assert.equal(matchesTailoredCv('024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCover('024-acme-cv-tools-cover-jane-smith-2026-11-07.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCv('024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'), false);
+  assert.equal(matchesTailoredCover('024-acme-cv-cover-dana-2026-11-07.pdf', 'acme'), false);
+  // A tracker slug that is only a prefix of the report's company still finds it.
+  assert.equal(matchesTailoredCv('330-veeva-systems-cv-robin-jones-2026-11-07.pdf', 'veeva'), true);
+  assert.equal(matchesTailoredCover('330-veeva-systems-cover-robin-jones-2026-11-07.pdf', 'veeva'), true);
+  // The company is a prefix match: a candidate called Zep is not the company.
+  assert.equal(matchesTailoredCv('024-acme-cv-zep-smith-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCover('024-acme-cover-zep-smith-2026-11-07.pdf', 'zep'), false);
+  assert.equal(matchesTailoredCv('024-acme-cv-robin-jones-2026-11-07.pdf', 'robin'), false);
   // Variants, drafts and other companies keep their existing behavior.
   assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07-ats.pdf', 'zep'), true);
   assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07.overflow.pdf', 'zep'), false);
