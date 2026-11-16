@@ -2930,6 +2930,11 @@ tracked_companies:
     notes: "Limerick / Dublin / Berlin. Software for the waste, recycling and utilities industry."
     enabled: true
 
+  - name: Avalara
+    careers_url: https://app.careerpuck.com/job-board/avalara
+    notes: "Remote / US / India. Tax compliance software. Board hosted on CareerPuck; job links go to the employer's own ATS."
+    enabled: false
+
   # -- DACH & European AI ecosystem --
   # All entries below have been verified against the Greenhouse / Ashby /
   # Lever / Workable APIs or live job boards. Greenhouse boards expose a

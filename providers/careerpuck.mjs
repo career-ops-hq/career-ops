@@ -21,9 +21,14 @@
 // (`bareNumeric` mode) and then reduced to text by htmlToText, which strips
 // markup before and after each further decode.
 //
-// Posting URL: `publicUrl`, accepted only on an https `app.careerpuck.com`
-// host. `applyUrl` points at the employer's upstream ATS (iCIMS, Workday, ...)
-// on a host this provider cannot vouch for, so it is not read.
+// Posting URL: `applyUrl`, the employer's own application link on its upstream
+// ATS (iCIMS, Workday, ...), when it is an https URL (Source Indexing Policy
+// rule 2: the shortest verifiable path to the employer). It is stored and never
+// fetched by this provider. Otherwise the row's `publicUrl` on
+// `app.careerpuck.com` (https host only) is the fallback.
+//
+// Language: the row's `language` (e.g. "english") is passed through as the
+// source names it.
 //
 // Failure answers: an unknown permalink answers 404, which reaches
 // verify-portals as a 404 naming the board. A board with no open roles
@@ -92,21 +97,27 @@ function str(v) {
 }
 
 /**
- * The posting page URL from `publicUrl`, accepted only on an https
- * `app.careerpuck.com` host.
- * @param {unknown} raw
+ * The posting URL: the employer's https `applyUrl`, else the row's `publicUrl`
+ * (accepted only on an https `app.careerpuck.com` host), else null.
+ * @param {any} row
  * @returns {string | null}
  */
-function postingUrl(raw) {
-  if (typeof raw !== 'string' || !raw) return null;
-  let u;
+export function postingUrl(row) {
+  const apply = httpsUrl(row?.applyUrl);
+  if (apply) return apply;
+  const page = httpsUrl(row?.publicUrl);
+  return page && new URL(page).hostname.toLowerCase() === CAREERPUCK_APP_HOST ? page : null;
+}
+
+/** @param {unknown} raw */
+function httpsUrl(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
   try {
-    u = new URL(raw);
+    const u = new URL(raw.trim());
+    return u.protocol === 'https:' && u.hostname ? u.href : null;
   } catch {
     return null;
   }
-  if (u.protocol !== 'https:' || u.hostname.toLowerCase() !== CAREERPUCK_APP_HOST) return null;
-  return u.href;
 }
 
 /**
@@ -130,7 +141,7 @@ export function parseCareerPuckJob(row, companyName, permalink) {
   if (!row || typeof row !== 'object') return null;
   if (row.status !== 'public') return null;
   const title = str(row.title);
-  const url = postingUrl(row.publicUrl);
+  const url = postingUrl(row);
   if (!title || !url) return null;
   /** @type {import('./_types.js').Job} */
   const job = { title, url, company: companyName, location: str(row.location) };
@@ -140,6 +151,8 @@ export function parseCareerPuckJob(row, companyName, permalink) {
   if (description) job.description = description;
   const requisitionId = coerceId(row.requisitionId);
   if (requisitionId) job.requisitionId = requisitionId;
+  const language = str(row.language);
+  if (language) job.language = language;
   Object.assign(job, workplaceField(row.workplaceType));
   const postingId = typeof row.permalink === 'string' && row.permalink && row.permalink === row.permalink.trim()
     ? row.permalink

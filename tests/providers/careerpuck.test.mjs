@@ -111,6 +111,20 @@ const envelope = (rows) => ({ jobs: rows, employerProfile: { permalink: 'acmeco'
   else fail('descriptionText() non-string handling wrong');
 }
 
+// postingUrl() — the employer's https applyUrl wins; publicUrl on app.careerpuck.com is the fallback.
+for (const [r, want, label] of [
+  [{ applyUrl: 'https://jobs.acme.example/1', publicUrl: `${BOARD_URL}/job/1` }, 'https://jobs.acme.example/1', 'applyUrl over publicUrl'],
+  [{ applyUrl: null, publicUrl: `${BOARD_URL}/job/1` }, `${BOARD_URL}/job/1`, 'publicUrl when applyUrl is missing'],
+  [{ applyUrl: 'http://jobs.acme.example/1', publicUrl: `${BOARD_URL}/job/1` }, `${BOARD_URL}/job/1`, 'publicUrl when applyUrl is not https'],
+  [{ applyUrl: 'not a url', publicUrl: `${BOARD_URL}/job/1` }, `${BOARD_URL}/job/1`, 'publicUrl when applyUrl is malformed'],
+  [{ applyUrl: 'https://jobs.acme.example/1', publicUrl: null }, 'https://jobs.acme.example/1', 'applyUrl when publicUrl is missing'],
+  [{ applyUrl: null, publicUrl: 'https://evil.example/job-board/acmeco/job/1' }, null, 'null when only a foreign publicUrl is left'],
+  [{}, null, 'null for a row with neither'],
+]) {
+  if (mod.postingUrl(r) === want) pass(`postingUrl() picks ${label}`);
+  else fail(`postingUrl() ${label}: ${mod.postingUrl(r)}`);
+}
+
 // parseCareerPuckBoard() — normalization of the live response shape.
 {
   const jobs = parseCareerPuckBoard(envelope([
@@ -119,9 +133,9 @@ const envelope = (rows) => ({ jobs: rows, employerProfile: { permalink: 'acmeco'
     row('3', { status: 'draft' }),
     row('4', { status: 'closed' }),
     row('5', { title: '   ' }),
-    row('6', { publicUrl: null }),
-    row('7', { publicUrl: 'https://evil.example/job-board/acmeco/job/7' }),
-    row('8', { publicUrl: 'http://app.careerpuck.com/job-board/acmeco/job/8' }),
+    row('6', { publicUrl: null, applyUrl: null }),
+    row('7', { publicUrl: 'https://evil.example/job-board/acmeco/job/7', applyUrl: null }),
+    row('8', { publicUrl: 'http://app.careerpuck.com/job-board/acmeco/job/8', applyUrl: 'javascript:alert(1)' }),
     row('9', { title: '  R&D   Lead  ' }),
     row('1'),
     null,
@@ -133,7 +147,8 @@ const envelope = (rows) => ({ jobs: rows, employerProfile: { permalink: 'acmeco'
   else fail(`parseCareerPuckBoard() kept ${jobs.length}: ${JSON.stringify(jobs.map((j) => j.url))}`);
   const j1 = byTitle['Engineer 1'];
   if (
-    j1?.url === `${BOARD_URL}/job/2026-1` &&
+    j1?.url === 'https://careers-acme.icims.com/jobs/1/job' &&
+    j1.language === 'english' &&
     j1.company === 'Acme' &&
     j1.location === 'Durham, North Carolina, United States' &&
     j1.workplaceType === 'remote' &&
@@ -150,8 +165,8 @@ const envelope = (rows) => ({ jobs: rows, employerProfile: { permalink: 'acmeco'
   else fail(`requisitionId invented: ${JSON.stringify(j1)}`);
   if (byTitle['R&D Lead']) pass('parseCareerPuckBoard() keeps a plain-text title as sent and collapses whitespace');
   else fail(`title not normalized: ${JSON.stringify(Object.keys(byTitle))}`);
-  if (!jobs.some((j) => /icims|evil\.example/.test(j.url))) pass('parseCareerPuckBoard() never uses applyUrl or a foreign host as the job URL');
-  else fail('a foreign URL leaked into a job URL');
+  if (!jobs.some((j) => /evil\.example|^http:|javascript:/.test(j.url))) pass('parseCareerPuckBoard() never uses a foreign publicUrl, a non-https URL or a script URL as the job URL');
+  else fail('a foreign or non-https URL leaked into a job URL');
 }
 {
   const [a, b, c] = parseCareerPuckBoard(envelope([
