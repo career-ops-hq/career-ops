@@ -101,23 +101,31 @@ test('parseOutputName: legacy and malformed names are not standard', () => {
   }
 });
 
-test('parseOutputName: a known company resolves kind tokens inside either slug', () => {
+test('buildOutputName: refuses a name that cannot be read back (a cv/cover word in a slug)', () => {
   const cases = [
     { report: 24, company: 'acme-cv-tools', kind: 'cv', candidate: 'Jane Smith', date: DATE },
     { report: 24, company: 'the-cv-centre', kind: 'cover', candidate: 'Avery Quinn', date: DATE },
     { report: 24, company: 'acme', kind: 'cv', candidate: 'Cover Dana', date: DATE },
     { report: 24, company: 'zep', kind: 'cover', candidate: 'Robin Cover Jones', date: DATE, variant: 'ats' },
   ];
-  for (const c of cases) {
-    const name = buildOutputName(c);
-    const parsed = parseOutputName(name, { company: kebab(c.company) });
+  for (const c of cases) assert.throws(() => buildOutputName(c), /Ambiguous/, JSON.stringify(c));
+  // Without such a word the same inputs build and round-trip.
+  const ok = buildOutputName({ report: 24, company: 'the-centre', kind: 'cover', candidate: 'Avery Quinn', date: DATE });
+  assert.equal(parseOutputName(ok)?.company, 'the-centre');
+});
+
+test('parseOutputName: a known company still reads a hand-written name with kind tokens in a slug', () => {
+  // Not names buildOutputName writes, but names an audit may meet in output/.
+  const cases = [
+    ['024-acme-cv-tools-cv-jane-smith-2026-11-07.pdf', 'acme-cv-tools', 'cv', 'jane-smith'],
+    ['024-the-cv-centre-cover-avery-quinn-2026-11-07.pdf', 'the-cv-centre', 'cover', 'avery-quinn'],
+    ['024-acme-cv-cover-dana-2026-11-07.pdf', 'acme', 'cv', 'cover-dana'],
+  ];
+  for (const [name, company, kind, candidate] of cases) {
+    const parsed = parseOutputName(name, { company });
     assert.ok(parsed, name);
-    assert.equal(parsed.company, kebab(c.company), name);
-    assert.equal(parsed.kind, c.kind, name);
-    assert.equal(parsed.candidate, kebab(c.candidate), name);
-    // Without the report's slug the same name is still ambiguous, never misread.
-    const bare = parseOutputName(name);
-    if (bare) assert.equal(bare.company, kebab(c.company), name);
+    assert.deepEqual([parsed.company, parsed.kind, parsed.candidate], [company, kind, candidate], name);
+    assert.equal(parseOutputName(name), null, `${name} is ambiguous without the company`);
   }
   // A name that does not start with the report's slug is not that report's artifact.
   assert.equal(parseOutputName('024-other-cv-jane-smith-2026-11-07.pdf', { company: 'zep' }), null);
