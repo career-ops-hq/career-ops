@@ -49,7 +49,7 @@ What that means depends on who makes the change:
 - **A contributor**, working by hand or with a coding agent they are directing: open an issue first, typos included, and link it from the PR, then expect a closer review. These paths are not off limits; several plugin-engine fixes landed this way.
 - **An unattended coding agent**, a session no person is watching (the Copilot cloud agent, for one): leave these paths alone. Stop and explain in the report why the task needs them, so a person can open the issue.
 
-The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/codeowners-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
+The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/contributing-owner-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
 
 ## Quick Start
 
