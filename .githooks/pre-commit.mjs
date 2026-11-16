@@ -29,7 +29,18 @@
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { join } from 'node:path';
+import { validateFlags } from '../lib/cli-flags.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
+
+const USAGE = `Usage: node .githooks/pre-commit.mjs
+
+The opt-in pre-commit checks. git runs them on every commit once you enable
+them with \`npm run hooks:install\`; you can also run them by hand on whatever
+is staged.
+
+Checks: paths, secrets, whitespace, gofmt, coverage, lint.
+CAREER_OPS_HOOK_SKIP=lint,coverage skips the named checks.
+git commit --no-verify skips all of them.`;
 
 // Mirrors USER_PATHS, EXACT_SCAFFOLD and isScaffold in
 // .github/workflows/no-user-data.yml. The workflow is what blocks a PR; this is
@@ -328,6 +339,9 @@ export function parseSkip(value) {
 }
 
 function main() {
+  // git passes pre-commit no arguments; this answers --help when you run it by
+  // hand, and rejects anything else with exit 2 instead of running the checks.
+  validateFlags(process.argv.slice(2), ['--help', '-h'], USAGE, { usageExitCode: 2 });
   const root = repoRoot();
   const staged = stagedPaths(root);
   const { skip, unknown } = parseSkip(process.env.CAREER_OPS_HOOK_SKIP);

@@ -222,9 +222,9 @@ function hookRepo(t) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, '.githooks'));
   for (const f of ['pre-commit', 'pre-commit.mjs']) copyFileSync(join(ROOT, '.githooks', f), join(dir, '.githooks', f));
-  // The hook imports lib/is-main-module.mjs for its entry guard.
+  // The hook imports these two for its flag handling and entry guard.
   mkdirSync(join(dir, 'lib'));
-  copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
+  for (const f of ['cli-flags.mjs', 'is-main-module.mjs']) copyFileSync(join(ROOT, 'lib', f), join(dir, 'lib', f));
   chmodSync(join(dir, '.githooks', 'pre-commit'), 0o755);
 
   const env = hermeticGitEnv(join(dir, 'co-hermetic-gitconfig'));
