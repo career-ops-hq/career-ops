@@ -27,16 +27,18 @@ export default async function Home() {
   const legitimacy: Record<string, string> = {};
   const postingUrls: Record<string, string> = {};
   const readReport = requestReportReader();
-  const loaded = new Map<string, { reason: CardReason | null; legitimacy: string; reportUrl: string }>();
+  const loaded = new Map<string, { reason: CardReason | null; legitimacy: string; reportUrl: string; reportFile: string | null }>();
   const readApp = (app: (typeof applications)[number]) => {
     const hit = loaded.get(app.n);
     if (hit) return hit;
-    const content = readReport(app)?.content ?? "";
+    const report = readReport(app);
+    const content = report?.content ?? "";
     const parsed = parseReport(content);
     const entry = {
       reason: cardReason(content),
       legitimacy: parsed.legitimacy ?? "",
       reportUrl: parsed.fields.find((field) => field.label === "URL")?.value ?? "",
+      reportFile: report?.file ?? null,
     };
     loaded.set(app.n, entry);
     return entry;
@@ -60,7 +62,9 @@ export default async function Home() {
       n: app.n,
       company: app.company,
       trackerMarked: (app.pdf ?? "").includes("✅"),
-      reportNumber: reportNumberFor(app.n, app, null),
+      // An empty report cell still has a file such as 7-fixture.md. The report
+      // number is on that filename, the same read the report page uses.
+      reportNumber: reportNumberFor(app.n, app, readApp(app).reportFile),
     })),
   );
   const applyFacts: Record<string, { pdfOnDisk: boolean; postingUrl: string }> = {};

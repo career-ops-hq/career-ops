@@ -36,4 +36,7 @@ test("the report Apply button is not ready from a loose cv file", () => {
   assert.doesNotMatch(view, /pdfReady=\{disk\.exists\}/);
   assert.match(home, /pdfOnDisk: disks\[app\.n\]\?\.applyPdfReady/);
   assert.doesNotMatch(home, /pdfOnDisk: disks\[app\.n\]\?\.exists/);
+  assert.match(home, /reportFile: report\?\.file \?\? null/);
+  assert.match(home, /reportNumberFor\(app\.n, app, readApp\(app\)\.reportFile\)/);
+  assert.doesNotMatch(home, /reportNumberFor\(app\.n, app, null\)/);
 });
