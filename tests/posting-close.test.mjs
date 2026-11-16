@@ -186,7 +186,7 @@ test('scan history indexes a close day by the posting URL key', () => {
   assert.equal(index.has('https://jobs.example/blank'), false);
   assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact'), '2026-10-03');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?utm_source=email'), '2026-10-03');
-  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '2026-10-03');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/northwind'), '2026-09-15');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=111'), '2026-03-03');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=222'), '2026-04-04');
@@ -233,6 +233,35 @@ test('a later added row still replaces the close day', () => {
     historyRow({ url, status: 'skipped_experience', closes_at: '2027-01-02' }),
   ].join('\n');
   assert.equal(closeDatesByUrl(text).get(url), '2026-11-11');
+});
+
+test('a board URL takes the close day recorded on another shape of the same posting', () => {
+  const embed = 'https://boards.greenhouse.io/embed/job_app?for=acme&token=8028783';
+  const board = 'https://boards.greenhouse.io/acme/jobs/8028783';
+  const apply = 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555/apply';
+  const posting = 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555';
+  const greenhouse = [
+    historyRow({ url: embed, closes_at: '2026-12-01' }),
+  ].join('\n');
+  assert.equal(closeDateForUrl(closeDatesByUrl(greenhouse), board), '2026-12-01');
+  const lever = [
+    historyRow({ url: apply, closes_at: '2026-08-08' }),
+  ].join('\n');
+  assert.equal(closeDateForUrl(closeDatesByUrl(lever), posting), '2026-08-08');
+  const both = [
+    historyRow({ url: embed, closes_at: '2026-12-01' }),
+    historyRow({ url: board, closes_at: '2026-12-15' }),
+  ].join('\n');
+  const index = closeDatesByUrl(both);
+  assert.equal(closeDateForUrl(index, board), '2026-12-15');
+  assert.equal(closeDateForUrl(index, embed), '2026-12-01');
+});
+
+test('two known language versions do not share a close day', () => {
+  const text = [
+    historyRow({ url: 'https://jobs.example/role?lang=de', closes_at: '2026-07-07' }),
+  ].join('\n');
+  assert.equal(closeDateForUrl(closeDatesByUrl(text), 'https://jobs.example/role?lang=en'), '');
 });
 
 test('a non-observational later row can still replace an added close day', () => {
