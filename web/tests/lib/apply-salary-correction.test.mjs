@@ -76,6 +76,23 @@ test("a dashboard correction updates a salary this session wrote", async () => {
   }
 });
 
+test("a padded salary this session wrote can still be corrected", async () => {
+  const session = salaryFrame("");
+  const live = open(session);
+  try {
+    const first = await live.fill({ salary: " 180000 " });
+    assert.equal(session.value(), "180000");
+    assert.equal(first.steps.find((step) => step.fieldId === "salary")?.ok, true);
+
+    const corrected = await live.fill({ salary: "190000" });
+    assert.equal(session.value(), "190000");
+    assert.deepEqual(session.fills, ["180000", "190000"]);
+    assert.equal(corrected.steps.find((step) => step.fieldId === "salary")?.ok, true);
+  } finally {
+    live.close();
+  }
+});
+
 test("a salary typed on the form stays, including one already on the form", async () => {
   const session = salaryFrame("");
   const live = open(session);

@@ -641,13 +641,15 @@ export async function fillSession(
         const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
         if (liveType === "password") continue;
         const current = (await loc.inputValue().catch(() => "")).trim();
-        // Remember only values this session wrote. A dashboard correction of one
-        // of those can replace it. A different value already on the form was
-        // typed there, so a later run leaves it.
+        // Remember only values this session wrote, without surrounding spaces.
+        // The live value is trimmed too, so a padded answer still matches on
+        // the next run and a dashboard correction can replace it. A different
+        // value already on the form was typed there, so a later run leaves it.
+        const answer = value.trim();
         const remembered = s.written?.get(fid);
-        if (!current || current === remembered) {
-          if (current !== value) await loc.fill(value);
-          (s.written ??= new Map()).set(fid, value);
+        if (answer && (!current || current === remembered)) {
+          if (current !== answer) await loc.fill(answer);
+          (s.written ??= new Map()).set(fid, answer);
         }
       }
       ok = !gaveUp;
