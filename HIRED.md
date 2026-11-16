@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=25 level=role role="Information Technology Engineer" sector="MSP" geo="Colorado" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/4918" -->
+### Hire #25
+
+> Landed an Information Technology Engineer role after a multi-round process, including a values-alignment presentation to the hiring panel. career-ops tracked 25+ evaluations, built
+
+**Information Technology Engineer** · MSP · Colorado · 12 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4918)
+
 <!-- hire n=24 level=handle handle=briacSck role="Country Launcher France / Head of Francophone Markets" sector="Corgi — YC-backed insurtech, London" geo="London, UK" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/4118" -->
 ### Hire #24
 
