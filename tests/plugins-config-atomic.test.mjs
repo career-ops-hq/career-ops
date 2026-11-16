@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -36,6 +36,26 @@ test('a failed publish leaves the previous plugins.yml and no temp file', async 
       cjsFs.renameSync = realRename;
       syncBuiltinESMExports();
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('saving keeps the existing plugins.yml mode', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows does not apply POSIX permission bits');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-mode-'));
+  mkdirSync(join(dir, 'config'));
+  const file = join(dir, 'config', 'plugins.yml');
+  try {
+    writeFileSync(file, 'plugins: {}\n');
+    chmodSync(file, 0o600);
+    const { setPluginEnabled } = await import(`${PLUGINS}?mode=${Date.now()}`);
+    setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' });
+    assert.match(readFileSync(file, 'utf8'), /enabled: true/);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
