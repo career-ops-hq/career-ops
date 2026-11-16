@@ -183,7 +183,8 @@ export default {
     /** @type {Map<string, Job>} */
     const byId = new Map();
     const errors = [];
-    let laterPageFailed = false;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    let partialReason = null;
 
     for (const keyword of keywords) {
       let total = 0;
@@ -198,9 +199,9 @@ export default {
         } catch (err) {
           if (probing) throw err;
           const message = (err && /** @type {Error} */ (err).message) || err;
+          partialReason ??= 'fetch-error';
           if (page === 1) errors.push([keyword, message]);
           else {
-            laterPageFailed = true;
             console.error(`⚠️  pracecz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
           }
           break;
@@ -223,8 +224,12 @@ export default {
           total = totalItems;
           lastPage = Math.min(Math.ceil(total / PAGE_SIZE), maxPages);
         }
-        if (page === maxPages && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
+        // A short page is the board's natural end even when the total read on
+        // page 1 promised more (it can shrink mid-walk): the cut needs a full
+        // page, counted in the source's items before normalization drops any.
+        if (page === maxPages && items.length >= PAGE_SIZE && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
           console.error(`⚠️  pracecz: ${entryName} truncated at max_pages=${maxPages} (${rows} of ${total} offers for "${keyword}") — narrow the keyword, set pracecz.location, or raise max_pages`);
+          partialReason ??= 'page-cap';
         }
       }
     }
@@ -238,10 +243,10 @@ export default {
 
     const jobs = [...byId.values()];
     // Part of the board was never read: a keyword failed on page 1 while another
-    // answered, or a later page failed. scan.mjs takes a board's health from the
-    // returned array, so the result says so; unmarked, the board is logged
-    // reachable as if fully read.
-    if (errors.length || laterPageFailed) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    // answered, a later page failed, or max_pages cut a keyword the source says
+    // has more. scan.mjs takes a board's health from the returned array, so the
+    // result says so; unmarked, the board is logged reachable as if fully read.
+    if (partialReason) markTruncated(jobs, partialReason, { fetched: jobs.length });
     return jobs;
   },
 };

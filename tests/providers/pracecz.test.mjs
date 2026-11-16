@@ -237,9 +237,22 @@ try {
   {
     // A configured max_pages below the cap still truncates, and says so.
     const { calls, ctx } = stub(fullPage(400));
-    const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx));
+    let capped = [];
+    const text = await captureStderr(async () => { capped = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, ctx); });
     if (calls.length === 2 && text.includes('truncated at max_pages=2')) pass('pracecz.fetch() stops at max_pages and warns that the search was truncated');
     else fail(`max_pages=2: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === capped.length && capped.length > 0) pass('pracecz.fetch() marks the board page-cap when max_pages truncates a keyword');
+    else fail(`max_pages=2 cut: ${capped.length} jobs, truncated = ${JSON.stringify(capped.truncated)}`);
+    // A short last page ends the board even when the total read on page 1
+    // promised more: no warning, no mark.
+    const shrunk = stub((url) => (pageOf(url) === '1'
+      ? page(Array.from({ length: 40 }, (_, i) => item({ metadata: { advertId: `1-${i}`, publishedAt: '2026-10-20T15:36:43+02:00' } })), 400)
+      : page([item({ metadata: { advertId: '2-0', publishedAt: '2026-10-20T15:36:43+02:00' } })], 41)));
+    let shrunkJobs = [];
+    const shrunkText = await captureStderr(async () => { shrunkJobs = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] }, max_pages: 2 }, shrunk.ctx); });
+    if (shrunk.calls.length === 2 && shrunkJobs.length === 41 && shrunkJobs.truncated === undefined && !shrunkText.includes('truncated at max_pages')) pass('pracecz.fetch() treats a short last page as the end of the board, whatever page 1 reported');
+    else fail(`short last page: ${shrunkJobs.length} jobs, truncated = ${JSON.stringify(shrunkJobs.truncated)}, stderr ${JSON.stringify(shrunkText)}`);
   }
 
     {
@@ -259,9 +272,12 @@ try {
     }
     {
       const { calls, ctx } = stub(fullPage(400), { maxPages: 1 });
-      const text = await captureStderr(() => pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, ctx));
+      let probed = [];
+      const text = await captureStderr(async () => { probed = await pracecz.fetch({ provider: 'pracecz', name: 'Acme', pracecz: { keywords: ['x'] } }, ctx); });
       if (calls.length === 1 && text === '') pass('pracecz.fetch() honors ctx.maxPages:1 with exactly one request and no warning');
       else fail(`ctx.maxPages=1: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+      if (probed.truncated === undefined) pass('pracecz.fetch() leaves the one-page probe unmarked');
+      else fail(`ctx.maxPages=1 probe was marked: ${JSON.stringify(probed.truncated)}`);
 
       const err = new Error('probe budget');
       let caught = null;
