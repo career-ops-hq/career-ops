@@ -103,10 +103,11 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 ### Pi invocation
 
 - **Project context:** `pi` reads `AGENTS.md` from the repo root automatically; there is no wrapper file to keep in sync.
-- **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. If a Pi build gates project resources behind a trust decision, run `/trust` once in the repo, then restart `pi` before `/skill:career-ops` (`/trust` applies to future Pi processes), or start with `-a`, which trusts a single run and needs no restart.
+- **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. Pi 0.79.0 and later discover it only in a trusted folder: run `/trust` once in the repo, then restart `pi` before `/skill:career-ops` (`/trust` applies to future Pi processes), or start with `--skill .agents/skills/career-ops`, which loads the router without trusting anything else in the checkout.
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
-- **Headless:** `pi -a -p "prompt"` for one-shot workers; `pi -a --mode json -p "prompt"` when the caller parses events. `-a` trusts project resources for that one run only, so a headless worker on a Pi build that gates them behind a trust decision still loads the skill (see `docs/SUPPORTED_CLIS.md`).
-- **Examples:** `pi -a -p "Run career-ops tracker mode"`, `pi -a -p "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
+- **Headless:** `pi -p --skill .agents/skills/career-ops "prompt"` for one-shot workers; add `--mode json` when the caller parses events. The router needs only that `--skill` path and `AGENTS.md`, which Pi loads in an untrusted folder too, so a headless worker never needs `-a`. Keep `-a` for a checkout whose `.pi/` and `.agents/skills/` you have reviewed: it trusts every project resource for the run and executes project extensions without asking.
+- **Tools:** Pi never asks before a tool call, and its default tools include bash, edit and write. Never run the `pdf` worker headless under Pi: rendering needs Bash, which the web never grants `pdf`, so no Pi tool set matches it (see `docs/SUPPORTED_CLIS.md`).
+- **Examples:** `pi -p --skill .agents/skills/career-ops "Run career-ops tracker mode"`, `pi -p --skill .agents/skills/career-ops "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"`
 
 ### Oh My Pi (omp) invocation
 
@@ -606,7 +607,7 @@ Headless worker command per CLI:
 |-----|---------|
 | Claude Code | `claude -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
-| Pi | `pi -a -p "prompt"` |
+| Pi | `pi -p --skill .agents/skills/career-ops "prompt"` (no `pdf` worker: see **Pi invocation**) |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
 | Qwen | `qwen -p "prompt"` |
