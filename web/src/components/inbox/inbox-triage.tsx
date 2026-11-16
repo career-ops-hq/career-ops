@@ -6,13 +6,12 @@ import { Undo2 } from "lucide-react";
 import { evaluationGateForJob } from "@/lib/job-gate.mjs";
 import { useJobs } from "@/components/jobs/job-store";
 import type { InboxJob } from "@/lib/career-ops";
-import type { AtsSource } from "@/lib/explore";
-import { ATS_SOURCES } from "@/lib/explore";
-import { daysSince, seniorityFromTitle, sourceFromUrl, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
+import { daysSince, seniorityFromTitle, SENIORITY_ORDER, type Seniority } from "@/lib/inbox";
 import { LinkedInPaste } from "@/components/linkedin-paste";
 import { orderInbox } from "@/lib/core/inbox-rank.mjs";
 import { cursorAfterRemoval, inboxCommand, moveCursor, selectionWithout, typingFromTarget } from "@/lib/inbox-keys.mjs";
 import { inboxScoreTarget, skippableJobs } from "@/lib/inbox-score-target.mjs";
+import { jobSource } from "@/lib/job-source.mjs";
 import { FacetChips } from "./facet-chips";
 import { TriageRow, type RowScore } from "./triage-row";
 import { ShortlistTray, type ShortItem } from "./shortlist-tray";
@@ -41,7 +40,7 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
   // facets
   const [within, setWithin] = useState<number | null>(null);
-  const [sources, setSources] = useState<Set<AtsSource>>(() => new Set());
+  const [sources, setSources] = useState<Set<string>>(() => new Set());
   const [seniorities, setSeniorities] = useState<Set<Seniority>>(() => new Set());
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
@@ -117,11 +116,13 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   // triages once (and Save/Skip/score, all keyed by URL, act on it coherently).
   const enriched = useMemo(() => {
     const seen = new Set<string>();
-    const out: { job: InboxJob; source: AtsSource | null; seniority: Seniority | null; age: number | null }[] = [];
+    const out: { job: InboxJob; source: string; seniority: Seniority | null; age: number | null }[] = [];
     for (const job of inbox) {
       if (seen.has(job.url)) continue;
       seen.add(job.url);
-      out.push({ job, source: sourceFromUrl(job.url), seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt, now) });
+      const fallback = jobSource(job);
+      const source = job.source || fallback.label;
+      out.push({ job: { ...job, source, sourceInferred: job.sourceInferred ?? fallback.inferred }, source, seniority: seniorityFromTitle(job.role), age: daysSince(job.postedAt, now) });
     }
     return out;
   }, [inbox, now]);
@@ -143,9 +144,9 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
 
   // facet options — only surface what's actually present in the (non-hidden) data
   const availSources = useMemo(() => {
-    const set = new Set<AtsSource>();
+    const set = new Set<string>();
     for (const e of enriched) if (e.source && !hidden.includes(e.job.url)) set.add(e.source);
-    return ATS_SOURCES.filter((s) => set.has(s));
+    return [...set].sort((a, b) => a.localeCompare(b));
   }, [enriched, hidden]);
   const availSeniorities = useMemo(() => {
     const set = new Set<Seniority>();

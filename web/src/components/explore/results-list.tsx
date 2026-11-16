@@ -25,7 +25,7 @@ import { CostBadge } from "@/components/cost/cost-badge";
 import { DiscoveryCard } from "./discovery-card";
 import { useExplore } from "./explore-provider";
 
-export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; evaluatedN?: string };
+export type EnrichedOffer = DiscoveredOffer & { inPipeline: boolean; processed?: boolean; evaluatedN?: string; applicationStatus?: string };
 
 type Layout = "grid" | "list";
 
@@ -34,7 +34,7 @@ const segmentOn = "bg-brand-soft text-brand-text";
 const segmentOff = "text-muted hover:text-foreground";
 
 export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
-  const { companiesScanned, partial, error, addToPipeline, added, mode, running } = useExplore();
+  const { companiesScanned, websitesSearched, websitesUndated, partial, error, addToPipeline, added, mode, running } = useExplore();
   const isAi = mode === "ai";
   const employer = offers.some(o => CHINA_SOURCES.includes(o.source));
   const [q, setQ] = useState("");
@@ -89,8 +89,9 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
           <p className="text-[12px] text-faint">
             {isAi
               ? "found by AI on the open web · unverified until you evaluate"
-              : employer ? "From selected employer sites · check the original JD · 0 tokens spent" : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}0 tokens spent${partial ? " · some boards were unreachable (normal for public directories)" : ""}`}
+              : employer ? "From selected employer sites · check the original JD · 0 tokens spent" : `${companiesScanned > 0 ? `${companiesScanned.toLocaleString()} companies scanned · ` : ""}${websitesSearched > 0 ? `${websitesSearched.toLocaleString()} saved website${websitesSearched === 1 ? "" : "s"} checked · ` : ""}0 tokens spent${partial ? " · some sources were unreachable" : ""}`}
           </p>
+          {!isAi && websitesUndated > 0 && <p className="text-[12px] text-amber-800 dark:text-amber-300">{websitesUndated} website {websitesUndated === 1 ? "job has" : "jobs have"} no posting date, so the date filter could not be applied to {websitesUndated === 1 ? "it" : "them"}.</p>}
           {!isAi && error && <p className="text-[12px] text-amber-800 dark:text-amber-300">{error}</p>}
         </div>
 
@@ -214,7 +215,7 @@ export function ResultsList({ offers }: { offers: EnrichedOffer[] }) {
 
       <div className={layout === "list" ? "flex flex-col gap-2" : "grid gap-3 sm:grid-cols-2 xl:grid-cols-3"}>
         {view.map((o) => (
-          <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} evaluatedN={o.evaluatedN} layout={layout === "list" ? "row" : "card"} />
+          <DiscoveryCard key={o.url} offer={o} inPipeline={o.inPipeline} processed={o.processed} evaluatedN={o.evaluatedN} applicationStatus={o.applicationStatus} layout={layout === "list" ? "row" : "card"} />
         ))}
       </div>
 

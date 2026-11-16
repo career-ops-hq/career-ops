@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Clock, Edit3, Globe, Loader2, MoreVertical, Pause, Play, Trash2, Zap } from "lucide-react";
 import type { ScheduledJob } from "@/lib/scheduled-jobs";
-import { scanEngineLabel, scheduleCadenceLabel } from "@/lib/schedule-label.mjs";
+import { scheduleCadenceLabel } from "@/lib/schedule-label.mjs";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
 
@@ -63,6 +63,11 @@ export function JobCard({
   };
 
   const isFull = job.engine === "full";
+  const websiteCount = job.filters?.websiteIds?.length || 0;
+  const hasAts = !Array.isArray(job.filters?.ats) || job.filters.ats.length > 0;
+  const engineLabel = websiteCount
+    ? isFull && !hasAts ? "Saved websites" : isFull ? "ATS + websites" : "Configured boards + websites"
+    : isFull ? "Broad ATS discovery" : "Configured companies & boards";
   const isActive = job.status === "active";
   const positiveList = job.filters?.positive || [];
   const letter = (job.name || "S").trim().charAt(0).toUpperCase();
@@ -137,7 +142,7 @@ export function JobCard({
             )}
           >
             {isFull ? <Globe className="size-3" /> : <Zap className="size-3" />}
-            {scanEngineLabel(job.engine)}
+            {engineLabel}
           </span>
 
           <span

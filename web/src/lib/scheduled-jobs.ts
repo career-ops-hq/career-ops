@@ -9,6 +9,8 @@ import {
 import { nextScheduledRun } from "./scheduled-cadence.mjs";
 import { assertScheduledJobBody } from "./scheduled-job-input.mjs";
 import { scheduledStorePath } from "./scheduled-runner-path.mjs";
+import { runCoreCli } from "@/lib/core-cli";
+import { validateScheduledSelection } from "./scheduled-source-selection.mjs";
 
 export type JobStatus = "active" | "paused" | "deleted";
 export type ScanEngine = "full" | "portals";
@@ -30,6 +32,7 @@ export type ScheduledJob = {
   lastRunAt?: string;
   lastError?: string;
   rolesFoundCount?: number;
+  websiteCheckpoints?: Record<string, { criteria: string; seenKeys: string[]; checkedAt: string }>;
 };
 
 export type JobRun = {
@@ -47,6 +50,12 @@ export type JobRun = {
 type QueueItem = { id: string; jobId: string; queuedAt: string };
 type Store = { jobs: ScheduledJob[]; runs: JobRun[]; queue: QueueItem[] };
 type JobFields = Pick<ScheduledJob, "name" | "engine" | "filters" | "timezone" | "startAt" | "every" | "unit">;
+
+function pruneWebsiteCheckpoints(job: ScheduledJob) {
+  if (!job.websiteCheckpoints) return;
+  const selected = new Set(job.filters.websiteIds || []);
+  job.websiteCheckpoints = Object.fromEntries(Object.entries(job.websiteCheckpoints).filter(([id]) => selected.has(id)));
+}
 
 export class ScheduledJobValidationError extends Error {
   constructor(message: string) {
@@ -109,7 +118,25 @@ export function parseScheduledJobInput(raw: unknown, base?: ScheduledJob): JobFi
     base?.filters || DEFAULT_FILTERS,
   );
 
+  try {
+    validateScheduledSelection(engine, filters, input.filters);
+  } catch (error) {
+    throw new ScheduledJobValidationError(error instanceof Error ? error.message : "Invalid sources.");
+  }
+
   return { name, engine, unit, every, timezone, startAt, filters };
+}
+
+async function validateSavedWebsites(ids: string[]) {
+  if (!ids.length) return;
+  const result = await runCoreCli("portal-monitor", ["list-sources"]);
+  if (result.code !== 0 || result.timedOut) throw new Error("Could not validate saved websites. Try again.");
+  let data: { sources?: { id?: string; enabled?: boolean }[] };
+  try { data = JSON.parse(result.stdout.trim().split("\n").at(-1) || "{}"); }
+  catch { throw new Error("Could not validate saved websites. Try again."); }
+  if (!Array.isArray(data.sources)) throw new Error("Could not validate saved websites. Try again.");
+  const available = new Set(data.sources.filter((source) => source.enabled).map((source) => source.id));
+  if (ids.some((id) => !available.has(id))) throw new ScheduledJobValidationError("A selected website was removed or paused. Update your source selection.");
 }
 
 export function listScheduledJobs(): Pick<Store, "jobs" | "runs"> {
@@ -123,6 +150,7 @@ export function getScheduledJob(id: string): ScheduledJob | undefined {
 }
 
 export async function createScheduledJob(fields: JobFields): Promise<ScheduledJob> {
+  await validateSavedWebsites(fields.filters.websiteIds || []);
   return withScheduledStore(storeFile(), (store: Store) => {
     const now = new Date().toISOString();
     const job: ScheduledJob = {
@@ -142,12 +170,14 @@ export async function updateScheduledJob(
   id: string,
   fields: JobFields & { status?: Exclude<JobStatus, "deleted"> },
 ): Promise<ScheduledJob | null> {
-  return withScheduledStore(storeFile(), (store: Store) => {
+  return withScheduledStore(storeFile(), async (store: Store) => {
     const job = store.jobs.find((item) => item.id === id && item.status !== "deleted");
     if (!job) return null;
+    await validateSavedWebsites(fields.filters.websiteIds || []);
     const startChanged = fields.startAt !== job.startAt;
     const cadenceChanged = fields.every !== job.every || fields.unit !== job.unit;
     Object.assign(job, fields, { updatedAt: new Date().toISOString() });
+    pruneWebsiteCheckpoints(job);
     if (startChanged) {
       job.nextRunAt = fields.startAt;
     } else if (cadenceChanged) {
@@ -159,7 +189,7 @@ export async function updateScheduledJob(
 
 export async function patchScheduledJob(id: string, raw: unknown): Promise<ScheduledJob | null> {
   if (!isSafeScheduledId(id)) return null;
-  return withScheduledStore(storeFile(), (store: Store) => {
+  return withScheduledStore(storeFile(), async (store: Store) => {
     const current = store.jobs.find((item) => item.id === id && item.status !== "deleted");
     if (!current) return null;
     let input: Record<string, unknown>;
@@ -169,9 +199,11 @@ export async function patchScheduledJob(id: string, raw: unknown): Promise<Sched
       throw new ScheduledJobValidationError("Invalid status.");
     }
     const fields = parseScheduledJobInput(input, current);
+    if (input.filters !== undefined) await validateSavedWebsites(fields.filters.websiteIds || []);
     const startChanged = fields.startAt !== current.startAt;
     const cadenceChanged = fields.every !== current.every || fields.unit !== current.unit || fields.timezone !== current.timezone;
     Object.assign(current, fields, input.status ? { status: input.status } : {}, { updatedAt: new Date().toISOString() });
+    pruneWebsiteCheckpoints(current);
     if (startChanged) current.nextRunAt = fields.startAt;
     else if (cadenceChanged) current.nextRunAt = nextScheduledRun(current.startAt, fields.every, fields.unit, Date.now(), fields.timezone) || current.nextRunAt;
     return current;

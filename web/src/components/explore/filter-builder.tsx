@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
 
 import { CHINA_PRESET, CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import type { EmployerSource } from "@/lib/explore";
+import { AddUrl } from "./add-url";
+
+type SavedWebsite = { id: string; name: string; url: string; enabled: boolean };
 
 const RECENCY = [
   { label: "24h", days: 1 },
@@ -109,31 +113,59 @@ export function FilterBuilder({
   onChange,
   seededFrom = [],
   disabled = false,
+  configuredBoards = false,
 }: {
   filters: ExploreFilters;
   onChange: (f: ExploreFilters) => void;
   seededFrom?: string[];
   disabled?: boolean;
+  configuredBoards?: boolean;
 }) {
-  const employer = filters.preset === CHINA_PRESET;
+  const employer = !configuredBoards && filters.preset === CHINA_PRESET;
+  const latestFilters = useRef(filters);
+  latestFilters.current = filters;
   const [advanced, setAdvanced] = useState(false);
+  const [websites, setWebsites] = useState<SavedWebsite[]>([]);
+  const [websiteError, setWebsiteError] = useState("");
+  const [loadingWebsites, setLoadingWebsites] = useState(true);
+  useEffect(() => {
+    let active = true;
+    async function loadWebsites() {
+      try {
+        const response = await fetch("/api/portals/monitors", { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data.sources)) throw new Error(data.error || "Could not load saved websites.");
+        if (active) { setWebsites(data.sources); setWebsiteError(""); }
+      } catch (error) {
+        if (active) setWebsiteError(error instanceof Error ? error.message : "Could not load saved websites.");
+      } finally { if (active) setLoadingWebsites(false); }
+    }
+    void loadWebsites();
+    window.addEventListener("portal-monitors-changed", loadWebsites);
+    window.addEventListener("focus", loadWebsites);
+    return () => { active = false; window.removeEventListener("portal-monitors-changed", loadWebsites); window.removeEventListener("focus", loadWebsites); };
+  }, []);
   const set = (patch: Partial<ExploreFilters>) => onChange({ ...filters, ...patch });
   const toggleAts = (a: AtsSource) => {
     const has = filters.ats.includes(a);
     const next = has ? filters.ats.filter((x) => x !== a) : [...filters.ats, a];
-    set({ ats: next.length ? next : filters.ats });
+    set({ ats: next });
+  };
+  const toggleWebsite = (id: string) => {
+    const selected = filters.websiteIds ?? [];
+    set({ websiteIds: selected.includes(id) ? selected.filter(value => value !== id) : [...selected, id] });
   };
 
   return (
     <fieldset disabled={disabled} className="space-y-4">
       <style>{STYLE}</style>
-      <fieldset>
+      {!configuredBoards && <fieldset>
         <legend className="mb-1.5 text-[13px] font-medium">Discovery sources</legend>
         <div className="flex flex-wrap gap-4 text-sm">
-          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={!employer} onChange={() => set({ preset: undefined })} />Public ATS network</label>
+          <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={!employer} onChange={() => set({ preset: undefined })} />Public job sources</label>
           <label className="inline-flex items-center gap-2"><input type="radio" name="explore-preset" checked={employer} onChange={() => set({ preset: CHINA_PRESET, employers: [...CHINA_SOURCES] as EmployerSource[] })} />China employer preset</label>
         </div>
-      </fieldset>
+      </fieldset>}
       {employer && <fieldset aria-describedby="employer-scope employer-selection">
         <legend className="mb-2 text-[13px] font-medium">Employers</legend>
         <div className="flex flex-wrap gap-4">{CHINA_SOURCES.map(id => <label key={id} className="inline-flex items-center gap-2 text-sm">
@@ -142,6 +174,30 @@ export function FilterBuilder({
         <p id="employer-selection" className="mt-2 text-xs text-muted">{filters.employers?.length ? "Only selected employers will be scanned." : "Select at least one employer to start a scan."}</p>
         <p id="employer-scope" className="mt-2 text-xs text-muted">Employer selection does not guarantee mainland-China, technical or experienced-hire eligibility. Check the original JD. Role and location terms are optional; unknown locations may remain, and remote titles may match. Locations are term filters, not eligibility checks. No posting-date cutoff applies. Other ATS filters are inactive for this preset. Coverage is limited to 10 pages per employer; limits or source problems are reported as incomplete.</p>
       </fieldset>}
+
+      {!employer && <div className="space-y-3 rounded-xl border border-border bg-surface/30 p-3">
+        {configuredBoards ? <p className="text-xs text-muted">This scan checks your configured companies and job boards. ATS network choices apply to broad ATS discovery; select any additional saved websites below.</p> : <div><Label hint={filters.ats.length === 0 && !(filters.websiteIds?.length) ? "select at least one" : undefined}>Sources</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {ATS_SOURCES.map((a) => {
+              const on = filters.ats.includes(a);
+              return <button key={a} type="button" aria-pressed={on} onClick={() => toggleAts(a)} className={cn("rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]", on ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground")}>{ATS_LABEL[a]}</button>;
+            })}
+          </div>
+        </div>}
+        <fieldset><legend className="mb-1.5 text-[13px] font-medium">Saved websites</legend>
+          {loadingWebsites ? <p className="text-xs text-muted">Loading websites…</p> : websiteError ? <p role="alert" className="text-xs text-red-700 dark:text-red-400">{websiteError}</p> : !websites.length ? <p className="text-xs text-muted">No websites added yet.</p> : <div className="flex flex-wrap gap-x-5 gap-y-2">
+            {websites.map(source => {
+              const on = (filters.websiteIds ?? []).includes(source.id);
+              return <label key={source.id} className={cn("inline-flex items-center gap-2 text-sm", !source.enabled && "text-muted")} title={source.url}>
+                <input type="checkbox" checked={on} disabled={!source.enabled && !on} onChange={() => toggleWebsite(source.id)} className="accent-brand" />{source.name}{!source.enabled && <span className="text-xs">· paused</span>}
+              </label>;
+            })}
+          </div>}
+          {!loadingWebsites && !websiteError && (filters.websiteIds ?? []).filter(id => !websites.some(source => source.id === id)).map((id, index) => <p key={id} className="mt-2 flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">A selected website is no longer available. <button type="button" aria-label={`Remove unavailable website ${index + 1}`} className="underline underline-offset-2" onClick={() => toggleWebsite(id)}>Remove from search</button></p>)}
+          {websites.some(source => !source.enabled) && <p className="mt-1 text-xs text-muted">Paused websites must be resumed in <Link href="/portals" className="underline underline-offset-2">Portals</Link> before searching. You can deselect a paused website here.</p>}
+        </fieldset>
+        <AddUrl onWebsiteAdded={(id) => onChange({ ...latestFilters.current, websiteIds: [...new Set([...(latestFilters.current.websiteIds ?? []), id])] })} />
+      </div>}
 
       <div>
         <Label hint={filters.positive.length === 0 ? (employer ? "empty = all titles" : "empty = every fresh posting") : undefined}>Roles to find</Label>
@@ -195,27 +251,6 @@ export function FilterBuilder({
           </div>
         </div>
 
-        <div>
-          <Label hint={filters.ats.length === 0 ? "pick at least one" : undefined}>Sources</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {ATS_SOURCES.map((a) => {
-              const on = filters.ats.includes(a);
-              return (
-                <button
-                  key={a}
-                  type="button"
-                  onClick={() => toggleAts(a)}
-                  className={cn(
-                    "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors max-sm:min-h-[44px]",
-                    on ? "border-brand/40 bg-brand-soft text-brand-text" : "border-border text-muted hover:text-foreground",
-                  )}
-                >
-                  {ATS_LABEL[a]}
-                </button>
-              );
-            })}
-          </div>
-        </div>
       </div>}
 
       {!employer && <button

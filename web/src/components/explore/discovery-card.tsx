@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ExternalLink, Plus, Check, Loader2, ShieldQuestion, Sparkles, Coins, CirclePause } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { instrumentSerif } from "@/lib/fonts";
+import { canonStatus } from "@/lib/format";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import { evaluationGateForJob } from "@/lib/job-gate.mjs";
@@ -43,11 +44,15 @@ const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "
 export function DiscoveryCard({
   offer,
   inPipeline,
+  processed = false,
+  applicationStatus,
   evaluatedN,
   layout = "card",
 }: {
   offer: DiscoveredOffer;
   inPipeline: boolean;
+  processed?: boolean;
+  applicationStatus?: string;
   evaluatedN?: string;
   /** "row" lays the same content out as one wide row, for the list view. */
   layout?: "card" | "row";
@@ -151,7 +156,7 @@ export function DiscoveryCard({
             href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}
             className="inline-flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-soft px-2.5 py-2 text-xs font-medium text-brand-text max-sm:min-h-[44px]"
           >
-            <Check className="size-3.5" /> Evaluated · view report
+            <Check className="size-3.5" /> {evaluatedN && applicationStatus && canonStatus(applicationStatus) !== "EVALUATED" ? `${applicationStatus} · view application` : "Evaluated · view report"}
           </a>
         ) : gate && job ? (
           <a href={`/jobs/${job.id}`} className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-2 text-xs font-medium text-amber-800 dark:text-amber-400 max-sm:min-h-[44px]">
@@ -161,7 +166,6 @@ export function DiscoveryCard({
           <div className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-brand/30 bg-brand-soft/60 px-2.5 py-2 text-xs font-medium text-brand-text">
             <Loader2 className="size-3.5 animate-spin" />
             {statusLabel}
-            {isAdded && <span className="text-brand-text">· in pipeline</span>}
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -175,7 +179,7 @@ export function DiscoveryCard({
               )}
             >
               {isAdding ? <Loader2 className="size-3.5 animate-spin" /> : isAdded ? <Check className="size-3.5" /> : <Plus className="size-3.5" />}
-              {isAdded ? "In pipeline" : "Add to pipeline"}
+              {processed ? "Processed" : isAdded ? "In inbox" : "Add to inbox"}
             </button>
             <button
               type="button"

@@ -19,6 +19,7 @@ import { WorkerPills } from "@/components/jobs/worker-pills";
 import { UsageMeter } from "@/components/usage-meter";
 import { instrumentSerif } from "@/lib/fonts";
 import { visibleNavItems, isActivePath } from "@/lib/nav-items";
+import { PortalMonitorNotice } from "@/components/portal-monitor-notice";
 
 export function AppShell({ children, followupsEnabled }: { children: React.ReactNode; followupsEnabled: boolean }) {
   const pathname = usePathname();
@@ -76,7 +77,7 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
             <ThemeToggle showLabel />
           </div>
         </aside>
-        <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none">{children}</main>
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-x-hidden focus:outline-none"><PortalMonitorNotice />{children}</main>
         <div className="print:hidden">
           <AssistantConsole />
           <BackToTop />
