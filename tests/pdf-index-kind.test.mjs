@@ -124,6 +124,9 @@ const kindCases = [
   [undefined, 'output/cv-acme-2026-09-05.pdf', 'cv', 'name', 'a cv- prefix reads as a CV'],
   [undefined, 'output/cv-covered-bridge-group.pdf', 'cv', 'name', 'a cv- prefix wins over a company named "Covered..."'],
   [undefined, 'output/discover-weekly-brief.pdf', 'cv', 'default', 'an unanchored "cover" inside a name is not a cover letter'],
+  [undefined, 'output/031-acme-cover-dana-quinn-2026-11-09.pdf', 'cover', 'name', 'a standard cover name reads as a cover letter (#6667)'],
+  [undefined, 'output/031-acme-cv-dana-quinn-2026-11-09.pdf', 'cv', 'name', 'a standard cv name reads as a CV (#6667)'],
+  [undefined, 'output/031-acme-cover-dana-quinn-2026-11-09.overflow.pdf', 'cover', 'name', 'an overflow draft keeps the standard kind'],
   [undefined, 'output/acme.pdf', 'cv', 'default', 'a name that signals nothing falls back to CV'],
 ];
 for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
@@ -242,4 +245,26 @@ for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
   kindIndex.get('32') === 'output/cv-initech.pdf'
     ? pass('parsePdfIndex treats a legacy row with no kind column as a CV (control)')
     : fail(`parsePdfIndex dropped a legacy kind-less pdf-index row: ${kindIndex.get('32')}`);
+}
+
+// The inline standard-name reader in resolveArtifactKind must agree with the
+// shared builder for every name it can produce (#6667).
+{
+  const { buildOutputName } = await import('../lib/output-names.mjs');
+  const bad = [];
+  for (const kind of ['cv', 'cover']) {
+    for (const company of ['acme', 'northwind-labs', 'the-cvx-centre']) {
+      for (const candidate of ['dana-quinn', 'robin-jones']) {
+        for (const variant of [undefined, 'ats']) {
+          let name;
+          try { name = buildOutputName({ report: 31, company, kind, candidate, date: '2026-11-09', variant, ext: 'pdf' }); } catch { continue; }
+          const got = resolveArtifactKind(undefined, `output/${name}`).kind;
+          if (got !== kind) bad.push(`${name} -> ${got}`);
+        }
+      }
+    }
+  }
+  bad.length === 0
+    ? pass('resolveArtifactKind agrees with buildOutputName for standard names')
+    : fail(`resolveArtifactKind disagrees with buildOutputName: ${bad.join('; ')}`);
 }
