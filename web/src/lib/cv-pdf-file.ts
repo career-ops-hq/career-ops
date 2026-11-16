@@ -46,7 +46,7 @@ export async function locateTailoredPdf(query: CvPdfSelectors): Promise<LocatedC
   if (!company) return { status: 400, message: "company required" };
   const key = companySlug(company);
   if (!key) return { status: 404, message: TAILORED_CV_MISSING };
-  const { slug } = key;
+  const { keys } = key;
   const dir = path.join(careerOpsRoot(), "output");
 
   let files: string[];
@@ -54,7 +54,7 @@ export async function locateTailoredPdf(query: CvPdfSelectors): Promise<LocatedC
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .filter((f) => matchesTailoredCv(f.toLowerCase(), slug))
+      .filter((f) => keys.some((k: string) => matchesTailoredCv(f.toLowerCase(), k)))
       // sortNewestFirst already drops directories and files that vanish under
       // it, but not a symlink PLACED in output/ that resolves elsewhere: that
       // one stats as a regular file and would be served. The realpath check is

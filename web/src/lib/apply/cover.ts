@@ -62,7 +62,7 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .filter((f) => matchesTailoredCover(f.toLowerCase(), key.slug))
+      .filter((f) => key.keys.some((k: string) => matchesTailoredCover(f.toLowerCase(), k)))
       // sortNewestFirst drops directories and files that vanish under it, but
       // not a symlink PLACED in output/ that resolves elsewhere: that one stats
       // as a regular file. Same realpath guard /api/cv-pdf applies, here rather

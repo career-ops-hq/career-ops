@@ -13,7 +13,12 @@
  * pattern that backtracks polynomially on adversarial input (CodeQL).
  *
  * @param {string | undefined | null} company
- * @returns {{ slug: string, first: string } | null}
+ * `keys` lists every slug a file could carry for this company: the folded
+ * `slug` (what lib/output-names.mjs writes) and, for an accented name, the
+ * `legacy` slug that drops the accented letters ("zo-caf"), which covers written
+ * without --report and older CVs still carry. Resolvers match any of them.
+ *
+ * @returns {{ slug: string, first: string, legacy: string, keys: string[] } | null}
  */
 export function companySlug(company) {
   const c = (company ?? "").trim();
@@ -23,5 +28,7 @@ export function companySlug(company) {
   const folded = c.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
   const slug = (folded.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
   if (!slug) return null;
-  return { slug, first: slug.split("-")[0] };
+  const legacy = (c.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
+  const keys = legacy && legacy !== slug ? [slug, legacy] : [slug];
+  return { slug, first: slug.split("-")[0], legacy: legacy || slug, keys };
 }
