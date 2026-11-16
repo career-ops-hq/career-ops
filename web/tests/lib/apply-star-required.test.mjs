@@ -65,6 +65,15 @@ test("a trailing star marks the field required", async (t) => {
       <label><input type="radio" name="workauth" value="0"> No</label>
     </div>
   </div>
+  <div class="field">
+    <div class="heading">
+      <p class="question-title">Sponsorship *</p>
+      <input type="radio" id="spon-yes" name="spon" value="1">
+      <label for="spon-yes">Yes</label>
+      <input type="radio" id="spon-no" name="spon" value="0">
+      <label for="spon-no">No</label>
+    </div>
+  </div>
 </form>`);
   const server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
@@ -115,6 +124,10 @@ test("a trailing star marks the field required", async (t) => {
     assert.ok(direct);
     assert.equal(direct.label, "Work authorization *");
     assert.equal(direct.required, true);
+    const sibling = form.fields.find((f) => f.type === "radio" && (f.label || "").includes("Sponsorship"));
+    assert.ok(sibling);
+    assert.equal(sibling.label, "Sponsorship *");
+    assert.equal(sibling.required, true);
   } finally {
     try {
       await browser?.close();

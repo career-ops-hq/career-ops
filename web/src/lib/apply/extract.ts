@@ -43,13 +43,19 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       return normalize(c.textContent);
     };
     // A heading that also wraps the radios keeps its own text. Drop each option
-    // label so a star after the question stays at the end.
+    // label, including a sibling label[for], so a star after the question stays
+    // at the end.
     const textWithoutRadios = (node: Element): string => {
       const copy = node.cloneNode(true) as Element;
       copy.querySelectorAll("input[type=radio]").forEach((radio) => {
-        const label = radio.closest("label");
-        if (label && label !== copy && copy.contains(label)) label.remove();
+        const id = (radio as HTMLInputElement).id;
+        const wrapped = radio.closest("label");
+        if (wrapped && wrapped !== copy && copy.contains(wrapped)) wrapped.remove();
         else radio.remove();
+        if (!id) return;
+        copy.querySelectorAll("label").forEach((label) => {
+          if (label !== copy && label.getAttribute("for") === id) label.remove();
+        });
       });
       return normalize(copy.textContent);
     };
