@@ -281,8 +281,14 @@ function linkedInCanonicalKey(raw) {
   if (u.protocol !== "http:" && u.protocol !== "https:") return "";
   const host = foldHostname(u.hostname);
   if (!/(^|\.)linkedin\.com$/.test(host)) return "";
-  const path = u.pathname.match(/^\/(?:jobs\/view\/(?:.*-)?|comm\/jobs\/view\/)(\d+)\/?$/);
-  const pathId = path ? path[1] : null;
+  // A year at the end of a title is not an id. A bare short path id still is.
+  const path = u.pathname.match(/^\/(?:jobs\/view\/((?:.*-)?)|comm\/jobs\/view\/)(\d+)\/?$/);
+  let pathId = null;
+  if (path) {
+    const slug = path[1];
+    const id = path[2];
+    if (!(slug && id.length < 7)) pathId = id;
+  }
   const current = u.searchParams.get("currentJobId");
   const id = pathId || (current && /^\d+$/.test(current) ? current : null);
   return id ? `linkedin.com:${id}` : "";

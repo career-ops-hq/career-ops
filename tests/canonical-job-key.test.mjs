@@ -178,6 +178,17 @@ test('two postings do not share a key', () => {
   }
 });
 
+test('a LinkedIn title that ends in a year is not a job id', () => {
+  const year = 'https://www.linkedin.com/jobs/view/data-scientist-2024';
+  const other = 'https://www.linkedin.com/jobs/view/engineer-2024';
+  assert.equal(webKey(year), 'https://www.linkedin.com/jobs/view/data-scientist-2024');
+  assert.equal(webKey(other), 'https://www.linkedin.com/jobs/view/engineer-2024');
+  assert.notEqual(webKey(year), webKey(other));
+  assert.equal(webKey('https://www.linkedin.com/jobs/view/2024'), 'linkedin.com:2024');
+  assert.equal(webKey('https://www.linkedin.com/jobs/view/data-scientist-1234567'), 'linkedin.com:1234567');
+  assert.notEqual(webKey('https://www.linkedin.com/comm/jobs/view/data-scientist-1234567'), 'linkedin.com:1234567');
+});
+
 test('a missing posting is not a key, and a repeated call on a URL is stable', () => {
   for (const bad of ['', '   ', 'N/A', 'local:jds/acme.md', 'not a url', null, undefined]) {
     assert.equal(canonicalJobKey(bad), '');
