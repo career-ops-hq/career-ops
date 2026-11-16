@@ -122,7 +122,7 @@ ok('a bold alias with a trailing date ("**Entrevista** 2026-06-01") is still rea
 // not delete that row or replace the rejection.
 const IN_MOTION = ['applied', 'responded', 'assessment', 'interview', 'offer', 'hired'];
 const KEPT_ON_TITLE = ['rejected'];
-const NOT_IN_MOTION = ['evaluated', 'rejected', 'discarded', 'skip'];
+const NOT_IN_MOTION = ['evaluated', 'speculative', 'rejected', 'discarded', 'skip'];
 
 const { loadCanonicalStates } = await import(pathToFileURL(join(ROOT, 'tracker-utils.mjs')).href);
 const states = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
@@ -167,6 +167,8 @@ const SANDBOX_FILES = [
   'dedup-tracker.mjs', 'path-resolver.mjs', 'role-matcher.mjs', 'url-key.mjs',
   'tracker-utils.mjs', 'tracker-parse.mjs', 'tracker-aliases.json', 'pipeline-lock.mjs',
   'lib/cli-flags.mjs', 'lib/linkedin-url.mjs', 'lib/dir-lock.mjs', 'lib/yaml-document.mjs',
+  // url-key.mjs reads Himalayas posting ids through the liveness resolver.
+  'himalayas-posting.mjs', 'lib/is-main-module.mjs',
 ];
 const DUPLICATE_ROWS = [
   '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',

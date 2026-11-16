@@ -47,6 +47,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing to the pipeline or scan history; `--tenant NAME` scans one board |
 | `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing to the pipeline or scan history; `--keyword TEXT` scans one keyword |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
+| `node web/scripts/scheduled-jobs-task.mjs` | `web/scripts/scheduled-jobs-task.mjs` | What the Windows scan task runs: sets the path overrides passed as `--env KEY=VALUE`, then runs the scheduled-jobs runner with its errors appended to `--log` (written by `install-scan-schedule.ps1`) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
 | `sh web/scripts/uninstall-scan-schedule.sh` | `web/scripts/uninstall-scan-schedule.sh` | Remove the macOS launchd agent or Linux cron line for the scheduled-jobs queue worker |
@@ -483,7 +484,7 @@ npm run keyword-match -- --self-test
 
 ## calibrate
 
-Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
+Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A row closed by `close-stale.mjs --confirm` counts as a `no_response` outcome until its status changes. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
 
 ```bash
 npm run calibrate
@@ -645,11 +646,16 @@ mode (#4691) before any cold WebSearch — "do I already have a saved contact
 at this company?" A real prior relationship (a past interviewer, or a contact
 from an earlier, different-role application) is a far stronger outreach
 target than a fresh search, so a match is surfaced first and offered as an
-`internal-referral` ask. Matching is exact-key via `normalizeCompany()`
-(`tracker-utils.mjs`) — the same key `merge-tracker.mjs`/`set-status.mjs`/
-`company-history.mjs` use for same-company lookups — deliberately not
-`linkedin-join.mjs`'s fuzzy token matching, since `contacts.tsv`'s company
-column is normally written from the same string already in the tracker.
+`internal-referral` ask. A contact matches when its company has the same
+`normalizeCompany()` key as `--company`, or when
+`companiesMatchIgnoringCorporateForm()` accepts the pair, so a contact saved
+as "Acme Inc." surfaces for "Acme". Both helpers live in `tracker-utils.mjs`
+and are the rule `set-status.mjs` and `outcome.mjs` use to find a company's
+tracker row. The corporate-form rule only lets the names differ by a trailing
+legal suffix or generic descriptor ("Acme Robotics" never matches "Acme"), and
+it is deliberately not `linkedin-join.mjs`'s fuzzy token matching, since
+`contacts.tsv`'s company column is normally written from the same string
+already in the tracker.
 
 ```bash
 node contact-lookup.mjs --company "Acme"            # JSON: saved contacts at "Acme"
@@ -1039,6 +1045,7 @@ Possible JSON responses:
 | `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
+| `checkout-unreadable` | A git checkout whose commit git cannot read (git missing, no commit yet, or git refusing the directory, e.g. "detected dubious ownership"). Carries `detail`: the first line of the error. No version verdict, on either channel |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
 

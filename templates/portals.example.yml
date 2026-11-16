@@ -1331,6 +1331,7 @@ search_queries:
 #   recruitee       <slug>.recruitee.com
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
+#   taleez          <tenant>.taleez.com                 (or api: field)
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
@@ -1520,6 +1521,10 @@ search_queries:
 #
 # - name: Example Breezy Co
 #   careers_url: https://exampleco.breezy.hr              # any *.breezy.hr host
+#   enabled: true
+#
+# - name: Example Taleez Co
+#   careers_url: https://exampleco.taleez.com             # any <tenant>.taleez.com careers site
 #   enabled: true
 #
 # - name: Example Deel Board Co
@@ -2274,8 +2279,10 @@ search_queries:
 #   provider: jobspresso
 #   enabled: true
 #
-# - name: The Muse                        # board-wide public jobs API
+# - name: The Muse                        # board-wide search page (server-rendered HTML)
 #   provider: themuse
+#   location: Germany                     # optional: narrows the search (country or city)
+#   posted: 30                            # optional: 1, 7 or 30 (days) — keeps the run small
 #   enabled: true
 #
 # - name: LaraJobs                        # Laravel / PHP jobs (public RSS feed)
@@ -2534,9 +2541,8 @@ tracked_companies:
     enabled: true
 
   - name: Parloa
-    careers_url: https://job-boards.eu.greenhouse.io/parloa
-    api: https://boards-api.greenhouse.io/v1/boards/parloa/jobs
-    notes: "Berlin EMEA. Voice AI enterprise."
+    careers_url: https://jobs.ashbyhq.com/parloa
+    notes: "Berlin EMEA. Voice AI enterprise. Moved from Greenhouse to Ashby; greenhouse.io/parloa answers 404."
     enabled: true
 
   - name: Intercom
@@ -2680,15 +2686,13 @@ tracked_companies:
 
   - name: Dialpad
     careers_url: https://www.dialpad.com/careers
-    scan_method: websearch
-    scan_query: '"dialpad" "AI" "Solutions" OR "Engineer" site:job-boards.greenhouse.io OR site:jobs.ashbyhq.com'
+    api: https://boards-api.greenhouse.io/v1/boards/dialpad/jobs
     notes: "Voice AI for business comms."
     enabled: true
 
   - name: Gong
     careers_url: https://www.gong.io/careers
-    scan_method: websearch
-    scan_query: 'site:gong.io/careers "AI" OR "Solutions" OR "Architect"'
+    api: https://boards-api.greenhouse.io/v1/boards/gongio/jobs
     notes: "Revenue intelligence with voice AI."
     enabled: true
 
@@ -2899,6 +2903,9 @@ tracked_companies:
   - name: Shiji Group
     careers_url: https://shijigroup.zohorecruit.com/jobs/Careers
     notes: "Katowice / Barcelona. International hubs of a Beijing-based hospitality technology group."
+    # The board page carries every opening inline (about 2 MB) and takes 6-48s to
+    # arrive, so the 10s default aborts it on most runs. See timeout_ms above.
+    timeout_ms: 60000
     enabled: true
 
   - name: Remote
@@ -2966,9 +2973,8 @@ tracked_companies:
     enabled: true
 
   - name: GetYourGuide
-    careers_url: https://job-boards.greenhouse.io/getyourguide
-    api: https://boards-api.greenhouse.io/v1/boards/getyourguide/jobs
-    notes: "Berlin. Travel marketplace, ML & data platform roles."
+    careers_url: https://jobs.ashbyhq.com/GetYourGuide
+    notes: "Berlin. Travel marketplace, ML & data platform roles. Moved from Greenhouse to Ashby; greenhouse.io/getyourguide is live but empty."
     enabled: true
 
   - name: HelloFresh
@@ -3069,6 +3075,11 @@ tracked_companies:
     careers_url: https://jobs.lever.co/pigment
     notes: "Paris FR / NYC / London. AI-powered FP&A planning platform."
     enabled: true
+
+  - name: Diabeloop
+    careers_url: https://diabeloop.taleez.com
+    notes: "Grenoble FR. AI-driven automated insulin delivery (closed-loop algorithm) — Taleez careers site."
+    enabled: false   # live Taleez board, no open posting when added (2026-11-13)
 
   - name: Diabolocom
     careers_url: https://jobs.eu.lever.co/diabolocom

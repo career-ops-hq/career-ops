@@ -87,13 +87,48 @@ export function shouldPutAfterPost(wrote, sent, current) {
  * @param {string | null} saving
  * @param {string | null} posting
  * @param {boolean} [uncertain] - A previous response may have been lost after writing.
- * @returns {"Saving" | "Unsaved" | "Saved"}
+ * @param {boolean} [rejected] - Save for apply stored this draft, then the PDF render failed.
+ * @returns {"Saving" | "Unsaved" | "Saved" | "Not in the PDF"}
  */
-export function editSaveStatus(saved, current, saving, posting, uncertain = false) {
+export function editSaveStatus(saved, current, saving, posting, uncertain = false, rejected = false) {
   const inflight = inflightEdits(saving, posting, current);
   if (inflight === current || (current === saved && inflight !== null)) return "Saving";
   if (current !== saved || uncertain) return "Unsaved";
+  if (rejected) return "Not in the PDF";
   return "Saved";
+}
+
+/**
+ * Save for apply and Reset both finish after they start. Each start takes the
+ * next number. Only that number may change the notice. An earlier save still
+ * records the edits it wrote.
+ *
+ * @param {number} epoch - The number this action took when it started.
+ * @param {number} current - The number held by the action that started last.
+ */
+export function ownsStatus(epoch, current) {
+  return epoch === current;
+}
+
+/**
+ * The studio file is the edits plus an optional failed-export flag.
+ * `next` undefined keeps a stored failure (autosave). null clears it after
+ * a PDF is written. An object records the render error.
+ *
+ * @param {object} edits
+ * @param {{ ok: false, error: string } | null} stored
+ * @param {{ ok: false, error: string } | null | undefined} next
+ */
+export function withPdfExport(edits, stored, next) {
+  const flag = next === undefined ? stored : next;
+  if (flag && flag.ok === false && typeof flag.error === "string" && flag.error.length > 0) {
+    return { ...edits, pdfExport: { ok: false, error: flag.error } };
+  }
+  if (edits && Object.hasOwn(edits, "pdfExport")) {
+    const { pdfExport: _dropped, ...rest } = edits;
+    return rest;
+  }
+  return edits;
 }
 
 export function createPutOrder() {

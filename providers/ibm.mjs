@@ -20,6 +20,7 @@
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { parseDate } from '../lib/parse-date.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_URL = 'https://www-api.ibm.com/search/api/v2';
 const PAGE_SIZE = 30;
@@ -180,6 +181,10 @@ export default {
     if (stopReason === 'cap') {
       console.error(`⚠️  ibm: ${entry.name} truncated at max_pages=${maxPages} (${out.length} jobs) — raise max_pages on this entry for more`);
     }
+    // The stop reason that drives the warnings marks the result too, so scan.mjs
+    // logs a partly read board `partial` instead of `reachable`
+    // (lib/board-truncation.mjs). 'cap' is named page-cap, as in themuse.mjs.
+    if (stopReason !== 'complete') markTruncated(out, stopReason === 'cap' ? 'page-cap' : stopReason, { fetched: out.length });
 
     return out;
   },

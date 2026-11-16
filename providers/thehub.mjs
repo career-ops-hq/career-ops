@@ -32,6 +32,7 @@
 
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const FEED_BASE = 'https://thehub.io/api/v2/jobsandfeatured';
 const TRUSTED_HOST = 'thehub.io';
@@ -179,10 +180,15 @@ export default {
     const state = { succeededOnce: false };
 
     const regionOk = await fetchScope(`countryCode=${encodeURIComponent(countryCode)}`, maxPages, fallbackCompany, byUrl, ctx, state);
-    if (regionOk && includeRemote) {
-      await fetchScope('isRemote=true', maxPages, fallbackCompany, byUrl, ctx, state);
-    }
+    const remoteOk = regionOk && includeRemote
+      ? await fetchScope('isRemote=true', maxPages, fallbackCompany, byUrl, ctx, state)
+      : true;
 
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    // A pass that stopped on a failure (or a remote pass skipped because the
+    // region pass did) left part of the board unread. The result says so, so
+    // scan.mjs logs it partial instead of reachable (lib/board-truncation.mjs).
+    if (!regionOk || !remoteOk) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

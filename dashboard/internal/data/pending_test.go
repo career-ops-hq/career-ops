@@ -447,3 +447,73 @@ func TestPendingURLKeyNormalizesLightly(t *testing.T) {
 		}
 	}
 }
+
+// sync-batch-input.mjs writes each pipeline URL to batch-input.tsv as Node's
+// `new URL(raw).href`, so the Inbox finds a row's batch status only when
+// pendingURLKey gives the row's URL as written the same key as that href.
+// testdata/pending-url-keys.json holds Node's href for each URL;
+// tests/dashboard-pending-parity.test.mjs checks it against the running Node.
+func TestPendingURLKeyMatchesNodeHref(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "pending-url-keys.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct {
+		URL  string `json:"url"`
+		Href string `json:"href"`
+	}
+	if err := json.Unmarshal(raw, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("the fixture lists no URLs")
+	}
+	for _, c := range cases {
+		if got := pendingURLKey(c.URL); got != c.Href {
+			t.Errorf("pendingURLKey(%q)\n got  %q\n want %q", c.URL, got, c.Href)
+		}
+		if got := pendingURLKey(c.Href); got != c.Href {
+			t.Errorf("pendingURLKey(%q) = %q, want it unchanged", c.Href, got)
+		}
+	}
+}
+
+func TestLoadPendingRowsFindsARowSyncBatchInputEncoded(t *testing.T) {
+	root := t.TempDir()
+	input := "id\turl\tsource\tnotes\n" +
+		"1\thttps://jobs.example.com/listing?location=Z%C3%BCrich\tpipeline\t\n" +
+		"2\thttps://jobs.example.com/jobs/data%20engineer\tpipeline\t\n"
+	state := "id\turl\tstatus\tstarted_at\tcompleted_at\treport_num\tscore\terror\tretries\n" +
+		"2\thttps://jobs.example.com/jobs/data%20engineer\tprocessing\t-\t-\t-\t-\t-\t0\n"
+	writeBatchCheckoutFiles(t, root, input, state)
+	writePending(t, root, "## Pending\n"+
+		"- [ ] https://jobs.example.com/listing?location=Zürich | Acme | Platform Engineer\n"+
+		"- [ ] https://jobs.example.com/jobs/data engineer | Globex | Data Engineer\n")
+	chdirForTest(t, root)
+
+	rows, err := LoadPendingRows(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"Platform Engineer": PendingStatusQueued,
+		"Data Engineer":     PendingStatusRunning,
+	}
+	got := statusByRole(rows)
+	for role, status := range want {
+		if got[role] != status {
+			t.Errorf("%s: status = %q, want %q", role, got[role], status)
+		}
+	}
+}
+
+func TestPendingRowsDedupeURLsWithTheSameHref(t *testing.T) {
+	// sync-batch-input.mjs queues these two rows once, as one href; the Inbox
+	// lists them once too, the first row winning.
+	rows := ParsePendingRows("## Pending\n" +
+		"- [ ] https://jobs.example.com/listing?location=Zürich | Acme | First\n" +
+		"- [ ] https://jobs.example.com/listing?location=Z%C3%BCrich | Acme | Second\n")
+	if len(rows) != 1 || rows[0].Role != "First" {
+		t.Fatalf("got %#v, want only the first row", rows)
+	}
+}

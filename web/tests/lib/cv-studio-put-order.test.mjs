@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPutOrder, editSaveStatus, inflightEdits, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "../../src/lib/cv-studio/put-order.mjs";
+import { createPutOrder, editSaveStatus, inflightEdits, ownsStatus, postWroteEdits, shouldPutAfterPost, shouldSendEdits } from "../../src/lib/cv-studio/put-order.mjs";
 
 test("an older PUT from the same tab is dropped once a newer one was written", () => {
   const order = createPutOrder();
@@ -62,6 +62,26 @@ test("a lost save still sends restored edits while the sent payload is in flight
   assert.equal(shouldSendEdits("restored", "restored", "hidden", false), false);
   assert.equal(shouldSendEdits("restored", "restored", "hidden", true), true);
   assert.equal(shouldSendEdits("saved", "current", "current", true), true);
+});
+
+test("Reset keeps the notice when an earlier save finishes", () => {
+  let current = 0;
+  current += 1;
+  const saveEpoch = current;
+  current += 1;
+  const resetEpoch = current;
+  assert.equal(ownsStatus(saveEpoch, current), false);
+  assert.equal(ownsStatus(resetEpoch, current), true);
+});
+
+test("a save started after Reset keeps the notice", () => {
+  let current = 0;
+  current += 1;
+  const resetEpoch = current;
+  current += 1;
+  const saveEpoch = current;
+  assert.equal(ownsStatus(resetEpoch, current), false);
+  assert.equal(ownsStatus(saveEpoch, current), true);
 });
 
 test("a lost autosave keeps the restored snapshot unsaved", () => {

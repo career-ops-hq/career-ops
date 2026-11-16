@@ -238,6 +238,27 @@ function readFile(path, label) {
 }
 
 // ---------------------------------------------------------------------------
+// Ending a run after a request
+// ---------------------------------------------------------------------------
+// Once a request has been made, the run ends by setting the exit code and
+// letting the event loop drain, not with process.exit(). On Windows, Node 23,
+// 25, and 24.x and 26.x before 24.20.0 and 26.7.0 can abort in process.exit()
+// after a request (nodejs/node#56645), and the run ends with exit code
+// 3221226505 instead of 1. Measured 2026-11-14 on Node 24.14.1: a stream record
+// over the size cap aborted 8 runs out of 8.
+//
+// This is top-level code, so the caller awaits the promise returned here. It
+// never settles, so nothing after the await runs, and Node exits with
+// process.exitCode once nothing else is pending: an exit code that is already
+// set wins over the unsettled-await code 13. The unref'd timer still ends a run
+// that something holds open, without holding the process open itself.
+function exitWhenDrained(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5_000).unref();
+  return new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Check Ollama is reachable before burning time on prompt assembly
 // ---------------------------------------------------------------------------
 try {
@@ -251,7 +272,7 @@ try {
    2. Start server:   ollama serve
    3. Pull a model:   ollama pull ${modelName}
 `);
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +387,7 @@ try {
     const body = await res.text();
     console.error(`❌  Ollama API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 
   // Streamed /api/chat is newline-delimited JSON: one object per token, the last carrying
@@ -422,7 +443,7 @@ try {
   } else {
     console.error(`❌  Ollama API call failed: ${err.message}`);
   }
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // ---------------------------------------------------------------------------

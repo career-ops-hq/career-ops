@@ -5,7 +5,8 @@
  *
  * Fetches https://nz.seek.com/<keyword>-jobs[/in-<Location>] and reads the
  * job records out of the page's inlined `window.SEEK_REDUX_DATA` (id, title,
- * advertiser, location, salary label, listing date, teaser, work types).
+ * advertiser, location, salary label, listing date, teaser, work types, and
+ * SEEK's Remote/Hybrid/On-site label as `workArrangement` for workplace_policy).
  *
  * Unlike `providers/jobstreet.mjs` (which queries `/api/jobsearch/v5/search`
  * for known companies in `companies:`), this scanner discovers roles by
@@ -223,6 +224,40 @@ function toArray(v) {
  * are located by shape (id + title + advertiser) rather than by a fixed path
  * into the Redux tree, so a rearranged tree does not silently return nothing.
  */
+const SEEK_COUNTRIES = { NZ: 'New Zealand', AU: 'Australia' };
+
+/**
+ * Location text for one SEEK job. Older payloads carry a flat `location` /
+ * `locationLabel` string; current ones carry `locations: [{ label,
+ * countryCode }]` instead, which read as an empty location and failed every
+ * location_filter. The country is appended from `countryCode` so a
+ * workplace_policy can see which country a remote role is in.
+ */
+export function seekLocation(job) {
+  const flat = job.location ?? job.locationLabel;
+  if (typeof flat === 'string' && flat.trim()) return decodeHtml(flat);
+  return toArray(job.locations)
+    .map((l) => {
+      const label = decodeHtml(l?.label ?? '');
+      const country = SEEK_COUNTRIES[String(l?.countryCode ?? '').toUpperCase()];
+      if (!label) return country ?? '';
+      return country && !label.toLowerCase().includes(country.toLowerCase()) ? `${label}, ${country}` : label;
+    })
+    .filter(Boolean)
+    .join(' / ');
+}
+
+/**
+ * SEEK's own work arrangement label ("Remote", "Hybrid", "On-site"), as the
+ * `workArrangement` field the workplace_policy reads. Omitted when absent.
+ */
+export function seekWorkArrangement(job) {
+  const wa = job.workArrangements;
+  const labels = toArray(wa?.data).map((d) => decodeHtml(d?.label?.text ?? '')).filter(Boolean);
+  const text = labels.length ? labels.join(', ') : decodeHtml(typeof wa?.displayText === 'string' ? wa.displayText : '');
+  return text ? { workArrangement: text } : {};
+}
+
 export function parseSeekPage(html) {
   const raw = extractReduxJson(html);
   if (!raw) throw new Error('SEEK_REDUX_DATA not found — page may be blocked or layout changed');
@@ -245,10 +280,11 @@ export function parseSeekPage(html) {
       url: `${BASE}/job/${id}`, // recorded, never fetched during scan
       title: decodeHtml(j.title),
       company: decodeHtml(j.advertiser?.description ?? j.companyName ?? ''),
-      location: decodeHtml(j.location ?? j.locationLabel ?? ''),
+      location: seekLocation(j),
       salary: decodeHtml(j.salaryLabel ?? ''),
       teaser: decodeHtml(j.teaser ?? ''),
       workTypes: toArray(j.workTypes).map(String),
+      ...seekWorkArrangement(j),
       postedAt: /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : '',
       source: 'seek-nz',
     });

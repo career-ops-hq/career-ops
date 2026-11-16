@@ -95,13 +95,16 @@ const { parallelEach, withTimeout, datasetFingerprint, restorePendingRetries, re
 }
 
 // ── Checkpoint compatibility rules (Task 3) ─────────────────────────
-const { loadCheckpoint, checkpointCompatible } = mod;
+const { loadCheckpoint, checkpointCompatible, checkpointMismatch } = mod;
 
 {
   const cp = { version: 1, cutoffMs: 1, ats: ['workday'], limit: null, includeUndated: false };
   const opts = { ats: ['workday'], limit: Infinity, includeUndated: false, shuffle: false };
   if (checkpointCompatible(cp, opts)) pass('checkpoint compatible with identical settings');
   else fail('identical settings judged incompatible');
+
+  if (checkpointMismatch(cp, opts) === null) pass('checkpointMismatch returns null on identical settings');
+  else fail(`expected null mismatch, got: ${checkpointMismatch(cp, opts)}`);
 
   if (!checkpointCompatible(cp, { ...opts, ats: ['greenhouse'] })) pass('ats mismatch rejected');
   else fail('ats mismatch accepted');
@@ -114,6 +117,99 @@ const { loadCheckpoint, checkpointCompatible } = mod;
 
   if (!checkpointCompatible(null, opts)) pass('null checkpoint rejected');
   else fail('null checkpoint accepted');
+
+  if (checkpointMismatch(null, opts) === 'missing checkpoint') pass('checkpointMismatch reports missing checkpoint');
+  else fail(`null checkpoint mismatch: ${checkpointMismatch(null, opts)}`);
+
+  // Edge cases for checkpointMismatch:
+  // 1. Added ATS sources
+  const addedMismatch = checkpointMismatch(cp, { ...opts, ats: ['workday', 'paylocity', 'join'] });
+  if (addedMismatch && addedMismatch.includes('added: paylocity, join') && !addedMismatch.includes('removed:')) {
+    pass('checkpointMismatch names added ATS sources');
+  } else {
+    fail(`added mismatch unexpected: ${addedMismatch}`);
+  }
+
+  // 2. Removed ATS sources
+  const cpMulti = { ...cp, ats: ['workday', 'lever', 'ashby'] };
+  const removedMismatch = checkpointMismatch(cpMulti, { ...opts, ats: ['workday'] });
+  if (removedMismatch && removedMismatch.includes('removed: lever, ashby') && !removedMismatch.includes('added:')) {
+    pass('checkpointMismatch names removed ATS sources');
+  } else {
+    fail(`removed mismatch unexpected: ${removedMismatch}`);
+  }
+
+  // 3. Both added and removed ATS sources
+  const bothMismatch = checkpointMismatch(cpMulti, { ...opts, ats: ['workday', 'greenhouse'] });
+  if (bothMismatch && bothMismatch.includes('added: greenhouse') && bothMismatch.includes('removed: lever, ashby')) {
+    pass('checkpointMismatch names both added and removed ATS sources');
+  } else {
+    fail(`both mismatch unexpected: ${bothMismatch}`);
+  }
+
+  // 4. Reordered ATS sources
+  const reorderMismatch = checkpointMismatch({ ...cp, ats: ['lever', 'workday'] }, { ...opts, ats: ['workday', 'lever'] });
+  if (reorderMismatch && reorderMismatch.includes('ATS sources order differed')) {
+    pass('checkpointMismatch detects ATS sources reordering');
+  } else {
+    fail(`reorder mismatch unexpected: ${reorderMismatch}`);
+  }
+
+  // 5. Limit differences
+  const limitToNumeric = checkpointMismatch(cp, { ...opts, limit: 200 });
+  if (limitToNumeric && limitToNumeric.includes('limit changed (was none, now 200)')) {
+    pass('checkpointMismatch explains limit added');
+  } else {
+    fail(`limitToNumeric unexpected: ${limitToNumeric}`);
+  }
+
+  const limitToNone = checkpointMismatch({ ...cp, limit: 150 }, { ...opts, limit: Infinity });
+  if (limitToNone && limitToNone.includes('limit changed (was 150, now none)')) {
+    pass('checkpointMismatch explains limit removed');
+  } else {
+    fail(`limitToNone unexpected: ${limitToNone}`);
+  }
+
+  const limitChanged = checkpointMismatch({ ...cp, limit: 100 }, { ...opts, limit: 250 });
+  if (limitChanged && limitChanged.includes('limit changed (was 100, now 250)')) {
+    pass('checkpointMismatch explains limit changed');
+  } else {
+    fail(`limitChanged unexpected: ${limitChanged}`);
+  }
+
+  // 6. includeUndated differences
+  const undatedMismatch = checkpointMismatch(cp, { ...opts, includeUndated: true });
+  if (undatedMismatch && undatedMismatch.includes('includeUndated changed (was false, now true)')) {
+    pass('checkpointMismatch explains includeUndated changed to true');
+  } else {
+    fail(`undatedMismatch unexpected: ${undatedMismatch}`);
+  }
+
+  const undatedReverse = checkpointMismatch({ ...cp, includeUndated: true }, { ...opts, includeUndated: false });
+  if (undatedReverse && undatedReverse.includes('includeUndated changed (was true, now false)')) {
+    pass('checkpointMismatch explains includeUndated changed to false');
+  } else {
+    fail(`undatedReverse unexpected: ${undatedReverse}`);
+  }
+
+  // 7. Shuffle flag passed
+  const shuffleMismatch = checkpointMismatch(cp, { ...opts, shuffle: true });
+  if (shuffleMismatch && shuffleMismatch.includes('--shuffle is set')) {
+    pass('checkpointMismatch explains shuffle set');
+  } else {
+    fail(`shuffleMismatch unexpected: ${shuffleMismatch}`);
+  }
+
+  // 8. Multiple differences combined
+  const multiMismatch = checkpointMismatch(cp, { ...opts, ats: ['workday', 'join'], limit: 50, shuffle: true });
+  if (multiMismatch
+    && multiMismatch.includes('--shuffle is set')
+    && multiMismatch.includes('added: join')
+    && multiMismatch.includes('limit changed (was none, now 50)')) {
+    pass('checkpointMismatch combines multiple differences separated by semicolons');
+  } else {
+    fail(`multiMismatch unexpected: ${multiMismatch}`);
+  }
 }
 
 // Filter fingerprints: a portals.yml filter edited between a run and its

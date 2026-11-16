@@ -135,7 +135,7 @@ Mantén la retroalimentación concisa. Una o dos cosas a mejorar por respuesta �
 
 ### Write Session Transcript
 
-Después del resumen, escribe una transcripción de la sesión legible por máquina en `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (usa `practice` para el slug de empresa/rol si no fue una sesión específica de empresa). Este es un registro estructurado de la ronda para modos de análisis posteriores; los turnos etiquetados por hablante permiten a un consumidor leer cualquier lado sin volver a inferir quién habló. El contrato completo vive en `interview-prep/sessions/README.md`.
+Después del resumen, escribe una transcripción de la sesión legible por máquina en `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (usa `practice` para el slug de empresa/rol si no fue una sesión específica de empresa). Si ese archivo ya existe, no lo sobrescribas: añade el siguiente contador libre (`-2`, `-3`, ...) antes de `.md`, como describe la sección "File names" del README. Este es un registro estructurado de la ronda para modos de análisis posteriores; los turnos etiquetados por hablante permiten a un consumidor leer cualquier lado sin volver a inferir quién habló. El contrato completo vive en `interview-prep/sessions/README.md`.
 
 Formato:
 

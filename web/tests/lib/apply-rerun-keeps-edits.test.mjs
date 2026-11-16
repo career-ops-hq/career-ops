@@ -1,5 +1,5 @@
 // A second fill must not replace a value the person typed on the form.
-// Served only on 127.0.0.1:3165.
+// Served only on 127.0.0.1:3166. The unlabeled-radio test uses 3165.
 //
 // Run from web/: node --experimental-strip-types --test tests/lib/apply-rerun-keeps-edits.test.mjs
 
@@ -14,7 +14,7 @@ import "../helpers/web-ts-alias-loader.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-rerun-salary.html"));
-const PORT = 3165;
+const PORT = 3166;
 
 test("a second fill keeps a salary the person changed by hand", async () => {
   const server = createServer((req, res) => {

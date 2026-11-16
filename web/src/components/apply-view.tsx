@@ -7,6 +7,7 @@ import type { ApplyIssue, DriveStep } from "@/lib/apply/issue";
 import { useApply } from "@/components/apply/apply-provider";
 import { needsLeaveConfirmation, resolveReturnPath } from "@/lib/apply/exit.mjs";
 import { markAppliedEnabled } from "@/lib/apply/mark-applied.mjs";
+import { showPrefilledBanner } from "@/lib/apply/prefilled-banner.mjs";
 import { reopenApplyOptions } from "@/lib/apply/reopen-options.mjs";
 import { checklistHrefFor } from "@/lib/apply/checklist-href.mjs";
 import { resumeFieldNotice } from "@/lib/apply/handoff-gate.mjs";
@@ -111,6 +112,7 @@ export function ApplyView() {
   const prefilling = a.status === "prefilling";
   const filling = a.status === "filling";
   const done = a.status === "done";
+  const prefilled = showPrefilledBanner(a.status, a.issues);
   const busy = opening || driving;
   const phase = busy ? 0 : prefilling ? 1 : 2;
 
@@ -258,7 +260,7 @@ export function ApplyView() {
               </div>
             </div>
           )}
-          {done && (
+          {prefilled && (
             <div className="co-rise mt-4 flex items-start gap-2.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm backdrop-blur-sm">
               <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-emerald-500" />
               <div>

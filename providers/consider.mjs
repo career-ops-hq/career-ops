@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchResponseWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Consider provider — multi-employer board adapter for `job_boards:`.
 // VC "talent network" portfolio boards built on Consider (consider.com) and
@@ -335,7 +336,9 @@ export default {
           : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
         const cause = err instanceof Error ? err.message : String(err);
         console.error(`⚠️  consider: ${entry.name} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${rows.length} jobs): ${cause}`);
-        return rows;
+        // Partly read, so the result says so: scan.mjs logs the board partial,
+        // not reachable (lib/board-truncation.mjs).
+        return markTruncated(rows, 'fetch-error', { fetched: rows.length });
       }
 
       const jobs = Array.isArray(json?.jobs) ? json.jobs : [];
@@ -360,6 +363,7 @@ export default {
         ? `the ${MAX_PAGES_CAP}-page hard cap, so raising max_pages reads no more`
         : 'raise max_pages on this entry for more';
       console.error(`⚠️  consider: ${entry.name} truncated at max_pages=${maxPages} (${rows.length}${of} jobs) — ${advice}`);
+      markTruncated(rows, 'page-cap', { fetched: rows.length });
     }
     return rows;
   },

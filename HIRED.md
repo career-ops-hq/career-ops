@@ -15,6 +15,13 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=23 level=handle handle=MainKataVerde role="Cash Solutions Technician (Productivity & Innovation)" sector="Multinational" weeks=1 link="https://github.com/career-ops-hq/career-ops/issues/7125" -->
+### Hire #23
+
+> Junior profile with a few months of QA and support experience. With career-ops I evaluated around 40 offers, prepared my emails and interviews, and reviewed the offer before signin
+
+<a href="https://github.com/MainKataVerde"><img src="https://github.com/MainKataVerde.png?size=64" width="28" height="28" align="top" alt="@MainKataVerde"> **@MainKataVerde**</a> · Cash Solutions Technician (Productivity &amp; Innovation) · 1 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/7125)
+
 <!-- hire n=22 level=handle handle=pelarson28 role="Customer Success Associate" sector="Startup (growth-stage)" geo="United States" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/6337" -->
 ### Hire #22
 

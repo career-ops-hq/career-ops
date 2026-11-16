@@ -24,7 +24,39 @@ export const RATES = {
   'deepseek/deepseek-reasoner': { input: 0.55 / 1000000, output: 2.19 / 1000000 },
   'deepseek-reasoner': { input: 0.55 / 1000000, output: 2.19 / 1000000 },
 
-  // Anthropic / Claude models
+  // Anthropic / Claude models. First-party list prices per 1M tokens from
+  // https://platform.claude.com/docs/en/about-claude/pricing (read 2026-11-12).
+  // Cache reads bill at a fraction of input (0.1x for most models; 0.05x on
+  // Opus/Sonnet 5.5, 0.025x on Fable 5.2/5.1, per that page's footnotes), so
+  // each row carries cachedInput: the 0.5x generic fallback below would
+  // overstate a cache-heavy Claude run. Cache writes (5m: 1.25x input on every
+  // row here, per the same page) are not modeled: estimateCost bills them as
+  // plain input, as it does for every provider.
+  // Longer ids come before their prefixes so substring matching
+  // ("anthropic/claude-opus-5-5", "claude-sonnet-5.5") can't land on a
+  // shorter sibling.
+  // Fable 5.2: $8 in / $40 out / $0.20 cache read (page row).
+  'claude-fable-5-2': { input: 8.00 / 1000000, output: 40.00 / 1000000, cachedInput: 0.20 / 1000000 },
+  // Fable 5.1: $10 / $50 / $0.25 (page row); listed so it does not fall to Fable 5's $1 cache read.
+  'claude-fable-5-1': { input: 10.00 / 1000000, output: 50.00 / 1000000, cachedInput: 0.25 / 1000000 },
+  // Fable 5: $10 / $50 / $1 (page row, standard 0.1x).
+  'claude-fable-5': { input: 10.00 / 1000000, output: 50.00 / 1000000, cachedInput: 1.00 / 1000000 },
+  // Opus 5.5 (spend_tier premium in batch/batch-runner.sh): $4 / $20 / $0.20 (page row).
+  'claude-opus-5-5': { input: 4.00 / 1000000, output: 20.00 / 1000000, cachedInput: 0.20 / 1000000 },
+  'claude-opus-5': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-opus-4-8': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-opus-4-7': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  'claude-opus-4-6': { input: 5.00 / 1000000, output: 25.00 / 1000000, cachedInput: 0.50 / 1000000 },
+  // Sonnet 5.5 (spend_tier standard): $2 / $10 / $0.10 (page row).
+  'claude-sonnet-5-5': { input: 2.00 / 1000000, output: 10.00 / 1000000, cachedInput: 0.10 / 1000000 },
+  'claude-sonnet-5': { input: 2.00 / 1000000, output: 10.00 / 1000000, cachedInput: 0.20 / 1000000 },
+  'claude-sonnet-4-6': { input: 3.00 / 1000000, output: 15.00 / 1000000, cachedInput: 0.30 / 1000000 },
+  // Haiku 5.5 (spend_tier economy): $0.10 / $0.50 / $0.01 cache read (page row
+  // for prompts up to 100K tokens; 0.01 is the standard 0.1x). Requests over
+  // 100K bill $0.50 / $2.50 / $0.05; usage here is a run total, so it cannot
+  // tell which requests crossed the line and uses the lower row.
+  'claude-haiku-5-5': { input: 0.10 / 1000000, output: 0.50 / 1000000, cachedInput: 0.01 / 1000000 },
+  'claude-haiku-4-5': { input: 1.00 / 1000000, output: 5.00 / 1000000, cachedInput: 0.10 / 1000000 },
   'claude-3-5-sonnet': { input: 3.0 / 1000000, output: 15.0 / 1000000 },
   'claude-3-5-haiku': { input: 0.80 / 1000000, output: 4.00 / 1000000 },
   'claude-3-opus': { input: 15.00 / 1000000, output: 75.00 / 1000000 },
@@ -62,7 +94,15 @@ export function estimateCost(model, usage, provider) {
     rate = RATES[model];
     if (!rate) {
       // try matching prefix or substring
-      const key = Object.keys(RATES).find(k => model.includes(k));
+      // OpenRouter spells Claude versions with dots ("anthropic/claude-sonnet-4.6"),
+      // the rate table with hyphens. Claude keys also match that spelling with
+      // dots turned to hyphens, in the same pass and table order, so
+      // "claude-sonnet-5.5" reaches its own row before "claude-sonnet-5"
+      // (a verbatim-first pass would stop at the shorter key). Other keys,
+      // such as the dotted Gemini ones, keep matching verbatim.
+      const dashed = model.replace(/\./g, '-');
+      const key = Object.keys(RATES).find(k => model.includes(k)
+        || (k.startsWith('claude-') && dashed.includes(k)));
       if (key) {
         rate = RATES[key];
       }
@@ -76,7 +116,9 @@ export function estimateCost(model, usage, provider) {
     if (provider === 'gemini') {
       rate = RATES['gemini-3.6-flash'];
     } else if (provider === 'claude' || provider === 'anthropic') {
-      rate = RATES['claude-3-5-sonnet'];
+      // Unknown Claude id: price it as the standard spend_tier model
+      // (batch/batch-runner.sh spend_tier_to_model: standard → claude-sonnet-5-5).
+      rate = RATES['claude-sonnet-5-5'];
     } else {
       return null;
     }
