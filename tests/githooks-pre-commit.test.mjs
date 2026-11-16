@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { hermeticGitEnv } from './helpers.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 import {
   EXACT_SCAFFOLD,
   SECRET_ALLOW_MARKER,
@@ -221,6 +222,9 @@ function hookRepo(t) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, '.githooks'));
   for (const f of ['pre-commit', 'pre-commit.mjs']) copyFileSync(join(ROOT, '.githooks', f), join(dir, '.githooks', f));
+  // The hook imports lib/is-main-module.mjs for its entry guard.
+  mkdirSync(join(dir, 'lib'));
+  copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(dir, 'lib', 'is-main-module.mjs'));
   chmodSync(join(dir, '.githooks', 'pre-commit'), 0o755);
 
   const env = hermeticGitEnv(join(dir, 'co-hermetic-gitconfig'));
@@ -256,7 +260,7 @@ function hookRepo(t) {
 test('a commit runs the hook and is refused over a private file', (t) => {
   const { commit, git } = hookRepo(t);
   const r = commit({ 'cv.md': '# Jane Doe\n' });
-  assert.notEqual(r.status, 0, 'the commit went through with cv.md staged');
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'the commit went through with cv.md staged'));
   assert.match(r.stderr, /✗ paths/);
   assert.match(r.stderr, /cv\.md/);
   assert.equal(git('rev-list', '--count', 'HEAD').stdout.trim(), '1', 'a refused commit still landed');
@@ -266,7 +270,7 @@ test('a commit is refused over a staged key, and the key is not printed', (t) =>
   const { commit } = hookRepo(t);
   const key = FAKES['GitHub token'];
   const r = commit({ 'src/a.mjs': `export const token = '${key}';\n` });
-  assert.notEqual(r.status, 0);
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'the commit went through with a key staged'));
   assert.match(r.stderr, /src\/a\.mjs:1 {2}GitHub token/);
   assert.ok(!r.stderr.includes(key), 'the hook printed the secret it found');
 });
@@ -277,7 +281,7 @@ test('trailing whitespace blocks code but not Markdown', (t) => {
   assert.equal(md.status, 0, `trailing spaces in Markdown are a line break and must pass: ${md.stderr}`);
 
   const code = commit({ 'src/b.mjs': 'export const b = 1;   \n' });
-  assert.notEqual(code.status, 0, 'trailing whitespace in a .mjs file passed');
+  assert.ok(exitedNonZero(code), describeSpawn(code, 'trailing whitespace in a .mjs file passed'));
   assert.match(code.stderr, /✗ whitespace/);
 });
 
@@ -293,7 +297,7 @@ const hasGofmt = !spawnSync('gofmt', ['-h']).error;
 test('gofmt flags an unformatted staged dashboard .go file',{ skip: !hasGofmt && 'gofmt not on PATH' }, (t) => {
   const { commit } = hookRepo(t);
   const bad = commit({ 'dashboard/x.go': 'package main\nfunc  main()  {}\n' });
-  assert.notEqual(bad.status, 0, 'an unformatted .go file passed');
+  assert.ok(exitedNonZero(bad), describeSpawn(bad, 'an unformatted .go file passed'));
   assert.match(bad.stderr, /✗ gofmt[\s\S]*dashboard\/x\.go/);
 
   const good = commit({ 'dashboard/x.go': 'package main\n\nfunc main() {}\n' });

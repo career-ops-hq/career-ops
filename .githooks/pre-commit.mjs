@@ -28,9 +28,8 @@
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../lib/is-main-module.mjs';
 
 // Mirrors USER_PATHS, EXACT_SCAFFOLD and isScaffold in
 // .github/workflows/no-user-data.yml. The workflow is what blocks a PR; this is
@@ -366,14 +365,4 @@ function main() {
   }
 }
 
-// realpath on both sides: a symlinked checkout, macOS's /tmp -> /private/tmp
-// and a Windows drive-letter case all make the raw strings differ.
-const isMain = (() => {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-})();
-if (isMain) main();
+if (isMainModule(import.meta.url)) main();
