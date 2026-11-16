@@ -302,6 +302,24 @@ export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_
   return corporateFormTokensMatch(ta, tb, formWords);
 }
 
+function collapseDottedCorporateForms(tokens, formWords) {
+  const collapsed = [];
+  for (let i = 0; i < tokens.length;) {
+    if (tokens[i].length !== 1) {
+      collapsed.push(tokens[i]);
+      i += 1;
+      continue;
+    }
+    let end = i + 1;
+    while (end < tokens.length && tokens[end].length === 1) end += 1;
+    const joined = tokens.slice(i, end).join('');
+    if (formWords.has(joined)) collapsed.push(joined);
+    else collapsed.push(...tokens.slice(i, end));
+    i = end;
+  }
+  return collapsed;
+}
+
 /**
  * True when two already-tokenized company names match as a corporate-form pair.
  *
@@ -310,10 +328,11 @@ export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_
  * them for a row can compare pairs without running that key again. Equal
  * lengths are either the exact tier's business or a genuine disagreement on a
  * substantive token. An empty stem is the blind-employer `?` marker and every
- * other punctuation-only cell, which must never match a named employer. A tail
- * made entirely of single letters also matches when joining them forms a known
- * corporate suffix, so "L.L.C.", "S.A." and "G.m.b.H." behave like their
- * undotted spellings without accepting arbitrary one-letter tails.
+ * other punctuation-only cell, which must never match a named employer. Within
+ * a corporate-form tail, consecutive single letters match when joining them
+ * forms a known suffix. That lets "L.L.C.", "S.A." and "G.m.b.H." behave like
+ * their undotted spellings, including after another form such as "Inc L.L.C.",
+ * without accepting arbitrary one-letter tails.
  *
  * @param {string[]} ta - Tokens of one company cell.
  * @param {string[]} tb - Tokens of the other company cell.
@@ -321,13 +340,16 @@ export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_
  * @returns {boolean}
  */
 export function corporateFormTokensMatch(ta, tb, formWords = CORPORATE_FORM_WORDS) {
-  const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  const ca = collapseDottedCorporateForms(ta, formWords);
+  const cb = collapseDottedCorporateForms(tb, formWords);
+  if (ca.length === cb.length && ca.every((token, i) => token === cb[i])) {
+    return ta.length !== tb.length || ta.some((token, i) => token !== tb[i]);
+  }
+  const [stem, full] = ca.length <= cb.length ? [ca, cb] : [cb, ca];
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
-  const tail = full.slice(stem.length);
-  return tail.every(token => formWords.has(token))
-    || (tail.every(token => token.length === 1) && formWords.has(tail.join('')));
+  return full.slice(stem.length).every(token => formWords.has(token));
 }
 
 /**

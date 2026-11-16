@@ -28,6 +28,7 @@ const SAME = [
   ['Acme L.L.C.', 'Acme', true],
   ['Acme S.A.', 'Acme', true],
   ['Acme G.m.b.H.', 'Acme', true],
+  ['Acme Inc L.L.C.', 'Acme Inc LLC', true],
 ];
 const DISTINCT = [
   // Both strip to "acme" under a naive suffix-strip key — the exact fold the
@@ -39,6 +40,7 @@ const DISTINCT = [
   ['Barco', 'Bar', false],
   // Single-letter tails are only a corporate form when they spell one.
   ['Acme X.Y.', 'Acme', false],
+  ['Acme Inc X.Y.', 'Acme Inc XY', false],
 ];
 for (const [a, b, exp] of [...SAME, ...DISTINCT]) {
   const got = companiesMatchIgnoringCorporateForm(a, b);
