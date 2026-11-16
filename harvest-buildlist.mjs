@@ -39,8 +39,8 @@
  * board found here is in exactly the canonical form the rest of career-ops
  * uses: EU Greenhouse and Lever boards keep their region, Ashby ids keep their
  * case, Workday boards keep their three coordinates. Gem, iCIMS, Personio and
- * Teamtailor, which scan.mjs reads but the registry does not cover, are read by
- * a small table below.
+ * Teamtailor, which scan.mjs reads, are read by a small table below, keyed on
+ * the whole tenant host (PARSED_ATS lists what comes from parseBoardUrl).
  *
  * ROBOTS AND POLITENESS
  * buildlist.xyz/robots.txt is `Allow: /` with `Disallow: /api/` for every
@@ -166,9 +166,19 @@ const ROUTE_WORDS = new Set(['api', 'embed', 'jobs', 'careers', 'www', 'null', '
 const firstLabel = (host) => host.split('.')[0];
 
 /**
- * Vendors scan.mjs reads that the employer registry (and so parseBoardUrl) does
- * not cover. Host-keyed vendors resolve the tenant from the careers_url host,
- * so the whole hostname is their board id.
+ * The ATS this script takes from parseBoardUrl. The employer registry admits
+ * more; Personio and Teamtailor keep their entries in the table below, and the
+ * others are not harvested.
+ */
+const PARSED_ATS = new Set([
+  'greenhouse', 'ashby', 'lever', 'workable', 'smartrecruiters', 'rippling', 'join',
+  'recruitee', 'breezy', 'bamboohr', 'pinpoint', 'workday',
+]);
+
+/**
+ * Vendors scan.mjs reads that this script does not take from parseBoardUrl.
+ * Host-keyed vendors resolve the tenant from the careers_url host, so the
+ * whole hostname is their board id.
  */
 const LOCAL_VENDORS = [
   {
@@ -335,7 +345,7 @@ export function boardFromUrl(raw) {
   }
 
   const parsed = parseBoardUrl(link);
-  if (!('error' in parsed)) {
+  if (!('error' in parsed) && PARSED_ATS.has(parsed.ats)) {
     return {
       vendor: parsed.ats,
       slug: parsed.board,

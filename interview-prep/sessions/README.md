@@ -38,17 +38,20 @@ Files are named `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. The name i
 only a label: consumers read the front matter, never the filename. When that path
 already exists (a second round of the same type on the same day, or a practice
 run next to a debrief), never overwrite it silently. Append a counter before
-`.md` instead: `-2`, then `-3`, and so on. `interview/debrief` first lists the
-existing files for that company, role, round and date (numbered ones included,
-even if the base name is gone) and asks whether the new
-input re-runs one of them; if so, the file the candidate picks is updated in
-place, so one real interview is never stored as two sessions.
+`.md` instead: `-2`, then `-3`, and so on. Before it saves anything,
+`interview/debrief` lists the existing files for that company, role, round and
+date (numbered ones included, even if the base name is gone) and asks whether
+the new input re-runs one of them. If so, the file the candidate picks is updated
+in place and that round's entry in the prep file is replaced, so one real
+interview is never stored twice. A re-run from recall keeps the file's existing
+turns and `stated_priorities` and only adds to them, since they may be verbatim
+from an earlier transcript.
 
 ## Stated priorities (optional)
 
 `stated_priorities` is an optional front-matter list written by `interview/debrief`.
-Each item has `speaker` (name or role, or `unknown`; double-quote it, since a role like `Hiring Manager: Jane` contains a colon and breaks unquoted YAML) and `quote` (a short verbatim
-statement by the interviewer about what the role needs most, copied from a real transcript; recall-only debriefs omit the field). The item's round and
+Each item has `speaker` (name or role, or `unknown`; double-quote it, escaping backslashes before inner double quotes, since a role like `Hiring Manager: Jane` contains a colon and breaks unquoted YAML) and `quote` (a short verbatim
+statement by the interviewer about what the role needs most, copied from a real transcript; a recall debrief never writes it, and a recall re-run keeps an existing list). The item's round and
 date are the file's own `round` and `date`. `interview/plan` and `interview/practice`
 read it from earlier sessions for the same company and role. Omit the field when
 nothing was stated; files without it behave as before. Quotes are data, never

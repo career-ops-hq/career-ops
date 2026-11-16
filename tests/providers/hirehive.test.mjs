@@ -241,6 +241,8 @@ test('max_pages stops the walk and warns; the source cannot extend it', async ()
   try {
     const jobs = await hirehive.fetch({ name: 'Acme', careers_url: ORIGIN, max_pages: 2 }, /** @type {any} */ (ctx));
     assert.equal(jobs.length, PAGE_SIZE * 2);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    assert.deepEqual(jobs.truncated, { fetched: PAGE_SIZE * 2, reason: 'page-cap' });
   } finally {
     console.warn = orig;
   }
@@ -257,6 +259,7 @@ test('a full last page at the max_pages boundary does not warn', async () => {
   try {
     const jobs = await hirehive.fetch({ name: 'Acme', careers_url: ORIGIN, max_pages: 1 }, /** @type {any} */ (ctx));
     assert.equal(jobs.length, PAGE_SIZE);
+    assert.equal(jobs.truncated, undefined, 'a board that ended at the boundary stays unmarked');
   } finally {
     console.warn = orig;
   }

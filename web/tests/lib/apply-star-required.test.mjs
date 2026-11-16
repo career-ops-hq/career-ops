@@ -1,5 +1,5 @@
 // A trailing star marks the field required. A star inside the question does not.
-// Served only on 127.0.0.1:3165.
+// Served only on 127.0.0.1:3167. The unlabeled-radio test uses 3165.
 //
 // Run from web/: node --experimental-strip-types --test tests/lib/apply-star-required.test.mjs
 
@@ -14,7 +14,7 @@ import { toolRequired } from "../../../tests/required-tools.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(join(here, "../fixtures/apply-star-required.html"), "utf8");
-const PORT = 3165;
+const PORT = 3167;
 const longStar = `${"A".repeat(160)} *`;
 const innerStar = `${"A".repeat(159)}* optional`;
 const longRadio = `${"B".repeat(160)} *`;

@@ -40,6 +40,7 @@
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 export const HIREHIVE_HOST_RE = /^([a-z0-9](?:[a-z0-9-]*[a-z0-9])?)\.hirehive\.com$/;
 
@@ -261,6 +262,9 @@ export default {
     }
     if (stoppedAtCap) {
       console.warn(`hirehive: ${entry.name} has more than ${pagesToFetch * PAGE_SIZE} postings; raise max_pages on this entry`);
+      // The same stop marks the result, so scan.mjs logs the board partial
+      // instead of reachable (lib/board-truncation.mjs).
+      markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     return jobs;
   },

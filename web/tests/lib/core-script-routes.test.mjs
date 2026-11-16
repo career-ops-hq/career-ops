@@ -150,9 +150,10 @@ test("the six analytics routes launch with process.execPath and windowsHide", as
   }
 });
 
-// Every route that calls execFile, found by reading the route tree. The two
-// tests above drive exactly these; a route added later that execFiles a core
-// script fails here until it is driven there too.
+// Every route that calls execFile, found by reading the route tree. The tests
+// above drive exactly these; a route added later that execFiles a core script
+// fails here until it is driven there too. version execFiles git rather than a
+// core script, so it is driven for the launch shape alone.
 const DRIVEN_ROUTES = [
   "company-history",
   "doctor",
@@ -164,7 +165,17 @@ const DRIVEN_ROUTES = [
   "quiet-companies",
   "stats",
   "upskill",
+  "version",
 ];
+
+test("version launches its git probe with windowsHide", async () => {
+  const { GET } = await route("version");
+  const { launches: made } = await call(GET);
+  assert.equal(made.length, 1, "version: one launch");
+  assert.equal(made[0].file, "git", "version: launched git");
+  assert.equal(made[0].script, "rev-parse", "version: asked for the short SHA");
+  assert.equal(made[0].options?.windowsHide, true, "version: launched with windowsHide");
+});
 
 test("census: the routes driven above are every route that calls execFile", () => {
   const apiRoot = fileURLToPath(new URL("../../src/app/api", import.meta.url));

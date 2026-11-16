@@ -142,7 +142,7 @@ export function candidateOwnWords(root) {
   const dnaPath = join(root, 'voice-dna.md');
   if (existsSync(dnaPath)) chunks.push(wordingFromVoiceDna(readFileSync(dnaPath, 'utf8')));
   const factsPath = join(root, 'config', 'cv-facts.json');
-  if (existsSync(factsPath)) chunks.push(wordingFromFacts(readFileSync(factsPath, 'utf8')));
+  if (existsSync(factsPath)) chunks.push(wordingFromFacts(readFileSync(factsPath, 'utf8').replace(/^\uFEFF/, '')));
   return chunks.filter(Boolean).join('\n');
 }
 

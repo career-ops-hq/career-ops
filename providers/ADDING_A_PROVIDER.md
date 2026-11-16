@@ -110,6 +110,10 @@ export default {
   files itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
+  When the source lists distinct places before joining, set `locations`
+  (string[], places without appended "Remote" or work models; omit when empty).
+  When the source has a dedicated country code field (Lever), set `country`
+  (trimmed, as given; omit when absent or null).
   When the payload has a dedicated field for them, also set `requisitionId`
   (the employer's requisition id — never the posting id, which changes on
   every re-release; `coerceId` from `_ids.mjs`) and `language` (the posting
@@ -790,6 +794,49 @@ chosen) is welcome — it documents that the number is not arbitrary.
 
 Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 `node test-all.mjs` (`--only` is not a merge gate).
+
+### Reporting offers a provider drops (`providerStats`)
+
+Most providers return everything the source gave them and leave filtering to
+`scan.mjs`. A provider that drops offers itself (for example because of an
+entry setting such as `workplace`) may say so, so the drops show up in the
+per-source table at the end of the scan. Attach a non-enumerable
+`providerStats` property to the list `fetch()` returns:
+
+```js
+providerStats = { dropped: { reason: count } }
+```
+
+`scan.mjs` reads `jobs.providerStats?.dropped`. It adds the counts to the
+`source` column, adds them to that row's `fetched`, and lists them per reason
+under "Dropped at the source". The property is optional; a provider without it
+is shown with `source` 0. Make it non-enumerable so it is not a field of the
+job list:
+
+```js
+const stats = { dropped: {} };
+// ...in the page loop, the filter counts what it drops:
+//   if (!keep && stats) stats.dropped.workplace = (stats.dropped.workplace || 0) + 1;
+for (const job of parseResponse(json, filters, stats)) {
+  if (seen.has(job.url)) continue;
+  seen.add(job.url);
+  jobs.push(job);
+}
+// Read by scan.mjs for the per-source summary; not part of the job list.
+Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
+return jobs;
+```
+
+Notes:
+
+- Count only offers the provider itself discards. Do not count offers `scan.mjs`
+  will filter later (title, location, age and so on); it counts those itself.
+- Use one short, stable key per reason, ideally the name of the setting that
+  caused the drop (`workplace`, say). When several filters can drop the same offer, count it
+  under the first one it fails, so the columns still add up.
+- `Total jobs found` and the `--json` receipt's `found` count the returned list,
+  so they exclude these drops, while the table's `fetched` includes them. See
+  [Per-source table](../docs/SCAN_SUMMARY_TABLE.md).
 
 ## 4. Reference modules
 

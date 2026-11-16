@@ -24,6 +24,17 @@ ensure_up() {
   if ! docker compose ps --services --filter "status=running" | grep -qx "$SERVICE"; then
     docker compose up -d >/dev/null
   fi
+  # Run as the owner of /app as the container sees it: git refuses a checkout
+  # owned by another user, and files written here stay the host user's. That is
+  # root where the mount looks root-owned (rootless Docker, Docker Desktop on
+  # Windows), and then nothing else changes: HOME is left to Docker, because
+  # Git Bash rewrites a path-like argument such as HOME=/root into a Windows
+  # path. Any other owner gets HOME=/tmp. Docker fills the node_modules volume
+  # as root, so the probe hands it over once; it runs as root whatever user the
+  # compose file sets.
+  user="$(docker compose exec -T -u 0 "$SERVICE" sh -c \
+    'u="$(stat -c %u:%g /app)"; [ "$(stat -c %u:%g /app/node_modules)" = "$u" ] || chown -R "$u" /app/node_modules; echo "$u"')"
+  home=; [ "${user%%:*}" = 0 ] || home='-e HOME=/tmp'
 }
 
 case "${1:-}" in
@@ -56,11 +67,11 @@ case "${1:-}" in
     ;;
   shell)
     ensure_up
-    exec docker compose exec -it "$SERVICE" bash
+    exec docker compose exec -it -u "$user" $home "$SERVICE" bash
     ;;
   node|npm|npx|go|bash|sh)
     ensure_up
-    exec docker compose exec -it "$SERVICE" "$@"
+    exec docker compose exec -it -u "$user" $home "$SERVICE" "$@"
     ;;
 esac
 
@@ -70,10 +81,10 @@ cmd="$1"; shift || true
 case "$cmd" in
   doctor|verify|normalize|dedup|merge|pdf|sync-check|liveness|scan|gemini:eval|update|update:check|rollback)
     ensure_up
-    exec docker compose exec -it "$SERVICE" npm run --silent "$cmd" -- "$@"
+    exec docker compose exec -it -u "$user" $home "$SERVICE" npm run --silent "$cmd" -- "$@"
     ;;
   *)
     ensure_up
-    exec docker compose exec -it "$SERVICE" "$cmd" "$@"
+    exec docker compose exec -it -u "$user" $home "$SERVICE" "$cmd" "$@"
     ;;
 esac

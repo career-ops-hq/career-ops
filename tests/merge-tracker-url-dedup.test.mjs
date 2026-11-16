@@ -425,6 +425,35 @@ ok('REGRESSION: two employer-board URLs are still proof of two distinct openings
   assert.equal(rows.length, 2, 'employer-controlled URLs still block the fuzzy tier');
 });
 
+ok('one Workday posting with and without its /en-US/ locale stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Director-of-Marketing_R123',
+    'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Director-of-Marketing_R123');
+  assertMerged(rows, 'one Workday posting as the scanner stores it and as a browser shows it');
+});
+
+ok('one Greenhouse posting on boards. and job-boards.greenhouse.io stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://boards.greenhouse.io/acme/jobs/7001',
+    'https://job-boards.greenhouse.io/acme/jobs/7001');
+  assertMerged(rows, 'one Greenhouse id on its old and current board host');
+});
+
+ok('a re-evaluation of the same report updates the row across two spellings of one posting', () => {
+  const env = makeEnv();
+  try {
+    writeTracker(env, [
+      '| 1 | 2026-06-01 | Acme | Director of Marketing | 4.0/5 | Applied | ❌ | [1](reports/1-acme.md) | n | https://boards.greenhouse.io/acme/jobs/7001 |',
+    ]);
+    addTsv(env, '1-acme.tsv', ['1', '2026-06-03', 'Acme', 'Director of Marketing', 'Evaluated', '4.1/5', '❌',
+      '[1](reports/1-acme.md)', 're-eval', 'https://careers.acme.example/jobs?gh_jid=7001']);
+    runMerge(env);
+    const rows = trackerRows(env);
+    assert.equal(rows.length, 1, `expected the row to be UPDATED through the report number, got ${rows.length} rows`);
+    assert.ok(rows[0].includes('4.1/5'), 're-eval score written through');
+  } finally { cleanup(env); }
+});
+
 ok('UNCHANGED: an addition with no URL cannot claim a row whose posting is known', () => {
   const rows = mergeTwoWithUrls('https://www.linkedin.com/jobs/view/4001', '');
   assert.equal(rows.length, 2, 'an absent key stays UNKNOWN, so the unkeyed addition inserts');
@@ -637,6 +666,34 @@ ok('uk. vs www. host variants of ONE Indeed posting still collapse to ONE row', 
     'https://uk.indeed.com/viewjob?jk=abc123',
     'https://www.indeed.com/viewjob?jk=abc123');
   assertMerged(rows, 'same posting id across regional hosts');
+});
+
+ok('two Himalayas postings at one company stay TWO rows, Applied row intact (#4469)', () => {
+  // The scanner path: providers/himalayas.mjs emits applicationLink (utm param
+  // included). Two different job slugs are two postings, however close the titles.
+  const rows = mergeTwoWithUrls(
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing?utm_source=api',
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing-emea?utm_source=api', 'Applied');
+  assert.equal(rows.length, 2, 'two job slugs at one company are two requisitions');
+  const applied = rows.find(r => urlHref(r).includes('/jobs/director-of-marketing?'));
+  assert.ok(applied && applied.includes('Applied') && applied.includes('1-acme.md'),
+    'the posting applied to keeps its URL, status and report');
+});
+
+ok('one Himalayas posting with and without the feed\'s utm param still collapses to ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing',
+    'https://himalayas.app/companies/acme/jobs/director-of-marketing?utm_source=api');
+  assertMerged(rows, 'same company and job slug → not evidence → fuzzy tier decides');
+});
+
+ok('two Jobicy job ids stay TWO rows; one id stays ONE row (#4469)', () => {
+  assert.equal(mergeTwoWithUrls(
+    'https://jobicy.com/jobs/161691-director-of-marketing',
+    'https://jobicy.com/jobs/161692-director-of-marketing').length, 2, 'two feed ids are two postings');
+  assertMerged(mergeTwoWithUrls(
+    'https://jobicy.com/jobs/161691-director-of-marketing',
+    'https://www.jobicy.com/jobs/161691-director-of-marketing/'), 'same feed id');
 });
 
 ok('KNOWN LIMITATION: an unmapped aggregator id shape over-merges two requisitions', () => {

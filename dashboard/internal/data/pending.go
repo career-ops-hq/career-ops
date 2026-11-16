@@ -281,13 +281,15 @@ func parseRankStamp(stamp string) (float64, string, bool) {
 // rows and to join a row to batch-input.tsv: scheme and host lower-cased, a
 // default port dropped, and an empty path written as "/". Those are the
 // differences sync-batch-input.mjs's `new URL(raw).href` most often makes to
-// a URL copied from pipeline.md. It is not a full WHATWG serializer: an
-// internationalized host, dot segments or an unencoded space are compared as
+// a URL copied from pipeline.md. A space or non-ASCII character after the
+// host is percent-encoded as href encodes it, so `?location=Zürich` joins the
+// `?location=Z%C3%BCrich` that batch-input.tsv holds. It is not a full WHATWG
+// serializer: an internationalized host and dot segments are compared as
 // written. Anything that is not an http(s) URL with a host, including a
 // `local:` target, is its own key.
 func pendingURLKey(raw string) string {
 	raw = strings.TrimSpace(raw)
-	u, err := url.Parse(raw)
+	u, err := url.Parse(encodeAfterHost(raw))
 	if err != nil || u.Host == "" {
 		return raw
 	}
@@ -309,6 +311,39 @@ func pendingURLKey(raw string) string {
 		u.Path = "/"
 	}
 	return u.String()
+}
+
+// encodeAfterHost percent-encodes each space and non-ASCII byte after the
+// host of raw, and each `"`, `'`, `<` and `>` in the query, with upper-case
+// hex, as WHATWG href does for an http(s) URL. The host and an existing %XX
+// are left as written.
+func encodeAfterHost(raw string) string {
+	i := strings.Index(raw, "://")
+	if i < 0 {
+		return raw
+	}
+	end := strings.IndexAny(raw[i+3:], "/?#")
+	if end < 0 {
+		return raw
+	}
+	start := i + 3 + end
+	var b strings.Builder
+	b.WriteString(raw[:start])
+	inQuery, inFragment := false, false
+	for j := start; j < len(raw); j++ {
+		c := raw[j]
+		if c == '#' {
+			inQuery, inFragment = false, true
+		} else if c == '?' && !inFragment {
+			inQuery = true
+		}
+		if c == ' ' || c >= 0x80 || (inQuery && strings.IndexByte(`"'<>`, c) >= 0) {
+			fmt.Fprintf(&b, "%%%02X", c)
+		} else {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // LoadPendingRows reads the Pending rows of {careerOpsPath}/data/pipeline.md

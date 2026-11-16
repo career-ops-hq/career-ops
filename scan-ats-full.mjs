@@ -185,15 +185,50 @@ function validCheckpointCurrent(cur) {
     && (cur.retries === undefined || validIndexList(cur.retries));
 }
 
+// Explains specifically what settings differed between an existing checkpoint and
+// the current run options. Returns null when the settings are compatible.
+export function checkpointMismatch(cp, opts) {
+  if (!cp) return 'missing checkpoint';
+  const reasons = [];
+
+  if (opts?.shuffle) {
+    reasons.push('--shuffle is set (order is not reproducible)');
+  }
+
+  const cpAts = Array.isArray(cp.ats) ? cp.ats : [];
+  const optAts = Array.isArray(opts?.ats) ? opts.ats : [];
+  const added = optAts.filter((s) => !cpAts.includes(s));
+  const removed = cpAts.filter((s) => !optAts.includes(s));
+  if (added.length > 0 && removed.length > 0) {
+    reasons.push(`ATS sources differ (added: ${added.join(', ')}, removed: ${removed.join(', ')})`);
+  } else if (added.length > 0) {
+    reasons.push(`ATS sources differ (added: ${added.join(', ')})`);
+  } else if (removed.length > 0) {
+    reasons.push(`ATS sources differ (removed: ${removed.join(', ')})`);
+  } else if (JSON.stringify(cpAts) !== JSON.stringify(optAts)) {
+    reasons.push(`ATS sources order differed (was [${cpAts.join(', ')}], now [${optAts.join(', ')}])`);
+  }
+
+  const cpLimit = cp.limit ?? null;
+  const optLimit = (opts?.limit === Infinity || opts?.limit === undefined) ? null : opts.limit;
+  if (cpLimit !== optLimit) {
+    reasons.push(`limit changed (was ${cpLimit ?? 'none'}, now ${optLimit ?? 'none'})`);
+  }
+
+  const cpUndated = Boolean(cp.includeUndated);
+  const optUndated = Boolean(opts?.includeUndated);
+  if (cpUndated !== optUndated) {
+    reasons.push(`includeUndated changed (was ${cpUndated}, now ${optUndated})`);
+  }
+
+  return reasons.length > 0 ? reasons.join('; ') : null;
+}
+
 // A checkpoint written under different scan settings must not be resumed —
 // silently mixing sources, caps, or undated policy would corrupt the run's
 // semantics. --shuffle is never resumable: the sampled order isn't reproducible.
 export function checkpointCompatible(cp, opts) {
-  return Boolean(cp)
-    && !opts.shuffle
-    && JSON.stringify(cp.ats) === JSON.stringify(opts.ats)
-    && (cp.limit ?? null) === (opts.limit === Infinity ? null : opts.limit)
-    && cp.includeUndated === opts.includeUndated;
+  return Boolean(cp) && checkpointMismatch(cp, opts) === null;
 }
 
 // Flags are not the only settings a resume can mix. The portals.yml filters
@@ -1671,24 +1706,31 @@ function isoDay(v) {
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }
 
-function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
+export function resumeRejected(cp, opts, filters, { freshOnMismatch = false } = {}) {
   const changed = changedFilterKeys(cp, filters);
-  const settingsDiffer = !checkpointCompatible(cp, opts);
-  if (!settingsDiffer && changed.length === 0) return false;
+  const mismatch = checkpointMismatch(cp, opts);
+  if (!mismatch && changed.length === 0) return false;
+  const parts = [];
+  if (mismatch) parts.push(mismatch);
+  if (changed.length > 0) parts.push(`portals.yml ${changed.join(', ')}`);
+  const why = parts.join('; ');
   if (freshOnMismatch) {
-    const why = settingsDiffer
-      ? 'different settings (--ats, --limit, --include-undated, or --shuffle)'
-      : `portals.yml ${changed.join(', ')}`;
     console.error(`⚠️  Checkpoint at ${CHECKPOINT_PATH} does not match this run (${why}). Starting a fresh sweep. The checkpoint will be overwritten.`);
     return true;
   }
-  if (settingsDiffer) {
-    console.error('Error: checkpoint was written with different settings (--ats/--limit/--include-undated, or --shuffle is set) — rerun with the original flags, or delete the checkpoint to start fresh.');
+  if (mismatch && changed.length > 0) {
+    console.error(`Error: checkpoint was written with different settings (${mismatch}; portals.yml ${changed.join(', ')} changed) — rerun with matching flags and filters, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
+  } else if (mismatch) {
+    console.error(`Error: checkpoint was written with different settings (${mismatch}) — rerun with the original flags, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
   } else {
-    console.error(`Error: portals.yml ${changed.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, or delete ${CHECKPOINT_PATH} to start fresh.`);
+    console.error(`Error: portals.yml ${changed.join(', ')} changed since the checkpoint was written — the boards already swept were filtered under the old settings. Restore them to finish this sweep, pass --resume-if-compatible to start fresh on mismatch, or delete ${CHECKPOINT_PATH} to start fresh.`);
   }
   return true;
 }
+
+// Set when main() settles (see exitWhenDrained at the end of this file). From
+// then on, the --json SIGTERM handler in main() leaves the result as it is.
+let mainSettled = false;
 
 async function main() {
   const opts = parseArgs(process.argv);
@@ -1939,7 +1981,14 @@ async function main() {
   if (opts.json) {
     let flushed = false;
     process.on('SIGTERM', () => {
-      if (flushed) return;
+      // Once main() has settled, its complete result or its error is already
+      // out, the exit code is set, and the process is only waiting for its
+      // event loop to drain. A partial result then would be a second JSON
+      // document after the complete one and, without --dry-run, would save the
+      // same roles again. The handler returns instead of being removed: with no
+      // listener, the signal would kill the process, and the web's scheduled
+      // runner counts only exit 0 as a finished sweep.
+      if (flushed || mainSettled) return;
       flushed = true;
       void (async () => {
         let saved = false;
@@ -2601,24 +2650,37 @@ async function main() {
 
 // Only run main() when invoked directly, not when imported by tests.
 if (isMainModule(import.meta.url)) {
-  // Exit explicitly once main() returns. The watchdog now cancels a timed-out
-  // board's work, but a keep-alive socket a single-host pool still holds (or a
-  // request aborting just as the summary prints) can otherwise keep the event
-  // loop open for minutes past the summary (#5570). Flush stdout first so a
-  // piped summary is never truncated.
-  const flushAndExit = (code) => {
-    // Exit from a write-completion callback, queued after whatever is already
-    // buffered, so a piped summary flushes first. `writableLength > 0` is not a
-    // reliable "wait for drain" signal — `drain` only fires for a write that
-    // returned false (past the high-water mark), so bytes queued below it would
-    // never drain and the process would hang (the opposite of the intent).
+  // Once main() settles, set the exit code and let the process end on its own
+  // when the event loop drains. On Windows, calling process.exit() right away
+  // made the run abort: Node 23 and later assert in libuv when process.exit()
+  // runs right after a request, until the fix in 24.20.0 and 26.7.0
+  // (nodejs/node#56645), and the run ends with a crash code instead of 0 or 1.
+  // Measured 2026-11-13 on Node 24.14.1 with --limit 3 --dry-run: a Greenhouse
+  // sweep aborted 4 times out of 4, and so did one that failed after the sweep;
+  // an Ashby sweep aborted 3 times out of 4.
+  //
+  // The timer keeps #5570's guarantee: if something still holds the loop open
+  // after the summary (a keep-alive socket, or a request aborting just as the
+  // summary prints), the process exits anyway after EXIT_BACKSTOP_MS. unref()
+  // keeps the timer itself from holding the process open, so a run whose loop
+  // drains never waits for it.
+  const EXIT_BACKSTOP_MS = 5_000;
+  const exitWhenDrained = (code) => {
+    mainSettled = true;
     process.exitCode = code;
-    process.stdout.write('', () => process.exit(code));
+    setTimeout(() => {
+      // Exit from a write-completion callback, queued after whatever is already
+      // buffered, so a piped summary flushes first. `writableLength > 0` is not a
+      // reliable "wait for drain" signal — `drain` only fires for a write that
+      // returned false (past the high-water mark), so bytes queued below it would
+      // never drain and the process would hang (the opposite of the intent).
+      process.stdout.write('', () => process.exit(code));
+    }, EXIT_BACKSTOP_MS).unref();
   };
   main()
-    .then(() => flushAndExit(0))
+    .then(() => exitWhenDrained(0))
     .catch(err => {
       console.error('Fatal:', err.message);
-      flushAndExit(1);
+      exitWhenDrained(1);
     });
 }
