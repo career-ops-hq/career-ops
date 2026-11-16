@@ -34,6 +34,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The tip of main, not the event's commit: when two hires are verified
+          # seconds apart, the second run starts after the first has pushed
+          # (concurrency group), but github.sha is still the main from before,
+          # so its push was rejected and that hire never reached the wall
+          # (#4118 on 18-sep, #4918 on 10-oct).
+          ref: ${{ github.event.repository.default_branch }}
           token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: 24 }
