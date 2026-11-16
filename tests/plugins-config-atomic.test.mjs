@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync, statSync, symlinkSync, lstatSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync, statSync, symlinkSync, lstatSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -130,5 +130,30 @@ test('a dangling symlink chain creates the missing final file', async (t) => {
     assert.equal(readdirSync(config).some((name) => name.endsWith('.tmp')), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a relative link through a symlinked config directory updates the file the reader loads', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const data = mkdtempSync(join(tmpdir(), 'co-plugins-yml-data-'));
+  const shared = mkdtempSync(join(tmpdir(), 'co-plugins-yml-shared-'));
+  const sharedConfig = join(shared, 'config');
+  const link = join(sharedConfig, 'plugins.yml');
+  try {
+    mkdirSync(sharedConfig);
+    symlinkSync(sharedConfig, join(data, 'config'));
+    symlinkSync('../plugins.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?dirlink=${Date.now()}`);
+    setPluginEnabled(data, 'h1b-sponsor', true, { region: 'us' });
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.equal(existsSync(join(data, 'plugins.yml')), false);
+    assert.match(readFileSync(join(shared, 'plugins.yml'), 'utf8'), /enabled: true/);
+    assert.match(readFileSync(join(data, 'config', 'plugins.yml'), 'utf8'), /enabled: true/);
+  } finally {
+    rmSync(data, { recursive: true, force: true });
+    rmSync(shared, { recursive: true, force: true });
   }
 });
