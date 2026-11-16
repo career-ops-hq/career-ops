@@ -257,6 +257,14 @@ test('a board URL takes the close day recorded on another shape of the same post
   assert.equal(closeDateForUrl(index, embed), '2026-12-01');
 });
 
+test('a greenhouse src query does not take the close day of the bare posting', () => {
+  const board = 'https://boards.greenhouse.io/acme/jobs/8028783';
+  const text = historyRow({ url: board, closes_at: '2026-12-01' });
+  const index = closeDatesByUrl(text);
+  assert.equal(closeDateForUrl(index, `${board}?src=email`), '');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=8028783'), '2026-12-01');
+});
+
 test('two known language versions do not share a close day', () => {
   const text = [
     historyRow({ url: 'https://jobs.example/role?lang=de', closes_at: '2026-07-07' }),
