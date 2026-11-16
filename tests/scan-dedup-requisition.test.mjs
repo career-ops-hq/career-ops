@@ -12,11 +12,12 @@
 // The halves this file gates:
 //   - the requisition parse: Workday URL tails and labelled notes agree, and
 //     Workday's `-N` repost suffix is the same requisition;
-//   - the decision is conservative: any seeded row without a requisition, or a
-//     candidate without one, keeps the historical "duplicate" answer;
+//   - a seeded row that named no requisition does not hide a later posting
+//     that names one, including an Applied row. A candidate that names none
+//     stays a duplicate;
 //   - end to end through the CLI: the labelled tracker row lets JR25853 through
-//     once (not again on a second run), and an unlabelled tracker row still
-//     suppresses both.
+//     once (not again on a second run), and an Applied row with no requisition
+//     lets later labelled openings through.
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -117,6 +118,33 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     pass('collectSeenCompanyRoles: tracker note, pipeline URL and scan-history URL all seed the same requisition');
   } else {
     fail(`collectSeenCompanyRoles seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], want [JR25919]`);
+  }
+}
+
+// An Applied row with no requisition in its notes is not proof of which
+// opening was applied to. The same title posted again with an id comes back.
+// The same title posted again with no id stays hidden.
+{
+  const requisitionsByBase = new Map();
+  collectSeenCompanyRoles({
+    applicationsText: trackerWith('applied; hybrid unconfirmed'),
+  }, {}, undefined, { requisitionsByBase });
+  const key = companyRoleDedupKey('UBC', 'Programmer Analyst I');
+  const seeded = requisitionsByBase.get(key);
+  const state = {
+    key,
+    baseKey: key,
+    seen: new Set([key]),
+    requisitions: requisitionsByBase,
+    locatedRequisitions: new Map(),
+  };
+  const labelled = requisitionIdsForDedup({ url: `${WD}/Programmer-Analyst-I_JR25919` });
+  const comesBack = matchesSeenCompanyRole(state, labelled) === false;
+  const staysHidden = matchesSeenCompanyRole(state, []) === true;
+  if (seeded?.size === 1 && seeded.has(ANY_REQUISITION) && comesBack && staysHidden) {
+    pass('an Applied row with no requisition lets the same title come back once it names an id');
+  } else {
+    fail(`Applied row with no requisition: seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], comesBack ${comesBack}, staysHidden ${staysHidden}`);
   }
 }
 

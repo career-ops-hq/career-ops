@@ -2963,8 +2963,9 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 
 /**
  * Marker for a seeded company+role row whose requisition is unknown (in the
- * language sets: whose language is unknown). A single such row keeps the key a
- * plain duplicate, exactly as if neither signal were read at all.
+ * language sets: whose language is unknown). It means this row named none, not
+ * that every id was seen. A later posting that names an id is a different
+ * opening. A later posting that also names none stays a duplicate.
  */
 export const ANY_REQUISITION = '*';
 
@@ -3077,12 +3078,12 @@ export function requisitionIdForDedup(source) {
  * Whether a candidate that matched a seen company+role key is nevertheless a
  * different requisition.
  *
- * True only when every seeded row for the key named its requisition and none of
- * the candidate's forms was seen. Any unknown on either side keeps the
- * historical answer — a duplicate — so the check can only let through postings
- * the company itself labelled as distinct. An ambiguous source contributes
- * every form it could mean (see {@link requisitionIdsForDedup}), and one hit
- * on any of them is a duplicate.
+ * True when the candidate names an id and no seeded row named that id. A seed
+ * that named none does not count as a match, so the labelled posting comes
+ * back, including when the seed is an Applied row. False when the candidate
+ * names no id, when a seeded row named one of its forms, or when there is no
+ * seed. An ambiguous source contributes every form it could mean (see
+ * {@link requisitionIdsForDedup}), and one hit on any of them is a duplicate.
  *
  * @param {Set<string>|undefined} seededRequisitions - Requisitions seen for matching keys.
  * @param {string[]|string|null} candidateRequisitions - From {@link requisitionIdsForDedup}.
