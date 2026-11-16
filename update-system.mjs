@@ -104,6 +104,35 @@ export function consumeReexecMarker() {
 
 const BACKUP_BRANCH_RE = /^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/;
 
+/**
+ * Claim `.update-lock` atomically. `flag: 'wx'` is O_EXCL, so the kernel picks
+ * one winner when two `apply` runs start together; a check-then-write let both
+ * observe no lock and both proceed to mutate the same checkout.
+ * @param {string} root
+ * @returns {boolean} true when this run now holds the lock
+ */
+export function claimUpdateLock(root) {
+  try {
+    writeFileSync(join(root, '.update-lock'), new Date().toISOString(), { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Release `.update-lock`, tolerating one that is already gone.
+ * @param {string} root
+ */
+export function releaseUpdateLock(root) {
+  try {
+    unlinkSync(join(root, '.update-lock'));
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
+  }
+}
+
 function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
@@ -4816,16 +4845,10 @@ async function apply() {
     return;
   }
 
-  // Check for lock
-  const lockFile = join(ROOT, '.update-lock');
-  if (existsSync(lockFile) && !isReexec) {
+  // Claim the lock atomically: two concurrent applies must not both win.
+  if (!isReexec && !claimUpdateLock(ROOT)) {
     console.error('Update already in progress (.update-lock exists). If stuck, delete it manually.');
     process.exit(1);
-  }
-
-  // Create lock
-  if (!isReexec) {
-    writeFileSync(lockFile, new Date().toISOString());
   }
 
   try {
@@ -5674,7 +5697,7 @@ async function apply() {
 
   } finally {
     // Remove lock
-    if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);
+    if (!isReexec) releaseUpdateLock(ROOT);
   }
 }
 
