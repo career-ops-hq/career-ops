@@ -1,0 +1,134 @@
+diff --git a/providers/landingjobs.mjs b/providers/landingjobs.mjs
+index 1c68f6e..f3f4810 100644
+--- a/providers/landingjobs.mjs
++++ b/providers/landingjobs.mjs
+@@ -39,6 +39,39 @@ function toEpochMs(value) {
+   return Number.isNaN(parsed) ? undefined : parsed;
+ }
+ 
++/**
++ * Map a Landing.jobs posting's gross salary fields to the Job.salary shape
++ * ({ min, max, currency }), or undefined when the posting carries no usable
++ * range. Follows leverSalary() in lever.mjs and parseCompensation() in
++ * ashby.mjs: only a real number counts, a one-sided range fills the missing
++ * bound from the other, and bounds are ordered.
++ *
++ * No annualization table here, unlike Lever and Ashby: the v1 feed exposes no
++ * interval field, and `gross_salary_low` / `gross_salary_high` are gross
++ * annual figures, so there is nothing to convert and nothing to guess.
++ *
++ * Exported for tests.
++ *
++ * @param {any} j - one posting from the v1 jobs list
++ * @returns {{min: number, max: number, currency: string} | undefined}
++ */
++export function landingSalary(j) {
++  if (!j || typeof j !== 'object') return undefined;
++  /** @param {unknown} v */
++  const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
++  const lowValue = num(j.gross_salary_low);
++  const highValue = num(j.gross_salary_high);
++  if (lowValue === undefined && highValue === undefined) return undefined;
++  const resolvedMin = /** @type {number} */ (lowValue ?? highValue);
++  const resolvedMax = /** @type {number} */ (highValue ?? lowValue);
++  const currency = typeof j.currency_code === 'string' ? j.currency_code.trim().toUpperCase() : '';
++  return {
++    min: Math.min(resolvedMin, resolvedMax),
++    max: Math.max(resolvedMin, resolvedMax),
++    currency,
++  };
++}
++
+ /**
+  * Derive a best-effort company name from a Landing.jobs posting URL.
+  * Posting URLs are `https://landing.jobs/at/<slug>/<job>`; the `<slug>` is
+@@ -110,6 +143,12 @@ export function normalizeLandingJob(j, fallbackCompany) {
+   const job = { title, url, company, location };
+   const postedAt = toEpochMs(j.published_at) ?? toEpochMs(j.created_at);
+   if (postedAt !== undefined) job.postedAt = postedAt;
++  // The feed publishes a gross annual range on roughly a quarter of postings.
++  // Without it salary_filter has nothing to compare (a posting with no salary
++  // always passes) and the compensation column stays empty for a board that
++  // did publish the figures.
++  const salary = landingSalary(j);
++  if (salary !== undefined) job.salary = salary;
+   return job;
+ }
+ 
+diff --git a/tests/providers/landingjobs.test.mjs b/tests/providers/landingjobs.test.mjs
+index cb1b17f..30bf466 100644
+--- a/tests/providers/landingjobs.test.mjs
++++ b/tests/providers/landingjobs.test.mjs
+@@ -8,7 +8,7 @@ console.log('\nProvider — landingjobs');
+ try {
+   const ljModule = await import(pathToFileURL(join(ROOT, 'providers/landingjobs.mjs')).href);
+   const landingjobs = ljModule.default;
+-  const { normalizeLandingJob, companyFromUrl } = ljModule;
++  const { normalizeLandingJob, companyFromUrl, landingSalary } = ljModule;
+ 
+   if (landingjobs.id === 'landingjobs') pass('landingjobs.id is "landingjobs"');
+   else fail(`landingjobs.id is ${JSON.stringify(landingjobs.id)}`);
+@@ -111,6 +111,63 @@ try {
+   if (badThrew) pass('landingjobs.fetch() throws on a non-array API response');
+   else fail('landingjobs.fetch() should throw when the response is not an array');
+ 
++  // --- gross salary -> Job.salary -------------------------------------
++  // Shapes verified against the live v1 feed: gross_salary_low/high are
++  // numbers, currency_code is a string, and the two bounds always arrive
++  // together. The one-sided and junk cases below are defensive.
++  const salCases = [
++    [{ gross_salary_low: 50000, gross_salary_high: 67000, currency_code: 'EUR' },
++     { min: 50000, max: 67000, currency: 'EUR' }, 'a full range maps straight through'],
++    [{ gross_salary_low: 40000, currency_code: 'eur' },
++     { min: 40000, max: 40000, currency: 'EUR' }, 'a low-only range fills max and upper-cases the currency'],
++    [{ gross_salary_high: 40000, currency_code: 'EUR' },
++     { min: 40000, max: 40000, currency: 'EUR' }, 'a high-only range fills min'],
++    [{ gross_salary_low: 90000, gross_salary_high: 30000, currency_code: 'EUR' },
++     { min: 30000, max: 90000, currency: 'EUR' }, 'inverted bounds are ordered'],
++    [{ gross_salary_low: 50000, gross_salary_high: 60000 },
++     { min: 50000, max: 60000, currency: '' }, 'a missing currency_code yields an empty string, not undefined'],
++  ];
++  for (const [input, want, label] of salCases) {
++    const got = landingSalary(input);
++    if (JSON.stringify(got) === JSON.stringify(want)) pass(`landingSalary: ${label}`);
++    else fail(`landingSalary: ${label} — got ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
++  }
++
++  const noSalary = [
++    [{ currency_code: 'EUR' }, 'no salary fields'],
++    [{ gross_salary_low: null, gross_salary_high: null }, 'explicit nulls'],
++    [{ gross_salary_low: 'lots' }, 'a non-numeric bound'],
++    [{ gross_salary_low: NaN }, 'NaN'],
++    [{ gross_salary_low: -5000 }, 'a negative figure'],
++    [null, 'a null posting'],
++  ];
++  for (const [input, label] of noSalary) {
++    if (landingSalary(input) === undefined) pass(`landingSalary: ${label} -> undefined`);
++    else fail(`landingSalary: ${label} should give undefined, got ${JSON.stringify(landingSalary(input))}`);
++  }
++
++  // the mapping must actually reach the normalized job
++  const withSal = normalizeLandingJob({
++    title: 'Senior AI Engineer',
++    url: 'https://landing.jobs/at/acme/senior-ai-engineer',
++    gross_salary_low: 50000, gross_salary_high: 65000, currency_code: 'EUR',
++  }, 'Fallback');
++  if (withSal && JSON.stringify(withSal.salary) === JSON.stringify({ min: 50000, max: 65000, currency: 'EUR' })) {
++    pass('normalizeLandingJob attaches salary when the posting publishes a range');
++  } else {
++    fail(`normalizeLandingJob salary = ${JSON.stringify(withSal && withSal.salary)}`);
++  }
++
++  const withoutSal = normalizeLandingJob({
++    title: 'Platform Engineer',
++    url: 'https://landing.jobs/at/acme/platform-engineer',
++  }, 'Fallback');
++  if (withoutSal && !('salary' in withoutSal)) {
++    pass('normalizeLandingJob omits salary entirely when the posting has none');
++  } else {
++    fail(`normalizeLandingJob should omit salary, got ${JSON.stringify(withoutSal && withoutSal.salary)}`);
++  }
++
+ } catch (e) {
+   fail(`landingjobs provider tests crashed: ${e.message}`);
+ }
