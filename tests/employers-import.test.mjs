@@ -23,7 +23,7 @@ import { BOARD_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
   chunkInbox, importList, nameFromBoard, normalizeWebsite, parseBoardUrl, parseCsv, readList,
 } from '../seeds/employers-import.mjs';
-import { inboxCareersUrl } from '../seeds/employers-inbox.mjs';
+import { INBOX_MAX_LINES, inboxCareersUrl } from '../seeds/employers-inbox.mjs';
 import { inboxLineProblems } from '../seeds/employers-validate.mjs';
 import applicantpro from '../providers/applicantpro.mjs';
 import homerun from '../providers/homerun.mjs';
@@ -373,17 +373,30 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
     writeFileSync(list, [...known, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-one')}`, 'https://nope.example/jobs', ''].join('\n'));
     const r = node(IMPORTER, [list, '--login', 'OctoCat', '--date', '2026-11-10'], dir);
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, new RegExp(`wrote ${known.length + 1} board\\(s\\) in 1 file\\(s\\)`));
-    const inbox = join(dir, 'employers', 'inbox', '2026-11-10-octocat.ndjson');
-    assert.equal(readFileSync(inbox, 'utf8').split('\n').filter(Boolean).length, known.length + 1);
+    // The registry no longer fits one inbox file: the contribution is written in as many parts as it needs.
+    const parts = Math.ceil((known.length + 1) / INBOX_MAX_LINES);
+    assert.match(r.stdout, new RegExp(`wrote ${known.length + 1} board\\(s\\) in ${parts} file\\(s\\)`));
+    const files = parts === 1
+      ? ['2026-11-10-octocat.ndjson']
+      : Array.from({ length: parts }, (_, i) => `2026-11-10-octocat-${String(i + 1).padStart(3, '0')}.ndjson`);
+    const written = files.map((f) => readFileSync(join(dir, 'employers', 'inbox', f), 'utf8').split('\n').filter(Boolean).length);
+    assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 1);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
       + `${known.length + 2},https://nope.example/jobs,`
       + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
-    assert.match(v.stderr, new RegExp(`warning: employers/inbox/2026-11-10-octocat.ndjson:1: ${known.length} boards are already in the registry`));
-    assert.equal(v.stderr.trim().split('\n').length, 1, 'one warning, nothing else');
+    // One warning for each part, at its first line, and together they count every known board.
+    const warned = v.stderr.trim().split('\n');
+    assert.equal(warned.length, parts, 'one warning for each part, nothing else');
+    let already = 0;
+    warned.forEach((line, i) => {
+      const m = new RegExp(`^warning: employers/inbox/${files[i]}:1: (\\d+) boards? (?:is|are) already in the registry`).exec(line);
+      assert.ok(m, line);
+      already += Number(m[1]);
+    });
+    assert.equal(already, known.length);
 
     // A second run for the same contribution does not overwrite it.
     const again = node(IMPORTER, [list, '--login', 'octocat', '--date', '2026-11-10'], dir);
