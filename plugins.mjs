@@ -18,7 +18,7 @@
 
 import path from 'path';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -495,24 +495,28 @@ export function setPluginEnabled(root, id, on, settings) {
 }
 
 /**
- * The file rename publishes onto. A symlink stays a symlink: the temp file is
- * written next to the target and renamed over that target.
+ * The file rename publishes onto. A symlink stays a symlink: follow the whole
+ * chain and rename onto the last file, even when that file is not there yet.
+ * A cycle stops the walk so an intermediate link is not replaced.
  *
  * @param {string} file
  * @returns {string}
  */
 function resolvedConfigFile(file) {
-  try {
-    if (!lstatSync(file).isSymbolicLink()) return file;
-  } catch (err) {
-    if (err?.code === 'ENOENT') return file;
-    throw err;
-  }
-  try {
-    return realpathSync(file);
-  } catch (err) {
-    if (err?.code !== 'ENOENT') throw err;
-    return path.resolve(path.dirname(file), readlinkSync(file));
+  const seen = new Set();
+  let current = path.resolve(file);
+  for (;;) {
+    if (seen.has(current)) return current;
+    seen.add(current);
+    let link;
+    try {
+      if (!lstatSync(current).isSymbolicLink()) return current;
+      link = readlinkSync(current);
+    } catch (err) {
+      if (err?.code === 'ENOENT') return current;
+      throw err;
+    }
+    current = path.resolve(path.dirname(current), link);
   }
 }
 

@@ -106,3 +106,29 @@ test('saving through a symlink updates the target and leaves the link', async (t
     rmSync(outside, { recursive: true, force: true });
   }
 });
+
+test('a dangling symlink chain creates the missing final file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-chain-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const intermediate = join(config, 'intermediate.yml');
+  const finalFile = join(config, 'final.yml');
+  try {
+    mkdirSync(config);
+    symlinkSync('final.yml', intermediate);
+    symlinkSync('intermediate.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?chain=${Date.now()}`);
+    setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' });
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.equal(lstatSync(intermediate).isSymbolicLink(), true);
+    assert.equal(lstatSync(finalFile).isFile(), true);
+    assert.match(readFileSync(finalFile, 'utf8'), /enabled: true/);
+    assert.equal(readdirSync(config).some((name) => name.endsWith('.tmp')), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
