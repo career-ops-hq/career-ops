@@ -471,6 +471,33 @@ try {
     fail(`fetch() cap marker = ${JSON.stringify(capMarker)}`);
   }
 
+  // A full page at the ceiling is only a truncation when the source's own
+  // total says more exist. When the collected rows reach that total, the whole
+  // board was read and the boundary page just happened to be full: complete,
+  // no marker, no "raise max_pages" advice.
+  const completeWarnings = [];
+  let completeAtCap;
+  try {
+    console.error = (...args) => completeWarnings.push(args.join(' '));
+    completeAtCap = await kariyer.fetch({ name: 'Kariyer.net', max_pages: 1 }, {
+      transport: 'http',
+      sleep: noSleep,
+      fetchJson: async () => envelope(Array.from({ length: 2000 }, (_, i) => mkItem(i)), 1, 2000),
+    });
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (completeAtCap.length === 2000 && completeWarnings.length === 0) {
+    pass('fetch() reads a full boundary page as complete when it reaches the reported total');
+  } else {
+    fail(`fetch() full-boundary completion = ${JSON.stringify({ jobs: completeAtCap?.length, warnings: completeWarnings })}`);
+  }
+  if (boardTruncation(completeAtCap) === null) {
+    pass('fetch() does not mark a full boundary page that completed the board as partial');
+  } else {
+    fail(`fetch() full-boundary marker = ${JSON.stringify(boardTruncation(completeAtCap))}`);
+  }
+
   // The gateway clamps currentPage at 100, so past that the advice must not be
   // "raise max_pages" — it cannot buy anything.
   const deepWarnings = [];

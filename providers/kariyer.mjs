@@ -457,7 +457,13 @@ export default {
       const rawCount = items.length;
       if (rawCount === 0) break; // natural end of the board
       if (rawCount < PAGE_SIZE) break; // short final page wins over the ceiling
-      if (page === maxPages) stopReason = 'cap';
+      if (page === maxPages) {
+        // A full page at the ceiling is only a truncation when the source's own
+        // total says more postings exist. Reaching that total means the whole
+        // board was read and the boundary page merely happened to be full — a
+        // board whose size is an exact multiple of PAGE_SIZE.
+        if (!(Number.isFinite(reportedTotal) && jobs.length >= reportedTotal)) stopReason = 'cap';
+      }
     }
 
     // The warning is tied to the entry's own bound, never to a ctx.maxPages
