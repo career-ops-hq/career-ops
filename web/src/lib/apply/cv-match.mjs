@@ -52,32 +52,32 @@ const STANDARD_NAME = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?\.[a-z0-
 /**
  * The kind (`cv` or `cover`) of a name in the standard layout
  * `{NNN}-{company-slug}-{kind}-{candidate-slug}-{date}[-{variant}].{ext}`
- * (lib/output-names.mjs, #6667), or null when the name is not in that layout,
- * or is ambiguous. A company or candidate slug can itself contain `cv` or
- * `cover`, so the kind cannot always be read off the name alone:
+ * (lib/output-names.mjs, #6667), or null when the name is not in that layout.
  *
- *  - With the caller's company `slug`, the name must start `{NNN}-{slug}-`. The
- *    slug may be only the front of the report's company slug (`veeva` for
- *    `veeva-systems`), so what follows is read for its kind token. One token
- *    gives the kind. Two or more is ambiguous (`acme` against
- *    `acme-cv-tools-cover-jane`): null, since attaching nothing beats attaching
- *    the wrong document.
- *  - Without a slug the same single-token rule applies to the whole name.
+ * buildOutputName() refuses any name carrying more than one `cv`/`cover` word
+ * (a company or candidate called "CV Tools" or "Cover"), so a standard name has
+ * exactly one kind token and a name with two is not one this repo wrote: null,
+ * since attaching nothing beats attaching the wrong document. The resolver
+ * depends on this parity, tests/output-names.test.mjs and the resolver test
+ * keep both sides in step.
  *
- * The slug is a prefix test, never a substring one, so a candidate called
- * `Zep` is not the company `zep`.
+ * With the caller's company `slug` the match is exact, as cv.ts requires
+ * (#2352: Acme must not resolve an Acme Bank file): the name must start
+ * `{NNN}-{slug}-` and the kind token must come right after it. A candidate
+ * called `Zep` is therefore not the company `zep`, and `acme` does not claim
+ * `024-acme-bank-cv-...`.
  */
 export function standardKind(filenameLower, slug) {
   const m = STANDARD_NAME.exec(filenameLower);
   if (!m) return null;
   const head = m[1];
-  let rest = head;
-  if (slug) {
-    if (!head.startsWith(`${slug}-`)) return null;
-    rest = head.slice(slug.length + 1);
-  }
-  const kinds = rest.split('-').filter((part) => part === 'cv' || part === 'cover');
+  const kinds = head.split('-').filter((part) => part === 'cv' || part === 'cover');
   if (kinds.length !== 1) return null;
+  if (slug) {
+    const prefix = `${slug}-`;
+    if (!head.startsWith(prefix)) return null;
+    if (head.slice(prefix.length).split('-')[0] !== kinds[0]) return null;
+  }
   return kinds[0];
 }
 
