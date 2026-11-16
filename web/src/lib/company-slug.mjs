@@ -16,7 +16,9 @@
  * `keys` lists every slug a file could carry for this company: the folded
  * `slug` (what lib/output-names.mjs writes) and, for an accented name, the
  * `legacy` slug that drops the accented letters ("zo-caf"), which covers written
- * without --report and older CVs still carry. Resolvers match any of them.
+ * without --report and older CVs still carry. Resolvers match them through
+ * matchesCompanyKeys() (cv-match.mjs), which applies the legacy slug to
+ * non-standard names only.
  *
  * @returns {{ slug: string, first: string, legacy: string, keys: string[] } | null}
  */
@@ -29,6 +31,9 @@ export function companySlug(company) {
   const slug = (folded.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
   if (!slug) return null;
   const legacy = (c.toLowerCase().match(/[a-z0-9]+/g) ?? []).join("-");
-  const keys = legacy && legacy !== slug ? [slug, legacy] : [slug];
+  // A legacy key that is a kind word ("CVé" -> "cv", "Coveré" -> "cover") would
+  // match every cv-*.pdf / *-cover.pdf, whatever the company, so it is dropped.
+  const usable = legacy && legacy !== slug && legacy !== "cv" && legacy !== "cover";
+  const keys = usable ? [slug, legacy] : [slug];
   return { slug, first: slug.split("-")[0], legacy: legacy || slug, keys };
 }
