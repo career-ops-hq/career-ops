@@ -498,6 +498,21 @@ try {
   assert.equal(syncedOk.status, 0);
   const localOk = spawnSync(NODE, ['backup.mjs', '--dest', join(tmp, 'backup', 'local-contacts'), '--include-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
   assert.equal(localOk.status, 0);
+  // --allow-synced-contacts is the separate acknowledgement that lets contacts into a synced folder; it still warns.
+  const allowedDest = join(fakeHome, 'Dropbox', 'Backups', 'allowed');
+  const allowed = spawnSync(NODE, ['backup.mjs', '--dest', allowedDest, '--include-contacts', '--allow-synced-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(allowed.status, 0, allowed.stdout + allowed.stderr);
+  assert.match(JSON.parse(allowed.stdout).warnings.join('\n'), /contact files are being copied into a dropbox folder/);
+  assert.equal(existsSync(join(allowedDest, 'data/contacts.tsv')), true);
+  const allowedProvider = spawnSync(NODE, ['backup.mjs', '--provider', 'dropbox', '--include-contacts', '--allow-synced-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(allowedProvider.status, 0, allowedProvider.stdout + allowedProvider.stderr);
+  // The acknowledgement alone does nothing: it needs --include-contacts, and it never copies contacts by itself.
+  const lone = spawnSync(NODE, ['backup.mjs', '--dest', join(fakeHome, 'Dropbox', 'Backups', 'lone'), '--allow-synced-contacts', '--json'], { cwd: ROOT, env: homeEnv, encoding: 'utf8' });
+  assert.equal(lone.status, 2);
+  assert.match(JSON.parse(lone.stdout).error, /only applies together with --include-contacts/);
+  // The exported API takes the same acknowledgement.
+  assert.throws(() => b.assertContactsNotSynced(syncedDest, true, { home: fakeHome }), /--allow-synced-contacts/);
+  assert.doesNotThrow(() => b.assertContactsNotSynced(syncedDest, true, { home: fakeHome }, true));
   // A fresh drive with no Backups/ folder yet works with --provider.
   const freshHome = join(tmp, 'fresh-home');
   mkdirSync(join(freshHome, 'Dropbox'), { recursive: true });
