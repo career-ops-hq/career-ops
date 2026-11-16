@@ -4,6 +4,9 @@ Career-Ops scans job sources through provider modules in `providers/`. Each
 non-helper `*.mjs` file maps to one supported source. Files prefixed with `_`
 are shared helpers and are not loaded as providers.
 
+For an opt-in Poland setup using existing board providers, see the
+[Poland market guide](MARKET_POLAND.md).
+
 | Board | Type (API / Atom / RSS / parser) | Notes |
 | --- | --- | --- |
 | 4 Day Week | API | Reads the public `https://4dayweek.io/api/jobs` JSON feed (4-day-week / reduced-hours roles). Configure with `provider: 4dayweek`; paginates `?page=N` up to `max_pages` (default 3), drops expired postings, then scanner filters apply. |

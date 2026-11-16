@@ -15,6 +15,54 @@ location_filter:
     remote_regions: [Europe, European Union, EU, EMEA, Worldwide, Anywhere, Global]
 ```
 
+### Poland-first, EU-remote example
+
+For a Poland-based search that accepts Warsaw/Poland office roles and remote
+roles explicitly open to EU-based applicants, use a narrower policy:
+
+```yaml
+location_filter:
+  allow: [Warsaw, Poland, Remote, EU, European Union]
+  workplace_policy:
+    onsite_locations: [Warsaw]
+    onsite_countries: [Poland]
+    remote_countries:
+      - Poland
+      - Austria
+      - Belgium
+      - Bulgaria
+      - Croatia
+      - Cyprus
+      - Czech Republic
+      - Denmark
+      - Estonia
+      - Finland
+      - France
+      - Germany
+      - Greece
+      - Hungary
+      - Ireland
+      - Italy
+      - Latvia
+      - Lithuania
+      - Luxembourg
+      - Malta
+      - Netherlands
+      - Portugal
+      - Romania
+      - Slovakia
+      - Slovenia
+      - Spain
+      - Sweden
+    remote_regions: [European Union, EU]
+```
+
+This keeps office/hybrid roles in Warsaw and permits remote roles whose
+description or structured eligibility identifies an EU country or the EU.
+For relocation to other EU offices, add those destinations to both `allow` and
+`onsite_countries`. If you want all of Europe rather than the EU, add the
+appropriate countries or region explicitly; the scopes are not interchangeable.
+
 Europe, the EU and the EEA are different scopes. Add EU/EEA region labels only
 when they cover your allowed remote country; these labels do not establish work
 authorization. See the [EU Council's EEA overview](https://www.consilium.europa.eu/en/policies/eu-eea-relations/)
