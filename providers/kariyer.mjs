@@ -1,6 +1,7 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { markTruncated } from '../lib/board-truncation.mjs';
 import { intInRange } from './_config-utils.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { htmlToText } from './_html-to-text.mjs';
@@ -75,7 +76,11 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 //
 // The walk stops on the board's own natural end (a page shorter than `size`,
 // then an empty one) and is bounded by this provider's own page ceiling; the
-// source's `totalJobCount` is never what decides the loop.
+// source's `totalJobCount` is never what decides the loop. A walk the ceiling
+// or a failed page cuts short carries the canonical
+// `jobs.truncated = { reason, fetched, total }` marker (`markTruncated()` in
+// `lib/board-truncation.mjs`), so scan.mjs logs the board `partial` instead of
+// `reachable`; a health probe and a naturally-ended walk are never marked.
 //
 // --- URL / dedup key --------------------------------------------------------
 //
@@ -398,6 +403,8 @@ export default {
     const jobs = [];
     const seen = new Set();
     let stopReason = 'complete';
+    /** @type {number|undefined} */
+    let reportedTotal;
 
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -432,6 +439,11 @@ export default {
         );
       }
 
+      // The source's own board size, carried into the truncation marker so a
+      // partial read says how much of the board it reached.
+      const pageTotal = json?.data?.totalJobCount;
+      if (Number.isFinite(pageTotal)) reportedTotal = pageTotal;
+
       for (const item of items) {
         const job = normalizeKariyerJob(item, label);
         if (!job) continue;
@@ -457,6 +469,19 @@ export default {
         ? 'raise max_pages on this entry for more'
         : `the gateway clamps currentPage at ${MAX_PAGES_CAP}, so a higher max_pages cannot help — raise PAGE_SIZE in the provider instead`;
       console.error(`⚠️  kariyer: ${label} truncated at max_pages=${maxPages} (${jobs.length} postings) — ${advice}`);
+    }
+
+    // Canonical partial-read signal (`lib/board-truncation.mjs`): a board cut
+    // short by the page ceiling or by a page that failed after retries is
+    // logged `partial` in the portal-health ledger instead of `reachable`, and
+    // named in the run summary. A health probe is not a truncation — it stops
+    // below the cap by design, and a failure there throws — so it never marks,
+    // and neither does a walk that ended on the board's own short/empty page.
+    if (!probing && (stopReason === 'cap' || stopReason === 'fetch-error')) {
+      markTruncated(jobs, stopReason === 'cap' ? 'page-cap' : 'fetch-error', {
+        fetched: jobs.length,
+        ...(reportedTotal === undefined ? {} : { total: reportedTotal }),
+      });
     }
 
     const { fetchDetails, detailLimit } = parseConfig(entry);

@@ -1,6 +1,7 @@
 // tests/providers/kariyer.test.mjs — mirrors the board-wide aggregator tests
 // (yourator, gupy) for the kariyer.net candidate API gateway.
 import { pass, fail, ROOT } from '../helpers.mjs';
+import { boardTruncation } from '../../lib/board-truncation.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 
@@ -339,6 +340,14 @@ try {
     fail(`fetch() dedup = ${jobs.length} rows, ${new Set(jobs.map((j) => j.url)).size} unique, pin rows ${pinRows}`);
   }
 
+  // A walk that ended on the board's own short/empty page is complete: no
+  // partial-read marker, and the canonical reader agrees (lib/board-truncation.mjs).
+  if (!('truncated' in jobs) && boardTruncation(jobs) === null) {
+    pass('fetch() leaves a naturally-ended walk unmarked');
+  } else {
+    fail(`fetch() marked a complete walk = ${JSON.stringify(boardTruncation(jobs))}`);
+  }
+
   // A well-formed but empty board is [], not a throw.
   const emptyBoard = await kariyer.fetch({ name: 'Kariyer.net' }, {
     transport: 'http',
@@ -347,6 +356,8 @@ try {
   });
   if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('fetch() returns [] for a present-and-empty board');
   else fail(`fetch() empty board = ${JSON.stringify(emptyBoard)}`);
+  if (boardTruncation(emptyBoard) === null) pass('fetch() does not mark an empty board as truncated');
+  else fail(`fetch() marked an empty board = ${JSON.stringify(boardTruncation(emptyBoard))}`);
 
   // Anything that is not the documented envelope must throw, not read as empty.
   const malformed = [
@@ -380,7 +391,7 @@ try {
 
   // verify-portals' health probe: one list request, whatever the entry says.
   const probeCalls = [];
-  await kariyer.fetch({ name: 'Kariyer.net', max_pages: 5 }, {
+  const probeResult = await kariyer.fetch({ name: 'Kariyer.net', max_pages: 5 }, {
     transport: 'http',
     maxPages: 1,
     sleep: noSleep,
@@ -391,14 +402,18 @@ try {
   });
   if (probeCalls.length === 1 && probeCalls[0] === 1) pass('fetch() honors ctx.maxPages over the entry max_pages');
   else fail(`fetch() probe requests = ${JSON.stringify(probeCalls)}`);
+  if (boardTruncation(probeResult) === null) pass('fetch() does not mark a health probe as truncated');
+  else fail(`fetch() marked a probe = ${JSON.stringify(boardTruncation(probeResult))}`);
 
   // A probe that stops on a full page is a deliberate cut-off, not a
-  // misconfigured entry: it must not draw the "raise max_pages" warning.
+  // misconfigured entry: it must not draw the "raise max_pages" warning, and it
+  // must not be marked either — a probe is not a truncated board.
   const realConsoleError = console.error;
   const probeWarnings = [];
+  let fullPageProbe;
   try {
     console.error = (...args) => probeWarnings.push(args.join(' '));
-    await kariyer.fetch({ name: 'Kariyer.net' }, {
+    fullPageProbe = await kariyer.fetch({ name: 'Kariyer.net' }, {
       transport: 'http',
       maxPages: 1,
       sleep: noSleep,
@@ -409,6 +424,8 @@ try {
   }
   if (probeWarnings.length === 0) pass('fetch() stays quiet when ctx.maxPages truncates — a probe is not a misconfiguration');
   else fail(`fetch() probe warnings = ${JSON.stringify(probeWarnings)}`);
+  if (boardTruncation(fullPageProbe) === null) pass('fetch() does not mark a probe that stopped on a full page at the cap');
+  else fail(`fetch() marked a capped probe = ${JSON.stringify(boardTruncation(fullPageProbe))}`);
 
   // A ctx.fetch rejection while probing must propagate unwrapped, so
   // verify-portals reads a budget cut-off as a live board.
@@ -447,6 +464,12 @@ try {
   } else {
     fail(`fetch() cap = ${JSON.stringify({ jobs: capped?.length, warnings: capWarnings })}`);
   }
+  const capMarker = boardTruncation(capped);
+  if (capMarker && capMarker.reason === 'page-cap' && capMarker.fetched === 2000 && capMarker.total === 22936 && capMarker.source === 'truncated') {
+    pass('fetch() marks a cap-truncated walk partial with reason/fetched/total');
+  } else {
+    fail(`fetch() cap marker = ${JSON.stringify(capMarker)}`);
+  }
 
   // The gateway clamps currentPage at 100, so past that the advice must not be
   // "raise max_pages" — it cannot buy anything.
@@ -466,6 +489,11 @@ try {
     pass('fetch() caps max_pages at the gateway\'s 100-page ceiling and does not suggest raising it');
   } else {
     fail(`fetch() page ceiling = ${JSON.stringify({ jobs: deep?.length, warnings: deepWarnings })}`);
+  }
+  if (boardTruncation(deep)?.reason === 'page-cap') {
+    pass('fetch() marks a walk stopped at the gateway ceiling as page-cap too');
+  } else {
+    fail(`fetch() ceiling marker = ${JSON.stringify(boardTruncation(deep))}`);
   }
 
   // A page that cannot be fetched after retries keeps the pages so far and
@@ -494,6 +522,12 @@ try {
     pass('fetch() keeps the pages already collected on a fetch-error stop, without blaming max_pages');
   } else {
     fail(`fetch() partial = ${JSON.stringify({ jobs: partial?.length, warnings: partialWarnings })}`);
+  }
+  const partialMarker = boardTruncation(partial);
+  if (partialMarker && partialMarker.reason === 'fetch-error' && partialMarker.fetched === 2000 && partialMarker.total === 22936) {
+    pass('fetch() marks a fetch-error stop partial with reason/fetched/total');
+  } else {
+    fail(`fetch() fetch-error marker = ${JSON.stringify(partialMarker)}`);
   }
 
   // A first page that cannot be fetched must fail loud, not read as an empty board.
