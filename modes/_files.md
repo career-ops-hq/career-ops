@@ -100,3 +100,7 @@ A capture is copied into `data/outcomes/` under its own extension (`posting.pdf`
 ## Recording a stale listing
 
 AGENTS.md → "Aggregator Listings" step 3 records an aggregator listing the employer does not carry in `data/scan-history.tsv` as `skipped_expired`. The URL, role and company come from the posting, so never put them into a shell command: write them to a JSON file with your file tool (`{"url": "…", "title": "…", "company": "…"}`), then run `node --input-type=module -e 'import { readFileSync } from "node:fs"; import { appendToScanHistory } from "./scan.mjs"; const p = JSON.parse(readFileSync(process.argv[1], "utf8")); await appendToScanHistory([{ ...p, source: "manual" }], process.argv[2], "skipped_expired")' <file.json> YYYY-MM-DD`. The status decides what the scanner does: `skipped_title`, `skipped_location`, `skipped_age`, `skipped_no_apply_control`, `skipped_content`, `skipped_visa`, `skipped_country_eligibility` and `skipped_experience` never count as seen, so the listing comes back, and a status the scanner does not know pins the URL for good.
+
+## Data root in scripts
+
+A new script resolves the data root and the tracker path through `path-resolver.mjs`, never through `__dirname`, because the data root can be overridden and can live outside the repository. Call `getCareerOpsRoot()` for the root, then pass it to `resolveTrackerPath(root)` to read or `resolveTrackerPathForWrite(root)` to write. Both take the root as an argument, with no default.

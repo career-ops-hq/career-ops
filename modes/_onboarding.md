@@ -147,3 +147,12 @@ Then suggest automation:
 > "Want me to scan for new offers automatically? I can set up a recurring scan every few days so you don't miss anything. Just say 'scan every 3 days' and I'll configure it."
 
 If the user accepts, use the `/loop` or `/schedule` skill (if available) to set up a recurring scan entrypoint for their CLI (`/career-ops scan`, `/skill:career-ops scan` on Pi, or the equivalent Codex prompt). If those aren't available, point them to [docs/AUTOMATION.md](../docs/AUTOMATION.md) for copy-paste cron / launchd / Windows Task Scheduler recipes plus a zero-token triage-to-shortlist prompt, or remind them to run the scan mode periodically.
+
+## When the data root is refused
+
+If `node doctor.mjs --json` reports `dataRootError`, run none of the steps above: AGENTS.md → "First Run — Onboarding" has the stop rule. Doctor exits non-zero with `data_root` null, and `onboardingNeeded` stays true so that nothing proceeds on this root. The user corrects `dataRootError.source`, and that source decides how the correction reaches doctor:
+
+- **An environment variable** (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`): a shell export does not reach an agent session that is already running. The user restarts the session from a shell that has the corrected value, and only then does a doctor rerun see it.
+- **The `.career-ops-data` marker file:** editing the file is enough. Doctor re-reads it on each run, so no restart is needed.
+
+Then run doctor again.
