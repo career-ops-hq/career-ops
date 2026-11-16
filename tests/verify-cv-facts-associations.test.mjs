@@ -30,6 +30,9 @@ AWS Certified Developer – Associate
 
 ## Standards
 Contributor — RFC 9999, Example Benchmarking Terminology
+
+## Skills
+Python, Go
 `;
 
 const TRUE = {

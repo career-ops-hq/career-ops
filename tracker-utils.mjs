@@ -8,7 +8,7 @@
  * copies — and every writer excludes every other writer through the same lock.
  */
 
-import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, rmSync, statSync, lstatSync, existsSync, realpathSync, readlinkSync, accessSync, constants as fsConstants, chmodSync, appendFileSync, openSync, fstatSync, readSync, closeSync, copyFileSync, truncateSync } from 'fs';
 import { join, dirname, basename, resolve, relative, isAbsolute, sep } from 'path';
 import { createHash, randomUUID } from 'crypto';
 import { tmpdir } from 'os';
@@ -805,6 +805,29 @@ export function writeFileAtomic(path, content, { mode } = {}) {
 }
 
 /**
+ * Copy `filePath` onto `filePath.bak` without exposing a partial backup.
+ *
+ * A direct copy onto `.bak` truncates that file first. A failure mid-copy
+ * removes the previous recovery file, and a reader can observe a short one.
+ * The copy lands in a sibling temp file. The rename replaces `.bak` only
+ * after that copy finishes, so a failure leaves the previous backup alone.
+ *
+ * @param {string} filePath - The file to copy.
+ * @returns {void}
+ */
+export function backupFileAtomically(filePath) {
+  const bak = `${filePath}.bak`;
+  const tmpPath = join(dirname(bak), `.${basename(bak)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`);
+  try {
+    copyFileSync(filePath, tmpPath);
+    renameSyncWithRetry(tmpPath, bak);
+  } catch (err) {
+    rmSync(tmpPath, { force: true });
+    throw err;
+  }
+}
+
+/**
  * Replace a hand-edited user file (cv.md, article-digest.md, portals.yml)
  * atomically, keeping what an in-place write kept.
  *
@@ -869,15 +892,23 @@ export function userFileWriteTarget(path) {
  */
 export function appendLedgerRows(path, text) {
   let lead = '';
+  let before = 0;
+  let existed = false;
   let fd;
   try {
     fd = openSync(path, 'r');
-  } catch {
-    fd = null; // no file yet: the append below creates it
+    existed = true;
+  } catch (err) {
+    // Only a missing file starts at size 0. Any other read failure, such as a
+    // ledger that is writable but not readable, must stop here. Treating it as
+    // missing would truncate the real file to empty when the append then fails.
+    if (err?.code !== 'ENOENT') throw err;
+    fd = null;
   }
   if (fd !== null) {
     try {
       const { size } = fstatSync(fd);
+      before = size;
       if (size > 0) {
         const last = Buffer.alloc(1);
         readSync(fd, last, 0, 1, size - 1);
@@ -887,7 +918,27 @@ export function appendLedgerRows(path, text) {
       closeSync(fd);
     }
   }
-  appendFileSync(path, lead + text, 'utf-8');
+  // appendFileSync can throw after the new bytes are already in the file, for
+  // example when the close fails. The caller reports the failure and may retry,
+  // which would record the same row again. Put the file back to the size it
+  // had before this append. A truncate that itself fails is reported: hiding it
+  // would leave the caller believing the ledger was unchanged.
+  try {
+    appendFileSync(path, lead + text, 'utf-8');
+  } catch (err) {
+    try {
+      truncateSync(path, before);
+    } catch (undoErr) {
+      if (undoErr?.code === 'ENOENT' && !existed) throw err;
+      const failure = new Error(
+        `${path}: the append failed (${err.code || err.message}) and the ledger could not be put back (${undoErr.code || undoErr.message})`,
+        { cause: err },
+      );
+      failure.code = undoErr.code;
+      throw failure;
+    }
+    throw err;
+  }
 }
 
 /**

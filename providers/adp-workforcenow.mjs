@@ -248,6 +248,8 @@ export function extractLocation(job) {
  * @returns {{min?: number, max?: number, currency?: string} | null}
  */
 export function extractSalary(job) {
+  const salaryRange = findCustomField(job?.customFieldGroup, 'stringFields', 'SalaryRange')?.stringValue;
+  if (typeof salaryRange === 'string' && /\bhour(?:ly)?\b|\bper\s+hour\b/i.test(salaryRange)) return null;
   const range = job?.payGradeRange;
   const minAmt = range?.minimumRate?.amountValue;
   const maxAmt = range?.maximumRate?.amountValue;
@@ -266,11 +268,9 @@ export function extractSalary(job) {
   // "$50,000 - $70,000"). Extract whatever numbers are present; a single
   // number becomes both min and max, two or more become the low/high of the
   // set (order-independent — some tenants write "up to $X" style strings).
-  const salaryRange = findCustomField(job?.customFieldGroup, 'stringFields', 'SalaryRange')?.stringValue;
   const symbolOrCode = findCustomField(job?.customFieldGroup, 'stringFields', 'CurrencySymbolOrCode')?.stringValue;
   if (typeof salaryRange === 'string' && salaryRange.trim()) {
-    if (/\bhour(?:ly)?\b|\bper\s+hour\b/i.test(salaryRange)) return null;
-    const nums = (salaryRange.match(/[\d,]+(?:\.\d+)?/g) || [])
+    const nums = (salaryRange.match(/\d[\d,]*(?:\.\d+)?/g) || [])
       .map((n) => Number(n.replace(/,/g, '')))
       .filter((n) => Number.isFinite(n));
     if (nums.length > 0) {

@@ -134,7 +134,7 @@ Informacja zwrotna ma być zwięzła. Jedna lub dwie rzeczy do poprawy na odpowi
 
 ### Write Session Transcript
 
-Po podsumowaniu zapisz czytelny maszynowo zapis sesji w `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (użyj `practice` jako sluga firmy/roli, jeśli sesja nie dotyczyła konkretnej firmy). To uporządkowany zapis rundy dla dalszych trybów analitycznych; tury oznaczone mówcą pozwalają odczytać każdą ze stron bez zgadywania, kto mówił. Pełna specyfikacja znajduje się w `interview-prep/sessions/README.md`.
+Po podsumowaniu zapisz czytelny maszynowo zapis sesji w `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` (użyj `practice` jako sluga firmy/roli, jeśli sesja nie dotyczyła konkretnej firmy). Jeśli ten plik już istnieje, nie nadpisuj go: dodaj kolejny wolny licznik (`-2`, `-3`, ...) przed `.md`, jak opisuje sekcja "File names" w README. To uporządkowany zapis rundy dla dalszych trybów analitycznych; tury oznaczone mówcą pozwalają odczytać każdą ze stron bez zgadywania, kto mówił. Pełna specyfikacja znajduje się w `interview-prep/sessions/README.md`.
 
 Format:
 

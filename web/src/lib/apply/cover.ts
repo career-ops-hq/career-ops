@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { careerOpsRoot, findApplication, isRegularContainedFile } from "@/lib/career-ops";
+import { careerOpsRoot, findApplication, isRegularContainedFile, pdfPathStatusForReport, readReport } from "@/lib/career-ops";
+import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { hasToken, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
 
@@ -18,18 +19,19 @@ const ROLE_SLUG_MAX = 30;
  * is a bug, because two applications at one company then both receive the
  * company's newest file.
  *
- * It cannot fix that the way resolveTailoredCv does, though. That resolver
- * joins the application to data/pdf-index.tsv via pdfPathStatusForReport, and
- * THAT MANIFEST CANNOT REPRESENT A COVER: its header is
- * `# report\tpdf\thtml\tformat\tdate` with no kind column, and
- * updatePDFManifest drops any existing row for a report number before
- * appending, so a cover generated with `--report N` evicts that report's CV
- * row (#3887). Reading a cover back out of it would hand over whichever
- * artifact happened to be written last — sometimes the CV.
+ * With a tracker row, the report -> PDF manifest is authoritative, as it is for
+ * CVs: data/pdf-index.tsv keys each row on report number AND artifact kind
+ * (#3959), so pdfPathStatusForReport(report, "cover") returns the cover
+ * generate-pdf.mjs recorded for THIS report, whatever its filename, and never
+ * that report's CV. The same lookup backs /api/cv-pdf?kind=cover and the apply
+ * page, so "View cover" and those agree on which file the cover is. A cover row
+ * that fails the manifest's containment checks resolves nothing rather than
+ * widening to a filename scan, as in locateTailoredPdf.
  *
- * So the application is identified from the tracker row itself: the cover must
- * carry BOTH the row's company slug and its role slug at token boundaries. If
- * no file on disk identifies this row's role, the answer is null — with two
+ * Without a cover row (no report number, an older manifest, or a cover written
+ * without --report), the row is identified from the tracker itself: the cover
+ * must carry BOTH the row's company slug and its role slug at token boundaries.
+ * If no file on disk identifies this row's role, the answer is null — with two
  * covers for one company and nothing to tell them apart, returning the newest
  * is exactly the #2599 defect. Company-only matching remains for the caller
  * that has no tracker row (a manually pasted URL).
@@ -41,6 +43,15 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
   // it cannot join.
   const app = n ? findApplication(n) : null;
   if (n && !app) return null;
+
+  if (n && app) {
+    const reportNumber = reportNumberFor(n, app, readReport(n)?.file ?? null);
+    if (reportNumber != null) {
+      const indexed = await pdfPathStatusForReport(String(reportNumber), "cover");
+      if (indexed.status === "found") return indexed.path;
+      if (indexed.status === "rejected") return null;
+    }
+  }
 
   const key = companySlug(app?.company ?? company);
   if (!key) return null;

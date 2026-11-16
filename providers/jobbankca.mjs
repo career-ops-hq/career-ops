@@ -48,6 +48,7 @@
 import { fetchTextWithRetry, BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const FEED_URL = 'https://www.jobbank.gc.ca/jobsearch/feed/jobSearchRSSfeed';
 const TRUSTED_HOST = 'www.jobbank.gc.ca';
@@ -254,6 +255,7 @@ export default {
     const byUrl = new Map();
     const errors = [];
     let succeeded = 0;
+    let laterPageFailed = false; // a page after the first failed: that keyword is only partly read
 
     for (const keyword of keywords) {
       let keywordFailed = false;
@@ -271,6 +273,8 @@ export default {
           if (page === 1) {
             keywordFailed = true;
             errors.push(`"${keyword}": ${(err && err.message) || err}`);
+          } else {
+            laterPageFailed = true; // the pages already read are kept
           }
           break;
         }
@@ -292,6 +296,12 @@ export default {
       throw new Error(`jobbankca: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
 
-    return [...byUrl.values()];
+    // Part of the board was never read: a keyword failed while another
+    // answered, or a later page failed. scan.mjs takes a board's health from
+    // the returned array, so the result says so; unmarked, the board is logged
+    // reachable as if fully read.
+    const jobs = [...byUrl.values()];
+    if (errors.length || laterPageFailed) markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    return jobs;
   },
 };

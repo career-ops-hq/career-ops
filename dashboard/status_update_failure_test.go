@@ -139,8 +139,8 @@ func TestViewerSidecarFailureReloadsPersistedStatusWithoutCelebrating(t *testing
 	if err := os.WriteFile(tracker, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// A directory blocks the ledger append after the tracker was committed,
-	// independent of the test runner's filesystem permissions.
+	// A directory blocks the ledger. The tracker write is put back, so the
+	// report stays Applied and the hired celebration does not start.
 	if err := os.Mkdir(filepath.Join(filepath.Dir(tracker), "status-log.tsv"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -148,10 +148,11 @@ func TestViewerSidecarFailureReloadsPersistedStatusWithoutCelebrating(t *testing
 	updated, _ := m.Update(screens.ViewerUpdateStatusMsg{App: app, NewStatus: "Hired"})
 	failed := updated.(appModel)
 	if failed.state != viewReport || strings.Contains(failed.View(), "CONGRATULATIONS") {
-		t.Fatal("partial success must remain in the viewer without celebrating")
+		t.Fatal("a refused ledger must stay in the viewer without celebrating")
 	}
-	if !strings.Contains(failed.View(), "status saved, but status-log append failed") {
-		t.Fatalf("sidecar failure must stay visible: %q", failed.View())
+	view := failed.View()
+	if !strings.Contains(view, "Could not write the status log") || !strings.Contains(view, "stays Applied") {
+		t.Fatalf("sidecar failure must stay visible: %q", view)
 	}
 	viewer, _ := failed.viewer.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
 	_, cmd := viewer.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -159,7 +160,7 @@ func TestViewerSidecarFailureReloadsPersistedStatusWithoutCelebrating(t *testing
 		t.Fatal("expected a status selection command")
 	}
 	selection := cmd().(screens.ViewerUpdateStatusMsg)
-	if selection.NewStatus != "Hired" || selection.App.Status != "Hired" {
-		t.Fatalf("viewer must reflect the target report's persisted status: %+v", selection)
+	if selection.NewStatus != "Applied" || selection.App.Status != "Applied" {
+		t.Fatalf("viewer must reflect the report's unchanged status: %+v", selection)
 	}
 }

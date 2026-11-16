@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'child_process';
-import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, existsSync, utimesSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, rmSync, chmodSync, existsSync, statSync, utimesSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { acquireTrackerLock } from '../tracker-utils.mjs';
@@ -912,34 +912,33 @@ const TRACKER_REPORT_MISMATCH = `# Applications Tracker
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
-// ── ledger append failure is a warning, not a failure ────────────
+// ── ledger append failure rolls the status back ─────────────────
 // Occupy the log path with a DIRECTORY so appendFileSync fails (EISDIR),
-// portable across platforms. The status write itself must still succeed.
+// portable across platforms. The tracker must stay on the old status.
 {
   const sb = makeSandbox(TRACKER_9);
   mkdirSync(join(sb.dir, 'status-log.tsv'));
   const r = runSetStatus(['2', 'Applied', '--json'], sb);
   let parsed = null;
   try { parsed = JSON.parse(r.stdout); } catch {}
-  const trackerUpdated = /\| Globex \| Platform Engineer \| 4.0\/5 \| Applied \|/.test(readTracker(sb));
-  // runSetStatus discards stderr on exit-0 runs, so the warning text itself
-  // isn't assertable here — statusLogged: false in the JSON is the contract.
-  if (r.code === 0 && trackerUpdated && parsed?.statusLogged === false) {
-    pass('ledger: append failure → exit 0, tracker updated, statusLogged: false');
+  const stillEvaluated = /\| Globex \| Platform Engineer \| 4.0\/5 \| Evaluated \|/.test(readTracker(sb));
+  const stillDir = existsSync(join(sb.dir, 'status-log.tsv')) && statSync(join(sb.dir, 'status-log.tsv')).isDirectory();
+  if (r.code === 1 && parsed?.code === 'status-not-logged' && stillEvaluated && stillDir
+      && /stays Evaluated/.test(r.stderr)) {
+    pass('ledger: append failure → exit 1, tracker stays Evaluated, status-not-logged');
   } else {
-    fail(`ledger: append-failure contract broken (code=${r.code}, logged=${parsed?.statusLogged})\n${r.stderr}`);
+    fail(`ledger: append-failure contract broken (code=${r.code}, json=${parsed?.code}, still=${stillEvaluated})\n${r.stdout}${r.stderr}`);
   }
   rmSync(sb.dir, { recursive: true, force: true });
 }
 
 // A dashboard retry may repair the ledger after the tracker was saved Applied
-// but status-log.tsv could not be appended on the first attempt. The repair is
-// explicit and idempotent; a second retry must not add another correction.
+// and a later edit dropped that observation. The repair is explicit and
+// idempotent; a second retry must not add another correction.
 {
   const sb = makeSandbox(TRACKER_9);
-  mkdirSync(join(sb.dir, 'status-log.tsv'));
-  runSetStatus(['2', 'Applied', '--json'], sb);
-  rmSync(join(sb.dir, 'status-log.tsv'), { recursive: true, force: true });
+  const applied = runSetStatus(['2', 'Applied', '--json'], sb);
+  if (applied.code !== 0) fail(`ledger repair setup could not apply (code=${applied.code})`);
   writeFileSync(join(sb.dir, 'status-log.tsv'), '2\t2026-06-02\t-\tEvaluated\timport\t\n');
   const repaired = runSetStatus(['2', 'Applied', '--repair-status-log', '--json'], sb);
   const parsed = JSON.parse(repaired.stdout);

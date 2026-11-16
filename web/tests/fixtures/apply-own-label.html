@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Own label fixture</title></head>
+<body>
+  <form class="application-fields">
+    <label for="missing-a">First name</label><input id="a" name="given">
+    <label for="missing-b">Last name</label><input id="b" name="family">
+    <label for="missing-c">Email</label><input id="c" name="contact" type="email">
+    <label for="missing-r">Resume</label><input id="r" name="resume" type="file">
+  </form>
+  <div class="field">
+    <label for="city">City</label>
+    <input id="city" name="city">
+  </div>
+  <div class="field">
+    <label style="display:none">Trap question</label>
+    <div class="question-title">Department</div>
+    <input name="dept">
+    <input name="dept_trap" style="display:none" tabindex="-1" autocomplete="off">
+  </div>
+  <div class="field">
+    <div style="display:none">
+      <div class="question-title" style="display:contents">Hidden team</div>
+    </div>
+    <div class="question-title" style="display:contents">Team</div>
+    <input name="team">
+  </div>
+  <div>
+    <label style="display:none">Trap office</label>
+    <div class="question-title">Office</div>
+    <input name="office">
+  </div>
+  <div class="field">
+    <div class="question-title">Role</div>
+    <input name="role">
+    <div class="autofill-from-resume"><input name="parse"></div>
+  </div>
+</body>
+</html>

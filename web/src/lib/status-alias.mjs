@@ -29,6 +29,9 @@ export const STATUS_ALIAS = {
   "已评估": "EVALUATED",
   "已評估": "EVALUATED",
   evaluado: "EVALUATED", // web-only: not in states.yml
+  // Speculative — states.yml `speculative`
+  spec: "SPECULATIVE",
+  gambit: "SPECULATIVE",
   // Applied — states.yml `applied`
   aplicado: "APPLIED",
   enviada: "APPLIED",

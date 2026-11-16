@@ -172,6 +172,33 @@ try {
   if (probeN.n === 1 && probe.result.length === 100 && !probe.result.truncated && probe.lines.length === 0)
     pass('amazon.fetch honours ctx.maxPages for a probe, silently');
   else fail(`amazon probe: ${probeN.n} calls, ${probe.result.length} jobs, ${JSON.stringify(probe.lines)}`);
+
+  // amazon.jobs refuses a request in-band: HTTP 200, an `error` string and
+  // `jobs: null` (the shape measured live for an out-of-range result_limit).
+  // That is not an empty board, so it must not read as "no open roles".
+  const refused = { error: 'Result limit cannot be greater than 100, Cannot return more than 10000 results', hits: 0, facets: {}, content: {}, jobs: null };
+  const fetchWith = async (pages) => {
+    let n = 0;
+    try {
+      const result = await quiet(() => amazon.fetch({ name: 'Amazon', amazon: {} }, { transport: 'http', async fetchJson() { return pages[Math.min(n++, pages.length - 1)]; }, async fetchText() { return ''; } }));
+      return { jobs: result.result };
+    } catch (err) {
+      return { error: err.message };
+    }
+  };
+  const inBand = await fetchWith([refused]);
+  if (inBand.error?.includes('unexpected response for Amazon') && inBand.error.includes('Result limit cannot be greater than 100')) pass('amazon.fetch throws on an in-band error response instead of reading it as an empty board');
+  else fail(`amazon in-band error: ${JSON.stringify(inBand)}`);
+  const notBoard = await fetchWith([{ message: 'Service Unavailable' }]);
+  if (notBoard.error?.includes('expected jobs[], got: [message]')) pass('amazon.fetch throws on a response with no jobs list, naming its keys');
+  else fail(`amazon non-board response: ${JSON.stringify(notBoard)}`);
+  const emptyBoard = await fetchWith([{ error: null, hits: 0, facets: {}, content: {}, jobs: [] }]);
+  if (Array.isArray(emptyBoard.jobs) && emptyBoard.jobs.length === 0 && !emptyBoard.error) pass('amazon.fetch still reads jobs: [] as an empty board');
+  else fail(`amazon empty board: ${JSON.stringify(emptyBoard)}`);
+  const fullPage = { error: null, hits: 300, jobs: Array.from({ length: 100 }, (_, i) => ({ title: `Role ${i}`, job_path: `/en/jobs/${900000 + i}/role` })) };
+  const laterRefused = await fetchWith([fullPage, refused]);
+  if (laterRefused.error?.includes('Result limit cannot be greater than 100')) pass('amazon.fetch throws when a later page is refused in-band, as it does on a later failed request');
+  else fail(`amazon later in-band error: ${JSON.stringify(laterRefused).slice(0, 200)}`);
 } catch (e) {
   fail(`amazon provider tests crashed: ${e.message}`);
 }

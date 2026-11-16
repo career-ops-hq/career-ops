@@ -47,12 +47,14 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run scan:dayforce` | `scan-dayforce.mjs` | Dayforce (Ceridian) scanner via Playwright. `--dry-run` writes nothing to the pipeline or scan history; `--tenant NAME` scans one board |
 | `npm run scan:topdev` | `scan-topdev.mjs` | TopDev (Vietnam) scanner via Playwright (the listing is hydrated in the browser). `--dry-run` writes nothing to the pipeline or scan history; `--keyword TEXT` scans one keyword |
 | `node web/scripts/scheduled-jobs-runner.mjs` | `web/scripts/scheduled-jobs-runner.mjs` | Run one due local scheduled scan (normally invoked by the OS scheduler: Task Scheduler, launchd or cron) |
+| `node web/scripts/scheduled-jobs-task.mjs` | `web/scripts/scheduled-jobs-task.mjs` | What the Windows scan task runs: sets the path overrides passed as `--env KEY=VALUE`, then runs the scheduled-jobs runner with its errors appended to `--log` (written by `install-scan-schedule.ps1`) |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1` | `web/scripts/install-scan-schedule.ps1` | Install the 15-minute Windows scheduled-jobs queue worker for the logged-in current user |
 | `sh web/scripts/install-scan-schedule.sh` | `web/scripts/install-scan-schedule.sh` | Install the 15-minute scheduled-jobs queue worker on macOS (launchd) or Linux (cron) for the current user |
 | `sh web/scripts/uninstall-scan-schedule.sh` | `web/scripts/uninstall-scan-schedule.sh` | Remove the macOS launchd agent or Linux cron line for the scheduled-jobs queue worker |
 | `node web/scripts/web-service.mjs install` | `web/scripts/web-service.mjs` | Install the web dashboard as a login service for the current user (macOS launchd, Linux `systemd --user`, Windows Task Scheduler). It installs dependencies and builds only when the lockfile, Node version or checkout changed. `--dry-run` prints the definition and changes nothing |
 | `node web/scripts/web-service.mjs uninstall` | `web/scripts/web-service.mjs` | Stop and remove the web dashboard service (keeps the log). `restart` rebuilds first when the code changed, and `status` shows the service's state |
 | `npm run company:funded` | `company-funded.mjs` | Review-first discovery of recently funded companies |
+| `npm run harvest:buildlist` | `harvest-buildlist.mjs` | Resolve BuildList's company roster to scannable ATS boards |
 | `npm run validate:portals` | `validate-portals.mjs` | Validate portals.yml shape before scanning |
 | `npm run tracker` | `tracker.mjs` | SQLite derived index over applications.md — sync/query/history/export |
 | `npm run find` | `find.mjs` | Resolve a report#/tracker#/company query to its full pipeline identity |
@@ -482,7 +484,7 @@ npm run keyword-match -- --self-test
 
 ## calibrate
 
-Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
+Reads the tracker and the outcome journals under `data/outcomes/` and reports whether higher evaluation scores actually convert better for you. Advisory and read-only: it never edits scoring rules, thresholds, or any user file. Applications still in flight are excluded from every rate and counted separately. A row closed by `close-stale.mjs --confirm` counts as a `no_response` outcome until its status changes. A score band with fewer than `--min-band-n` resolved applications (default 5) is printed without a percentage.
 
 ```bash
 npm run calibrate
@@ -644,11 +646,16 @@ mode (#4691) before any cold WebSearch — "do I already have a saved contact
 at this company?" A real prior relationship (a past interviewer, or a contact
 from an earlier, different-role application) is a far stronger outreach
 target than a fresh search, so a match is surfaced first and offered as an
-`internal-referral` ask. Matching is exact-key via `normalizeCompany()`
-(`tracker-utils.mjs`) — the same key `merge-tracker.mjs`/`set-status.mjs`/
-`company-history.mjs` use for same-company lookups — deliberately not
-`linkedin-join.mjs`'s fuzzy token matching, since `contacts.tsv`'s company
-column is normally written from the same string already in the tracker.
+`internal-referral` ask. A contact matches when its company has the same
+`normalizeCompany()` key as `--company`, or when
+`companiesMatchIgnoringCorporateForm()` accepts the pair, so a contact saved
+as "Acme Inc." surfaces for "Acme". Both helpers live in `tracker-utils.mjs`
+and are the rule `set-status.mjs` and `outcome.mjs` use to find a company's
+tracker row. The corporate-form rule only lets the names differ by a trailing
+legal suffix or generic descriptor ("Acme Robotics" never matches "Acme"), and
+it is deliberately not `linkedin-join.mjs`'s fuzzy token matching, since
+`contacts.tsv`'s company column is normally written from the same string
+already in the tracker.
 
 ```bash
 node contact-lookup.mjs --company "Acme"            # JSON: saved contacts at "Acme"
@@ -1038,6 +1045,7 @@ Possible JSON responses:
 | `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
+| `checkout-unreadable` | A git checkout whose commit git cannot read (git missing, no commit yet, or git refusing the directory, e.g. "detected dubious ownership"). Carries `detail`: the first line of the error. No version verdict, on either channel |
 
 `check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
 
@@ -1396,6 +1404,38 @@ Runs without `--dry-run` write JSON under `output/` and a Markdown report under 
 Source diagnostics are included in JSON output and surfaced in human output when a source has errors, is blocked, returns no items, or when no candidates are found.
 
 **Exit codes:** `0` discovery completed, `1` invalid arguments or fatal runtime error.
+
+---
+
+## harvest:buildlist
+
+Turns [BuildList](https://buildlist.xyz)'s company roster into companies `scan.mjs` can read. BuildList indexes ~820 hard-tech startups (AI, robotics, aerospace, defense, energy), and every "Apply" link on it points at the company's own ATS — so its value here is the **company list**, not the job feed. Harvest once and the companies are yours; scanning never touches BuildList again.
+
+It reads the public sitemap and public company pages only (`robots.txt` disallows `/api/` for every agent), and **never writes `portals.yml`**: it writes a file for you to review and paste. It runs on your machine but reads a whole site, so it keeps to the pace rule 6 of the Source Indexing Policy (`CONTRIBUTING.md`) sets for the project's own indexing layer: one request at a time, at least a second apart, longer when `robots.txt` states a `Crawl-delay`, and a `Retry-After` is honoured. Every request is also checked against the live `robots.txt` first (`robots-check.mjs`, read once per run, fail-closed), so a changed policy stops the harvest instead of being ignored. A run fetches at most 2,000 company pages, whatever the sitemap lists; a full harvest of today's roster takes about 15 minutes.
+
+```bash
+npm run harvest:buildlist -- --out buildlist-portals.yml
+npm run harvest:buildlist -- --limit 25 --summary     # quick sample
+npm run harvest:buildlist -- --out buildlist-portals.yml --resume   # continue
+npm run harvest:buildlist -- --json                   # machine-readable
+npm run harvest:buildlist -- --self-test
+```
+
+**The output is `tracked_companies:` entries for every resolved board**, with no job-count test. That test (`discover-ats.mjs` admits a board only if it lists a job today) is right when a slug was *guessed*: an empty board is then indistinguishable from a wrong guess. Here the board is read off the page, so it is known-good and the job count is only today's weather. `tracked_companies` is a standing watch whose purpose is catching a role the day it opens, and `title_filter` still does the per-scan filtering on live postings. The list is not handed to `discover-ats.mjs`, because it probes a slug on every vendor in turn and keeps the first that answers: a Lever board named `initech` could come back as another company's Greenhouse board of the same name.
+
+**Why it reads the page instead of guessing the slug.** BuildList's URL slug is frequently not the ATS board id: `altos-labs` is Greenhouse `altoslabs`, `altana` is `altanaai`, `agility-robotics` is a Greenhouse embed. Feeding guessed slugs to `discover-ats.mjs` resolved 6 of 20 in testing. Each Apply link is read back to its board by `parseBoardUrl` (`seeds/employers-import.mjs`), the reverse of the `lib/ats-board-url.mjs` builders that `discover-ats.mjs` and the employer registry use, so a board comes out in the same canonical form: EU Greenhouse and Lever boards keep their region, Ashby ids keep their case, Workday boards keep their three coordinates, and a vendor's own pages (`www.greenhouse.io/…`, `jobs.ashbyhq.com/api/…`) are not boards. One exception to that shared rule: an Ashby board whose id holds a space (`jobs.ashbyhq.com/Hippocratic%20AI`) is live and answers only in that spelling, so it is kept, with the space encoded; the shared slug rule has no space in it.
+
+Boards it emits: Greenhouse (including links to the `boards-api` host and `?for=` embeds), Ashby, Lever, Rippling, Workable, SmartRecruiters, Join, Recruitee, Breezy, BambooHR, Pinpoint and Workday, plus Gem, iCIMS, Personio and Teamtailor, which `scan.mjs` reads but the registry does not cover. Comeet is listed as **manual follow-up**: its provider needs a careers-api URL carrying a secret `?token=` the public page never exposes.
+
+It skips companies `portals.yml` already tracks, by name **or** by board (`dedupeAgainstPortals` from `discover-ats.mjs`, with each existing `careers_url` read back to its canonical board, so an entry on a legacy host still matches), because a duplicate entry silently double-scans. A `portals.yml` that does not parse is reported on screen and in the output, not treated as empty. `--include-tracked` turns the skip off; `--portals-file` points at a different file (default: `portals.yml` in the data root, so a `CAREER_OPS_ROOT` override is honoured); `--disabled` stages entries as `enabled: false` so you can widen the scan gradually. When two BuildList companies link the same board (a parent and a subsidiary), it is emitted once and the other name is listed in a comment.
+
+**Interrupted runs.** With `--out`, progress is saved to `<file>.progress.json` every 25 companies, and kept while anything is left to do (pages that failed, or companies `--limit` did not reach). Run the same command with `--resume` to continue; a progress file that does not check out is ignored entry by entry, never trusted.
+
+**Guards.** `--out` refuses any file named `portals.yml` in any letter case, the file `--portals-file` names (followed through symlinks and hard links), and an `--out` whose progress file would land on it. An unrecognized flag or a malformed number (`--limit abc`) is an error, not a silent fallback to the default. `--summary` and `--json` print instead of writing, so they cannot be combined with `--out`.
+
+Company profile text (sector, description, HQ, headcount, funding) is BuildList's own editorial content, carried into the `notes:` field as context only. It is never a scoring input and never reaches generated user-facing content. Page text is untrusted: a board is emitted only when its link reads back to a valid board, names are quoted unless they are plainly a string, and control characters and line breaks are stripped from anything printed or written to a comment, so nothing read off a page can add or change an entry in the file you paste.
+
+**Exit codes:** `0` harvest completed, `1` invalid arguments or fatal runtime error.
 
 ---
 

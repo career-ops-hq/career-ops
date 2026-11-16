@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -28,7 +29,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 创建，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders">700+ 位贡献者</a>参与</p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;由 <a href="https://github.com/santifer"><strong>@santifer</strong></a> 创建，&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.cn.md#builders">800+ 位贡献者</a>参与</p>
 
 <p align="center">
 <strong>几个月投出的简历，全都石&#8288;沉&#8288;大&#8288;海。</strong><br>
@@ -280,7 +281,7 @@ npm i -g @santifer/career-ops
 
 ## 用法
 
-把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。如果无法读取某个职位，流水线会停下并请你粘贴文本。
+把职位链接或职位描述粘贴到你的 AI CLI 中。career-ops 会检查带链接的职位是否仍在招（粘贴的文本没有可检查的链接），对照你的简历打分，撰写报告，定制你的简历（默认生成 PDF），并在你的追踪表中新增一行。大多数日子里这就够了。其余一切都是按名称调用的模式。如果无法读取某个职位，流水线会停下并请你粘贴文本或分享截图。
 
 ### 如何调用模式
 

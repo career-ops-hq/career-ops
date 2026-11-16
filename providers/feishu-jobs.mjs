@@ -44,6 +44,7 @@
 
 import { MACOS_BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
@@ -195,7 +196,9 @@ export default {
             const err = result.reason;
             if (seen.size === 0) throw err;
             console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-            return [...seen.values()];
+            // The rest of the board was never read: the result says so, so scan.mjs
+            // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+            return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
           }
           const json = result.value;
           const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];

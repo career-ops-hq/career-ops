@@ -104,6 +104,35 @@ export function consumeReexecMarker() {
 
 const BACKUP_BRANCH_RE = /^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/;
 
+/**
+ * Claim `.update-lock` atomically. `flag: 'wx'` is O_EXCL, so the kernel picks
+ * one winner when two `apply` runs start together; a check-then-write let both
+ * observe no lock and both proceed to mutate the same checkout.
+ * @param {string} root
+ * @returns {boolean} true when this run now holds the lock
+ */
+export function claimUpdateLock(root) {
+  try {
+    writeFileSync(join(root, '.update-lock'), new Date().toISOString(), { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Release `.update-lock`, tolerating one that is already gone.
+ * @param {string} root
+ */
+export function releaseUpdateLock(root) {
+  try {
+    unlinkSync(join(root, '.update-lock'));
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
+  }
+}
+
 function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
@@ -2538,6 +2567,98 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
       }
     }
 
+    // Files an update delivered that still differ from what it delivered. The
+    // content is upstream's when upstream published it AFTER the delivered
+    // version: the install took a newer upstream file ahead of a release, in a
+    // commit of its own. Reporting it preserves it, the next update commit then
+    // does not change it, and the delivered version stays the reference on
+    // every later update, so the file never updates again. The direction
+    // matters: content upstream published BEFORE the delivered version is a
+    // revert the user chose, and stays reported (#3129).
+    const deliveredDiffers = [...changedLocally].filter((file) => deliveredBy.has(file));
+    if (deliveredDiffers.length > 0) {
+      try {
+        // Mode and blob each update commit installed, per file. A version is
+        // matched on both, so upstream's content with a mode upstream never
+        // shipped (a local chmod) stays the user's (#6891 review).
+        const deliveredVersion = new Map();
+        for (const [commit, files] of byCommit) {
+          const pending = files.filter((file) => changedLocally.has(file));
+          for (const batch of argvBatches(pending)) {
+            for (const line of runGit('ls-tree', '-r', '--full-tree', commit, '--', ...batch).split('\n')) {
+              const tab = line.indexOf('\t');
+              if (tab < 0) continue;
+              const [mode, , sha] = line.slice(0, tab).split(' ');
+              deliveredVersion.set(line.slice(tab + 1), `${mode} ${sha}`);
+            }
+          }
+        }
+        // `mode sha` of the new side of a `--raw` line, or null for a zero sha:
+        // a deletion, or a worktree file git did not hash, which stays reported.
+        const rawVersion = (line) => {
+          const parts = line.slice(0, line.indexOf('\t')).split(' ');
+          return parts[3] && !/^0+$/.test(parts[3]) ? `${parts[1]} ${parts[3]}` : null;
+        };
+        const worktreeVersion = new Map();
+        for (const batch of argvBatches(deliveredDiffers)) {
+          for (const line of runGit('diff', '--raw', '--no-abbrev', '--no-renames', upstreamRef, '--', ...batch).split('\n')) {
+            if (!line.startsWith(':')) continue;
+            const version = rawVersion(line);
+            if (version) worktreeVersion.set(line.slice(line.indexOf('\t') + 1), version);
+          }
+        }
+        // The commits that published each version of each path upstream. A
+        // merge is diffed against its first parent, so a version that exists
+        // only as a merge's resolution is attributed to that merge. Git older
+        // than 2.31 has no --diff-merges, and the throw keeps the candidates.
+        const publishedRange = mergeBase ? `${mergeBase}..${upstreamRef}` : upstreamRef;
+        const publishedBy = new Map();
+        for (const batch of argvBatches(deliveredDiffers)) {
+          const log = runGit('log', '--diff-merges=first-parent', '--raw', '--no-abbrev', '--no-renames', '--format=%x1e%H', publishedRange, '--', ...batch);
+          let commit = null;
+          for (const line of log.split('\n')) {
+            if (line.startsWith('\x1e')) {
+              commit = line.slice(1).trim();
+              continue;
+            }
+            if (!commit || !line.startsWith(':')) continue;
+            const version = rawVersion(line);
+            if (!version) continue;
+            const path = line.slice(line.indexOf('\t') + 1);
+            if (!publishedBy.has(path)) publishedBy.set(path, new Map());
+            const byVersion = publishedBy.get(path);
+            if (!byVersion.has(version)) byVersion.set(version, new Set());
+            byVersion.get(version).add(commit);
+          }
+        }
+        const isAncestor = (older, newer) => {
+          try {
+            runGit('merge-base', '--is-ancestor', older, newer);
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        for (const file of deliveredDiffers) {
+          // Both versions must be found upstream: without the delivered one,
+          // newer and older cannot be told apart, and over-reporting is the
+          // safe side.
+          const versions = publishedBy.get(file);
+          const delivered = versions?.get(deliveredVersion.get(file));
+          const taken = versions?.get(worktreeVersion.get(file));
+          if (!delivered || !taken) continue;
+          // Newer means published on history that already held the delivered
+          // version: a commit that published it is an ancestor of one that
+          // published the worktree's. Position in a log listing cannot say
+          // this once a merge joins two lines of history (#6891 review).
+          const newer = [...taken].some((t) => [...delivered].some((d) => d !== t && isAncestor(d, t)));
+          if (newer) changedLocally.delete(file);
+        }
+      } catch {
+        // Unreadable history keeps the candidates: over-report.
+      }
+    }
+
     // Files no update commit ever changed. Upstream's own history decides
     // whether the current content is still attributable to the user: content
     // that upstream published for the path since the merge-base is upstream's
@@ -4067,10 +4188,12 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // VERSION is release metadata, not a complete description of the system
   // tree. Compare the installed commit with main as well, so same-version
   // manifest/file drift is visible (#2630). A failed commit lookup is
-  // deliberately conservative: version checks still work offline/behind a
-  // restricted git transport. The main-ref lookup runs alongside the version
-  // sources, not after them: sequentially, a black-holed network paid the curl
-  // budget twice before the git fallback even started.
+  // deliberately conservative: drift can't be ruled out, so it is reported
+  // rather than up-to-date (#7095), while the version checks still work
+  // offline/behind a restricted git transport. The main-ref lookup runs
+  // alongside the version sources, not after them: sequentially, a
+  // black-holed network paid the curl budget twice before the git fallback
+  // even started.
   const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
     runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
     runCurlGet(RELEASES_API, [
@@ -4159,7 +4282,11 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // conservative (drift reported), matching the failed-commit-lookup policy
   // at the top of this function.
   let systemTreeDrift = false;
-  if (localCommit && remoteCommit && localCommit !== remoteCommit) {
+  if (localCommit && !remoteCommit) {
+    // main's commit is unknown (rate limit, filtered API host): nothing to
+    // compare against, so report drift instead of claiming up-to-date (#7095).
+    systemTreeDrift = true;
+  } else if (localCommit && localCommit !== remoteCommit) {
     try {
       // Same explicit refspec as apply() on this channel: `main` alone lets git
       // auto-follow a tag into FETCH_HEAD, and the diff below reads FETCH_HEAD
@@ -4219,6 +4346,17 @@ async function check() {
   // update-available would only lead the agent to offer an update that fails.
   if (outsideGitCheckout()) {
     console.log(JSON.stringify({ status: 'not-a-git-checkout', local: localVersion() }));
+    return;
+  }
+  // A checkout git cannot read: git missing, or refusing the directory (a
+  // container running git as a user other than the checkout's owner gets
+  // "detected dubious ownership"). Both channels would answer without the
+  // local commit, up-to-date included, while apply() fails here.
+  try {
+    gitQuiet('rev-parse', 'HEAD');
+  } catch (err) {
+    const detail = String(err.stderr || '').trim().split(/\r?\n/)[0] || err.message;
+    console.log(JSON.stringify({ status: 'checkout-unreadable', local: localVersion(), detail }));
     return;
   }
 
@@ -4707,16 +4845,10 @@ async function apply() {
     return;
   }
 
-  // Check for lock
-  const lockFile = join(ROOT, '.update-lock');
-  if (existsSync(lockFile) && !isReexec) {
+  // Claim the lock atomically: two concurrent applies must not both win.
+  if (!isReexec && !claimUpdateLock(ROOT)) {
     console.error('Update already in progress (.update-lock exists). If stuck, delete it manually.');
     process.exit(1);
-  }
-
-  // Create lock
-  if (!isReexec) {
-    writeFileSync(lockFile, new Date().toISOString());
   }
 
   try {
@@ -5565,7 +5697,7 @@ async function apply() {
 
   } finally {
     // Remove lock
-    if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);
+    if (!isReexec) releaseUpdateLock(ROOT);
   }
 }
 

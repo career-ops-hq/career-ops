@@ -10,6 +10,7 @@
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { normalizeEmploymentType } from './_employment-type.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const FEED_URL = 'https://himalayas.app/jobs/api?limit=20';
 const TRUSTED_HOST = 'himalayas.app';
@@ -124,6 +125,9 @@ export default {
     }
     if (probeCap === Infinity) {
       console.error(`⚠️  himalayas: ${entry.name || 'Himalayas'} truncated at max_pages=${maxPages} (${jobs.length} jobs)`);
+      // A cursor was left when max_pages ran out: the result says so too, so
+      // scan.mjs logs the board partial instead of reachable (lib/board-truncation.mjs).
+      markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     return jobs;
   },

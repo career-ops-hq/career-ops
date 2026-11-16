@@ -505,19 +505,22 @@ test('failed canonical write leaves no receipt and may be reviewed again', async
   assert.equal(readFileSync(f.log, 'utf8').trim().split('\n').length, 1);
 });
 
-test('ledger append failure keeps the atomic status and receipt, preventing a duplicate retry', t => {
+test('ledger append failure puts the status back so a later retry can apply', t => {
   const f = fixture(t);
   const p = proposal(f);
   drop(f, p);
   mkdirSync(f.log);
+  const before = readFileSync(f.tracker, 'utf8');
   const result = run(f, 'y\n');
   assert.match(result.stderr, /status-log append failed/);
-  assert.equal(apps(f)[0].status, 'Interview');
-  assert.ok(apps(f)[0].notes.includes(receipt(p.source)));
-  const accepted = readFileSync(f.tracker, 'utf8');
+  assert.match(result.stderr, /Could not write the status log for #7, so it stays Applied/);
+  assert.equal(apps(f)[0].status, 'Applied');
+  assert.equal(apps(f)[0].notes.includes(receipt(p.source)), false);
+  assert.equal(readFileSync(f.tracker, 'utf8'), before);
   rmSync(f.log, { recursive: true });
   const retry = run(f, 'y\n');
-  assert.doesNotMatch(retry.stdout, /Apply recommended status updates/);
-  assert.equal(readFileSync(f.tracker, 'utf8'), accepted);
-  assert.equal(existsSync(f.log), false);
+  assert.match(retry.stdout, /Updated #7 to Interview/);
+  assert.equal(apps(f)[0].status, 'Interview');
+  assert.ok(apps(f)[0].notes.includes(receipt(p.source)));
+  assert.equal(readFileSync(f.log, 'utf8').trim().split('\n').length, 1);
 });

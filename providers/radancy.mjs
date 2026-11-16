@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Radancy (TalentBrew) provider — the career sites Radancy hosts for large
 // employers (careers.munichre.com and its ERGO brands, plus many others). The
@@ -110,6 +111,10 @@ const PAGE_DELAY_MS = 150; // polite pacing — full walks are >100 sequential r
 // Page size for the JSON fragment transport. 100 is honored live by both known
 // legacy tenants (UHG, Kaiser); the HTML page hard-codes 15.
 const FRAGMENT_RECORDS_PER_PAGE = 100;
+// The HTML ?p=N page size the site hard-codes (see the transport notes above).
+// A page with fewer rows is the board's natural end, even at the max_pages
+// boundary.
+const HTML_RECORDS_PER_PAGE = 15;
 
 // A user-supplied `max_jobs` is not otherwise bounded by anything but
 // `max_pages` (itself capped at MAX_PAGES): a garbage value here doesn't risk
@@ -257,6 +262,21 @@ export function parseLegacyResults(html, origin) {
 }
 
 /**
+ * How many result cards a results page carries as the source sent it, before
+ * parseResults drops malformed or repeated ones: the modern list items, or the
+ * distinct job ids the legacy layouts put on their links. Page fullness is read
+ * from this, so one malformed card does not make a full page look short.
+ * @param {string} html
+ * @returns {number}
+ */
+export function countResultCards(html) {
+  if (typeof html !== 'string') return 0;
+  const modern = html.split(/<li class="search-results-list__item/).length - 1;
+  const ids = new Set([...html.matchAll(/data-job-id="([^"]+)"/gi)].map((m) => m[1]));
+  return Math.max(modern, ids.size);
+}
+
+/**
  * Parse one search-results page (or results fragment) into raw
  * {id, title, url, location} records. Tries the modern markup first so existing
  * tenants keep their exact behavior, then falls back to the legacy markup.
@@ -364,6 +384,9 @@ export default {
         const firstIsString = typeof first?.results === 'string';
         const firstHtml = firstIsString ? first.results : '';
         const firstRows = firstHtml ? parseResults(firstHtml, origin) : [];
+        // A short last page is the board's natural end and takes precedence over
+        // our caps: fullness counts the cards the source sent (100 requested).
+        let lastFragmentFull = countResultCards(firstHtml) >= FRAGMENT_RECORDS_PER_PAGE;
         // Proof of life only for a WELL-FORMED fragment response: a string
         // `results` — even "" (zero rows) — counts, but a missing/non-string
         // `results` or a response that crashes parsing leaves this false, so
@@ -413,6 +436,7 @@ export default {
               if (typeof json?.results !== 'string') {
                 throw new Error(`radancy: unexpected fragment response shape at page ${page} (results is not a string)`);
               }
+              lastFragmentFull = countResultCards(json.results) >= FRAGMENT_RECORDS_PER_PAGE;
               rows = json.results ? parseResults(json.results, origin) : [];
             } catch (err) {
               if (probing) throw err; // propagate ProbePageBudgetReached (or any rejection) unwrapped
@@ -443,7 +467,7 @@ export default {
           // (`max_pages`, or `ctx.maxPages` while probing) and the source
           // either gave no page count or claimed more pages than that.
           if (stopReason === 'complete' && page > lastPage && lastPage === effectiveMaxPages
-            && (totalPages == null || totalPages > effectiveMaxPages)) {
+            && (totalPages == null || totalPages > effectiveMaxPages) && lastFragmentFull) {
             stopReason = 'cap';
           }
           // `jobs.length >= maxJobs` alone isn't enough: a tenant whose real
@@ -457,7 +481,7 @@ export default {
           // lastPage`) — i.e. max_jobs itself is what kept a further page
           // from being tried, not a coincidence of how many rows fit.
           if (stopReason === 'complete'
-            && (jobs.length > maxJobs || (jobs.length === maxJobs && page <= lastPage))) {
+            && (jobs.length > maxJobs || (jobs.length === maxJobs && page <= lastPage && lastFragmentFull))) {
             stopReason = 'cap';
           }
 
@@ -480,7 +504,14 @@ export default {
               + ` (max_pages/max_jobs reached) — raise max_jobs/max_pages on this entry for more`,
             );
           }
-          return jobs.slice(0, maxJobs);
+          const result = jobs.slice(0, maxJobs);
+          // A partly read board says so in the return value, so scan.mjs logs it
+          // `partial` instead of `reachable` (lib/board-truncation.mjs). The stop
+          // reason above drives it, as it drives the warnings; never while probing.
+          if (!probing && stopReason !== 'complete') {
+            markTruncated(result, stopReason === 'cap' ? 'page-cap' : 'fetch-error', { fetched: result.length });
+          }
+          return result;
         }
       } catch (err) {
         // succeededOnce can only still be false here (the one JSON request
@@ -498,19 +529,28 @@ export default {
     // THROW so scan/portal-health record a failure instead of "live but empty"
     // (meituan/tencent idiom). A resolved fragment request above, or a mid-scan
     // failure here, keeps partials instead.
-    for (let page = 1; page <= effectiveMaxPages; page++) {
+    let stoppedOnError = false;
+    let lastPageFull = false;
+    let pageCards = 0;
+    let page = 1;
+    for (; page <= effectiveMaxPages; page++) {
       if (page > 1) await sleep(PAGE_DELAY_MS, ctx);
       let rows;
       try {
         const html = await fetchTextWithRetry(ctx, `${listUrl}?p=${page}`, { redirect: 'error', headers: { accept: 'text/html' } });
+        pageCards = countResultCards(html);
         rows = parseResults(html, origin);
       } catch (err) {
         if (probing) throw err; // propagate ProbePageBudgetReached (or any rejection) unwrapped
         if (!succeededOnce) throw err;
+        stoppedOnError = true;
         break; // keep jobs collected so far — a transient mid-scan failure shouldn't discard earlier pages
       }
       succeededOnce = true;
       if (rows.length === 0) break; // past the last page
+      // The cards the source sent, before parseResults drops any: a short page
+      // is the board's natural end.
+      lastPageFull = pageCards >= HTML_RECORDS_PER_PAGE;
 
       let fresh = 0;
       for (const row of rows) {
@@ -523,6 +563,23 @@ export default {
       if (fresh === 0) break;
       if (jobs.length >= maxJobs) break;
     }
-    return jobs.slice(0, maxJobs);
+    const result = jobs.slice(0, maxJobs);
+    if (stoppedOnError) {
+      // The pages after the failure were never read: marked, as on the fragment path.
+      markTruncated(result, 'fetch-error', { fetched: result.length });
+    } else if (!probing && (jobs.length > maxJobs || (page > effectiveMaxPages && lastPageFull))) {
+      // Our own limit ended the walk with pages possibly left: a page pushed the
+      // buffer past max_jobs (the slice drops the overshoot), or max_pages ran
+      // out on a full page. A cap stop, warned and marked as on the fragment
+      // path. A short last page at the max_pages boundary is the board's natural
+      // end, and an exact max_jobs match cannot be told from one (this path has
+      // no reported total), so neither is a cap.
+      console.error(
+        `⚠️  radancy: ${entry.name} truncated at ${result.length} jobs`
+        + ' (max_pages/max_jobs reached) — raise max_jobs/max_pages on this entry for more',
+      );
+      markTruncated(result, 'page-cap', { fetched: result.length });
+    }
+    return result;
   },
 };

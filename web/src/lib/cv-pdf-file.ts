@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { styledCvNames } from "@/lib/apply/ats-pdf.mjs";
 import { resolveTailoredCv } from "@/lib/apply/cv";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { careerOpsRoot, isRegularContainedFile, pdfPathStatusForReport } from "@/lib/career-ops";
@@ -64,7 +65,7 @@ export async function locateTailoredPdf(query: CvPdfSelectors): Promise<LocatedC
   }
   if (!files.length) return { status: 404, message: TAILORED_CV_MISSING };
 
-  const sorted = sortNewestFirst(dir, files);
+  const sorted = sortNewestFirst(dir, styledCvNames(files));
   if (!sorted.length) return { status: 404, message: TAILORED_CV_MISSING };
   return { file: path.join(dir, sorted[0]) };
 }

@@ -275,6 +275,7 @@ const MARKET_EVAL_FILES = {
   fr: 'offre.md',
   hi: 'naukri.md',
   id: 'lowongan.md',
+  in: 'offer.md',
   it: 'annuncio.md',
   ja: 'kyujin.md',
   ko: 'gonggo.md',

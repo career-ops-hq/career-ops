@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Skabt af <a href="https://github.com/santifer"><strong>@santifer</strong></a>, med&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.da.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.da.md#builders">700+ bidragydere</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Skabt af <a href="https://github.com/santifer"><strong>@santifer</strong></a>, med&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.da.md#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops/blob/main/README.da.md#builders">800+ bidragydere</a></p>
 
 <p align="center">
 <strong>Måneder med at sende CV'er ud i&nbsp;stilheden.</strong><br>
@@ -278,7 +279,7 @@ Se [docs/SETUP.md](docs/SETUP.md) for den fulde opsætningsguide, [docs/RUNNING_
 
 ## Brug
 
-Indsæt en job-URL eller jobbeskrivelse i din AI-CLI. career-ops tjekker, at et linket opslag stadig er aktivt (indsat tekst har intet link at tjekke), vurderer det op mod dit CV, skriver en rapport, tilpasser dit CV (som PDF som standard) og tilføjer en række til din tracker. Det dækker de fleste dage. Alt andet er en tilstand, du beder om ved navn. Hvis et opslag ikke kan læses, stopper pipelinen og beder dig indsætte teksten.
+Indsæt en job-URL eller jobbeskrivelse i din AI-CLI. career-ops tjekker, at et linket opslag stadig er aktivt (indsat tekst har intet link at tjekke), vurderer det op mod dit CV, skriver en rapport, tilpasser dit CV (som PDF som standard) og tilføjer en række til din tracker. Det dækker de fleste dage. Alt andet er en tilstand, du beder om ved navn. Hvis et opslag ikke kan læses, stopper pipelinen og beder dig indsætte teksten eller dele et skærmbillede.
 
 ### Sådan beder du om en tilstand
 
