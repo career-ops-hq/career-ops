@@ -157,3 +157,29 @@ test('a relative link through a symlinked config directory updates the file the 
     rmSync(shared, { recursive: true, force: true });
   }
 });
+
+test('a link target applies ".." after a directory symlink inside it', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const root = mkdtempSync(join(tmpdir(), 'co-plugins-yml-root-'));
+  const shared = mkdtempSync(join(tmpdir(), 'co-plugins-yml-alias-'));
+  const config = join(root, 'config');
+  const link = join(config, 'plugins.yml');
+  try {
+    mkdirSync(join(shared, 'nested'));
+    mkdirSync(config);
+    symlinkSync(join(shared, 'nested'), join(config, 'alias'));
+    symlinkSync('alias/../target.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?alias=${Date.now()}`);
+    setPluginEnabled(root, 'h1b-sponsor', true, { region: 'us' });
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+    assert.equal(existsSync(join(config, 'target.yml')), false);
+    assert.match(readFileSync(join(shared, 'target.yml'), 'utf8'), /enabled: true/);
+    assert.match(readFileSync(link, 'utf8'), /enabled: true/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(shared, { recursive: true, force: true });
+  }
+});

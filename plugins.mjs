@@ -497,8 +497,9 @@ export function setPluginEnabled(root, id, on, settings) {
 /**
  * The file rename publishes onto. A symlink stays a symlink: follow the whole
  * chain and rename onto the last file, even when that file is not there yet.
- * Directory links are resolved before "..", so the save hits the same file
- * the reader loads. A cycle stops the walk so an intermediate link is not replaced.
+ * Directory links are resolved before "..", including ".." inside the link
+ * target, so the save hits the same file the reader loads. A cycle stops
+ * the walk so an intermediate link is not replaced.
  *
  * @param {string} file
  * @returns {string}
@@ -517,11 +518,74 @@ function resolvedConfigFile(file) {
       if (err?.code === 'ENOENT') return current;
       throw err;
     }
-    // path.resolve applies ".." lexically. A symlinked config directory would
-    // then publish next to the link instead of next to the real directory.
-    const parent = realpathSync(path.dirname(current));
-    current = path.resolve(parent, link);
+    current = resolveLinkTarget(path.dirname(current), link, seen);
   }
+}
+
+/**
+ * Walk one symlink target in filesystem order. ".." is applied after a
+ * directory link, and a missing final file stays a missing final file.
+ *
+ * @param {string} parentDir
+ * @param {string} link
+ * @param {Set<string>} seen
+ * @returns {string}
+ */
+function resolveLinkTarget(parentDir, link, seen) {
+  let base = parentDir;
+  try {
+    base = realpathSync(parentDir);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  const root = path.parse(path.isAbsolute(link) ? link : base).root;
+  let current = path.isAbsolute(link) ? root : base;
+  const body = path.isAbsolute(link) ? link.slice(root.length) : link;
+  const segments = body.split(/[/\\]/).filter((seg) => seg !== '' && seg !== '.');
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg === '..') {
+      current = path.dirname(current);
+      continue;
+    }
+    const next = path.join(current, seg);
+    let st;
+    try {
+      st = lstatSync(next);
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+      return appendMissing(next, segments.slice(i + 1));
+    }
+    const last = i === segments.length - 1;
+    if (!last && st.isSymbolicLink()) {
+      if (seen.has(next)) return next;
+      seen.add(next);
+      current = resolveLinkTarget(path.dirname(next), readlinkSync(next), seen);
+      try {
+        current = realpathSync(current);
+      } catch (err) {
+        if (err?.code !== 'ENOENT') throw err;
+        return appendMissing(current, segments.slice(i + 1));
+      }
+      continue;
+    }
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * @param {string} start
+ * @param {string[]} segments
+ * @returns {string}
+ */
+function appendMissing(start, segments) {
+  let current = start;
+  for (const seg of segments) {
+    if (seg === '..') current = path.dirname(current);
+    else if (seg !== '.') current = path.join(current, seg);
+  }
+  return current;
 }
 
 const setEnabled = (id, on, settings) => setPluginEnabled(DATA_ROOT, id, on, settings);
