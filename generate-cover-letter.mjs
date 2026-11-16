@@ -703,6 +703,13 @@ async function main() {
     } catch (err) {
       console.error(`Voice check skipped: ${err.message}`);
     }
+    // The person's own habits, from data/writing-profile.json when they built one.
+    try {
+      const { loadProfile, profileNotes } = await import("./writing-profile.mjs");
+      for (const note of profileNotes(loadProfile(), html)) console.error(note);
+    } catch (err) {
+      console.error(`Writing profile check skipped: ${err.message}`);
+    }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.
     const { normalizeTextForATS, reportAtsReplacements, renderHtmlToPdf } = await import("./generate-pdf.mjs");
