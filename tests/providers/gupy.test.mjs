@@ -364,6 +364,26 @@ try {
   if (probed.truncated === undefined) pass('fetch() leaves a probe cut by ctx.maxPages unmarked');
   else fail(`probe was marked: ${JSON.stringify(probed.truncated)}`);
 
+  // An entry whose own max_pages is 1 ends the walk on the same page the probe
+  // budget does, but that ceiling belongs to the entry: the probe is still a
+  // probe and must stay quiet and unmarked (#7180).
+  const entryCapWarnings = [];
+  let entryCapped;
+  const beforeEntryCap = console.error;
+  try {
+    console.error = (...args) => entryCapWarnings.push(args.join(' '));
+    entryCapped = await provider.fetch({ gupy: { keywords: ['A'] }, max_pages: 1 }, {
+      maxPages: 1,
+      sleep: noSleep, fetchJson: async () => ({ data: Array.from({ length: 100 }, (_, i) => mk(i)), pagination: { total: 100 } }),
+    });
+  } finally {
+    console.error = beforeEntryCap;
+  }
+  if (entryCapWarnings.length === 0) pass('fetch() stays quiet when the entry max_pages and a probe end on the same page (#7180)');
+  else fail(`entry-capped probe emitted warnings: ${JSON.stringify(entryCapWarnings)}`);
+  if (entryCapped.truncated === undefined) pass('fetch() leaves an entry-capped probe unmarked (#7180)');
+  else fail(`entry-capped probe was marked: ${JSON.stringify(entryCapped.truncated)}`);
+
   // max_pages caps the sweep and warns.
   const capCalls = [];
   const capCtx = {
