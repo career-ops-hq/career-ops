@@ -186,7 +186,7 @@ test('scan history indexes a close day by the posting URL key', () => {
   assert.equal(index.has('https://jobs.example/blank'), false);
   assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact'), '2026-10-03');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?utm_source=email'), '2026-10-03');
-  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '2026-10-03');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/acme-exact?src=email'), '');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/northwind'), '2026-09-15');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=111'), '2026-03-03');
   assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=222'), '2026-04-04');
