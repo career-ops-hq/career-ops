@@ -211,6 +211,24 @@ try {
   } else {
     fail(`alibaba.fetch() short page at max_pages: truncated = ${JSON.stringify(shortJobs.truncated)}, warnings = ${JSON.stringify(shortErrors)}`);
   }
+  // With no totalCount, a full page cut by max_pages is still a cap, and a
+  // short page ends the walk: the stop reason does not depend on a total.
+  const noTotalFull = mkCtx(({ pageIndex }) => ({ success: true, content: { datas: Array.from({ length: 100 }, (_, i) => mkJob(9500 + pageIndex * 100 + i, `岗位N${i}`)) } }));
+  const { result: noTotalJobs, errors: noTotalErrors } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 1 }, noTotalFull.ctx));
+  if (noTotalJobs.length === 100 && noTotalJobs.truncated?.reason === 'page-cap' && noTotalErrors.some((line) => String(line).includes('truncated at 100 postings'))) {
+    pass('alibaba.fetch() marks a full page cut by max_pages page-cap when the source sends no totalCount');
+  } else {
+    fail(`alibaba.fetch() no totalCount, full page at max_pages: ${noTotalJobs.length} jobs, truncated = ${JSON.stringify(noTotalJobs.truncated)}, warnings = ${JSON.stringify(noTotalErrors)}`);
+  }
+  const noTotalShort = mkCtx(({ pageIndex }) => ({ success: true, content: { datas: Array.from({ length: pageIndex === 1 ? 100 : 30 }, (_, i) => mkJob(9800 + pageIndex * 100 + i, `岗位T${i}`)) } }));
+  const { result: noTotalShortJobs } = await captureConsoleErrors(() =>
+    alibaba.fetch({ name: '阿里巴巴', careers_url: ALI_URL, keywords: ['AI'], max_pages: 5 }, noTotalShort.ctx));
+  if (noTotalShort.calls.length === 2 && noTotalShortJobs.length === 130 && noTotalShortJobs.truncated === undefined) {
+    pass('alibaba.fetch() walks past page 1 without a totalCount and ends on the first short page, unmarked');
+  } else {
+    fail(`alibaba.fetch() no totalCount walk: ${noTotalShort.calls.length} requests, ${noTotalShortJobs.length} jobs, truncated = ${JSON.stringify(noTotalShortJobs.truncated)}`);
+  }
 
   const probe = mkCtx(() => ({
     success: true,

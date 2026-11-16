@@ -185,13 +185,16 @@ export default {
           if (!seen.has(job.url)) seen.set(job.url, job);
         }
 
-        if (page * PAGE_SIZE >= total) break;
+        // Past the end: the reported total says so, or, when the source sent
+        // no total, a short page (meituan reads a missing total the same way).
+        // A missing total used to end the walk after page 1, unmarked.
+        if (total > 0 ? page * PAGE_SIZE >= total : rawCount < PAGE_SIZE) break;
         // The page cap, not the board, ended this keyword. Stay quiet when the
         // cap is the health probe's, not max_pages.
         // A short page is the board's natural end, even at the cap: the cut needs
         // a full page by the source's own row count, not the filtered jobs.
         if (page === maxPages && rawCount >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
-          console.error(`  ⚠ alibaba: keyword "${keyword}" truncated at ${page * PAGE_SIZE} of ${total} postings — raise max_pages on this entry for complete coverage`);
+          console.error(`  ⚠ alibaba: keyword "${keyword}" truncated at ${page * PAGE_SIZE}${total > 0 ? ` of ${total}` : ''} postings — raise max_pages on this entry for complete coverage`);
           partialReason ??= 'page-cap';
         }
       }

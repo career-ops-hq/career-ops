@@ -279,6 +279,32 @@ try {
   } else {
     fail(`feishu-jobs.fetch() empty page at max_pages: ${exhaustedJobs.length} jobs, truncated = ${JSON.stringify(exhaustedJobs.truncated)}, warnings = ${JSON.stringify(exhaustedWarnings)}`);
   }
+  // With no count, the page budget stands: full pages are read up to max_pages
+  // and the cut is a cap; a short page ends the keyword, unmarked.
+  const noCountRun = async (rowsFor, max_pages) => {
+    const ctx = mkCtx(({ offset }) => ({ code: 0, data: { job_post_list: Array.from({ length: rowsFor(offset / 100 + 1) }, (_, i) => mkJob(String(9500 + offset + i), `岗位N${offset + i}`)) } }));
+    const lines = [];
+    const before = console.error;
+    console.error = (...args) => lines.push(args.join(' '));
+    try {
+      const jobs = await feishu.fetch({ name: 'Example Labs', careers_url: TENANT_URL, keywords: ['AI'], max_pages }, ctx.ctx);
+      return { jobs, lines, calls: ctx.calls.length };
+    } finally {
+      console.error = before;
+    }
+  };
+  const noCountFull = await noCountRun(() => 100, 2);
+  if (noCountFull.calls === 2 && noCountFull.jobs.length === 200 && noCountFull.jobs.truncated?.reason === 'page-cap' && noCountFull.lines.some((l) => l.includes('truncated at 200 postings'))) {
+    pass('feishu-jobs.fetch() reads full pages up to max_pages without a count and marks the cut page-cap');
+  } else {
+    fail(`feishu-jobs.fetch() no count, full pages: ${noCountFull.calls} requests, ${noCountFull.jobs.length} jobs, truncated = ${JSON.stringify(noCountFull.jobs.truncated)}, warnings = ${JSON.stringify(noCountFull.lines)}`);
+  }
+  const noCountShort = await noCountRun((page) => (page === 1 ? 40 : 100), 3);
+  if (noCountShort.calls === 1 && noCountShort.jobs.length === 40 && noCountShort.jobs.truncated === undefined && noCountShort.lines.length === 0) {
+    pass('feishu-jobs.fetch() ends a keyword on a short first page without a count, unmarked');
+  } else {
+    fail(`feishu-jobs.fetch() no count, short page: ${noCountShort.calls} requests, ${noCountShort.jobs.length} jobs, truncated = ${JSON.stringify(noCountShort.jobs.truncated)}`);
+  }
 
   const probe = mkCtx(() => ({
     code: 0,

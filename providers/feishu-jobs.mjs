@@ -216,15 +216,21 @@ export default {
           }
           if (batch[i] === 1) {
             total = parsed.total;
-            lastPage = Math.min(maxPages, Math.ceil(total / PAGE_SIZE));
+            // With no count the page budget stands; a short page then ends the
+            // keyword below. A missing count used to leave a budget of zero pages.
+            lastPage = total > 0 ? Math.min(maxPages, Math.ceil(total / PAGE_SIZE)) : maxPages;
           }
+          if (total <= 0 && sourcePage.length < PAGE_SIZE) { exhausted = true; break; }
         }
         if (exhausted) break;
         page = batch[batch.length - 1] + 1;
       }
+      // Postings left: the reported count says so, or, with no count, the page
+      // budget ran out on a full page.
       const covered = Math.min(lastPage * PAGE_SIZE, total);
-      if (covered < total && lastPage === maxPages && lastRawRows >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
-        console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
+      const moreLeft = total > 0 ? covered < total : true;
+      if (moreLeft && lastPage === maxPages && lastRawRows >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
+        console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${total > 0 ? `${covered} of ${total}` : lastPage * PAGE_SIZE} postings — raise max_pages for complete coverage`);
         partialReason ??= 'page-cap';
       }
     }
