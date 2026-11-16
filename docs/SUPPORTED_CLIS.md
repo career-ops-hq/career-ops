@@ -8,7 +8,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Cursor | `AGENTS.md` | Interactive: open the project in Cursor and ask for `career-ops` (auto-discovered from `.agents/skills/career-ops/SKILL.md`) |
 | Codex | `CODEX.md` (see [`docs/CODEX.md`](CODEX.md)) | Interactive: `codex` (then use plain text). Headless/Batch: `codex exec "prompt"` |
 | OpenCode | `OPENCODE.md` | Interactive: `opencode` (then `/career-ops`). Headless/Batch: `opencode run "prompt"` |
-| Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --skill .agents/skills/career-ops "prompt"` |
+| Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --no-approve --skill .agents/skills/career-ops "prompt"` (Pi 0.79.1+) |
 | Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless/Batch: `agy -p "prompt"` |
 | Grok Build CLI | `AGENTS.md` | Interactive: `grok` (then `/career-ops`). Headless/Batch: `grok -p "prompt"` (add `--yolo` to auto-approve tool executions) |
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
@@ -29,22 +29,24 @@ Pi needs no wrapper file: it reads `AGENTS.md` from the working directory as pro
 ```bash
 cd career-ops
 pi                                          # interactive
-pi -p --skill .agents/skills/career-ops "Evaluate this JD with career-ops auto-pipeline: https://company.com/jobs/123"
+pi -p --no-approve --skill .agents/skills/career-ops "Run career-ops tracker mode and summarize the current statuses."
 ```
 
 ### Project trust
 
-Pi 0.79.0 added a per-folder trust decision. Until you trust a folder, Pi skips its project resources: `.pi/` settings, extensions, skills, prompts and themes, and the skills in `.agents/skills/`. In interactive mode, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes). A headless run cannot ask, so an untrusted folder stays untrusted.
+Pi 0.79.0 added a per-folder trust decision. Until you trust a folder, Pi skips its project resources: `.pi/` settings, extensions, skills, prompts and themes, and the skills in `.agents/skills/`. In interactive mode, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes).
 
-The router needs none of those resources except its own `SKILL.md`, and `AGENTS.md` loads in an untrusted folder too. So a headless worker passes `--skill .agents/skills/career-ops` and leaves the folder untrusted: Pi loads an explicit `--skill` path whether or not the folder is trusted.
+A headless worker needs only the router and `AGENTS.md`. `--skill .agents/skills/career-ops` loads the router whether or not the folder is trusted, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder too. `--no-approve` treats the folder as untrusted for the run, even when you trusted it before or set `defaultProjectTrust` to `always`, so the checkout's extensions never run inside a worker.
 
-`-a` (`--approve`) trusts the folder for one run. Pi then loads every project resource, installs missing project packages, and executes the project's extensions in its own process, with your permissions, without asking. Use it only in a checkout whose `.pi/` and `.agents/skills/` you have reviewed, never as the default worker command.
+`-a` (`--approve`) does the opposite and trusts the folder for one run. Pi then loads every project resource, installs missing project packages, and executes the project's extensions in its own process, with your permissions, without asking. Keep it for an interactive session in a checkout whose `.pi/` and `.agents/skills/` you have reviewed, and never give it to a worker.
 
-Pi 0.54.0 to 0.78.x have no trust step and find the project skill without one. They accept `--skill`, so the headless command above runs there unchanged, but they reject `-a` (`Error: Unknown option: -a`) and exit. A Pi older than 0.54.0 does not look in `.agents/skills` at all, so upgrade it. The Nix dev shell (`flake.nix`) pins a newer Pi.
+Run headless workers on Pi 0.79.1 or later. Pi 0.79.0 does not load `AGENTS.md` in an untrusted folder, so a worker there misses the Data Contract and the untrusted-content rules. Pi 0.54.0 to 0.78.x have no trust step: they load the checkout's `.pi/` extensions at startup, and they reject `--no-approve` as an unknown option. A Pi older than 0.54.0 does not look in `.agents/skills` at all. The Nix dev shell (`flake.nix`) pins a newer Pi.
 
-### No `pdf` worker under headless Pi
+### Workers headless Pi must not run
 
-Pi never asks before a tool call: a headless run calls any tool it has, and the default set includes bash, edit and write. The web runs the `pdf` worker with no write tools and no Bash (#2172) and renders the PDF itself. A `pdf` worker run by hand has to render with `node generate-pdf.mjs`, which needs Bash, so no Pi tool set matches the web's grant: `--tools read,grep,find,ls` cannot render, and the default set can change any file. Don't run `pdf` as a headless Pi worker. Make CV PDFs from the web UI, or in an interactive `pi` session you are watching.
+Pi never asks before a tool call: a headless run calls any tool it has, and the default set includes bash, edit and write. The web runs the `evaluate`, `research` and `cover` workers without write tools, and `pdf` without write tools or Bash (#2172); the web writes their reports and renders the PDF itself. Run by hand, those workers need what the web withholds: an evaluation writes its report and tracker row, and a CV PDF needs Bash for `node generate-pdf.mjs`. A `--tools read,grep,find,ls` run cannot do that work, and the default set can change any file, so no Pi tool set matches the web's grant.
+
+So don't run evaluations (`oferta`, `auto-pipeline`, which also renders the CV PDF, and batch), research, cover letters (`cover`) or CV PDFs (`pdf`) as headless Pi workers. Use the web UI, or an interactive `pi` session you are watching.
 
 ## Oh My Pi (omp)
 
