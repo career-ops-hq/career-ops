@@ -339,8 +339,8 @@ const PI_SHELL_READ_TOOLS = Object.freeze(["read", "bash", "grep", "find", "ls"]
  * codemode and tool_search unless an allowlist entry starts with `mcp__`, and an
  * MCP server can supply a write tool. Pi's own docs name `--exclude-tools
  * 'mcp__*'` (or `--no-mcp`) as the way to remove them. The exclusion is used
- * rather than `--no-mcp` because it parses on every Pi the fence supports (0.79.0+,
- * see PI_NO_PROJECT_TRUST): from 0.99.0 to 1.0.3 `--tools` already removed MCP
+ * rather than `--no-mcp` because it parses on every Pi the web runs (PI_MIN_VERSION
+ * and later): from 0.99.0 to 1.0.3 `--tools` already removed MCP
  * tools, and before 0.99.0 Pi had no built-in MCP, so the pattern matches nothing
  * there. `--no-mcp` exists only from 1.0.4, and an older Pi exits on it with
  * "Unknown option".
@@ -352,17 +352,29 @@ const PI_MCP_EXCLUSION = "mcp__*";
  * for it or set `defaultProjectTrust: always`. A trusted folder loads its
  * project-local extensions, packages and settings, and an extension's own code
  * runs with the user's full access, outside any tool allowlist. Matches the
- * headless Pi command docs/SUPPORTED_CLIS.md gives after #7169.
- *
- * Pi added the flag in 0.79.0. An older Pi exits with "Unknown option" before
- * the model runs, so no worker tool call ever happens on it. That exit comes
- * after Pi has loaded its extensions, though (checked at v0.78.0:
- * `resourceLoader.reload()` runs before the unknown-flag check), so a
- * project-local extension's load-time code still runs. Pi before 0.79.0 has no
- * project trust and loads those extensions on every run, with or without this
- * flag, so the flag does not widen anything there.
+ * headless Pi command docs/SUPPORTED_CLIS.md gives after #7169. Pi added the
+ * flag in 0.79.0; see PI_MIN_VERSION for why the web needs 0.79.1.
  */
 const PI_NO_PROJECT_TRUST = "--no-approve";
+
+/**
+ * The oldest Pi the web runs. spawnHeadlessCli refuses an older binary before it
+ * starts a worker, using `pi --version` (cli-fencing-probe.mjs), which exits
+ * before Pi loads any project files.
+ *
+ * - Before 0.79.0, Pi has no project trust and no `--no-approve`. It loads the
+ *   folder's `.pi/extensions` on every run, and it rejects the unknown flag only
+ *   after loading them (checked at v0.78.0: `resourceLoader.reload()` runs
+ *   before the unknown-flag check), so a project extension's code would run
+ *   before the run failed.
+ * - 0.79.0 skips AGENTS.md in an untrusted folder (`loadProjectContextFiles`
+ *   has a trust gate there and not at 0.79.1), so a `--no-approve` worker would
+ *   lose the project's instructions.
+ *
+ * Exported as DATA, like the Codex flag lists, so the probe checks the version
+ * this module's flags need.
+ */
+export const PI_MIN_VERSION = "0.79.1";
 
 /**
  * Pi options that select tools or trust project files, i.e. options that decide
