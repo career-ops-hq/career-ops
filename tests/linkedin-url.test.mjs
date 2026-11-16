@@ -12,7 +12,7 @@ import { join } from 'path';
 import { pass, fail, ROOT } from './helpers.mjs';
 import { linkedInJobId, linkedInPathJobId, linkedInGuestUrl, linkedInCanonicalKey } from '../lib/linkedin-url.mjs';
 import { resolveAtsApi } from '../liveness-api.mjs';
-import { aggregatorPostingId } from '../url-key.mjs';
+import { aggregatorPostingId, canonicalJobKey } from '../url-key.mjs';
 
 console.log('\nlib/linkedin-url.mjs — LinkedIn job-URL parser');
 
@@ -121,6 +121,18 @@ check('linkedInCanonicalKey ignores a non-posting',
 check('a year at the end of a slug is not the short job id',
   linkedInCanonicalKey('https://www.linkedin.com/jobs/view/data-scientist-2024') === ''
   && linkedInCanonicalKey('https://www.linkedin.com/jobs/view/2024') === 'linkedin.com:2024');
+const yearQuery = 'https://www.linkedin.com/jobs/view/data-scientist-2024?currentJobId=4402976479';
+check('a rejected year slug still yields currentJobId', idOf(yearQuery) === '4402976479');
+check('liveness agrees on a year slug with currentJobId',
+  resolveAtsApi(yearQuery)?.parts?.id === '4402976479');
+check('url-key agrees on a year slug with currentJobId',
+  aggregatorPostingId(yearQuery)?.id === '4402976479');
+check('a year slug with currentJobId uses that id',
+  linkedInCanonicalKey(yearQuery) === 'linkedin.com:4402976479'
+  && canonicalJobKey(yearQuery) === 'linkedin.com:4402976479');
+check('two title years are not one LinkedIn job',
+  canonicalJobKey('https://www.linkedin.com/jobs/view/data-scientist-2024')
+    !== canonicalJobKey('https://www.linkedin.com/jobs/view/engineer-2024'));
 
 // -- 6. loadable outside Node, and shipped by the updater --------------------
 // A browser bundle has to be able to load this file, so it must import nothing.
