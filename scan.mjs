@@ -131,9 +131,6 @@ const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DA
 // two it still writes into the one inbox and the one dedup history. That is not
 // just untidy: scan-history.tsv IS the dedup source, so a posting surfaced in
 // lane A is silently counted as a duplicate in lane B and never shown at all.
-const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
-const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
-const APPLICATIONS_PATH = path.join(DATA_ROOT, 'data/applications.md');
 // Exported because scan-ats-full.mjs, scan-interamt.mjs and scan-hn.mjs write to
 // these same files through appendToPipeline/appendToScanHistory. They each used
 // to carry their own bare-relative copy, so a sibling could check existence and
@@ -4242,7 +4239,6 @@ export function appendScanRunSummary(c, filePath = SCAN_RUNS_PATH) {
       );
     }
   }
-
   const row = [
     c.timestamp, c.status ?? 'completed', c.companies, c.boards, c.found,
     c.filteredTitle, c.filteredTier, c.filteredLocation, c.filteredPostingAge,
