@@ -38,7 +38,32 @@ function toEpochMs(value) {
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
 }
+/**
+ * @param {any} j - one posting from the v1 jobs list
+ * @returns {{min: number, max: number, currency: string} | undefined}
+ */
+export function landingSalary(j) {
+  if (!j || typeof j !== 'object') return undefined;
 
+  /** @param {unknown} v */
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+
+  const lowValue = num(j.gross_salary_low);
+  const highValue = num(j.gross_salary_high);
+
+  if (lowValue === undefined && highValue === undefined) return undefined;
+
+  const resolvedMin = /** @type {number} */ (lowValue ?? highValue);
+  const resolvedMax = /** @type {number} */ (highValue ?? lowValue);
+
+  const currency = typeof j.currency_code === 'string' ? j.currency_code.trim().toUpperCase() : '';
+
+  return {
+    min: Math.min(resolvedMin, resolvedMax),
+    max: Math.max(resolvedMin, resolvedMax),
+    currency,
+  };
+}
 /**
  * Derive a best-effort company name from a Landing.jobs posting URL.
  * Posting URLs are `https://landing.jobs/at/<slug>/<job>`; the `<slug>` is
@@ -127,6 +152,8 @@ export default {
       );
     }
     const fallbackCompany = entry?.name;
-    return json.map(j => normalizeLandingJob(j, fallbackCompany)).filter(Boolean);
+    return json
+      .map(j => normalizeLandingJob(j, fallbackCompany))
+      .filter((job) => job !== null);
   },
 };
