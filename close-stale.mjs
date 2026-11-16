@@ -46,7 +46,8 @@
  * appended to Notes, and one `source=close-stale` line per row is appended to
  * data/status-log.tsv. The tag is how these rows are told apart from real
  * rejections and found again if a reply arrives later. Re-running changes
- * nothing: closed rows are no longer Applied.
+ * nothing: closed rows are no longer Applied. When the status-log lines cannot
+ * be written, the tracker is put back and the command fails: nothing is closed.
  *
  * Run: node close-stale.mjs                        (dry run, JSON to stdout)
  *      node close-stale.mjs --summary              (dry run, human-readable)
@@ -447,15 +448,26 @@ if (isMainModule(import.meta.url)) {
         const newLines = applyClosures([...classified.lines], classified.colmap, classified.candidates, { targetStatus, tag });
         tx.replace(newLines.join('\n'));
         closed = classified.candidates.length;
-        // Observation trail only: the tracker stays the source of truth, so a
-        // failed append is a warning (same policy as set-status.mjs).
+        // The ledger line is what makes a closure an auto-close: calibrate.mjs
+        // counts the row as no_response from it, and a set-status undo reads it.
+        // A closure the ledger did not record is a plain Discarded row, so a
+        // failed append puts the tracker back and the command fails, as
+        // set-status.mjs does since #7143. appendLedgerRows() leaves the ledger
+        // at the size it had before.
         try {
           const text = classified.candidates
             .map((c) => `${c.num}\t${today}\tApplied\t${targetStatus}\t${LEDGER_SOURCE}\t${cell(`${days}d`)}\n`)
             .join('');
           appendLedgerRows(statusLogPath(trackerPath), text);
         } catch (err) {
-          warnings.push(`status-log append failed (tracker was updated): ${err.message}`);
+          let restored = false;
+          try {
+            tx.replace(content);
+            restored = true;
+          } catch { /* reported below */ }
+          throw new Error(restored
+            ? `Could not write the status log (${err.message}), so no row was closed.`
+            : `Could not write the status log (${err.message}), and could not put the tracker back: ${closed} row(s) now read ${targetStatus} with no status-log line.`);
         }
       }
       report = buildReport({ classified, today, days, targetStatus, confirm, closed, warnings, trackerPath });

@@ -956,7 +956,7 @@ A row is a candidate when its status resolves to `Applied` (aliases such as `Sen
 
 Every other state (Evaluated, Responded, Assessment, Interview, Offer, Hired, Rejected, Discarded, SKIP) is never touched.
 
-`--confirm` rewrites the candidates inside one tracker transaction (the lock and atomic replace `dedup-tracker.mjs` uses): Status becomes `--status` (default `Discarded`; any canonical state except `Applied`, aliases accepted), the fixed tag `no response (auto-closed YYYY-MM-DD, Nd)` is appended to Notes so these rows can be told apart from real rejections and found again if a reply arrives, and one `source=close-stale` line per row is appended to `data/status-log.tsv`. To reopen a row that did get a reply, use `set-status.mjs`. Re-running changes nothing.
+`--confirm` rewrites the candidates inside one tracker transaction (the lock and atomic replace `dedup-tracker.mjs` uses): Status becomes `--status` (default `Discarded`; any canonical state except `Applied`, aliases accepted), the fixed tag `no response (auto-closed YYYY-MM-DD, Nd)` is appended to Notes so these rows can be told apart from real rejections and found again if a reply arrives, and one `source=close-stale` line per row is appended to `data/status-log.tsv`. If those lines cannot be written, the tracker is put back and the command fails, so no row is closed without its ledger line. To reopen a row that did get a reply, use `set-status.mjs`. Re-running changes nothing.
 
 ```bash
 node close-stale.mjs                       # dry run, JSON (metadata, candidates, skipped)

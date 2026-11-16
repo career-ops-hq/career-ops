@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { openTrackerTransaction } from '../tracker-utils.mjs';
 import { parseStatusLog } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
@@ -204,6 +204,44 @@ test('--confirm writes status, note tag and one status-log line per row; only th
     assert.equal(readFileSync(log, 'utf-8'), `1\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d\n2\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d\n`);
     // The tracker write is an atomic replace: no temp file or lock directory is left behind.
     assert.deepEqual(readdirSync(join(root, 'data')).sort(), ['applications.md', 'status-log.tsv']);
+  });
+});
+
+test('a status-log append that fails puts the tracker back and fails the run', () => {
+  // The append is refused by a preload that replaces fs.appendFileSync for the
+  // ledger and republishes it with syncBuiltinESMExports(), so the ESM import
+  // in tracker-utils.mjs sees it. A directory in place of the ledger fails the
+  // read before anything is written, and chmod does not withhold access on
+  // Windows or from a privileged process. Reads of the ledger still work.
+  const rows = [row(1, OLD, 'Old Co', 'Applied', 'sent by email'), row(2, D61, 'Edge Co', 'Applied'), row(3, D60, 'Keep Co', 'Applied')];
+  withRoot(rows, {}, ({ tracker, log, root }) => {
+    const before = readFileSync(tracker, 'utf-8');
+    const preload = join(root, 'refuse-ledger-append.mjs');
+    writeFileSync(preload, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const realAppend = fs.appendFileSync;
+fs.appendFileSync = function appendFileSync(path, data, options) {
+  if (String(path).endsWith('status-log.tsv')) {
+    const err = new Error('EACCES: permission denied');
+    err.code = 'EACCES';
+    throw err;
+  }
+  return realAppend.call(this, path, data, options);
+};
+syncBuiltinESMExports();
+`);
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, SCRIPT, '--today', TODAY, '--confirm'], {
+      encoding: 'utf-8',
+      env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '' },
+    });
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'a closure the ledger did not record must fail the run'));
+    assert.match(r.stderr, /Could not write the status log \(EACCES: permission denied\), so no row was closed\./);
+    assert.equal(readFileSync(tracker, 'utf-8'), before, 'every row is still Applied');
+    assert.equal(existsSync(log), false);
+    // The lock is released: a dry run sees both rows as candidates again.
+    const dry = run(root);
+    assert.equal(dry.status, 0, describeSpawn(dry));
+    assert.deepEqual(closedNums(dry.json), [1, 2]);
   });
 });
 
