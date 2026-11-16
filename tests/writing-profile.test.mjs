@@ -191,6 +191,46 @@ test('no profile file means no note', () => {
   assert.doesNotMatch(run.stderr, /Writing profile/);
 });
 
+test('--check=FILE measures the supplied file and does not rebuild the profile', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-wprofile-'));
+  try {
+    mkdirSync(join(dir, 'writing-samples'));
+    mkdirSync(join(dir, 'data'));
+    writeFileSync(join(dir, 'writing-samples', 'post.txt'), sample(10));
+
+    const profile = {
+      ...buildProfile([{ file: 'post.txt', text: sample(12) }]),
+      testMarker: 'existing-profile-was-preserved',
+    };
+
+    const profilePath = join(dir, 'data', 'writing-profile.json');
+    writeFileSync(profilePath, `${JSON.stringify(profile, null, 2)}\n`);
+
+    const target = join(dir, 'notes.txt');
+    writeFileSync(target, sample(6));
+
+    const run = spawnSync(
+      process.execPath,
+      [join(ROOT, 'writing-profile.mjs'), `--check=${target}`],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CAREER_OPS_ROOT: dir },
+      }
+    );
+
+    assert.equal(run.status, 0, describeSpawn(run));
+    assert.match(run.stdout, /Inside the range of your samples/);
+
+    assert.equal(
+      JSON.parse(readFileSync(profilePath, 'utf8')).testMarker,
+      'existing-profile-was-preserved',
+      'the equals form must check the target instead of rebuilding the profile'
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('--help prints usage and builds nothing', () => {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-wprofile-'));
   try {

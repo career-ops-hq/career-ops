@@ -24,7 +24,7 @@ const USAGE = `Usage:
 
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
-import { validateFlags } from './lib/cli-flags.mjs';
+import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { listTree } from './lib/walk-tree.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -210,9 +210,8 @@ export function readSamples(root = getCareerOpsRoot()) {
 function main(argv) {
   validateFlags(argv, ['--check', '--help', '-h'], USAGE, { valueFlags: ['--check'], requireOperand: true });
   const root = getCareerOpsRoot();
-  const checkAt = argv.indexOf('--check');
-  if (checkAt !== -1) {
-    const target = argv[checkAt + 1];
+   if (hasFlag(argv, '--check')) {
+    const target = flagValue(argv, '--check');
     if (!target || target.startsWith('--') || !existsSync(target)) {
       console.error('Usage: node writing-profile.mjs --check <text file>');
       return 1;
