@@ -613,6 +613,9 @@ test("pi's pdf worker gets read-only tools and no MCP tools (#2172)", () => {
   // ...with every MCP tool removed, since `--tools` alone keeps them on Pi 1.0.4+
   // and an MCP server can supply a write tool...
   assert.deepEqual(piList(args, "--exclude-tools"), ["mcp__*"]);
+  // ...the folder stays untrusted, so no project-local extension loads, even
+  // after a saved /trust...
+  assert.ok(args.includes("--no-approve"), "the run must not trust the project folder");
   // ...and the run is graded fully fenced, with no notice.
   assert.deepEqual(fencingReport({ cliId: "pi", cliName: "Pi", capabilities: capabilitiesFor("pdf") }), { level: "full", notice: null });
 });
@@ -631,6 +634,7 @@ test("no non-writing worker on pi is handed edit or write", () => {
       assert.ok(!tools.includes(forbidden), `${name}: ${forbidden} must not be allowed`);
     }
     assert.deepEqual(piList(args, "--exclude-tools"), ["mcp__*"], `${name}: MCP tools must be excluded`);
+    assert.ok(args.includes("--no-approve"), `${name}: the project folder must stay untrusted`);
     // And bash only when the worker has to reach the web, which Pi does through it
     assert.equal(tools.includes("bash"), Boolean(caps.network), `${name}: bash iff the record needs the web`);
   }
@@ -675,7 +679,7 @@ test("pi fencing keeps the prompt right after -p", () => {
 });
 
 test("a pi argv that already chooses its own tools is refused", () => {
-  // Given call sites that spell a tool selection or project trust themselves,
+  // Given call sites that spell a tool selection or a project trust choice themselves,
   // in every spelling Pi's parser takes
   const spellings = [
     ["--tools", "read,bash"],
@@ -689,6 +693,8 @@ test("a pi argv that already chooses its own tools is refused", () => {
     ["--no-mcp"],
     ["--approve"],
     ["-a"],
+    ["--no-approve"],
+    ["-na"],
     ["--tools=read,bash"],
   ];
   for (const spelled of spellings) {

@@ -339,20 +339,30 @@ const PI_SHELL_READ_TOOLS = Object.freeze(["read", "bash", "grep", "find", "ls"]
  * codemode and tool_search unless an allowlist entry starts with `mcp__`, and an
  * MCP server can supply a write tool. Pi's own docs name `--exclude-tools
  * 'mcp__*'` (or `--no-mcp`) as the way to remove them. The exclusion is used
- * rather than `--no-mcp` because it parses on every Pi from 0.77.0, which added
- * `--exclude-tools`: from 0.99.0 to 1.0.3 `--tools` already removed MCP tools, and
- * before 0.99.0 Pi had no built-in MCP, so the pattern simply matches nothing
+ * rather than `--no-mcp` because it parses on every Pi the fence supports (0.79.0+,
+ * see PI_NO_PROJECT_TRUST): from 0.99.0 to 1.0.3 `--tools` already removed MCP
+ * tools, and before 0.99.0 Pi had no built-in MCP, so the pattern matches nothing
  * there. `--no-mcp` exists only from 1.0.4, and an older Pi exits on it with
- * "Unknown option". A Pi older than 0.77.0 exits the same way on
- * `--exclude-tools`, so an old binary fails the run rather than running unfenced.
+ * "Unknown option".
  */
 const PI_MCP_EXCLUSION = "mcp__*";
 
 /**
+ * Keep the folder untrusted for this run, even when the user saved a `/trust`
+ * for it or set `defaultProjectTrust: always`. A trusted folder loads its
+ * project-local extensions, packages and settings, and an extension's own code
+ * runs with the user's full access, outside any tool allowlist. Matches the
+ * headless Pi command docs/SUPPORTED_CLIS.md gives after #7169. Pi added the flag in
+ * 0.79.0; an older Pi exits with "Unknown option", so an old binary fails the
+ * run rather than running unfenced.
+ */
+const PI_NO_PROJECT_TRUST = "--no-approve";
+
+/**
  * Pi options that select tools or trust project files, i.e. options that decide
  * this run's permissions. Short and long spellings both, from Pi's `args.ts`.
- * `-a`/`--approve` is here because trusting the project loads project-local
- * extensions and settings, including a `defaultTools` setting.
+ * The trust options are here because trusting the project loads project-local
+ * extensions and settings (see PI_NO_PROJECT_TRUST).
  */
 const PI_PERMISSION_TOKENS = Object.freeze([
   "--tools",
@@ -366,6 +376,8 @@ const PI_PERMISSION_TOKENS = Object.freeze([
   "--no-mcp",
   "--approve",
   "-a",
+  "--no-approve",
+  "-na",
 ]);
 
 /**
@@ -390,7 +402,7 @@ function assertPiArgvUnfenced(args) {
  * Restrict Pi to the tools a capability record allows.
  *
  * A worker that does not write gets a `--tools` allowlist without `edit` or
- * `write`, plus `--exclude-tools 'mcp__*'`. It gets `bash` only when it needs
+ * `write`, plus `--exclude-tools 'mcp__*'` and `--no-approve`. It gets `bash` only when it needs
  * the web, since `bash` is Pi's only way there. So `pdf` (#2172) runs on read,
  * grep, find and ls alone. A writing worker keeps Pi's default tools: its record
  * grants writes and fetches, which is what those tools give.
@@ -406,7 +418,7 @@ function fencePiArgs(args, { writes, network }) {
   assertPiArgvUnfenced(args);
   if (writes) return args;
   const tools = network ? PI_SHELL_READ_TOOLS : PI_READ_TOOLS;
-  return ["--tools", tools.join(","), "--exclude-tools", PI_MCP_EXCLUSION, ...args];
+  return ["--tools", tools.join(","), "--exclude-tools", PI_MCP_EXCLUSION, PI_NO_PROJECT_TRUST, ...args];
 }
 
 /**
