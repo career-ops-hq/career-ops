@@ -310,7 +310,10 @@ export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_
  * them for a row can compare pairs without running that key again. Equal
  * lengths are either the exact tier's business or a genuine disagreement on a
  * substantive token. An empty stem is the blind-employer `?` marker and every
- * other punctuation-only cell, which must never match a named employer.
+ * other punctuation-only cell, which must never match a named employer. A tail
+ * made entirely of single letters also matches when joining them forms a known
+ * corporate suffix, so "L.L.C.", "S.A." and "G.m.b.H." behave like their
+ * undotted spellings without accepting arbitrary one-letter tails.
  *
  * @param {string[]} ta - Tokens of one company cell.
  * @param {string[]} tb - Tokens of the other company cell.
@@ -322,7 +325,9 @@ export function corporateFormTokensMatch(ta, tb, formWords = CORPORATE_FORM_WORD
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
-  return full.slice(stem.length).every(token => formWords.has(token));
+  const tail = full.slice(stem.length);
+  return tail.every(token => formWords.has(token))
+    || (tail.every(token => token.length === 1) && formWords.has(tail.join('')));
 }
 
 /**

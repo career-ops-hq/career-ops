@@ -25,6 +25,9 @@ const SAME = [
   ['Foo GmbH', 'Foo', true],
   ['Foo SRL', 'Foo', true],
   ['Foo, Inc', 'Foo', true],
+  ['Acme L.L.C.', 'Acme', true],
+  ['Acme S.A.', 'Acme', true],
+  ['Acme G.m.b.H.', 'Acme', true],
 ];
 const DISTINCT = [
   // Both strip to "acme" under a naive suffix-strip key — the exact fold the
@@ -34,6 +37,8 @@ const DISTINCT = [
   ['Acme Robotics', 'Acme', false],
   // "Barco" merely ends in the letters "co"; no separator-delimited tail.
   ['Barco', 'Bar', false],
+  // Single-letter tails are only a corporate form when they spell one.
+  ['Acme X.Y.', 'Acme', false],
 ];
 for (const [a, b, exp] of [...SAME, ...DISTINCT]) {
   const got = companiesMatchIgnoringCorporateForm(a, b);
@@ -67,7 +72,21 @@ function runDedup(rows) {
   return { out, md: readFileSync(tracker, 'utf-8') };
 }
 
-// 2a. Suffix twin with the SAME role → one row survives (the higher score).
+// 2a. A dotted legal form is one suffix split by punctuation on the wire.
+{
+  const { md } = runDedup([
+    row(1, 'Acme L.L.C.', '4.2/5'),
+    row(2, 'Acme', '3.1/5'),
+  ]);
+  const rows = dataRows(md);
+  if (rows.length === 1 && rows[0].includes('4.2/5')) {
+    pass('dedup merges a dotted L.L.C. suffix and keeps the higher score');
+  } else {
+    fail(`dotted legal suffix did not merge to one keeper row: ${JSON.stringify(rows)}`);
+  }
+}
+
+// 2b. Suffix twin with the SAME role → one row survives (the higher score).
 {
   const { md } = runDedup([
     row(1, 'Acme Widgets, APC', '4.2/5'),
@@ -81,7 +100,7 @@ function runDedup(rows) {
   }
 }
 
-// 2b. Distinct employers sharing a first token must ALL survive — the naive
+// 2c. Distinct employers sharing a first token must ALL survive — the naive
 // suffix-strip fix would collapse these to one "acme" and delete two real rows.
 {
   const { md } = runDedup([
@@ -97,7 +116,7 @@ function runDedup(rows) {
   }
 }
 
-// 2c. The transitive trap: a bare "Acme" matches BOTH "Acme Solutions" and "Acme
+// 2d. The transitive trap: a bare "Acme" matches BOTH "Acme Solutions" and "Acme
 // Technologies", which do not match each other. Gating only on the anchor row
 // made all three one cluster and deleted "Acme Technologies". "Acme" / "Acme
 // Solutions" is a genuine pair and still merges; the third row must survive.
@@ -116,7 +135,7 @@ function runDedup(rows) {
   }
 }
 
-// 2d. Regression guard for the bucket key: "Foo-Bar" and "FooBar" are one
+// 2e. Regression guard for the bucket key: "Foo-Bar" and "FooBar" are one
 // employer under normalizeCompany() but tokenize to different first tokens, so
 // a first-token bucket never compared them and the exact duplicate survived.
 {
