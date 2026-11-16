@@ -5,7 +5,7 @@ import { careerOpsRoot, findApplication, pdfPathStatusForReport, readReport } fr
 import { getProfilePath } from "@/lib/core/profile-path.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
-import { matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
+import { matchesCompanyKeys, matchesTailoredCv, sortNewestFirst } from "./cv-match.mjs";
 import { cvUploadName } from "./upload-name.mjs";
 
 /**
@@ -47,7 +47,7 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
   // `key.first` is deliberately NOT used as a fallback: matching a company by
   // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
   // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
-  const matches = files.filter((f) => keys.some((k: string) => matchesTailoredCv(f.toLowerCase(), k)));
+  const matches = files.filter((f) => matchesCompanyKeys(matchesTailoredCv, f.toLowerCase(), keys));
   if (!matches.length) return null;
   const sorted = sortNewestFirst(dir, matches);
   if (!sorted.length) return null;

@@ -1,5 +1,5 @@
 import { companySlug } from "./company-slug.mjs";
-import { matchesTailoredCv } from "./apply/cv-match.mjs";
+import { matchesCompanyKeys, matchesTailoredCv } from "./apply/cv-match.mjs";
 
 /** Plain-text body for a CV download that has nothing to serve. */
 export const TAILORED_CV_MISSING =
@@ -24,7 +24,7 @@ export function tailoredCvOnDisk({ indexStatus = "not-found", filenames = [], co
   if (!key?.slug) return false;
   for (const name of filenames) {
     if (typeof name !== "string") continue;
-    if (key.keys.some((k) => matchesTailoredCv(name.toLowerCase(), k))) return true;
+    if (matchesCompanyKeys(matchesTailoredCv, name.toLowerCase(), key.keys)) return true;
   }
   return false;
 }

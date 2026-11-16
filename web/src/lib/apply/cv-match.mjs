@@ -98,6 +98,25 @@ export function isStandardName(filenameLower) {
   return STANDARD_NAME.test(filenameLower);
 }
 
+/**
+ * Match a file against every slug a company can carry (companySlug().keys): the
+ * first is the folded slug and the rest are legacy slugs that dropped accented
+ * letters. A standard-layout name folds accents, so only the folded slug
+ * identifies it; matching it against a legacy slug ("caf" for Café) could claim
+ * another company's file ("031-caf-cv-..." belongs to CAF). Legacy slugs apply
+ * to non-standard names only.
+ *
+ * @param {(filenameLower: string, slug: string) => boolean} matcher
+ * @param {string} filenameLower
+ * @param {string[]} keys
+ */
+export function matchesCompanyKeys(matcher, filenameLower, keys) {
+  const [folded, ...legacy] = keys;
+  if (matcher(filenameLower, folded)) return true;
+  if (isStandardName(filenameLower)) return false;
+  return legacy.some((key) => matcher(filenameLower, key));
+}
+
 export function matchesTailoredCv(filenameLower, slug) {
   if (isOverflowDraft(filenameLower)) return false;
   if (isStandardName(filenameLower)) return standardKind(filenameLower, slug) === 'cv';
