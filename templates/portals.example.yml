@@ -2280,6 +2280,9 @@ search_queries:
 #   enabled: true
 #
 # - name: The Muse                        # board-wide search page (server-rendered HTML)
+#   # Availability: Cloudflare challenges this board from US and Canadian egresses
+#   # (2026-11-15), so a scan may fail with a named "Cloudflare challenge" error.
+#   # See The Muse in docs/SUPPORTED_JOB_BOARDS.md.
 #   provider: themuse
 #   location: Germany                     # optional: narrows the search (country or city)
 #   posted: 30                            # optional: 1, 7 or 30 (days) — keeps the run small

@@ -256,6 +256,7 @@
  * @property {(string|null)}         [body]
  * @property {('error'|'follow'|'manual')} [redirect]
  * @property {number}                [maxBytes] Response-body ceiling for fetchJson/fetchText; defaults to _http.mjs DEFAULT_MAX_BODY_BYTES. Over-cap throws `code: 'response_too_large'`.
+ * @property {(res: { status: number, headers: Headers }) => void} [onResponse] Called with the response (status and headers) before the body is read, including on a non-2xx just before it throws. themuse.mjs reads `cf-mitigated` this way.
  */
 
 /**
