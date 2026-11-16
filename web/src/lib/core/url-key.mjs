@@ -281,7 +281,6 @@ function linkedInCanonicalKey(raw) {
   if (u.protocol !== "http:" && u.protocol !== "https:") return "";
   const host = foldHostname(u.hostname);
   if (!/(^|\.)linkedin\.com$/.test(host)) return "";
-  // A year at the end of a title is not an id. A bare short path id still is.
   const path = u.pathname.match(/^\/(?:jobs\/view\/((?:.*-)?)|comm\/jobs\/view\/)(\d+)\/?$/);
   let pathId = null;
   if (path) {
