@@ -13,7 +13,7 @@ const localParser = (await import(pathToFileURL(join(ROOT, 'providers/local-pars
 
 // Prints its own path and cwd as the job title, so a test can see which file
 // ran and where.
-const PARSER_SOURCE = `console.log(JSON.stringify([{ title: process.argv[1] + '|' + process.cwd(), url: 'https://example.com/job' }]));\n`;
+const PARSER_SOURCE = `import { fileURLToPath } from 'url';\nconsole.log(JSON.stringify([{ title: fileURLToPath(import.meta.url) + '|' + process.cwd(), url: 'https://example.com/job' }]));\n`;
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'co-local-parser-data-root-')));
 const dataRoot = join(base, 'data-root');
@@ -57,8 +57,10 @@ try {
 
   const jobs = await localParser.fetch(entry('local/acme-jobs.mjs'));
   const [ranPath, ranCwd] = String(jobs[0]?.title ?? '').split('|');
-  if (ranPath === localScript) {
-    pass('fetch() runs the validated absolute path of the data-root parser');
+  // Compared through realpathSync.native: on Windows the module loader and
+  // fs.realpathSync can spell one temp path with long and 8.3 short names.
+  if (ranPath && realpathSync.native(ranPath) === realpathSync.native(localScript)) {
+    pass('fetch() runs the data-root parser it validated');
   } else {
     fail(`fetch() ran ${JSON.stringify(ranPath)}, expected ${localScript}`);
   }
