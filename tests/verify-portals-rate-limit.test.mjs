@@ -1,5 +1,3 @@
-// A 429 is a rate limit. It must not be labeled unresolved, and the health
-// check must not offer an empty board as a replacement slug.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyFetchError, printResults, verifyCompanies } from '../verify-portals.mjs';
