@@ -289,6 +289,27 @@ console.log('\n--- 4. real-file loaders ---');
 
     const counts = buildFollowupCountsByAppNum(followups.rows);
     eq('buildFollowupCountsByAppNum: counts appNum 1 once', counts.get(1), 1);
+
+    const mixedTsv = [
+      'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
+      'https://loaderco.example/jobs/1\t2026-01-01\tgreenhouse\tEngineer\tLoaderCo\tadded\tRemote',
+      'https://loaderco.example/jobs/2\t2026-02-15\tgreenhouse\tEngineer\tLoaderCo Inc.\tadded\tRemote',
+      'https://otherco.example/jobs/1\t2026-01-01\tgreenhouse\tEngineer\tOtherCo\tadded\tRemote',
+      'https://otherco.example/jobs/2\t2026-02-15\tgreenhouse\tEngineer\tOtherCo\tadded\tRemote',
+    ].join('\n');
+    const mixedPath = join(tmpDir, 'mixed-scan-history.tsv');
+    writeFileSync(mixedPath, mixedTsv);
+    const full = loadRepostClusters(tmpDir, mixedPath);
+    const scoped = loadRepostClusters(tmpDir, mixedPath, undefined, 'LoaderCo');
+    const sources = { tracker: false, followups: false, scanHistory: true, statusLog: false };
+    const churnOf = (clusters, name) => getCompanyCard(buildCompanyCards(
+      { trackerRows: [], followupRows: [], repostClusters: clusters, sourcesLoaded: sources },
+      { now: NOW, silenceWindowDays: 28 },
+    ), name).postingChurn;
+    eq('scoped load keeps the sibling spelling inside the LoaderCo cluster', churnOf(scoped.clusters, 'LoaderCo'), churnOf(full.clusters, 'LoaderCo'));
+    ok('scoped LoaderCo cluster counted both URLs', churnOf(scoped.clusters, 'LoaderCo').clusters[0]?.repostCount === 2);
+    eq('scoped load leaves OtherCo off the LoaderCo card', churnOf(scoped.clusters, 'OtherCo').label, 'none-detected');
+    eq('full load still clusters OtherCo', churnOf(full.clusters, 'OtherCo').clusters.length, 1);
   } finally {
     rmSync(tmpDir, { recursive: true, force: true });
   }
