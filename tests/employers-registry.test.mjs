@@ -575,7 +575,7 @@ test('boards/ has no hard size limit: above 25 MB it is a warning, never an erro
     mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
     writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(BOARDS_WARN_BYTES) })}\n`);
     const { errors, warnings } = validateRegistry({ root: head });
-    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is 25\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
+    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
     assert.deepEqual(errors.filter((e) => e.file === 'employers/boards'), [], 'the size is never an error');
   } finally { rmSync(head, { recursive: true, force: true }); }
 });

@@ -240,7 +240,9 @@ test('end to end: the committed boards plus new ones, imported, validated, folde
 
     const v1 = node(VALIDATOR, [], dir);
     assert.equal(v1.status, 0, v1.stderr);
-    assert.match(v1.stderr, new RegExp(`${urls.length} boards are already in the registry`));
+    // The warning is one for each inbox file, and a registry above the size of one file is imported in parts.
+    const already = [...v1.stderr.matchAll(/: (\d+) boards? (?:is|are) already in the registry/g)].reduce((sum, m) => sum + Number(m[1]), 0);
+    assert.equal(already, urls.length);
 
     const dry = node(FOLD, [], dir);
     assert.equal(dry.status, 0, dry.stderr);
