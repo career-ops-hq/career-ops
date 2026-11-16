@@ -287,4 +287,9 @@ test('matchers: report-leading names from lib/output-names.mjs (#6667)', async (
   assert.equal(matchesTailoredCv('024-zep-cv-avery-quinn-2026-11-07.overflow.pdf', 'zep'), false);
   assert.equal(matchesTailoredCv('024-zepellin-cv-avery-quinn-2026-11-07.pdf', 'zep'), false);
   assert.equal(matchesTailoredCv('cv-avery-quinn-zep-2026-11-07.pdf', 'zep'), true);
+  // An accented company slugs the same way here as in lib/output-names.mjs.
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { kebab } = await import('../../../lib/output-names.mjs');
+  assert.equal(companySlug('Zoë Café').slug, kebab('Zoë Café'));
+  assert.equal(matchesTailoredCv('031-zoe-cafe-cv-dana-quinn-2026-11-09.pdf', companySlug('Zoë Café').slug), true);
 });
