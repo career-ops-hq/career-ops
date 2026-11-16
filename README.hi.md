@@ -425,8 +425,8 @@ pi
 ### वन-शॉट Pi (`pi -p`)
 
 ```bash
-pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops scan"
-pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops tracker"
+pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops scan"
+pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops tracker"
 ```
 
 इसके लिए Pi 0.79.1 या नया वर्ज़न चाहिए। `--skill` career-ops राउटर को रजिस्टर करता है, और प्रॉम्प्ट की शुरुआत में `/skill:career-ops` लिखने से Pi पूरा राउटर प्रॉम्प्ट में डाल देता है (सादे प्रॉम्प्ट में मॉडल को सिर्फ़ स्किल का नाम और विवरण दिखता है)। `--no-approve` इस रन के लिए फ़ोल्डर को अविश्वसनीय मानता है, भले ही आपने पहले उस पर भरोसा किया हो। इससे चेकआउट के प्रोजेक्ट एक्सटेंशन वर्कर में नहीं चलते। इंटरैक्टिव `pi` में स्किल अपने-आप मिले, इसके लिए रिपॉज़िटरी के अंदर एक बार `/trust` चलाएँ और `pi` को दोबारा शुरू करें (`/trust` आगे के Pi प्रोसेस पर लागू होता है)। किसी वर्कर को `-a` न दें: यह उस रन के लिए सारे प्रोजेक्ट संसाधनों पर भरोसा करता है और प्रोजेक्ट के एक्सटेंशन बिना पूछे चलाता है।

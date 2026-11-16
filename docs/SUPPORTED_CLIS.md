@@ -8,7 +8,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Cursor | `AGENTS.md` | Interactive: open the project in Cursor and ask for `career-ops` (auto-discovered from `.agents/skills/career-ops/SKILL.md`) |
 | Codex | `CODEX.md` (see [`docs/CODEX.md`](CODEX.md)) | Interactive: `codex` (then use plain text). Headless/Batch: `codex exec "prompt"` |
 | OpenCode | `OPENCODE.md` | Interactive: `opencode` (then `/career-ops`). Headless/Batch: `opencode run "prompt"` |
-| Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+) |
+| Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+) |
 | Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless/Batch: `agy -p "prompt"` |
 | Grok Build CLI | `AGENTS.md` | Interactive: `grok` (then `/career-ops`). Headless/Batch: `grok -p "prompt"` (add `--yolo` to auto-approve tool executions) |
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
@@ -29,14 +29,14 @@ Pi needs no wrapper file: it reads `AGENTS.md` from the working directory as pro
 ```bash
 cd career-ops
 pi                                          # interactive
-pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops tracker"
+pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops tracker"
 ```
 
 ### Project trust
 
 Pi 0.79.0 added a per-folder trust decision. Until you trust a folder, Pi skips its project resources: `.pi/` settings, extensions, skills, prompts and themes, and the skills in `.agents/skills/`. In interactive mode, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes).
 
-A headless worker needs only the router and `AGENTS.md`. `--skill .agents/skills/career-ops` registers the router whether or not the folder is trusted, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder too. A registered skill reaches the model as a name and a description, and the model reads the rest only if it chooses to. Start the prompt with `/skill:career-ops` and Pi puts the whole `SKILL.md` in the prompt, print mode included. `--no-approve` treats the folder as untrusted for the run, even when you trusted it before or set `defaultProjectTrust` to `always`, so the checkout's extensions never run inside a worker.
+A headless worker needs only the router and `AGENTS.md`. `--skill .agents/skills/career-ops` registers the router whether or not the folder is trusted, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder too. A registered skill reaches the model as a name and a description, and the model reads the rest only if it chooses to. Start the prompt with `/skill:career-ops` and Pi puts the whole `SKILL.md` in the prompt, print mode included. `--no-skills` drops your global skills from the run: when two skills share a name, Pi keeps the first it finds and lists global skills before a `--skill` path, so a global `career-ops` skill would otherwise replace this checkout's router. `--no-approve` treats the folder as untrusted for the run, even when you trusted it before or set `defaultProjectTrust` to `always`, so the checkout's extensions never run inside a worker.
 
 `-a` (`--approve`) does the opposite and trusts the folder for one run. Pi then loads every project resource, installs missing project packages, and executes the project's extensions in its own process, with your permissions, without asking. Keep it for an interactive session in a checkout whose `.pi/` and `.agents/skills/` you have reviewed, and never give it to a worker.
 
