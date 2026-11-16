@@ -85,7 +85,7 @@ test('No status-log entry is written on a no-op re-run', () => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-test('Status-log append failure does not abort the tracker update', () => {
+test('Status-log append failure leaves the tracker status unchanged', () => {
   const { tmp, dataDir, trackerFile } = setupWorkspace();
   const candFile = join(tmp, 'cands.json');
   writeFileSync(candFile, JSON.stringify([{
@@ -99,13 +99,11 @@ test('Status-log append failure does not abort the tracker update', () => {
   // Make log file a directory so appendFileSync fails
   mkdirSync(logFile);
 
+  const before = readFileSync(trackerFile, 'utf-8');
   const res = runReplyWatch(tmp, trackerFile, candFile, 'y\n');
   assert.equal(res.status, 0, describeSpawn(res));
-  assert.match(res.stderr || res.stdout, /failed to append to status-log\.tsv/);
-
-  // Tracker is still updated
-  const trackerContent = readFileSync(trackerFile, 'utf-8');
-  assert.match(trackerContent, /\| 1 \|.+?\| Interview \|/);
+  assert.match(res.stderr || res.stdout, /Could not write the status log for #1, so it stays Applied/);
+  assert.equal(readFileSync(trackerFile, 'utf-8'), before);
 
   rmSync(tmp, { recursive: true, force: true });
 });

@@ -868,15 +868,13 @@ try {
   }
 
   // ── status-log append (transition ledger, read by funnel-velocity.mjs) ──
-  // Observation trail only: the tracker stays the source of truth for STATE,
-  // the ledger records WHEN transitions happened. A failed append is a warning,
-  // never a failure — the status write above already succeeded. Sibling of the
-  // tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
-  // the ledger next to the tracker it describes. Inside the lock window, so
-  // concurrent writers can't interleave lines.
+  // The ledger records WHEN a transition happened. A status that is not in the
+  // ledger cannot be undone, so a failed append puts the old line back and the
+  // command fails. Sibling of the tracker file so CAREER_OPS_TRACKER redirects
+  // (tests, custom layouts) keep the ledger next to the tracker it describes.
+  // Inside the lock window, so concurrent writers can't interleave lines.
   // An undo retracts the entry it selected even when that entry left the
   // status as it was (Applied → Applied), or the next undo would pick it again.
-  // The retraction is the undo, so a failed append puts the old status back.
   if (undone && !flags.dryRun) {
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
@@ -912,13 +910,24 @@ try {
       to: newStatus,
       source: flags.source ?? 'set-status',
     });
+    if (!statusLogged) {
+      let restored = false;
+      lines[target.lineIdx] = rawLine;
+      try {
+        writeFileAtomic(APPS_FILE, lines.join('\n'));
+        restored = true;
+        statusChanged = false;
+      } catch { /* reported below */ }
+      failWith(EXIT_USAGE, 'status-not-logged', restored
+        ? `Could not write the status log for #${target.num}, so it stays ${oldStatus}`
+        : `Could not write the status log for #${target.num}, and could not put it back to ${oldStatus}; it now reads ${newStatus}`);
+    }
   }
-  // A dashboard call that received the partial-success error above can retry
-  // the same Applied action. The tracker is already Applied, so there is no
-  // normal transition to log; append one correction observation only when the
-  // effective timeline does not already end at Applied. This is append-only
-  // and idempotent, and the correction source is folded by funnel-velocity.mjs
-  // onto the repaired stage.
+  // --repair-status-log is for a tracker that is already Applied while the
+  // ledger does not end at Applied. A failed append above puts the row back,
+  // so the retry is an ordinary transition and does not reach this branch.
+  // The correction is append-only and idempotent, and funnel-velocity.mjs
+  // folds that source onto the repaired stage.
   if (flags.repairStatusLog && !statusChanged && newStatus === 'Applied' && !flags.dryRun) {
     const logPath = statusLogPath(APPS_FILE);
     const timeline = [];
@@ -1002,9 +1011,8 @@ const changed = statusChanged || noteChanged;
 // AFTER the tracker lock is released, deliberately: the seeder re-reads the
 // row this run just wrote (lib/status-hooks.mjs has the rest of the why).
 //
-// A seeding failure NEVER fails the status change. The write has already
-// committed and the caller's exit code is about that write — same policy as
-// the status-log append above.
+// A seeding failure NEVER fails a status that already landed in the tracker
+// and the ledger. The caller's exit code is about that write.
 let followupSeeded = null;
 if (!undone && (statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
   followupSeeded = await seedFollowupOnApplied(target.num, {
