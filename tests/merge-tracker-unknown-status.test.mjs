@@ -40,6 +40,10 @@ function run(tsv) {
     timeout: 30_000,
     env: {
       ...process.env,
+      // Keep the merge's workspace ledgers inside this fixture, too.
+      CAREER_OPS_ROOT: work,
+      CAREER_OPS_DATA_DIR: '',
+      CAREER_OPS_FOLLOWUPS: '',
       CAREER_OPS_TRACKER: tracker,
       CAREER_OPS_ADDITIONS: addsDir,
       CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir),
