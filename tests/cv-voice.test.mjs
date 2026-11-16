@@ -346,3 +346,26 @@ test('generate-latex checks wording against cv.md, not article-digest.md', () =>
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('flags template connectors like "resulting in" and "thereby"', () => {
+  const issues = voiceIssues('- Built an API gateway, resulting in faster deploys.');
+  assert.ok(issues.some((i) => /connector/i.test(i)));
+});
+
+test('flags 4+ consecutive "-ed" bullets across Markdown (+, -, *) and HTML <li>', () => {
+  const md = [
+    '+ Built service A.',
+    '- Deployed service B.',
+    '* Configured alerts.',
+    '+ Updated pipelines.',
+  ].join('\n');
+  assert.ok(voiceIssues(md).some((i) => /4\+ consecutive bullets/i.test(i)));
+
+  const html = '<ul><li>Built A.</li><li>Deployed B.</li><li>Configured C.</li><li>Updated D.</li></ul>';
+  assert.ok(voiceIssues(html).some((i) => /4\+ consecutive bullets/i.test(i)));
+});
+
+test('decodes HTML entities like &mdash; before checking long dashes', () => {
+  const html = '<p>Built A &mdash; fast &mdash; reliably.</p>';
+  assert.ok(voiceIssues(html).length > 0);
+});
