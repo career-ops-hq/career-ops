@@ -3,7 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, findApplication, isRegularContainedFile, pdfPathStatusForReport, readReport } from "@/lib/career-ops";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
-import { hasToken, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
+import { hasToken, matchesCompanyKeys, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
 
 /** The length generate-cover-letter.mjs truncates a role slug to when it builds
  *  a default output filename (`role.slice(0, 30)`). A role longer than this is
@@ -62,7 +62,7 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .filter((f) => key.keys.some((k: string) => matchesTailoredCover(f.toLowerCase(), k)))
+      .filter((f) => matchesCompanyKeys(matchesTailoredCover, f.toLowerCase(), key.keys))
       // sortNewestFirst drops directories and files that vanish under it, but
       // not a symlink PLACED in output/ that resolves elsewhere: that one stats
       // as a regular file. Same realpath guard /api/cv-pdf applies, here rather

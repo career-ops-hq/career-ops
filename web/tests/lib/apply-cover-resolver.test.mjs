@@ -419,10 +419,10 @@ test('matchers agree with buildOutputName for every name it will write (#6667)',
 
 test('an accented company is found under both its folded and its legacy slug', async () => {
   const { companySlug } = await import('../../src/lib/company-slug.mjs');
-  const { matchesTailoredCover, matchesTailoredCv } = await import('../../src/lib/apply/cv-match.mjs');
+  const { matchesTailoredCover, matchesTailoredCv, matchesCompanyKeys } = await import('../../src/lib/apply/cv-match.mjs');
   const key = companySlug('Zoë Café');
   assert.deepEqual(key.keys, ['zoe-cafe', 'zo-caf']);
-  const anyKey = (match, name) => key.keys.some((k) => match(name, k));
+  const anyKey = (match, name) => matchesCompanyKeys(match, name, key.keys);
   // The standard name uses the folded slug; covers written without --report and
   // older CVs carry the slug that dropped the accented letters.
   assert.equal(anyKey(matchesTailoredCover, '031-zoe-cafe-cover-dana-quinn-2026-11-09.pdf'), true);
@@ -433,3 +433,18 @@ test('an accented company is found under both its folded and its legacy slug', a
   assert.deepEqual(companySlug('Acme Co').keys, ['acme-co']);
 });
 
+test('a legacy key never claims a standard-layout file or a kind word (#6667)', async () => {
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { matchesTailoredCover, matchesTailoredCv, matchesCompanyKeys } = await import('../../src/lib/apply/cv-match.mjs');
+  // "Café" has the legacy key "caf"; the company CAF owns this standard name.
+  const cafe = companySlug('Café');
+  assert.deepEqual(cafe.keys, ['cafe', 'caf']);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '031-caf-cv-dana-quinn-2026-11-09.pdf', cafe.keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCover, '031-caf-cover-dana-quinn-2026-11-09.pdf', cafe.keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '031-cafe-cv-dana-quinn-2026-11-09.pdf', cafe.keys), true);
+  // A legacy key that is a kind word is dropped, so "CVé" cannot pick up any cv-*.pdf.
+  assert.deepEqual(companySlug('CVé').keys, ['cve']);
+  assert.deepEqual(companySlug('Coveré').keys, ['covere']);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, 'cv-acme-2026-11-09.pdf', companySlug('CVé').keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCover, 'acme-role-cover.pdf', companySlug('Coveré').keys), false);
+});
