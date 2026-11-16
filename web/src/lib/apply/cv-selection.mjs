@@ -1,3 +1,5 @@
+import { standardKind } from "./cv-match.mjs";
+
 /** Return the report number referenced by a tracker report cell, e.g.
  *  "[010](../reports/010-decagon-2026-07-13.md)" -> 10. Requires the full
  *  inline-link form — the label AND its "(" destination opener, not just a
@@ -12,6 +14,10 @@ export function reportNumberFromCell(cell) {
 
 function untaggedArtifactKind(pdfPath) {
   const base = String(pdfPath ?? "").split(/[/\\]/).pop() ?? "";
+  // A standard name ({NNN}-{company}-{kind}-..., #6667) carries its kind as a
+  // token; the same single-token rule generate-pdf.mjs resolveArtifactKind uses.
+  const standard = standardKind(base.toLowerCase().replace(/\.overflow(-\d+)?(\.[^.]*)$/, "$2"));
+  if (standard) return standard;
   const name = base.toLowerCase().replace(/\.[^.]*$/, "");
   if (name.startsWith("cv-")) return "cv";
   if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) return "cover";

@@ -138,3 +138,13 @@ test("parsePdfManifestRows extracts structured entries and defaults missing kind
   assert.equal(rows[3].kind, "cv");
   assert.equal(rows[4].kind, "unknown");
 });
+
+test("parsePdfManifestRows reads the kind of a blank-kind standard name (#6667)", () => {
+  const rows = parsePdfManifestRows([
+    "031\toutput/031-acme-cover-dana-quinn-2026-11-09.pdf\t\tletter\t2026-11-09\t",
+    "031\toutput/031-acme-cv-dana-quinn-2026-11-09.pdf\t\tletter\t2026-11-09\t",
+    "031\toutput/031-acme-cover-cv-dana-quinn-2026-11-09.pdf\t\tletter\t2026-11-09\t",
+    "031\toutput/031-acme-cover-dana-quinn-2026-11-09.overflow.pdf\t\tletter\t2026-11-09\t",
+  ].join("\n"));
+  assert.deepEqual(rows.map((r) => r.kind), ["cover", "cv", "cv", "cover"]);
+});
