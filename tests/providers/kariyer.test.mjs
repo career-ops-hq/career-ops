@@ -11,7 +11,10 @@ const noSleep = async () => {};
 try {
   const mod = await import(pathToFileURL(join(ROOT, 'providers/kariyer.mjs')).href);
   const kariyer = mod.default;
-  const { resolveKariyerUrl, normalizeKariyerJob, kariyerPostedAt, parseKariyerDetail } = mod;
+  const {
+    resolveKariyerUrl, normalizeKariyerJob, kariyerPostedAt, parseKariyerDetail,
+    kariyerWorkplaceType, kariyerPlaces,
+  } = mod;
 
   if (kariyer.id === 'kariyer') pass('kariyer.id is "kariyer"');
   else fail(`kariyer.id is ${JSON.stringify(kariyer.id)}`);
@@ -146,6 +149,11 @@ try {
       jobCode: ' RF-AF6464 ',
       showTime: '2026-11-12T17:14',
       postingDate: '2026-11-12',
+      workModel: 'Hybrid',
+      locations: [
+        { countryId: '65', countryName: 'Türkiye', cityId: '34', cityName: 'İstanbul(Avr.)', jobTownLocationList: [{ townId: '453', townName: 'Şişli' }] },
+        { countryId: '65', countryName: 'Türkiye', cityId: '82', cityName: 'İstanbul(Asya)', jobTownLocationList: [] },
+      ],
       isSponsored: true,
     },
     'Fallback',
@@ -158,6 +166,8 @@ try {
     && full.location === 'İstanbul(Avr.)'
     && full.externalId === '4596857'
     && full.requisitionId === 'RF-AF6464'
+    && full.workplaceType === 'hybrid'
+    && JSON.stringify(full.locations) === JSON.stringify(['İstanbul(Avr.)', 'İstanbul(Asya)'])
     && new Date(full.postedAt).toISOString() === '2026-11-12T14:14:00.000Z'
   ) {
     pass('normalizeKariyerJob maps + trims title/company/location/id/jobCode and the TRT date');
@@ -169,6 +179,58 @@ try {
     pass('normalizeKariyerJob omits language/salary/description the list payload does not carry');
   } else {
     fail(`normalizeKariyerJob invented fields = ${JSON.stringify(Object.keys(full))}`);
+  }
+
+  // The source resolves no tenant/board namespace, so no strong listing
+  // identity is asserted (docs/listing-fingerprint.md: supply no triple when
+  // the full identity cannot be resolved).
+  if (!('listingIdentity' in full) && !('country' in full) && !('eligibilityText' in full) && !('visaText' in full)) {
+    pass('normalizeKariyerJob asserts no listingIdentity and no country the payload cannot resolve');
+  } else {
+    fail(`normalizeKariyerJob asserted an unresolvable identity = ${JSON.stringify(Object.keys(full))}`);
+  }
+
+  // workModel is a dedicated field; only the three contract values pass, and an
+  // unknown one is omitted rather than guessed.
+  const workplaces = [
+    kariyerWorkplaceType({ workModel: 'OnSite' }),
+    kariyerWorkplaceType({ workModel: 'Remote' }),
+    kariyerWorkplaceType({ workModel: ' hybrid ' }),
+    kariyerWorkplaceType({ workModel: 'Field' }),
+    kariyerWorkplaceType({ workModel: '' }),
+    kariyerWorkplaceType({}),
+    kariyerWorkplaceType(null),
+  ];
+  if (JSON.stringify(workplaces) === JSON.stringify(['onsite', 'remote', 'hybrid', undefined, undefined, undefined, undefined])) {
+    pass('kariyerWorkplaceType maps the source\'s three values and omits anything else');
+  } else {
+    fail(`kariyerWorkplaceType = ${JSON.stringify(workplaces)}`);
+  }
+  if (!('workplaceType' in normalizeKariyerJob({ id: 4, title: 'T', jobUrl: '/is-ilani/t-4', workModel: 'Field' }))) {
+    pass('normalizeKariyerJob omits workplaceType for an unmapped workModel');
+  } else {
+    fail('normalizeKariyerJob emitted an unmapped workplaceType');
+  }
+
+  // Places, before the board joins them into locationText.
+  const places = [
+    kariyerPlaces({ locations: [{ cityName: 'Ankara' }, { cityName: 'Ankara' }, { cityName: '' , countryName: 'Türkiye' }] }),
+    kariyerPlaces({ locations: [] }),
+    kariyerPlaces({ locations: 'nope' }),
+    kariyerPlaces({}),
+  ];
+  if (
+    JSON.stringify(places[0]) === JSON.stringify(['Ankara', 'Türkiye'])
+    && places.slice(1).every((p) => Array.isArray(p) && p.length === 0)
+  ) {
+    pass('kariyerPlaces keeps the payload order, dedupes and falls back to countryName');
+  } else {
+    fail(`kariyerPlaces = ${JSON.stringify(places)}`);
+  }
+  if (!('locations' in normalizeKariyerJob({ id: 5, title: 'T', jobUrl: '/is-ilani/t-5' }))) {
+    pass('normalizeKariyerJob omits locations when the payload lists none');
+  } else {
+    fail('normalizeKariyerJob emitted an empty locations array');
   }
 
   const locFallback = normalizeKariyerJob({ id: 1, title: 'T', jobUrl: '/is-ilani/t-1', allLocations: 'Ankara' });
@@ -223,6 +285,8 @@ try {
     companyName: `Co ${id}`,
     jobUrl: `/is-ilani/co-${id}-role-${id}-${id}`,
     locationText: 'İstanbul(Avr.)',
+    locations: [{ countryName: 'Türkiye', cityName: 'İstanbul(Avr.)' }],
+    workModel: 'OnSite',
     postingDate: '2026-11-16',
     showTime: '2026-11-16T08:40',
     jobCode: `REQ-${id}`,

@@ -102,10 +102,24 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 //   from the host clock. `postingDate` (date-only) is the fallback.
 // - `requisitionId` is the employer's own posting code (`jobCode`, e.g.
 //   "RF-AF6464"), present on every row; `externalId` is the board's own
-//   posting id.
+//   posting id. `listingIdentity` is deliberately NOT set: the gateway serves
+//   the whole country board with no tenant or board slug to resolve, and
+//   `docs/listing-fingerprint.md` says to supply no triple when the full
+//   namespace cannot be resolved (a made-up `board_slug` would assert a strong
+//   identity the source never issued). URL dedup still collapses the same
+//   posting reached twice.
+// - `workplaceType` comes from the payload's own `workModel`
+//   ("OnSite"/"Hybrid"/"Remote"), a dedicated field, never inferred from the
+//   location text; an unmapped or absent value omits the key.
+// - `locations` carries the payload's per-place array before it is joined into
+//   `locationText` (`locations[].cityName`, deduped, omitted when empty) — a
+//   multi-city posting like "İstanbul(Asya), Kocaeli" ships as two places.
 // - No `language`: the list payload carries no language field, and the detail
 //   payload's display name ("Turkish") is not worth making the Job shape
 //   depend on whether detail enrichment is on.
+// - No `country` (`locations[].countryId` is an internal id, not a country
+//   code) and no `eligibilityText`/`visaText` (the board states no such thing
+//   outside the JD).
 // - No `salary` and no list-level `description`: the list payload carries
 //   neither. `qualifications` on the detail endpoint is the real JD text, so
 //   opt in per entry with `kariyer: { fetchDetails: true, detailLimit: 25 }`
@@ -143,6 +157,15 @@ const SEARCH_SORT = Object.freeze({ sortType: 'SortByDate', sortDirection: 'Asce
 // attribution, not the employer's page (rule 2 + rule 3).
 const TRACKING_REDIRECT_HOSTS = new Set(['stats.the-network.com']);
 
+// `workModel` is the source's dedicated workplace field. Anything else — a new
+// value the board introduces — maps to nothing and the key is omitted, rather
+// than being forced into one of the three the contract allows.
+const WORKPLACE_TYPES = new Map([
+  ['onsite', 'onsite'],
+  ['hybrid', 'hybrid'],
+  ['remote', 'remote'],
+]);
+
 /** @param {unknown} value */
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -167,6 +190,33 @@ export function kariyerPostedAt(item) {
     if (!Number.isNaN(parsed)) return parsed;
   }
   return undefined;
+}
+
+/**
+ * The payload's own workplace model, normalized to the contract's three
+ * values. Undefined when the field is absent or carries a value this provider
+ * does not know.
+ * @param {any} item
+ * @returns {'onsite'|'hybrid'|'remote'|undefined}
+ */
+export function kariyerWorkplaceType(item) {
+  return WORKPLACE_TYPES.get(text(item?.workModel).toLowerCase());
+}
+
+/**
+ * The distinct places the payload lists before it joins them into
+ * `locationText` — its per-place `cityName`, in payload order, deduped.
+ * @param {any} item
+ * @returns {string[]}
+ */
+export function kariyerPlaces(item) {
+  const rows = Array.isArray(item?.locations) ? item.locations : [];
+  const out = [];
+  for (const row of rows) {
+    const name = text(row?.cityName) || text(row?.countryName);
+    if (name && !out.includes(name)) out.push(name);
+  }
+  return out;
 }
 
 /**
@@ -221,13 +271,15 @@ export function resolveKariyerUrl(item) {
  *   - url:           see resolveKariyerUrl (rows with no usable URL are dropped).
  *   - company:       `companyName`, falling back to the portal entry name.
  *   - location:      `locationText`, falling back to `allLocations`.
+ *   - locations:     the payload's per-place `cityName` list, before joining.
+ *   - workplaceType: `workModel`, normalized; omitted when unknown.
  *   - postedAt:      `showTime` (Turkish local, UTC+3), else `postingDate`.
  *   - externalId:    the board's own posting id.
  *   - requisitionId: `jobCode`, the employer's own posting code.
  *
  * @param {any} item
  * @param {string} [fallbackCompany]
- * @returns {{title: string, url: string, company: string, location: string, postedAt?: number, externalId?: string, requisitionId?: string} | null}
+ * @returns {{title: string, url: string, company: string, location: string, locations?: string[], workplaceType?: 'onsite'|'hybrid'|'remote', postedAt?: number, externalId?: string, requisitionId?: string} | null}
  */
 export function normalizeKariyerJob(item, fallbackCompany) {
   if (!item || typeof item !== 'object') return null;
@@ -240,6 +292,8 @@ export function normalizeKariyerJob(item, fallbackCompany) {
 
   const company = text(item.companyName) || text(fallbackCompany) || 'kariyer.net';
   const location = text(item.locationText) || text(item.allLocations);
+  const locations = kariyerPlaces(item);
+  const workplaceType = kariyerWorkplaceType(item);
   const postedAt = kariyerPostedAt(item);
   const externalId = coerceId(item.id);
   const requisitionId = coerceId(item.jobCode);
@@ -249,6 +303,8 @@ export function normalizeKariyerJob(item, fallbackCompany) {
     url,
     company,
     location,
+    ...(locations.length === 0 ? {} : { locations }),
+    ...(workplaceType === undefined ? {} : { workplaceType }),
     ...(postedAt === undefined ? {} : { postedAt }),
     ...(externalId === undefined ? {} : { externalId }),
     ...(requisitionId === undefined ? {} : { requisitionId }),
