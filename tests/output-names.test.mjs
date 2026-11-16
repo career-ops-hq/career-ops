@@ -53,6 +53,7 @@ test('buildOutputName: rejects bad input instead of guessing', () => {
   assert.throws(() => buildOutputName({ ...ok, kind: 'resume' }), /kind/);
   assert.throws(() => buildOutputName({ ...ok, variant: 'fancy' }), /variant/);
   assert.throws(() => buildOutputName({ ...ok, date: '11/07/2026' }), /date/);
+  assert.throws(() => buildOutputName({ ...ok, date: '2026-02-30' }), /date/);
   assert.throws(() => buildOutputName({ ...ok, company: '---' }), /company/);
   assert.throws(() => buildOutputName({ ...ok, candidate: '' }), /candidate/);
   assert.throws(() => buildOutputName({ ...ok, report: 'abc' }), /report/);
@@ -153,6 +154,15 @@ test('slugFromReport: reads the slug from the report filename', () => {
     assert.equal(slugFromReport(26, dir), null);
     assert.equal(slugFromReport(99, dir), null);
     assert.equal(slugFromReport('x', dir), null);
+  });
+});
+
+test('slugFromReport: returns a kebab-case slug the parser accepts', () => {
+  withReports(['031-Acme_Co-2026-11-09.md'], (dir) => {
+    const slug = slugFromReport(31, dir);
+    assert.equal(slug, 'acme-co');
+    const name = buildOutputName({ report: 31, company: slug, kind: 'cv', candidate: 'Dana Quinn', date: '2026-11-09' });
+    assert.ok(parseOutputName(name, { company: slug }));
   });
 });
 
