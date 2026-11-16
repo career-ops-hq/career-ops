@@ -348,11 +348,20 @@ test('--base: a contribution with its own manifest passes, without touching CHAN
 
 test('--base: a base with no registry (the bootstrap PR) counts every row as new', () => {
   const empty = mkdtempSync(join(tmpdir(), 'co-employers-base-'));
+  // A registry that starts has no retired row (a new row cannot be retired), and the real one may
+  // have some: the copy it is checked from drops those marks.
+  const head = checkout();
   try {
-    const r = run(ROOT, ['--base', empty]);
+    for (const { row } of rowsOf(reg(head)).filter((r) => r.row.retired === true)) {
+      editRow(head, row.careers_url, ({ retired, retired_reason, ...rest }) => rest);
+    }
+    const r = run(head, ['--base', empty]);
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /counts as new/);
-  } finally { rmSync(empty, { recursive: true, force: true }); }
+  } finally {
+    rmSync(empty, { recursive: true, force: true });
+    rmSync(head, { recursive: true, force: true });
+  }
 });
 
 test('--base: a deleted row fails; rows are retired, never deleted', () => {
