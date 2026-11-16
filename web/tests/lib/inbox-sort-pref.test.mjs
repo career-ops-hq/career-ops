@@ -80,4 +80,8 @@ test("picking a sort only changes the view; Make default is what saves it", () =
   assert.match(triage, /"✓ Default" : "Make default"/);
   // A failed save is shown, not swallowed.
   assert.match(triage, /Can’t save in this browser/);
+  // Another tab's save updates the saved default only, never this tab's view.
+  assert.match(triage, /window\.addEventListener\("storage", onStorage\)/);
+  assert.match(triage, /window\.removeEventListener\("storage", onStorage\)/);
+  assert.match(triage, /event\.key !== INBOX_SORT_STORAGE_KEY\) return;\s*setDefaultSort\(readInboxSort\(browserStorage\(\)\)\);/);
 });

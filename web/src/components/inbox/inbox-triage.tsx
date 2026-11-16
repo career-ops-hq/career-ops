@@ -21,7 +21,7 @@ import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
-import { DEFAULT_INBOX_SORT, readInboxSort, writeInboxSort } from "@/lib/inbox-sort-pref.mjs";
+import { DEFAULT_INBOX_SORT, INBOX_SORT_STORAGE_KEY, readInboxSort, writeInboxSort } from "@/lib/inbox-sort-pref.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
@@ -93,6 +93,16 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     }
     setLoaded(true);
     // First SSR inbox only — later refreshes prune via the inbox effect below.
+  }, []);
+  // Another tab saved a default: keep the pill honest. Only defaultSort follows;
+  // sortMode stays, so this tab's current view is not changed under the user.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== INBOX_SORT_STORAGE_KEY) return;
+      setDefaultSort(readInboxSort(browserStorage()));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
   useEffect(() => {
     function read() {

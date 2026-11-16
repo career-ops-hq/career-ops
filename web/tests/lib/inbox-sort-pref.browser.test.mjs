@@ -16,7 +16,8 @@ test("Make default saves the sort; picking a sort alone does not; bad values fal
   const { chromium } = await import("playwright-core");
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   t.after(() => browser.close());
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("console", (message) => {
@@ -91,6 +92,20 @@ test("Make default saves the sort; picking a sort alone does not; bad values fal
   await reload();
   assert.equal(await pressed(fit), "true");
   await until(async () => (await isDefault.count()) === 1);
+
+  // Two tabs: saving a default in one updates the other tab's pill, but not its view.
+  const tabB = await context.newPage();
+  await tabB.goto(`${origin.origin}/pipeline`);
+  const sortB = tabB.getByRole("group", { name: "Sort inbox" });
+  await sortB.getByRole("button", { name: "✓ Default" }).waitFor(); // Best fit is the default here
+  await newest.click();
+  await makeDefault.click();
+  await until(async () => (await stored()) === "newest");
+  // Tab B still views Best fit, now offers to make it the default again.
+  await sortB.getByRole("button", { name: "Make default" }).waitFor();
+  assert.equal(await sortB.getByRole("button", { name: "Best fit" }).getAttribute("aria-pressed"), "true");
+  await tabB.close();
+  await page.evaluate((k) => localStorage.setItem(k, "fit"), KEY);
 
   // Storage refusing writes for this key (private mode, quota): the page works, the view still
   // changes, and Make default says it could not save instead of pretending it did.
