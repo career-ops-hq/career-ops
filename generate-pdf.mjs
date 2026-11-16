@@ -1638,10 +1638,12 @@ export function resolveArtifactKind(explicit, outputPath) {
   // in step with parseOutputName(). Exactly one kind token, else it falls
   // through (a name carrying two is ambiguous without the report's company).
   const stdName = name.replace(/\.overflow(-\d+)?$/, '');
+  // Count kind tokens as whole hyphen-delimited parts, so adjacent tokens
+  // ("-cover-cv-") are both seen rather than one eating the other's separator.
   const stdKinds = /^\d{3,}-.+-\d{4}-\d{2}-\d{2}(?:-[a-z0-9]+)*$/.test(stdName)
-    ? stdName.match(/-(cv|cover)-/g) || []
+    ? stdName.split('-').filter((part) => part === 'cv' || part === 'cover')
     : [];
-  if (stdKinds.length === 1) return { kind: stdKinds[0].slice(1, -1), source: 'name' };
+  if (stdKinds.length === 1) return { kind: stdKinds[0], source: 'name' };
   if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
   if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
     return { kind: 'cover', source: 'name' };
