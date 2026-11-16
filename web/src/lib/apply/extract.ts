@@ -191,7 +191,20 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         }
         if (name) seenRadio.add(name);
         const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
-        const options = group.map((r) => clean(labelFor(r) || (r as HTMLInputElement).value)).filter(Boolean);
+        const labeled = group.map((r) => clean(labelFor(r)));
+        // Pass the choice words in, or the first wrapping label is read as the question
+        // and that choice is then replaced by its value.
+        const question = clean(groupLabel(el, labeled));
+        // The same text on every radio is the question or the input name, not a
+        // choice. Use each input's value so Yes and No stay distinct.
+        const shared = labeled.length > 1 && labeled.every((text) => text && text === labeled[0]);
+        const options = group.map((r, i) => {
+          const value = clean((r as HTMLInputElement).value);
+          const text = labeled[i];
+          const rawName = (r as HTMLInputElement).name || "";
+          if (!text || text === rawName || (question && text === question) || (shared && value)) return value || text;
+          return text || value;
+        }).filter(Boolean);
         group.forEach((r, i) => {
           r.setAttribute("data-co-field", fid);
           r.setAttribute("data-co-option", options[i] ?? String(i));
