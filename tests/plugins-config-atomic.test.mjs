@@ -1,4 +1,3 @@
-// A crash while publishing config/plugins.yml must leave the previous file.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire, syncBuiltinESMExports } from 'node:module';

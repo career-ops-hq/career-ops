@@ -478,7 +478,7 @@ export function setPluginEnabled(root, id, on, settings) {
     writeFileSync(tmp, text, 'utf8');
     renameSync(tmp, file);
   } catch (err) {
-    try { rmSync(tmp, { force: true }); } catch { /* the publish error is the one to surface */ }
+    try { rmSync(tmp, { force: true }); } catch {}
     throw err;
   }
 }
