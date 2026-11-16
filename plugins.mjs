@@ -544,7 +544,9 @@ function resolveLinkTarget(parentDir, link, expanding = new Set()) {
   const body = path.isAbsolute(link) ? link.slice(root.length) : link;
   // On POSIX a backslash is a filename character. Windows accepts both separators.
   const separators = path.sep === '\\' ? /[/\\]/ : /\//;
-  const segments = body.split(separators).filter((seg) => seg !== '' && seg !== '.');
+  // Keep ".". Dropping it turns "regular/." into "regular" and the save
+  // overwrites that file. A dot after a non-directory fails below.
+  const segments = body.split(separators).filter((seg) => seg !== '');
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (seg === '..') {

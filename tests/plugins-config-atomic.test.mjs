@@ -304,3 +304,37 @@ test('a non-directory step in a link target does not choose another file', async
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a dot after a file does not overwrite that file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-dot-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const regular = join(config, 'regular');
+  try {
+    mkdirSync(config);
+    writeFileSync(regular, 'keep\n');
+    symlinkSync('regular/.', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?dot=${Date.now()}`);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ENOTDIR',
+    );
+    assert.equal(readFileSync(regular, 'utf8'), 'keep\n');
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+
+    rmSync(link);
+    mkdirSync(join(config, 'nested'));
+    symlinkSync('nested/./target.yml', link);
+    const again = await import(`${PLUGINS}?dotdir=${Date.now()}`);
+    again.setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' });
+    assert.match(readFileSync(join(config, 'nested', 'target.yml'), 'utf8'), /enabled: true/);
+    assert.equal(readFileSync(regular, 'utf8'), 'keep\n');
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
