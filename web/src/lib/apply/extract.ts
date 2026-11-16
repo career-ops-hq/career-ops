@@ -114,9 +114,11 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         for (const c of Array.from(cands)) {
           const t = pure(c);
           // Keep a long title. clean() shortens what is shown, and the trailing
-          // star is read from this full text. A 160-character cut here would
-          // drop a star that sits past the cut.
-          if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
+          // star is read from this full text. Options are stored already cut to
+          // 160 characters, so compare that cut too. Otherwise a long option
+          // looks like the question, and a star on the option marks the group.
+          const shown = clean(t).toLowerCase();
+          if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !optSet.has(shown) && !isUuid(t) && !isGenericPh(t)) return t;
         }
       }
       return "";

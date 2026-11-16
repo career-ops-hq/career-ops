@@ -19,6 +19,7 @@ const longStar = `${"A".repeat(160)} *`;
 const innerStar = `${"A".repeat(159)}* optional`;
 const longRadio = `${"B".repeat(160)} *`;
 const innerRadio = `${"C".repeat(159)}* and more`;
+const longOption = `${"D".repeat(160)} *`;
 
 test("a trailing star marks the field required", async (t) => {
   const pageHtml = html.replace("</form>", `
@@ -35,6 +36,10 @@ test("a trailing star marks the field required", async (t) => {
     <p class="question">${innerRadio}</p>
     <label><input type="radio" name="innerq" value="1"> Yes</label>
     <label><input type="radio" name="innerq" value="0"> No</label>
+  </div>
+  <div class="field">
+    <label><input type="radio" name="longopt" value="1"> ${longOption}</label>
+    <label><input type="radio" name="longopt" value="0"> No</label>
   </div>
 </form>`);
   const server = createServer((req, res) => {
@@ -71,6 +76,10 @@ test("a trailing star marks the field required", async (t) => {
     assert.equal(longQ.required, true);
     assert.ok(innerQ);
     assert.equal(innerQ.required, false);
+    const longOpt = form.fields.find((f) => f.type === "radio" && f.options?.includes("D".repeat(160)));
+    assert.ok(longOpt);
+    assert.equal(longOpt.label, "longopt");
+    assert.equal(longOpt.required, false);
   } finally {
     try {
       await browser?.close();
