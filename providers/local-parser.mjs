@@ -102,6 +102,9 @@ function dataLocalRoot() {
     return null;
   }
   if (dataRoot === PROJECT_ROOT) return null;
+  // A local/ that is a symlink out of the data root (to /usr/bin, say) would
+  // make its target the allowed folder. Refuse it.
+  if (!isInside(localDir, dataRoot)) return null;
   return { dataRoot, localDir };
 }
 

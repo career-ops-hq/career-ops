@@ -115,6 +115,34 @@ try {
     pass('symlink case skipped: this platform could not create a symlink');
   }
 
+  // 3b. A local/ folder that is itself a symlink out of the data root is not
+  //     an allowed folder; one that points inside the data root still is.
+  if (symlinked) {
+    const linkedRoot = join(base, 'linked-local-root');
+    mkdirSync(linkedRoot, { recursive: true });
+    symlinkSync(outside, join(linkedRoot, 'local'), 'dir');
+    process.env.CAREER_OPS_ROOT = linkedRoot;
+    if (localParser.detect(entry('local/evil.mjs')) === null) {
+      pass('detect() refuses a parser when <DATA_ROOT>/local is a symlink out of the data root');
+    } else {
+      fail('detect() accepted a parser through a local/ symlink that leaves the data root');
+    }
+
+    const innerRoot = join(base, 'inner-local-root');
+    mkdirSync(join(innerRoot, 'parsers'), { recursive: true });
+    writeFileSync(join(innerRoot, 'parsers', 'acme-jobs.mjs'), PARSER_SOURCE);
+    symlinkSync(join(innerRoot, 'parsers'), join(innerRoot, 'local'), 'dir');
+    process.env.CAREER_OPS_ROOT = innerRoot;
+    if (localParser.detect(entry('local/acme-jobs.mjs'))) {
+      pass('detect() accepts a parser when <DATA_ROOT>/local links to a folder inside the data root');
+    } else {
+      fail('detect() rejected a local/ symlink that stays inside the data root');
+    }
+    process.env.CAREER_OPS_ROOT = dataRoot;
+  } else {
+    pass('local/ symlink cases skipped: this platform could not create a symlink');
+  }
+
   // 4. With the data root at the checkout (no override), nothing changes.
   process.env.CAREER_OPS_ROOT = ROOT;
   if (localParser.detect(entry(localScript)) === null) {
