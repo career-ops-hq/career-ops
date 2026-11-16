@@ -1598,12 +1598,16 @@ export function structuredAssociationClaims(targetText, sourceTexts, config = {}
   // Cover prose has no job classes. Reuse the employer reader rather than
   // treating the addressed company or a future plan as employment evidence.
   const prose = removeBalancedElements(String(targetText), /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])job(?![\w-])[^"]*"[^>]*>/gi);
-  for (const statement of factStatements(prose)) {
+  for (const statement of sourceStatementsOf(prose)) {
     if (!metricClaims(statement).size || FORWARD_MARKER_RE.test(statement)) continue;
     const employers = factClaims(statement).filter(claim => claim.kind === 'employer');
     if (employers.length !== 1) continue;
-    const matches = experience.filter(entry => sourceContainsFact(norm(entry.company), employers[0].value));
-    if (!matches.length) continue;
+    const employer = employers[0].value;
+    const exact = experience.filter(entry => norm(entry.company) === employer);
+    const matches = exact.length ? exact
+      : experience.filter(entry => sourceContainsFact(norm(entry.company), employer));
+    // A shortened name must identify one employer, not pool different jobs.
+    if (!matches.length || new Set(matches.map(entry => norm(entry.company))).size !== 1) continue;
     metricContexts.push({ lines: [statement], sources: matches.flatMap(entry => sourceStatementsOf(entry.body)) });
   }
   for (const context of metricContexts) {
@@ -1649,7 +1653,7 @@ const BLOCK_END_RE = /^\s*(?:#|\|)|^\s*\*\*[^*]+\*\*\s*$|(?:\\|\s{2}|>)$/u;
  * continues the previous one unless it opens its own block, the previous line
  * closes one, or either line is blank.
  *
- * This runs on source text only. In generated text a newline separates
+ * This runs on source text and cover prose only. In structured generated text a newline separates
  * elements, so factStatements keeps splitting on every newline there; joining
  * soft wraps in generated text regresses the "a phrase spanning two statements
  * is not a claim" self-test.

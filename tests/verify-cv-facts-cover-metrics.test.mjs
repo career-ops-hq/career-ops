@@ -192,3 +192,28 @@ test('a structured job is not checked a second time as cover prose', () => {
     assert.equal(contexts(result).length, 1, JSON.stringify(result));
   }
 });
+
+
+test('soft-wrapped cover statements retain their employer and metric', () => {
+  for (const html of [true, false]) {
+    for (const newline of ['\n', '\r\n']) {
+      const result = check(`At Acme Corp, I cut claim-form${newline}rendering 92%.`, { html });
+      assert.equal(result.verdict, 'warn', JSON.stringify(result));
+      assert.equal(contexts(result).length, 1);
+      assert.equal(check(`At Acme Corp, I cut duplicate${newline}records 92%.`, { html }).verdict, 'pass');
+    }
+  }
+});
+
+test('an exact employer takes precedence over a longer employer sharing its name', () => {
+  const sourceText = CV.replace('### Acme Corp', '### Acme').replace('### Globex', '### Acme Labs');
+  assert.equal(check('At Acme, I cut duplicate records 92%.', { sourceText }).verdict, 'pass');
+  const result = check('At Acme, I cut cloud spend 92%.', { sourceText });
+  assert.equal(result.verdict, 'warn', JSON.stringify(result));
+  assert.equal(contexts(result).length, 1);
+});
+
+test('a shortened employer shared by multiple jobs is left ambiguous', () => {
+  const sourceText = CV.replace('### Globex', '### Acme Labs');
+  assert.deepEqual(contexts(check('At Acme, I cut claim-form rendering 92%.', { sourceText })), []);
+});
