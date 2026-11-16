@@ -1638,10 +1638,15 @@ export function resolveArtifactKind(explicit, outputPath) {
   // in step with parseOutputName(). Exactly one kind token, else it falls
   // through (a name carrying two is ambiguous without the report's company).
   const stdName = name.replace(/\.overflow(-\d+)?$/, '');
-  // Count kind tokens as whole hyphen-delimited parts, so adjacent tokens
-  // ("-cover-cv-") are both seen rather than one eating the other's separator.
-  const stdKinds = /^\d{3,}-.+-\d{4}-\d{2}-\d{2}(?:-[a-z0-9]+)*$/.test(stdName)
-    ? stdName.split('-').filter((part) => part === 'cv' || part === 'cover')
+  // Count only the kind words between two dashes in the name's head
+  // (`{company}-{kind}-{candidate}`), as parseOutputName() does: a company that
+  // starts with "Cover" or a candidate that ends with it carries no second
+  // kind, while adjacent tokens ("-cover-cv-") are both seen. Read inline
+  // rather than imported (fixtures copy a fixed list of imports);
+  // tests/pdf-index-kind.test.mjs keeps it in step with the builder.
+  const stdHead = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?$/.exec(stdName);
+  const stdKinds = stdHead
+    ? stdHead[1].split('-').slice(1, -1).filter((part) => part === 'cv' || part === 'cover')
     : [];
   if (stdKinds.length === 1) return { kind: stdKinds[0], source: 'name' };
   if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };

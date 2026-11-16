@@ -128,6 +128,8 @@ const kindCases = [
   [undefined, 'output/031-acme-cv-dana-quinn-2026-11-09.pdf', 'cv', 'name', 'a standard cv name reads as a CV (#6667)'],
   [undefined, 'output/031-acme-cover-dana-quinn-2026-11-09.overflow.pdf', 'cover', 'name', 'an overflow draft keeps the standard kind'],
   [undefined, 'output/031-acme-cover-cv-dana-quinn-2026-11-09.pdf', 'cv', 'default', 'adjacent kind tokens are ambiguous, not read as one (#6667)'],
+  [undefined, 'output/031-cover-genius-cover-dana-quinn-2026-11-09.pdf', 'cover', 'name', 'a company that starts with a kind word has one kind (#6667)'],
+  [undefined, 'output/031-acme-cover-jane-cover-2026-11-09.pdf', 'cover', 'name', 'a candidate that ends with a kind word has one kind (#6667)'],
   [undefined, 'output/acme.pdf', 'cv', 'default', 'a name that signals nothing falls back to CV'],
 ];
 for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
@@ -255,8 +257,8 @@ for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
   const bad = [];
   let built = 0;
   for (const kind of ['cv', 'cover']) {
-    for (const company of ['acme', 'northwind-labs', 'the-cvx-centre']) {
-      for (const candidate of ['dana-quinn', 'robin-jones']) {
+    for (const company of ['acme', 'northwind-labs', 'the-cvx-centre', 'cover-genius', 'cv-tools']) {
+      for (const candidate of ['dana-quinn', 'robin-jones', 'jane-cover']) {
         for (const variant of [undefined, 'ats']) {
           // A valid builder input must build: a throw is a failure, not a skip.
           const name = buildOutputName({ report: 31, company, kind, candidate, date: '2026-11-09', variant, ext: 'pdf' });
@@ -267,7 +269,7 @@ for (const [explicit, path, wantKind, wantSource, label] of kindCases) {
       }
     }
   }
-  bad.length === 0 && built === 24
+  bad.length === 0 && built === 60
     ? pass('resolveArtifactKind agrees with buildOutputName for standard names')
     : fail(`resolveArtifactKind disagrees with buildOutputName: ${bad.join('; ')}`);
 }
