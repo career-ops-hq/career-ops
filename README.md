@@ -345,6 +345,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`cover`](modes/cover.md) | Cover letter, from a pasted JD or an evaluated report (`cover {slug}`) |
 | [`email`](modes/email.md) | Formal application email draft. Draft-only: never sends, submits or clicks |
 | [`contacto`](modes/contacto.md) | Find the hiring manager, recruiter or a peer, and draft a LinkedIn message |
+| [`gambit`](modes/gambit.md) | Pitch a role a company has not posted: research an evidenced need, then draft the role, CV, cover letter and pitch. Draft-only: never sends |
 | [`apply`](modes/apply.md) | Live application assistant (Playwright from this checkout). Does not submit |
 
 **Interview**

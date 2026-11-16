@@ -16,6 +16,7 @@ import { openTrackerTransaction } from '../tracker-utils.mjs';
 import { parseStatusLog } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
 import { daysBetween, isoMinusDays, noteTag, classifyRows } from '../close-stale.mjs';
+import { loadClosedNoResponse } from '../calibrate.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -326,6 +327,41 @@ test('close-stale is a member of the status-log source set and kept out of day-m
   assert.deepEqual(unparseable, []);
   assert.equal(observations.length, 1);
   assert.equal(observations[0].dayMath, false, 'a declared silence is not an observed hop');
+});
+
+test('calibrate counts a closed row as no_response and a reopened one as in flight', () => {
+  const reopened = `2\t2026-06-20\tApplied\tDiscarded\tclose-stale\t60d\n2\t2026-06-25\tDiscarded\tApplied\tset-status\t\n`;
+  withRoot([row(1, OLD, 'Quiet Co', 'Applied'), row(2, OLD, 'Back Co', 'Applied')], { 'status-log.tsv': reopened }, ({ root }) => {
+    const closed = run(root, ['--confirm']);
+    assert.equal(closed.status, 0, describeSpawn(closed));
+    const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '' };
+    const r = spawnSync(process.execPath, [join(ROOT, 'calibrate.mjs'), '--json', '--min-band-n', '1'], { encoding: 'utf-8', env });
+    assert.equal(r.status, 0, describeSpawn(r));
+    const result = JSON.parse(r.stdout);
+    assert.equal(result.resolved, 1);
+    assert.equal(result.inFlight, 1);
+    assert.equal(result.bands.reduce((sum, b) => sum + b.interviews, 0), 0);
+  });
+});
+
+test('calibrate reads close-stale lines beside the tracker, after an undo, past a bad line, and never for a shared #', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'close-stale-calibrate-'));
+  try {
+    writeFileSync(join(dir, 'status-log.tsv'), [
+      `1\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d`,
+      `1\t${TODAY}\tDiscarded\tApplied\tset-status\t`,
+      `1\t${TODAY}\t-\t-\tset-status\tundo Discarded → Applied`,
+      `2\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d`,
+      '2\tnot-a-date',
+      `3\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d`,
+      '',
+    ].join('\n'));
+    const states = loadCanonicalStates(join(ROOT, 'templates', 'states.yml'));
+    const rows = [{ num: 1 }, { num: 2 }, { num: 3 }, { num: 3 }];
+    assert.deepEqual(loadClosedNoResponse(join(dir, 'applications.md'), rows, states), new Map([[1, 'discarded'], [2, 'discarded']]));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('classifyRows is pure: the same input classifies the same way', () => {

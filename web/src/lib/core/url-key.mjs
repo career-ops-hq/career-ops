@@ -193,12 +193,30 @@ export function postingUrlRelation(rawA, rawB) {
   const a = postingLanguageKey(rawA);
   const b = postingLanguageKey(rawB);
   if (!a.key || !b.key) return "no-key";
-  if (a.key !== b.key) return "distinct";
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return "distinct";
   if (a.language === b.language) {
     if (a.language && a.script && b.script && a.script !== b.script) return "distinct";
     return "same";
   }
   return a.language && b.language ? "distinct" : "one-sided-language";
+}
+
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an
+ * extracted id, whatever the rest of the query says, or one path on an ATS
+ * host whose spellings it folds, with the same query.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes("://")) return true;
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [

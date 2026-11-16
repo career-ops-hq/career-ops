@@ -463,7 +463,8 @@ export function languageSubtag(value) {
  * What two posting URLs say about whether they name the same posting.
  *
  * - `'no-key'`: either side has no key — no evidence at all.
- * - `'same'`: the same page in the same language, or both without one.
+ * - `'same'`: the same page in the same language, or both without one. Two
+ *   spellings of one posting count as one page (sameJobSpelling()).
  * - `'distinct'`: two different pages, or the same page in two known,
  *   different languages — two language versions of one posting are kept as
  *   two tracker rows. Two known, different SCRIPTS of one language count here
@@ -496,7 +497,7 @@ export function postingUrlRelation(rawA, rawB) {
  */
 export function relatePostingLanguageKeys(a, b) {
   if (!a.key || !b.key) return 'no-key';
-  if (a.key !== b.key) return 'distinct';
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return 'distinct';
   if (a.language === b.language) {
     // One language, two scripts: two versions, not one page. Only when BOTH
     // sides actually state a script — `zh` vs `zh-Hant` stays 'same', because
@@ -505,6 +506,29 @@ export function relatePostingLanguageKeys(a, b) {
     return 'same';
   }
   return a.language && b.language ? 'distinct' : 'one-sided-language';
+}
+
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an id
+ * it extracts (the same Greenhouse or SmartRecruiters id on two hosts), which
+ * names the posting whatever the rest of the query says, or, with the same
+ * query, one path on an ATS host whose spellings it folds (a Lever `/apply`
+ * form, an Ashby `/application` tab, a Workable account page). Its other folds
+ * are no evidence here: it lowercases every path, strips every trailing slash
+ * and drops `ref` and `source`, and a generic site may tell pages apart by any
+ * of those.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes('://')) return true;
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [
