@@ -18,7 +18,7 @@
 
 import path from 'path';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
+import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -476,20 +476,43 @@ export function setPluginEnabled(root, id, on, settings) {
   // Node's default mode is 0o666, and the mode passed to writeFileSync is
   // still narrowed by the umask. chmod restores the exact bits, so a 0640
   // config stays 0640 after the rename.
+  const dest = resolvedConfigFile(file);
   let mode;
   try {
-    mode = statSync(file).mode & 0o777;
+    mode = statSync(dest).mode & 0o777;
   } catch (err) {
     if (err?.code !== 'ENOENT') throw err;
   }
-  const tmp = path.join(root, 'config', `.plugins.yml.${process.pid}.${randomUUID()}.tmp`);
+  const tmp = path.join(path.dirname(dest), `.plugins.yml.${process.pid}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmp, text, mode == null ? 'utf8' : { encoding: 'utf8', mode });
     if (mode != null) chmodSync(tmp, mode);
-    renameSync(tmp, file);
+    renameSync(tmp, dest);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch {}
     throw err;
+  }
+}
+
+/**
+ * The file rename publishes onto. A symlink stays a symlink: the temp file is
+ * written next to the target and renamed over that target.
+ *
+ * @param {string} file
+ * @returns {string}
+ */
+function resolvedConfigFile(file) {
+  try {
+    if (!lstatSync(file).isSymbolicLink()) return file;
+  } catch (err) {
+    if (err?.code === 'ENOENT') return file;
+    throw err;
+  }
+  try {
+    return realpathSync(file);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+    return path.resolve(path.dirname(file), readlinkSync(file));
   }
 }
 
