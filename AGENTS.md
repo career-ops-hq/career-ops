@@ -105,9 +105,9 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 - **Project context:** `pi` reads `AGENTS.md` from the repo root automatically; there is no wrapper file to keep in sync.
 - **Skill:** Pi discovers the shared router at `.agents/skills/career-ops/SKILL.md`, exposed as `/skill:career-ops`. Pi 0.79.0 and later discover it only in a trusted folder: run `/trust` once in the repo, then restart `pi` before `/skill:career-ops` (`/trust` applies to future Pi processes), or start with `--skill .agents/skills/career-ops`, which loads the router whether or not the folder is trusted.
 - **Interactive:** run `pi` in the repo root, then `/skill:career-ops <mode>`.
-- **Headless:** `pi -p --no-approve --skill .agents/skills/career-ops "prompt"` for one-shot workers, on Pi 0.79.1 or later; add `--mode json` when the caller parses events. `--no-approve` runs the worker with the folder untrusted, even if you trusted it before, so the checkout's extensions and `.pi/` resources stay out; `--skill` still loads the router, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder. Never give a worker `-a`: it trusts the checkout for the run and executes its project extensions without asking.
+- **Headless:** `pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops <request>"` for one-shot workers, on Pi 0.79.1 or later; add `--mode json` when the caller parses events. Start the prompt with `/skill:career-ops`: Pi then puts the whole router in the prompt, while a plain prompt shows the model only the skill's name and description. `--no-approve` runs the worker with the folder untrusted, even if you trusted it before, so the checkout's extensions and `.pi/` resources stay out; `--skill` still loads the router, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder. Never give a worker `-a`: it trusts the checkout for the run and executes its project extensions without asking.
 - **Workers:** Pi never asks before a tool call, and its default tools include bash, edit and write. The web runs the `evaluate`, `research`, `cover` and `pdf` workers without write tools (`pdf` without Bash too), so never run evaluations (`oferta`, `auto-pipeline`, batch), research, cover letters or CV PDFs headless under Pi (see `docs/SUPPORTED_CLIS.md`).
-- **Example:** `pi -p --no-approve --skill .agents/skills/career-ops "Run career-ops tracker mode"`
+- **Example:** `pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops tracker"`
 
 ### Oh My Pi (omp) invocation
 
@@ -607,7 +607,7 @@ Headless worker command per CLI:
 |-----|---------|
 | Claude Code | `claude -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
-| Pi | `pi -p --no-approve --skill .agents/skills/career-ops "prompt"` (Pi 0.79.1+; no `evaluate`, `research`, `cover` or `pdf` worker: see **Pi invocation**) |
+| Pi | `pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+; no `evaluate`, `research`, `cover` or `pdf` worker: see **Pi invocation**) |
 | Copilot CLI | `copilot -p "prompt"` |
 | Codex | `codex exec "prompt"` |
 | Qwen | `qwen -p "prompt"` |

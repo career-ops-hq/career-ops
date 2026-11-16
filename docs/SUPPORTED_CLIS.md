@@ -8,7 +8,7 @@ Career-ops is AI-agnostic and runs on several command-line agent tools. The core
 | Cursor | `AGENTS.md` | Interactive: open the project in Cursor and ask for `career-ops` (auto-discovered from `.agents/skills/career-ops/SKILL.md`) |
 | Codex | `CODEX.md` (see [`docs/CODEX.md`](CODEX.md)) | Interactive: `codex` (then use plain text). Headless/Batch: `codex exec "prompt"` |
 | OpenCode | `OPENCODE.md` | Interactive: `opencode` (then `/career-ops`). Headless/Batch: `opencode run "prompt"` |
-| Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --no-approve --skill .agents/skills/career-ops "prompt"` (Pi 0.79.1+) |
+| Pi | `AGENTS.md` | Interactive: `pi` (then `/skill:career-ops`). Headless/Batch: `pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+) |
 | Antigravity CLI | `AGENTS.md` | Interactive: `agy` (then `/career-ops`). Headless/Batch: `agy -p "prompt"` |
 | Grok Build CLI | `AGENTS.md` | Interactive: `grok` (then `/career-ops`). Headless/Batch: `grok -p "prompt"` (add `--yolo` to auto-approve tool executions) |
 | Qwen | `AGENTS.md` | Interactive: `qwen`. Headless/Batch: `qwen -p "prompt"` |
@@ -29,14 +29,14 @@ Pi needs no wrapper file: it reads `AGENTS.md` from the working directory as pro
 ```bash
 cd career-ops
 pi                                          # interactive
-pi -p --no-approve --skill .agents/skills/career-ops "Run career-ops tracker mode and summarize the current statuses."
+pi -p --no-approve --skill .agents/skills/career-ops "/skill:career-ops tracker"
 ```
 
 ### Project trust
 
 Pi 0.79.0 added a per-folder trust decision. Until you trust a folder, Pi skips its project resources: `.pi/` settings, extensions, skills, prompts and themes, and the skills in `.agents/skills/`. In interactive mode, run `/trust` once inside the repo and restart `pi` so the project skill loads (`/trust` applies to future Pi processes).
 
-A headless worker needs only the router and `AGENTS.md`. `--skill .agents/skills/career-ops` loads the router whether or not the folder is trusted, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder too. `--no-approve` treats the folder as untrusted for the run, even when you trusted it before or set `defaultProjectTrust` to `always`, so the checkout's extensions never run inside a worker.
+A headless worker needs only the router and `AGENTS.md`. `--skill .agents/skills/career-ops` registers the router whether or not the folder is trusted, and Pi 0.79.1 and later load `AGENTS.md` in an untrusted folder too. A registered skill reaches the model as a name and a description, and the model reads the rest only if it chooses to. Start the prompt with `/skill:career-ops` and Pi puts the whole `SKILL.md` in the prompt, print mode included. `--no-approve` treats the folder as untrusted for the run, even when you trusted it before or set `defaultProjectTrust` to `always`, so the checkout's extensions never run inside a worker.
 
 `-a` (`--approve`) does the opposite and trusts the folder for one run. Pi then loads every project resource, installs missing project packages, and executes the project's extensions in its own process, with your permissions, without asking. Keep it for an interactive session in a checkout whose `.pi/` and `.agents/skills/` you have reviewed, and never give it to a worker.
 
@@ -46,7 +46,7 @@ Run headless workers on Pi 0.79.1 or later. Pi 0.79.0 does not load `AGENTS.md` 
 
 Pi never asks before a tool call: a headless run calls any tool it has, and the default set includes bash, edit and write. The web runs the `evaluate`, `research` and `cover` workers without write tools, and `pdf` without write tools or Bash (#2172); the web writes their reports and renders the PDF itself. Run by hand, those workers need what the web withholds: an evaluation writes its report and tracker row, and a CV PDF needs Bash for `node generate-pdf.mjs`. A `--tools read,grep,find,ls` run cannot do that work, and the default set can change any file, so no Pi tool set matches the web's grant.
 
-So don't run evaluations (`oferta`, `auto-pipeline`, which also renders the CV PDF, and batch), research, cover letters (`cover`) or CV PDFs (`pdf`) as headless Pi workers. Use the web UI, or an interactive `pi` session you are watching.
+So don't run evaluations (`oferta`, `auto-pipeline`, which also renders the CV PDF, and batch), research, cover letters (`cover`) or CV PDFs (`pdf`) as headless Pi workers. Run them from the web UI with Claude Code, whose per-tool deny lists match each worker's grant, or in an interactive `pi` session you are watching. The web can run Pi too, but without those deny lists; each run's fencing notice says how much of the grant applied.
 
 ## Oh My Pi (omp)
 
