@@ -8,6 +8,7 @@ import { resolveSessionCv } from "@/lib/apply/cv";
 import { applyCvSource } from "@/lib/apply/cv-source.mjs";
 import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
 import { blankUnknownDraft, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
+import { guardAiDirectedAnswers } from "@/lib/apply/ai-directed-field.mjs";
 import { runPlanner } from "@/lib/apply/planner";
 import { extractJsonObject } from "@/lib/extract-json-object.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -139,9 +140,13 @@ export async function POST(req: Request) {
       } catch (error) {
         return fail(error instanceof Error ? error.message.slice(0, 200) : "could not read the profile");
       }
-      const answers = blankUnknownDraft(s.fields, obj, profile);
+      // A question addressed to an AI filling the form stays empty for the
+      // candidate, whatever the planner wrote (#7193). It runs after
+      // blankUnknownDraft, which rebuilds every answer and would drop the reason.
+      const { answers, flagged } = guardAiDirectedAnswers(s.fields, blankUnknownDraft(s.fields, obj, profile));
       const count = Object.keys(answers).length;
       log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
+      if (flagged.length) log(`Left ${flagged.length} AI-directed field(s) for you: ${flagged.join(", ")}`);
       emit({ t: "done", answers, truncated, count });
       controller.close();
     },
