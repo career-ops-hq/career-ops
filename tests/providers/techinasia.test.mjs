@@ -278,8 +278,9 @@ try {
   const capWarnings = [];
   console.warn = (msg) => capWarnings.push(String(msg));
   let capCalls = 0;
+  let capped = [];
   try {
-    await techinasia.fetch(
+    capped = await techinasia.fetch(
       { name: 'X', provider: 'techinasia' },
       {
         fetchText: async (url) => (url.includes('/jobs/search') ? sampleHtml : appJs),
@@ -299,6 +300,12 @@ try {
     pass('techinasia.fetch() warns that the cap cut a healthy board short');
   } else {
     fail(`techinasia.fetch() truncation warnings = ${JSON.stringify(capWarnings)}`);
+  }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === capped.length && capped.length === 5) {
+    pass('techinasia.fetch() marks the board page-cap when the cap cut it short');
+  } else {
+    fail(`techinasia.fetch() cap cut: ${capped.length} jobs, truncated = ${JSON.stringify(capped.truncated)}`);
   }
 
   // A probe asks whether the board is live, not what it contains.
@@ -332,6 +339,8 @@ try {
   } else {
     fail(`techinasia.fetch() warned during a probe: ${JSON.stringify(probeWarnings)}`);
   }
+  if (probe.truncated === undefined) pass('techinasia.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`techinasia.fetch() probe was marked: ${JSON.stringify(probe.truncated)}`);
 
   // ── Contentless bodies are an empty board, not a broken one ───────────
   for (const emptyBody of [null, {}, { results: [] }]) {

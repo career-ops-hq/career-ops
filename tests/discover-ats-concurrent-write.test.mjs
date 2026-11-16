@@ -32,6 +32,10 @@ function fixture() {
     greenhouse.fetch = async () => [{ title: 'Engineer', url: 'https://example.test/job' }];
     const portals = process.env.CAREER_OPS_PORTALS;
     const role = process.env.DISCOVERY_WRITER;
+    // The pipeline lock follows the real file. /var and /private/var are the
+    // same directory on macOS, and mkdir is called with the real spelling.
+    let canonicalLock = portals + '.lock';
+    try { canonicalLock = fs.realpathSync(portals) + '.lock'; } catch { /* the path is already the one mkdir will use */ }
     const write = fs.writeFileSync;
     const rename = fs.renameSync;
     const mkdir = fs.mkdirSync;
@@ -54,7 +58,7 @@ function fixture() {
     fs.mkdirSync = function(file, ...args) {
       try { return mkdir.call(this, file, ...args); }
       catch (error) {
-        if (role === 'second' && String(file) === portals + '.lock' && error.code === 'EEXIST') {
+        if (role === 'second' && (String(file) === canonicalLock || String(file) === portals + '.lock') && error.code === 'EEXIST') {
           write(portals + '.second-waiting', 'ready');
         }
         throw error;

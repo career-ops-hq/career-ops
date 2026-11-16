@@ -15,6 +15,27 @@ nothing leaves your machine until you press Submit yourself).
 
 <!-- ENTRIES -->
 
+<!-- hire n=25 level=role role="Information Technology Engineer" sector="MSP" geo="Colorado" weeks=12 link="https://github.com/career-ops-hq/career-ops/issues/4918" -->
+### Hire #25
+
+> Landed an Information Technology Engineer role after a multi-round process, including a values-alignment presentation to the hiring panel. career-ops tracked 25+ evaluations, built
+
+**Information Technology Engineer** · MSP · Colorado · 12 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4918)
+
+<!-- hire n=24 level=handle handle=briacSck role="Country Launcher France / Head of Francophone Markets" sector="Corgi — YC-backed insurtech, London" geo="London, UK" weeks=5 link="https://github.com/career-ops-hq/career-ops/issues/4118" -->
+### Hire #24
+
+> career-ops scanned Corgi's whole job board in one pass and told me which of the six openings was actually mine, instead of me guessing. The outreach mode got me a warm LinkedIn int
+
+<a href="https://github.com/briacSck"><img src="https://github.com/briacSck.png?size=64" width="28" height="28" align="top" alt="@briacSck"> **@briacSck**</a> · Country Launcher France / Head of Francophone Markets · London, UK · 5 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/4118)
+
+<!-- hire n=23 level=handle handle=MainKataVerde role="Cash Solutions Technician (Productivity & Innovation)" sector="Multinational" weeks=1 link="https://github.com/career-ops-hq/career-ops/issues/7125" -->
+### Hire #23
+
+> Junior profile with a few months of QA and support experience. With career-ops I evaluated around 40 offers, prepared my emails and interviews, and reviewed the offer before signin
+
+<a href="https://github.com/MainKataVerde"><img src="https://github.com/MainKataVerde.png?size=64" width="28" height="28" align="top" alt="@MainKataVerde"> **@MainKataVerde**</a> · Cash Solutions Technician (Productivity &amp; Innovation) · 1 weeks · [story →](https://github.com/career-ops-hq/career-ops/issues/7125)
+
 <!-- hire n=22 level=handle handle=pelarson28 role="Customer Success Associate" sector="Startup (growth-stage)" geo="United States" weeks=10 link="https://github.com/career-ops-hq/career-ops/issues/6337" -->
 ### Hire #22
 

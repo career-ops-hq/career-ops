@@ -133,3 +133,16 @@ if (/A-G always/.test(oferta) && /Block H at or above 4\.5/.test(oferta) && !/A-
 } else {
   fail(`discovery menu line for oferta should say "A-G always" and "Block H at or above 4.5", not A-F: ${oferta || '(no oferta line found)'}`);
 }
+
+// gambit stops at its Step 3 checkpoint to let the candidate choose a role
+// thesis before any document exists. A worker has no way to ask the candidate,
+// so a delegated gambit either stopped before the theses or picked one alone
+// (#824).
+const delegatedModes = delegated.split('\n## ')[0];
+if (/`gambit`/.test(delegatedModes)) {
+  fail('gambit is listed under "Modes delegated to subagent": its Step 3 checkpoint needs the interactive session');
+} else if (!/Run `gambit` here, in the interactive session/.test(skill)) {
+  fail('router no longer says gambit runs in the interactive session');
+} else {
+  pass('gambit runs in the interactive session, so its Step 3 checkpoint reaches the candidate');
+}

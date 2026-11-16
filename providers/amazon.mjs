@@ -124,11 +124,20 @@ export default {
     for (let page = 0; page < maxPages; page++) {
       const url = buildQuery(entry, page * PAGE_SIZE);
       const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
+      // amazon.jobs refuses a request in-band: HTTP 200 with an `error` string and
+      // `jobs: null` ("Result limit cannot be greater than 100, ..."). Read as an
+      // empty page, that ended the walk as if the board had run out. A page is
+      // only a page when `jobs` is a list; an empty board answers `jobs: []`.
+      if (!Array.isArray(json?.jobs)) {
+        const inBand = typeof json?.error === 'string' && json.error.trim() ? json.error.trim().slice(0, 160) : '';
+        const keys = json && typeof json === 'object' ? Object.keys(json).join(', ') : json === null ? 'null' : typeof json;
+        throw new Error(`amazon: unexpected response for ${entry.name} — expected jobs[], got: ${inBand ? `error "${inBand}"` : `[${keys}]`}`);
+      }
       if (total === null && Number.isInteger(json?.hits)) {
         total = json.hits;
         if (!(probe > 0)) maxPages = Math.max(maxPages, Math.min(Math.ceil(total / PAGE_SIZE) + 1, HARD_MAX_PAGES));
       }
-      const postings = Array.isArray(json?.jobs) ? json.jobs : [];
+      const postings = json.jobs;
       if (postings.length === 0) { ended = true; break; }
 
       let fresh = 0;

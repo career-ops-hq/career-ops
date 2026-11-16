@@ -2,6 +2,7 @@ import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import type { CliSpec } from "@/lib/clis";
 
 /**
@@ -13,9 +14,11 @@ import type { CliSpec } from "@/lib/clis";
  * stdout/stderr with a heartbeat. Those are planner concerns, and a second
  * caller cannot reuse them while they sit inside a ReadableStream's start().
  *
- * Everything here is a relocation. The argv, the Claude carve-out and its
- * reasoning, the timeout formula, the heartbeat interval, and the resolve-on-
- * error behaviour are byte-for-byte what the route did.
+ * Everything here is a relocation, with one addition (a prompt too long for the
+ * command line goes through a file, see the spill below). The argv for a prompt
+ * that fits, the Claude carve-out and its reasoning, the timeout formula, the
+ * heartbeat interval, and the resolve-on-error behaviour are byte-for-byte what
+ * the route did.
  *
  * The planner's permissions live here too (#2507): the capability record it
  * runs under, the derived Claude deny list, the unfenced-runtime notice and the
@@ -61,16 +64,23 @@ export function runPlanner(opts: {
   /** Request start, so elapsed times in the log stay relative to the same t0 the caller reports. */
   t0: number;
   log: (m: string) => void;
+  /**
+   * Whose command-line limit decides if the prompt must move to a file. Defaults
+   * to this process's platform; exists so tests can exercise the Windows limit
+   * on any OS (mirrors spillOversizedPrompt's own parameter).
+   */
+  platform?: NodeJS.Platform;
 }): Promise<PlannerRun> {
-  const { cliId, spec, binPath, prompt, fieldCount, cwd, t0, log } = opts;
+  const { cliId, spec, binPath, prompt, fieldCount, cwd, t0, log, platform } = opts;
 
   const isClaude = cliId === "claude";
   // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
   // faster startup (skips the user's global playwright/gmail/linear/… servers
   // the planner doesn't need; it only reads local files).
-  const args = isClaude
-    ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed]
-    : spec.args(prompt);
+  const buildArgs = (p: string) =>
+    isClaude
+      ? ["-p", p, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed]
+      : spec.args(p);
   // A runtime with no verified fencing mechanism plans with its default access.
   // log() is the caller's non-fatal channel; it surfaces in the collapsed
   // "Pre-fill diagnostics" drawer, which is where the other planner facts go
@@ -88,10 +98,25 @@ export function runPlanner(opts: {
     // Read,Glob,Grep and denies WebFetch/WebSearch along with every write
     // tool, so Codex gets a true read-only sandbox here.
     let child;
+    let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
     try {
+      // The prompt inlines the user's durable notes, so it can outgrow the OS
+      // command-line limit (`spawn ENAMETOOLONG` on Windows). The planner already
+      // reads local files (Read,Glob,Grep on Claude, a read-only sandbox on
+      // Codex), so an oversized prompt goes to a file under the data root (cwd)
+      // and argv carries a pointer to it. A prompt that fits is untouched.
+      spill = spillOversizedPrompt({
+        prompt,
+        buildArgs,
+        binPath,
+        fencing: { cliId: spec.id, capabilities: CAPS.localReadOnly },
+        root: cwd,
+        platform,
+      });
+      if (spill.spilled) log(`Prompt too long for the command line (${prompt.length} chars) → passed to the planner in a file`);
       child = spawnHeadlessCli(
         binPath,
-        args,
+        spill.args,
         { cwd, env: process.env },
         // spec.id, not the caller's cliId: same value once resolveCli has
         // accepted it, but typed as the canonical id rather than the caller's
@@ -99,6 +124,7 @@ export function runPlanner(opts: {
         { cliId: spec.id, capabilities: CAPS.localReadOnly },
       );
     } catch (e) {
+      spill?.cleanup?.();
       // Fencing refuses an argv that contradicts the capability record. Resolve
       // with the reason so the caller reports it and closes its stream; an
       // escaping throw inside this executor would leave the promise pending
@@ -134,12 +160,14 @@ export function runPlanner(opts: {
     child.on("close", (code, signal) => {
       clearTimeout(killer);
       clearInterval(hb);
+      spill?.cleanup?.();
       resolve({ buf, code, signal });
     });
     child.on("error", (e) => {
       clearTimeout(killer);
       clearInterval(hb);
       log(`spawn error: ${e.message}`);
+      spill?.cleanup?.();
       resolve({ buf, code: null, signal: null });
     });
   });

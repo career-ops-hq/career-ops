@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -280,7 +281,7 @@ Consulta [docs/SETUP.md](docs/SETUP.md) para la guía de instalación completa, 
 
 ## Uso
 
-Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto.
+Pega la URL o la descripción de una oferta en tu CLI de IA. career-ops comprueba que una oferta enlazada siga abierta (un texto pegado no tiene enlace que comprobar), la puntúa frente a tu CV, escribe un informe, adapta tu CV (en PDF por defecto) y añade una fila a tu tracker. Eso cubre la mayoría de los días. Todo lo demás es un modo que pides por su nombre. Si no se puede leer una oferta, el pipeline se detiene y te pide que pegues el texto o compartas una captura de pantalla.
 
 ### Cómo pedir un modo
 

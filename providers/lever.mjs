@@ -3,6 +3,8 @@
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { workplaceField } from './_workplace-type.mjs';
+import { isWorkModelOnly } from './greenhouse.mjs';
 
 // Lever provider — hits the public postings endpoint.
 // Auto-detects from careers_url via jobs.(eu.)?lever.co/<slug>.
@@ -57,6 +59,29 @@ function resolveApiUrl(entry) {
 // does not count as already saying Remote.
 const REMOTE_WORD_RE = /(?<![\p{L}\p{M}\p{N}])remote(?![\p{L}\p{M}\p{N}])/iu;
 
+function resolveRawPlaces(categories) {
+  const primary = typeof categories?.location === 'string' ? categories.location.trim() : '';
+  const all = Array.isArray(categories?.allLocations)
+    ? categories.allLocations.filter(l => typeof l === 'string' && l.trim()).map(l => l.trim())
+    : [];
+  const merged = [];
+  for (const l of [primary, ...all]) {
+    if (l && !merged.some(m => m.toLowerCase() === l.toLowerCase())) merged.push(l);
+  }
+  return merged;
+}
+
+/**
+ * Deduplicated individual places from `categories.location` and `categories.allLocations`,
+ * in order, case-insensitively deduped, without appended "Remote" or work models.
+ * Exported for tests.
+ * @param {any} categories
+ * @returns {string[]}
+ */
+export function resolvePlaces(categories) {
+  return resolveRawPlaces(categories).filter(l => !isWorkModelOnly(l));
+}
+
 /** Fold `categories.location` together with any extra `categories.allLocations`
  *  into one string. Lever puts a SINGLE primary city in `location`, and exposes
  *  the full set on multi-location postings in `allLocations` — reading only the
@@ -72,14 +97,7 @@ const REMOTE_WORD_RE = /(?<![\p{L}\p{M}\p{N}])remote(?![\p{L}\p{M}\p{N}])/iu;
  *  @param {any} categories
  *  @param {unknown} workplaceType */
 function resolveLocation(categories, workplaceType) {
-  const primary = typeof categories?.location === 'string' ? categories.location.trim() : '';
-  const all = Array.isArray(categories?.allLocations)
-    ? categories.allLocations.filter(l => typeof l === 'string' && l.trim()).map(l => l.trim())
-    : [];
-  const merged = [];
-  for (const l of [primary, ...all]) {
-    if (l && !merged.some(m => m.toLowerCase() === l.toLowerCase())) merged.push(l);
-  }
+  const merged = resolveRawPlaces(categories);
   const remote = typeof workplaceType === 'string' && workplaceType.trim().toLowerCase() === 'remote';
   if (remote && !merged.some(m => REMOTE_WORD_RE.test(m))) merged.push('Remote');
   return merged.join('; ');
@@ -306,26 +324,33 @@ export default {
       throw new Error(`lever: unexpected response for ${entry.name} — expected an array of postings, got: [${got}]`);
     }
     const boardSlug = new URL(apiUrl).pathname.match(/^\/v0\/postings\/([^/]+)\/?$/)?.[1] || '';
-    const mapped = json.map(j => ({
-      title: j.text || '',
-      url: j.hostedUrl || '',
-      company: entry.name,
-      listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
-        ? { ats_provider: 'lever', board_slug: boardSlug, posting_id: j.id }
-        : undefined,
-      location: resolveLocation(j.categories, j.workplaceType),
-      // Lever's v0 postings list ships the full description for free (same
-      // payload, no per-job request) — enables scan.mjs content_filter.
-      description: leverDescription(j),
-      postedAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
-      // Lever's salaryRange ({ currency, interval, min, max }) maps to
-      // Job.salary annualized; an unknown interval or no usable number
-      // leaves salary off rather than guessing (#6907).
-      salary: leverSalary(j),
-      // Lever's posting uuid; the v0 board API exposes no employer requisition
-      // field, so requisitionId stays unset rather than being inferred.
-      externalId: coerceId(j.id),
-    }));
+    const mapped = json.map(j => {
+      const places = resolvePlaces(j.categories);
+      const country = typeof j.country === 'string' && j.country.trim() ? j.country.trim() : undefined;
+      return {
+        title: j.text || '',
+        url: j.hostedUrl || '',
+        company: entry.name,
+        listingIdentity: boardSlug && typeof j.id === 'string' && j.id.trim()
+          ? { ats_provider: 'lever', board_slug: boardSlug, posting_id: j.id }
+          : undefined,
+        location: resolveLocation(j.categories, j.workplaceType),
+        ...(places.length > 0 ? { locations: places } : {}),
+        ...(country ? { country } : {}),
+        // Lever's v0 postings list ships the full description for free (same
+        // payload, no per-job request) — enables scan.mjs content_filter.
+        description: leverDescription(j),
+        postedAt: typeof j.createdAt === 'number' ? j.createdAt : undefined,
+        // Lever's salaryRange ({ currency, interval, min, max }) maps to
+        // Job.salary annualized; an unknown interval or no usable number
+        // leaves salary off rather than guessing (#6907).
+        salary: leverSalary(j),
+        // Lever's posting uuid; the v0 board API exposes no employer requisition
+        // field, so requisitionId stays unset rather than being inferred.
+        externalId: coerceId(j.id),
+        ...workplaceField(j.workplaceType),
+      };
+    });
     if (/** @type {any} */ (json).leverTruncated) /** @type {any} */ (mapped).leverTruncated = /** @type {any} */ (json).leverTruncated;
     return mapped;
   },

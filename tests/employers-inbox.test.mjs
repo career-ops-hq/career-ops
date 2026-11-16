@@ -12,11 +12,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, copyEmployerRegistry } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry, employerRegistryToday, unlistedEmployerBoard } from './helpers.mjs';
 
 import {
   DEFAULT_REGION, DEFAULT_WORKDAY_HOST, INBOX_DIR, INBOX_LINE_KEYS, INBOX_MAX_LINES,
@@ -29,7 +29,7 @@ const { GITHUB_ACTIONS: _ga, GITHUB_STEP_SUMMARY: _gss, ...PLAIN_ENV } = process
 const run = (cwd, args = [], env = {}) => spawnSync(process.execPath, [VALIDATOR, ...args], { cwd, encoding: 'utf8', env: { ...PLAIN_ENV, ...env } });
 
 const DATE = '2026-11-10';
-const TODAY = new Date('2026-11-11T12:00:00Z');
+const TODAY = employerRegistryToday();
 
 /** A scratch checkout with a copy of the real registry and the given inbox files. */
 function withInbox(files, body) {
@@ -57,6 +57,9 @@ const NEW = [
   { ats: 'workday', board: 'bigco/wd1/External', workday_host: 'site', name: 'BigCo' },
   { ats: 'recruitee', board: 'tinyco', name: 'TinyCo' },
 ];
+// The same lines with any board the committed registry has come to list renamed to
+// one it does not: the cases that expect no board to be known use these.
+const UNLISTED = NEW.map((line) => ({ ...line, board: unlistedEmployerBoard(line.ats, line.board) }));
 
 // ── File names ─────────────────────────────────────────────────────────────
 
@@ -95,6 +98,12 @@ test('an inbox line builds its careers URL with the default hosts', () => {
   assert.equal(inboxCareersUrl(NEW[1]), 'https://jobs.eu.lever.co/eurocorp');
   assert.equal(inboxCareersUrl(NEW[3]), 'https://acmeco.wd3.myworkdayjobs.com/Careers');
   assert.equal(inboxCareersUrl(NEW[4]), 'https://wd1.myworkdaysite.com/recruiting/bigco/External');
+  // Zoho Recruit has no default region: without one the board is on zohorecruit.com, and the row has none either.
+  const zoho = { ats: 'zoho-recruit', board: 'acme', name: 'Acme' };
+  assert.equal(inboxCareersUrl(zoho), 'https://acme.zohorecruit.com/jobs/Careers');
+  assert.equal(inboxCareersUrl({ ...zoho, region: 'jp' }), 'https://acme.zohorecruit.jp/jobs/Careers');
+  assert.ok(!('region' in inboxLineToRow(zoho, { source: 'community', contribution: '2026-11-10-octocat', added: DATE })));
+  assert.equal(inboxLineToRow({ ...zoho, region: 'jp' }, { source: 'community', contribution: '2026-11-10-octocat', added: DATE }).region, 'jp');
 });
 
 test('inboxLineToRow writes a full registry row, keys in the registry order', () => {
@@ -122,6 +131,10 @@ test('inboxLineProblems: the short format and nothing else', () => {
     [{ ats: 'workday', board: 'acme', name: 'Acme' }, /workday board is "tenant\/wdN\/site"/],
     [{ ats: 'greenhouse', board: 'jobs', name: 'Acme' }, /placeholder/],
     [{ ats: 'recruitee', board: 'Acme', name: 'Acme' }, /lowercase/],
+    [{ ats: 'teamtailor', board: 'Acme', name: 'Acme' }, /teamtailor boards are lowercase/],
+    [{ ats: 'personio', board: 'acme.gmbh', name: 'Acme' }, /one subdomain label/],
+    [{ ats: 'zoho-recruit', region: 'us', board: 'acme', name: 'Acme' }, /region "us" is not one of: au, ca, cn, eu, in, jp, sa; leave it out/],
+    [{ ats: 'homerun', board: 'feed', name: 'Acme' }, /"feed" is one of homerun's own subdomains/],
     [{ ats: 'ashby', board: 'acme', name: 'Jane jane@example.com' }, /email address/],
     [{ ats: 'ashby', board: 'acme', name: 'Acme +34 600 123 456' }, /phone number/],
     [{ ats: 'ashby', board: 'acme', name: 'Acme', website: 'https://acme.example' }, /bare domain/],
@@ -136,26 +149,35 @@ test('inboxLineProblems: the short format and nothing else', () => {
 
 // ── The inbox in the registry ─────────────────────────────────────────────
 
-test('a valid inbox passes, with no warning, and the CLI reports it', () => withInbox({ [`${DATE}-octocat.ndjson`]: NEW }, (dir) => {
+test('a valid inbox passes, with no warning, and the CLI reports it', () => withInbox({ [`${DATE}-octocat.ndjson`]: UNLISTED }, (dir) => {
   const { errors, warnings, stats } = validate(dir);
   assert.deepEqual(at(errors), []);
   assert.deepEqual(at(warnings), []);
   assert.equal(stats.inboxFiles, 1);
-  assert.equal(stats.inboxLines, NEW.length);
+  assert.equal(stats.inboxLines, UNLISTED.length);
   const r = run(dir);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /inbox: 6 board\(s\) in 1 file\(s\), 0 already in the registry/);
 }));
 
-test('a pull request that only adds an inbox file passes --base against the registry it targets', () => withInbox({ [`${DATE}-octocat.ndjson`]: NEW }, (dir) => {
+test('a pull request that only adds an inbox file passes --base against the registry it targets', () => withInbox({ [`${DATE}-octocat.ndjson`]: UNLISTED }, (dir) => {
   const r = run(dir, ['--base', ROOT]);
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stderr, '');
 }));
 
 test('the registry without inbox/ is valid: the directory is optional', () => {
-  const { errors } = validateRegistry({ root: ROOT, today: TODAY });
-  assert.deepEqual(errors, []);
+  // A copy with no inbox/ at all. The real tree has one while contributions wait, and
+  // its files carry the dates they were made on, which TODAY (read from boards/ and
+  // contributions/ only) knows nothing of.
+  const dir = mkdtempSync(join(tmpdir(), 'co-employers-inbox-'));
+  try {
+    copyEmployerRegistry(dir);
+    assert.equal(existsSync(join(dir, INBOX_DIR)), false);
+    assert.deepEqual(validate(dir).errors, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('bad lines are errors on their own line, and the rest of the file is still read', () => withInbox({
@@ -230,7 +252,7 @@ test('a board already in boards/ is one warning per file, never an error', () =>
     { ats: 'greenhouse', board: 'Airtable', name: 'Airtable' }, // letter case does not make it new
     { ats: 'workday', workday_host: 'site', board: 'nvidia/wd5/NVIDIAExternalCareerSite', name: 'NVIDIA' }, // nor the other host form
   ];
-  withInbox({ [`${DATE}-octocat.ndjson`]: [NEW[0], ...known] }, (dir) => {
+  withInbox({ [`${DATE}-octocat.ndjson`]: [UNLISTED[0], ...known] }, (dir) => {
     const { errors, warnings, stats } = validate(dir);
     assert.deepEqual(errors, []);
     assert.deepEqual(at(warnings), [
@@ -283,7 +305,7 @@ test('a manifest is checked like contributions/, plus its rows and its login', (
 // ── GitHub Actions output ─────────────────────────────────────────────────
 
 test('in GitHub Actions, inbox errors are annotations and the summary counts the inbox', () => withInbox({
-  [`${DATE}-octocat.ndjson`]: [NEW[0], { ats: 'ashby', board: 'acme', name: 'Acme', foo: 1 }, { ats: 'greenhouse', board: 'anthropic', name: 'Anthropic' }],
+  [`${DATE}-octocat.ndjson`]: [UNLISTED[0], { ats: 'ashby', board: 'acme', name: 'Acme', foo: 1 }, { ats: 'greenhouse', board: 'anthropic', name: 'Anthropic' }],
 }, (dir) => {
   const summary = join(dir, 'summary.md');
   const r = run(dir, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });

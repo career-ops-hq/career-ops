@@ -2,7 +2,7 @@ import type { Page, Frame } from "playwright-core";
 
 export type ApplyField = {
   id: string; // our stable handle, also set as data-co-field on the live element
-  type: "text" | "email" | "tel" | "url" | "number" | "date" | "textarea" | "select" | "checkbox" | "radio" | "file";
+  type: "text" | "email" | "tel" | "url" | "number" | "date" | "textarea" | "select" | "checkbox" | "radio" | "file" | "password";
   label: string;
   required: boolean;
   options?: string[];
@@ -21,7 +21,11 @@ export type ExtractedForm = { title: string; url: string; fields: ApplyField[] }
 // introspection — clean ATS (Ashby/Lever/Greenhouse) work well; Workday best-effort.
 export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
   const data = await ctx.evaluate(() => {
-    const clean = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().slice(0, 160);
+    const normalize = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim();
+    // The shown label stays short. A trailing star is read on the full text,
+    // before this cut, so a star past 160 characters is not lost and a star
+    // that merely lands on the cut is not treated as the required mark.
+    const clean = (s: string | null | undefined) => normalize(s).slice(0, 160);
     const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
     // generic placeholders that masquerade as labels (Ashby/react-select)
     const isGenericPh = (s: string) => /^(start typing|select\b|choose|search\b|type\b|--|please select|e\.?g\.?)/i.test(s.trim());
@@ -36,7 +40,24 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       if (!node) return "";
       const c = node.cloneNode(true) as Element;
       c.querySelectorAll?.("input, select, textarea, option, button, [role=option], [class*='menu' i]").forEach((n) => n.remove());
-      return clean(c.textContent);
+      return normalize(c.textContent);
+    };
+    // A heading that also wraps the radios keeps its own text. Drop each option
+    // label, including a sibling label[for], so a star after the question stays
+    // at the end.
+    const textWithoutRadios = (node: Element): string => {
+      const copy = node.cloneNode(true) as Element;
+      copy.querySelectorAll("input[type=radio]").forEach((radio) => {
+        const id = (radio as HTMLInputElement).id;
+        const wrapped = radio.closest("label");
+        if (wrapped && wrapped !== copy && copy.contains(wrapped)) wrapped.remove();
+        else radio.remove();
+        if (!id) return;
+        copy.querySelectorAll("label").forEach((label) => {
+          if (label !== copy && label.getAttribute("for") === id) label.remove();
+        });
+      });
+      return normalize(copy.textContent);
     };
 
     // The field WRAPPER (Ashby `ashby-application-form-field-entry`, Greenhouse
@@ -47,6 +68,44 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       return el.closest(
         '[class*="field-entry" i], [class*="fieldEntry" i], [class*="form-group" i], [class*="question" i], [class*="field__" i], [class*="__field" i], fieldset, [class*="field" i]',
       );
+    }
+
+    // Same skips as the extract loop. A hidden honeypot or an autofill helper
+    // is not a second question, so it must not knock out the wrapper title.
+    function isEligibleControl(node: Element): boolean {
+      const tag = node.tagName.toLowerCase();
+      const type = ((node as HTMLInputElement).type || "").toLowerCase();
+      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(type)) return false;
+      if ((node as HTMLElement).offsetParent === null && type !== "radio" && type !== "checkbox") return false;
+      if (node.closest('[class*="autofill" i]')) return false;
+      return true;
+    }
+
+    // A shared box whose class contains "field" is not one question. Another
+    // control in that box means its first label belongs to someone else.
+    function hasOtherControl(container: Element, el: Element): boolean {
+      const ownName = (el as HTMLInputElement).name;
+      for (const node of Array.from(container.querySelectorAll("input, textarea, select"))) {
+        if (node === el || !isEligibleControl(node)) continue;
+        const type = ((node as HTMLInputElement).type || "").toLowerCase();
+        if (type === "radio" && ownName && (node as HTMLInputElement).name === ownName) continue;
+        const dummy = node.closest('[class*="select__"], .select-shell') && node.getAttribute("role") !== "combobox";
+        if (dummy && el.getAttribute("role") === "combobox") continue;
+        return true;
+      }
+      return false;
+    }
+
+    // A display:none honeypot has no box. display:contents also has no box,
+    // but its text stays on screen, so walk up until an ancestor has one.
+    function isVisibleNode(node: Element): boolean {
+      let current: HTMLElement | null = node as HTMLElement;
+      while (current && current !== document.body) {
+        if (current.offsetParent !== null) return true;
+        if (getComputedStyle(current).display !== "contents") return false;
+        current = current.parentElement;
+      }
+      return current === document.body;
     }
 
     function labelFor(el: Element): string {
@@ -67,16 +126,17 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       // the question title inside the field wrapper (handles Ashby's
       // `ashby-application-form-question-title`, Greenhouse `select__label`, etc.)
       const grp = fieldGroup(el);
-      if (grp) {
-        const lab = grp.querySelector(
+      if (grp && !hasOtherControl(grp, el)) {
+        const lab = Array.from(grp.querySelectorAll(
           'label, legend, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i]',
-        );
+        )).find((node) => isVisibleNode(node));
         if (lab && ok(pure(lab))) return pure(lab);
       }
-      // walk up a few ancestors for a nearby label/heading
       let c: Element | null = el.parentElement;
       for (let i = 0; i < 4 && c; i++, c = c.parentElement) {
-        const lab = c.querySelector('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5');
+        if (hasOtherControl(c, el)) break;
+        const lab = Array.from(c.querySelectorAll('label, legend, [class*="label" i], [class*="title" i], h3, h4, h5'))
+          .find((node) => isVisibleNode(node));
         if (lab && ok(pure(lab))) return pure(lab);
       }
       const ph = (el as HTMLInputElement).placeholder;
@@ -103,13 +163,19 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       }
       const optSet = new Set(options.map((o) => o.toLowerCase()));
       const container = fieldGroup(firstRadio) || firstRadio.parentElement?.parentElement || firstRadio.parentElement;
-      if (container) {
+      if (container && !hasOtherControl(container, firstRadio)) {
         const cands = container.querySelectorAll(
           'label, legend, h1, h2, h3, h4, h5, h6, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i], [class*="question" i]',
         );
         for (const c of Array.from(cands)) {
-          const t = pure(c);
-          if (t && t.length > 2 && t.length < 160 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
+          if (!isVisibleNode(c)) continue;
+          const t = c.querySelectorAll("input[type=radio]").length > 1 ? textWithoutRadios(c) : pure(c);
+          // Keep a long title. clean() shortens what is shown, and the trailing
+          // star is read from this full text. Options are matched on their full
+          // text too. The 160-character cut would hide a real question that only
+          // shares that prefix with an option, and it would let a long option
+          // through as the question.
+          if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }
       }
       return "";
@@ -123,11 +189,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
     for (const el of els) {
       const tag = el.tagName.toLowerCase();
       const itype = ((el as HTMLInputElement).type || "").toLowerCase();
-      if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(itype)) continue;
-      if ((el as HTMLElement).offsetParent === null && itype !== "radio" && itype !== "checkbox") continue;
-      // skip ATS "autofill from resume / parse my CV" helper widgets (Ashby) — these
-      // are convenience uploaders, not real application fields.
-      if ((el as Element).closest('[class*="autofill" i]')) continue;
+      if (!isEligibleControl(el)) continue;
 
       // react-select widgets render an extra internal/autosize <input> next to the
       // real role=combobox input. Keep ONLY the combobox; drop the dummy (it's the
@@ -136,14 +198,19 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       const isCombobox = el.getAttribute("role") === "combobox";
       if (inReactSelect && tag === "input" && !isCombobox) continue;
 
-      const required = (el as HTMLInputElement).required || el.getAttribute("aria-required") === "true";
+      const domRequired = (el as HTMLInputElement).required || el.getAttribute("aria-required") === "true";
+      // A trailing star is the board's required mark. A star inside the sentence is not.
+      // The argument is the full label, before clean() cuts it to 160 characters.
+      const requiredFor = (label: string) => domRequired || /\*\s*$/.test(normalize(label));
       const nativeId = (el as HTMLElement).id || undefined;
       const nativeName = (el as HTMLInputElement).name || undefined;
       const fid = `co${n++}`;
 
       if (isCombobox) {
         el.setAttribute("data-co-field", fid);
-        fields.push({ id: fid, type: "select", combobox: true, label: clean(labelFor(el)), required, options: [], nativeId, nativeName });
+        const labelRaw = labelFor(el);
+        const label = clean(labelRaw);
+        fields.push({ id: fid, type: "select", combobox: true, label, required: requiredFor(labelRaw), options: [], nativeId, nativeName });
         continue;
       }
 
@@ -155,12 +222,31 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         }
         if (name) seenRadio.add(name);
         const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
-        const options = group.map((r) => clean(labelFor(r) || (r as HTMLInputElement).value)).filter(Boolean);
+        const fullLabels = group.map((r) => normalize(labelFor(r)));
+        // The same text on every radio is the question or the input name, not a
+        // choice. Use each input's value so Yes and No stay distinct.
+        const shared = fullLabels.length > 1 && fullLabels.every((text) => text && text === fullLabels[0]);
+        const options = group.map((r, i) => {
+          const value = clean((r as HTMLInputElement).value);
+          const full = fullLabels[i];
+          const text = clean(full);
+          const rawName = (r as HTMLInputElement).name || "";
+          if (!full || full === rawName || (shared && value)) return value || text;
+          return text || value;
+        }).filter(Boolean);
+        // Match the question against the full choice text. clean() is only what
+        // we show. When every radio repeats one label, match the values instead,
+        // so that repeated label can still be the question.
+        const matchTexts = shared
+          ? options
+          : fullLabels.map((full, i) => full || normalize((group[i] as HTMLInputElement).value)).filter(Boolean);
         group.forEach((r, i) => {
           r.setAttribute("data-co-field", fid);
           r.setAttribute("data-co-option", options[i] ?? String(i));
         });
-        fields.push({ id: fid, type: "radio", label: clean(groupLabel(el, options)) || name, required, options });
+        const radioRaw = groupLabel(el, matchTexts);
+        const radioLabel = clean(radioRaw) || name;
+        fields.push({ id: fid, type: "radio", label: radioLabel, required: requiredFor(clean(radioRaw) ? radioRaw : (name || "")), options });
         continue;
       }
 
@@ -168,16 +254,20 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
       if (tag === "select") {
         const options = Array.from((el as HTMLSelectElement).options).map((o) => clean(o.textContent)).filter((o) => o && !/^(select|choose|--)/i.test(o));
-        fields.push({ id: fid, type: "select", label: clean(labelFor(el)), required, options, nativeId, nativeName });
+        const selectRaw = labelFor(el);
+        const selectLabel = clean(selectRaw);
+        fields.push({ id: fid, type: "select", label: selectLabel, required: requiredFor(selectRaw), options, nativeId, nativeName });
         continue;
       }
-      const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file"].includes(itype) ? itype : "text";
+      const type = tag === "textarea" ? "textarea" : ["email", "tel", "url", "number", "date", "checkbox", "file", "password"].includes(itype) ? itype : "text";
       const ml = (el as HTMLInputElement).maxLength;
+      const labelRaw = labelFor(el);
+      const label = clean(labelRaw);
       fields.push({
         id: fid,
         type,
-        label: clean(labelFor(el)),
-        required,
+        label,
+        required: requiredFor(labelRaw),
         maxLength: ml && ml > 0 ? ml : undefined,
         value: (el as HTMLInputElement).value || undefined,
         nativeId,

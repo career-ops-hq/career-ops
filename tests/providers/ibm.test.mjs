@@ -156,6 +156,9 @@ try {
   } else {
     fail(`capped run made ${capped.calls} calls, ${cappedRun.result.length} jobs, stderr ${JSON.stringify(cappedRun.lines)}`);
   }
+  // Each warned stop is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedRun.result.truncated?.reason === 'page-cap' && cappedRun.result.truncated.fetched === 90) pass('a full board cut at max_pages is marked page-cap');
+  else fail(`capped run: truncated = ${JSON.stringify(cappedRun.result.truncated)}`);
 
   // A board that ends exactly at the cap with a short page is complete.
   let shortCalls = 0;
@@ -168,6 +171,8 @@ try {
   }));
   if (shortCalls === 2 && shortAtCap.result.length === 35 && shortAtCap.lines.length === 0) pass('a short page at the cap is a complete board, not a truncation');
   else fail(`short-at-cap made ${shortCalls} calls, stderr ${JSON.stringify(shortAtCap.lines)}`);
+  if (shortAtCap.result.truncated === undefined) pass('a board ending on a short page at the cap is left unmarked');
+  else fail(`short-at-cap was marked: ${JSON.stringify(shortAtCap.result.truncated)}`);
 
   // A transient 503 is retried, not fatal.
   const flaky = fullBoard({ failOn: { 0: 503 } });
@@ -183,6 +188,8 @@ try {
   } else {
     fail(`later-failure run returned ${laterRun.result.length} jobs, stderr ${JSON.stringify(laterRun.lines)}`);
   }
+  if (laterRun.result.truncated?.reason === 'fetch-error' && laterRun.result.truncated.fetched === 30) pass('a failed later page marks the board partial');
+  else fail(`later-failure run: truncated = ${JSON.stringify(laterRun.result.truncated)}`);
 
   // A failed first page throws: an empty list would read as "no postings".
   let firstThrew = false;

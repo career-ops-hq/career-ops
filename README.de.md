@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -280,7 +281,7 @@ Siehe [docs/SETUP.md](docs/SETUP.md) für die vollständige Einrichtungsanleitun
 
 ## Nutzung
 
-Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst. Lässt sich eine Stelle nicht lesen, hält die Pipeline an und bittet dich, den Text einzufügen.
+Füge eine Stellen-URL oder Stellenbeschreibung in deine KI-CLI ein. career-ops prüft, ob eine verlinkte Stelle noch offen ist (bei eingefügtem Text gibt es keinen Link zum Prüfen), bewertet sie gegen deinen Lebenslauf, schreibt einen Report, passt deinen Lebenslauf an (standardmäßig als PDF) und ergänzt eine Zeile in deinem Tracker. Das deckt die meisten Tage ab. Alles andere ist ein Modus, den du beim Namen anforderst. Lässt sich eine Stelle nicht lesen, hält die Pipeline an und bittet dich, den Text einzufügen oder einen Screenshot zu teilen.
 
 ### Einen Modus anfordern
 

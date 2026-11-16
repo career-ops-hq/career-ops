@@ -714,6 +714,17 @@ function looksToolShaped(rawValue) {
   return trimmed.split(/\s+/).every(word => /^[\p{Lu}]/u.test(word));
 }
 
+/** A Title Case phrase of plain words, with no digit. "Distributed Systems"
+ *  is posting vocabulary, so the skills check warns on it. A product token is
+ *  one word, or it carries a digit or a mark (".", "+", "#", "/"). */
+function plainTitlePhrase(rawValue) {
+  const trimmed = String(rawValue).trim();
+  if (/\d/.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/);
+  if (words.length < 2) return false;
+  return words.every(word => /^[\p{L}]+(?:[-'’][\p{L}]+)*$/u.test(word));
+}
+
 /**
  * Keep likely technology names while dropping ordinary prose fragments.
  *
@@ -1088,6 +1099,17 @@ function zhToolClaims(clean, sourceNormalized = null) {
   return names;
 }
 
+// A prize named in a sentence. Requires a capitalised name ("Nobel Prize",
+// "Example Industry Award") so a lowercase "award" in ordinary prose is not a claim.
+const PROSE_AWARD_RE = /\b((?:[Nn]obel|[Pp]ulitzer)\s+[Pp]rize|(?:[\p{Lu}][\p{L}\p{N}&.'’-]*\s+){1,6}(?:Prize|Award|Medal|Fellowship))\b/gu;
+const AWARD_SENTENCE_VERB_RE = /^(?:won|received|awarded|earned|named|granted|given)\s+/i;
+
+function awardClaimValue(raw) {
+  const stripped = String(raw).replace(AWARD_SENTENCE_VERB_RE, '');
+  if (stripped !== raw && /(?:prize|award|medal|fellowship)\s*$/i.test(stripped)) return normalizeFact(stripped);
+  return normalizeFact(raw);
+}
+
 export function factClaims(text, sourceNormalized = null) {
   const clean = stripMarkup(text);
   const claims = [];
@@ -1200,6 +1222,13 @@ export function factClaims(text, sourceNormalized = null) {
   // Pushed one at a time, like the tool names: spread into push(), a page of
   // 150,000 statements overflows the call stack.
   for (const claim of atEmployerClaims(text)) claims.push(claim);
+  // A prize in a sentence is the same claim as an award-title field. The
+  // pattern keeps a lowercase "award" in ordinary prose, and reads a name
+  // such as "Nobel Prize" or "Example Industry Award".
+  for (const match of clean.matchAll(PROSE_AWARD_RE)) {
+    const value = awardClaimValue(match[1]);
+    if (value) claims.push({ kind: 'award', value });
+  }
   // Report each claim once. Both tool patterns read most names, so without
   // this every tool would be listed twice. Repeated employer and title claims
   // collapse too, as they already did in verifyFacts.
@@ -1218,8 +1247,11 @@ export function factClaims(text, sourceNormalized = null) {
 // them. The job title only WARNS: cv-title-check.mjs is deliberately warn-only
 // about titles, because reframing one is sometimes the candidate's call, and a
 // second check that blocked on the same field would overrule that choice.
-// Skills lists are not read here. Rewording a skill into the posting's
-// vocabulary is the reformulation the tailoring is allowed to do.
+// A skills line is not one claim. skillToolClaims reads each token. A single
+// capitalised name, or a token with a digit or a product mark, blocks when no
+// source contains it. A Title Case phrase of more than one plain word
+// ("Distributed Systems") warns: it is posting vocabulary, so generation
+// continues. Lowercase wording stays unchecked.
 //
 // Templates with section partials (#2183) may use other class names, and a
 // markdown CV has no markup to read, so neither is covered.
@@ -1344,6 +1376,74 @@ export function structuredFieldClaims(text) {
   }
   const seen = new Set();
   return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
+}
+
+/**
+ * Tool-shaped tokens on a skills line or a competency tag.
+ *
+ * The whole line is not a claim: "status notes, agendas, Kubernetes" may
+ * reword the first items and still invent the last. "and" and "or" split a
+ * token the way a comma does. A single capitalised name, or a token with a
+ * digit or a product mark, blocks when no source contains it. A Title Case
+ * phrase of more than one plain word warns instead. Lowercase items are left
+ * alone. A LaTeX skills row is read the same way as an HTML skill item.
+ *
+ * @param {string} text generated HTML or LaTeX
+ * @returns {{kind: string, value: string, blocking: boolean}[]}
+ */
+const LATEX_SKILL_ROW_RE = /^\s*(?:\\textbf\{(?:[^{}]|\{[^{}]*\})*\}\{: \})?\{((?:[^{}]|\{[^{}]*\})*)\}\s*\\\\/gm;
+
+function skillTokens(text) {
+  const tokens = [];
+  for (const piece of String(text).split(/[,;|•·]/)) {
+    for (const part of piece.split(/\s+\b(?:and|or)\b\s+/i)) {
+      const trimmed = part.replace(/^(?:and|or)\b\s+/i, '').trim();
+      if (trimmed) tokens.push(trimmed);
+    }
+  }
+  return tokens;
+}
+
+function plainLatexSkillText(value) {
+  let text = String(value);
+  const wrap = /\\(?:textit|textbf|emph|texttt|textsc)\{([^{}]*)\}/g;
+  for (let pass = 0; pass < 4; pass++) {
+    const next = text.replace(wrap, '$1');
+    if (next === text) break;
+    text = next;
+  }
+  return text.replace(/\\([&%$#_{}])/g, '$1');
+}
+
+function pushSkillTokens(claims, seen, text) {
+  for (const trimmed of skillTokens(text)) {
+    if (!looksToolShaped(trimmed)) continue;
+    const value = normalizeFact(trimmed);
+    if (!value || seen.has(value)) continue;
+    seen.add(value);
+    // Classify the normalized claim. A trailing period is not part of the
+    // name ("Distributed Systems."), and the raw token would block on it.
+    claims.push({ kind: 'tool', value, blocking: !plainTitlePhrase(value) });
+  }
+}
+
+export function skillToolClaims(text) {
+  const raw = latexBody(text ?? '');
+  const claims = [];
+  const seen = new Set();
+  for (const cls of ['skill-item', 'competency-tag']) {
+    for (const inner of extractStructuredFieldInners(raw, cls)) {
+      const withoutCategory = removeBalancedElements(
+        inner,
+        /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])skill-category(?![\w-])[^"]*"[^>]*>/gi,
+      );
+      pushSkillTokens(claims, seen, stripMarkup(withoutCategory));
+    }
+  }
+  for (const match of raw.matchAll(LATEX_SKILL_ROW_RE)) {
+    pushSkillTokens(claims, seen, plainLatexSkillText(match[1]));
+  }
+  return claims;
 }
 
 // Association checks compare bounded records, never the joined source bag.
@@ -1490,10 +1590,29 @@ export function structuredAssociationClaims(targetText, sourceTexts, config = {}
   const linesWithMetrics = texts => texts.flatMap(text => text.split(/\r?\n/).map(line => ({ line, metrics: metricClaims(line) })));
   const allSourceLines = linesWithMetrics(sourceTexts);
   const explicitlyAllowed = allowedMetricSet('', config.allow_metrics || []);
-  for (const context of jobContexts) {
+  const metricContexts = jobContexts.map(context => ({
+    lines: findBalancedElements(context.html, /<(li)\b[^>]*>/gi)
+      .map(el => stripMarkup(context.html.slice(el.contentStart, el.contentEnd))),
+    sources: context.sources,
+  }));
+  // Cover prose has no job classes. Reuse the employer reader rather than
+  // treating the addressed company or a future plan as employment evidence.
+  const prose = removeBalancedElements(String(targetText), /<(span|div)\b[^>]*\bclass="[^"]*(?<![\w-])job(?![\w-])[^"]*"[^>]*>/gi);
+  for (const statement of sourceStatementsOf(prose)) {
+    if (!metricClaims(statement).size || FORWARD_MARKER_RE.test(statement)) continue;
+    const employers = factClaims(statement).filter(claim => claim.kind === 'employer');
+    if (employers.length !== 1) continue;
+    const employer = employers[0].value;
+    const exact = experience.filter(entry => norm(entry.company) === employer);
+    const matches = exact.length ? exact
+      : experience.filter(entry => sourceContainsFact(norm(entry.company), employer));
+    // A shortened name must identify one employer, not pool different jobs.
+    if (!matches.length || new Set(matches.map(entry => norm(entry.company))).size !== 1) continue;
+    metricContexts.push({ lines: [statement], sources: matches.flatMap(entry => sourceStatementsOf(entry.body)) });
+  }
+  for (const context of metricContexts) {
     const sourceLines = linesWithMetrics(context.sources);
-    for (const el of findBalancedElements(context.html, /<(li)\b[^>]*>/gi)) {
-      const line = stripMarkup(context.html.slice(el.contentStart, el.contentEnd));
+    for (const line of context.lines) {
       for (const metric of metricClaims(line)) {
         if (explicitlyAllowed.has(metric)) continue;
         const sources = sourceLines.filter(entry => entry.metrics.has(metric));
@@ -1518,6 +1637,45 @@ function factStatements(text) {
     .filter(Boolean);
 }
 
+/**
+ * A line that opens its own block: list item, ordered item, heading, table row
+ * (leading pipe, as lib/cv-markdown.mjs parses them), quote, HTML tag, or a
+ * thematic break. The bullet markers mirror LIST_MARKER_RE so a Unicode-
+ * bulleted list keeps each item a separate statement.
+ */
+const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)|^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u;
+/** A line that closes its block: heading, table row, bold-only label, or an explicit hard break. */
+const BLOCK_END_RE = /^\s*(?:#|\|)|^\s*\*\*[^*]+\*\*\s*$|(?:\\|\s{2}|>)$/u;
+
+/**
+ * Join soft-wrapped continuation lines in Markdown source so a bullet or
+ * paragraph that spans several physical lines reads as one statement. A line
+ * continues the previous one unless it opens its own block, the previous line
+ * closes one, or either line is blank.
+ *
+ * This runs on source text and cover prose only. In structured generated text a newline separates
+ * elements, so factStatements keeps splitting on every newline there; joining
+ * soft wraps in generated text regresses the "a phrase spanning two statements
+ * is not a claim" self-test.
+ */
+function joinSoftWraps(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  return lines
+    .map((line, i) => {
+      if (i === 0) return line;
+      const prev = lines[i - 1];
+      const soft = line.trim() && prev.trim()
+        && !BLOCK_START_RE.test(line) && !BLOCK_END_RE.test(prev);
+      return soft ? ` ${line.trim()}` : `\n${line}`;
+    })
+    .join('');
+}
+
+/** factStatements for source documents: soft-wrapped lines are one statement. */
+function sourceStatementsOf(text) {
+  return factStatements(joinSoftWraps(text));
+}
+
 /** Return conservative content tokens used only to link a rewrite to its source statement. */
 function attributionTokens(text) {
   return normalizeFact(text)
@@ -1538,7 +1696,7 @@ function attributionTokens(text) {
  * third-party execution evidence rather than candidate direct-work evidence.
  */
 export function delegatedAuthorshipClaims(targetText, sourceText) {
-  const sourceStatements = factStatements(sourceText);
+  const sourceStatements = sourceStatementsOf(sourceText);
   const directSources = sourceStatements
     .filter(statement => DIRECT_AUTHORSHIP_SIGNAL_RE.test(statement))
     .filter(statement => !THIRD_PARTY_EXECUTION_RE.test(statement))
@@ -2506,7 +2664,7 @@ function parseSwaps(entries = []) {
 export function bulletDriftClaims(targetText, sourceText, { allowSwaps = [], allowFacts = [] } = {}) {
   const swaps = parseSwaps(allowSwaps);
   const declared = driftKeySet(allowFacts.map(fact => String(fact).trim()).filter(fact => !/\s/u.test(fact)));
-  const sources = factStatements(sourceText)
+  const sources = sourceStatementsOf(sourceText)
     .map(stripListMarker)
     .filter(statement => !HEADING_RE.test(statement))
     .map((statement) => {
@@ -3057,7 +3215,7 @@ export function auditClaims(targetText, sourceText, config = {}) {
 export function loadFactConfig(path) {
   const keys = ['allow_metrics', 'allow_facts', 'allow_swaps', 'forbidden_phrases', 'warn_phrases'];
   if (!existsSync(path)) return { missing: true, config: Object.fromEntries(keys.map(key => [key, []])) };
-  const config = JSON.parse(readFileSync(path, 'utf-8'));
+  const config = JSON.parse(readFileSync(path, 'utf-8').replace(/^\uFEFF/, ''));
   for (const key of keys) {
     if (config[key] == null) config[key] = [];
     else if (!Array.isArray(config[key])) throw new Error(`${key} must be an array in ${path}`);
@@ -3307,7 +3465,10 @@ export function verifyFacts(targetText, {
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
   const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
-  const sourceText = sourceTexts.join('\n');
+  // Separate files with a blank line, not a bare newline: a file with no
+  // trailing newline would otherwise soft-wrap into the next file's opening
+  // line when the drift and authorship checks join soft wraps.
+  const sourceText = sourceTexts.join('\n\n');
   const { missing: configMissing, config } = loadFactConfig(resolveInputPath(configPath, cwd));
   const allowed = allowedMetricSet(sourceText, config.allow_metrics);
   const targetClaims = metricClaims(targetText);
@@ -3329,8 +3490,10 @@ export function verifyFacts(targetText, {
   const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const associations = structuredAssociationClaims(targetText, sourceTexts, config);
+  const skillClaims = skillToolClaims(targetText);
   const namedFacts = [
     ...factClaims(targetText, sourceLookup),
+    ...skillClaims.filter(claim => claim.blocking),
     ...delegatedAuthorshipClaims(targetText, sourceText),
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);
@@ -3363,6 +3526,9 @@ export function verifyFacts(targetText, {
     ...fieldClaims.filter(claim => !claim.blocking).map(({ kind, value, line }) => ({ kind, value, line })),
     // A drift whose only new verb is ambiguous ("and automated reporting").
     ...driftFacts.filter(({ blocking }) => !blocking),
+    // A multi-word Title Case skill ("Distributed Systems"). The same unsourced
+    // test as a blocking tool: the phrase in cv.md word for word is not a finding.
+    ...skillClaims.filter(claim => !claim.blocking).filter(unsourced),
   ].filter(({ value }) => !allowedFacts.has(value));
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
