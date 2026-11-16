@@ -17,7 +17,8 @@
  */
 
 import path from 'path';
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, renameSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -471,7 +472,15 @@ export function setPluginEnabled(root, id, on, settings) {
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
   mkdirSync(path.join(root, 'config'), { recursive: true });
-  writeFileSync(file, '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg), 'utf8');
+  const text = '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg);
+  const tmp = path.join(root, 'config', `.plugins.yml.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, text, 'utf8');
+    renameSync(tmp, file);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the publish error is the one to surface */ }
+    throw err;
+  }
 }
 
 const setEnabled = (id, on, settings) => setPluginEnabled(DATA_ROOT, id, on, settings);
