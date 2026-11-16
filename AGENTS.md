@@ -121,13 +121,15 @@ node doctor.mjs --json
 
 Output: `{"onboardingNeeded": <bool>, "data_root": "<path>", "project_root": "<path>", "missing": [...], "unpersonalized": [...], "warnings": [...], "autoCopied": [...]}`. `data_root` is where every user-layer file lives (`data/`, `cv.md`, `config/profile.yml`, `portals.yml`, etc.) and `project_root` is the code checkout: in a split checkout (the `.career-ops-data` marker or an exported `CAREER_OPS_ROOT` / `CAREER_OPS_DATA_DIR`), operate on `{data_root}`, except where a per-file override (`CAREER_OPS_TRACKER`, `CAREER_OPS_PROFILE`) names that file. `missing` lists whichever of `cv.md`, `config/profile.yml`, `modes/_profile.md`, `portals.yml` are absent; `warnings` holds non-blocking setup signals. The command is read-only: `autoCopied` stays empty unless `--init-templates` is added during onboarding.
 
+The output above is the healthy shape. **`dataRootError` — a hard stop, not an onboarding invitation.** When the resolved data root is refused because it sits inside a Claude Code plugin install (the next plugin update deletes that copy), doctor exits non-zero and reports a different shape: `data_root` is null, `onboardingNeeded` stays true so that nothing proceeds on this root, `warnings[0]` carries the refusal, and `dataRootError` names it (`{code, source, root}`). Do not onboard on this state — no `--init-templates`, no `cv.md`, no tracker: every write to that root is lost on the next plugin update. Show the user the refusal from `warnings[0]`, and wait for them to point `dataRootError.source` at a folder outside `~/.claude/plugins` (or remove it to use the default data root). When the source is an environment variable (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`), a shell export does not reach an agent session that is already running: the session restarts from a shell that has the corrected value, and only then does a doctor rerun see it. When the source is the `.career-ops-data` marker file, editing the file is enough — doctor re-reads it on each run, so no restart is needed. Then run doctor again.
+
 **`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that still carries template content, or a `config/profile.yml` or `portals.yml` that holds only comments. An unedited `_profile.md` scores every A-F evaluation against the **template author's** archetypes and North Star; an unedited `_brief.md` hands triage literal `{placeholders}`. It is a warning, not a gate, but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
 
 > "`modes/_profile.md` is still the shipped template, so evaluations would score against the template author's targeting rather than yours. Want me to personalize it from your CV first? (~1 min, and it changes every score.)"
 
 `modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
-**If `onboardingNeeded` is true, enter onboarding mode for workflows that need
+**If `onboardingNeeded` is true and `dataRootError` is absent, enter onboarding mode for workflows that need
 those inputs.** Do not proceed with an evaluation, scan, or application draft
 until the basics are in place. For read-only diagnosis, use
 `node doctor.mjs --json` to report missing prerequisites without creating user-layer files.

@@ -2,9 +2,10 @@ package screens
 
 // The Inbox tab (#5269): the Pending rows of data/pipeline.md, beside the
 // tracker tabs, with the first-pass rank and what the batch files record for
-// each row. One key acts on a row: `e` queues it for evaluation through
-// sync-batch-input.mjs (pipeline_pending_queue.go). No key skips, triages or
-// evaluates a row, and the dashboard itself writes no file.
+// each row. Three keys act on a row: `e` queues it for evaluation through
+// sync-batch-input.mjs (pipeline_pending_queue.go), and `x` skips it and `u`
+// undoes that skip through inbox-skip.mjs (pipeline_pending_skip.go). No key
+// triages or evaluates a row, and the dashboard itself writes no file.
 //
 // Two things keep tracker actions off this tab. applyFilterAndSort leaves the
 // tracker's row list empty while the Inbox is active, so CurrentApp has
@@ -252,6 +253,12 @@ func (m PipelineModel) handlePendingKey(msg tea.KeyMsg) (next PipelineModel, cmd
 		return m, func() tea.Msg { return PipelineOpenURLMsg{URL: target} }, true
 	case "e":
 		next, cmd := m.queuePendingRow()
+		return next, cmd, true
+	case "x":
+		next, cmd := m.skipPendingRow()
+		return next, cmd, true
+	case "u":
+		next, cmd := m.undoPendingSkip()
 		return next, cmd, true
 	}
 	return m, nil, true
@@ -520,6 +527,8 @@ func pendingHelpItems() []keyHelpItem {
 		{"r", i18n.Current.HelpRefresh},
 		{"o", i18n.Current.HelpOpenURL},
 		{"e", i18n.Current.HelpQueue},
+		{"x", i18n.Current.HelpSkip},
+		{"u", i18n.Current.HelpUndoSkip},
 		{"p", i18n.Current.HelpProgress},
 		{"S", i18n.Current.HelpStats},
 		{"t", i18n.Current.HelpLanguage},

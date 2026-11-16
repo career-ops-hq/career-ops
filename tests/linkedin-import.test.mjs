@@ -64,6 +64,17 @@ test('a saved email with a quoted-printable line break still yields the job', ()
   assert.deepEqual(jobs, [{ id: E, url: `https://www.linkedin.com/jobs/view/${E}` }]);
 });
 
+test('a quoted-printable equals sign in currentJobId still yields the job', () => {
+  const id = '4392837462';
+  const jobs = linkedInJobsFromText(`https://www.linkedin.com/jobs/search/?currentJobId=3D${id}`);
+  assert.deepEqual(jobs, [{ id, url: `https://www.linkedin.com/jobs/view/${id}` }]);
+});
+
+test('a quoted-printable id split by a soft break still yields the job', () => {
+  const jobs = linkedInJobsFromText('https://www.linkedin.com/jobs/search/?currentJobId=3D4392=\n837462');
+  assert.deepEqual(jobs, [{ id: '4392837462', url: 'https://www.linkedin.com/jobs/view/4392837462' }]);
+});
+
 test('bare and full links keep the order they appear in', () => {
   const text = `linkedin.com/jobs/view/${A}\nhttps://www.linkedin.com/jobs/view/${B}\nwww.linkedin.com/jobs/view/${C}`;
   assert.deepEqual(linkedInJobsFromText(text).map((job) => job.id), [A, B, C]);

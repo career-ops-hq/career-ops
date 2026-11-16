@@ -55,6 +55,34 @@ ok('recognized hash-route job IDs stay distinct', () => {
     normalizeUrl('https://jobs.example.com/careers#/jobs/123'),
     normalizeUrl('https://jobs.example.com/careers#/jobs/456'));
 });
+ok('a trailing slash does not collapse two fragment jobs', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#/job/111/'),
+    normalizeUrl('https://jobs.example.com/careers#/job/222/'));
+  assert.equal(
+    normalizeUrl('https://jobs.example.com/careers#/job/111/'),
+    'https://jobs.example.com/careers?_career_ops_fragment_job_id=111');
+});
+ok('a hashbang does not collapse two fragment jobs', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#!/job/111'),
+    normalizeUrl('https://jobs.example.com/careers#!/job/222'));
+});
+ok('a language query inside the fragment keeps two versions apart', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers#/jobs/123?lang=de'), 'distinct');
+});
+ok('lang in the fragment and lang in the query name the same job', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers?lang=en#/jobs/123'), 'same');
+});
+ok('a fragment language against the bare fragment job is one-sided', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers#/jobs/123'), 'one-sided-language');
+});
 ok('pre-existing internal fragment key is preserved beside promoted hash job ID', () => {
   assert.equal(
     normalizeUrl('https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id'),
@@ -321,6 +349,9 @@ ok('two spellings canonicalJobKey reads as one posting are the same page', () =>
   assert.equal(postingUrlRelation('https://careers.acme.example/openings/123//', 'https://careers.acme.example/openings/123'), 'distinct');
   // An extracted id names the posting whatever the rest of the query says.
   assert.equal(postingUrlRelation(`${GH}?ref=1`, `${GH}?ref=2`), 'same');
+  const WD = 'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R123';
+  assert.equal(postingUrlRelation(WD, 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123'), 'same');
+  assert.equal(postingUrlRelation(WD, 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R124'), 'distinct');
 });
 ok('the same page with a language on one side only is its own relation, in either order', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'https://acme.recruitee.com/o/a?lang=de'), 'one-sided-language');

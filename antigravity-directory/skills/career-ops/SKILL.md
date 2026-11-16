@@ -222,7 +222,7 @@ Or paste a JD directly to run the full pipeline.
 
 After determining the mode, load the necessary files before executing:
 
-**First run.** Before a mode that needs the user's profile (an evaluation, a scan, an application draft, a tracker write), if `node doctor.mjs --json` reports `onboardingNeeded`, read `modes/_onboarding.md` and complete onboarding first, as AGENTS.md → "First Run — Onboarding" sets out.
+**First run.** Before a mode that needs the user's profile (an evaluation, a scan, an application draft, a tracker write), if `node doctor.mjs --json` reports `dataRootError`, stop: onboarding writes nothing to that root, as AGENTS.md → "First Run — Onboarding" sets out. Otherwise, if it reports `onboardingNeeded`, read `modes/_onboarding.md` and complete onboarding first.
 
 If `modes/_custom.md` exists, read it after `modes/_profile.md` and before the selected mode file. It contains user house rules and procedural preferences. It may override workflow/style defaults, but it never adds factual claims about the candidate.
 

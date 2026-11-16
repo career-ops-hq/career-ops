@@ -1244,7 +1244,9 @@ search_queries:
   #   enabled: true
 
   # -- Türkiye / Turkey job portals --
-  # WebSearch queries for Turkish job boards (no public ATS APIs).
+  # WebSearch queries for Turkish job boards. Kariyer.net has a built-in
+  # provider (`provider: kariyer`, see the job-boards stanzas), so these
+  # site: queries are the keyword-scoped fallback for it and for the others.
   # [CUSTOMIZE] Replace keywords with your target roles in Turkish.
 
   - name: Kariyer.net — Backend / Software Engineer
@@ -1356,6 +1358,8 @@ search_queries:
 #   aldi-nord       www.aldi-nord.de, www.aldi.(nl|be|lu|fr|es|pt|pl)  (ALDI Nord's own country sites; optional aldi_nord: block, see below)
 #   gupy            portal.gupy.io       (pt-BR board-wide Gupy search; each gupy.keywords entry swept separately, results
 #                   deduped. A single tenant's <slug>.gupy.io career page is NOT claimed)
+#   kariyer         www.kariyer.net/is-ilanlari[/<city>|/<position>|?kw=...]  (TR board-wide; the
+#                   same host's employer profile pages under /firma-profil are NOT claimed)
 #   feishu-jobs     jobs.bytedance.com or <tenant>.jobs.feishu.cn
 #   mokahr          (app|hire-r1).mokahr.com/(social-recruitment|campus-recruitment|apply)/<org>/<siteId>
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
@@ -2280,6 +2284,9 @@ search_queries:
 #   enabled: true
 #
 # - name: The Muse                        # board-wide search page (server-rendered HTML)
+#   # Availability: Cloudflare challenges this board from US and Canadian egresses
+#   # (2026-11-15), so a scan may fail with a named "Cloudflare challenge" error.
+#   # See The Muse in docs/SUPPORTED_JOB_BOARDS.md.
 #   provider: themuse
 #   location: Germany                     # optional: narrows the search (country or city)
 #   posted: 30                            # optional: 1, 7 or 30 (days) — keeps the run small
@@ -2349,6 +2356,15 @@ search_queries:
 #   provider: yourator
 #   careers_url: https://www.yourator.co/jobs
 #   max_pages: 120                        # optional page cap (default 120, max 500)
+#   enabled: true
+#
+# - name: Kariyer.net                     # Turkish board-wide aggregator (public JSON gateway, no auth)
+#   provider: kariyer
+#   careers_url: https://www.kariyer.net/is-ilanlari
+#   max_pages: 50                         # optional page cap (default 50, max 100)
+#   kariyer:
+#     fetchDetails: false                 # optional: fetch each posting's JD text
+#     detailLimit: 25                     # 1..100, default 25
 #   enabled: true
 #
 # Comeet needs the full careers-api URL (it carries a per-tenant token that a

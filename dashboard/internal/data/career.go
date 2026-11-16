@@ -51,10 +51,23 @@ func resolveReportPath(careerOpsPath, trackerPath, link string) string {
 			resolved = legacy
 		}
 	}
-	if rel, err := filepath.Rel(careerOpsPath, resolved); err == nil {
-		return rel
+	rel, err := filepath.Rel(careerOpsPath, resolved)
+	if err != nil {
+		// Cross-volume (Windows) has no relative form. Keep the legacy raw
+		// link only when it is itself a contained relative path.
+		if isSafeRepoRelativePath(link) {
+			return link
+		}
+		return ""
 	}
-	return link
+	// A `Report` cell is tracker data, not a trusted path. Every consumer
+	// joins the result against careerOpsPath and reads it, so a link that
+	// walks out of the data root must not resolve — the same rule the PDF
+	// path already applies to crafted tracker rows.
+	if !isSafeRepoRelativePath(rel) {
+		return ""
+	}
+	return rel
 }
 
 // repoRootMarker identifies a career-ops checkout. path-resolver.mjs is chosen

@@ -160,13 +160,28 @@ The task runs in the current user's interactive session, so you must be logged i
 
 The macOS and Linux worker records each check in `<store>.tick`, next to the
 scheduled jobs store (`data/scheduled-jobs.json.tick` by default); the page reads
-that file for "Last OS check". The installer bakes `CAREER_OPS_ROOT`,
-`CAREER_OPS_DATA_DIR` and `CAREER_OPS_SCHEDULED_JOBS_PATH` into the job when they
-are set in the shell that runs it. The web process must get the same values, for
-example in `web/.env.local`, or the page reads a different store and tick file.
-The installer does not read `web/.env.local`, so export the values in your shell
-when you install (for example `CAREER_OPS_ROOT=/path/to/data sh web/scripts/install-scan-schedule.sh`).
-Run the installer again after you change them.
+that file for "Last OS check". On Windows the page reads the task's last run time
+from Task Scheduler instead, so there is no tick file.
+
+Both installers carry `CAREER_OPS_ROOT`, `CAREER_OPS_DATA_DIR` and
+`CAREER_OPS_SCHEDULED_JOBS_PATH` into the job when they are set in the shell that
+runs them: the macOS and Linux installer writes them into the job's command, and
+the Windows installer passes them to `web/scripts/scheduled-jobs-task.mjs` as
+arguments, with an empty value for each one that is unset so a value saved in
+your Windows user environment cannot override it. The web process must get the same values, for example in
+`web/.env.local`, or the page reads a different store. Neither installer reads
+`web/.env.local`, so set the values in your shell when you install, for example
+`CAREER_OPS_ROOT=/path/to/data sh web/scripts/install-scan-schedule.sh`, or in
+PowerShell:
+
+```powershell
+$env:CAREER_OPS_ROOT = 'D:\career-ops-data'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File web/scripts/install-scan-schedule.ps1
+```
+
+Run the installer again after you change them. On all three systems the worker
+appends its errors to `scheduled-jobs.log` next to the store
+(`data/scheduled-jobs.log` by default).
 
 After any of these, new postings land in `data/pipeline.md` under `## Pending` on
 each run. Next you decide which are worth your attention — cheaply.

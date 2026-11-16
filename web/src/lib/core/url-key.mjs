@@ -48,16 +48,25 @@ function foldHostname(host) {
  * Promote a known identity-bearing SPA fragment into a functional query key
  * before generic URL normalization drops the fragment. Most fragments are
  * presentation-only. The narrow exceptions are recognized `#/job/{id}` and
- * `#/jobs/{id}` routes; MokaHR keeps its established board-specific key.
+ * `#/jobs/{id}` routes, including a trailing slash and a `#!` prefix.
+ * A lang, language, or locale query inside that fragment is copied onto the
+ * comparison URL. MokaHR keeps its established board-specific key.
  *
  * @param {URL} url
  */
 export function promoteKnownFragmentIdentity(url) {
-  const match = /^#\/jobs?\/([^/?#]+)(?:\?[^#]*)?$/i.exec(url.hash);
+  const match = /^#!?\/jobs?\/([^/?#]+)\/?(?:\?([^#]*))?$/i.exec(url.hash);
   if (!match) return;
   let jobId;
   try { jobId = decodeURIComponent(match[1]); } catch { return; }
   if (!jobId) return;
+  if (match[2]) {
+    const frag = new URLSearchParams(match[2]);
+    for (const name of LANGUAGE_PARAMS) {
+      const value = frag.get(name);
+      if (value && !url.searchParams.has(name)) url.searchParams.append(name, value);
+    }
+  }
   if (url.hostname.toLowerCase() === "app.mokahr.com") {
     url.searchParams.append("mokahr_job_id", jobId);
     return;
@@ -117,6 +126,35 @@ export function normalizeUrl(raw) {
 // Query params naming the language a posting page renders in.
 export const LANGUAGE_PARAMS = ["language", "lang", "locale"];
 
+/** Drop a language query from a known job fragment and report it.
+ *  promoteKnownFragmentIdentity copies that query onto the comparison URL,
+ *  which would put the language back into a key that just had it removed.
+ *  @param {URL} url
+ *  @returns {{language: string, script: string}}
+ */
+function stripFragmentLanguage(url) {
+  const match = /^#(!?)(\/jobs?\/[^/?#]+\/?)(?:\?([^#]*))?$/i.exec(url.hash);
+  if (!match?.[3]) return { language: "", script: "" };
+  const frag = new URLSearchParams(match[3]);
+  let language = "";
+  let script = "";
+  let removed = false;
+  for (const name of [...frag.keys()]) {
+    if (!LANGUAGE_PARAMS.includes(name.toLowerCase())) continue;
+    if (!language) {
+      const rawValue = frag.get(name);
+      language = languageSubtag(rawValue);
+      script = postingScript(rawValue);
+    }
+    frag.delete(name);
+    removed = true;
+  }
+  if (!removed) return { language: "", script: "" };
+  const rest = frag.toString();
+  url.hash = `#${match[1]}${match[2]}${rest ? `?${rest}` : ""}`;
+  return { language, script };
+}
+
 /**
  * The posting a URL names, apart from the language it asks for.
  *
@@ -138,6 +176,11 @@ export function postingLanguageKey(raw) {
       script = postingScript(raw);
     }
     u.searchParams.delete(name);
+  }
+  const fromFragment = stripFragmentLanguage(u);
+  if (!language && fromFragment.language) {
+    language = fromFragment.language;
+    script = fromFragment.script;
   }
   return { key: normalizeUrl(u.href), language, script };
 }
@@ -201,7 +244,7 @@ export function postingUrlRelation(rawA, rawB) {
   return a.language && b.language ? "distinct" : "one-sided-language";
 }
 
-const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com)$/;
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com)$/;
 
 /**
  * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an
@@ -345,6 +388,9 @@ export function canonicalJobKey(raw) {
   }
   if (out.hostname === "apply.workable.com") {
     out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, "/j/$1");
+  }
+  if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/[^/]+\/job\/)/, "");
   }
   return out.toString();
 }

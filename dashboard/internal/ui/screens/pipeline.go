@@ -384,6 +384,9 @@ type PipelineModel struct {
 	// succeeds. A flash alone is cleared by the next key, which left an
 	// unreadable inbox looking empty.
 	pendingErr string
+	// pendingLastSkip is the URL of the last row `x` skipped in this session,
+	// which `u` puts back (pipeline_pending_skip.go). "" when there is none.
+	pendingLastSkip string
 }
 
 // IsTextInputActive returns true if the search or any other text input is currently focused
@@ -472,6 +475,7 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.pending = m.pending
 	reloaded.pendingSort = m.pendingSort
 	reloaded.pendingErr = m.pendingErr
+	reloaded.pendingLastSkip = m.pendingLastSkip
 	reloaded.viewMode = m.viewMode
 	// Preserve search state across refresh — otherwise pressing `r` silently drops a
 	// committed query and the user loses their place mid-investigation.
@@ -601,6 +605,8 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		return m, nil
 	case PipelineQueueEvalDoneMsg:
 		return m.onQueueEvalDone(msg), nil
+	case PipelineSkipDoneMsg:
+		return m.onSkipDone(msg), nil
 	case pipelineStartDiscardPickerMsg:
 		// The status change that starts this flow came from a tracker tab; if
 		// the user has since moved to the Inbox, which has no tracker rows, go
@@ -643,7 +649,7 @@ func (m PipelineModel) handleKey(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 		return m.handleKeysHelp(msg)
 	}
 	// On the Inbox only its allowlisted keys reach the switch below; its own
-	// keys, `e` among them, are handled in handlePendingKey.
+	// keys, `e`, `x` and `u` among them, are handled in handlePendingKey.
 	if m.onPendingTab() {
 		if next, cmd, handled := m.handlePendingKey(msg); handled {
 			return next, cmd

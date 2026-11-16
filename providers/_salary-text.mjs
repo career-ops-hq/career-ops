@@ -46,6 +46,18 @@ function canonicalizeSeparators(numStr) {
   return numStr.replace(grouped, '$1').replace(sep, '.');
 }
 
+const ISO_4217_CODES = new Set(Intl.supportedValuesOf('currency'));
+
+/**
+ * Whether a token is an ISO-4217 currency code, in any case ("USD", "eur").
+ *
+ * @param {unknown} token
+ * @returns {boolean}
+ */
+export function isCurrencyCode(token) {
+  return ISO_4217_CODES.has(String(token ?? '').toUpperCase());
+}
+
 // Chinese spellings: 万/萬 (x10,000), "N薪" (months of pay per year), the
 // 年薪 / 月薪 period words, 税前 (gross) and the 人民币 / 元 currency words.
 const ZH_HINT_RE = /[万萬薪元]|人民币|人民幣|[税稅][前后後]|[\/／]\s*[年月]|每[年月]/;
@@ -137,6 +149,33 @@ export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
   if (ZH_HINT_RE.test(s)) return parseChineseAmount(s);
+  // Decided on the whole string, before any label, bullet suffix or note is
+  // cut away: "Monthly salary: 5,000 USD" and "5,000 USD • per month" lose
+  // their period with the text around the number, and would read as annual.
+  const period = compensationPeriod(s);
+  if (period && period !== 'annual') return null;
+  // Strings copied verbatim from a JD carry a leading label ("Annual Salary
+  // Range: $165,000 - $190,000") and a trailing bullet suffix ("$204.4K -
+  // $352K • Offers Equity"). Both are dropped before anything below reads the
+  // number, so the separator logic only ever sees the amount itself. Only a
+  // colon BEFORE the first digit is a label: one after it belongs to a note
+  // ("$150,000 (note: negotiable)"), and cutting there would drop the amount.
+  const firstDigit = s.search(/\d/);
+  const labelColon = firstDigit === -1 ? -1 : s.lastIndexOf(':', firstDigit);
+  if (labelColon !== -1) s = s.slice(labelColon + 1).trim();
+  s = s.split('•')[0].trim();
+  // A bracketed magnitude ("80–100 USD (in thousands)") scales the figure, so
+  // it is read before the note strip below, which would drop it and leave
+  // thousands read as units.
+  let scale = 1;
+  const magnitude = s.match(/\s*\(\s*(?:in\s+)?(thousands?|k|millions?|mm|mn)(?:\s+[A-Za-z]{3})?\s*\)\s*$/i);
+  if (magnitude) {
+    scale = /^(?:thousands?|k)$/i.test(magnitude[1]) ? 1000 : 1_000_000;
+    s = s.slice(0, magnitude.index).trim();
+  }
+  // A trailing parenthetical with no digits is a note ("(note: negotiable)",
+  // "(Spain)"), never part of the figure.
+  s = s.replace(/\s*\([^()\d]*\)\s*$/, '').trim();
   // Keep period recognition separate from amount parsing, but allow an explicit
   // annual suffix to coexist with the numeric value.
   // It may appear on either side of a trailing currency token ("60k CAD per
@@ -158,16 +197,21 @@ export function parseAmount(raw) {
     .replace(/(\d)[    ](?=\d{3}(?!\d))/g, '$1')
     .trim();
   // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
-  // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
-  // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
-  // three letters, so the lone "k" magnitude suffix ("80k") is never eaten, and
-  // prose ("competitive") still fails the numeric match below even after losing
-  // its last three letters.
-  s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
+  // symbol on both bounds: "$123,684—$254,644 USD") and a trailing ISO-4217
+  // code (any case — "450k SEK", "80-90k eur"). Only a real code is stripped:
+  // any three letters would turn "100k tax" into 100k, a qualifier read as
+  // salary data. RMB is not an ISO code but is the usual spelling of CNY, so
+  // it counts. A three-letter token also never eats the lone "k" magnitude
+  // suffix ("80k").
+  s = s.replace(/[€$£¥]/g, '')
+    .replace(/\s*([A-Za-z]{3})\s*$/, (token, code) => (isCurrencyCode(code) || /^rmb$/i.test(code) ? '' : token))
+    .trim();
   s = stripAnnual(s);
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(canonicalizeSeparators(numStr));
-    return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
+    // "80k (in thousands)" names two magnitudes; neither reading is safe.
+    if (Number.isNaN(n) || (kFlag && scale !== 1)) return null;
+    return n * (kFlag ? 1000 : scale);
   };
   const range = s.match(/^([\d.,]+)\s*(k)?\s*[-–—]\s*([\d.,]+)\s*(k)?$/i);
   if (range) {
@@ -189,7 +233,7 @@ export function parseAmount(raw) {
  * The pay period a compensation string names, or null when it names none.
  *
  * @param {unknown} raw
- * @returns {'annual' | 'monthly' | 'hourly' | null}
+ * @returns {'annual' | 'monthly' | 'weekly' | 'daily' | 'hourly' | null}
  */
 export function compensationPeriod(raw) {
   const value = String(raw ?? '');
@@ -200,6 +244,8 @@ export function compensationPeriod(raw) {
   if (ZH_MONTHLY_RE.test(zh)) return 'monthly';
   if (/(?:\/\s*(?:year|yr)\b|\bper\s+(?:year|annum)\b|\bannual(?:ly)?\b|\byearly\b)/i.test(value)) return 'annual';
   if (/(?:\/\s*(?:month|mo)\b|\bper\s+month\b|\bmonthly\b)/i.test(value)) return 'monthly';
+  if (/(?:\/\s*(?:week|wk)\b|\bper\s+week\b|\bweekly\b)/i.test(value)) return 'weekly';
+  if (/(?:\/\s*day\b|\bper\s+day\b|\bdaily\b)/i.test(value)) return 'daily';
   if (/(?:\/\s*(?:hour|hr)\b|\bper\s+hour\b|\bhourly\b)/i.test(value)) return 'hourly';
   return null;
 }

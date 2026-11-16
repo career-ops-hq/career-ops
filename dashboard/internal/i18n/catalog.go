@@ -132,6 +132,8 @@ type Catalog struct {
 	HelpReport     string
 	HelpOpenURL    string
 	HelpQueue      string
+	HelpSkip       string
+	HelpUndoSkip   string
 	HelpOpenPDF    string
 	HelpCopyPDF    string
 	HelpRegenPDF   string
@@ -207,6 +209,21 @@ type Catalog struct {
 	InboxQueueRetryFailed string
 	InboxQueueUnreadable  string
 	InboxQueueNoWebURL    string
+
+	// Inbox `x` and `u`: skip the selected row in data/pipeline.md, and undo
+	// the last skip of the session (#5269)
+	InboxSkipping       string
+	InboxSkipped        string
+	InboxSkipUnchanged  string
+	InboxSkipUnreadable string
+	InboxSkipFailed     string
+	InboxSkipNoWebURL   string
+	InboxUndoNothing    string
+	InboxUndoing        string
+	InboxUndone         string
+	InboxUndoUnchanged  string
+	InboxUndoGone       string
+	InboxUndoFailed     string
 }
 
 // SortModeLabel returns the localized display label for a sort mode ("score", "date", etc.).
@@ -469,6 +486,8 @@ var En = Catalog{
 	HelpReport:     " report  ",
 	HelpOpenURL:    " open URL  ",
 	HelpQueue:      " queue  ",
+	HelpSkip:       " skip  ",
+	HelpUndoSkip:   " undo skip  ",
 	HelpOpenPDF:    " open PDF  ",
 	HelpCopyPDF:    " copy PDF path  ",
 	HelpRegenPDF:   " regen PDF  ",
@@ -543,6 +562,19 @@ var En = Catalog{
 	InboxQueueRetryFailed: "Failed in the batch; retry with batch/batch-runner.sh --retry-failed: %s",
 	InboxQueueUnreadable:  "Not queued: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
 	InboxQueueNoWebURL:    "Not a web address, nothing queued: %s",
+
+	InboxSkipping:       "Skipping %s ...",
+	InboxSkipped:        "Skipped; u puts it back: %s",
+	InboxSkipUnchanged:  "Already skipped in data/pipeline.md, nothing changed: %s",
+	InboxSkipUnreadable: "Not skipped: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
+	InboxSkipFailed:     "Could not skip the row: %s",
+	InboxSkipNoWebURL:   "Not a web address, nothing skipped: %s",
+	InboxUndoNothing:    "Nothing to undo: no row was skipped in this session",
+	InboxUndoing:        "Putting back %s ...",
+	InboxUndone:         "Back in the Inbox: %s",
+	InboxUndoUnchanged:  "Not skipped any more, nothing to undo: %s",
+	InboxUndoGone:       "Not put back: the row is no longer in the Pending section of data/pipeline.md: %s",
+	InboxUndoFailed:     "Could not undo the skip; u tries again: %s",
 }
 
 // Tr is the static Turkish translation catalog.
@@ -669,6 +701,8 @@ var Tr = Catalog{
 	HelpReport:     " rapor  ",
 	HelpOpenURL:    " URL aç  ",
 	HelpQueue:      " sıraya al  ",
+	HelpSkip:       " atla  ",
+	HelpUndoSkip:   " atlamayı geri al  ",
 	HelpOpenPDF:    " PDF'i aç  ",
 	HelpCopyPDF:    " PDF yolunu kopyala  ",
 	HelpRegenPDF:   " PDF üret  ",
@@ -743,6 +777,19 @@ var Tr = Catalog{
 	InboxQueueRetryFailed: "Toplu işte başarısız; batch/batch-runner.sh --retry-failed ile yeniden deneyin: %s",
 	InboxQueueUnreadable:  "Sıraya alınmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
 	InboxQueueNoWebURL:    "Web adresi değil, sıraya alınmadı: %s",
+
+	InboxSkipping:       "Atlanıyor: %s ...",
+	InboxSkipped:        "Atlandı; u ile geri gelir: %s",
+	InboxSkipUnchanged:  "data/pipeline.md içinde zaten atlanmış, değişiklik yok: %s",
+	InboxSkipUnreadable: "Atlanmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
+	InboxSkipFailed:     "Satır atlanamadı: %s",
+	InboxSkipNoWebURL:   "Web adresi değil, atlanmadı: %s",
+	InboxUndoNothing:    "Geri alınacak bir şey yok: bu oturumda hiçbir satır atlanmadı",
+	InboxUndoing:        "Geri getiriliyor: %s ...",
+	InboxUndone:         "Yeniden gelen kutusunda: %s",
+	InboxUndoUnchanged:  "Artık atlanmış değil, geri alınacak bir şey yok: %s",
+	InboxUndoGone:       "Geri getirilmedi: satır artık data/pipeline.md dosyasının Pending bölümünde değil: %s",
+	InboxUndoFailed:     "Atlama geri alınamadı; u ile yeniden deneyin: %s",
 }
 
 // Es is the static Spanish translation catalog.
@@ -869,6 +916,8 @@ var Es = Catalog{
 	HelpReport:     " informe  ",
 	HelpOpenURL:    " abrir URL  ",
 	HelpQueue:      " encolar  ",
+	HelpSkip:       " omitir  ",
+	HelpUndoSkip:   " deshacer omisión  ",
 	HelpOpenPDF:    " abrir PDF  ",
 	HelpCopyPDF:    " copiar ruta del PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
@@ -943,6 +992,19 @@ var Es = Catalog{
 	InboxQueueRetryFailed: "Falló en el batch; reinténtalo con batch/batch-runner.sh --retry-failed: %s",
 	InboxQueueUnreadable:  "No se encoló: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
 	InboxQueueNoWebURL:    "No es una dirección web; no se encoló nada: %s",
+
+	InboxSkipping:       "Omitiendo %s ...",
+	InboxSkipped:        "Omitida; u la devuelve: %s",
+	InboxSkipUnchanged:  "Ya estaba omitida en data/pipeline.md; no cambió nada: %s",
+	InboxSkipUnreadable: "No se omitió: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
+	InboxSkipFailed:     "No se pudo omitir la fila: %s",
+	InboxSkipNoWebURL:   "No es una dirección web; no se omitió nada: %s",
+	InboxUndoNothing:    "Nada que deshacer: no se omitió ninguna fila en esta sesión",
+	InboxUndoing:        "Devolviendo %s ...",
+	InboxUndone:         "De vuelta en la bandeja: %s",
+	InboxUndoUnchanged:  "Ya no está omitida; nada que deshacer: %s",
+	InboxUndoGone:       "No se devolvió: la fila ya no está en la sección Pending de data/pipeline.md: %s",
+	InboxUndoFailed:     "No se pudo deshacer la omisión; u lo intenta de nuevo: %s",
 }
 
 // Current points to the active language catalog. Defaults to English (&En).
