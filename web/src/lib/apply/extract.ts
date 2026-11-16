@@ -114,11 +114,11 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         for (const c of Array.from(cands)) {
           const t = pure(c);
           // Keep a long title. clean() shortens what is shown, and the trailing
-          // star is read from this full text. Options are stored already cut to
-          // 160 characters, so compare that cut too. Otherwise a long option
-          // looks like the question, and a star on the option marks the group.
-          const shown = clean(t).toLowerCase();
-          if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !optSet.has(shown) && !isUuid(t) && !isGenericPh(t)) return t;
+          // star is read from this full text. Options are matched on their full
+          // text too. The 160-character cut would hide a real question that only
+          // shares that prefix with an option, and it would let a long option
+          // through as the question.
+          if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }
       }
       return "";
@@ -169,12 +169,13 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         }
         if (name) seenRadio.add(name);
         const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
-        const options = group.map((r) => clean(labelFor(r) || (r as HTMLInputElement).value)).filter(Boolean);
+        const optionFull = group.map((r) => normalize(labelFor(r) || (r as HTMLInputElement).value)).filter(Boolean);
+        const options = optionFull.map((t) => clean(t));
         group.forEach((r, i) => {
           r.setAttribute("data-co-field", fid);
           r.setAttribute("data-co-option", options[i] ?? String(i));
         });
-        const radioRaw = groupLabel(el, options);
+        const radioRaw = groupLabel(el, optionFull);
         const radioLabel = clean(radioRaw) || name;
         fields.push({ id: fid, type: "radio", label: radioLabel, required: requiredFor(clean(radioRaw) ? radioRaw : (name || "")), options });
         continue;
