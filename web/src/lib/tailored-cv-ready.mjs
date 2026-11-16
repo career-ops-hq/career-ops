@@ -24,7 +24,7 @@ export function tailoredCvOnDisk({ indexStatus = "not-found", filenames = [], co
   if (!key?.slug) return false;
   for (const name of filenames) {
     if (typeof name !== "string") continue;
-    if (matchesTailoredCv(name.toLowerCase(), key.slug)) return true;
+    if (key.keys.some((k) => matchesTailoredCv(name.toLowerCase(), k))) return true;
   }
   return false;
 }

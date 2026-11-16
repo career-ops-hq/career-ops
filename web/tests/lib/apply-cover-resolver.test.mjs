@@ -298,3 +298,58 @@ test('matchers: report-leading names from lib/output-names.mjs (#6667)', async (
   assert.equal(companySlug('Zoë Café').slug, kebab('Zoë Café'));
   assert.equal(matchesTailoredCv('031-zoe-cafe-cv-dana-quinn-2026-11-09.pdf', companySlug('Zoë Café').slug), true);
 });
+
+test('matchers agree with buildOutputName for every name it will write (#6667)', async () => {
+  const { buildOutputName } = await import('../../../lib/output-names.mjs');
+  const { kebab } = await import('../../../lib/output-names.mjs');
+  const { matchesTailoredCv, matchesTailoredCover, standardKind } = await import('../../src/lib/apply/cv-match.mjs');
+  const companies = ['Acme', 'CV Tools', 'Cover Systems', 'Cover Genius', 'The CV Centre', 'Zoë Café'];
+  const candidates = ['Jane Smith', 'Jane Cover', 'Cover Dana', 'Robin Cv Jones'];
+  let built = 0;
+  let refused = 0;
+  const bad = [];
+  for (const company of companies) {
+    for (const candidate of candidates) {
+      for (const kind of ['cv', 'cover']) {
+        let name;
+        try {
+          name = buildOutputName({ report: 24, company, kind, candidate, date: '2026-11-07' });
+        } catch {
+          refused += 1;
+          continue;
+        }
+        built += 1;
+        const slug = kebab(company);
+        const wantCv = kind === 'cv';
+        if (standardKind(name) !== kind) bad.push(`${name} -> kind ${standardKind(name)}`);
+        if (matchesTailoredCv(name, slug) !== wantCv) bad.push(`${name} cv-match`);
+        if (matchesTailoredCover(name, slug) !== !wantCv) bad.push(`${name} cover-match`);
+      }
+    }
+  }
+  assert.deepEqual(bad, []);
+  // Both sides are exercised: names with kind words at the edges are written
+  // and read back, and the ones with a kind word inside a slug are refused.
+  assert.ok(built > 0 && refused > 0, `built=${built} refused=${refused}`);
+  for (const [company, candidate, kind] of [['Cover Systems', 'Jane Smith', 'cover'], ['Acme', 'Jane Cover', 'cover'], ['Cover Genius', 'Dana Quinn', 'cover'], ['CV Tools', 'Jane Smith', 'cover']]) {
+    const name = buildOutputName({ report: 24, company, kind, candidate, date: '2026-11-07' });
+    assert.equal(standardKind(name), kind, name);
+  }
+});
+
+test('an accented company is found under both its folded and its legacy slug', async () => {
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { matchesTailoredCover, matchesTailoredCv } = await import('../../src/lib/apply/cv-match.mjs');
+  const key = companySlug('Zoë Café');
+  assert.deepEqual(key.keys, ['zoe-cafe', 'zo-caf']);
+  const anyKey = (match, name) => key.keys.some((k) => match(name, k));
+  // The standard name uses the folded slug; covers written without --report and
+  // older CVs carry the slug that dropped the accented letters.
+  assert.equal(anyKey(matchesTailoredCover, '031-zoe-cafe-cover-dana-quinn-2026-11-09.pdf'), true);
+  assert.equal(anyKey(matchesTailoredCover, 'zo-caf--engineer-cover.pdf'), true);
+  assert.equal(anyKey(matchesTailoredCv, 'cv-dana-quinn-zo-caf-2026-11-09.pdf'), true);
+  assert.equal(anyKey(matchesTailoredCover, 'acme-engineer-cover.pdf'), false);
+  // An unaccented company has a single key.
+  assert.deepEqual(companySlug('Acme Co').keys, ['acme-co']);
+});
+
