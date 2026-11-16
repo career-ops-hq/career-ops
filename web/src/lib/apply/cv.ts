@@ -43,11 +43,11 @@ export async function resolveTailoredCv(company?: string, applicationNumber?: st
   // output/, which resolved the newest unrelated CV instead (#2352).
   const key = companySlug(c);
   if (!key) return null;
-  const { slug } = key;
+  const { keys } = key;
   // `key.first` is deliberately NOT used as a fallback: matching a company by
   // its first token alone made "Acme" resolve an unrelated "Acme Bank" file,
   // and matchesTailoredCv already requires the cv- prefix AND a token boundary.
-  const matches = files.filter((f) => matchesTailoredCv(f.toLowerCase(), slug));
+  const matches = files.filter((f) => keys.some((k: string) => matchesTailoredCv(f.toLowerCase(), k)));
   if (!matches.length) return null;
   const sorted = sortNewestFirst(dir, matches);
   if (!sorted.length) return null;
