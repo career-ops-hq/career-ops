@@ -2,12 +2,16 @@
 
 This is a user-selected setup guide, not a change to the shipped search
 defaults. It uses existing providers and adds no scraper or candidate data.
+For a copyable, opt-in portal fragment, see
+[the Poland/EU example](../examples/poland-market/portals.fragment.yml). Merge
+it into your user-owned `portals.yml`; do not replace your personal filters.
 
 ## Poland-relevant job boards
 
-These entries are already in `templates/portals.example.yml` and are disabled
-by default. Enable only the boards you want in your user-owned `portals.yml`;
-do not edit the shipped template.
+These providers already exist in `templates/portals.example.yml`. The template
+currently enables SolidJobs IT and leaves JustJoin.it, No Fluff Jobs, and
+Bulldogjob disabled. The example opts into these existing providers without
+changing the shipped template.
 
 | Board | Provider | Support |
 |---|---|---|
@@ -22,16 +26,19 @@ pagination, fields, and limitations.
 Other Polish sources such as [Pracuj.pl](https://www.pracuj.pl/),
 [RocketJobs.pl](https://rocketjobs.pl/), and
 [theprotocol.it](https://theprotocol.it/) do not currently have dedicated
-built-in board providers in this checkout. Do not treat them as scanner-enabled;
-adding a provider would be separate implementation work.
+built-in board providers in this checkout, so the example does not scan them.
+The repository's provider guide requires a source proposal before implementing
+a board provider when source eligibility is uncertain. Do not work around a
+board's bot challenge to create an integration.
 
 ## Poland-first location
 
-For Warsaw/Poland office roles and remote roles explicitly eligible for EU
-applicants, use the [Poland-first, EU-remote location policy](WORKPLACE_GEOGRAPHY.md#poland-first-eu-remote-example).
-It is opt-in. Add other countries to `allow` and `onsite_countries` only when
-you are willing to consider office or hybrid work there. A remote-region label
-is not proof of work authorization.
+For Warsaw office roles and remote roles explicitly eligible for EU applicants,
+use the [Poland-first, EU-remote location policy](WORKPLACE_GEOGRAPHY.md#poland-first-eu-remote-example).
+The copyable example is city-specific: add each desired city to both `allow`
+and `onsite_locations`, and add its country to `onsite_countries` for office or
+hybrid work. This also lets EU-based users add their own local office locations.
+A remote-region label is not proof of work authorization.
 
 ## Compensation details
 
