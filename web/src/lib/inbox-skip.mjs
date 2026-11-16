@@ -114,15 +114,18 @@ export async function setInboxSkip(pipelinePath, url, done, options = {}) {
 
   const run = () => {
     let md;
+    let target;
     try {
-      md = fs.readFileSync(pipelinePath, "utf8");
+      // Read and replace the same file, keeping a shared inbox symlink intact.
+      target = fs.realpathSync(pipelinePath);
+      md = fs.readFileSync(target, "utf8");
     } catch (err) {
       if (err && err.code === "ENOENT") return { ok: false, error: "not-found" };
       throw err;
     }
     const result = applyInboxSkip(md, parsed, done);
     if (!result.ok) return result;
-    if (result.changed > 0) atomicWrite(pipelinePath, result.text);
+    if (result.changed > 0) atomicWrite(target, result.text);
     return result;
   };
 
