@@ -6,6 +6,8 @@ import { detectColumns, extractCellUrl, isHeaderRow, isSeparatorRow, linkedRepor
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { hireHiveTenantOf } from './providers/hirehive.mjs';
 import { resolveHibobTenant } from './providers/hibob.mjs';
+import { resolveHomerunFeedUrl } from './providers/homerun.mjs';
+import { resolveBoardUrl as resolvePaylocityBoardUrl } from './providers/paylocity.mjs';
 import { resolveBoard as resolveTalentlinkBoard } from './providers/talentlink.mjs';
 import { extractClient as extractTrakstarClient } from './providers/trakstar.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
@@ -27,7 +29,7 @@ const HTTPS_VENDORS = new Set([
 const TENANT_ORIGIN_VENDORS = new Set([
   'applicantpro', 'bamboohr', 'breezy', 'icims', 'jazzhr', 'keka', 'personio',
   'pinpoint', 'prevueaps', 'recruitee', 'schoolspring', 'taleez', 'teamtailor',
-  'trakstar', 'turbohire', 'zoho-recruit',
+  'turbohire', 'zoho-recruit',
 ]);
 
 // Vendors whose provider reads the board slug from the first path segment.
@@ -85,23 +87,18 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
     if (parts[0] !== 'companies' || !parts[1]) return null;
     u.pathname = `/companies/${parts[1]}`;
   } else if (vendor === 'homerun') {
-    // feed.homerun.co/<slug> is the board feed; a tenant subdomain is the board.
-    if (u.hostname.toLowerCase() === 'feed.homerun.co') {
-      if (!parts[0]) return null;
-      u.pathname = `/${parts[0]}`;
-    } else {
-      u.pathname = '/';
-    }
+    // <slug>.homerun.co and feed.homerun.co/<slug> are one board; the provider
+    // maps both to the feed URL, so the seed uses that one spelling.
+    return resolveHomerunFeedUrl({ careers_url: u.href });
   } else if (vendor === 'mokahr') {
     // The board is /<kind>/<orgId>/<siteId>; the posting itself sits in the hash.
     if (parts.length < 3) return null;
     u.pathname = `/${parts.slice(0, 3).join('/')}`;
   } else if (vendor === 'paylocity') {
     // Only a board URL names the company GUID; a posting URL carries a job id.
-    // Spelled the way the provider builds it, so letter case cannot split a board.
-    const guid = u.pathname.match(/^\/recruiting\/jobs\/all\/([^/]+)/i)?.[1];
-    if (!guid) return null;
-    u.pathname = `/Recruiting/Jobs/All/${guid.toLowerCase()}`;
+    // The provider rebuilds the board from a valid GUID in its own spelling,
+    // so letter case cannot split a board and a malformed GUID gives no seed.
+    return resolvePaylocityBoardUrl({ careers_url: u.href });
   } else if (vendor === 'adp-workforcenow') {
     // The tenant lives in the query (cid, ccId, lang), which the generic
     // cleanup below would drop; keep those three and nothing else.
@@ -124,11 +121,12 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
   } else if (vendor === 'successfactors') {
     const endpointAt = parts.findIndex((part) => /^(?:job|search|tile-search-results|services)$/i.test(part));
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
-  } else if (vendor === 'trakstar' && u.hostname.toLowerCase() === 'jsapi.recruiterbox.com') {
-    // The openings API names the board in ?client_name=; the tenant host is
-    // the same board in the form the provider reads from a careers_url. The
-    // provider's own parser applies its path, slug and reserved-label rules.
-    const client = extractTrakstarClient(rawUrl);
+  } else if (vendor === 'trakstar') {
+    // <client>.hire.trakstar.com, the legacy <client>.recruiterbox.com and the
+    // openings API's ?client_name= all name one board. The provider's parser
+    // applies its path, slug and reserved-label rules; the seed uses the
+    // current tenant host.
+    const client = extractTrakstarClient(u.href);
     return client ? `https://${client}.hire.trakstar.com` : null;
   } else if (TENANT_ORIGIN_VENDORS.has(vendor)) {
     // www.applicantpro.com/openings/<tenant>/… is an alias of the tenant host.
