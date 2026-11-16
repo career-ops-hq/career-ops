@@ -23,6 +23,7 @@ const longOption = `${"D".repeat(160)} *`;
 const sharedPrefix = "E".repeat(161);
 const sharedQuestion = `${sharedPrefix} Do you agree? *`;
 const sharedOption = `${sharedPrefix} I agree`;
+const wrappedOption = `${"F".repeat(160)} yes`;
 
 test("a trailing star marks the field required", async (t) => {
   const pageHtml = html.replace("</form>", `
@@ -48,6 +49,13 @@ test("a trailing star marks the field required", async (t) => {
     <p class="question">${sharedQuestion}</p>
     <label><input type="radio" name="sharedq" value="1"> ${sharedOption}</label>
     <label><input type="radio" name="sharedq" value="0"> No</label>
+  </div>
+  <div class="field">
+    <div class="heading">
+      <p class="question-title">Eligibility *</p>
+      <label><input type="radio" name="elig" value="1"> ${wrappedOption}</label>
+      <label><input type="radio" name="elig" value="0"> No</label>
+    </div>
   </div>
 </form>`);
   const server = createServer((req, res) => {
@@ -91,6 +99,10 @@ test("a trailing star marks the field required", async (t) => {
     const shared = form.fields.find((f) => f.type === "radio" && f.label === "E".repeat(160));
     assert.ok(shared);
     assert.equal(shared.required, true);
+    const wrapped = form.fields.find((f) => f.type === "radio" && f.options?.includes("F".repeat(160)));
+    assert.ok(wrapped);
+    assert.equal(wrapped.label, "Eligibility *");
+    assert.equal(wrapped.required, true);
   } finally {
     try {
       await browser?.close();

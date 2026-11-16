@@ -158,6 +158,9 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           // text too. The 160-character cut would hide a real question that only
           // shares that prefix with an option, and it would let a long option
           // through as the question.
+          // A wrapper around the radios includes their labels in its text, so
+          // the star sits in the middle and the group looks optional.
+          if (c.querySelectorAll("input[type=radio]").length > 1) continue;
           if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }
       }
