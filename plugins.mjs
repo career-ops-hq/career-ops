@@ -467,7 +467,16 @@ function readPluginConfigListError(root) {
 // the user's other plugins or non-secret settings).
 export function setPluginEnabled(root, id, on, settings) {
   const file = path.join(root, 'config', 'plugins.yml');
-  const cfg = parsePluginConfig(existsSync(file) ? readFileSync(file, 'utf8') : null, file);
+  // existsSync is false for ELOOP and EACCES as well as a missing file.
+  // Read the path and keep every error except ENOENT, so a long symlink
+  // chain is not replaced with an empty configuration.
+  let raw = null;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  const cfg = parsePluginConfig(raw, file);
   if (!cfg.plugins || typeof cfg.plugins !== 'object') cfg.plugins = {};
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
@@ -547,6 +556,9 @@ function resolveLinkTarget(parentDir, link, expanding = new Set()) {
   // Keep ".". Dropping it turns "regular/." into "regular" and the save
   // overwrites that file. A dot after a non-directory fails below.
   const segments = body.split(separators).filter((seg) => seg !== '');
+  // "regular/" is a directory lookup. Splitting drops the empty tail, so
+  // remember the separator and do not treat a file as the final name.
+  const directoryRequired = body.endsWith('/') || (path.sep === '\\' && body.endsWith('\\'));
   for (let i = 0; i < segments.length; i++) {
     const seg = segments[i];
     if (seg === '..') {
@@ -562,7 +574,7 @@ function resolveLinkTarget(parentDir, link, expanding = new Set()) {
       if (err?.code !== 'ENOENT') throw err;
       // A missing final file is created. A missing step in the middle is ENOENT,
       // the same as the reader, so "missing/../target.yml" does not pick another file.
-      if (!last) throw Object.assign(new Error(`missing path component: ${next}`), { code: 'ENOENT' });
+      if (!last || directoryRequired) throw Object.assign(new Error(`missing path component: ${next}`), { code: 'ENOENT' });
       return next;
     }
     if (!last && st.isSymbolicLink()) {
@@ -589,7 +601,19 @@ function resolveLinkTarget(parentDir, link, expanding = new Set()) {
     }
     current = next;
   }
-  return current;
+  if (!directoryRequired) return current;
+  let st;
+  try {
+    st = lstatSync(current);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+    throw Object.assign(new Error(`missing path component: ${current}`), { code: 'ENOENT' });
+  }
+  const probe = st.isSymbolicLink() ? realpathSync(current) : current;
+  if (!lstatSync(probe).isDirectory()) {
+    throw Object.assign(new Error(`not a directory: ${current}`), { code: 'ENOTDIR' });
+  }
+  throw Object.assign(new Error(`directory: ${current}`), { code: 'EISDIR' });
 }
 
 const setEnabled = (id, on, settings) => setPluginEnabled(DATA_ROOT, id, on, settings);

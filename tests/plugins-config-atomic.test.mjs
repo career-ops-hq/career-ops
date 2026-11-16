@@ -338,3 +338,59 @@ test('a dot after a file does not overwrite that file', async (t) => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a trailing slash does not overwrite a file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-slashdir-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const regular = join(config, 'regular');
+  try {
+    mkdirSync(config);
+    writeFileSync(regular, 'keep\n');
+    symlinkSync('regular/', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?slashdir=${Date.now()}`);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ENOTDIR',
+    );
+    assert.equal(readFileSync(regular, 'utf8'), 'keep\n');
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a symlink chain past the lookup limit does not replace its target', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-loop-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const target = join(config, 'target.yml');
+  try {
+    mkdirSync(config);
+    writeFileSync(target, 'keep: true\n');
+    let name = 'target.yml';
+    for (let i = 0; i < 64; i++) {
+      const linkName = `s${i}`;
+      symlinkSync(name, join(config, linkName));
+      name = linkName;
+    }
+    symlinkSync(name, link);
+    assert.throws(() => readFileSync(link, 'utf8'), (err) => err?.code === 'ELOOP');
+    const { setPluginEnabled } = await import(`${PLUGINS}?loop=${Date.now()}`);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ELOOP',
+    );
+    assert.equal(readFileSync(target, 'utf8'), 'keep: true\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
