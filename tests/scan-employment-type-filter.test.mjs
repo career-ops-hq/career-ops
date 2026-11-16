@@ -131,6 +131,15 @@ ${filterBlock}tracked_companies:
 
 const counter = (stdout) => stdout.match(/Filtered by employment type:\s+(\d+) removed/)?.[1];
 
+// The per-source table's Total row: every posting fetched lands in exactly one
+// column (fetched = source + title + location + age + other + seen + new).
+const totalRow = (stdout) => {
+  const m = stdout.match(/^\s+Total((?:\s+\d+){8})\s*$/m);
+  if (!m) return undefined;
+  const [fetched, source, title, location, age, other, seen, added] = m[1].trim().split(/\s+/).map(Number);
+  return { fetched, source, title, location, age, other, seen, added };
+};
+
 test('scan without the block: every posting is added, no counter line, types reach scan-history', () => {
   const { status, stdout, stderr, slugs, history } = runScan('');
   assert.equal(status, 0, stderr);
@@ -144,6 +153,11 @@ test('scan with allow [contract, part_time]: full-time dropped and counted, unty
   assert.equal(status, 0, stderr);
   assert.deepEqual(slugs, ['contract', 'parttime', 'untyped']);
   assert.equal(counter(stdout), '1', stdout);
+  const total = totalRow(stdout);
+  assert.ok(total, stdout);
+  assert.equal(total.other, 1, 'the dropped full-time posting is counted under other');
+  assert.equal(total.fetched, total.source + total.title + total.location + total.age + total.other + total.seen + total.added,
+    'the per-source row adds up');
 });
 
 test('scan with include_unknown: false: the untyped posting is dropped too', () => {

@@ -4722,7 +4722,7 @@ export function printBoardStats(stats, { verify = false } = {}) {
       console.log(`  ${name}: ${Object.entries(st.sourceDetail).map(([reason, n]) => `${reason} ${n}`).join(', ')}`);
     }
   }
-  console.log('  other = tier, declared field, salary, content, country, visa, cooldown and blacklist; seen = already in your history');
+  console.log('  other = tier, declared field, salary, employment type, content, country, visa, cooldown and blacklist; seen = already in your history');
 }
 
 const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
@@ -5476,6 +5476,7 @@ async function main() {
         }
         if (!employmentTypeFilter(job.employmentType)) {
           totalFilteredEmploymentType++;
+          st.other++;
           continue;
         }
         if (titleMissed) {
