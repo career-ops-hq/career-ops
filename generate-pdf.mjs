@@ -1601,7 +1601,9 @@ export const ARTIFACT_KINDS = ['cv', 'cover'];
  *
  * Precedence, most specific first:
  *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
- *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *   2. A standard name from lib/output-names.mjs (`{NNN}-{company}-{kind}-...`),
+ *      which carries its kind as a token after the report number and company.
+ *   2b. A `cv-` prefix, the CV convention every generator writes. It wins over
  *      the cover check so a company whose own name starts with "Cover" keeps
  *      its CV filed as a CV.
  *   3. `cover` as the leading or trailing token: both real conventions, the
@@ -1628,6 +1630,18 @@ export function resolveArtifactKind(explicit, outputPath) {
   }
 
   const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  // Standard names from lib/output-names.mjs (#6667) lead with the report
+  // number, so neither the prefix nor the suffix rules below see their kind
+  // token. A renderer-owned `.overflow` / `.overflow-2` draft keeps its kind.
+  // Read inline rather than imported: isolated generate-pdf fixtures copy a
+  // fixed list of this script's imports. tests/pdf-index-kind.test.mjs keeps it
+  // in step with parseOutputName(). Exactly one kind token, else it falls
+  // through (a name carrying two is ambiguous without the report's company).
+  const stdName = name.replace(/\.overflow(-\d+)?$/, '');
+  const stdKinds = /^\d{3,}-.+-\d{4}-\d{2}-\d{2}(?:-[a-z0-9]+)*$/.test(stdName)
+    ? stdName.match(/-(cv|cover)-/g) || []
+    : [];
+  if (stdKinds.length === 1) return { kind: stdKinds[0].slice(1, -1), source: 'name' };
   if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
   if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
     return { kind: 'cover', source: 'name' };
