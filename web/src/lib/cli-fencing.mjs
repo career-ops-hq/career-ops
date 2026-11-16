@@ -352,9 +352,15 @@ const PI_MCP_EXCLUSION = "mcp__*";
  * for it or set `defaultProjectTrust: always`. A trusted folder loads its
  * project-local extensions, packages and settings, and an extension's own code
  * runs with the user's full access, outside any tool allowlist. Matches the
- * headless Pi command docs/SUPPORTED_CLIS.md gives after #7169. Pi added the flag in
- * 0.79.0; an older Pi exits with "Unknown option", so an old binary fails the
- * run rather than running unfenced.
+ * headless Pi command docs/SUPPORTED_CLIS.md gives after #7169.
+ *
+ * Pi added the flag in 0.79.0. An older Pi exits with "Unknown option" before
+ * the model runs, so no worker tool call ever happens on it. That exit comes
+ * after Pi has loaded its extensions, though (checked at v0.78.0:
+ * `resourceLoader.reload()` runs before the unknown-flag check), so a
+ * project-local extension's load-time code still runs. Pi before 0.79.0 has no
+ * project trust and loads those extensions on every run, with or without this
+ * flag, so the flag does not widen anything there.
  */
 const PI_NO_PROJECT_TRUST = "--no-approve";
 
