@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildProfile, loadProfile, measure, profileNotes, readSamples, MIN_SAMPLE_WORDS } from '../writing-profile.mjs';
-import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -189,4 +189,37 @@ test('no profile file means no note', () => {
   const { run } = runLetter({ opening: `${STIFF} ${FILLER}`, withProfile: false });
   assert.equal(run.status, 0, describeSpawn(run));
   assert.doesNotMatch(run.stderr, /Writing profile/);
+});
+
+test('--help prints usage and builds nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-wprofile-'));
+  try {
+    mkdirSync(join(dir, 'writing-samples'));
+    writeFileSync(join(dir, 'writing-samples', 'post.txt'), sample(10));
+    const run = spawnSync(process.execPath, [join(ROOT, 'writing-profile.mjs'), '--help'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(run.status, 0, describeSpawn(run));
+    assert.match(run.stdout, /Usage:/);
+    assert.equal(existsSync(join(dir, 'data', 'writing-profile.json')), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a mistyped flag is refused and builds nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-wprofile-'));
+  try {
+    mkdirSync(join(dir, 'writing-samples'));
+    writeFileSync(join(dir, 'writing-samples', 'post.txt'), sample(10));
+    const run = spawnSync(process.execPath, [join(ROOT, 'writing-profile.mjs'), '--chek', 'x.txt'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.ok(exitedNonZero(run), describeSpawn(run));
+    assert.equal(existsSync(join(dir, 'data', 'writing-profile.json')), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

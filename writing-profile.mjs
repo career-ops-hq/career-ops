@@ -17,8 +17,14 @@
  *   node writing-profile.mjs --check F  Measure text file F against the profile
  */
 
+const USAGE = `Usage:
+  node writing-profile.mjs            Build or refresh data/writing-profile.json from writing-samples/
+  node writing-profile.mjs --check F  Measure the text file F against that profile
+  --help, -h                          Print this and exit`;
+
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { listTree } from './lib/walk-tree.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -202,6 +208,7 @@ export function readSamples(root = getCareerOpsRoot()) {
 }
 
 function main(argv) {
+  validateFlags(argv, ['--check', '--help', '-h'], USAGE, { valueFlags: ['--check'], requireOperand: true });
   const root = getCareerOpsRoot();
   const checkAt = argv.indexOf('--check');
   if (checkAt !== -1) {
