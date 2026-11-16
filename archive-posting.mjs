@@ -13,8 +13,9 @@
  *   node archive-posting.mjs --pipeline          Archive pending URLs in data/pipeline.md
  *   node archive-posting.mjs --dry-run <url>     Preview filename without saving
  *
- * Output:    jds/YYYY-MM-DD_company-slug_role-slug.pdf
- *            jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf   (with --report)
+ * Output:    jds/YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf
+ *            jds/NNN-YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf   (with --report)
+ *            Add -2, -3, etc. before .pdf when the filename already exists.
  * Reference: local:jds/{filename}  (paste into pipeline.md)
  *
  * Prefer --report. Without it the capture can only be found again by rebuilding
@@ -22,16 +23,20 @@
  * resolving the next day. outcome.mjs looks captures up by report number.
  */
 
-import { chromium } from 'playwright';
-import { writeFile, readFile } from 'fs/promises';
+import { open, unlink, readFile } from 'fs/promises';
+import { createHash } from 'crypto';
 import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { getCareerOpsRoot } from './path-resolver.mjs';
-import { reportPrefix } from './jd-capture.mjs';
+import { captureSlug, reportPrefix } from './jd-capture.mjs';
 import { rejectPrivateOrInvalid, validateUrlSecurity } from './liveness-browser.mjs';
+import { cloudflareInterstitial } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { localToday } from './lib/local-today.mjs';
+import { detectNonContentMarker } from './check-jd-archive.mjs';
+import { browserLaunchOptions } from './lib/browser-launch.mjs';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -40,6 +45,24 @@ const PIPELINE_PATH = join(DATA_ROOT, 'data', 'pipeline.md');
 
 const KNOWN_FLAGS = ['--company', '--role', '--report', '--pipeline', '--dry-run', '--help', '-h'];
 const VALUE_FLAGS = ['--company', '--role', '--report'];
+
+// A real posting page's rendered text — title, description, requirements,
+// nav/footer boilerplate — is reliably in the thousands of characters. A
+// genuine login-wall/404/paywall/challenge page is typically a couple of
+// sentences. A real posting can still legitimately CARRY one of those phrases
+// incidentally (e.g. a sidebar "sign in to save this job" prompt next to a
+// full JD) — refusing on phrase match alone would then reject a real capture.
+// Gating on total length as well means the marker only fires when the whole
+// page IS essentially the wall, not when a real posting merely mentions one
+// nearby.
+const NON_CONTENT_PAGE_MAX_CHARS = 600;
+
+// A Cloudflare interstitial is recognised by its title instead
+// (cloudflareInterstitial, liveness-core.mjs): a site-branded challenge body
+// can run past NON_CONTENT_PAGE_MAX_CHARS and use none of the phrases
+// detectNonContentMarker knows ("Humans only", "Ray ID:"), so the body check
+// never fires on it (#6713). A challenge the browser passes reloads the real
+// posting under its own title, and that capture is kept.
 
 // ── CLI parsing ──────────────────────────────────────────────────────────────
 
@@ -65,8 +88,9 @@ const HELP_TEXT = `
     --help             Show this help
 
   OUTPUT
-    jds/YYYY-MM-DD_company-slug_role-slug.pdf
-    jds/NNN-YYYY-MM-DD_company-slug_role-slug.pdf     with --report
+    jds/YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf
+    jds/NNN-YYYY-MM-DD_company-slug_role-slug_{sha256(url)[0:16]}.pdf     with --report
+    Add -2, -3, etc. before .pdf when the filename already exists.
 
   WHY --report
     Without it, a capture is only findable by rebuilding its filename from
@@ -171,17 +195,12 @@ function parseCliArgs(args) {
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
-function slugify(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .replace(/[\s_]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60);
-}
-
+// The LOCAL calendar day. This names the capture file, and AGENTS.md is explicit
+// that a date-named capture "stops resolving the day after it is written" -- with
+// the UTC day an evening run west of Greenwich writes TOMORROW's date, so the
+// name is already stale at the moment it is created, before a single day passes.
 function today() {
-  return new Date().toISOString().split('T')[0];
+  return localToday();
 }
 
 /**
@@ -189,8 +208,14 @@ function today() {
  * report number, which is what makes the capture findable later: the date and
  * the scraped company/role all change between runs, the report number does not.
  */
-function captureFilename(company, role) {
-  const base = `${today()}_${slugify(company)}_${slugify(role)}.pdf`;
+function captureFilename(company, role, url) {
+  const identity = createHash('sha256').update(url).digest('hex').slice(0, 16);
+  // A company with no letter or digit, such as the `?` placeholder for an
+  // unknown employer, has no slug. It is filed as `unknown`, the name a posting
+  // gets when no company was detected at all: an empty field (`015-…__role_…`)
+  // matched no lookup, so outcome.mjs reported the posting missing after
+  // archiving it, and archived it again on every run.
+  const base = `${today()}_${captureSlug(company) || 'unknown'}_${captureSlug(role)}_${identity}.pdf`;
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
@@ -350,6 +375,36 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
     const h1Text = await page.$eval('h1', el => el.innerText.trim()).catch(() => '');
     const urlCompany = extractCompanyFromUrl(url);
 
+    // check-jd-archive.mjs already knows how to recognize a login wall, a 404
+    // shell, a paywall interstitial, or a "please enable JavaScript" page —
+    // but only at AUDIT time, well after the fact. Applying the same
+    // detection HERE, before anything is written, means a capture never
+    // silently reports success on a non-content page in the first place — a
+    // login-wall PDF sitting in jds/ is worse than no capture at all, since
+    // it reads as "archived" until someone happens to open it or run a
+    // separate audit (#4526). Checked against the rendered page's own text,
+    // not the report-section text detectNonContentMarker was written for —
+    // the same phrase patterns apply to either, and body innerText is what a
+    // login/paywall/404 shell actually renders as its visible content.
+    // Deliberately NOT `.catch(() => '')` here: an empty string is treated as
+    // "nothing to inspect, proceed" (matches on no marker pattern) — but a
+    // rejected evaluate() means the page's actual content is UNKNOWN, not
+    // confirmed empty. Silently coercing that to "proceed" would let a page
+    // whose content genuinely couldn't be inspected reach page.pdf() without
+    // ever having been checked — a capture-time gap in the exact protection
+    // this block exists to add. Fail closed: propagate the error, refusing
+    // to archive rather than archiving blind.
+    const bodyText = await page.evaluate(() => document.body?.innerText ?? '');
+    if (!bodyText.trim()) {
+      throw new Error('refusing to archive: page has no visible text');
+    }
+    const nonContentMarker = bodyText.length <= NON_CONTENT_PAGE_MAX_CHARS
+      ? detectNonContentMarker(bodyText)
+      : null;
+    if (nonContentMarker) {
+      throw new Error(`refusing to archive: page ${nonContentMarker.reason}`);
+    }
+
     // Parse page title first — it usually has "Role | Company" or "Company | Role".
     // Fall back to h1 for the role when the page title doesn't yield one cleanly.
     const detected = parsePageTitle(pageTitle);
@@ -362,15 +417,16 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
 
     console.log(`   Company: ${company}`);
     console.log(`   Role:    ${role}`);
+    if (httpStatus === 404) {
+      throw new Error('refusing to archive: HTTP 404');
+    }
+    const interstitial = httpStatus >= 400 ? cloudflareInterstitial(pageTitle) : null;
+    if (interstitial) {
+      throw new Error(`refusing to archive: HTTP ${httpStatus} Cloudflare ${interstitial} ("${pageTitle.trim()}"), not a posting`);
+    }
     if (httpStatus && httpStatus >= 400) {
       console.log(`HTTP ${httpStatus} — page may be closed, archiving anyway`);
     }
-
-    const filename = captureFilename(company, role);
-    const outputPath = join(JDS_DIR, filename);
-    const reference = `local:jds/${filename}`;
-
-    console.log(`   Output:  jds/${filename}`);
 
     mkdirSync(JDS_DIR, { recursive: true });
 
@@ -381,7 +437,32 @@ export async function archiveUrl(browser, url, { company: companyHint, role: rol
       preferCSSPageSize: false,
     });
 
-    await writeFile(outputPath, pdfBuffer);
+    const baseFilename = captureFilename(company, role, url);
+    let filename;
+    // URL identity separates requisitions; exclusive creation also preserves
+    // older snapshots of the same URL, including simultaneous captures.
+    for (let attempt = 0; ; attempt++) {
+      filename = attempt ? baseFilename.replace(/\.pdf$/, `-${attempt + 1}.pdf`) : baseFilename;
+      const outputPath = join(JDS_DIR, filename);
+      let file;
+      try {
+        file = await open(outputPath, 'wx');
+      } catch (err) {
+        if (err.code === 'EEXIST') continue;
+        throw err;
+      }
+      try {
+        await file.writeFile(pdfBuffer);
+        await file.close();
+      } catch (err) {
+        await file.close().catch(() => {});
+        await unlink(outputPath).catch(() => {});
+        throw err;
+      }
+      break;
+    }
+    const reference = `local:jds/${filename}`;
+    console.log(`   Output:  jds/${filename}`);
 
     const sizeKb = (pdfBuffer.length / 1024).toFixed(1);
     console.log(`Saved (${sizeKb} KB)`);
@@ -423,7 +504,7 @@ async function main() {
       const urlCompany = extractCompanyFromUrl(url);
       const resolvedCompany = overrideCompany || company || urlCompany || 'unknown';
       const resolvedRole = overrideRole || role || 'job';
-      const filename = captureFilename(resolvedCompany, resolvedRole);
+      const filename = captureFilename(resolvedCompany, resolvedRole, url);
       const reference = `local:jds/${filename}`;
       console.log(`\n🔗  ${url}`);
       console.log(`   Company: ${resolvedCompany}`);
@@ -433,8 +514,12 @@ async function main() {
       results.push({ url, filename, reference, skipped: true });
     }
   } else {
-    // Sequential — project convention: never Playwright in parallel
-    const browser = await chromium.launch({ headless: true });
+    // Sequential — project convention: never Playwright in parallel.
+    // Loaded here, after --help / --dry-run / a missing pipeline have already
+    // returned. A static import made those paths wait on the browser package
+    // and crash when it was not installed.
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {
         try {

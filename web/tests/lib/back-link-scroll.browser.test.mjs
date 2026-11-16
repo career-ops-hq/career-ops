@@ -1,0 +1,95 @@
+// Optional browser regression: use the disposable fixture created by
+// node tests/fixtures/pipeline-long.mjs as CAREER_OPS_ROOT for a local server.
+// Set BACK_SCROLL_TEST_URL and BACK_SCROLL_TEST_ROOT to run this suite.
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { test } from "node:test";
+import { liveServerSkip } from "../helpers/live-server.mjs";
+
+const url = process.env.BACK_SCROLL_TEST_URL;
+const root = process.env.BACK_SCROLL_TEST_ROOT;
+
+test("The in-page back link returns to the list where it was left", { skip: liveServerSkip("BACK_SCROLL_TEST_URL", "BACK_SCROLL_TEST_ROOT"), timeout: 120_000 }, async (t) => {
+  const origin = new URL(url);
+  assert.ok(["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname));
+  const relative = path.relative(os.tmpdir(), fs.realpathSync(root));
+  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  assert.equal(fs.readFileSync(path.join(root, ".pipeline-long-fixture"), "utf8").trim(), "fictional-only");
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ channel: "chrome", headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const back = () => page.getByRole("link", { name: "Pipeline", exact: true }).filter({ has: page.locator("svg.lucide-arrow-left") });
+  const rows = page.locator("tbody tr");
+  const query = "tab=ALL&sort=tracker&dir=1";
+  // A fresh navigation to the same URL would pass a URL check. The entry key
+  // only matches when the back link returned to the entry the list was on.
+  const entryKey = () => page.evaluate(() => window.navigation.currentEntry.key);
+
+  await page.goto(`${origin.origin}/pipeline?${query}`);
+  // On a slow runner the page can hold a second, hidden copy of the table for a
+  // moment: match only the visible row, and wait for the list to render before
+  // measuring how far there is to scroll.
+  const company = page.getByRole("link", { name: "Fixture Company 60", exact: true }).filter({ visible: true });
+  await page.getByRole("link", { name: "#1", exact: true }).filter({ visible: true }).waitFor();
+  // Off-screen rows are not mounted, so scroll the page until that row exists.
+  // The height is read again on every step: it grows as the list settles.
+  const scrollHeight = () => page.evaluate(() => document.body.scrollHeight);
+  let mountedCompany = false;
+  for (let y = 0; !mountedCompany && y <= await scrollHeight(); y += 400) {
+    await page.evaluate((top) => window.scrollTo(0, top), y);
+    mountedCompany = await company.waitFor({ state: "attached", timeout: 800 }).then(() => true).catch(() => false);
+  }
+  assert.equal(mountedCompany, true, "Fixture Company 60 mounts when the list is scrolled");
+  await company.scrollIntoViewIfNeeded();
+  // The row can mount in the overscan, still below the fold. scrollIntoView
+  // updates scrollY before its scroll event, and Back restores the offset from
+  // that event. Wait for the event to land.
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  const before = await page.evaluate(() => window.scrollY);
+  assert.ok(before > 1000, `the list scrolled to row 60 (scrollY ${before})`);
+  const listKey = await entryKey();
+  await company.click();
+  await page.getByRole("heading", { name: "Fixture Company 60", exact: true }).waitFor();
+  await back().click();
+  const returned = await company.waitFor({ timeout: 5_000 }).then(() => true).catch(() => false);
+  if (!returned) {
+    const diag = await page.evaluate(() => ({
+      scrollY: window.scrollY,
+      rows: [...document.querySelectorAll("tr[data-application-key] a")].slice(0, 6).map((a) => a.textContent.trim()),
+    }));
+    assert.equal(returned, true, `company 60 was not mounted after back (scrollY ${diag.scrollY}, first rows ${diag.rows.join(", ")})`);
+  }
+  await page.waitForFunction((y) => Math.abs(window.scrollY - y) < 50, before, { timeout: 5_000 }).catch(() => {});
+  const after = await page.evaluate(() => window.scrollY);
+  assert.ok(Math.abs(after - before) < 50, `scrollY ${after} returned to ${before}`);
+  assert.equal(new URL(page.url()).search.slice(1), query);
+  assert.equal(await entryKey(), listKey, "the back link restored the list's own history entry");
+
+  await page.goto(`${origin.origin}/pipeline/5`);
+  await back().click();
+  await page.waitForURL((u) => u.pathname === "/pipeline");
+  await page.getByRole("heading", { name: "Pipeline", exact: true }).waitFor();
+  assert.equal(new URL(page.url()).search, "");
+  assert.equal(await page.evaluate(() => window.scrollY), 0);
+
+  const compareQuery = "tab=ALL&min=3.5&sort=company&dir=1&q=Fixture";
+  await page.goto(`${origin.origin}/pipeline?${compareQuery}`);
+  await rows.nth(0).getByRole("checkbox").check();
+  await rows.nth(1).getByRole("checkbox").check();
+  const compareFromKey = await entryKey();
+  await page.getByRole("link", { name: "Compare", exact: true }).click();
+  await page.getByRole("heading", { name: "Compare" }).waitFor();
+  assert.equal(await back().getAttribute("href"), `/pipeline?${compareQuery}`);
+  await back().click();
+  await page.waitForURL((u) => u.pathname === "/pipeline" && u.search === `?${compareQuery}`);
+  assert.equal(new URL(page.url()).search, `?${compareQuery}`);
+  assert.equal(await entryKey(), compareFromKey, "the back link restored the Pipeline entry Compare was opened from");
+  assert.deepEqual(errors, []);
+});

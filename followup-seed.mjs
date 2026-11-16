@@ -31,7 +31,7 @@
  * unlabelled guess is the trade that replaced it (#2607).
  *
  * Idempotency: by default, seeding a given appNum is a NO-OP FOREVER once
- * either a pin or a follow-up table row exists for it (exit 0, seeded:false).
+ * either a pin or a logged follow-up exists for it (exit 0, seeded:false).
  * Pass --force to append a fresh pin anyway.
  *
  * Usage:
@@ -53,34 +53,33 @@
  *   CAREER_OPS_FOLLOWUPS_LOCK_TIMEOUT_MS   lock acquire timeout
  *   CAREER_OPS_FOLLOWUPS_LOCK_RETRY_MS     lock retry interval
  *   CAREER_OPS_FOLLOWUPS_LOCK_STALE_MS     stale-lock recovery threshold
+ *   CAREER_OPS_OWNERLESS_GRACE_MS          ownerless-lock floor (lib/dir-lock.mjs; shared, not per-script)
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, statSync, realpathSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, realpathSync } from 'fs';
 import { join, dirname, basename, resolve, isAbsolute, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
-// Third copy of the directory-lock protocol in this repo, and the one #2984
-// missed: that fix declared "one definition, no sibling drift" while patching
-// pipeline-lock.mjs and tracker-utils.mjs, and this file was carrying all three
-// faces of #2777 the whole time. The classifiers come from pipeline-lock now,
-// so the next Windows-contention finding lands in one place instead of three.
-import {
-  isMkdirContention, isRmContention, rmLockArtifactSync, createLockWaitPolicy,
-  sameLockDirectory, lockRecoveryVerdict, RECOVER_STALE,
-} from './pipeline-lock.mjs';
-import { renameSyncWithRetry } from './tracker-utils.mjs';
+// The lock protocol is lib/dir-lock.mjs, shared with every other core lock;
+// this module only picks the follow-ups lock directory, timing and error.
+import { acquireDirLock, releaseOrWarn } from './lib/dir-lock.mjs';
+import { makeCliFailWith, renameSyncWithRetry } from './tracker-utils.mjs';
 import { tmpdir } from 'os';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
   resolveCadenceConfig,
+  loadFollowupsEnabled,
   normalizeStatus,
   parseAppliedDate,
+  parseFollowups,
   parseNextOverrides,
   parseDate,
   addDays,
+  isRealCalendarDate,
 } from './followup-cadence.mjs';
-import { getCareerOpsRoot, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
+import { flagValue } from './lib/cli-flags.mjs';
+import { getCareerOpsRoot, canonicalizeTrackerPath, resolveTrackerPath as sharedResolveTrackerPath } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
@@ -102,7 +101,7 @@ const FOLLOWUPS_LOCK_PREFIX = 'career-ops-followups-';
  * Re-exported rather than redeclared: the floor is applied inside that function
  * now, so a local copy would be a constant this file no longer enforces.
  */
-export { OWNERLESS_GRACE_MS } from './pipeline-lock.mjs';
+export { OWNERLESS_GRACE_MS } from './lib/dir-lock.mjs';
 
 /** Structured error carrying an exit-code-mapping `code`. */
 export class SeedError extends Error {
@@ -166,10 +165,13 @@ export function isValidCalendarDate(str) {
  *
  * @param {{num?: number, notes?: string, date?: string}} row - Parsed tracker row.
  * @param {string|null|undefined} explicitDate - `--date` value, already validated.
- * @returns {{appliedDate: string, appDateSource: 'explicit'|'notes'|'evaluation-date'|'today'}}
+ * @param {string|null|undefined} [statusChangeDate] - The day a caller moved the row
+ *   to Applied. It ranks below the notes date, which the user wrote on purpose, and
+ *   above the evaluation-date column, which is only a proxy.
+ * @returns {{appliedDate: string, appDateSource: 'explicit'|'notes'|'status-change'|'evaluation-date'|'today'}}
  * @throws {SeedError} INVALID_DATE when the notes carry an impossible date.
  */
-export function resolveAppliedDate(row, explicitDate) {
+export function resolveAppliedDate(row, explicitDate, statusChangeDate) {
   if (explicitDate) return { appliedDate: explicitDate, appDateSource: 'explicit' };
   const notesDate = parseAppliedDate(row?.notes);
   if (notesDate) {
@@ -178,6 +180,7 @@ export function resolveAppliedDate(row, explicitDate) {
     }
     return { appliedDate: notesDate, appDateSource: 'notes' };
   }
+  if (statusChangeDate) return { appliedDate: statusChangeDate, appDateSource: 'status-change' };
   // Only a usable calendar date qualifies: a blank or malformed `date` cell
   // must not become a pin with a "null" next-date, which is the same failure
   // the notes branch throws over.
@@ -226,35 +229,22 @@ function envInt(name, fallback) {
 function readTrackerRows(trackerPath) {
   const content = readFileSync(trackerPath, 'utf-8');
   const lines = content.split('\n');
-  const colmap = resolveColumns(lines);
+  const parseOptions = { allowTabs: true, allowIndentation: true };
+  const colmap = resolveColumns(lines, parseOptions);
   const rows = [];
   for (const line of lines) {
-    const row = parseTrackerRow(line, colmap);
+    const row = parseTrackerRow(line, colmap, parseOptions);
     if (row) rows.push(row);
   }
   return rows;
 }
 
-// --- Idempotency: pin OR follow-up table row already exists for appNum ----
-
-// Mirrors followup-cadence.mjs's parseFollowups: a `|`-delimited row whose 3rd
-// cell (index 2 after split('|').map(trim) — index 0 is the empty cell before
-// the leading pipe, index 1 is the follow-up's own `num`) is the appNum.
-function hasFollowupTableRow(content, appNum) {
-  for (const line of content.split('\n')) {
-    if (!line.startsWith('|')) continue;
-    const parts = line.split('|').map(s => s.trim());
-    if (parts.length < 8) continue;
-    const rowAppNum = parseInt(parts[2], 10);
-    if (!isNaN(rowAppNum) && rowAppNum === appNum) return true;
-  }
-  return false;
-}
+// --- Idempotency: pin OR an existing follow-up for appNum -----------------
 
 function isAlreadySeeded(content, appNum) {
   if (!content) return false;
   if (parseNextOverrides(content).has(appNum)) return true;
-  return hasFollowupTableRow(content, appNum);
+  return parseFollowups(content).some(entry => entry.appNum === appNum);
 }
 
 // --- Locking (mirrors merge-tracker.mjs's tracker lock, scoped to follow-ups) --
@@ -279,159 +269,30 @@ function resolveFollowupsLockDir(envValue, lockKey) {
 
 function resolveLockDir(explicitLockDir, followupsPath) {
   if (explicitLockDir) return explicitLockDir;
-  const lockKey = createHash('sha256').update(followupsPath).digest('hex').slice(0, 16);
+  // Canonicalize the parent so the key stays stable when the file is first created.
+  const lockPath = join(canonicalizeTrackerPath(dirname(followupsPath)), basename(followupsPath));
+  const lockKey = createHash('sha256').update(lockPath).digest('hex').slice(0, 16);
   return resolveFollowupsLockDir(process.env.CAREER_OPS_FOLLOWUPS_LOCK, lockKey);
 }
 
-function sleep(ms) {
-  return new Promise(res => setTimeout(res, ms));
-}
-
-function readLockOwner(lockDir) {
-  try {
-    return JSON.parse(readFileSync(join(lockDir, 'owner.json'), 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
-// The recovery judgment comes from pipeline-lock rather than a fourth copy of
-// it, for the reason stated at the import: a finding lands once. This file's
-// copy had drifted twice over — it still answered a bare boolean, so "the
-// directory was gone when I looked" reached the caller as a licence to DELETE
-// whatever is at that path now, and it predated #2984, so an unreadable owner
-// stamp fell through to the age rule and could condemn a live lock.
-
 /**
  * Acquire an exclusive filesystem lock covering the read-check-append
- * critical section for data/follow-ups.md. Mirrors merge-tracker.mjs's
- * tracker lock: atomic `mkdirSync`, an `owner.json` with pid/timestamp,
- * pid-alive detection, stale-lock recovery, and retry/backoff.
+ * critical section for data/follow-ups.md, through the protocol every core
+ * lock shares (lib/dir-lock.mjs).
  *
  * @param {string} lockDir
  * @param {string} followupsPath - Recorded in owner.json for diagnostics.
  * @param {{timeoutMs?: number, retryMs?: number, staleMs?: number}} [options] - `staleMs` is floored at OWNERLESS_GRACE_MS.
  * @returns {Promise<{release: Function}>}
  */
-async function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 60_000;
-  const retryMs = options.retryMs ?? 75;
-  const staleMs = options.staleMs ?? 10 * 60_000;
-  const recoverGuardDir = `${lockDir}.recover`;
-  const token = randomUUID();
-
-  // Jitter and the progress rule come from pipeline-lock rather than a fourth
-  // hand-rolled wait loop. This file slept a FIXED retryMs and bounded the loop
-  // on plain elapsed time, so it carried both defects #2506 and #2835 removed
-  // from the definition: waiters woke in lockstep and re-raced, and a caller
-  // waiting on a healthy lock being handed round briskly was killed anyway.
-  //
-  // There is no separate maxWaitMs knob here, so the ceiling is the same
-  // multiple of timeoutMs the definition defaults to.
-  const { backoffMs, holderStillWedged, noteWaiting, ceilingReached } = createLockWaitPolicy(lockDir, {
-    timeoutMs, retryMs, deadline: Date.now() + timeoutMs, hardDeadline: Date.now() + timeoutMs * 10,
+function acquireFollowupsLock(lockDir, followupsPath, options = {}) {
+  return acquireDirLock(lockDir, {
+    timeoutMs: options.timeoutMs ?? 60_000,
+    retryMs: options.retryMs ?? 75,
+    staleMs: options.staleMs ?? 10 * 60_000,
+    owner: { followups: followupsPath },
+    timeoutError: () => new SeedError('LOCK_TIMEOUT', `Timed out waiting for follow-ups lock at ${lockDir}`),
   });
-  for (;;) {
-    if (holderStillWedged() || ceilingReached()) break;
-    try {
-      mkdirSync(lockDir);
-      writeFileSync(join(lockDir, 'owner.json'), JSON.stringify({
-        pid: process.pid,
-        token,
-        startedAt: new Date().toISOString(),
-        followups: followupsPath,
-      }, null, 2));
-
-      let released = false;
-      return {
-        release() {
-          if (released) return;
-          released = true;
-          // The token says the stamp is ours. It does NOT say the directory
-          // still is: between reading the stamp and the rm, a reclaimer can
-          // delete this lock and a new holder can create one at the same path,
-          // and the rm then lands on theirs. pipeline-lock, portal-health-lock
-          // and tracker-utils all bracket the rm with a stat either side and
-          // compare identity; this file was the one that did not, so it is the
-          // one that could free someone else's critical section.
-          let before;
-          try {
-            before = statSync(lockDir);
-          } catch {
-            return; // already gone
-          }
-          const owner = readLockOwner(lockDir);
-          if (owner?.token !== token) return; // reclaimed by someone else
-          let after;
-          try {
-            after = statSync(lockDir);
-          } catch {
-            return;
-          }
-          if (!sameLockDirectory(before, after)) return; // swapped underneath us
-          // Best-effort: ownership is verified, so a contended rm (Windows
-          // EPERM/EBUSY while another process stats it) must not kill a caller
-          // whose work already succeeded. The orphan ages out via lockRecoveryVerdict.
-          rmLockArtifactSync(lockDir);
-        },
-      };
-    } catch (err) {
-      // Not just EEXIST: Windows reports a directory that is mid-create or
-      // mid-remove by another process as EPERM/EACCES. That is contention, not
-      // failure — treating it as fatal kills a concurrent writer and loses its
-      // write (#2777, measured on windows-latest).
-      if (!isMkdirContention(err)) throw err;
-      noteWaiting();
-
-      let hasRecoverGuard = false;
-      try {
-        mkdirSync(recoverGuardDir);
-        hasRecoverGuard = true;
-      } catch (guardErr) {
-        if (!isMkdirContention(guardErr)) throw guardErr;
-        // Only an EEXIST guard is judged by age: an EPERM/EACCES answer means
-        // the guard is mid-flight right now, and reasoning about the age of a
-        // directory we cannot stat reliably would evict a live guard.
-        if (guardErr.code !== 'EEXIST') {
-          await sleep(backoffMs());
-          continue;
-        }
-        // A process killed between creating the guard and its cleanup leaves
-        // the guard behind forever, permanently disabling stale-lock recovery
-        // for every future writer. The guard normally lives for milliseconds,
-        // so an old one is judged stale by the same age rule as a
-        // metadata-free lock and removed; the next loop iteration can then
-        // take the guard and run recovery. Removing it unconditionally would
-        // instead let two writers recover the same lock at once, which is
-        // exactly what the guard exists to prevent.
-        // STALE only: a guard already gone needs no eviction, and evicting on
-        // that answer deletes the guard another caller has just taken.
-        if (lockRecoveryVerdict(recoverGuardDir, staleMs) === RECOVER_STALE) {
-          rmLockArtifactSync(recoverGuardDir);
-        }
-      }
-
-      if (hasRecoverGuard) {
-        try {
-          // STALE only. VANISHED means the lock was absent when we looked, and
-          // by the time this line runs another acquirer may have won the mkdir
-          // and be partway through writing owner.json — deleting on that answer
-          // destroys a live lock and kills its winner with ENOENT.
-          if (lockRecoveryVerdict(lockDir, staleMs) === RECOVER_STALE) {
-            if (rmLockArtifactSync(lockDir)) continue;
-            // rm hit contention: another process is touching the stale lock at
-            // this instant — back off instead of treating the collision as fatal.
-          }
-        } finally {
-          rmLockArtifactSync(recoverGuardDir);
-        }
-      }
-
-      await sleep(backoffMs());
-    }
-  }
-
-  throw new SeedError('LOCK_TIMEOUT', `Timed out waiting for follow-ups lock at ${lockDir}`);
 }
 
 // --- Atomic write (mirrors writeFileAtomic in tracker.mjs / merge-tracker.mjs) --
@@ -467,7 +328,13 @@ function appendPins(existingContent, pinLines) {
  * @param {number} appNum
  * @param {object} [options]
  * @param {string} [options.date] - Explicit apply date (YYYY-MM-DD), already validated.
+ * @param {string} [options.statusChangeDate] - The day the row moved to Applied, see resolveAppliedDate.
  * @param {boolean} [options.force] - Bypass idempotency guard and the Applied-status guard.
+ * @param {boolean} [options.assumeApplied] - Relax the Applied-status guard ONLY, keeping
+ *   idempotency intact. For a caller that is about to make the row Applied and wants a
+ *   truthful preview of what will happen: `force` would answer that question by also
+ *   suppressing `already-seeded`, so the preview would promise a pin the real run then
+ *   declines to write. This says "treat the status as Applied", not "write regardless".
  * @param {boolean} [options.dryRun] - Compute and report, but write nothing (no lock taken).
  * @param {string} [options.trackerPath]
  * @param {string} [options.followupsPath]
@@ -529,8 +396,79 @@ export async function withFollowupsLock(followupsPath, fn, options = {}) {
   try {
     return await fn();
   } finally {
-    lock.release();
+    releaseOrWarn(lock);
   }
+}
+
+const PIN_LINE = /^-\s+next\s+#(\d+)\s+(\d{4}-\d{2}-\d{2})(?:\s+\(set\s+(\d{4}-\d{2}-\d{2})\))?(?:\s*[—–-]\s*(.*))?\s*$/i;
+
+function pinLinePattern(appNum) {
+  return new RegExp(`^-\\s+next\\s+#${appNum}\\s`, 'i');
+}
+
+function lastPin(content, appNum) {
+  let found = null;
+  for (const line of String(content ?? '').split('\n')) {
+    const match = line.match(PIN_LINE);
+    if (!match || Number(match[1]) !== appNum) continue;
+    found = { date: match[2], setDate: match[3] || match[2], why: (match[4] || '').trim() };
+  }
+  return found;
+}
+
+function withoutPins(content, appNum) {
+  const pattern = pinLinePattern(appNum);
+  return String(content ?? '').split('\n').filter((line) => !pattern.test(line)).join('\n');
+}
+
+function appendPinLine(content, appNum, line) {
+  const base = content == null ? `${FOLLOWUPS_HEADER}\n` : withoutPins(content, appNum);
+  return `${base.endsWith('\n') ? base : `${base}\n`}${line}\n`;
+}
+
+function pinText(appNum, date, setDate, why) {
+  const line = formatPinLine(appNum, date, setDate);
+  return why ? `${line} — ${why}` : line;
+}
+
+export async function replaceNextPin(appNum, options = {}) {
+  if (!Number.isInteger(appNum) || appNum <= 0) {
+    throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
+  }
+  if (!isRealCalendarDate(options.date)) {
+    throw new SeedError('INVALID_DATE', `next date must be a real calendar date in YYYY-MM-DD form: ${options.date}`);
+  }
+  const why = String(options.why ?? '').trim();
+  if (/[\t\r\n]/.test(why)) {
+    throw new SeedError('USAGE', 'pin note cannot contain a tab or newline');
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+  const setDate = localToday(options.now instanceof Date ? options.now : new Date());
+  return withFollowupsLock(followupsPath, () => {
+    const existing = existsSync(followupsPath) ? readFileSync(followupsPath, 'utf8') : null;
+    const current = existing == null ? null : lastPin(existing, appNum);
+    if (current && current.date === options.date && current.why === why) {
+      return { changed: false, date: options.date, setDate: current.setDate };
+    }
+    mkdirSync(dirname(followupsPath), { recursive: true });
+    writeFileAtomic(followupsPath, appendPinLine(existing, appNum, pinText(appNum, options.date, setDate, why)));
+    return { changed: true, date: options.date, setDate };
+  }, { timeoutMs: options.lockTimeoutMs, lockDir: options.lockDir });
+}
+
+export async function clearNextPin(appNum, options = {}) {
+  if (!Number.isInteger(appNum) || appNum <= 0) {
+    throw new SeedError('USAGE', `Invalid appNum: ${appNum}`);
+  }
+  const followupsPath = resolveFollowupsPath(options.followupsPath);
+  return withFollowupsLock(followupsPath, () => {
+    if (!existsSync(followupsPath)) return { cleared: false };
+    const existing = readFileSync(followupsPath, 'utf8');
+    const next = withoutPins(existing, appNum);
+    if (next === existing) return { cleared: false };
+    writeFileAtomic(followupsPath, next);
+    return { cleared: true };
+  }, { timeoutMs: options.lockTimeoutMs, lockDir: options.lockDir });
 }
 
 export async function seedFollowup(appNum, options = {}) {
@@ -539,6 +477,10 @@ export async function seedFollowup(appNum, options = {}) {
   }
   if (options.date != null && !isValidCalendarDate(options.date)) {
     throw new SeedError('INVALID_DATE', `--date must be a real calendar date in YYYY-MM-DD form: ${options.date}`);
+  }
+
+  if (!loadFollowupsEnabled(options.profilePath)) {
+    return { seeded: false, appNum, pin: null, nextDate: null, reason: 'disabled', ...(options.dryRun ? { dryRun: true } : {}) };
   }
 
   const trackerPath = resolveTrackerPath(options.trackerPath);
@@ -554,14 +496,14 @@ export async function seedFollowup(appNum, options = {}) {
   }
 
   const normalized = normalizeStatus(row.status);
-  if (normalized !== 'applied' && !options.force) {
+  if (normalized !== 'applied' && !options.force && !options.assumeApplied) {
     throw new SeedError('NOT_APPLIED', `Application #${appNum} is not Applied (status: "${row.status.trim()}"); use --force to seed anyway`);
   }
 
   // appDateSource travels with the result so a caller can tell a measured apply
   // date from a proxy or a guess — the same contract followup-cadence.mjs and
   // company-history.mjs already expose.
-  const { appliedDate, appDateSource } = resolveAppliedDate(row, options.date);
+  const { appliedDate, appDateSource } = resolveAppliedDate(row, options.date, options.statusChangeDate);
   const cadence = resolveCadenceConfig({ profilePath: options.profilePath });
   const nextDate = addDays(parseDate(appliedDate), cadence.applied_first);
   const setDate = todayStr();
@@ -592,7 +534,7 @@ export async function seedFollowup(appNum, options = {}) {
     writeFileAtomic(followupsPath, appendPins(existingContent, [pin]));
     return { seeded: true, appNum, pin, nextDate, appliedDate, appDateSource, setDate };
   } finally {
-    lock.release();
+    releaseOrWarn(lock);
   }
 }
 
@@ -607,6 +549,7 @@ export async function seedFollowup(appNum, options = {}) {
  * @returns {Promise<{seeded: object[], skipped: object[]}>}
  */
 export async function seedBackfill(options = {}) {
+  if (!loadFollowupsEnabled(options.profilePath)) return { seeded: [], skipped: [], reason: 'disabled' };
   const trackerPath = resolveTrackerPath(options.trackerPath);
   const followupsPath = resolveFollowupsPath(options.followupsPath);
 
@@ -685,21 +628,35 @@ export async function seedBackfill(options = {}) {
 
     return { seeded, skipped };
   } finally {
-    lock.release();
+    releaseOrWarn(lock);
   }
 }
 
 // --- CLI ---------------------------------------------------------------
 
+const USAGE = `Usage:
+  node followup-seed.mjs <appNum> [--date YYYY-MM-DD] [--force] [--dry-run] [--json]
+  node followup-seed.mjs --backfill [--force] [--dry-run] [--json]
+
+  --date <YYYY-MM-DD>  override applied date (single-app only)
+  --backfill           seed all Applied rows lacking pins/logs
+  --force              re-seed even if already pinned/logged
+  --dry-run            compute without writing follow-ups.md
+  --json               machine-readable JSON output
+  --help, -h           print this and exit`;
+
 function parseCliArgs(argv) {
-  const opts = { force: false, dryRun: false, json: false, backfill: false, date: null, appNum: null };
+  const opts = { force: false, dryRun: false, json: false, backfill: false, date: null, appNum: null, help: false };
   const positionals = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--date') {
-      i++;
-      if (argv[i] === undefined) throw new SeedError('USAGE', '--date requires a value');
-      opts.date = argv[i];
+    if (a === '--date' || a.startsWith('--date=')) {
+      const val = flagValue(argv.slice(i, i + 2), '--date');
+      if (val === undefined) throw new SeedError('USAGE', '--date requires a value');
+      opts.date = val;
+      if (a === '--date') i++;
+    } else if (a === '--help' || a === '-h') {
+      opts.help = true;
     } else if (a === '--force') {
       opts.force = true;
     } else if (a === '--dry-run') {
@@ -714,6 +671,8 @@ function parseCliArgs(argv) {
       positionals.push(a);
     }
   }
+
+  if (opts.help) return opts;
 
   if (opts.backfill) {
     if (positionals.length !== 0) {
@@ -745,12 +704,6 @@ const EXIT_CODES = {
   LOCK_TIMEOUT: 4,
 };
 
-function failWith(exitCode, code, message, json) {
-  if (json) console.log(JSON.stringify({ error: message, code }));
-  console.error(`❌ ${message}`);
-  process.exit(exitCode);
-}
-
 /**
  * How the apply date was arrived at, for the human-readable line — empty for a
  * date that was actually measured.
@@ -771,6 +724,10 @@ function reportSingle(result, json) {
     console.log(JSON.stringify(result));
     return;
   }
+  if (result.reason === 'disabled') {
+    console.log('⏭️  Follow-ups are turned off (follow_ups.enabled: false in config/profile.yml); nothing seeded.');
+    return;
+  }
   const dryTag = result.dryRun ? ' [dry-run]' : '';
   if (result.seeded) {
     console.log(`✅ Seeded #${result.appNum}: next follow-up ${result.nextDate} (applied ${result.appliedDate}${appDateNote(result.appDateSource)}, set ${result.setDate})${dryTag}`);
@@ -784,6 +741,10 @@ function reportBackfill(result, json) {
     console.log(JSON.stringify(result));
     return;
   }
+  if (result.reason === 'disabled') {
+    console.log('⏭️  Follow-ups are turned off (follow_ups.enabled: false in config/profile.yml); nothing seeded.');
+    return;
+  }
   const dryTag = result.dryRun ? ' [dry-run]' : '';
   console.log(`✅ Backfill${dryTag}: seeded ${result.seeded.length}, skipped ${result.skipped.length}`);
   for (const s of result.seeded) console.log(`  + #${s.appNum}: next ${s.nextDate}${appDateNote(s.appDateSource)}`);
@@ -793,12 +754,20 @@ function reportBackfill(result, json) {
 async function main() {
   const argv = process.argv.slice(2);
   const jsonRequested = argv.includes('--json');
+  // Bound from the raw argv rather than from opts.json: a parse that fails mid-argv
+  // never settles opts.json, and the two disagree for `--date --json` (#5198).
+  const failWith = makeCliFailWith(jsonRequested);
   let opts;
   try {
     opts = parseCliArgs(argv);
   } catch (err) {
-    failWith(EXIT_CODES[err.code] ?? 1, err.code || 'USAGE', err.message, jsonRequested);
+    failWith(EXIT_CODES[err.code] ?? 1, err.code || 'USAGE', err.message);
     return;
+  }
+
+  if (opts.help) {
+    console.log(USAGE);
+    process.exit(0);
   }
 
   try {
@@ -813,7 +782,7 @@ async function main() {
   } catch (err) {
     const code = err.code || 'ERROR';
     const exitCode = EXIT_CODES[code] ?? 1;
-    failWith(exitCode, code, err.message, opts.json);
+    failWith(exitCode, code, err.message);
   }
 }
 

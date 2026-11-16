@@ -1,5 +1,5 @@
 /**
- * company-history.test.mjs — External test suite for company-history.mjs
+ * tests/company-history.test.mjs — External test suite for company-history.mjs
  *
  * Complements the 38 in-file `--self-test` fixtures (join/label goldens,
  * right-censoring, rejection-is-an-answer, confidence-vs-label, staleness,
@@ -11,7 +11,10 @@
  * loading real files from disk via the exported loaders, and CLI smoke
  * tests.
  *
- * Run: node company-history.test.mjs
+ * Run: node test-all.mjs --only company-history
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import {
@@ -347,18 +350,32 @@ try {
   ok('unknown flag exits 1', e.status === 1);
 }
 
-// --emit-signal is a bare boolean flag, not a value flag: `--emit-signal=true`
-// must be rejected explicitly, since the unknown-flag check strips the `=`
-// suffix before matching KNOWN_FLAGS (so it would otherwise pass as "known")
-// while the boolean read is an exact-token check that would silently never
-// see it as set — accepted args, signal never emitted.
+// --emit-signal is a bare boolean flag: any `=` form is not a flag this script
+// accepts, so the shared validator reports it as unrecognized instead of
+// letting it pass as "known" while never turning emission on.
 for (const bad of ['--emit-signal=true', '--emit-signal=1', '--emit-signal=']) {
   try {
     execFileSync('node', [scriptPath, '--summary', bad], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
     ok(`"${bad}" exits 1`, false);
   } catch (e) {
-    ok(`"${bad}" exits 1`, e.status === 1 && /does not accept a value/.test(String(e.stderr)));
+    ok(`"${bad}" exits 1`, e.status === 1 && /unrecognized flag/.test(String(e.stderr)));
   }
+}
+
+// Unknown flags are rejected BEFORE --help is answered: `--help --bogus` must
+// fail, not print usage and exit 0 having never looked at `--bogus`.
+try {
+  execFileSync('node', [scriptPath, '--help', '--bogus-flag-xyz'], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+  ok('--help with an unknown flag exits 1', false);
+} catch (e) {
+  ok('--help with an unknown flag exits 1', e.status === 1 && /unrecognized flag/.test(String(e.stderr)));
+}
+
+try {
+  const helpOut = execFileSync('node', [scriptPath, '--help'], { encoding: 'utf-8', timeout: 10000, cwd: dirname(scriptPath) });
+  ok('--help alone prints usage and exits 0', /^Usage:/.test(helpOut));
+} catch (e) {
+  ok('--help alone prints usage and exits 0', false);
 }
 
 // --silence-window validation: non-numeric, zero, and negative must fail fast
@@ -391,6 +408,6 @@ for (const flagArgs of [['--company', '--summary'], ['--company'], ['--scan-hist
     ok(`value flag without a value ("${label}") exits 1`, false);
   } catch (e) {
     ok(`value flag without a value ("${label}") exits 1`,
-      e.status === 1 && /expects a (non-empty )?value/.test(String(e.stderr)));
+      e.status === 1 && /(expects a (non-empty )?|requires a )value/.test(String(e.stderr)));
   }
 }

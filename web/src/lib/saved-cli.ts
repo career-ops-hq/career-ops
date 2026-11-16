@@ -1,4 +1,7 @@
-export const CONFIG_KEY = "career-ops:config";
+import { keepIfInstalled, pickSoleInstalled } from "./cli-pick.mjs";
+import { CONFIG_KEY, writeConfig } from "./config-events.mjs";
+
+export { CONFIG_KEY } from "./config-events.mjs";
 
 export function readSavedCliId(): string | null {
   try {
@@ -14,34 +17,74 @@ export function persistCliId(cliId: string) {
   try {
     const raw = localStorage.getItem(CONFIG_KEY);
     const prev = raw ? JSON.parse(raw) : {};
-    localStorage.setItem(
-      CONFIG_KEY,
-      JSON.stringify({ ...prev, mode: prev.mode || "cli", cliId }),
-    );
+    writeConfig(localStorage, typeof window === "undefined" ? null : window, {
+      ...prev, mode: prev.mode || "cli", cliId,
+    });
   } catch {
     /* quota / private mode */
   }
 }
 
-export function pickSoleInstalled(
-  clis: { id: string; installed?: boolean }[] | undefined,
-): string | null {
-  const installed = (clis || []).filter((c) => c.installed);
-  return installed.length === 1 ? installed[0].id : null;
+export { pickDefaultInstalled, pickSoleInstalled } from "./cli-pick.mjs";
+
+// /api/clis is parsed with a type assertion, not runtime-checked, so a bad
+// entry (null, a string, {id: 123}) would otherwise reach .some()/filter()
+// and either throw or silently pick a CLI with no real id. One malformed
+// entry invalidates the whole response — we don't know what else is wrong
+// with it, so fall through to the same "can't check" path as a network error.
+function isCliEntry(c: unknown): c is { id: string; installed?: boolean } {
+  if (typeof c !== "object" || c === null) return false;
+  const { id, installed } = c as { id?: unknown; installed?: unknown };
+  return typeof id === "string" && id !== "" && (installed === undefined || typeof installed === "boolean");
 }
 
-/** Saved Config cliId, or the only installed CLI (and persist that pick). */
-export async function resolveCliId(): Promise<string | null> {
+/**
+ * Saved Config cliId if it is still installed, otherwise the only installed CLI
+ * (and persist that pick). Returns null when neither resolves — the caller then
+ * shows the "open Config" message rather than launching a run that 404s.
+ *
+ * The saved id is validated against /api/clis, not trusted blind: an install
+ * swapped from one CLI to another leaves a stale id in localStorage, and
+ * `resolveCli()` on the server returns null for it, so every run fails with
+ * `CLI '<id>' not found` until Config is reopened (#4012).
+ *
+ * `onStale` fires when a saved id is dropped for not being installed, with the
+ * id that replaced it (or null). The replacement is persisted, so the old value
+ * is otherwise gone without a trace — and a transient `installed: false` (a
+ * reinstall in flight, a PATH not yet refreshed) is enough to trigger it.
+ */
+// /api/clis is a synchronous PATH scan — no subprocesses — so this is slack,
+// not an estimate.
+const CLIS_TIMEOUT_MS = 5000;
+
+export async function resolveCliId(
+  onStale?: (stale: string, replacement: string | null) => void,
+): Promise<string | null> {
   const saved = readSavedCliId();
-  if (saved) return saved;
+  let clis: { id: string; installed?: boolean }[] | undefined;
+  let remembered: string | null = null;
   try {
-    const r = await fetch("/api/clis");
-    const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[] };
-    const sole = pickSoleInstalled(d.clis);
-    if (!sole) return null;
-    persistCliId(sole);
-    return sole;
+    // Bounded: every job start awaits this, so a stalled request would leave
+    // the job at "Starting…" instead of reaching the saved-id fallback below.
+    const r = await fetch("/api/clis", { signal: AbortSignal.timeout(CLIS_TIMEOUT_MS) });
+    if (r.ok) {
+      const d = (await r.json()) as { clis?: { id: string; installed?: boolean }[]; remembered?: unknown };
+      clis = d.clis;
+      if (typeof d.remembered === "string") remembered = d.remembered;
+    }
   } catch {
-    return null;
+    // network error or timeout — fall through to the not-an-array guard below
   }
+  if (!Array.isArray(clis) || !clis.every(isCliEntry)) {
+    // /api/clis unreachable, errored, or malformed — can't check. Trust the
+    // saved id rather than stranding a working setup on a transient failure.
+    return saved;
+  }
+  if (keepIfInstalled(saved, clis)) return saved;
+  const fallback = keepIfInstalled(remembered, clis) || pickSoleInstalled(clis);
+  // The lookup awaited /api/clis: a Config save made meanwhile is newer than
+  // this pick, so it is kept rather than overwritten.
+  if (fallback && readSavedCliId() === saved) persistCliId(fallback);
+  if (saved) onStale?.(saved, fallback);
+  return fallback;
 }

@@ -1,0 +1,209 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { handleDocumentsRequest } from "../../src/lib/documents.ts";
+
+function setupTestEnv() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-api-test-"));
+  const outputDir = path.join(root, "output");
+  const dataDir = path.join(root, "data");
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.mkdirSync(dataDir, { recursive: true });
+  const manifestPath = path.join(dataDir, "pdf-index.tsv");
+
+  const cleanup = () => {
+    fs.rmSync(root, { recursive: true, force: true });
+  };
+
+  return { root, outputDir, manifestPath, cleanup };
+}
+
+function mockIsRegularContainedFile(absPath, outputDir) {
+  if (!fs.existsSync(absPath)) return false;
+  const rel = path.relative(outputDir, absPath);
+  return rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel);
+}
+
+test("API: List available generated PDF documents", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  try {
+    fs.writeFileSync(path.join(outputDir, "cv-1.pdf"), "fake pdf content 1");
+    fs.writeFileSync(path.join(outputDir, "cover-1.pdf"), "fake cover content 1");
+
+    fs.writeFileSync(manifestPath, [
+      "# report\tpdf\thtml\tformat\tdate\tkind",
+      "10\toutput/cv-1.pdf\t\t\t2026-01-01\tcv",
+      "11\toutput/cover-1.pdf\t\t\t2026-01-02\tcover"
+    ].join("\n"));
+
+    const req = new Request("http://localhost:3000/api/documents");
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+
+    assert.equal(res.status, 200);
+    const data = await res.json();
+    assert.equal(data.length, 2);
+
+    const cv = data.find(d => d.filename === "cv-1.pdf");
+    assert.ok(cv.id);
+    assert.equal(cv.kind, "cv");
+
+    const cover = data.find(d => d.filename === "cover-1.pdf");
+    assert.ok(cover.id);
+    assert.equal(cover.kind, "cover");
+  } finally {
+    cleanup();
+  }
+});
+
+test("API: Invalid identifiers and path-traversal attempts", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  try {
+    const maliciousId = Buffer.from("../../../etc/passwd").toString("base64url");
+    const req = new Request(`http://localhost:3000/api/documents?id=${maliciousId}`);
+
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+    assert.equal(res.status, 404);
+  } finally {
+    cleanup();
+  }
+});
+
+test("API: Missing or deleted files between discovery and serving", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  try {
+    fs.writeFileSync(path.join(outputDir, "cv-missing.pdf"), "content");
+    fs.writeFileSync(manifestPath, [
+      "# report\tpdf\thtml\tformat\tdate\tkind",
+      "10\toutput/cv-missing.pdf\t\t\t2026-01-01\tcv"
+    ].join("\n"));
+
+    // Discover it, but then delete it before serving
+    const id = Buffer.from("cv-missing.pdf").toString("base64url");
+    const req = new Request(`http://localhost:3000/api/documents?id=${id}`);
+
+    // Delete file immediately to simulate TOCTOU or missing
+    fs.unlinkSync(path.join(outputDir, "cv-missing.pdf"));
+
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+    assert.equal(res.status, 404);
+  } finally {
+    cleanup();
+  }
+});
+
+test("API: Symlink rejection, including an internal symlink", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  try {
+    const realPdf = path.join(outputDir, "cv-real.pdf");
+    fs.writeFileSync(realPdf, "real content");
+
+    let symlinkCreated = false;
+    try {
+      const internalSymlink = path.join(outputDir, "cv-internal-symlink.pdf");
+      fs.symlinkSync(realPdf, internalSymlink);
+
+      const outsideFile = path.join(root, "outside.pdf");
+      fs.writeFileSync(outsideFile, "outside content");
+      fs.symlinkSync(outsideFile, path.join(outputDir, "cv-external-symlink.pdf"));
+      symlinkCreated = true;
+    } catch {}
+
+    if (symlinkCreated) {
+      // Mock discoverDocuments to pretend it found the symlink, testing the TOCTOU check
+      const id = Buffer.from("cv-internal-symlink.pdf").toString("base64url");
+      const req = new Request(`http://localhost:3000/api/documents?id=${id}`);
+
+      const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+      // Because documents API explicitly rejects symlinks during serving:
+      assert.equal(res.status, 404);
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test("API: Unexpected file types and safe response headers", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  try {
+    fs.writeFileSync(path.join(outputDir, "cv-safe.pdf"), "pdf content");
+    const id = Buffer.from("cv-safe.pdf").toString("base64url");
+    const req = new Request(`http://localhost:3000/api/documents?id=${id}`);
+
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "application/pdf");
+    assert.ok(res.headers.get("content-disposition").includes('filename="cv-safe.pdf"'));
+    assert.equal(res.headers.get("cache-control"), "no-store");
+  } finally {
+    cleanup();
+  }
+});
+
+test("API: RFC 8187 filename* encoding percent-encodes reserved characters including parentheses", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  try {
+    const filename = "résumé (Jane).pdf";
+    fs.writeFileSync(path.join(outputDir, filename), "pdf content");
+    const id = Buffer.from(filename).toString("base64url");
+    const req = new Request(`http://localhost:3000/api/documents?id=${id}`);
+
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+    assert.equal(res.status, 200);
+
+    const disposition = res.headers.get("content-disposition");
+    assert.ok(disposition);
+    // ASCII fallback replaces non-ASCII characters with '?'
+    assert.ok(disposition.includes('filename="r?sum? (Jane).pdf"'));
+    // RFC 8187 filename* must percent-encode '(', ')', and '*' in addition to encodeURIComponent
+    assert.ok(disposition.includes("filename*=UTF-8''r%C3%A9sum%C3%A9%20%28Jane%29.pdf"));
+  } finally {
+    cleanup();
+  }
+});
+
+test("API: Sibling directory containment regression (output-evil)", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  const evilDir = path.join(root, "output-evil");
+  try {
+    fs.mkdirSync(evilDir, { recursive: true });
+    fs.writeFileSync(path.join(evilDir, "evil.pdf"), "evil content");
+
+    const maliciousId = Buffer.from("../output-evil/evil.pdf").toString("base64url");
+    const req = new Request(`http://localhost:3000/api/documents?id=${maliciousId}`);
+
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+    assert.notEqual(res.status, 200); // Must be rejected
+  } finally {
+    cleanup();
+    fs.rmSync(evilDir, { recursive: true, force: true });
+  }
+});
+
+test("API: Returns 500 when discovery encounters an unexpected filesystem error", async () => {
+  const { root, outputDir, manifestPath, cleanup } = setupTestEnv();
+  const origReaddirSync = fs.readdirSync;
+  const origConsoleError = console.error;
+  try {
+    console.error = () => {};
+    fs.readdirSync = (dir, opts) => {
+      if (dir === outputDir) {
+        const err = new Error("EACCES: permission denied");
+        err.code = "EACCES";
+        throw err;
+      }
+      return origReaddirSync(dir, opts);
+    };
+
+    const req = new Request("http://localhost:3000/api/documents");
+    const res = await handleDocumentsRequest(req, root, manifestPath, mockIsRegularContainedFile);
+    assert.equal(res.status, 500);
+    const text = await res.text();
+    assert.equal(text, "failed to discover documents");
+  } finally {
+    console.error = origConsoleError;
+    fs.readdirSync = origReaddirSync;
+    cleanup();
+  }
+});

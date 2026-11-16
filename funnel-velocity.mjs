@@ -4,7 +4,9 @@
  *
  * Three payloads, decreasing availability:
  *   1. calibration — own funnel rates (canonical ever* definition imported from
- *      stats.mjs) vs candidate-side market benchmark ranges. Works day one.
+ *      stats.mjs) vs candidate-side market benchmark ranges. Works day one;
+ *      folds status-log history when the ledger is present so a row rejected
+ *      after an interview still counts as having reached Interview (#3493).
  *   2. waiting — in-flight Applied rows and elapsed days vs the typical
  *      first-response window. Per-row factual reporting, not an aggregate claim.
  *   3. velocity — median/p75 days per stage hop, folded from the append-only
@@ -37,17 +39,29 @@
 import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import * as yaml from 'js-yaml';
-import { computeFunnel, computeTrackerStats } from './stats.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
+import { computeFunnel, computeFunnelWithHistory, parseStatusLogStages, trackerStatusByNum, computeTrackerStats } from './stats.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
 import { resolveTrackerPath, loadCanonicalStates, resolveCanonicalState } from './tracker-utils.mjs';
-import { parseAppliedDate, normalizeStatus } from './followup-cadence.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { parseAppliedDate, normalizeStatus, loadFollowupsEnabled } from './followup-cadence.mjs';
 import { flagValue, validateFlags } from './lib/cli-flags.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STATES_FILE = join(CAREER_OPS, 'templates/states.yml');
+// Two roots, because this file reads both layers and they are not the same
+// directory. CODE_ROOT is where the shipped templates live; DATA_ROOT is where
+// the USER's tracker and overrides live, and getCareerOpsRoot() is what honours
+// CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / the .career-ops-data marker.
+//
+// One name for both is how this went wrong: the constant was called CAREER_OPS
+// and held __dirname, so it read correctly for templates and silently pointed
+// the tracker lookup at the checkout. A user with a data root configured got
+// "No tracker found ... nothing to calibrate yet" — indistinguishable from
+// having no data.
+const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
+const DATA_ROOT = getCareerOpsRoot();
+const STATES_FILE = join(CODE_ROOT, 'templates/states.yml');
 
 const KNOWN_FLAGS = ['--summary', '--self-test', '--benchmarks', '--help', '-h'];
 const VALUE_FLAGS = ['--benchmarks'];
@@ -65,9 +79,16 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // reconstructed afterwards. Only the door differs.
 // `reply-watch` is the same class: the user confirms the update interactively;
 // the transition is observed at that moment, not reconstructed later.
-const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual', 'reply-watch']);
-// Sources whose dates are trusted for day-math. backfill/manual are parsed and
-// counted but excluded: they are reconstructed after the fact, not observed.
+// `dedup-tracker` is the opposite class: the kept row of a duplicate pair takes
+// over the removed row's more advanced status, and that transition was found
+// at dedup time, not observed then (#5536).
+// `close-stale` is the same class: close-stale.mjs moves a long-silent Applied
+// row to Discarded in bulk, dated the day it ran. That is when the silence was
+// declared, not when anything happened, so it must not read as a hop (#5794).
+const VALID_SOURCES = new Set(['set-status', 'web', 'correction', 'backfill', 'manual', 'reply-watch', 'dedup-tracker', 'close-stale']);
+// Sources whose dates are trusted for day-math. backfill/manual/dedup-tracker/close-stale
+// are parsed and counted but excluded: they are reconstructed after the fact,
+// not observed.
 const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction', 'reply-watch']);
 
 // The hops a candidate can measure from their own tracker. Applied→Rejected is
@@ -75,7 +96,11 @@ const DAY_MATH_SOURCES = new Set(['set-status', 'web', 'correction', 'reply-watc
 // mixes offers and rejections reads grim and means nothing.
 const HOPS = [
   { key: 'appliedToResponded', from: 'Applied', to: 'Responded' },
-  { key: 'respondedToInterview', from: 'Responded', to: 'Interview' },
+  { key: 'respondedToAssessment', from: 'Responded', to: 'Assessment' },
+  { key: 'assessmentToInterview', from: 'Assessment', to: 'Interview' },
+  // Keep the direct hop for legacy rows that moved from Responded straight to
+  // Interview before Assessment became a first-class lifecycle stage.
+  { key: 'respondedToInterview', from: 'Responded', to: 'Interview', excludeIntermediate: 'Assessment' },
   { key: 'interviewToOffer', from: 'Interview', to: 'Offer' },
   { key: 'appliedToRejected', from: 'Applied', to: 'Rejected' },
 ];
@@ -83,6 +108,7 @@ const HOPS = [
 // Verbatim strings the tone contract pins (also asserted by mode-doc checks).
 const SELECTION_BIAS_NOTE = 'targeted applications are expected to beat mass-platform averages — this confirms your filtering works';
 const BELOW_RANGE_ACTION = '→ check follow-up compliance (followup mode) or review your score threshold (patterns mode)';
+const BELOW_RANGE_ACTION_NO_FOLLOWUPS = '→ review your score threshold (patterns mode)';
 const CLAIM_MIN_N = 20;
 const HOP_MIN_N = 3;
 
@@ -131,19 +157,20 @@ export function parseStatusLog(content, states) {
 }
 
 /**
- * Fold observations into one ordered timeline per tracker#.
- *
- * Rules (append-only log semantics):
+ * Replay observations in file order, one timeline per tracker#, applying the
+ * ledger's edit rules:
  *   - later `correction` with same (num, to) replaces the earlier observation's
  *     date (the fix for "agent logged the wrong day")
  *   - `to: "-"` retracts the row's latest surviving observation (the fix for
  *     "that transition never happened")
- *   - otherwise observations accumulate in file order (the log IS the order;
- *     dates may legitimately be non-monotonic via --on backdating)
+ *   - otherwise observations accumulate in file order
  *
- * @returns Map num -> [{to, date, source, dayMath}]
+ * File order is what a retraction pops, so the last entry is the change a new
+ * retraction line would remove (set-status.mjs --undo reads it).
+ *
+ * @returns Map num -> [{from, to, date, source, dayMath}]
  */
-export function foldObservations(observations) {
+export function replayObservations(observations) {
   const byNum = new Map();
   for (const obs of observations) {
     if (!byNum.has(obs.num)) byNum.set(obs.num, []);
@@ -151,13 +178,23 @@ export function foldObservations(observations) {
     if (obs.to === '-') { timeline.pop(); continue; }
     if (obs.source === 'correction') {
       const idx = timeline.map(o => o.to).lastIndexOf(obs.to);
-      if (idx !== -1) { timeline[idx] = { to: obs.to, date: obs.date, source: obs.source, dayMath: obs.dayMath }; continue; }
+      if (idx !== -1) { timeline[idx] = { from: timeline[idx].from, to: obs.to, date: obs.date, source: obs.source, dayMath: obs.dayMath }; continue; }
     }
-    timeline.push({ to: obs.to, date: obs.date, source: obs.source, dayMath: obs.dayMath });
+    timeline.push({ from: obs.from, to: obs.to, date: obs.date, source: obs.source, dayMath: obs.dayMath });
   }
-  // Sort each timeline by date so hop math sees event order, not entry order
-  // (--on backdating makes file order unreliable). Stable sort keeps same-day
-  // catch-up entries in entry order.
+  return byNum;
+}
+
+/**
+ * Fold observations into one timeline per tracker#: replayObservations(), then
+ * sorted by date so hop math sees event order, not entry order (--on
+ * backdating makes file order unreliable, so dates may be non-monotonic in the
+ * log). Stable sort keeps same-day catch-up entries in entry order.
+ *
+ * @returns Map num -> [{from, to, date, source, dayMath}]
+ */
+export function foldObservations(observations) {
+  const byNum = replayObservations(observations);
   for (const timeline of byNum.values()) {
     timeline.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
   }
@@ -202,20 +239,32 @@ export function computeVelocity(timelines, todayStr) {
     let sameDayExcluded = 0;
     let censored = 0;
     for (const timeline of timelines.values()) {
-      const fromIdx = timeline.findIndex(o => o.to === hop.from && o.dayMath);
-      if (fromIdx === -1) continue;
-      const next = timeline.slice(fromIdx + 1).find(o => o.to === hop.to && o.dayMath);
-      if (next) {
-        const d = daysBetween(timeline[fromIdx].date, next.date);
-        if (d === null || d < 0) continue;
-        if (d === 0) { sameDayExcluded++; continue; }
-        days.push(d);
-      } else if (fromIdx === timeline.length - 1) {
-        // Row's latest state is the hop's from-state: still waiting = censored.
-        // Only forward hops censor; Applied→Rejected shares Applied rows with
-        // Applied→Responded, so count censoring once (on the forward hop).
-        if (hop.to !== 'Rejected') censored++;
+      // A row can re-enter the from-state (re-applied after a rejection), so
+      // each entry starts its own measurement instead of the row's first one.
+      let start = null;
+      let left = false;
+      let viaIntermediate = false;
+      for (const o of timeline) {
+        if (o.to === hop.from) {
+          if (!start || left) { start = o.dayMath ? o : null; left = false; viaIntermediate = false; }
+          continue;
+        }
+        if (!start) continue;
+        if (o.to === hop.to && o.dayMath) {
+          const d = daysBetween(start.date, o.date);
+          start = null;
+          if (viaIntermediate || d === null || d < 0) continue;
+          if (d === 0) { sameDayExcluded++; continue; }
+          days.push(d);
+          continue;
+        }
+        left = true;
+        if (o.to === hop.excludeIntermediate) viaIntermediate = true;
       }
+      // Row's latest state is the hop's from-state: still waiting = censored.
+      // Only forward hops censor; Applied→Rejected shares Applied rows with
+      // Applied→Responded, so count censoring once (on the forward hop).
+      if (start && timeline.at(-1).to === hop.from && hop.to !== 'Rejected') censored++;
     }
     result[hop.key] = {
       from: hop.from,
@@ -234,10 +283,10 @@ export function computeVelocity(timelines, todayStr) {
 // --- Benchmarks ---
 export function loadBenchmarks(explicitPath) {
   const path = explicitPath
-    || (existsSync(join(CAREER_OPS, 'config/benchmarks.yml')) ? join(CAREER_OPS, 'config/benchmarks.yml') : join(CAREER_OPS, 'templates/benchmarks.yml'));
+    || (existsSync(join(DATA_ROOT, 'config/benchmarks.yml')) ? join(DATA_ROOT, 'config/benchmarks.yml') : join(CODE_ROOT, 'templates/benchmarks.yml'));
   let doc;
   try {
-    doc = yaml.load(readFileSync(path, 'utf-8'));
+    doc = loadYaml(readFileSync(path, 'utf-8'));
   } catch (err) {
     throw new Error(`Cannot read benchmarks at ${path}: ${err.message}`);
   }
@@ -272,6 +321,9 @@ export function computeCalibration(funnel, benchmarks) {
     everApplied: funnel.everApplied,
     smallSample,
     claimMinN: CLAIM_MIN_N,
+    // 'ledger' when the ever* counts fold status-log history (rejected-after-
+    // interview rows counted at the stage they reached), 'snapshot' otherwise.
+    basis: funnel.basis === 'ledger' ? 'ledger' : 'snapshot',
     responseRate: classify(funnel.everApplied > 0 ? funnel.responseRate : null, benchmarks.response_rate),
     interviewRate: classify(funnel.everApplied > 0 ? funnel.interviewRate : null, benchmarks.application_to_interview),
   };
@@ -335,7 +387,18 @@ export function parseTrackerRows(content) {
 export function analyze({ trackerContent, logContent, benchmarks, states, todayStr }) {
   const rows = parseTrackerRows(trackerContent);
   const stats = computeTrackerStats(trackerContent);
-  const funnel = computeFunnel(stats.byStatus);
+  // Ledger-aware funnel when the transition log carries usable history: a row now
+  // sitting in a terminal snapshot (Rejected/Discarded) still counts for the
+  // middle stages it passed through, so interviewRate/responseRate stop
+  // undercounting rejected-after-interview rows (#3493). Same canonical
+  // definition `node stats.mjs` uses. Branch on the parsed stages, not the raw
+  // file: a header-only, comment-only, or all-malformed log has no history to
+  // fold, and taking the ledger path anyway would stamp basis:'ledger' on a
+  // funnel identical to the snapshot and print the "rates fold history" note.
+  const ledgerStages = parseStatusLogStages(logContent);
+  const funnel = ledgerStages.length > 0
+    ? computeFunnelWithHistory(trackerStatusByNum(trackerContent), ledgerStages)
+    : computeFunnel(stats.byStatus);
   const { observations, unparseable, unknownSources } = parseStatusLog(logContent, states);
   const timelines = foldObservations(observations);
 
@@ -376,7 +439,7 @@ export function analyze({ trackerContent, logContent, benchmarks, states, todayS
 }
 
 // --- Summary rendering (tone contract lives here — see header) ---
-function fmtCalibrationLine(label, c, smallSample, n) {
+function fmtCalibrationLine(label, c, smallSample, n, belowRangeAction) {
   if (!c || c.ownPct === null) return `  ${label}: no data yet`;
   const range = `${c.rangePct[0]}–${c.rangePct[1]}% typical band (${c.year ?? 'n/a'}, directional)`;
   let line = `  ${label}: ${c.ownPct}% vs ${range}`;
@@ -387,15 +450,16 @@ function fmtCalibrationLine(label, c, smallSample, n) {
   if (c.band === 'above-range') {
     line += ` — above the typical band${c.vsTypical ? `, ${c.vsTypical}× typical` : ''} (${SELECTION_BIAS_NOTE})`;
   } else if (c.band === 'below-range') {
-    line += ` — below the typical band ${BELOW_RANGE_ACTION}`;
+    line += ` — below the typical band ${belowRangeAction}`;
   } else {
     line += ' — within the typical band';
   }
   return line;
 }
 
-export function renderSummary(result, todayStr) {
+export function renderSummary(result, todayStr, { followupsEnabled = true } = {}) {
   const out = [];
+  const belowRangeAction = followupsEnabled ? BELOW_RANGE_ACTION : BELOW_RANGE_ACTION_NO_FOLLOWUPS;
   const { calibration: cal, waiting, velocity, dataQuality: dq } = result;
   out.push('━'.repeat(46));
   out.push(`Funnel Calibration — ${todayStr}`);
@@ -405,8 +469,9 @@ export function renderSummary(result, todayStr) {
   if (cal.everApplied === 0) {
     out.push('  no applications sent yet — calibration starts at your first Applied row');
   } else {
-    out.push(fmtCalibrationLine('Response rate', cal.responseRate, cal.smallSample, cal.everApplied));
-    out.push(fmtCalibrationLine('Interview rate', cal.interviewRate, cal.smallSample, cal.everApplied));
+    out.push(fmtCalibrationLine('Response rate', cal.responseRate, cal.smallSample, cal.everApplied, belowRangeAction));
+    out.push(fmtCalibrationLine('Interview rate', cal.interviewRate, cal.smallSample, cal.everApplied, belowRangeAction));
+    if (cal.basis === 'ledger') out.push('  (rates fold status-log history — a row rejected after an interview still counts as reaching Interview)');
     if (cal.smallSample) out.push(`  (comparative claims need n≥${cal.claimMinN} applied; you have ${cal.everApplied})`);
   }
 
@@ -417,7 +482,7 @@ export function renderSummary(result, todayStr) {
     out.push(`  ${waiting.inFlight} in flight. Typical first-response window: ${waiting.windowDays[0]}–${waiting.windowDays[1]} days (${waiting.windowSource?.year ?? 'n/a'}, directional; many applications never get a response — silence is common, not a verdict).`);
     for (const item of waiting.items) {
       if (item.appliedDate === null) { out.push(`  #${item.num} ${item.company} — applied date unknown (no dated Applied observation; add "Applied YYYY-MM-DD" to its notes or use set-status)`); continue; }
-      const flag = item.beyondTypicalWindow ? `, beyond typical ${waiting.windowDays[0]}–${waiting.windowDays[1]}d window → consider followup mode` : '';
+      const flag = item.beyondTypicalWindow ? `, beyond typical ${waiting.windowDays[0]}–${waiting.windowDays[1]}d window${followupsEnabled ? ' → consider followup mode' : ''}` : '';
       out.push(`  #${item.num} ${item.company} — applied ${item.appliedDate} (${item.elapsedDays}d${flag})`);
     }
   }
@@ -566,6 +631,22 @@ function selfTest() {
   check(velocity.appliedToRejected.censored === 0, 'velocity: rejection hop does not double-count censoring');
   check(velocity.interviewToOffer.n === 1 && velocity.interviewToOffer.insufficientData, 'velocity: I→O n=1 insufficient');
 
+  const ASSESSMENT_FIXTURE = [
+    '10\t2026-06-01\tApplied\tResponded\tset-status\t',
+    '10\t2026-06-04\tResponded\tAssessment\tset-status\t',
+    '10\t2026-06-09\tAssessment\tInterview\tset-status\t',
+  ].join('\n');
+  const assessmentVelocity = computeVelocity(
+    foldObservations(parseStatusLog(ASSESSMENT_FIXTURE, states).observations),
+    TODAY,
+  );
+  check(assessmentVelocity.respondedToAssessment.n === 1,
+    `velocity: Responded→Assessment expected n=1, got ${assessmentVelocity.respondedToAssessment.n}`);
+  check(assessmentVelocity.assessmentToInterview.n === 1,
+    `velocity: Assessment→Interview expected n=1, got ${assessmentVelocity.assessmentToInterview.n}`);
+  check(assessmentVelocity.respondedToInterview.n === 0,
+    `velocity: Assessment path must not count as legacy Responded→Interview, got n=${assessmentVelocity.respondedToInterview.n}`);
+
   // three completed A→R measurements → median renders
   const logWithThird = LOG_FIXTURE + '\n4\t2026-06-27\tApplied\tResponded\tset-status\t';
   const v3 = computeVelocity(foldObservations(parseStatusLog(logWithThird, states).observations), TODAY);
@@ -573,7 +654,7 @@ function selfTest() {
   check(v3.appliedToResponded.censored === 2, 'velocity: censored drops to 2 after row 4 completes');
 
   // -- benchmarks + classification --
-  const bm = loadBenchmarks(join(CAREER_OPS, 'templates/benchmarks.yml')).benchmarks;
+  const bm = loadBenchmarks(join(CODE_ROOT, 'templates/benchmarks.yml')).benchmarks;
   check(bm.response_rate && Array.isArray(bm.response_rate.range_pct), 'benchmarks: shipped file loads');
   check(bm.days_first_response.range_days[1] === 14, 'benchmarks: first-response window upper bound');
   check(!('time_to_fill' in bm), 'benchmarks: employer-side time_to_fill must not exist');
@@ -611,6 +692,80 @@ function selfTest() {
   const below = renderSummary(analyze({ trackerContent: mkTracker(40, 0), logContent: '', benchmarks: bm, states, todayStr: TODAY }), TODAY);
   check(below.includes(BELOW_RANGE_ACTION), 'tone: below-range carries the single action pointer');
   check(below.includes('(2025, directional)'), 'tone: benchmark year + directional attached');
+
+  // -- ledger-aware calibration (#3493): a terminal Rejected snapshot must not
+  // erase the middle stages the row actually reached. Same shape stats.mjs uses. --
+  const ledgerHeader = '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n|---|------|---------|------|-------|--------|-----|--------|-------|';
+  const ledgerRows = [];
+  for (let i = 1; i <= 21; i++) ledgerRows.push(`| ${i} | 2026-06-01 | Co${i} | Role | 4.0/5 | Applied | ❌ | - | |`);
+  for (let i = 22; i <= 25; i++) ledgerRows.push(`| ${i} | 2026-06-01 | Co${i} | Role | 4.0/5 | Rejected | ❌ | - | |`);
+  const ledgerTracker = `${ledgerHeader}\n${ledgerRows.join('\n')}`;
+  const ledgerLog = [
+    '22\t2026-06-02\tApplied\tResponded\tset-status\t',
+    '22\t2026-06-09\tResponded\tInterview\tset-status\t',
+    '22\t2026-06-20\tInterview\tRejected\tset-status\t',
+    '23\t2026-06-02\tApplied\tResponded\tset-status\t',
+    '23\t2026-06-09\tResponded\tInterview\tset-status\t',
+    '23\t2026-06-20\tInterview\tRejected\tset-status\t',
+    '24\t2026-06-03\tApplied\tResponded\tset-status\t',
+    '24\t2026-06-18\tResponded\tRejected\tset-status\t',
+  ].join('\n');
+  const snap = analyze({ trackerContent: ledgerTracker, logContent: '', benchmarks: bm, states, todayStr: TODAY });
+  check(snap.calibration.basis === 'snapshot', 'ledger-funnel: no log → snapshot basis');
+  check(snap.calibration.interviewRate.ownPct === 0, `ledger-funnel: snapshot erases interviews reached, got ${snap.calibration.interviewRate.ownPct}`);
+  const led = analyze({ trackerContent: ledgerTracker, logContent: ledgerLog, benchmarks: bm, states, todayStr: TODAY });
+  check(led.calibration.basis === 'ledger', 'ledger-funnel: log present → ledger basis');
+  check(led.calibration.everApplied === 25, `ledger-funnel: everApplied still 25, got ${led.calibration.everApplied}`);
+  check(led.calibration.interviewRate.ownPct === 8, `ledger-funnel: 2/25 reached Interview → 8%, got ${led.calibration.interviewRate.ownPct}`);
+  check(led.calibration.responseRate.ownPct === 16, `ledger-funnel: 4/25 received a reply including rejection → 16%, got ${led.calibration.responseRate.ownPct}`);
+  check(renderSummary(led, TODAY).includes('rates fold status-log history'), 'ledger-funnel: summary flags the folded basis');
+  check(!renderSummary(snap, TODAY).includes('rates fold status-log history'), 'ledger-funnel: snapshot summary carries no fold note');
+
+  // A log with no *parsed* history — header row, comments, torn rows — must stay
+  // on the snapshot basis: taking the ledger path would stamp basis:'ledger' on
+  // a funnel identical to the snapshot and wrongly print the fold note.
+  for (const [label, emptyLog] of [
+    ['header only', '#\tdate\tfrom\tto\tsource\tnote'],
+    ['comment only', '# migrated 2026-06-01 — no transitions yet'],
+    ['torn rows only', 'x\t2026-06-02\tApplied\tResponded\nx\t2026-06-09\tResponded\tInterview'],
+    ['whitespace', '   \n\t\n'],
+  ]) {
+    const r = analyze({ trackerContent: ledgerTracker, logContent: emptyLog, benchmarks: bm, states, todayStr: TODAY });
+    check(r.calibration.basis === 'snapshot', `ledger-funnel: ${label} log → snapshot basis`);
+    check(r.calibration.interviewRate.ownPct === snap.calibration.interviewRate.ownPct, `ledger-funnel: ${label} log leaves rates on the snapshot value`);
+    check(!renderSummary(r, TODAY).includes('rates fold status-log history'), `ledger-funnel: ${label} log carries no fold note`);
+  }
+
+  // everX counts distinct tracker rows, so a transition the ledger records more
+  // than once (a re-applied set-status, a torn-then-rewritten append) must not
+  // inflate the funnel — the ledger result is identical with each line doubled.
+  const dupLog = ledgerLog.split('\n').flatMap(l => [l, l]).join('\n');
+  const dup = analyze({ trackerContent: ledgerTracker, logContent: dupLog, benchmarks: bm, states, todayStr: TODAY });
+  check(dup.calibration.everApplied === led.calibration.everApplied, `ledger-funnel: duplicated transitions leave everApplied at ${led.calibration.everApplied}, got ${dup.calibration.everApplied}`);
+  check(dup.calibration.interviewRate.ownPct === led.calibration.interviewRate.ownPct, `ledger-funnel: duplicated transitions leave interviewRate at ${led.calibration.interviewRate.ownPct}%, got ${dup.calibration.interviewRate.ownPct}%`);
+  check(dup.calibration.responseRate.ownPct === led.calibration.responseRate.ownPct, `ledger-funnel: duplicated transitions leave responseRate at ${led.calibration.responseRate.ownPct}%, got ${dup.calibration.responseRate.ownPct}%`);
+  // A row that genuinely bounces back and forth is still one row at its deepest
+  // stage — Responded→Interview→Responded→Interview counts once into everInterview.
+  const bounceLog = [
+    '2\t2026-06-02\tApplied\tResponded\tset-status\t',
+    '2\t2026-06-09\tResponded\tInterview\tset-status\t',
+    '2\t2026-06-12\tInterview\tResponded\tset-status\t',
+    '2\t2026-06-15\tResponded\tInterview\tset-status\t',
+  ].join('\n');
+  const bounce = analyze({ trackerContent: ledgerTracker, logContent: bounceLog, benchmarks: bm, states, todayStr: TODAY });
+  check(bounce.calibration.interviewRate.ownPct === 4, `ledger-funnel: a bouncing row counts once → 1/25 = 4%, got ${bounce.calibration.interviewRate.ownPct}`);
+
+  // A current Discarded row with no ledger history stays out of everApplied in
+  // both funnels — Discarded (unlike Rejected) does not by itself prove a
+  // submission, and the ledger path must not silently diverge from the snapshot.
+  const discardTracker = `${ledgerHeader}\n${[
+    ...Array.from({ length: 10 }, (_, i) => `| ${i + 1} | 2026-06-01 | Co${i + 1} | Role | 4.0/5 | Applied | ❌ | - | |`),
+    '| 11 | 2026-06-01 | Co11 | Role | 4.0/5 | Discarded | ❌ | - | |',
+  ].join('\n')}`;
+  const discardSnap = analyze({ trackerContent: discardTracker, logContent: '', benchmarks: bm, states, todayStr: TODAY });
+  const discardLed = analyze({ trackerContent: discardTracker, logContent: '1\t2026-06-05\tApplied\tResponded\tset-status\t', benchmarks: bm, states, todayStr: TODAY });
+  check(discardSnap.calibration.everApplied === 10, `ledger-funnel: snapshot leaves a no-history Discarded row out of everApplied, got ${discardSnap.calibration.everApplied}`);
+  check(discardLed.calibration.everApplied === discardSnap.calibration.everApplied, `ledger-funnel: ledger path agrees with snapshot on a no-history Discarded row, got ${discardLed.calibration.everApplied} vs ${discardSnap.calibration.everApplied}`);
 
   // -- waiting --
   const waitTracker = [
@@ -718,7 +873,7 @@ function main() {
     process.exit(1);
   }
   const states = loadCanonicalStates(STATES_FILE);
-  const trackerPath = resolveTrackerPath(CAREER_OPS);
+  const trackerPath = resolveTrackerPath(DATA_ROOT);
   const logPath = join(dirname(trackerPath), 'status-log.tsv');
   const trackerContent = existsSync(trackerPath) ? readFileSync(trackerPath, 'utf-8') : '';
   const logContent = existsSync(logPath) ? readFileSync(logPath, 'utf-8') : '';
@@ -733,7 +888,7 @@ function main() {
   }
 
   const result = analyze({ trackerContent, logContent, benchmarks, states, todayStr });
-  if (summaryMode) console.log(renderSummary(result, todayStr));
+  if (summaryMode) console.log(renderSummary(result, todayStr, { followupsEnabled: loadFollowupsEnabled() }));
   else console.log(JSON.stringify({ ...result, generatedAt: todayStr }, null, 2));
 }
 

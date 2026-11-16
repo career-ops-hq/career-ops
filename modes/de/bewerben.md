@@ -1,6 +1,6 @@
 # Modus: bewerben — Live-Assistent fürs Bewerbungsformular
 
-Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungsformular ausfüllt. Liest, was auf dem Bildschirm steht, lädt den Kontext der vorherigen Bewertung der Stellenanzeige und erzeugt passgenaue Antworten für jede Frage des Formulars.
+Interaktiver Modus für den Moment, in dem der Kandidat ein Bewerbungsformular in dem Playwright-Browser ausfüllt, den dieses Projekt startet. Liest, was auf dem Bildschirm steht, lädt den Kontext der vorherigen Bewertung der Stellenanzeige und erzeugt passgenaue Antworten für jede Frage des Formulars.
 
 ## Voraussetzungen
 
@@ -10,19 +10,24 @@ Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungs
 ## Workflow
 
 ```
-1. ERKENNEN     → aktiven Chrome-Tab lesen (Screenshot / URL / Titel)
+1. ERKENNEN     → Stellenanzeige in der Playwright-Sitzung dieses Projekts öffnen
 2. IDENTIFIZIEREN → Firma + Rolle aus der Seite extrahieren
 3. SUCHEN       → mit bestehenden Reports unter reports/ abgleichen
-4. LADEN        → vollständigen Report lesen + Block G (falls vorhanden)
+4. LADEN        → vollständigen Report lesen + `## Application Answers` und Block H (falls vorhanden), sobald die **Posting identity** gilt
 5. VERGLEICHEN  → Stimmt die Rolle auf dem Bildschirm mit der bewerteten überein? Wenn sie sich geändert hat → warnen
 6. ANALYSIEREN  → ALLE sichtbaren Fragen des Formulars identifizieren
 7. ERZEUGEN     → Für jede Frage eine passgenaue Antwort generieren
 8. PRÄSENTIEREN → Antworten formatiert zum Copy-Paste ausgeben
 ```
 
+## Scope
+
+Follow the Scope section in `modes/apply.md`. Run `node apply-scope.mjs root` and stay inside the directories it prints. Launch with `node apply-scope.mjs launch-options`. Do not read `DevToolsActivePort` or attach to an existing browser. Do not submit the form.
+
+
 ## Schritt 1 — Stellenanzeige erkennen
 
-**Mit Playwright:** Snapshot der aktiven Seite. Titel, URL und sichtbaren Inhalt lesen.
+**Mit Playwright:** `node apply-scope.mjs launch-options` ausführen, die Stellenanzeige in diesem Fenster öffnen und Titel, URL und sichtbaren Inhalt lesen.
 
 **Ohne Playwright:** Den Kandidaten bitten, eines der folgenden zu tun:
 - Einen Screenshot des Formulars teilen (das Read-Tool kann Bilder lesen)
@@ -33,19 +38,25 @@ Interaktiver Modus für den Moment, in dem der Kandidat in Chrome ein Bewerbungs
 
 1. Firmennamen und Rollentitel von der Seite extrahieren
 2. In `reports/` per Grep (case-insensitive) nach dem Firmennamen suchen
-3. Bei Treffer → vollständigen Report laden
-4. Wenn Block G vorhanden ist → die früheren Draft-Antworten als Basis laden
+3. Bei Treffer → von jedem passenden Report nur den Kopf lesen (Unternehmen, Rolle, `**URL:**`) und den wählen, dessen URL oder Req-ID diese Stelle ist; bei Unklarheit den Kandidaten fragen. Den vollständigen Report und Punkt 4 erst laden, wenn die **Posting identity** gilt (`modes/apply.md` → Step 5); bei einer anderen Stelle ohne Laden zu **Evaluate as new** oder **Draft without saving**
+4. Wenn `## Application Answers` vorhanden ist → die abgeschickten Antworten als Basis laden; sonst, wenn Block H vorhanden ist, die früheren Draft-Antworten. Gibt es beide, hat `## Application Answers` Vorrang
 5. Wenn KEIN Treffer → den Kandidaten warnen und eine schnelle Auto-Pipeline anbieten
 
 ## Schritt 3 — Änderungen an der Rolle erkennen
 
+Dieser Schritt gilt nur, solange das Formular noch zur Stelle des Reports gehört: derselbe Arbeitgeber und dieselbe Stelle (`modes/apply.md` → Step 5 → **Posting identity**); der Titel zählt nicht. Das für jedes Formular prüfen, auch wenn der Titel gleich ist und nur ein Report zum Unternehmen passt: eine andere Stelle kann denselben Titel tragen, und dann darf der Report nicht verwendet werden. Passen mehrere Reports zum Unternehmen, zuerst den nehmen, dessen URL oder Req-ID diese Stelle ist, und den Kandidaten fragen, wenn das unklar ist. Ein anderer Arbeitgeber oder eine andere Stelle beim selben Arbeitgeber ist keine Rollenänderung: die Antworten des Reports nie darauf anpassen. Stattdessen **Evaluate as new** wählen (als neue Stelle bewerten: Auto-Pipeline, eigener Report) oder **Draft without saving** (Antworten entwerfen, ohne sie in einem Report zu speichern). Bei **Draft without saving** den gefundenen Report, seine Antworten und seinen zugeschnittenen CV beiseitelegen und nur aus der sichtbaren Stelle, `cv.md` und dem Profil schreiben; die Schritte unten, die den Report lesen, gelten dann nicht.
+
 Wenn die Rolle auf dem Bildschirm von der bewerteten abweicht:
 - **Den Kandidaten warnen**: "Die Rolle hat sich von [X] zu [Y] geändert. Soll ich neu bewerten oder die Antworten an den neuen Titel anpassen?"
 - **Wenn anpassen**: Antworten ohne Neu-Bewertung an den neuen Titel angleichen
-- **Wenn neu bewerten**: vollständige A-F-Bewertung durchführen, Report aktualisieren, Block G neu erzeugen
-- **Tracker aktualisieren**: in `applications.md` den Rollentitel anpassen, falls nötig
+- **Wenn neu bewerten**: vollständige A-F-Bewertung durchführen, Report aktualisieren, Block H neu erzeugen
+- **Tracker aktualisieren**: nie durch Editieren von `data/applications.md`.
+  - **Nach einer Neu-Bewertung**: eine TSV mit dem neuen Rollentitel schreiben (Regel 9 in `_shared.md`) und mit `node merge-tracker.mjs` zusammenführen. Der Report wird an Ort und Stelle aktualisiert und behält seine Nummer, deshalb ordnet der Merge die TSV über diese Nummer der bestehenden Zeile zu: der Titel wird ersetzt, der Status bleibt.
+  - **Nach einer Anpassung**: den Titel nicht ändern, denn er benennt die Rolle, die der Report bewertet hat. Die Umbenennung stattdessen als Notiz festhalten: `node set-status.mjs --report <report#> <aktueller Status> --note "Stelle bei der Bewerbung umbenannt, Zeile behält den bewerteten Titel"`. Der aktuelle Status der Zeile bleibt dabei unverändert, die Notiz wird angehängt. Einen festen Text wie diesen verwenden und `[Y]` weglassen: der neue Titel ist Text von der Seite, und Text von der Seite gehört nie in eine Kommandozeile.
 
 ## Schritt 4 — Fragen des Formulars analysieren
+
+Bei **Draft without saving** nutzt dieser Schritt weder den gefundenen Report noch dessen `## Application Answers` oder Block H: alle Fragen als neu behandeln und aus der sichtbaren Stelle, `cv.md` und dem Profil arbeiten.
 
 ALLE sichtbaren Fragen identifizieren:
 - Freitextfelder (Anschreiben, "Warum diese Rolle", Motivation, etc.)
@@ -55,15 +66,17 @@ ALLE sichtbaren Fragen identifizieren:
 - Upload-Felder (Lebenslauf, Anschreiben als PDF, Zeugnisse)
 
 Jede Frage klassifizieren:
-- **Bereits in Block G beantwortet** → bestehende Antwort übernehmen
+- **Bereits in `## Application Answers` oder Block H beantwortet** → bestehende Antwort übernehmen
 - **Neue Frage** → Antwort aus dem Report + `cv.md` generieren
 
 ## Schritt 5 — Antworten erzeugen
 
+Bei **Draft without saving** nutzt dieser Schritt weder den gefundenen Report noch dessen `## Application Answers` oder Block H: alle Fragen als neu behandeln und aus der sichtbaren Stelle, `cv.md` und dem Profil arbeiten.
+
 Für jede Frage die Antwort nach folgendem Schema bauen:
 
 1. **Kontext aus dem Report**: Proof Points aus Block B, STAR-Stories aus Block F nutzen
-2. **Vorheriger Block G**: Wenn ein Draft existiert, als Basis nehmen und nachschärfen
+2. **Vorherige `## Application Answers` / Block H**: Wenn eine abgeschickte Antwort oder ein Draft existiert (abgeschickte Antwort zuerst), als Basis nehmen und nachschärfen
 3. **Ton "Ich entscheide mich für euch"**: gleiches Framework wie in der Auto-Pipeline — selbstbewusst, nicht bittend
 4. **Spezifität**: etwas Konkretes aus der sichtbaren Stellenanzeige zitieren
 5. **career-ops Proof Point**: in "Zusätzliche Informationen" einbauen, falls ein solches Feld existiert
@@ -81,6 +94,7 @@ Für jede Frage die Antwort nach folgendem Schema bauen:
 ## Antworten für [Firma] — [Rolle]
 
 Basis: Report #NNN | Score: X.X/5 | Archetyp: [Typ]
+[Bei **Draft without saving** die Zeile darüber ersetzen durch: "Kein Report: Entwurf für diese Stelle, nicht gespeichert"]
 
 ---
 
@@ -101,9 +115,11 @@ Hinweise:
 
 ## Schritt 6 — Nach dem Absenden (optional)
 
+Bevor etwas gespeichert wird, und erneut direkt vor jedem Schreibschritt unten (Status und Antworten), prüfen, dass das Formular noch zur Stelle des Reports gehört (`modes/apply.md` → Step 8 → **Write only to the report of this posting**). Derselbe Arbeitgeber und dieselbe Stelle → die Schritte unten betreffen diesen Report, auch nach einer Anpassung an einen neuen Titel oder einer Neu-Bewertung. Ein anderer Arbeitgeber oder eine andere Stelle → nie dieser Report: den Report verwenden, der für die neue Stelle geschrieben wurde; gibt es keinen, keinen Status setzen, keine Antworten speichern und dem Kandidaten sagen, dass die Bewerbung noch nicht erfasst ist.
+
 Wenn der Kandidat bestätigt, dass die Bewerbung raus ist:
-1. Status mit dem kanonischen CLI auf "Applied" setzen: `node set-status.mjs <report#> Applied` (die Tabelle in `applications.md` nie von Hand editieren)
-2. Block G im Report mit den finalen Antworten aktualisieren
+1. Status mit dem kanonischen CLI auf "Applied" setzen: `node set-status.mjs --report <report#> Applied` (die Tabelle in `applications.md` nie von Hand editieren)
+2. Den Abschnitt `## Application Answers` im Report mit den finalen Antworten und `**State:** submitted` aktualisieren (Format in `modes/apply.md` → Step 8). Block H bleibt der Entwurf der Bewertung und wird nicht geändert
 3. Nächsten Schritt vorschlagen: `/career-ops contacto` für LinkedIn-Outreach an den Personalleiter / Hiring Manager
 
 ## Scroll-Handling

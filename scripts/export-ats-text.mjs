@@ -5,11 +5,13 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import * as yaml from 'js-yaml';
+import { loadYaml } from '../lib/yaml-document.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
+import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from '../path-resolver.mjs';
+import { validateFlags } from '../lib/cli-flags.mjs';
 
 /**
  * Sanitizes plain text for ATS forms (converting bullets, dashes, quotes, and stripping emojis/non-breaking spaces).
@@ -214,7 +216,7 @@ export function normalizeProfile(raw = {}, cvData = {}) {
  */
 export function loadProfile(customProfilePath = null, customCvPath = null) {
   let profileRaw = null;
-  const profileSource = customProfilePath || process.env.CAREER_OPS_PROFILE || 'config/profile.yml';
+  const profileSource = customProfilePath || getProfilePath();
 
   if (customProfilePath) {
     if (!existsSync(customProfilePath)) {
@@ -222,7 +224,7 @@ export function loadProfile(customProfilePath = null, customCvPath = null) {
     }
     try {
       const content = readFileSync(customProfilePath, 'utf8');
-      profileRaw = yaml.load(content);
+      profileRaw = loadYaml(content);
       if (!profileRaw || typeof profileRaw !== 'object') {
         throw new Error(`Invalid YAML in profile file: ${customProfilePath}`);
       }
@@ -231,11 +233,12 @@ export function loadProfile(customProfilePath = null, customCvPath = null) {
     }
   } else {
     if (!existsSync(profileSource)) {
-      throw new Error('config/profile.yml not found: fill it in first');
+      const via = hasProfileOverride() ? ' (named by CAREER_OPS_PROFILE)' : '';
+      throw new Error(`Profile not found at ${profileSource}${via}: fill it in first`);
     }
     try {
       const content = readFileSync(profileSource, 'utf8');
-      profileRaw = yaml.load(content);
+      profileRaw = loadYaml(content);
       if (!profileRaw || typeof profileRaw !== 'object') {
         throw new Error('config/profile.yml is empty or invalid YAML: fill it in first');
       }
@@ -245,7 +248,7 @@ export function loadProfile(customProfilePath = null, customCvPath = null) {
   }
 
   let cvData = {};
-  const cvSource = customCvPath || process.env.CAREER_OPS_CV || 'cv.md';
+  const cvSource = customCvPath || process.env.CAREER_OPS_CV || join(getCareerOpsRoot(), 'cv.md');
   if (customCvPath) {
     if (!existsSync(customCvPath)) {
       throw new Error(`CV file not found at: ${customCvPath}`);
@@ -369,6 +372,18 @@ export function formatAtsText(profile = {}, options = {}) {
 
 // Main CLI execution guard (repo convention: lib/is-main-module.mjs, #3170)
 if (isMainModule(import.meta.url)) {
+  validateFlags(process.argv.slice(2), ['--section', '--out', '--profile', '--cv', '--help', '-h'], `Usage: node scripts/export-ats-text.mjs [options]
+
+Export profile and CV sections as plain text for ATS forms.
+
+Options:
+  --section <name>  Export personal, summary, skills, experience or education only
+  --out <path>      Write to a file instead of stdout
+  --profile <path>  Profile YAML (default: CAREER_OPS_PROFILE, else config/profile.yml in the data root)
+  --cv <path>       CV Markdown (default: CAREER_OPS_CV, else cv.md in the data root, when present)
+  --help, -h        Show help without reading the profile/CV or writing output
+`, { valueFlags: ['--section', '--out', '--profile', '--cv'], requireOperand: true });
+
   const { values } = parseArgs({
     options: {
       section: { type: 'string' },

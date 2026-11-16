@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execFile } from "node:child_process";
 
 // The WEB build's own version + channel (NOT the user's data checkout) — read from
 // the repo's VERSION (parent of the web/ cwd). The channel is derived from a
@@ -25,12 +25,16 @@ function readVersion(): string {
   return "";
 }
 
-function shortSha(): string {
-  try {
-    return execSync("git rev-parse --short HEAD", { cwd: process.cwd(), stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
-  } catch {
-    return "";
-  }
+function shortSha(): Promise<string> {
+  // execFile with an argv array, never a shell string: the argument list is
+  // fixed here, but the web layer does not hand a shell a command line at all
+  // (see api/doctor/route.ts). windowsHide: a stale inherited console kills
+  // every child with 0xC0000142 on Windows; never inherit one.
+  return new Promise((resolve) => {
+    execFile("git", ["rev-parse", "--short", "HEAD"], { cwd: process.cwd(), windowsHide: true }, (err, out) =>
+      resolve(err ? "" : out.toString().trim()),
+    );
+  });
 }
 
 function webVersion(): string {
@@ -52,5 +56,5 @@ export async function GET() {
   // stay visible until the web graduates to 1.0.
   const channel = m ? m[1].toLowerCase() : web && /^0\./.test(web) ? "alpha" : "stable";
   const version = web ? `web ${web}` : coreVersion;
-  return Response.json({ version, coreVersion, channel, sha: shortSha() });
+  return Response.json({ version, coreVersion, channel, sha: await shortSha() });
 }

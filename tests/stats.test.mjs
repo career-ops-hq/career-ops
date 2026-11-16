@@ -2,12 +2,44 @@
 import { pass, fail, run, NODE, ROOT, lastRunFailure } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import { mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
+import assert from 'node:assert/strict';
 
 console.log('\nstats.mjs — lifetime pipeline stats aggregator (#1604)');
 try {
   const stats = await import(pathToFileURL(join(ROOT, 'stats.mjs')).href);
+  const states = [...Array(10).fill('Applied'), ...Array(5).fill('Responded'), ...Array(2).fill('Interview'), ...Array(12).fill('Rejected')];
+  const numbered = new Map(states.map((s,i) => [i+1,s]));
+  const transitions = [18,19,20].map(n => `${n}\t2026-09-01\tInterview\tRejected\tset-status\t`).join('\n');
+  const recovered = stats.computeFunnelWithHistory(numbered, stats.parseStatusLogStages(transitions + '\n' + transitions));
+  assert.equal(recovered.everApplied, 29);
+  assert.equal(recovered.everResponded, 19);
+  assert.equal(recovered.everInterview, 5);
+  assert.equal(recovered.responseRate, 65.5);
+  assert.equal(recovered.interviewRate, 17.2);
+  assert.equal(stats.computeFunnel({Rejected:2, Discarded:3}).everResponded, 2);
+  assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'Rejected',to:'Discarded'}]).everResponded, 1);
+  assert.equal(stats.computeFunnelWithHistory(new Map([[1,'Discarded']]), [{num:1,from:'offer',to:'discarded'}]).everOffer, 1);
+  pass('rejections count as replies and distinct ledger history retains reached stages');
+
+  const skipTracker = [
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    '| 1 | 2026-09-01 | Acme | Eng | 4/5 | **SKIP** | - | - | |',
+    '| 2 | 2026-09-01 | Beta | Eng | 4/5 | No Aplicar | - | - | |',
+    '| 3 | 2026-09-01 | Gama | Eng | 4/5 | Rejected | - | - | |',
+  ].join('\n');
+  const skipLedger = stats.parseStatusLogStages([
+    '1\t2026-09-01\tInterview\tSKIP',
+    '2\t2026-09-01\tOffer\tSKIP',
+    '3\t2026-09-01\tInterview\tRejected',
+  ].join('\n'));
+  assert.deepEqual(stats.computeFunnelWithHistory(stats.trackerStatusByNum(skipTracker), skipLedger), {
+    everApplied: 1, everResponded: 1, everInterview: 1, everOffer: 0,
+    responseRate: 100, interviewRate: 100, offerRate: 0, smallSample: true, basis: 'ledger',
+  });
+  pass('canonicalized SKIP rows cannot recover prior interview or offer stages');
 
   // Tracker roll-up — CRLF input on purpose (Windows checkouts).
   const trackerMd = [
@@ -46,8 +78,8 @@ try {
 
   // Funnel — Rejected counts into everApplied (mirrors dashboard ComputeProgressMetrics).
   const f = stats.computeFunnel({ Applied: 4, Responded: 2, Interview: 1, Offer: 1, Rejected: 2, Evaluated: 9 });
-  if (f.everApplied === 10 && f.everResponded === 4 && f.everInterview === 2 && f.everOffer === 1
-      && f.responseRate === 40 && f.offerRate === 10 && f.smallSample === false) {
+  if (f.everApplied === 10 && f.everResponded === 6 && f.everInterview === 2 && f.everOffer === 1
+      && f.responseRate === 60 && f.offerRate === 10 && f.smallSample === false) {
     pass('computeFunnel cumulative ever* stages match the dashboard math');
   } else {
     fail(`computeFunnel wrong output: ${JSON.stringify(f)}`);
@@ -61,6 +93,12 @@ try {
   } else {
     fail(`computeFunnel mishandles Hired: ${JSON.stringify(fh)}`);
   }
+  const fa = stats.computeFunnel({ Applied: 1, Assessment: 1 });
+  if (fa.everApplied === 2 && fa.everResponded === 1 && fa.everInterview === 0) {
+    pass('computeFunnel treats Assessment as responded-before-interview');
+  } else {
+    fail(`computeFunnel mishandles Assessment: ${JSON.stringify(fa)}`);
+  }
   if (stats.computeFunnel({ Applied: 3 }).smallSample === true) {
     pass('computeFunnel flags small samples (everApplied < 10)');
   } else {
@@ -70,7 +108,7 @@ try {
   // Ledger-aware funnel (#1428): a declined offer (now Discarded) and a
   // rejected-after-interview must count for the stages they passed through,
   // which the status snapshot alone cannot see. Row 3 has no ledger history and
-  // must fall back to its current status (Rejected proves everApplied only).
+  // must fall back to its current status (Rejected proves a reply, not an interview).
   const statusByNum = new Map([[1, 'Discarded'], [2, 'Rejected'], [3, 'Rejected'], [4, 'Interview']]);
   const ledgerTsv = [
     '1\t2026-08-19\tInterview\tOffer\tset-status\t',   // row 1 reached Offer, then declined
@@ -274,30 +312,27 @@ try {
     fail(`stats.mjs --bogus did not fail as expected: exit=${bogusFailure?.status ?? 'null'} output=${bogusOutput.trim()}`);
   }
 
-  // --summary cold-classification integration (#2123): the CLI reads its
-  // fixed data/ paths, so exercise it against real (temporary) tracker +
-  // follow-ups files at those exact paths, then restore whatever was there.
-  const liveAppsFile = join(ROOT, 'data', 'applications.md');
-  const liveFupsFile = join(ROOT, 'data', 'follow-ups.md');
-  const { existsSync, readFileSync: readFileSyncNode, mkdirSync } = await import('fs');
-  const dataDirExisted = existsSync(join(ROOT, 'data'));
-  const appsExisted = existsSync(liveAppsFile);
-  const fupsExisted = existsSync(liveFupsFile);
-  const appsBackup = appsExisted ? readFileSyncNode(liveAppsFile, 'utf-8') : null;
-  const fupsBackup = fupsExisted ? readFileSyncNode(liveFupsFile, 'utf-8') : null;
+  // --summary cold-classification integration (#2123): the CLI resolves its
+  // tracker and follow-ups through the data root, so give it a root of its own.
+  // This used to overwrite the checkout's live data/applications.md and
+  // data/follow-ups.md and put them back from a variable in `finally` — which
+  // an interrupted run never reaches, leaving the fixture where the tracker
+  // was, in a directory git does not track (#5113).
+  const coldRoot = mkdtempSync(join(tmpdir(), 'co-stats-cold-'));
   try {
-    if (!dataDirExisted) mkdirSync(join(ROOT, 'data'), { recursive: true });
-    writeFileSync(liveAppsFile, coldTrackerMd);
-    writeFileSync(liveFupsFile, coldFollowupsMd);
-    const coldSummaryOut = run(NODE, [join(ROOT, 'stats.mjs'), '--summary']);
+    mkdirSync(join(coldRoot, 'data'));
+    writeFileSync(join(coldRoot, 'data', 'applications.md'), coldTrackerMd);
+    writeFileSync(join(coldRoot, 'data', 'follow-ups.md'), coldFollowupsMd);
+    const coldSummaryOut = run(NODE, [join(ROOT, 'stats.mjs'), '--summary'], {
+      env: { ...process.env, CAREER_OPS_ROOT: coldRoot, CAREER_OPS_DATA_DIR: '' },
+    });
     if (coldSummaryOut && coldSummaryOut.includes('3 active (2 live, 1 cold)')) {
       pass('stats.mjs --summary integrates live/cold counts into the existing Tracker line');
     } else {
       fail(`stats.mjs --summary missing live/cold breakdown: ${coldSummaryOut}`);
     }
   } finally {
-    if (appsBackup !== null) writeFileSync(liveAppsFile, appsBackup); else if (!appsExisted) rmSync(liveAppsFile, { force: true });
-    if (fupsBackup !== null) writeFileSync(liveFupsFile, fupsBackup); else if (!fupsExisted) rmSync(liveFupsFile, { force: true });
+    rmSync(coldRoot, { recursive: true, force: true });
   }
 } catch (e) {
   fail(`stats.mjs tests crashed: ${e.message}`);

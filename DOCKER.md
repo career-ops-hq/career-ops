@@ -5,10 +5,20 @@ Use this when the host can't install Playwright/Chromium directly (e.g. Ubuntu
 laptops). The image is based on Microsoft's official Playwright image, which
 ships Chromium preinstalled and works on any Linux kernel Docker supports.
 
-No feature is dropped: PDF generation, scanner, liveness checker, dashboard
-(Go), batch workers, update system — everything runs inside the container.
-Your project directory is bind-mounted, so reports, CVs, profile, tracker, and
-all generated artifacts live on the host as before.
+The container runs the project's scripts: PDF generation, scanner, liveness
+checker, dashboard (Go), LaTeX, the API-key evaluators (`./cops gemini:eval`)
+and the update system. Your project directory is bind-mounted, so reports, CVs,
+profile, tracker, and all generated artifacts live on the host as before.
+
+**The image has no AI coding CLI.** Claude Code, Codex, OpenCode, Gemini CLI
+and the others are not installed in it, so the agent modes (evaluating a pasted
+job, tailoring a CV, `apply`) run in the CLI on your host. Those modes call
+scripts such as `node generate-pdf.mjs` and `node check-liveness.mjs` directly,
+with the host's Node, so on a host where Playwright can't run, those steps fail
+just as they would without Docker. When one does, run the script yourself
+through `./cops`, for example `./cops pdf output/cv.html output/cv.pdf`.
+Batch mode (`batch/batch-runner.sh`) starts a worker CLI for every offer, so it
+can't run inside the container at all.
 
 ## Prerequisites
 
@@ -49,7 +59,7 @@ The `./cops` wrapper forwards any command into the container.
 Unknown subcommands fall through to `docker compose exec` so anything works:
 
 ```bash
-./cops npm test
+./cops node test-all.mjs --quick
 ./cops bash -c 'find reports -name "*.md" | wc -l'
 ```
 
@@ -58,7 +68,8 @@ Unknown subcommands fall through to `docker compose exec` so anything works:
 ```bash
 ./cops up        # start (idempotent)
 ./cops down      # stop and remove the container (volumes kept)
-./cops rebuild   # full rebuild (use after Dockerfile or deps change)
+./cops rebuild   # rebuild the image and recreate the node_modules volume
+                 # (use after Dockerfile or deps change)
 ./cops logs      # tail container logs
 ```
 
@@ -68,7 +79,8 @@ Unknown subcommands fall through to `docker compose exec` so anything works:
   Go (for the dashboard), LaTeX (for `generate-latex.mjs`), and project deps.
 - `docker-compose.yml` — bind-mounts the project at `/app` so host edits appear
   inside the container immediately. `node_modules` lives in a named volume to
-  avoid host/container ABI mismatches.
+  avoid host/container ABI mismatches. Docker fills that volume from the image
+  only when it is created, so `./cops rebuild` removes and recreates it.
 - `.dockerignore` — keeps generated and personal data out of the build context.
 
 ## API keys
@@ -94,28 +106,52 @@ Nothing important is stored inside the container. `./cops down` is safe.
 
 ## Updating
 
-Career-ops updates work the same as native:
-
 ```bash
-./cops update:check
-./cops update
+./cops update:check   # is a newer release out?
+./cops update         # apply it
+./cops rollback       # undo the last update
 ```
 
-If `package.json` deps change, run `./cops rebuild` once to refresh the image
-layer that holds `node_modules`.
+`./cops` runs each command as the owner of the project directory as the
+container sees it. With Docker Engine's default (rootful) install on Linux that
+is your own user, so git accepts the checkout and the files an update writes
+stay yours. Where the directory looks root-owned inside the container (rootless
+Docker or Docker Desktop on Windows, for example), commands run as root, which
+is what git expects there.
+
+If you used an older `./cops` on Linux, run `sudo chown -R "$USER" .` once: it
+ran every command as root, and writing to the files it left root-owned fails
+with `Permission denied`.
+
+On `main`, an update ends with a git commit, and the container does not see
+your global git config. Set a name and email for this project once, from the
+project directory on the host, or the update stops at the commit with
+`Author identity unknown`:
+
+```bash
+git config user.name "Your Name"
+git config user.email "you@example.com"
+```
+
+An update runs `npm install` inside the container, into the `node_modules`
+volume. When it runs as your user, it prints `playwright install skipped`: the
+image already ships Chromium, and the browser comes with the image, not with
+the update. If an update changes `package.json` deps (Playwright included), run
+`./cops rebuild` once. It rebuilds the image and recreates the `node_modules`
+volume from it, so the container picks up the new packages.
 
 ## Troubleshooting
 
 **`docker: not found`** — install Docker Engine + Compose plugin first.
 
 **Playwright still complains** — you're running the host's Node, not the
-container's. Always go through `./cops`.
+container's. Always go through `./cops`. That includes a script an AI CLI on
+the host ran for you: run it again with `./cops node <script>`.
 
-**Permission errors on generated files** — the container runs as root by
-default. If host files end up root-owned, either:
-- run `sudo chown -R "$USER" .` once, or
-- add `user: "${UID}:${GID}"` to `docker-compose.yml` (export `UID`/`GID`
-  in your shell first).
+**Permission errors on generated files** — `./cops` writes files as the owner of
+the project directory. Files created by an older `./cops`, which ran everything
+as root, can still be root-owned on the host. Run `sudo chown -R "$USER" .`
+once to take them back.
 
 **Slow first build** — base image is ~1.5 GB. Subsequent builds reuse layers
 and finish in seconds.

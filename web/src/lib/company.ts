@@ -3,10 +3,11 @@
 // The job logos look "pro" when the real brand mark sits next to the name. But
 // the posting URL is ALWAYS a job board (greenhouse/lever/ashby/workday/linkedin),
 // so it can NEVER be used to derive the employer domain. We resolve the domain
-// from the company NAME instead: a small curated override map for the brand≠slug
-// long tail, then a slug+.com heuristic. The logo itself is fetched (and cached)
-// by the /api/logo localhost proxy; if anything fails we fall back to a
-// deterministic monogram that works fully offline with zero privacy leak.
+// from the company NAME instead. This file holds the curated override map for the
+// brand≠slug long tail; lib/core/company-domains.mjs adds the ASCII-folded slug
+// guesses after it. The logo itself is fetched (and cached) by the /api/logo
+// localhost proxy; if anything fails we fall back to a deterministic monogram
+// that works fully offline with zero privacy leak.
 
 /** Curated name → domain overrides for the common cases slug+.com gets wrong. */
 const DOMAIN_OVERRIDES: Record<string, string> = {
@@ -81,6 +82,7 @@ const DOMAIN_OVERRIDES: Record<string, string> = {
   dropbox: "dropbox.com",
   asana: "asana.com",
   airtable: "airtable.com",
+  "at&t": "att.com",
   segment: "segment.com",
   elastic: "elastic.co",
   mongodb: "mongodb.com",
@@ -101,29 +103,34 @@ const DOMAIN_OVERRIDES: Record<string, string> = {
   redhat: "redhat.com",
 };
 
-const LEGAL_SUFFIX = /\b(inc|llc|ltd|limited|gmbh|co|corp|corporation|sa|s\.a|ag|plc|sl|s\.l|bv|oy|ab|company|group|holdings|technologies|technology|labs|systems)\b/gi;
+// A suffix is a whole word, and a hyphen joins words rather than separating
+// them: with a plain \b, the "co" of "Co-op" counted as a suffix and was
+// stripped. \p{L} (not \w) keeps "Bâco" from reading as "Bâ" + "co".
+const LEGAL_SUFFIX = /(?<![\p{L}\p{N}_-])(inc|llc|ltd|limited|gmbh|co|corp|corporation|sa|s\.a|ag|plc|sl|s\.l|bv|oy|ab|company|group|holdings|technologies|technology|labs|systems)(?![\p{L}\p{N}_-])/giu;
 
-/** Normalize a company name to a likely registrable domain, or null if empty. */
-export function companyDomain(name: string | undefined | null): string | null {
+/**
+ * The curated brand domain for a company name, or null when the map has none.
+ *
+ * Curated ONLY, never a guess. companyDomains() (lib/core/company-domains.mjs)
+ * puts this result first and adds its own ASCII-folded slug guesses after it.
+ * This used to fall back to an un-folded slug+".com", which then went first for
+ * every company not in the map: "Telefónica" probed telefónica.com ahead of
+ * telefonica.com, and "Co-op Group" probed -op.com.
+ */
+export function curatedCompanyDomain(name: string | undefined | null): string | null {
   if (!name) return null;
   const key = name.trim().toLowerCase();
   if (!key) return null;
   if (DOMAIN_OVERRIDES[key]) return DOMAIN_OVERRIDES[key];
 
-  // strip the leading word before "@"/"·"/"-" separators sometimes present
+  // re-check after stripping suffixes and punctuation (e.g. "Stripe, Inc." → "stripe")
   const cleaned = key
     .replace(/[®™©]/g, " ")
     .replace(LEGAL_SUFFIX, " ")
     .replace(/[.,&'’/()|]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  if (!cleaned) return null;
-  // re-check overrides after stripping suffixes (e.g. "Stripe, Inc." → "stripe")
-  if (DOMAIN_OVERRIDES[cleaned]) return DOMAIN_OVERRIDES[cleaned];
-
-  const slug = cleaned.replace(/\s+/g, "");
-  if (slug.length < 2) return null;
-  return `${slug}.com`;
+  return DOMAIN_OVERRIDES[cleaned] ?? null;
 }
 
 /** 1–2 uppercase initials for the monogram fallback. */

@@ -1,5 +1,17 @@
 @import "tailwindcss";
-@custom-variant dark (&:where(.dark, .dark *));
+/* Dark is a screen theme: browsers drop backgrounds when printing, so print
+   always takes the light palette and light variants. */
+@custom-variant dark {
+  @media screen {
+    &:where(.dark, .dark *) {
+      @slot;
+    }
+  }
+}
+/* Desktop windows tall enough that the sidebar's links, usage meter and theme
+   toggle all end above the Ask button parked at the sidebar's foot (about 850px
+   of sidebar content). Shorter windows keep Ask in the bottom-right corner. */
+@custom-variant md-tall (@media (min-width: 48rem) and (min-height: 56rem));
 
 /* ──────────────────────────────────────────────────────────────────────────
    Design tokens — inherited from career-ops-docs. Brand burnt-orange #dd7627
@@ -33,8 +45,8 @@
   --color-landing: var(--landing); /* editorial olive (light) / cream (dark) — docs landing-foreground */
   /* Brand as SMALL TEXT: the raw orange only passes AA in dark (4.95); in light
      it's 2.6-3.1 on cream/white. brand-text darkens it for light and keeps the
-     raw brand in dark. Use for small text/badges; brand stays for accents,
-     surfaces, icons and large headings (≥24px passes at 3:1). */
+     raw brand in dark. Every text color (text-*, CSS color) uses brand-text;
+     brand stays for fills, borders, rings and gradients. */
   --color-brand-text: var(--brand-text);
 }
 
@@ -53,19 +65,21 @@
   color-scheme: light;
 }
 
-.dark {
-  --bg: #0a0a0a;
-  --surface: #161616;
-  --surface-hover: #232323;
-  --border: #262626;
-  --fg: #fafafa;
-  --muted: #a1a1aa;
-  --faint: #8b8b95; /* AA: ~4.6:1 on #161616 (was #71717a ≈ 3.7:1, failed small text) */
-  --landing: #e4e2d0; /* cream editorial headline */
-  --brand-text: hsl(26 73% 51%); /* raw brand already passes in dark (≥4.95 on bg/surface) */
-  --dot: 240 5% 65% / 0.10;
-  --pre-bg: #111111;
-  color-scheme: dark;
+@media screen {
+  .dark {
+    --bg: #0a0a0a;
+    --surface: #161616;
+    --surface-hover: #232323;
+    --border: #262626;
+    --fg: #fafafa;
+    --muted: #a1a1aa;
+    --faint: #8b8b95; /* AA: ~4.6:1 on #161616 (was #71717a ≈ 3.7:1, failed small text) */
+    --landing: #e4e2d0; /* cream editorial headline */
+    --brand-text: hsl(26 73% 51%); /* raw brand already passes in dark (≥4.95 on bg/surface) */
+    --dot: 240 5% 65% / 0.10;
+    --pre-bg: #111111;
+    color-scheme: dark;
+  }
 }
 
 body {
@@ -124,6 +138,63 @@ html {
   animation: job-progress 1.3s ease-in-out infinite;
 }
 
+/* ── Route transition feedback ──────────────────────────────────────────── */
+/* The skeleton remains intentionally neutral so it works in both themes and
+   keeps the page structure visible while server components/data resolve. */
+@keyframes skeleton-sheen {
+  100% { transform: translateX(100%); }
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--fg) 9%, transparent),
+    transparent
+  );
+  animation: skeleton-sheen 1.5s ease-in-out infinite;
+}
+
+@keyframes route-bar-creep {
+  0% { transform: scaleX(0.02); }
+  40% { transform: scaleX(0.35); }
+  75% { transform: scaleX(0.68); }
+  100% { transform: scaleX(0.9); }
+}
+
+.route-bar {
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--color-brand) 70%, transparent), var(--color-brand), var(--color-brand-200));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-brand) 60%, transparent);
+  will-change: transform, opacity;
+}
+
+.route-bar[data-state="loading"] {
+  opacity: 1;
+  animation: route-bar-creep 8s cubic-bezier(0.1, 0.7, 0.2, 1) forwards;
+}
+
+.route-bar[data-state="done"] {
+  opacity: 0;
+  transform: scaleX(1);
+  transition: transform 0.2s ease-out, opacity 0.35s ease-out 0.15s;
+}
+
+.route-bar[data-state="idle"] {
+  opacity: 0;
+  transform: scaleX(0);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cli-cursor,
   .animate-terminal-popup,
@@ -131,14 +202,20 @@ html {
     animation: none;
   }
   .job-indeterminate::after { animation: none; width: 100%; opacity: 0.35; }
+  .skeleton::after { animation: none; }
+  .route-bar[data-state="loading"] { animation: none; transform: scaleX(0.9); }
 }
 
 /* ── Report / CV markdown prose (theme-aware) ───────────────────────────── */
 .report-prose {
-  color: color-mix(in srgb, var(--fg) 88%, transparent);
+  color: var(--fg);
   font-size: 0.95rem;
   line-height: 1.7;
 }
+.report-prose > p,
+.report-prose > ul,
+.report-prose > ol,
+.report-prose > blockquote { max-width: 75ch; }
 .report-prose > :first-child { margin-top: 0; }
 .report-prose h1, .report-prose h2, .report-prose h3, .report-prose h4 {
   color: var(--fg);
@@ -156,13 +233,21 @@ html {
 .report-prose h3 { font-weight: 600; font-size: 1.05rem; margin: 1.6rem 0 0.5rem; }
 .report-prose h4 { font-weight: 600; font-size: 0.95rem; color: var(--muted); margin: 1.25rem 0 0.4rem; }
 .report-prose p { margin: 0.9rem 0; }
+
+/* The report container widens on large screens so dense Block B/C tables get
+   room to breathe (they were pinned to ~720px on a 3440px display). Running
+   TEXT must not widen with it -- long measures are hard to read -- so prose
+   blocks keep a comfortable cap while tables use the full container width. */
+.report-prose p,
+.report-prose li,
+.report-prose blockquote { max-width: 76ch; }
 .report-prose strong { color: var(--fg); font-weight: 600; }
-.report-prose a { color: var(--color-brand); text-decoration: none; }
+.report-prose a { color: var(--color-brand-text); text-decoration: none; }
 .report-prose a:hover { text-decoration: underline; }
 .report-prose code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  color: var(--color-brand);
+  color: var(--color-brand-text);
   background: var(--surface-hover);
   padding: 0.1em 0.35em;
   border-radius: 0.3rem;
@@ -207,6 +292,7 @@ html {
   padding: 0.55rem 0.75rem;
   vertical-align: top;
   border-top: 1px solid var(--border);
+  color: var(--fg);
   /* overflow-wrap, not word-break: `word-break: break-word` makes every
      character a soft-wrap opportunity for min-content sizing, so columns
      collapsed and words split mid-syllable ("consisten/cy"). overflow-wrap
@@ -242,12 +328,25 @@ html {
 .report-prose tbody tr:hover { background: color-mix(in srgb, var(--fg) 3%, transparent); }
 .report-prose img { border-radius: 0.5rem; }
 
+/* Paper cannot open a <details> or scroll a table, so print shows every
+   section expanded and lets wide tables wrap to the page width. */
+@media print {
+  details::details-content { content-visibility: visible; display: block; }
+  .report-prose table { display: table; width: 100%; max-width: none; overflow: visible; table-layout: fixed; }
+  .report-prose :is(td, th) { overflow-wrap: anywhere; }
+  .report-prose table:has(tr > *:nth-child(6)) :is(td, th) { min-width: 0; }
+  .report-prose tr, summary { break-inside: avoid; }
+  .report-prose :is(h1, h2, h3, h4), summary { break-after: avoid; }
+}
+
 /* CostBadge (co-located → global): cost color-semantics, see cost-badge.tsx */
 .co-cost{display:inline-flex;align-items:center;gap:.28rem;border-radius:999px;font-weight:600;line-height:1;white-space:nowrap;border:1px solid transparent}
 .co-cost[data-size="xs"]{font-size:10.5px;padding:.16rem .4rem;letter-spacing:.04em;text-transform:uppercase}
 .co-cost[data-size="sm"]{font-size:11px;padding:.24rem .5rem}
 .co-cost[data-tone="free"]{color:hsl(162 91% 24%);background:hsl(160 64% 46% / .12);border-color:hsl(160 64% 46% / .28)}
-html.dark .co-cost[data-tone="free"]{color:hsl(158 64% 60%);background:hsl(158 64% 52% / .13);border-color:hsl(158 64% 52% / .26)}
 .co-cost[data-tone="spend"]{color:hsl(35 9% 34%);background:hsl(35 8% 46% / .12);border-color:hsl(35 8% 46% / .26)}
+@media screen{
+html.dark .co-cost[data-tone="free"]{color:hsl(158 64% 60%);background:hsl(158 64% 52% / .13);border-color:hsl(158 64% 52% / .26)}
 html.dark .co-cost[data-tone="spend"]{color:hsl(35 8% 70%);background:hsl(35 6% 60% / .12);border-color:hsl(35 6% 60% / .24)}
+}
 .co-cost svg{width:.85em;height:.85em}

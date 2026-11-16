@@ -1,5 +1,5 @@
 # CODEOWNERS — auto-requests maintainer review on sensitive paths.
-# Last matching pattern wins. See MAINTAINERS.md for the team + ladder.
+# Last matching pattern wins. See MAINTAINERS.md for the team and GOVERNANCE.md for the ladder.
 #
 # Scope principle: gate what CI can't catch (a bad change here passes the
 # tests silently) + the catastrophic updater + governance docs. Code that
@@ -18,9 +18,15 @@
 # Repo docs & governance
 /README*.md            @santifer
 /CONTRIBUTING.md       @santifer
+/GOVERNANCE.md         @santifer
 /MAINTAINERS.md        @santifer
 /ARCHITECTURE.md       @santifer
 /.github/CODEOWNERS    @santifer
+
+# Coding-agent configuration (instructions, agent profiles, setup job):
+# a change here rewrites what an autonomous session is allowed to do.
+/.github/copilot-instructions.md  @santifer
+/.github/agents/                  @santifer
 
 # Agent behavior & the multi-CLI contract (prompt layer — CI-blind)
 /CLAUDE.md             @santifer
@@ -28,6 +34,12 @@
 /CODEX.md              @santifer
 /OPENCODE.md           @santifer
 /GEMINI.md             @santifer
+/KIMI.md               @santifer
+# The skill router. Every CLI's skill entrypoint (.claude/, .cursor/,
+# .opencode/, .qwen/, .kimi/, .grok/, .antigravitycli/) is a symlink to this
+# one file, so an edit here changes only this path — the symlinks never show
+# up in the diff.
+/.agents/skills/career-ops/SKILL.md  @santifer
 
 # Scoring & the system/user data contract (CI-blind; silent-danger)
 /modes/_shared.md      @santifer
@@ -35,11 +47,15 @@
 
 # The self-updater (catastrophic if wrong — touches user installs)
 /update-system.mjs     @santifer
+# Its system-layer list (#5554). Kept here: the run-time checks refuse an entry
+# that names the user layer, not one that ships a file installs should not get.
+/lib/update-manifest.mjs  @santifer
 /updater-migration-tests.mjs  @santifer
 
 # Plugin governance chokepoint (a bad change here ships unreviewed code to
 # every user — the registry pin, the gates, and the CI must stay single-owner).
-/plugins-registry.json         @santifer
+# The registry is one file per plugin under plugins-registry/ (#1401).
+/plugins-registry/             @santifer
 /validate-plugin-registry.mjs  @santifer
 /plugin-install.mjs            @santifer
 /plugin-audit.mjs              @santifer
@@ -49,6 +65,14 @@
 /plugins/_registry.mjs         @santifer
 /.github/workflows/            @santifer
 /docs/PLUGIN_REVIEW.md         @santifer
+
+# Employer registry: community data kept in the repository (the updater does
+# not ship it to installs), plus the gate that judges it. CI runs the base
+# branch's copy of the validator (and of the URL builder it imports), so a
+# change to either needs an owner's review.
+/employers/                    @santifer
+/seeds/employers-validate.mjs  @santifer
+/lib/ats-board-url.mjs         @santifer
 
 # The experimental web UI — owned by the web track (dual-track review with the
 # core maintainer on any PR that also touches root files).
@@ -63,3 +87,9 @@
 # check runs through, so it keeps the wider review.
 /tests/     @Scott-Emberson
 /dashboard/ @Scott-Emberson
+# Scanner providers and their contract suites are one reviewable unit: the
+# module and its test land together, and the review that matters on a fetch
+# surface (host allowlisting, redirects, SSRF, parsing pinned with concrete
+# assertions) is the one he has been doing on every provider PR (2-sep).
+/providers/       @Scott-Emberson
+/tests/providers/ @Scott-Emberson

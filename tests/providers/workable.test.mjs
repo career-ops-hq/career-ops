@@ -108,6 +108,172 @@ try {
     fail('parseWorkableWidget should return [] for null and {} payloads');
   }
 
+  // -- multi-country fan-out ----------------------------------------------
+  // Real shape, captured live 2026-08-21 from
+  //   apply.workable.com/api/v1/widget/accounts/digitalgenius?details=true
+  // A multi-country posting comes back as ONE ENTRY PER LOCATION, all sharing
+  // the same shortlink and differing only in city/state/country. Keeping just
+  // the first recorded "Implementation Engineer" as London/United Kingdom and
+  // dropped its three EU alternatives, so a UK block rule threw the posting
+  // away. Note the payload interleaves two fanned-out postings — the parser
+  // must key on the URL, not on adjacency.
+  const fanOutPayload = {
+    name: 'DigitalGenius',
+    jobs: [
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: 'London', state: 'England', country: 'United Kingdom',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'United Kingdom', countryCode: 'GB', city: 'London', region: 'England' }],
+      },
+      {
+        title: 'Solutions Engineer',
+        shortcode: 'E8064EA4C7',
+        shortlink: 'https://apply.workable.com/j/E8064EA4C7',
+        url: 'https://apply.workable.com/j/E8064EA4C7',
+        city: '', state: '', country: 'Romania',
+        telecommuting: true, published_on: '2026-06-12',
+        locations: [{ country: 'Romania', countryCode: 'RO', city: '', region: null }],
+      },
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: '', state: '', country: 'Romania',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'Romania', countryCode: 'RO', city: '', region: null }],
+      },
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: '', state: '', country: 'Poland',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'Poland', countryCode: 'PL', city: '', region: null }],
+      },
+      {
+        title: 'Solutions Engineer',
+        shortcode: 'E8064EA4C7',
+        shortlink: 'https://apply.workable.com/j/E8064EA4C7',
+        url: 'https://apply.workable.com/j/E8064EA4C7',
+        city: '', state: '', country: 'Portugal',
+        telecommuting: true, published_on: '2026-06-12',
+        locations: [{ country: 'Portugal', countryCode: 'PT', city: '', region: null }],
+      },
+      {
+        title: 'Implementation Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/801183DB79',
+        url: 'https://apply.workable.com/j/801183DB79',
+        city: '', state: '', country: 'Croatia',
+        telecommuting: true, published_on: '2026-06-30',
+        description: '<p>Deploy the platform.</p>',
+        locations: [{ country: 'Croatia', countryCode: 'HR', city: '', region: null }],
+      },
+    ],
+  };
+  const fanOutJobs = parseWorkableWidget(fanOutPayload, 'DigitalGenius');
+
+  if (fanOutJobs.length === 2) {
+    pass('parseWorkableWidget collapses each multi-country fan-out into one job');
+  } else {
+    fail(`fan-out produced ${fanOutJobs.length} jobs, expected 2: ${JSON.stringify(fanOutJobs.map(j => `${j.title}@${j.location}`))}`);
+  }
+
+  const implRole = fanOutJobs.find(j => j.title === 'Implementation Engineer');
+  if (implRole?.location === 'London, United Kingdom · Romania · Poland · Croatia · Remote') {
+    pass('parseWorkableWidget joins every fanned-out location in payload order');
+  } else {
+    fail(`fanned-out location was ${JSON.stringify(implRole?.location)}, expected all four countries joined`);
+  }
+
+  // The interleaved second posting must not absorb the first one's locations.
+  const solutionsRole = fanOutJobs.find(j => j.title === 'Solutions Engineer');
+  if (solutionsRole?.location === 'Romania · Portugal · Remote') {
+    pass('parseWorkableWidget keeps interleaved fan-outs separate (keyed on URL, not adjacency)');
+  } else {
+    fail(`interleaved fan-out location was ${JSON.stringify(solutionsRole?.location)}, expected "Romania · Portugal · Remote"`);
+  }
+
+  // Everything except location still comes from the first entry.
+  if (implRole?.postedAt === Date.parse('2026-06-30')
+      && implRole?.url === 'https://apply.workable.com/j/801183DB79'
+      && (implRole?.description || '').includes('Deploy the platform')) {
+    pass('parseWorkableWidget takes non-location fields from the first fanned-out entry');
+  } else {
+    fail(`merged job carried unexpected fields: ${JSON.stringify(implRole)}`);
+  }
+
+  // Siblings with no location of their own add nothing, and a repeat collapses.
+  const noisyFanOut = parseWorkableWidget({
+    jobs: [
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', country: 'Spain' },
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', country: 'Spain' },
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', city: '', country: '' },
+      { title: 'Ops Lead', shortlink: 'https://apply.workable.com/j/N1', country: 'Italy' },
+    ],
+  }, 'NoisyCo');
+  if (noisyFanOut.length === 1 && noisyFanOut[0].location === 'Spain · Italy') {
+    pass('parseWorkableWidget dedups repeated locations and ignores empty siblings');
+  } else {
+    fail(`noisy fan-out produced ${JSON.stringify(noisyFanOut.map(j => j.location))}, expected ["Spain · Italy"]`);
+  }
+
+  // telecommuting is a per-job flag. A city-filled role used to keep only
+  // "Bend, United States", and a state with no city collapsed to the country.
+  // Hybrid is not this flag: telecommuting false stays city-only. A sibling
+  // that already contributed "Remote" must not be doubled.
+  const placeFlags = parseWorkableWidget({
+    jobs: [
+      { title: 'Field Coordinator', shortlink: 'https://apply.workable.com/j/B1', city: 'Bend', state: 'Oregon', country: 'United States', telecommuting: true },
+      { title: 'Regional Lead', shortlink: 'https://apply.workable.com/j/B2', city: '', state: 'Oregon', country: 'United States', telecommuting: true },
+      { title: 'Desk Analyst', shortlink: 'https://apply.workable.com/j/B3', city: 'Vancouver', state: 'British Columbia', country: 'Canada', telecommuting: false },
+      { title: 'State Only', shortlink: 'https://apply.workable.com/j/B4', city: '', state: 'Queensland', country: 'Australia', telecommuting: true },
+      { title: 'Already Remote', shortlink: 'https://apply.workable.com/j/B5', city: 'Oslo', country: 'Norway', telecommuting: true },
+      { title: 'Already Remote', shortlink: 'https://apply.workable.com/j/B5', telecommuting: true },
+      { title: 'Mixed Desk', shortlink: 'https://apply.workable.com/j/B6', city: 'Ghent', country: 'Belgium', telecommuting: false },
+      { title: 'Mixed Desk', shortlink: 'https://apply.workable.com/j/B6', city: 'Oslo', country: 'Norway', telecommuting: true },
+    ],
+  }, 'Acme');
+  const byTitle = Object.fromEntries(placeFlags.map(j => [j.title, j.location]));
+  const expectPlaces = {
+    'Field Coordinator': 'Bend, United States · Remote',
+    'Regional Lead': 'Oregon, United States · Remote',
+    'Desk Analyst': 'Vancouver, Canada',
+    'State Only': 'Queensland, Australia · Remote',
+    'Already Remote': 'Oslo, Norway · Remote',
+    'Mixed Desk': 'Ghent, Belgium · Oslo, Norway · Remote',
+  };
+  const placeMismatches = Object.entries(expectPlaces).filter(([title, loc]) => byTitle[title] !== loc);
+  if (placeMismatches.length === 0 && placeFlags.length === 6) {
+    pass('parseWorkableWidget keeps telecommuting and a state-only place on the folded location');
+  } else {
+    fail(`telecommuting locations = ${JSON.stringify(byTitle)}`);
+  }
+
+  // The point of the fix: ask the real consumer, not a reimplementation of it.
+  // This is the config shape that parked the posting — UK blocked, EU allowed.
+  const { buildLocationFilter } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const euFilter = buildLocationFilter({
+    always_allow: ['Romania', 'Poland', 'Croatia'],
+    allow: ['Remote', 'Europe'],
+    block: ['United Kingdom', 'London'],
+  });
+  const beforeFix = 'London, United Kingdom';
+  if (!euFilter(beforeFix) && euFilter(implRole?.location)) {
+    pass('merged location survives a UK-blocking location_filter that rejects the pre-fix string');
+  } else {
+    fail(`location_filter verdicts unexpected: pre-fix ${euFilter(beforeFix)}, merged ${euFilter(implRole?.location)}`);
+  }
+
   // fetch() prefers the widget API and never touches the markdown feed when it works.
   let apiCallHeaders = null;
   const apiJobs = await workable.fetch(
@@ -305,6 +471,179 @@ try {
     pass('parseWorkableMarkdown drops off-domain and non-https [View] links');
   } else {
     fail(`expected only "Good Role" through, got ${JSON.stringify(filteredJobs.map(j => j.title))}`);
+  }
+
+  // listingIdentity (#6908): the widget payload's shortcode becomes the strong
+  // ATS-native identity. It is read from the payload, never from the URL, and
+  // it sits on the posting after location rows have been merged by URL.
+  {
+    const { workableListingIdentity } = workableModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+    const widgetCtx = (jobs) => ({
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson: async () => ({ jobs }),
+      fetchText: async () => { throw new Error('markdown feed should not be used when the widget payload is readable'); },
+    });
+
+    const [row] = await workable.fetch(
+      { name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets' },
+      widgetCtx([{
+        title: 'Staff Engineer',
+        // The shortcode and the URL token differ on purpose: posting_id must
+        // be the payload field, and board_slug the resolved account, not a
+        // slug or id parsed out of either URL.
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/URLTOKEN',
+        url: 'https://apply.workable.com/other-co/jobs/view/URLTOKEN',
+        city: 'Ghent', country: 'Belgium',
+      }]),
+    );
+    const identity = row?.listingIdentity;
+    if (identity?.ats_provider === 'workable'
+        && identity?.board_slug === 'acme-widgets'
+        && identity?.posting_id === '801183DB79'
+        && Object.keys(identity).length === 3
+        && row.url === 'https://apply.workable.com/j/URLTOKEN') {
+      pass('fetch() returns exactly workable/<account slug>/<shortcode> and does not parse it from the URL');
+    } else {
+      fail(`workable identity = ${JSON.stringify(identity)}, url = ${JSON.stringify(row?.url)}`);
+    }
+
+    const [parsed] = parseWorkableWidget({
+      jobs: [{
+        title: 'Staff Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/URLTOKEN',
+        city: 'Ghent', country: 'Belgium',
+      }],
+    }, 'Acme', 'acme-widgets');
+    const parsedIdentity = parsed?.listingIdentity;
+    if (parsedIdentity?.ats_provider === 'workable'
+        && parsedIdentity?.board_slug === 'acme-widgets'
+        && parsedIdentity?.posting_id === '801183DB79'
+        && Object.keys(parsedIdentity).length === 3) {
+      pass('parseWorkableWidget returns exactly workable/<account slug>/<shortcode> from the payload');
+    } else {
+      fail(`parsed identity = ${JSON.stringify(parsedIdentity)}`);
+    }
+
+    // The same posting reached at the markdown view URL (or any other URL)
+    // is one listing. URL dedup cannot join these; only the shortcode can.
+    const viewPage = { ...row, url: 'https://apply.workable.com/acme-widgets/jobs/view/801183DB79' };
+    const seen = new Set();
+    if (seenJobKey(row.url) === seenJobKey(viewPage.url)) {
+      fail('the two Workable URLs already share a URL key, so this check would pass without listingIdentity');
+    } else {
+      markOfferSeen(row, seen);
+      if (isOfferSeen(viewPage, seen)) {
+        pass('the same Workable posting under another URL is already seen (one row, not two)');
+      } else {
+        fail(`view URL not seen; identity = ${JSON.stringify(row?.listingIdentity)}`);
+      }
+    }
+
+    // The same shortcode on another account is a different listing. The URLs
+    // differ too, so a pass here is the board_slug and not URL dedup.
+    const [otherBoard] = await workable.fetch(
+      { name: 'Other', careers_url: 'https://apply.workable.com/other-co' },
+      widgetCtx([{
+        title: 'Staff Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/other-co/j/801183DB79',
+      }]),
+    );
+    if (listingIdentityToken(otherBoard)
+        && listingIdentityToken(otherBoard) !== listingIdentityToken(row)
+        && seenJobKey(otherBoard.url) !== seenJobKey(row.url)
+        && !isOfferSeen(otherBoard, seen)) {
+      pass('the same Workable shortcode on another account is a different listing');
+    } else {
+      fail(`other-board token = ${listingIdentityToken(otherBoard)}`);
+    }
+
+    // A bad shortcode or slug keeps the row and leaves identity off.
+    const keptWithoutIdentity = (slug, job) => {
+      const rows = slug === undefined
+        ? parseWorkableWidget({ jobs: [job] }, 'Acme')
+        : parseWorkableWidget({ jobs: [job] }, 'Acme', slug);
+      return rows.length === 1 && rows[0].title === job.title && rows[0].url && !('listingIdentity' in rows[0]);
+    };
+    const base = { title: 'Kept', shortlink: 'https://apply.workable.com/j/KEPT', country: 'Spain' };
+    const badCases = [
+      ['missing shortcode', 'acme', { ...base }],
+      ['empty shortcode', 'acme', { ...base, shortcode: '' }],
+      ['whitespace shortcode', 'acme', { ...base, shortcode: '   ' }],
+      ['padded shortcode', 'acme', { ...base, shortcode: ' KEPT ' }],
+      ['control-character shortcode', 'acme', { ...base, shortcode: 'KE\u0007PT' }],
+      ['numeric shortcode', 'acme', { ...base, shortcode: 15 }],
+      ['padded slug', ' acme ', { ...base, shortcode: 'KEPT' }],
+      ['control-character slug', 'ac\u0007me', { ...base, shortcode: 'KEPT' }],
+      ['empty slug', '', { ...base, shortcode: 'KEPT' }],
+      ['slash slug', 'acme/other', { ...base, shortcode: 'KEPT' }],
+      ['dotted slug', 'acme.com', { ...base, shortcode: 'KEPT' }],
+      ['omitted slug', undefined, { ...base, shortcode: 'KEPT' }],
+    ];
+    const badFailures = badCases.filter(([label, slug, job]) => !keptWithoutIdentity(slug, job)).map(([label]) => label);
+    if (badFailures.length === 0) {
+      pass('an invalid, missing, padded or control-character shortcode or slug keeps the row and leaves listingIdentity off');
+    } else {
+      fail(`identity leaked or the row was dropped for: ${badFailures.join(', ')}`);
+    }
+
+    // The markdown feed has no shortcode field. Its view URL must not become one.
+    if (jobs[0]?.url === 'https://apply.workable.com/acme-widgets/jobs/view/ABC123' && !('listingIdentity' in jobs[0])) {
+      pass('the markdown fallback does not invent a posting id from the view URL');
+    } else {
+      fail(`markdown row = ${JSON.stringify(jobs[0])}`);
+    }
+
+    // Fan-out: one posting per location, merged by URL. Identity is on that
+    // one merged posting, and the locations are still all there.
+    const merged = parseWorkableWidget(fanOutPayload, 'DigitalGenius', 'digitalgenius');
+    const impl = merged.find(j => j.title === 'Implementation Engineer');
+    const solutions = merged.find(j => j.title === 'Solutions Engineer');
+    if (merged.length === 2
+        && impl?.location === 'London, United Kingdom · Romania · Poland · Croatia · Remote'
+        && impl?.listingIdentity?.ats_provider === 'workable'
+        && impl?.listingIdentity?.board_slug === 'digitalgenius'
+        && impl?.listingIdentity?.posting_id === '801183DB79'
+        && Object.keys(impl.listingIdentity).length === 3
+        && solutions?.listingIdentity?.posting_id === 'E8064EA4C7'
+        && solutions?.location === 'Romania · Portugal · Remote') {
+      pass('listingIdentity sits on the URL-merged posting, once, not on each location row');
+    } else {
+      fail(`merged identities = ${JSON.stringify(merged.map(j => ({ title: j.title, location: j.location, listingIdentity: j.listingIdentity })))}`);
+    }
+
+    // Callers that omit the slug (the existing fan-out assertions above, the
+    // public XML feed) keep today's shape: a merged row, no identity.
+    if (implRole && !('listingIdentity' in implRole)) {
+      pass('parseWorkableWidget without a board slug still merges and leaves listingIdentity off');
+    } else {
+      fail(`slug-less merged row = ${JSON.stringify(implRole)}`);
+    }
+
+    if (workableListingIdentity('acme', '801183DB79')?.posting_id === '801183DB79'
+        && workableListingIdentity('AcmeWidgets', '801183DB79')?.board_slug === 'AcmeWidgets'
+        && workableListingIdentity('acme', 15) === undefined
+        && workableListingIdentity('acme', ' 15 ') === undefined
+        && workableListingIdentity('acme', '15\u0007') === undefined
+        && workableListingIdentity('acme', '') === undefined
+        && workableListingIdentity('acme', '   ') === undefined
+        && workableListingIdentity(' acme', '15') === undefined
+        && workableListingIdentity('acme ', '15') === undefined
+        && workableListingIdentity('ac\u0007me', '15') === undefined
+        && workableListingIdentity('acme/other', '15') === undefined
+        && workableListingIdentity('acme.com', '15') === undefined
+        && workableListingIdentity('', '15') === undefined
+        && workableListingIdentity(null, '15') === undefined
+        && workableListingIdentity(undefined, '15') === undefined) {
+      pass('workableListingIdentity() accepts only an account slug and an opaque shortcode string');
+    } else {
+      fail('workableListingIdentity() accepted a shortcode or slug that cannot form a strong identity');
+    }
   }
 
 } catch (e) {

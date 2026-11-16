@@ -57,23 +57,112 @@ try {
   const radJobs = await radancy.fetch({ name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' }, radCtx);
   if (radJobs.length === 3 && radCalls === 3) pass('radancy.fetch() paginates and stops on the first empty page');
   else fail(`radancy.fetch() returned ${radJobs.length} jobs after ${radCalls} calls`);
+  if (radJobs.truncated === undefined) pass('radancy.fetch() leaves an HTML walk that reached an empty page unmarked');
+  else fail(`radancy.fetch() natural HTML end was marked: ${JSON.stringify(radJobs.truncated)}`);
   if (radSeen[0]?.endsWith('?p=1') && radSeen[1]?.endsWith('?p=2')) pass('radancy.fetch() pages via ?p=N (1-based)');
   else fail(`radancy.fetch() paged wrong: ${JSON.stringify(radSeen)}`);
 
   // fetch — a mid-scan failure preserves jobs already collected, never
   // discards earlier pages.
+  // Non-retryable (a definitive 404, not a transient 5xx/network blip) — this
+  // test is about partial-page preservation, not about how many times
+  // fetchTextWithRetry itself attempts a retryable failure.
   let partialCalls = 0;
   const partialCtx = {
     sleep: async () => {},
     fetchText: async () => {
       partialCalls++;
       if (partialCalls === 1) return html; // 2 jobs
-      throw new Error('network blip on page 2');
+      const err = new Error('network blip on page 2');
+      err.status = 404;
+      throw err;
     },
   };
   const partialJobs = await radancy.fetch({ name: 'Munich Re', api: 'https://careers.munichre.com/en/search-jobs' }, partialCtx);
   if (partialJobs.length === 2 && partialCalls === 2) pass('radancy.fetch() preserves jobs from earlier pages when a later page fetch throws');
   else fail(`radancy.fetch() partial-failure handling wrong: ${partialJobs.length} jobs after ${partialCalls} calls`);
+  // Partly read, so the result says so: scan.mjs logs the board partial, not reachable.
+  if (partialJobs.truncated?.reason === 'fetch-error' && partialJobs.truncated.fetched === 2) pass('radancy.fetch() marks the board partial when a later HTML page fails');
+  else fail(`radancy.fetch() later HTML page failure: truncated = ${JSON.stringify(partialJobs.truncated)}`);
+
+  // The HTML walk can also stop at its own limits with pages left: past
+  // max_jobs (the slice drops the rows that crossed it) or at max_pages on a
+  // full page (the site hard-codes 15 rows per ?p=N page). Both are cap stops,
+  // marked page-cap and warned like the fragment path's. A short last page at
+  // the max_pages boundary is the board's natural end, and an exact max_jobs
+  // match cannot be told from one (no reported total on this path), so neither
+  // is marked; nor is the one-page health probe.
+  const htmlPage = (n, size) => '<html>' + Array.from({ length: size }, (_, i) => card(String(5000 + n * 100 + i), `Role ${n}-${i}`, 'Berlin, Germany')).join('') + '</html>';
+  const htmlWalk = async (entryExtra, { size = 15, ...ctxExtra } = {}) => {
+    const calls = [];
+    const lines = [];
+    const origError = console.error;
+    console.error = (m) => lines.push(String(m));
+    try {
+      const jobs = await radancy.fetch(
+        { name: 'HtmlWalk', api: 'https://careers.munichre.com/en/search-jobs', ...entryExtra },
+        { sleep: async () => {}, fetchText: async (url) => { calls.push(url); return htmlPage(Number(new URL(url).searchParams.get('p')), size); }, ...ctxExtra },
+      );
+      return { jobs, calls: calls.length, lines };
+    } finally {
+      console.error = origError;
+    }
+  };
+  const overshot = await htmlWalk({ max_jobs: 20 });
+  if (overshot.jobs.length === 20 && overshot.calls === 2 && overshot.jobs.truncated?.reason === 'page-cap' && overshot.jobs.truncated.fetched === 20
+      && overshot.lines.some((l) => /raise max_jobs\/max_pages/.test(l))) {
+    pass('radancy.fetch() marks the HTML walk page-cap and warns when max_jobs cuts a page');
+  } else {
+    fail(`radancy.fetch() HTML max_jobs overshoot: ${overshot.jobs.length} jobs, ${overshot.calls} pages, truncated = ${JSON.stringify(overshot.jobs.truncated)}, warnings ${JSON.stringify(overshot.lines)}`);
+  }
+  const pageCapped = await htmlWalk({ max_pages: 2 });
+  if (pageCapped.jobs.length === 30 && pageCapped.calls === 2 && pageCapped.jobs.truncated?.reason === 'page-cap' && pageCapped.jobs.truncated.fetched === 30
+      && pageCapped.lines.some((l) => /raise max_jobs\/max_pages/.test(l))) {
+    pass('radancy.fetch() marks the HTML walk page-cap and warns when max_pages ends it on a full page');
+  } else {
+    fail(`radancy.fetch() HTML max_pages cut: ${pageCapped.jobs.length} jobs, ${pageCapped.calls} pages, truncated = ${JSON.stringify(pageCapped.jobs.truncated)}, warnings ${JSON.stringify(pageCapped.lines)}`);
+  }
+  const shortAtBoundary = await htmlWalk({ max_pages: 1 }, { size: 2 });
+  if (shortAtBoundary.jobs.length === 2 && shortAtBoundary.calls === 1 && shortAtBoundary.jobs.truncated === undefined && shortAtBoundary.lines.length === 0) {
+    pass('radancy.fetch() leaves a short last HTML page at the max_pages boundary unmarked and silent');
+  } else {
+    fail(`radancy.fetch() HTML short page at the boundary: ${shortAtBoundary.jobs.length} jobs, truncated = ${JSON.stringify(shortAtBoundary.jobs.truncated)}, warnings ${JSON.stringify(shortAtBoundary.lines)}`);
+  }
+  // Fullness counts the cards the source sent: one malformed card (no title)
+  // does not make a full page short, so the cut is still marked.
+  const malformedCalls = [];
+  const malformedLines = [];
+  const errorBefore = console.error;
+  console.error = (m) => malformedLines.push(String(m));
+  let malformed;
+  try {
+    malformed = await radancy.fetch({ name: 'HtmlWalk', api: 'https://careers.munichre.com/en/search-jobs', max_pages: 1 }, {
+      sleep: async () => {},
+      fetchText: async (url) => {
+        malformedCalls.push(url);
+        return '<html>' + Array.from({ length: 14 }, (_, i) => card(String(7000 + i), `Role M${i}`, 'Berlin, Germany')).join('') + card('7099', '', 'Berlin, Germany') + '</html>';
+      },
+    });
+  } finally {
+    console.error = errorBefore;
+  }
+  if (malformed.length === 14 && malformedCalls.length === 1 && malformed.truncated?.reason === 'page-cap' && malformed.truncated.fetched === 14) {
+    pass('radancy.fetch() still marks a full HTML page page-cap when one of its 15 cards is malformed');
+  } else {
+    fail(`radancy.fetch() full page with a malformed card: ${malformed.length} jobs, truncated = ${JSON.stringify(malformed.truncated)}`);
+  }
+  const exactFit = await htmlWalk({ max_jobs: 15 });
+  if (exactFit.jobs.length === 15 && exactFit.calls === 1 && exactFit.jobs.truncated === undefined && exactFit.lines.length === 0) {
+    pass('radancy.fetch() leaves an HTML walk that exactly fills max_jobs unmarked and silent');
+  } else {
+    fail(`radancy.fetch() HTML exact max_jobs: ${exactFit.jobs.length} jobs, truncated = ${JSON.stringify(exactFit.jobs.truncated)}, warnings ${JSON.stringify(exactFit.lines)}`);
+  }
+  const probedHtml = await htmlWalk({}, { maxPages: 1 });
+  if (probedHtml.calls === 1 && probedHtml.jobs.truncated === undefined && probedHtml.lines.length === 0) {
+    pass('radancy.fetch() leaves a one-page HTML probe unmarked and silent');
+  } else {
+    fail(`radancy.fetch() HTML probe: ${probedHtml.calls} pages, truncated = ${JSON.stringify(probedHtml.jobs.truncated)}, warnings ${JSON.stringify(probedHtml.lines)}`);
+  }
 
   // A FIRST-page failure means the board is unreachable, not empty. It must
   // throw so scan/portal-health record a failure instead of "live but empty".
@@ -151,6 +240,23 @@ try {
 </li>
 </ul></section>`;
 
+  // search.jobs.barclays — card layout: title in <strong> inside the anchor,
+  // location as a SIBLING <div class="job-location"> after it (not inside),
+  // plus a job-date block whose <span> must not be mistaken for the location.
+  const LEGACY_BARCLAYS = `
+<section id="search-results" data-total-results="797" data-total-pages="8" data-records-per-page="100">
+<div class="list-item list-item--card fs-column fs-top round-corners bg--pale-blue-light p-1 text--black">
+  <a href="/job/noida/fcs-senior-analyst/13015/101304506192" class="headline-3 job-title--link text--black" data-job-id="101304506192"><strong>FCS Senior Analyst</strong></a>
+  <div class="job-location"> Noida, India</div>
+  <div class="bg--white round-corners--small job-date"><img src="https://tbcdn.talentbrew.com/company/13015/v1_0/img/icons/icon-date--active-blue.svg" alt="" class="job-date--icon" /> <span>28 Sep</span></div>
+</div>
+<div class="list-item list-item--card fs-column fs-top round-corners bg--pale-blue-light p-1 text--black">
+  <a href="/job/hong-kong/vp-quant-analyst/13015/99719476320" class="headline-3 job-title--link text--black" data-job-id="99719476320"><strong>VP Global Markets Liquid Financing Quant Analyst</strong></a>
+  <div class="job-location"> Hong Kong, Hong Kong</div>
+  <div class="bg--white round-corners--small job-date"><span>27 Sep</span></div>
+</div>
+</section>`;
+
   // The modern parser must be untouched by the legacy addition.
   if (parseModernResults(html, 'https://careers.munichre.com').length === 2) pass('radancy.parseModernResults() still parses the search-results-list__item markup');
   else fail('radancy.parseModernResults() regressed on modern markup');
@@ -169,6 +275,58 @@ try {
   else fail(`radancy.parseLegacyResults() UHG url = ${JSON.stringify(uhgRows[0]?.url)}`);
   if (uhgRows[1]?.title === 'Principal Architect, Interoperability & Integration') pass('radancy.parseLegacyResults() decodes entities in legacy titles');
   else fail(`radancy.parseLegacyResults() UHG title[1] = ${JSON.stringify(uhgRows[1]?.title)}`);
+
+  // Barclays: the location element is a sibling <div>, not a <span> inside the anchor.
+  const bcRows = parseLegacyResults(LEGACY_BARCLAYS, 'https://search.jobs.barclays');
+  if (bcRows.length === 2 && bcRows[0]?.title === 'FCS Senior Analyst') pass('radancy.parseLegacyResults() parses the Barclays card layout (title from <strong>)');
+  else fail(`radancy.parseLegacyResults() Barclays rows = ${JSON.stringify(bcRows)}`);
+  if (bcRows[0]?.location === 'Noida, India' && bcRows[1]?.location === 'Hong Kong, Hong Kong') pass('radancy.parseLegacyResults() reads a sibling <div class="job-location"> that follows the anchor');
+  else fail(`radancy.parseLegacyResults() Barclays locations = ${JSON.stringify(bcRows.map(r => r.location))}`);
+  if (parseModernResults(LEGACY_BARCLAYS, 'https://x').length === 0) pass('radancy.parseModernResults() does not claim the Barclays card layout');
+  else fail('radancy.parseModernResults() wrongly matched Barclays markup');
+
+  // A <p class="job-location"> and a row with no location at all: the sibling
+  // fallback must read the former and must not invent a location for the latter
+  // (nor borrow the next row's).
+  const LEGACY_MIXED = `
+<ul>
+<li><a href="/job/london/analyst/13015/1" data-job-id="1"><strong>Analyst</strong></a><p class="job-location">London (United Kingdom)</p></li>
+<li><a href="/job/nowhere/unplaced/13015/2" data-job-id="2"><strong>Unplaced</strong></a></li>
+<li><a href="/job/pune/engineer/13015/3" data-job-id="3"><strong>Engineer</strong></a><div class="job-location">Pune (India)</div></li>
+</ul>`;
+  const mixed = parseLegacyResults(LEGACY_MIXED, 'https://search.jobs.barclays').map(r => r.location);
+  if (mixed.length === 3 && mixed[0] === 'London (United Kingdom)' && mixed[1] === '' && mixed[2] === 'Pune (India)') {
+    pass('radancy.parseLegacyResults() reads a <p class="job-location"> and leaves a location-less row empty instead of borrowing the next row\u2019s');
+  } else {
+    fail(`radancy.parseLegacyResults() mixed locations = ${JSON.stringify(mixed)}`);
+  }
+
+  // careers.arm.com: a job-card row whose location is a sibling
+  // <span class="location"> (a bare `location` class, no `job-location`), next to
+  // a category span that must not be read. A class that only starts with
+  // "location" (here a "location-label" with text) is not the location element.
+  const LEGACY_ARM = `
+<ul class="list-reset" id="search-results-jobs" data-results-count="426">
+<li class="job-card fs-start fs-middle fs-container custom-row-gap-1">
+  <a class="job-card__title fs-11 fs-m-11" href="/job/toronto/staff-security-architect/33099/91096676096" data-job-id="91096676096">Staff Security Architect</a>
+  <span class="location">Toronto, Canada</span>
+  <span class="category">Hardware Engineering</span>
+  <button type="button" class="js-save-job-btn button" data-job-id="91096676096" data-org-id="33099"><span class="sr-only">Save job</span></button>
+</li>
+<li class="job-card fs-start fs-middle fs-container custom-row-gap-1">
+  <a class="job-card__title fs-11 fs-m-11" href="/job/lund/graphics-engineer/33099/2" data-job-id="2">Graphics Engineer</a>
+  <span class="location-label">Location</span>
+  <span class="category">Software Engineering</span>
+</li>
+</ul>`;
+  const armRows = parseLegacyResults(LEGACY_ARM, 'https://careers.arm.com');
+  if (armRows.length === 2 && armRows[0].title === 'Staff Security Architect' && armRows[0].location === 'Toronto, Canada') {
+    pass('radancy.parseLegacyResults() reads a sibling <span class="location"> (careers.arm.com)');
+  } else {
+    fail(`radancy.parseLegacyResults() Arm rows = ${JSON.stringify(armRows)}`);
+  }
+  if (armRows[1]?.location === '') pass('radancy.parseLegacyResults() does not take a "location-label" class for the location');
+  else fail(`radancy.parseLegacyResults() Arm row 2 location = ${JSON.stringify(armRows[1]?.location)}`);
 
   // Legacy: Kaiser variant.
   const kpRows = parseLegacyResults(LEGACY_KP, 'https://www.kaiserpermanentejobs.org');
@@ -324,6 +482,389 @@ try {
     pass('radancy truncation warning reports the returned count, not the pre-slice buffer');
   } else {
     fail(`radancy truncation warning: returned ${overshootJobs?.length}, warned "${warned}" (expected 4 / "4")`);
+  }
+  if (overshootJobs.truncated?.reason === 'page-cap' && overshootJobs.truncated.fetched === 4) pass('radancy.fetch() marks the board partial when max_jobs cuts the fragment walk');
+  else fail(`radancy.fetch() max_jobs cut: truncated = ${JSON.stringify(overshootJobs.truncated)}`);
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // ctx.maxPages / verify-portals probe handling (ADDING_A_PROVIDER.md's
+  // ctx.maxPages convention — SHOULD cap the walk, MUST propagate a
+  // ctx.fetch* rejection unwrapped instead of swallowing it)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // A non-string json.results on page 2+ must throw descriptively, not be
+  // silently coerced to [] and read as a natural end — a real "no more jobs"
+  // page is still a STRING (confirmed live: it can parse to zero rows
+  // without being empty), so anything else is a malformed response.
+  const malformedWarnings = [];
+  const malformedCtx = {
+    sleep: async () => {},
+    fetchJson: async (u) => {
+      const page = Number(new URL(u).searchParams.get('CurrentPage'));
+      if (page === 2) return { results: { unexpected: 'shape' }, hasJobs: true };
+      return {
+        results: `<section data-total-results="500" data-total-pages="5">${rowFor(page * 10 + 1)}</section>`,
+        hasJobs: true,
+      };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => malformedWarnings.push(String(m));
+  let malformedJobs;
+  try {
+    malformedJobs = await radancy.fetch({ name: 'MalformedResults', careers_url: 'https://t.example/search-jobs' }, malformedCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (malformedJobs.length === 1 && malformedWarnings.some((m) => m.includes('unexpected fragment response shape'))) {
+    pass('radancy.fetch() throws on a non-string json.results instead of reading it as a natural end');
+  } else {
+    fail(`radancy.fetch() malformed-results handling: jobs=${malformedJobs?.length} warnings=${JSON.stringify(malformedWarnings)}`);
+  }
+
+  // ctx.maxPages caps the walk (SHOULD) — a source claiming far more pages
+  // than the probe budget must not be walked past that budget, and no
+  // "raise max_pages" advice fires for a limit that was the probe's own,
+  // not the tenant's real config.
+  let probeCapPage = 0;
+  const probeCapWarnings = [];
+  const probeCapCtx = {
+    maxPages: 1,
+    sleep: async () => {},
+    fetchJson: async () => {
+      probeCapPage++;
+      return {
+        results: `<section data-total-results="500" data-total-pages="5">${rowFor(probeCapPage * 10 + 1)}</section>`,
+        hasJobs: true,
+      };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => probeCapWarnings.push(String(m));
+  let probeCapJobs;
+  try {
+    probeCapJobs = await radancy.fetch({ name: 'ProbeCapped', careers_url: 'https://s.example/search-jobs' }, probeCapCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (probeCapJobs.length === 1 && probeCapPage === 1 && probeCapWarnings.length === 0) {
+    pass('radancy.fetch() caps the walk to ctx.maxPages while probing, with no cap warning');
+  } else {
+    fail(`radancy.fetch() probe-cap handling: jobs=${probeCapJobs?.length} pages=${probeCapPage} warnings=${JSON.stringify(probeCapWarnings)}`);
+  }
+
+  // A ctx.fetch* rejection while probing — the shape of verify-portals.mjs's
+  // budget-exhaustion sentinel — must propagate unwrapped, not be absorbed
+  // into a normal stopReason/partial-result path: a swallowed sentinel reads
+  // to verify-portals as "board is down" instead of "live, partial".
+  class FakeProbeBudgetReached extends Error {}
+  const probeErrorCtx = {
+    maxPages: 3,
+    sleep: async () => {},
+    fetchJson: async (u) => {
+      const page = Number(new URL(u).searchParams.get('CurrentPage'));
+      if (page === 2) throw new FakeProbeBudgetReached('budget exhausted');
+      return {
+        results: `<section data-total-results="500" data-total-pages="5">${rowFor(page * 10 + 1)}</section>`,
+        hasJobs: true,
+      };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  let probeErrorCaught = null;
+  try {
+    await radancy.fetch({ name: 'ProbeError', careers_url: 'https://r.example/search-jobs' }, probeErrorCtx);
+  } catch (err) {
+    probeErrorCaught = err;
+  }
+  if (probeErrorCaught instanceof FakeProbeBudgetReached) {
+    pass('radancy.fetch() propagates a ctx.fetch* rejection unwrapped while probing (JSON transport)');
+  } else {
+    fail(`radancy.fetch() probe-error propagation (JSON): ${probeErrorCaught?.constructor?.name || probeErrorCaught}`);
+  }
+
+  // Same propagation requirement on the HTML fallback transport.
+  const probeErrorHtmlCtx = {
+    maxPages: 3,
+    sleep: async () => {},
+    fetchText: async (u) => {
+      const p = Number(new URL(u).searchParams.get('p'));
+      if (p === 2) throw new FakeProbeBudgetReached('budget exhausted');
+      return html; // page 1: 2 jobs, proves succeededOnce would otherwise apply
+    },
+  };
+  let probeErrorHtmlCaught = null;
+  try {
+    await radancy.fetch({ name: 'ProbeErrorHtml', api: 'https://qh.example/search-jobs' }, probeErrorHtmlCtx);
+  } catch (err) {
+    probeErrorHtmlCaught = err;
+  }
+  if (probeErrorHtmlCaught instanceof FakeProbeBudgetReached) {
+    pass('radancy.fetch() propagates a ctx.fetch* rejection unwrapped while probing (HTML transport)');
+  } else {
+    fail(`radancy.fetch() probe-error propagation (HTML): ${probeErrorHtmlCaught?.constructor?.name || probeErrorHtmlCaught}`);
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // Cache-buster + total-mismatch handling (added after a live investigation
+  // of 11 TalentBrew tenants — see the transport note at the top of the file)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // jobs.length >= maxJobs alone is not proof max_jobs cut anything short —
+  // a tenant whose real total exactly fills the page(s) already walked must
+  // not false-positive into a 'cap' warning just because the count happens
+  // to land exactly on max_jobs.
+  const exactWarnings = [];
+  const exactCtx = {
+    sleep: async () => {},
+    fetchJson: async () => ({
+      results: `<section data-total-results="3" data-total-pages="1">${rowFor(1)}${rowFor(2)}${rowFor(3)}</section>`,
+      hasJobs: true,
+    }),
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => exactWarnings.push(String(m));
+  let exactJobs;
+  try {
+    exactJobs = await radancy.fetch({ name: 'ExactFit', careers_url: 'https://u.example/search-jobs', max_jobs: 3 }, exactCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (exactJobs.length === 3 && exactWarnings.length === 0) {
+    pass('radancy.fetch() does not warn when max_jobs exactly matches a naturally-complete result');
+  } else {
+    fail(`radancy.fetch() exact-max_jobs handling: jobs=${exactJobs?.length} warnings=${JSON.stringify(exactWarnings)}`);
+  }
+  if (exactJobs.truncated === undefined) pass('radancy.fetch() leaves a naturally complete walk unmarked when max_jobs matches it exactly');
+  else fail(`radancy.fetch() exact max_jobs was marked: ${JSON.stringify(exactJobs.truncated)}`);
+
+  // Every fetch call — both JSON fragment pages and the HTML fallback — must
+  // refuse a redirect (#1440's mandatory SSRF guard, every peer provider
+  // sets it; flagged as a pre-existing gap on radancy.mjs specifically in
+  // review). A 3xx is still blocked at DNS resolution by the central
+  // _ip-guard.mjs, so this is defense-in-depth, not a live bypass — but the
+  // convention is per-provider, so it belongs here too.
+  const redirectCallsJson = [];
+  const redirectJsonCtx = {
+    sleep: async () => {},
+    fetchJson: async (u, o) => {
+      redirectCallsJson.push(o?.redirect);
+      const page = Number(new URL(u).searchParams.get('CurrentPage'));
+      return page === 1
+        ? { results: `<section data-total-results="4" data-total-pages="2">${rowFor(1)}${rowFor(2)}</section>`, hasJobs: true }
+        : { results: `<section data-total-results="4" data-total-pages="2">${rowFor(3)}</section>`, hasJobs: true };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  await radancy.fetch({ name: 'RedirectCheckJson', careers_url: 'https://redirect-json.example/search-jobs' }, redirectJsonCtx);
+  if (redirectCallsJson.length >= 2 && redirectCallsJson.every((r) => r === 'error')) {
+    pass('radancy.fetch() sets redirect:"error" on every JSON fragment request');
+  } else {
+    fail(`radancy.fetch() JSON redirect option: ${JSON.stringify(redirectCallsJson)}`);
+  }
+
+  const redirectCallsHtml = [];
+  const redirectHtmlCtx = {
+    sleep: async () => {},
+    fetchText: async (u, o) => {
+      redirectCallsHtml.push(o?.redirect);
+      return redirectCallsHtml.length === 1 ? html : '<html></html>';
+    },
+  };
+  await radancy.fetch({ name: 'RedirectCheckHtml', careers_url: 'https://redirect-html.example/search-jobs' }, redirectHtmlCtx);
+  if (redirectCallsHtml.length >= 2 && redirectCallsHtml.every((r) => r === 'error')) {
+    pass('radancy.fetch() sets redirect:"error" on every HTML ?p=N request');
+  } else {
+    fail(`radancy.fetch() HTML redirect option: ${JSON.stringify(redirectCallsHtml)}`);
+  }
+
+  // max_jobs must be clamped the same way max_pages already is — a garbage
+  // config value shouldn't be trusted just because it's a positive integer.
+  // The clamp lands at MAX_PAGES * 100 (the JSON transport's true ceiling,
+  // the more generous of the two transports), which happens to be
+  // unobservable through fetch() itself (max_pages already produces the same
+  // practical bound), so this is exercised directly.
+  const { resolveMaxJobs } = radancyModule;
+  if (resolveMaxJobs({ max_jobs: 999999999 }) === 20000) {
+    pass('radancy.resolveMaxJobs() clamps an absurd max_jobs to the true JSON-transport ceiling');
+  } else {
+    fail(`radancy.resolveMaxJobs() did not clamp: ${resolveMaxJobs({ max_jobs: 999999999 })}`);
+  }
+  if (resolveMaxJobs({}) === 2000) {
+    pass('radancy.resolveMaxJobs() defaults to 2000 when max_jobs is unset');
+  } else {
+    fail(`radancy.resolveMaxJobs() default wrong: ${resolveMaxJobs({})}`);
+  }
+
+  // The cache-buster must vary per call — a caching layer keying on the URL
+  // still produces a stable, wrong result if the extra parameter is itself
+  // deterministic (e.g. derived from `page`, which repeats across fetch()
+  // calls for the same page number).
+  const cbUrl1 = new URL(buildFragmentUrl('https://x.example/search-jobs', 1));
+  const cbUrl2 = new URL(buildFragmentUrl('https://x.example/search-jobs', 1));
+  if (cbUrl1.searchParams.get('_') && cbUrl1.searchParams.get('_') !== cbUrl2.searchParams.get('_')) {
+    pass('radancy.buildFragmentUrl() appends a per-call random cache-buster');
+  } else {
+    fail(`radancy.buildFragmentUrl() cache-buster missing or not unique: ${cbUrl1.searchParams.get('_')} / ${cbUrl2.searchParams.get('_')}`);
+  }
+
+  // A source total overstating what pagination actually serves is routine
+  // (verified live on 4 of 9 tenants) and must never fire the "raise
+  // max_pages" warning — that advice cannot fix a source-side count, and
+  // firing it here would be noise on a majority of real tenants.
+  const overstateWarnings = [];
+  const overstateCtx = {
+    sleep: async () => {},
+    fetchJson: async () => ({
+      results: `<section data-total-results="10" data-total-pages="1">${rowFor('501')}</section>`,
+      hasJobs: true,
+    }),
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => overstateWarnings.push(String(m));
+  let overstateJobs;
+  try {
+    overstateJobs = await radancy.fetch({ name: 'Understated', careers_url: 'https://y.example/search-jobs' }, overstateCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (overstateJobs.length === 1 && overstateWarnings.length === 0) {
+    pass('radancy.fetch() does not warn when a natural page-1 end falls short of an inflated totalResults');
+  } else {
+    fail(`radancy.fetch() overstated-total handling: ${overstateJobs?.length} jobs, warnings=${JSON.stringify(overstateWarnings)}`);
+  }
+  if (overstateJobs.truncated === undefined) pass('radancy.fetch() leaves a natural end under an inflated total unmarked');
+  else fail(`radancy.fetch() natural end was marked: ${JSON.stringify(overstateJobs.truncated)}`);
+
+  // max_pages capping the walk short of the source's own LARGER totalPages IS
+  // worth a warning — this is the one case where "raise max_pages" is
+  // actually actionable.
+  let capPage = 0;
+  const capWarnings = [];
+  const genuineCapCtx = {
+    sleep: async () => {},
+    fetchJson: async () => {
+      capPage++;
+      return {
+        // Full pages: a short page is the board's end and takes precedence over a cap.
+        results: `<section data-total-results="500" data-total-pages="5">${Array.from({ length: 100 }, (_, i) => rowFor(capPage * 1000 + i)).join('')}</section>`,
+        hasJobs: true,
+      };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => capWarnings.push(String(m));
+  let genuineCapJobs;
+  try {
+    genuineCapJobs = await radancy.fetch({ name: 'CappedShort', careers_url: 'https://z.example/search-jobs', max_pages: 2 }, genuineCapCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  const genuineCapWarned = capWarnings.some((m) => /raise max_jobs\/max_pages/.test(m));
+  if (genuineCapJobs.length === 200 && capPage === 2 && genuineCapWarned) {
+    pass('radancy.fetch() warns when max_pages caps the walk short of a larger source-reported totalPages');
+  } else {
+    fail(`radancy.fetch() genuine cap handling: jobs=${genuineCapJobs?.length} pages=${capPage} warned=${genuineCapWarned}`);
+  }
+  if (genuineCapJobs.truncated?.reason === 'page-cap' && genuineCapJobs.truncated.fetched === 200) pass('radancy.fetch() marks the board partial when max_pages cuts the fragment walk');
+  else fail(`radancy.fetch() max_pages cut: truncated = ${JSON.stringify(genuineCapJobs.truncated)}`);
+
+  // A short last fragment page is the board's end even at max_pages and with no
+  // data-total-pages to say so: no cap warning, no mark.
+  const shortFragmentWarnings = [];
+  console.error = (m) => shortFragmentWarnings.push(String(m));
+  let shortFragment;
+  try {
+    shortFragment = await radancy.fetch({ name: 'ShortFragment', careers_url: 'https://s.example/search-jobs', max_pages: 1 }, {
+      sleep: async () => {},
+      fetchJson: async () => ({ results: `<section>${rowFor(61)}${rowFor(62)}</section>`, hasJobs: true }),
+      fetchText: async () => { throw new Error('unused'); },
+    });
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (shortFragment.length === 2 && shortFragment.truncated === undefined && !shortFragmentWarnings.some((m) => /raise max_jobs\/max_pages/.test(m))) {
+    pass('radancy.fetch() treats a short last fragment page at max_pages as the end of the board');
+  } else {
+    fail(`radancy.fetch() short fragment page at max_pages: ${shortFragment.length} jobs, truncated = ${JSON.stringify(shortFragment.truncated)}, warnings ${JSON.stringify(shortFragmentWarnings)}`);
+  }
+
+  // A mid-walk JSON fetch error must keep earlier pages and log why
+  // pagination stopped, distinct from — and without — cap advice. Page 2
+  // fails on EVERY attempt (retries included, via fetchJsonWithRetry) — a
+  // one-shot-then-recovers mock would silently "fix itself" on retry and
+  // prove nothing about the error path.
+  const errWarnings = [];
+  const jsonErrorCtx = {
+    sleep: async () => {},
+    fetchJson: async (u) => {
+      const page = Number(new URL(u).searchParams.get('CurrentPage'));
+      if (page === 2) {
+        const err = new Error('503 on page 2');
+        err.status = 503;
+        throw err;
+      }
+      return {
+        results: `<section data-total-results="500" data-total-pages="5">${rowFor(page * 10 + 1)}</section>`,
+        hasJobs: true,
+      };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => errWarnings.push(String(m));
+  let jsonErrorJobs;
+  try {
+    jsonErrorJobs = await radancy.fetch({ name: 'MidWalkError', careers_url: 'https://w.example/search-jobs' }, jsonErrorCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  const errLogged = errWarnings.some((m) => m.includes('503 on page 2'));
+  const noCapAdvice = !errWarnings.some((m) => /raise max_jobs\/max_pages/.test(m));
+  if (jsonErrorJobs.length === 1 && errLogged && noCapAdvice) {
+    pass('radancy.fetch() keeps earlier pages and logs the fetch error on a mid-walk JSON failure, without cap advice');
+  } else {
+    fail(`radancy.fetch() mid-walk JSON error handling: jobs=${jsonErrorJobs?.length} warnings=${JSON.stringify(errWarnings)}`);
+  }
+  if (jsonErrorJobs.truncated?.reason === 'fetch-error' && jsonErrorJobs.truncated.fetched === 1) pass('radancy.fetch() marks the board partial when a later fragment page fails');
+  else fail(`radancy.fetch() later fragment page failure: truncated = ${JSON.stringify(jsonErrorJobs.truncated)}`);
+
+  // The actual point of routing through fetchJsonWithRetry: a page that
+  // fails once transiently (429/5xx/network) then succeeds must recover
+  // silently — no lost page, no error logged — where the old bare
+  // ctx.fetchJson call would have permanently truncated the walk from
+  // there on a single blip.
+  let attemptsOnPage2 = 0;
+  const transientWarnings = [];
+  const transientCtx = {
+    sleep: async () => {},
+    fetchJson: async (u) => {
+      const page = Number(new URL(u).searchParams.get('CurrentPage'));
+      if (page === 2) {
+        attemptsOnPage2++;
+        if (attemptsOnPage2 === 1) {
+          const err = new Error('503 Service Unavailable');
+          err.status = 503;
+          throw err;
+        }
+      }
+      return {
+        results: `<section data-total-results="500" data-total-pages="3">${rowFor(page * 10 + 1)}</section>`,
+        hasJobs: true,
+      };
+    },
+    fetchText: async () => { throw new Error('unused'); },
+  };
+  console.error = (m) => transientWarnings.push(String(m));
+  let transientJobs;
+  try {
+    transientJobs = await radancy.fetch({ name: 'TransientBlip', careers_url: 'https://v.example/search-jobs' }, transientCtx);
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (transientJobs.length === 3 && attemptsOnPage2 === 2 && transientWarnings.length === 0) {
+    pass('radancy.fetch() recovers a page that fails once transiently, via fetchJsonWithRetry, with no data lost and no warning');
+  } else {
+    fail(`radancy.fetch() transient-recovery handling: jobs=${transientJobs?.length} attempts=${attemptsOnPage2} warnings=${JSON.stringify(transientWarnings)}`);
   }
 } catch (e) {
   fail(`radancy provider tests crashed: ${e.message}`);

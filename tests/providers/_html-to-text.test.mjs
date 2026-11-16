@@ -85,6 +85,57 @@ try {
     fail(`double decode = ${JSON.stringify(doubled)}`);
   }
 
+  const doubleEncodedMarkup = htmlToText(
+    '&amp;lt;script&amp;gt;alert(1)&amp;lt;/script&amp;gt;After &#252; &quot;quoted&quot;'
+  );
+  if (doubleEncodedMarkup === 'After ü "quoted"') {
+    pass('htmlToText() keeps double-encoded active markup inert while decoding text entities');
+  } else {
+    fail(`double-encoded active markup = ${JSON.stringify(doubleEncodedMarkup)}`);
+  }
+
+  const incompleteEncodedMarkup = htmlToText(
+    'Before &amp;lt;script data-x=alert(1) After'
+  );
+  if (incompleteEncodedMarkup === 'Before script data-x=alert(1) After') {
+    pass('htmlToText() neutralizes incomplete double-encoded tag openers without dropping text');
+  } else {
+    fail(`incomplete double-encoded markup = ${JSON.stringify(incompleteEncodedMarkup)}`);
+  }
+
+  // A comparison in prose is text, not a tag. Decoded, `&lt;10` is `<10`, and
+  // a tag matcher that accepted any `<` read it as a tag opener and deleted
+  // everything up to the next `>`: here `&gt;150k`, a paragraph later, with
+  // the sponsorship sentence between them. Both the single-escaped shape and
+  // greenhouse's double-escaped one, where the third strip did the damage.
+  const proseAngles = htmlToText(
+    '<p>Requirements: experience with teams of &lt;10 engineers.</p>'
+    + '<p>Visa sponsorship is not available for this role. Salary &gt;150k.</p>'
+  );
+  if (proseAngles === 'Requirements: experience with teams of <10 engineers. Visa sponsorship is not available for this role. Salary >150k.') {
+    pass('htmlToText() keeps a decoded prose `<` and the text after it');
+  } else {
+    fail(`prose angle brackets = ${JSON.stringify(proseAngles)}`);
+  }
+
+  const doubleEscapedProse = htmlToText(
+    '&lt;p&gt;Teams of &amp;lt;10 engineers.&lt;/p&gt;&lt;p&gt;No visa sponsorship. Salary &amp;gt;150k.&lt;/p&gt;'
+  );
+  if (doubleEscapedProse === 'Teams of <10 engineers. No visa sponsorship. Salary >150k.') {
+    pass('htmlToText() keeps a double-escaped prose `<` and the text after it');
+  } else {
+    fail(`double-escaped prose angle brackets = ${JSON.stringify(doubleEscapedProse)}`);
+  }
+
+  // The other side of that line: markup that does open like a tag is still
+  // stripped after every decode, attributes and all.
+  const encodedHandler = htmlToText('&lt;img src=x onerror=alert(1)&gt; text');
+  if (encodedHandler === 'text') {
+    pass('htmlToText() still strips decoded markup that opens with a tag name');
+  } else {
+    fail(`decoded img tag = ${JSON.stringify(encodedHandler)}`);
+  }
+
   // A keyword split across a tag boundary must survive stripping, since
   // visa/content filters substring-match over the result.
   const split = htmlToText('<p>No sponsorship is <span>provided</span> for this role</p>');
@@ -108,6 +159,13 @@ try {
     pass('htmlToText() caps output at DESCRIPTION_CAP characters');
   } else {
     fail(`cap: length=${capped.length}, tail=${JSON.stringify(capped.slice(-10))}`);
+  }
+
+  const uncapped = htmlToText(longBody, { cap: Infinity });
+  if (uncapped.length === 'word '.repeat(1200).trim().length) {
+    pass('htmlToText(content, { cap: Infinity }) returns the whole text');
+  } else {
+    fail(`cap Infinity: length=${uncapped.length}`);
   }
 } catch (e) {
   fail(`_html-to-text tests crashed: ${e.message}`);

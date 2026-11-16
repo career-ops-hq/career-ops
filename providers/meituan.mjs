@@ -2,6 +2,8 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { sleep } from './_http.mjs';
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Meituan careers provider — posts to the public zhaopin.meituan.com JSON API
 // (no auth, no browser, no special headers). Verified 2026-07 by capturing the
@@ -17,15 +19,15 @@ import { sleep } from './_http.mjs';
 //   - name: 美团
 //     careers_url: https://zhaopin.meituan.com/web/social   # auto-detected
 //     keywords: ["AI", "大模型"]   # each keyword is a separate server-side query, results deduped;
-//                                  # omit to pull the whole board (~2300 postings)
-//     max_pages: 30                # per keyword, pageSize 100
+//                                  # omit to pull the whole board (~2500 postings)
+//     max_pages: 100               # per keyword, pageSize 100
 
 const API_HOST = 'zhaopin.meituan.com';
 const API = `https://${API_HOST}/api/official/job/getJobList`;
 const DETAIL = `https://${API_HOST}/web/position/detail?jobUnionId=`;
 const PAGE_SIZE = 100;
 const DEFAULT_KEYWORDS = [''];  // empty keyword = the whole board, no topical bias
-const DEFAULT_MAX_PAGES = 30;
+const DEFAULT_MAX_PAGES = 100;
 // Every request after the first pays it — across pages and keyword switches
 // (same idiom as avature/workday); 400ms instead of their 150 because this
 // board rate-limits harder (see EMPTY_RETRIES below).
@@ -76,9 +78,13 @@ export function parseMeituanResponse(json, companyName) {
     const title = p.name || '';
     const id = p.jobUnionId;
     if (!title || !id) continue;
+    // A lone surrogate in id throws URIError out of encodeURIComponent and
+    // aborts this loop, losing every job on the page. Drop just this one.
+    const encodedId = safeEncodeURIComponent(id);
+    if (encodedId === null) continue;
     jobs.push({
       title,
-      url: DETAIL + encodeURIComponent(id),
+      url: DETAIL + encodedId,
       company: companyName,
       location: names(p.cityList),
       // Meituan posts carry full-text JDs (duty + requirements), much longer
@@ -116,12 +122,16 @@ export default {
       : DEFAULT_KEYWORDS;
     const entryMaxPages = Number(entry.max_pages) > 0 ? Number(entry.max_pages) : DEFAULT_MAX_PAGES;
     // Honor the ctx.maxPages pagination hint (verify-portals' health probe passes 1).
-    const maxPages = Math.min(entryMaxPages, Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity);
+    const probeMaxPages = Number(ctx?.maxPages) > 0 ? Number(ctx.maxPages) : Infinity;
+    const maxPages = Math.min(entryMaxPages, probeMaxPages);
 
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
     let firstRequest = true;
     let succeededOnce = false;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'source-reports-more' | null} */
+    let partialReason = null;
 
     for (const keyword of keywords) {
       let total = 0;
@@ -149,7 +159,9 @@ export default {
             // can legitimately match 0 jobs, so seen.size is not the signal.
             if (!succeededOnce) throw err;
             console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
-            return [...seen.values()];
+            // The rest of the board was never read: the result says so, so scan.mjs
+            // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
+            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
           }
           const parsed = parseMeituanResponse(json, entry.name || '美团');
           succeededOnce = true;
@@ -161,6 +173,7 @@ export default {
         if (!jobs) {
           if (total && (pageNo - 1) * PAGE_SIZE < total) {
             console.error(`  ⚠ meituan: keyword "${keyword}" page ${pageNo} still empty after ${EMPTY_RETRIES} retries — keeping the ${seen.size} jobs collected so far`);
+            partialReason ??= 'source-reports-more';
           }
           break;
         }
@@ -170,9 +183,16 @@ export default {
         }
 
         if (total && pageNo * PAGE_SIZE >= total) break;
+        // The page cap, not the board, ended this keyword. Stay quiet when the
+        // cap is the health probe's, not max_pages.
+        if (pageNo === maxPages && probeMaxPages > entryMaxPages) {
+          console.error(`  ⚠ meituan: keyword "${keyword}" truncated at ${pageNo * PAGE_SIZE}${total ? ` of ${total}` : ''} postings — raise max_pages on this entry for complete coverage`);
+        }
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };

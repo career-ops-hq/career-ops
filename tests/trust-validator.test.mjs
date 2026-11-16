@@ -1,8 +1,10 @@
-#!/usr/bin/env node
 // @ts-check
 /**
- * test-trust-validator.mjs — Comprehensive test suite for trust validation.
- * Run: node test-trust-validator.mjs
+ * tests/trust-validator.test.mjs — Comprehensive test suite for trust validation.
+ * Run: node test-all.mjs --only trust-validator
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  *
  * Tests cover:
  *   - buildTrustValidator: disabled/enabled, config merging
@@ -330,6 +332,43 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
   const v = buildTrustValidator({ enabled: true });
   const r = v({ url: 'https://acme.ashbyhq.com/jobs', company: 'Acme' });
   assert(!r.flags.includes('company_domain_mismatch'), 'ashbyhq.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://recruiting.paylocity.com/Recruiting/Jobs/Details/4001', company: 'Acme' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'paylocity.com → ATS allowlist, no mismatch');
+}
+
+{
+  // The tenant label need not match the company name, so the host alone must clear it.
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://exampleco.careers.hibob.com/jobs/0b1c2d3e-0000-4000-8000-000000000001', company: 'BigCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'careers.hibob.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://acme.hirehive.com/backend-engineer-berlin-Ab12Cd', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'hirehive.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://acme.recruitmentplatform.com/details.html?jobId=4001', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'recruitmentplatform.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://taleez.com/apply/backend-engineer-paris-exampleco-cdi', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'taleez.com → ATS allowlist, no mismatch');
+}
+
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://join.com/companies/acme/15402839', company: 'Acme' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'join.com → ATS allowlist, no mismatch');
 }
 
 section('buildTrustValidator — Rule 4: empty company → no mismatch flag');

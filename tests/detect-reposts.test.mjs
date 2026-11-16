@@ -1,5 +1,5 @@
 /**
- * detect-reposts.test.mjs — Systematic test suite for detect-reposts.mjs
+ * tests/detect-reposts.test.mjs — Systematic test suite for detect-reposts.mjs
  *
  * Tests every exported and internal function across:
  * - Input validation (malformed, missing, boundary values)
@@ -14,7 +14,10 @@
  * - CLI behavior (args, flags, missing file)
  * - Integration (full TSV round-trip, multi-company, mixed statuses)
  *
- * Run: node detect-reposts.test.mjs
+ * Run: node test-all.mjs --only detect-reposts
+ *      Running the file directly prints the same ✅/❌ lines, but a
+ *      discovered suite reports through the shared counters and never
+ *      exits — so a direct run returns 0 even when assertions fail.
  */
 
 import { detectReposts, parseScanHistory, companyKey, titleIdentityKey } from '../detect-reposts.mjs';
@@ -24,6 +27,7 @@ import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 import { pass, fail } from './helpers.mjs';
+import { parseDate } from '../lib/parse-date.mjs';
 
 console.log('\ndetect-reposts.mjs — repost detection');
 
@@ -61,17 +65,9 @@ function d(iso) {
 }
 
 // ============================================================================
-// 1. parseDate (replicated for testing — internal function not exported)
+// 1. parseDate
 // ============================================================================
 console.log('\n--- 1. parseDate ---');
-
-function parseDate(dateStr) {
-  const iso = String(dateStr || '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
-  const date = new Date(`${iso}T00:00:00Z`);
-  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== iso) return null;
-  return date;
-}
 
 // Valid dates
 ok('valid date 2026-01-01', parseDate('2026-01-01') !== null);
@@ -1297,14 +1293,17 @@ for (const [flag, value, field, expected, label] of flagFallbackCases) {
   eq(label, JSON.parse(out).metadata[field], expected);
 }
 
-// `--min-span=` supplies an EMPTY value, which must fall back too. Number('')
-// is 0, so a validator written with Number()/Number.isInteger() would read this
-// as a deliberate zero and quietly disable the floor.
-const emptySpanOut = execFileSync('node', [scriptPath, '--min-span='], {
-  encoding: 'utf-8', timeout: 10000,
-  cwd: dirname(scriptPath),
-});
-eq('--min-span= (empty value) falls back to 1, not 0', JSON.parse(emptySpanOut).metadata.minSpanDays, 1);
+// `--min-span=` supplies an EMPTY value, which is rejected as a missing operand (#5127).
+try {
+  execFileSync('node', [scriptPath, '--min-span='], {
+    encoding: 'utf-8', timeout: 10000,
+    cwd: dirname(scriptPath),
+  });
+  ok('--min-span= (empty value) exits non-zero', false);
+} catch (e) {
+  ok('--min-span= (empty value) exits non-zero', e.status === 1);
+  ok('--min-span= (empty value) reports the missing operand', /--min-span requires a value/.test(e.stderr || ''));
+}
 
 // 0 remains a legitimate explicit value on both flags — the fallback rules must
 // not swallow it, or the floor could never be switched off on purpose.

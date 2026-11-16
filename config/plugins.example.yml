@@ -33,3 +33,11 @@ plugins:
     enabled: false
     # label: "Job Leads"     # the Gmail label to scan
     # days_back: 7           # how far back to look
+
+  # ── h1b-sponsor (ingest) ── US DOL H-1B/PERM sponsorship history per employer, answered from a local index. (feature #2635)
+  # Needs no key. Install the index once: `node plugins/h1b-sponsor/install-h1b-index.mjs`.
+  # Check an employer: `node plugins/h1b-sponsor/check.mjs "Acme Corp"`. See plugins/h1b-sponsor/README.md.
+  # Optional in .env: H1B_INDEX_PATH (an index kept elsewhere); H1B_API_BASE + H1B_API_TOKEN
+  # (an HTTP endpoint you name yourself; it is never picked for you).
+  h1b-sponsor:
+    enabled: false

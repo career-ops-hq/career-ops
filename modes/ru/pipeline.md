@@ -4,7 +4,7 @@
 
 ## Workflow
 
-1. **Прочитать** `data/pipeline.md` → найти `- [ ]` в секции "Ожидающие" (или "Pendientes" / "Pending" — pipeline.md может содержать заголовки на любом языке)
+1. **Прочитать** `data/pipeline.md` (искать через `grep -n -m 20 '^- \[ \] ' data/pipeline.md` и повторять поиск после каждой партии, пока не останутся только пункты, оставленные в Pending в этом проходе, не читать файл целиком) → найти `- [ ]` в секции "Ожидающие" (или "Pendientes" / "Pending" — pipeline.md может содержать заголовки на любом языке)
 2. **Для каждого URL**:
    a. Зарезервировать следующий `REPORT_NUM` атомарно, запустив `node reserve-report-num.mjs` (и освободить маркер, запустив `node reserve-report-num.mjs --release <num>` после записи отчета)
    b. **Извлечь JD** через Playwright → WebFetch → WebSearch

@@ -33,8 +33,11 @@
 // silent-zero failure is the whole risk of scraping and the reason for
 // `assertParsedSomething` below.
 
-import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry } from './_http.mjs';
+import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
+import { visibleText } from './_html-to-text.mjs';
+
+export { visibleText } from './_html-to-text.mjs';
 
 const TRUSTED_HOST = 'senjob.com';
 const LIST_URL = 'https://senjob.com/offres-d-emploi.php';
@@ -62,12 +65,6 @@ const POSTING_ANCHOR_RE =
 /** The machine-readable publication date, hidden next to its localized form. */
 const HIDDEN_ISO_DATE_RE = /display:\s*none;?\s*"?>\s*(\d{4}-\d{2}-\d{2})\s*</i;
 
-/** @param {any} ctx @param {number} ms */
-function sleep(ctx, ms) {
-  if (typeof ctx?.sleep === 'function') return ctx.sleep(ms);
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /** @param {string} url */
 function assertSenjobUrl(url) {
   let parsed;
@@ -81,24 +78,6 @@ function assertSenjobUrl(url) {
     throw new Error(`senjob: untrusted hostname "${parsed.hostname}" — must be ${TRUSTED_HOST}`);
   }
   return url;
-}
-
-/**
- * Collapse a markup fragment to its visible text.
- * Comments are stripped FIRST: the anchor bodies carry `<!-- d ico postulez -->`
- * between the title and a spacer image, and a naive tag strip would leave the
- * comment body sitting inside the title.
- * @param {string} fragment
- * @returns {string}
- */
-export function visibleText(fragment) {
-  return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 /**
@@ -205,7 +184,7 @@ export default {
     const seen = new Set();
 
     for (let page = 1; page <= maxPages; page++) {
-      if (page > 1) await sleep(ctx, INTER_PAGE_DELAY_MS);
+      if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const url = assertSenjobUrl(buildListUrl(page));
       const html = await fetchTextWithRetry(ctx, url, {

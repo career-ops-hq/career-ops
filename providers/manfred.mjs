@@ -18,7 +18,15 @@
 //
 // Wire in via a `job_boards:` entry with `provider: manfred`.
 
+import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { fetchJsonWithRetry } from './_http.mjs';
+
 const FEED_BASE = 'https://www.getmanfred.com/api/v2/public/offers';
+// The full catalogue in one response runs ~2.3MB and takes 8-9.6s to arrive
+// even on a clean connection — right against the shared 10s default timeout,
+// so any network jitter aborts it. Give it real headroom rather than relying
+// on retry alone to paper over a structurally near-timeout request.
+const FETCH_TIMEOUT_MS = 25_000;
 const TRUSTED_HOST = 'www.getmanfred.com';
 const OFFER_BASE = 'https://www.getmanfred.com/ofertas-empleo';
 const VALID_LANGS = ['EN', 'ES'];
@@ -164,7 +172,11 @@ export function normalizeManfredOffer(offer, fallbackCompany) {
   const id = Number(offer.id);
   const slug = typeof offer.slug === 'string' ? offer.slug.trim() : '';
   if (!Number.isInteger(id) || id <= 0 || !slug) return null;
-  const url = `${OFFER_BASE}/${id}/${encodeURIComponent(slug)}`;
+  // A lone surrogate in slug would throw URIError out of encodeURIComponent and
+  // abort the caller's loop over the whole catalogue. Drop this one.
+  const encodedSlug = safeEncodeURIComponent(slug);
+  if (encodedSlug === null) return null;
+  const url = `${OFFER_BASE}/${id}/${encodedSlug}`;
 
   const company =
     typeof offer.company?.name === 'string' && offer.company.name.trim()
@@ -191,7 +203,9 @@ export default {
     // is meaningful, then redirect:'error' blocks SSRF via server-side
     // redirects — together they keep the request on getmanfred.com.
     const url = assertManfredUrl(buildFeedUrl(entry));
-    const json = /** @type {any} */ (await ctx.fetchJson(url, { redirect: 'error' }));
+    const json = /** @type {any} */ (
+      await fetchJsonWithRetry(ctx, url, { redirect: 'error', timeoutMs: FETCH_TIMEOUT_MS })
+    );
     if (!Array.isArray(json)) {
       throw new Error(
         `manfred: unexpected API response — expected a JSON array of offers, got ${json === null ? 'null' : typeof json}`,

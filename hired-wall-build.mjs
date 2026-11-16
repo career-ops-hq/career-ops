@@ -5,7 +5,8 @@
  * HIRED.md is the ledger. Each entry is one machine-readable comment line
  * (the source of truth) followed by its rendered card; this script APPENDS
  * new entries, regenerates every rendered card from the comments, bumps
- * docs/hired-count.json (what the README badge reads) and regenerates
+ * docs/hired-count.json (the README badge, docs/hired-badge.svg, is redrawn from
+ * it by .github/scripts/readme-badges.mjs in the hired-wall workflow) and regenerates
  * docs/hired-wall.svg (the three most recent card-level stories shown under
  * the hero). One writer for all four surfaces so they cannot drift apart.
  *
@@ -78,14 +79,74 @@ export function ledgerLine(e) {
 
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+/**
+ * A GitHub login, reduced to the charset an account name can actually hold.
+ *
+ * The ledger is a hand-editable file and `--rebuild` re-renders whatever it
+ * finds, so the parse path needs the same rule `--add` applies at ingest —
+ * otherwise the two disagree about what a handle is, and only one of them is
+ * ever exercised by the CLI. One definition, used by both, so a rebuild cannot
+ * render something an add would have refused.
+ *
+ * 39 is GitHub's maximum login length; the slice is a bound, not a check.
+ *
+ * @param {unknown} value
+ * @returns {string} The login, or '' when nothing addressable is left.
+ */
+export function safeHandle(value) {
+  return String(value ?? '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 39);
+}
+
+/**
+ * The avatar request URL for a handle.
+ *
+ * Separate from the fetch so the URL construction — the part that decides which
+ * resource is requested — is assertable without a network seam, and built from
+ * the sanitized login only: a separator cannot survive into the path or query.
+ *
+ * @param {unknown} handle
+ * @returns {string|null} The URL, or null when the handle sanitizes away.
+ */
+export function avatarUrl(handle) {
+  const login = safeHandle(handle);
+  return login ? `https://github.com/${login}.png?size=64` : null;
+}
+
+/**
+ * The identity a card is credited to, decided once for every surface that draws
+ * it.
+ *
+ * The markdown card and the README strip both render the same entry, and they
+ * used to decide the handle question separately: the card asked `level ===
+ * 'handle'`, the strip asked the same but printed the raw field, so a sanitized
+ * avatar could sit beside an unsanitized `@name`, and an entry whose handle
+ * sanitized away showed `@` in the strip while its card fell back to the role.
+ *
+ * `credited` is the login to show, or '' when the entry is not a credited card
+ * or nothing addressable survived sanitizing. Callers pair it with `e.role`, and
+ * the same emptiness decides the fallback on both surfaces.
+ *
+ * @param {{level?: string, handle?: unknown, role?: string}} entry
+ * @returns {{handle: string, credited: string}} The sanitized login, and the one
+ *   to credit, which is that login or ''.
+ */
+export function cardIdentity(entry) {
+  const handle = safeHandle(entry?.handle);
+  return { handle, credited: entry?.level === 'handle' && handle ? handle : '' };
+}
+
 /** The rendered markdown card that sits under each ledger line. */
 export function renderCard(e) {
   if (e.withdrawn) return `**Hire #${e.n}** — counted, story withdrawn at the author's request.`;
   if (e.level === 'count') return `**Hire #${e.n}** — counted, story kept private by choice.`;
-  const who = e.level === 'handle'
-    ? `<a href="https://github.com/${e.handle}"><img src="https://github.com/${e.handle}.png?size=64" width="28" height="28" align="top" alt="@${e.handle}"> **@${e.handle}**</a>`
+  const { credited } = cardIdentity(e);
+  // An entry whose handle leaves nothing addressable renders like a role card
+  // rather than an empty link: the hire stays on the wall either way, and a
+  // dangling `@` would be a worse answer than the role it was credited to.
+  const who = credited
+    ? `<a href="https://github.com/${credited}"><img src="${avatarUrl(credited)}" width="28" height="28" align="top" alt="@${esc(credited)}"> **@${esc(credited)}**</a>`
     : `**${esc(e.role)}**`;
-  const meta = [e.level === 'handle' ? esc(e.role) : (e.sector ? esc(e.sector) : null), e.geo ? esc(e.geo) : null, e.weeks ? `${e.weeks} weeks` : null]
+  const meta = [credited ? esc(e.role) : (e.sector ? esc(e.sector) : null), e.geo ? esc(e.geo) : null, e.weeks ? `${e.weeks} weeks` : null]
     .filter(Boolean).join(' · ');
   return [
     `### Hire #${e.n}`,
@@ -128,10 +189,12 @@ export function rebuildWall(text) {
 
 // ── The README strip (SVG, three most recent card-level stories) ────────────
 
-async function avatarDataUri(handle, { fetchAvatars, fixture }) {
+async function avatarDataUri(handle, { fetchAvatars, fixture, fetchFn = fetch }) {
   if (fixture) return `data:image/png;base64,${readFileSync(fixture).toString('base64')}`;
   if (!fetchAvatars) return null;
-  const res = await fetch(`https://github.com/${handle}.png?size=64`, { redirect: 'follow' });
+  const url = avatarUrl(handle);
+  if (!url) return null;
+  const res = await fetchFn(url, { redirect: 'follow' });
   if (!res.ok) return null;
   const buf = Buffer.from(await res.arrayBuffer());
   return `data:image/png;base64,${buf.toString('base64')}`;
@@ -171,13 +234,14 @@ export async function buildSvg(entries, opts = {}) {
     }
     if (!e) continue;
     const quote = wrapQuote(e.story ?? '', peek ? 33 : 34);
-    const avatar = e.level === 'handle' ? await avatarDataUri(e.handle, opts) : null;
+    const { credited } = cardIdentity(e);
+    const avatar = credited ? await avatarDataUri(credited, opts) : null;
     // Single-line rows have no wrapping: anything wider than the card was
     // silently CLIPPED by the viewBox (hire #5's four-word role was). Ellipsize
     // at ~the character count that fits the ~222px text run at each font size.
     const oneLine = (s, max) => { const t = String(s ?? ''); return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t; };
-    const who = oneLine(e.level === 'handle' ? `@${e.handle}` : e.role, 33);
-    const sub = oneLine([e.level === 'handle' ? e.role : (e.sector || null), e.geo || null].filter(Boolean).join(' · '), 40);
+    const who = oneLine(credited ? `@${credited}` : e.role, 33);
+    const sub = oneLine([credited ? e.role : (e.sector || null), e.geo || null].filter(Boolean).join(' · '), 40);
     cards += `<g><rect x="${x}" y="14" width="${CW}" height="150" rx="10" fill="#161b22" stroke="#30363d"/>
 <text x="${x + 16}" y="44" fill="#DD7627" font-size="22" font-weight="800">“</text>
 ${quote.map((l, k) => `<text x="${x + 34}" y="${44 + k * 19}" fill="#e6edf3" font-size="13" font-style="italic">${esc(l)}</text>`).join('\n')}
@@ -209,6 +273,14 @@ async function main() {
   if (args.includes('--help') || args.includes('-h')) { console.log(USAGE); return; }
   const bad = validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
   if (bad) { process.exitCode = 1; return; }
+  // Writing is opt-in: a bare run (or one with only modifiers such as
+  // --fetch-avatars) would otherwise fall through to the rebuild below and
+  // rewrite three tracked files, bumping updatedAt to today (#4896).
+  if (!hasFlag(args, '--rebuild') && !hasFlag(args, '--add')) {
+    console.error(`hired-wall-build: pass --rebuild or --add; nothing was written.\n\n${USAGE}`);
+    process.exitCode = 1;
+    return;
+  }
 
   const root = flagValue(args, '--root') || HERE;
   const wallPath = join(root, 'HIRED.md');
@@ -227,7 +299,7 @@ async function main() {
     const e = {
       n: entries.length ? Math.max(...entries.map((x) => x.n)) + 1 : 1,
       level,
-      handle: clean(flagValue(args, '--handle'), 40).replace(/[^A-Za-z0-9-]/g, ''),
+      handle: safeHandle(clean(flagValue(args, '--handle'), 40)),
       role: clean(flagValue(args, '--role'), 80),
       sector: clean(flagValue(args, '--sector'), 40),
       geo: clean(flagValue(args, '--geo'), 40),

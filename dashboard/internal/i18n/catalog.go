@@ -17,19 +17,22 @@ type Catalog struct {
 	LoadingPreview string
 
 	// Tabs & filters
-	TabAll       string
-	TabEvaluated string
-	TabApplied   string
-	TabInterview string
-	TabResponded string
-	TabTop       string
-	TabSkip      string
-	TabRejected  string
-	TabDiscarded string
+	TabAll         string
+	TabEvaluated   string
+	TabSpeculative string
+	TabApplied     string
+	TabInterview   string
+	TabResponded   string
+	TabAssessment  string
+	TabTop         string
+	TabSkip        string
+	TabRejected    string
+	TabDiscarded   string
+	TabOther       string
 
 	// Table column headers
 	ColFit      string
-	ColApplied  string
+	ColDate     string
 	ColCompany  string
 	ColRole     string
 	ColStatus   string
@@ -100,15 +103,18 @@ type Catalog struct {
 	TimeDaysAgo   string
 
 	// Status display names
-	StatusEvaluated string
-	StatusApplied   string
-	StatusResponded string
-	StatusInterview string
-	StatusOffer     string
-	StatusRejected  string
-	StatusDiscarded string
-	StatusSkip      string
-	StatusHired     string
+	StatusEvaluated   string
+	StatusSpeculative string
+	StatusApplied     string
+	StatusResponded   string
+	StatusAssessment  string
+	StatusInterview   string
+	StatusOffer       string
+	StatusRejected    string
+	StatusDiscarded   string
+	StatusSkip        string
+	StatusHired       string
+	StatusOther       string
 
 	// Additional UI strings
 	NoData        string
@@ -125,7 +131,11 @@ type Catalog struct {
 	HelpRefresh    string
 	HelpReport     string
 	HelpOpenURL    string
+	HelpQueue      string
+	HelpSkip       string
+	HelpUndoSkip   string
 	HelpOpenPDF    string
+	HelpCopyPDF    string
 	HelpRegenPDF   string
 	HelpChange     string
 	HelpColumns    string
@@ -133,6 +143,7 @@ type Catalog struct {
 	HelpProgress   string
 	HelpStats      string
 	HelpQuit       string
+	HelpKeys       string
 	HelpScroll     string
 	HelpPage       string
 	HelpTopEnd     string
@@ -168,8 +179,51 @@ type Catalog struct {
 	SortLocation string
 	SortPay      string
 	SortLast     string
+	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
+
+	// Inbox tab (#5269): the Pending rows of data/pipeline.md
+	TabInbox               string
+	ColRank                string
+	SortRank               string
+	LabelRank              string
+	LabelURL               string
+	InboxEmpty             string
+	InboxNotRanked         string
+	InboxSummary           string
+	InboxNoWebURL          string
+	InboxUnavailable       string
+	InboxStatusQueued      string
+	InboxStatusRunning     string
+	InboxStatusPaused      string
+	InboxStatusNeedsAnswer string
+	InboxStatusFailed      string
+	InboxStatusDone        string
+
+	// Inbox `e`: queue the selected row in batch/batch-input.tsv (#5269)
+	InboxQueueing         string
+	InboxQueued           string
+	InboxQueueFailed      string
+	InboxQueueAlready     string
+	InboxQueueRetryFailed string
+	InboxQueueUnreadable  string
+	InboxQueueNoWebURL    string
+
+	// Inbox `x` and `u`: skip the selected row in data/pipeline.md, and undo
+	// the last skip of the session (#5269)
+	InboxSkipping       string
+	InboxSkipped        string
+	InboxSkipUnchanged  string
+	InboxSkipUnreadable string
+	InboxSkipFailed     string
+	InboxSkipNoWebURL   string
+	InboxUndoNothing    string
+	InboxUndoing        string
+	InboxUndone         string
+	InboxUndoUnchanged  string
+	InboxUndoGone       string
+	InboxUndoFailed     string
 }
 
 // SortModeLabel returns the localized display label for a sort mode ("score", "date", etc.).
@@ -189,6 +243,8 @@ func (c *Catalog) SortModeLabel(mode string) string {
 		return c.SortPay
 	case "last":
 		return c.SortLast
+	case "posted":
+		return c.SortPosted
 	default:
 		return mode
 	}
@@ -207,8 +263,8 @@ func (c *Catalog) ViewModeLabel(mode string) string {
 }
 
 // StatusLabel returns the localized display label for a canonical status ID
-// (interview, offer, hired, responded, applied, evaluated, skip, rejected,
-// discarded).
+// (interview, offer, hired, responded, assessment, applied, evaluated, skip,
+// rejected, discarded).
 func (c *Catalog) StatusLabel(norm string) string {
 	switch strings.ToLower(strings.TrimSpace(norm)) {
 	case "interview":
@@ -219,18 +275,41 @@ func (c *Catalog) StatusLabel(norm string) string {
 		return c.StatusHired
 	case "responded":
 		return c.StatusResponded
+	case "assessment":
+		return c.StatusAssessment
 	case "applied":
 		return c.StatusApplied
 	case "evaluated":
 		return c.StatusEvaluated
+	case "speculative":
+		return c.StatusSpeculative
 	case "skip":
 		return c.StatusSkip
 	case "rejected":
 		return c.StatusRejected
 	case "discarded":
 		return c.StatusDiscarded
+	case "other":
+		return c.StatusOther
 	default:
 		return norm
+	}
+}
+
+// WorkModeLabel returns the localized display label for a derived work mode
+// ("Remote", "RemoteFlex", "Hybrid", "Full").
+func (c *Catalog) WorkModeLabel(mode string) string {
+	switch mode {
+	case "Remote":
+		return c.ModeRemote
+	case "RemoteFlex":
+		return c.ModeRemoteFlex
+	case "Hybrid":
+		return c.ModeHybrid
+	case "Full":
+		return c.ModeFull
+	default:
+		return mode
 	}
 }
 
@@ -292,19 +371,22 @@ var En = Catalog{
 	LoadingPreview: "Loading preview...",
 
 	// Tabs & filters
-	TabAll:       "ALL",
-	TabEvaluated: "EVALUATED",
-	TabApplied:   "APPLIED",
-	TabInterview: "INTERVIEW",
-	TabResponded: "RESPONDED",
-	TabTop:       "TOP ≥4",
-	TabSkip:      "SKIP",
-	TabRejected:  "REJECTED",
-	TabDiscarded: "DISCARDED",
+	TabAll:         "ALL",
+	TabEvaluated:   "EVALUATED",
+	TabSpeculative: "SPEC",
+	TabApplied:     "APPLIED",
+	TabInterview:   "INTERVIEW",
+	TabResponded:   "RESPONDED",
+	TabAssessment:  "ASSESSMENT",
+	TabTop:         "TOP ≥4",
+	TabSkip:        "SKIP",
+	TabRejected:    "REJECTED",
+	TabDiscarded:   "DISCARDED",
+	TabOther:       "OTHER",
 
 	// Table column headers
 	ColFit:      "FIT",
-	ColApplied:  "APPLIED",
+	ColDate:     "DATE",
 	ColCompany:  "COMPANY",
 	ColRole:     "ROLE",
 	ColStatus:   "STATUS",
@@ -322,13 +404,13 @@ var En = Catalog{
 
 	// Work modes
 	ModeRemote:     "Remote",
-	ModeRemoteFlex: "RemoteFlex",
+	ModeRemoteFlex: "Remote (flex)",
 	ModeHybrid:     "Hybrid",
-	ModeFull:       "Full",
+	ModeFull:       "On-site",
 
 	// Progress screen
 	ProgressTitle:   "SEARCH PROGRESS",
-	ProgressSummary: "%d evaluated | %.1f avg score",
+	ProgressSummary: "%d tracked | %s avg score",
 	FunnelTitle:     "Pipeline Funnel",
 	ScoresTitle:     "Score Distribution",
 	RatesTitle:      "Conversion Rates",
@@ -375,15 +457,18 @@ var En = Catalog{
 	TimeDaysAgo:   "%dd ago",
 
 	// Status display names
-	StatusEvaluated: "Evaluated",
-	StatusApplied:   "Applied",
-	StatusResponded: "Responded",
-	StatusInterview: "Interview",
-	StatusOffer:     "Offer",
-	StatusRejected:  "Rejected",
-	StatusDiscarded: "Discarded",
-	StatusSkip:      "SKIP",
-	StatusHired:     "Hired",
+	StatusEvaluated:   "Evaluated",
+	StatusSpeculative: "Speculative",
+	StatusApplied:     "Applied",
+	StatusResponded:   "Responded",
+	StatusAssessment:  "Assessment",
+	StatusInterview:   "Interview",
+	StatusOffer:       "Offer",
+	StatusRejected:    "Rejected",
+	StatusDiscarded:   "Discarded",
+	StatusSkip:        "SKIP",
+	StatusHired:       "Hired",
+	StatusOther:       "Other",
 
 	// Additional UI strings
 	NoData:        "No data",
@@ -400,7 +485,11 @@ var En = Catalog{
 	HelpRefresh:    " refresh  ",
 	HelpReport:     " report  ",
 	HelpOpenURL:    " open URL  ",
+	HelpQueue:      " queue  ",
+	HelpSkip:       " skip  ",
+	HelpUndoSkip:   " undo skip  ",
 	HelpOpenPDF:    " open PDF  ",
+	HelpCopyPDF:    " copy PDF path  ",
 	HelpRegenPDF:   " regen PDF  ",
 	HelpChange:     " change  ",
 	HelpColumns:    " columns  ",
@@ -408,6 +497,7 @@ var En = Catalog{
 	HelpProgress:   " progress  ",
 	HelpStats:      " stats  ",
 	HelpQuit:       " quit",
+	HelpKeys:       " keys  ",
 	HelpScroll:     " scroll  ",
 	HelpPage:       " page  ",
 	HelpTopEnd:     " top/end  ",
@@ -443,8 +533,48 @@ var En = Catalog{
 	SortLocation: "location",
 	SortPay:      "pay",
 	SortLast:     "last",
+	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
+
+	// Inbox tab
+	TabInbox:               "INBOX",
+	ColRank:                "RANK",
+	SortRank:               "rank",
+	LabelRank:              "Rank: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No pending rows in data/pipeline.md",
+	InboxNotRanked:         "not ranked",
+	InboxSummary:           "%d pending · %d not ranked",
+	InboxNoWebURL:          "Not a web address, nothing opened: %s",
+	InboxUnavailable:       "Inbox unavailable; showing previous rows: %s",
+	InboxStatusQueued:      "Queued",
+	InboxStatusRunning:     "Running",
+	InboxStatusPaused:      "Paused",
+	InboxStatusNeedsAnswer: "Needs answer",
+	InboxStatusFailed:      "Failed",
+	InboxStatusDone:        "Done",
+
+	InboxQueueing:         "Queueing %s ...",
+	InboxQueued:           "Queued. Run batch/batch-runner.sh to evaluate it: %s",
+	InboxQueueFailed:      "Could not queue the row: %s",
+	InboxQueueAlready:     "Already in the batch files, nothing queued: %s",
+	InboxQueueRetryFailed: "Failed in the batch; retry with batch/batch-runner.sh --retry-failed: %s",
+	InboxQueueUnreadable:  "Not queued: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
+	InboxQueueNoWebURL:    "Not a web address, nothing queued: %s",
+
+	InboxSkipping:       "Skipping %s ...",
+	InboxSkipped:        "Skipped; u puts it back: %s",
+	InboxSkipUnchanged:  "Already skipped in data/pipeline.md, nothing changed: %s",
+	InboxSkipUnreadable: "Not skipped: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
+	InboxSkipFailed:     "Could not skip the row: %s",
+	InboxSkipNoWebURL:   "Not a web address, nothing skipped: %s",
+	InboxUndoNothing:    "Nothing to undo: no row was skipped in this session",
+	InboxUndoing:        "Putting back %s ...",
+	InboxUndone:         "Back in the Inbox: %s",
+	InboxUndoUnchanged:  "Not skipped any more, nothing to undo: %s",
+	InboxUndoGone:       "Not put back: the row is no longer in the Pending section of data/pipeline.md: %s",
+	InboxUndoFailed:     "Could not undo the skip; u tries again: %s",
 }
 
 // Tr is the static Turkish translation catalog.
@@ -456,19 +586,22 @@ var Tr = Catalog{
 	LoadingPreview: "Önizleme yükleniyor...",
 
 	// Tabs & filters
-	TabAll:       "TÜMÜ",
-	TabEvaluated: "DEĞERLENDİRİLDİ",
-	TabApplied:   "BAŞVURULDU",
-	TabInterview: "MÜLAKAT",
-	TabResponded: "YANIT VERİLDİ",
-	TabTop:       "EN İYİ ≥4",
-	TabSkip:      "UYGUN DEĞİL",
-	TabRejected:  "REDDEDİLDİ",
-	TabDiscarded: "İPTAL",
+	TabAll:         "TÜMÜ",
+	TabEvaluated:   "DEĞERLENDİRİLDİ",
+	TabSpeculative: "SPEKÜLATİF",
+	TabApplied:     "BAŞVURULDU",
+	TabInterview:   "MÜLAKAT",
+	TabResponded:   "YANIT VERİLDİ",
+	TabAssessment:  "DEĞERLENDİRME",
+	TabTop:         "EN İYİ ≥4",
+	TabSkip:        "UYGUN DEĞİL",
+	TabRejected:    "REDDEDİLDİ",
+	TabDiscarded:   "İPTAL",
+	TabOther:       "DİĞER",
 
 	// Table column headers
 	ColFit:      "UYUM",
-	ColApplied:  "TARİH",
+	ColDate:     "TARİH",
 	ColCompany:  "ŞİRKET",
 	ColRole:     "POZİSYON",
 	ColStatus:   "DURUM",
@@ -492,7 +625,7 @@ var Tr = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "TAKİP İLERLEMESİ",
-	ProgressSummary: "%d değerlendirildi | %.1f ort. puan",
+	ProgressSummary: "%d takipte | %s ort. puan",
 	FunnelTitle:     "Pipeline Hunisi",
 	ScoresTitle:     "Puan Dağılımı",
 	RatesTitle:      "Dönüşüm Oranları",
@@ -539,15 +672,18 @@ var Tr = Catalog{
 	TimeDaysAgo:   "%d gün önce",
 
 	// Status display names
-	StatusEvaluated: "Değerlendirildi",
-	StatusApplied:   "Başvuruldu",
-	StatusResponded: "Yanıt Verildi",
-	StatusInterview: "Mülakat",
-	StatusOffer:     "Teklif",
-	StatusRejected:  "Reddedildi",
-	StatusDiscarded: "İptal Edildi",
-	StatusSkip:      "Uygun Değil",
-	StatusHired:     "İşe Alındı",
+	StatusEvaluated:   "Değerlendirildi",
+	StatusSpeculative: "Spekülatif",
+	StatusApplied:     "Başvuruldu",
+	StatusResponded:   "Yanıt Verildi",
+	StatusAssessment:  "Değerlendirme",
+	StatusInterview:   "Mülakat",
+	StatusOffer:       "Teklif",
+	StatusRejected:    "Reddedildi",
+	StatusDiscarded:   "İptal Edildi",
+	StatusSkip:        "Uygun Değil",
+	StatusHired:       "İşe Alındı",
+	StatusOther:       "Diğer",
 
 	// Additional UI strings
 	NoData:        "Veri yok",
@@ -564,7 +700,11 @@ var Tr = Catalog{
 	HelpRefresh:    " yenile  ",
 	HelpReport:     " rapor  ",
 	HelpOpenURL:    " URL aç  ",
+	HelpQueue:      " sıraya al  ",
+	HelpSkip:       " atla  ",
+	HelpUndoSkip:   " atlamayı geri al  ",
 	HelpOpenPDF:    " PDF'i aç  ",
+	HelpCopyPDF:    " PDF yolunu kopyala  ",
 	HelpRegenPDF:   " PDF üret  ",
 	HelpChange:     " durum  ",
 	HelpColumns:    " sütunlar  ",
@@ -572,6 +712,7 @@ var Tr = Catalog{
 	HelpProgress:   " ilerleme  ",
 	HelpStats:      " istatistik  ",
 	HelpQuit:       " çıkış",
+	HelpKeys:       " tuşlar  ",
 	HelpScroll:     " kaydır  ",
 	HelpPage:       " sayfa  ",
 	HelpTopEnd:     " baş/son  ",
@@ -607,8 +748,48 @@ var Tr = Catalog{
 	SortLocation: "konum",
 	SortPay:      "ücret",
 	SortLast:     "son",
+	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
+
+	// Inbox tab
+	TabInbox:               "GELEN",
+	ColRank:                "SIRA",
+	SortRank:               "sıra",
+	LabelRank:              "Sıra: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "data/pipeline.md içinde bekleyen satır yok",
+	InboxNotRanked:         "sıralanmadı",
+	InboxSummary:           "%d bekleyen · %d sıralanmadı",
+	InboxNoWebURL:          "Web adresi değil, hiçbir şey açılmadı: %s",
+	InboxUnavailable:       "Gelen kutusu okunamadı; önceki satırlar gösteriliyor: %s",
+	InboxStatusQueued:      "Sırada",
+	InboxStatusRunning:     "Çalışıyor",
+	InboxStatusPaused:      "Duraklatıldı",
+	InboxStatusNeedsAnswer: "Yanıt bekliyor",
+	InboxStatusFailed:      "Başarısız",
+	InboxStatusDone:        "Tamamlandı",
+
+	InboxQueueing:         "Sıraya alınıyor: %s ...",
+	InboxQueued:           "Sıraya alındı. Değerlendirmek için batch/batch-runner.sh çalıştırın: %s",
+	InboxQueueFailed:      "Satır sıraya alınamadı: %s",
+	InboxQueueAlready:     "Zaten toplu iş dosyalarında, sıraya alınmadı: %s",
+	InboxQueueRetryFailed: "Toplu işte başarısız; batch/batch-runner.sh --retry-failed ile yeniden deneyin: %s",
+	InboxQueueUnreadable:  "Sıraya alınmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
+	InboxQueueNoWebURL:    "Web adresi değil, sıraya alınmadı: %s",
+
+	InboxSkipping:       "Atlanıyor: %s ...",
+	InboxSkipped:        "Atlandı; u ile geri gelir: %s",
+	InboxSkipUnchanged:  "data/pipeline.md içinde zaten atlanmış, değişiklik yok: %s",
+	InboxSkipUnreadable: "Atlanmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
+	InboxSkipFailed:     "Satır atlanamadı: %s",
+	InboxSkipNoWebURL:   "Web adresi değil, atlanmadı: %s",
+	InboxUndoNothing:    "Geri alınacak bir şey yok: bu oturumda hiçbir satır atlanmadı",
+	InboxUndoing:        "Geri getiriliyor: %s ...",
+	InboxUndone:         "Yeniden gelen kutusunda: %s",
+	InboxUndoUnchanged:  "Artık atlanmış değil, geri alınacak bir şey yok: %s",
+	InboxUndoGone:       "Geri getirilmedi: satır artık data/pipeline.md dosyasının Pending bölümünde değil: %s",
+	InboxUndoFailed:     "Atlama geri alınamadı; u ile yeniden deneyin: %s",
 }
 
 // Es is the static Spanish translation catalog.
@@ -620,19 +801,22 @@ var Es = Catalog{
 	LoadingPreview: "Cargando vista previa...",
 
 	// Tabs & filters
-	TabAll:       "TODAS",
-	TabEvaluated: "EVALUADAS",
-	TabApplied:   "APLICADAS",
-	TabInterview: "ENTREVISTA",
-	TabResponded: "RESPONDIDAS",
-	TabTop:       "TOP ≥4",
-	TabSkip:      "OMITIR",
-	TabRejected:  "RECHAZADAS",
-	TabDiscarded: "DESCARTADAS",
+	TabAll:         "TODAS",
+	TabEvaluated:   "EVALUADAS",
+	TabSpeculative: "ESPECULATIVAS",
+	TabApplied:     "APLICADAS",
+	TabInterview:   "ENTREVISTA",
+	TabResponded:   "RESPONDIDAS",
+	TabAssessment:  "PRUEBA",
+	TabTop:         "TOP ≥4",
+	TabSkip:        "OMITIR",
+	TabRejected:    "RECHAZADAS",
+	TabDiscarded:   "DESCARTADAS",
+	TabOther:       "OTRAS",
 
 	// Table column headers
 	ColFit:      "AJUSTE",
-	ColApplied:  "APLICADA",
+	ColDate:     "FECHA",
 	ColCompany:  "EMPRESA",
 	ColRole:     "PUESTO",
 	ColStatus:   "ESTADO",
@@ -656,7 +840,7 @@ var Es = Catalog{
 
 	// Progress screen
 	ProgressTitle:   "PROGRESO DE BÚSQUEDA",
-	ProgressSummary: "%d evaluadas | %.1f puntuación media",
+	ProgressSummary: "%d en seguimiento | %s puntuación media",
 	FunnelTitle:     "Embudo del proceso",
 	ScoresTitle:     "Distribución de puntuaciones",
 	RatesTitle:      "Tasas de conversión",
@@ -703,15 +887,18 @@ var Es = Catalog{
 	TimeDaysAgo:   "hace %dd",
 
 	// Status display names
-	StatusEvaluated: "Evaluada",
-	StatusApplied:   "Aplicada",
-	StatusResponded: "Respondida",
-	StatusInterview: "Entrevista",
-	StatusOffer:     "Oferta",
-	StatusRejected:  "Rechazada",
-	StatusDiscarded: "Descartada",
-	StatusSkip:      "OMITIR",
-	StatusHired:     "Contratada",
+	StatusEvaluated:   "Evaluada",
+	StatusSpeculative: "Especulativa",
+	StatusApplied:     "Aplicada",
+	StatusResponded:   "Respondida",
+	StatusAssessment:  "Prueba",
+	StatusInterview:   "Entrevista",
+	StatusOffer:       "Oferta",
+	StatusRejected:    "Rechazada",
+	StatusDiscarded:   "Descartada",
+	StatusSkip:        "OMITIR",
+	StatusHired:       "Contratada",
+	StatusOther:       "Otras",
 
 	// Additional UI strings
 	NoData:        "Sin datos",
@@ -728,7 +915,11 @@ var Es = Catalog{
 	HelpRefresh:    " actualizar  ",
 	HelpReport:     " informe  ",
 	HelpOpenURL:    " abrir URL  ",
+	HelpQueue:      " encolar  ",
+	HelpSkip:       " omitir  ",
+	HelpUndoSkip:   " deshacer omisión  ",
 	HelpOpenPDF:    " abrir PDF  ",
+	HelpCopyPDF:    " copiar ruta del PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
 	HelpChange:     " cambiar  ",
 	HelpColumns:    " columnas  ",
@@ -736,6 +927,7 @@ var Es = Catalog{
 	HelpProgress:   " progreso  ",
 	HelpStats:      " estadísticas  ",
 	HelpQuit:       " salir",
+	HelpKeys:       " teclas  ",
 	HelpScroll:     " desplazar  ",
 	HelpPage:       " página  ",
 	HelpTopEnd:     " inicio/fin  ",
@@ -771,44 +963,110 @@ var Es = Catalog{
 	SortLocation: "ubicación",
 	SortPay:      "salario",
 	SortLast:     "último",
+	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
+
+	// Inbox tab
+	TabInbox:               "BANDEJA",
+	ColRank:                "RANGO",
+	SortRank:               "rango",
+	LabelRank:              "Rango: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No hay filas pendientes en data/pipeline.md",
+	InboxNotRanked:         "sin rango",
+	InboxSummary:           "%d pendientes · %d sin rango",
+	InboxNoWebURL:          "No es una dirección web; no se abrió nada: %s",
+	InboxUnavailable:       "Bandeja no disponible; se muestran las filas anteriores: %s",
+	InboxStatusQueued:      "En cola",
+	InboxStatusRunning:     "En curso",
+	InboxStatusPaused:      "En pausa",
+	InboxStatusNeedsAnswer: "Falta respuesta",
+	InboxStatusFailed:      "Fallida",
+	InboxStatusDone:        "Hecha",
+
+	InboxQueueing:         "Encolando %s ...",
+	InboxQueued:           "En cola. Ejecuta batch/batch-runner.sh para evaluarla: %s",
+	InboxQueueFailed:      "No se pudo encolar la fila: %s",
+	InboxQueueAlready:     "Ya está en los archivos de batch; no se encoló nada: %s",
+	InboxQueueRetryFailed: "Falló en el batch; reinténtalo con batch/batch-runner.sh --retry-failed: %s",
+	InboxQueueUnreadable:  "No se encoló: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
+	InboxQueueNoWebURL:    "No es una dirección web; no se encoló nada: %s",
+
+	InboxSkipping:       "Omitiendo %s ...",
+	InboxSkipped:        "Omitida; u la devuelve: %s",
+	InboxSkipUnchanged:  "Ya estaba omitida en data/pipeline.md; no cambió nada: %s",
+	InboxSkipUnreadable: "No se omitió: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
+	InboxSkipFailed:     "No se pudo omitir la fila: %s",
+	InboxSkipNoWebURL:   "No es una dirección web; no se omitió nada: %s",
+	InboxUndoNothing:    "Nada que deshacer: no se omitió ninguna fila en esta sesión",
+	InboxUndoing:        "Devolviendo %s ...",
+	InboxUndone:         "De vuelta en la bandeja: %s",
+	InboxUndoUnchanged:  "Ya no está omitida; nada que deshacer: %s",
+	InboxUndoGone:       "No se devolvió: la fila ya no está en la sección Pending de data/pipeline.md: %s",
+	InboxUndoFailed:     "No se pudo deshacer la omisión; u lo intenta de nuevo: %s",
 }
 
 // Current points to the active language catalog. Defaults to English (&En).
 var Current = &En
 
+// languages is the single source of truth for which languages exist, in the
+// order ToggleLang cycles them. SetLang, GetLang and ToggleLang all read it, so
+// adding a language is one entry here rather than three separate edits that can
+// drift — which is how ToggleLang came to be unable to reach Spanish.
+//
+// Order matters twice: it is the cycle order, and SetLang matches by prefix in
+// this order. "en" before "es" is harmless since neither is a prefix of the
+// other, but a future code that is a prefix of another must come after it.
+var languages = []struct {
+	code    string
+	catalog *Catalog
+}{
+	{"en", &En},
+	{"tr", &Tr},
+	{"es", &Es},
+}
+
 // SetLang sets the active catalog based on language code prefix
 // (e.g., "tr", "tr_TR" -> &Tr; "es", "es_ES" -> &Es; anything else -> &En).
 func SetLang(lang string) {
 	l := strings.ToLower(strings.TrimSpace(lang))
-	switch {
-	case strings.HasPrefix(l, "tr"):
-		Current = &Tr
-	case strings.HasPrefix(l, "es"):
-		Current = &Es
-	default:
-		Current = &En
+	for _, entry := range languages {
+		if strings.HasPrefix(l, entry.code) {
+			Current = entry.catalog
+			return
+		}
 	}
+	Current = &En
 }
 
-// ToggleLang switches Current between &En and &Tr.
+// ToggleLang advances Current to the next language in `languages`, wrapping.
+//
+// It used to flip between &En and &Tr, with every other catalog falling into
+// the else branch and landing on English. Spanish was added after that was
+// written, so a user who started the dashboard in Spanish pressed the key the
+// help bar advertises as "lang" and could not get back — the toggle could only
+// ever reach English and Turkish. Cycling makes every supported language
+// reachable from every other one.
 func ToggleLang() {
-	if Current == &En {
-		Current = &Tr
-	} else {
-		Current = &En
+	for i, entry := range languages {
+		if Current == entry.catalog {
+			Current = languages[(i+1)%len(languages)].catalog
+			return
+		}
 	}
+	// Current points at a catalog outside the list: land somewhere defined
+	// rather than leaving it unchanged, so the key always does something.
+	Current = &En
 }
 
-// GetLang returns the active language code ("tr" if Current == &Tr, "es" if
-// Current == &Es, else "en").
+// GetLang returns the active language code, or "en" when Current points at a
+// catalog that is not in `languages`.
 func GetLang() string {
-	if Current == &Tr {
-		return "tr"
-	}
-	if Current == &Es {
-		return "es"
+	for _, entry := range languages {
+		if Current == entry.catalog {
+			return entry.code
+		}
 	}
 	return "en"
 }

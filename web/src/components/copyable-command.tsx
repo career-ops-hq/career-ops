@@ -39,7 +39,7 @@ export function CopyableCommand({
       <span
         aria-hidden="true"
         className={cn(
-          "hidden shrink-0 text-xs font-medium text-brand transition-opacity duration-200 sm:inline-block",
+          "hidden shrink-0 text-xs font-medium text-brand-text transition-opacity duration-200 sm:inline-block",
           copied ? "opacity-100" : "opacity-0",
         )}
       >
@@ -55,7 +55,7 @@ export function CopyableCommand({
         className="shrink-0 text-muted"
       >
         {copied ? (
-          <CheckIcon className="size-4 text-brand" aria-hidden="true" />
+          <CheckIcon className="size-4 text-brand-text" aria-hidden="true" />
         ) : (
           <CopyIcon className="size-4" aria-hidden="true" />
         )}

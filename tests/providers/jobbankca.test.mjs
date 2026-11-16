@@ -1,5 +1,5 @@
 // tests/providers/jobbankca.test.mjs
-import { pass, fail, ROOT } from '../helpers.mjs';
+import { pass, fail, ROOT, rmSync } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs';
@@ -321,12 +321,20 @@ try {
     const withTmpCwd = async (setup, run) => {
       const tmp = mkdtempSync(join(tmpdir(), 'career-ops-jobbankca-fallback-'));
       const cwdBefore = process.cwd();
+      const rootEnvBefore = { root: process.env.CAREER_OPS_ROOT, dir: process.env.CAREER_OPS_DATA_DIR };
       try {
         setup(tmp);
         process.chdir(tmp);
+        process.env.CAREER_OPS_ROOT = tmp;
+        process.env.CAREER_OPS_DATA_DIR = '';
         return await run();
       } finally {
+        if (rootEnvBefore.root === undefined) delete process.env.CAREER_OPS_ROOT;
+        else process.env.CAREER_OPS_ROOT = rootEnvBefore.root;
+        if (rootEnvBefore.dir === undefined) delete process.env.CAREER_OPS_DATA_DIR;
+        else process.env.CAREER_OPS_DATA_DIR = rootEnvBefore.dir;
         process.chdir(cwdBefore);
+        rmSync(tmp, { recursive: true, force: true });
       }
     };
 
@@ -455,6 +463,26 @@ try {
     } else {
       fail(`jobbankca.fetch() returned ${fetched.length} valid job(s) and later-page job=${fetched.some((job) => job.title === 'role 100')} (expected 100/true)`);
     }
+    if (fetched.truncated === undefined) pass('jobbankca.fetch() leaves a fully read board unmarked');
+    else fail(`jobbankca.fetch() marked a fully read board: ${JSON.stringify(fetched.truncated)}`);
+
+    // A later page failing keeps the pages already read, and marks the board
+    // partial: the rest of that keyword was never read.
+    const laterFailed = await jobbankca.fetch(
+      { provider: 'jobbankca', name: 'Later page fails', jobbankca: { keywords: ['developer'] } },
+      {
+        sleep: async () => {},
+        fetchText: async (url) => {
+          if (new URL(url).searchParams.get('page') === '2') throw new Error('network error');
+          return feed(fullRawPage);
+        },
+      },
+    );
+    if (laterFailed.length === 99 && laterFailed.truncated?.reason === 'fetch-error' && laterFailed.truncated.fetched === 99) {
+      pass('jobbankca.fetch() keeps page 1 and marks the board partial when a later page fails');
+    } else {
+      fail(`jobbankca.fetch() later-page failure: ${laterFailed.length} job(s), truncated = ${JSON.stringify(laterFailed.truncated)}`);
+    }
   }
 
   // ── fetch(): entry.max_pages configures the run, ctx.maxPages only caps it ──
@@ -490,6 +518,13 @@ try {
       pass('jobbankca.fetch(): a failed keyword does not abort keywords that still succeed');
     } else {
       fail(`jobbankca.fetch() with one failing keyword returned ${JSON.stringify(fetched)}`);
+    }
+    // ...but the failed keyword was never read, so the result says the board is
+    // partial: scan.mjs logs it partial instead of reachable.
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 1) {
+      pass('jobbankca.fetch(): a failed keyword marks the board partial (fetch-error)');
+    } else {
+      fail(`jobbankca.fetch() with one failing keyword: truncated = ${JSON.stringify(fetched.truncated)}`);
     }
   }
 

@@ -77,6 +77,55 @@ entries:
       - "Ogletree Deakins analysis of California Labor Code 432.3 salary history inquiry ban (AB 168)"
       - "Jackson Lewis guidance on California's salary history ban effective January 1, 2018"
 
+  # Norway: national law, so the key is the country code alone (as the US key in
+  # immigration-status-requirements.yml). Quoted: a YAML 1.1 parser reads a bare
+  # NO as boolean false. Verified on lovdata.no and ldo.no 2026-11-06.
+  - jurisdiction: "NO"
+    jurisdiction_name: "Norway"
+    prohibited: >-
+      Seeking, in the hiring process (including in the job advertisement, at
+      interview or in any other way), information about the applicant's
+      pregnancy, adoption or plans to have children; religion or belief;
+      ethnicity; disability; sexual orientation, gender identity or gender
+      expression; political views; or membership of a trade union. Asking for
+      health information other than what is needed to perform the tasks of the
+      position.
+    matching: >-
+      Fires when a posting or application-form field asks the applicant to
+      state any of those characteristics: for example a question about
+      pregnancy or family plans, religious affiliation, ethnic background,
+      disability, sexual orientation, party politics or union membership, or a
+      request for a general health declaration not tied to the position's
+      tasks. The cited sections give no exception for pregnancy, adoption or
+      plans to have children, or for sexual orientation, gender identity or
+      gender expression. They allow a question about ethnicity, religion,
+      belief, disability or cohabitation status (samlivsform) where the
+      information is decisive for performing the work; about cohabitation
+      status, religion or belief where the employer's purpose is to promote a
+      particular religion or belief and the position matters for that purpose;
+      and about political views or union membership where the nature of the
+      position justifies it or the employer's purpose is to promote a
+      particular political view and the position matters for that purpose. For
+      the purpose-based exceptions the requirement must be stated in the
+      advertisement. When the posting states such a reason, say so and do not
+      report a clean match.
+      Does NOT fire on an equal-opportunity statement that encourages everyone
+      to apply, on a question about whether the applicant needs accommodation
+      to perform the tasks, or on a physical or health requirement plainly tied
+      to the tasks. Treat a clearly optional, voluntary self-identification
+      question as uncertain, not as a match: the Ombud's guidance treats
+      information the applicant shares voluntarily as outside the ban, and
+      whether a form question is truly voluntary cannot be fully judged from
+      the form.
+    legal_basis: >-
+      Likestillings- og diskrimineringsloven (LOV-2017-06-16-51) § 30;
+      arbeidsmiljøloven (LOV-2005-06-17-62) § 13-4 and § 9-3
+    effective: "2018-01-01"
+    sources:
+      - "Lovdata — likestillings- og diskrimineringsloven chapter 5, § 30 Forbud mot innhenting av opplysninger i ansettelsesprosesser (lovdata.no/dokument/NL/lov/2017-06-16-51/KAPITTEL_5)"
+      - "Lovdata — arbeidsmiljøloven § 13-4 Innhenting av opplysninger ved ansettelse (current wording in force 2018-01-01) and § 9-3 Innhenting av helseopplysninger ved ansettelse (lovdata.no/dokument/NL/lov/2005-06-17-62)"
+      - "Likestillings- og diskrimineringsombudet — Diskriminerende spørsmål på jobbintervju (ldo.no/diskrimineringssituasjoner/diskriminerende-sporsmal-pa-jobbintervju/)"
+
 # Known candidate rows for contributors — NOT entries yet. Each needs its own
 # verified statute citation + effective date + matching-scope check before
 # being promoted to an entry (scopes vary a lot; verify individually):

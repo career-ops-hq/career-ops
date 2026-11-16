@@ -11,20 +11,25 @@
  * verification logic):
  *
  *   A story-bank.md numeric claim is used ONLY if the same number, with a
- *   matching unit, ALSO appears verbatim in cv.md. If it doesn't, the claim
- *   is EXCLUDED from output entirely — not flagged, not included with a
+ *   matching unit, ALSO appears verbatim in cv.md — for a before/after claim,
+ *   both numbers in the SAME cv.md sentence. If it doesn't, the claim is
+ *   EXCLUDED from output entirely — not flagged, not included with a
  *   caveat. Pulling an unverified figure into words a candidate will say out
  *   loud in a negotiation is a higher-stakes place for a fabrication to land
  *   than an interview answer: if challenged and it doesn't hold up, the
  *   damage is to credibility and the offer, not just to one interview
  *   answer. This is deliberately the narrowest possible check — direct
- *   substring match, no fuzzy scoring, no new infrastructure. A richer
- *   four-tier provenance classifier for story-bank.md claims is in progress
- *   on a separate, unmerged branch (`story-provenance-check.mjs`, PR #2948).
- *   Once that lands, this script would be a natural candidate to consume its
- *   `existing` bucket directly instead of doing its own narrower check — but
- *   that is a future upgrade, not a dependency: this file has zero import
- *   from that branch and ships standalone.
+ *   substring match, no fuzzy scoring, no new infrastructure.
+ *
+ *   A story whose `**Provenance:**` marker reads `user-cannot-confirm` is
+ *   excluded before that check runs, whatever cv.md says: the user has said
+ *   they don't know whether its figures hold, and AGENTS.md's confirmation
+ *   invariant forbids turning that answer into a quantified claim. The marker
+ *   is read through story-provenance-check.mjs's parseStoryBlocks(), so a
+ *   marker the checker honours (including one below a table or heading
+ *   inside the story) is honoured here too. That checker's four-bucket
+ *   classification is not used as the gate itself: its `existing` bucket
+ *   accepts a context match this gate deliberately does not.
  *
  * Second invariant: wage basis and task frequency are NEVER guessed. Both
  * must come from either (a) explicit text in the story-bank entry itself
@@ -54,21 +59,27 @@
  *      node negotiation-roi.mjs --wage 45 --occurrences 52       (direct annual count)
  *      node negotiation-roi.mjs --self-test
  *
- * Issue #2949 — github.com/santifer/career-ops
+ * Issue #2949 — github.com/career-ops-hq/career-ops
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
+import { join } from 'path';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
-import { parseStories } from './match-star.mjs';
+import { parseStories } from './lib/story-bank.mjs';
+import { parseStoryBlocks } from './story-provenance-check.mjs';
 import { flagValue, hasFlag } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 
-const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
-const STORY_BANK_PATH = join(CAREER_OPS, 'interview-prep', 'story-bank.md');
 const DATA_ROOT = getCareerOpsRoot();
+// BOTH from the data root, because the v1 safety gate compares them: a claim
+// survives only if its number also appears verbatim in cv.md. Resolving the
+// story bank from the CODE root and cv.md from the DATA root pointed the two
+// halves of one comparison at two different installs — so for any configured
+// data root the gate read a story bank that is not there, found no claims, and
+// produced an empty draft that looks like "you have no quantified stories".
+const STORY_BANK_PATH = join(DATA_ROOT, 'interview-prep', 'story-bank.md');
 const CV_PATH = join(DATA_ROOT, 'cv.md');
 
 // ── Frequency vocabulary ─────────────────────────────────────────────
@@ -184,8 +195,17 @@ function anyVariantInText(variants, text) {
   });
 }
 
+// A sentence ends at a line break or at `.`/`!`/`?` followed by whitespace,
+// so "1.5 hours" stays in one piece.
+function cvSentences(text) {
+  return text.split(/\n+|(?<=[.!?])\s+/).filter((s) => s.trim());
+}
+
 /**
  * Verify a claim's number(s) appear verbatim (with a matching unit) in cv.md.
+ * A time reduction needs both numbers in ONE cv.md sentence: "8 hours of
+ * on-call coverage" in one bullet and "a 2 hours workshop" in another are two
+ * unrelated facts, not a reduction from 8 hours to 2.
  * Returns { verified: boolean, checkedVariants: string[] } — never mutates
  * the claim, never partially includes an unverified figure.
  * @param {object} claim
@@ -196,9 +216,9 @@ export function verifyClaim(claim, cvText) {
   if (claim.type === 'time-reduction') {
     const beforeVariants = numberVariants(claim.before.value, HOUR_UNIT_FAMILY);
     const afterVariants = numberVariants(claim.after.value, HOUR_UNIT_FAMILY);
-    const beforeOk = anyVariantInText(beforeVariants, text);
-    const afterOk = anyVariantInText(afterVariants, text);
-    return { verified: beforeOk && afterOk, checkedVariants: [...beforeVariants, ...afterVariants] };
+    const verified = cvSentences(text).some((sentence) =>
+      anyVariantInText(beforeVariants, sentence) && anyVariantInText(afterVariants, sentence));
+    return { verified, checkedVariants: [...beforeVariants, ...afterVariants] };
   }
   if (claim.type === 'percent-reduction') {
     const variants = [`${claim.percent}%`, `${claim.percent} %`];
@@ -324,10 +344,13 @@ export function buildDraftParagraph(claim, calc) {
  */
 export function analyze(storyBankText, cvText, opts = {}) {
   const stories = parseStories(storyBankText);
+  const provenanceAt = new Map(parseStoryBlocks(storyBankText)
+    .filter((e) => e.kind === 'story').map((e) => [e.line, e.provenance]));
   const warnings = [];
 
   let claimsFound = 0;
   let excludedUnverified = 0;
+  let excludedCannotConfirm = 0;
   const calculable = [];
   const uncalculable = [];
 
@@ -337,6 +360,13 @@ export function analyze(storyBankText, cvText, opts = {}) {
     const storyLabel = story.theme ? `[${story.theme}] ${story.title}` : story.title;
     const claims = extractQuantifiedClaims(storyText, storyLabel);
     claimsFound += claims.length;
+
+    // Before the cv.md gate, not after it: a figure the user said they can't
+    // confirm stays out even when cv.md happens to carry the same numbers.
+    if (provenanceAt.get(story.line) === 'user-cannot-confirm') {
+      excludedCannotConfirm += claims.length;
+      continue;
+    }
 
     for (const claim of claims) {
       const { verified } = verifyClaim(claim, cvText);
@@ -360,6 +390,9 @@ export function analyze(storyBankText, cvText, opts = {}) {
   if (excludedUnverified > 0) {
     warnings.push(`${excludedUnverified} quantified claim${excludedUnverified === 1 ? '' : 's'} found in story-bank.md ${excludedUnverified === 1 ? 'was' : 'were'} excluded: no matching figure found verbatim in cv.md (v1 safety gate).`);
   }
+  if (excludedCannotConfirm > 0) {
+    warnings.push(`${excludedCannotConfirm} quantified claim${excludedCannotConfirm === 1 ? '' : 's'} ${excludedCannotConfirm === 1 ? 'was' : 'were'} excluded: the story is marked **Provenance:** user-cannot-confirm, so its figures are never used as a talking point.`);
+  }
   if (stories.length === 0) {
     warnings.push('No stories found in story-bank.md.');
   }
@@ -369,6 +402,7 @@ export function analyze(storyBankText, cvText, opts = {}) {
     claimsFound,
     verified: calculable.length + uncalculable.length,
     excludedUnverified,
+    excludedCannotConfirm,
     calculable,
     uncalculable,
     warnings,
@@ -609,6 +643,7 @@ function printSummary(result) {
   console.log(`  Quantified claims found: ${result.claimsFound}`);
   console.log(`  Verified against cv.md: ${result.verified}`);
   console.log(`  Excluded (no verbatim match in cv.md): ${result.excludedUnverified}`);
+  console.log(`  Excluded (story marked user-cannot-confirm): ${result.excludedCannotConfirm}`);
 
   if (result.calculable.length) {
     console.log('\n  Draft talking points:\n');
@@ -702,6 +737,25 @@ function main() {
   }
 }
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node negotiation-roi.mjs [--summary] [--wage <n>] [--frequency <unit>] [--occurrences <n>] [--self-test]
+
+  --summary             human-readable output instead of JSON
+  --wage <n>            wage used for the annualized estimate
+  --frequency <unit>    daily|weekly|biweekly|monthly|quarterly|annually|yearly
+  --occurrences <n>     occurrences per year, instead of --frequency
+  --self-test           run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   main();
 }

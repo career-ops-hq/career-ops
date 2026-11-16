@@ -250,12 +250,26 @@ function entries(pipelinePath) {
 // 6. Importing scan.mjs must not create data/ on its own - the module has three
 //    write-time paths (pipeline, scan-history, scan-runs) and none of them
 //    should fire before a caller actually asks for a write (#3159).
+//
+//    CAREER_OPS_ROOT is pinned to the temp dir, and that pin is the whole test.
+//    scan.mjs anchors its paths to getCareerOpsRoot(), NOT to the cwd, so with
+//    the variable unset an import-time mkdir lands in the REPO's own data/ --
+//    a directory that already exists on every developer machine and in CI. The
+//    assertion below would look at the empty temp dir, see no data/, and pass
+//    while the regression it guards was live. Setting cwd alone is inert here.
+//    With the root pinned, the only data/ scan.mjs can create is this one.
 {
   const dir = mkdtempSync(join(tmpdir(), 'scan-outpaths-import-'));
   try {
     const scanUrl = pathToFileURL(join(ROOT, 'scan.mjs')).href;
+    // The two overrides are cleared so an ambient value in the developer's own
+    // shell cannot redirect scan-history/pipeline out of the directory watched.
+    const env = { ...process.env, CAREER_OPS_ROOT: dir };
+    delete env.CAREER_OPS_SCAN_HISTORY;
+    delete env.CAREER_OPS_PIPELINE;
     execFileSync(NODE, ['--input-type=module', '-e', `import(${JSON.stringify(scanUrl)})`], {
       cwd: dir,
+      env,
       encoding: 'utf-8',
     });
     if (!existsSync(join(dir, 'data'))) {

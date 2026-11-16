@@ -4,8 +4,8 @@ contact_links:
     url: https://discord.gg/8pRpHETxa4
     about: For setup help and general questions, ask in Discord instead of opening an issue.
   - name: GitHub Discussions
-    url: https://github.com/santifer/career-ops/discussions
+    url: https://github.com/career-ops-hq/career-ops/discussions
     about: For ideas, Q&A, and community conversations.
   - name: "📤 Sharing scan results or automation output?"
-    url: https://github.com/santifer/career-ops/blob/main/DATA_CONTRACT.md
+    url: https://github.com/career-ops-hq/career-ops/blob/main/DATA_CONTRACT.md
     about: Your scans and reports stay local (data/ + reports/). Please don't file them here — they'd be public, and they're not needed upstream. Point any scheduled run at your own fork.

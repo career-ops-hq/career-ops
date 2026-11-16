@@ -86,6 +86,7 @@ func TestComputeStatsMetrics(t *testing.T) {
 		{
 			Archetype: "Technical AI PM",
 			Score:     4.5,
+			HasScore:  true,
 			WorkMode:  "Remote",
 			Location:  "Berlin",
 			PayMax:    180000,
@@ -95,6 +96,7 @@ func TestComputeStatsMetrics(t *testing.T) {
 		{
 			Archetype: "Senior AI Product Manager",
 			Score:     4.0,
+			HasScore:  true,
 			WorkMode:  "Remote",
 			Location:  "Berlin",
 			PayMax:    200000,
@@ -104,6 +106,7 @@ func TestComputeStatsMetrics(t *testing.T) {
 		{
 			Archetype: "Solutions Architect AI",
 			Score:     3.2,
+			HasScore:  true,
 			WorkMode:  "Hybrid",
 			Location:  "Munich",
 			PayMax:    120000,
@@ -113,6 +116,7 @@ func TestComputeStatsMetrics(t *testing.T) {
 		{
 			Archetype: "Research Scientist",
 			Score:     2.1,
+			HasScore:  true,
 			WorkMode:  "Onsite",
 			Location:  "Munich",
 			PayMax:    90000,
@@ -246,5 +250,21 @@ func TestComputeStatsMetrics(t *testing.T) {
 	// QualityBarPct: Elite (1) + Strong (1) = 2 out of 4 scored = 50%
 	if metrics.QualityBarPct < 49.99 || metrics.QualityBarPct > 50.01 {
 		t.Errorf("expected QualityBarPct ~50.0, got %f", metrics.QualityBarPct)
+	}
+}
+
+// Every tier label ComputeStatsMetrics can emit is in ScoreTierLabels, in its
+// order. The stats screen colours slices by looking a label up there, so a
+// label the list lacks would fall back to the neutral colour.
+func TestScoreTiersUseTheExportedLabels(t *testing.T) {
+	apps := []model.CareerApplication{{Score: 4.7}, {Score: 4.1}, {Score: 3.6}, {Score: 3.1}, {Score: 2.4}}
+	got := ComputeStatsMetrics(apps).ScoreTiers
+	if len(got) != len(ScoreTierLabels) {
+		t.Fatalf("one app per tier gave %d tiers, want %d: %v", len(got), len(ScoreTierLabels), got)
+	}
+	for i, tier := range got {
+		if tier.Label != ScoreTierLabels[i] {
+			t.Errorf("ScoreTiers[%d] = %q, want %q", i, tier.Label, ScoreTierLabels[i])
+		}
 	}
 }

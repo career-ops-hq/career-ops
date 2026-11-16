@@ -13,6 +13,10 @@ try {
   if (torre.id === 'torre') pass('torre.id is "torre"');
   else fail(`torre.id is ${JSON.stringify(torre.id)}`);
 
+  if (torre.detect({ provider: 'torre' })?.url === 'https://search.torre.co/opportunities/_search' && torre.detect({ name: 'X' }) === null)
+    pass('torre.detect() matches only an explicit provider: torre');
+  else fail('torre.detect() should match only provider: torre');
+
   // -- Query construction: only filters proven to move `total` may be sent. --
 
   if (JSON.stringify(buildTorreQuery({})) === '{}')
@@ -99,53 +103,6 @@ try {
     ],
   };
 
-  let capturedUrl = null;
-  let capturedOpts = null;
-  const fetched = await torre.fetch(
-    { name: 'Torre Feed', provider: 'torre', search: 'engineering manager' },
-    { fetchJson: async (url, opts) => { capturedUrl = url; capturedOpts = opts; return sample; } },
-  );
-
-  if (capturedUrl === 'https://search.torre.co/opportunities/_search?offset=0&size=20')
-    pass('torre.fetch() requests the search endpoint at offset=0 with the 20-row cap');
-  else fail(`torre.fetch() requested ${JSON.stringify(capturedUrl)}`);
-
-  if (capturedOpts && capturedOpts.method === 'POST'
-      && capturedOpts.headers?.['Content-Type'] === 'application/json'
-      && capturedOpts.body === JSON.stringify({ 'skill/role': { text: 'engineering manager', experience: '1-plus-year' } }))
-    pass('torre.fetch() POSTs the JSON query body');
-  else fail(`torre.fetch() opts = ${JSON.stringify(capturedOpts)}`);
-
-  if (capturedOpts && capturedOpts.redirect === 'error')
-    pass('torre.fetch() passes redirect:"error" to fetchJson (SSRF guard)');
-  else fail(`torre.fetch() should pass redirect:"error", got: ${JSON.stringify(capturedOpts)}`);
-
-  if (fetched.length === 2)
-    pass('torre.fetch() keeps 2 valid rows (drops closed, untitled, id-less and bad-id rows)');
-  else fail(`torre.fetch() returned ${fetched.length} jobs (expected 2): ${JSON.stringify(fetched)}`);
-
-  if (fetched[0]?.title === 'Engineering Manager'
-      && fetched[0]?.url === 'https://torre.ai/post/NwBp2Axr'
-      && fetched[0]?.company === 'Torre.ai')
-    pass('torre.fetch() trims the title and builds the permalink from the id');
-  else fail(`torre.fetch() row 0 = ${JSON.stringify(fetched[0])}`);
-
-  if (fetched[0]?.location === 'Remote — Colombia, Uruguay')
-    pass('torre.fetch() keeps the country list on a remote posting');
-  else fail(`torre.fetch() row 0 location = ${JSON.stringify(fetched[0]?.location)}`);
-
-  if (fetched[0]?.postedAt === Date.parse('2026-08-06T17:48:17.000Z'))
-    pass('torre.fetch() maps created (ISO 8601) to postedAt in ms');
-  else fail(`torre.fetch() row 0 postedAt = ${JSON.stringify(fetched[0]?.postedAt)}`);
-
-  if (fetched[1]?.location === 'Montevideo, Uruguay' && fetched[1]?.company === 'dLocal')
-    pass('torre.fetch() joins locations for a non-remote row and skips an unnamed org');
-  else fail(`torre.fetch() row 1 = ${JSON.stringify(fetched[1])}`);
-
-  if (fetched[1] && !('postedAt' in fetched[1]))
-    pass('torre.fetch() omits postedAt when created is absent');
-  else fail(`torre.fetch() row 1 postedAt = ${JSON.stringify(fetched[1]?.postedAt)}`);
-
   const noStatus = normalizeTorreOpportunity({ id: 'Zz99yy88', objective: 'Role', remote: true });
   if (noStatus && noStatus.url === 'https://torre.ai/post/Zz99yy88')
     pass('normalizeTorreOpportunity() treats an absent status as open');
@@ -156,53 +113,25 @@ try {
     pass('normalizeTorreOpportunity() defaults company to "Torre" with no org and no entry name');
   else fail(`normalizeTorreOpportunity(no org) company = ${JSON.stringify(noOrg?.company)}`);
 
-  // -- Error handling and the single-request contract --
+  // -- Retirement (#4859): fetch() throws without touching the network. --
 
-  let badResponseThrew = false;
+  let networkCalls = 0;
+  let fetchErr = null;
   try {
-    await torre.fetch({ name: 'X' }, { fetchJson: async () => ({ wrong: true }) });
+    await torre.fetch(
+      { name: 'Torre - cybersecurity', provider: 'torre', search: 'cybersecurity' },
+      { fetchJson: async () => { networkCalls++; return { results: [] }; } },
+    );
   } catch (err) {
-    badResponseThrew = /unexpected API response/.test(err.message);
+    fetchErr = err;
   }
-  if (badResponseThrew) pass('torre.fetch() throws on unexpected API response shape');
-  else fail('torre.fetch() should throw when the results array is absent');
-
-  const mkRow = (i) => ({ id: `Id${String(i).padStart(6, '0')}`, objective: `Role ${i}`, status: 'open', remote: true });
-  const fullPage = { results: Array.from({ length: 20 }, (_, i) => mkRow(i)) };
-
-  // The endpoint caps at 20 rows and ignores offset/page/from, so the provider
-  // must issue exactly ONE request and never try to advance.
-  const callUrls = [];
-  const single = await torre.fetch(
-    { name: 'T' },
-    { fetchJson: async (url) => { callUrls.push(url); return fullPage; } },
-  );
-  if (callUrls.length === 1)
-    pass('torre.fetch() issues exactly one request even on a full 20-row page');
-  else fail(`torre.fetch() made ${callUrls.length} requests (expected 1): ${JSON.stringify(callUrls)}`);
-
-  if (single.length === 20)
-    pass('torre.fetch() returns the full 20-row page');
-  else fail(`torre.fetch() returned ${single.length} rows (expected 20)`);
-
-  // max_pages / ctx.maxPages must not resurrect a paging loop that cannot advance.
-  const pagingHints = [];
-  await torre.fetch(
-    { name: 'T', max_pages: 10 },
-    { maxPages: 5, fetchJson: async (url) => { pagingHints.push(url); return fullPage; } },
-  );
-  if (pagingHints.length === 1)
-    pass('torre.fetch() stays at one request regardless of max_pages / ctx.maxPages');
-  else fail(`torre.fetch() made ${pagingHints.length} requests with paging hints set`);
-
-  const dupRow = mkRow(1);
-  const deduped = await torre.fetch(
-    { name: 'T' },
-    { fetchJson: async () => ({ results: [dupRow, dupRow, mkRow(2)] }) },
-  );
-  if (deduped.length === 2)
-    pass('torre.fetch() dedups a repeated opportunity within a page');
-  else fail(`torre.fetch() dedup failed: ${JSON.stringify(deduped.map((j) => j.url))}`);
+  if (networkCalls === 0 && fetchErr
+      && /torre: this source is unavailable/.test(fetchErr.message)
+      && /HTTP 400/.test(fetchErr.message)
+      && /#4859/.test(fetchErr.message)
+      && /remove `provider: torre`/.test(fetchErr.message))
+    pass('torre.fetch() throws a "source unavailable" message naming the cause (#4859) without touching the network');
+  else fail(`torre.fetch() should throw a retirement message with zero network calls, got: networkCalls=${networkCalls}, error=${fetchErr ? fetchErr.message : '(did not throw)'}`);
 
 } catch (e) {
   fail(`torre provider tests crashed: ${e.message}`);

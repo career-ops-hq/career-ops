@@ -1,7 +1,7 @@
 // tests/gemini-node-floor.test.mjs
 //
-// The Gemini integration needs Node 20+ while the rest of the project needs 18+.
-// That difference lived only in prose until now: docs/SETUP.md carried it, the
+// The Gemini integration needs Node 20+. When the rest of the project needed
+// only 18+, that difference lived only in prose until now: docs/SETUP.md carried it, the
 // docs site did not, and the Spanish and French pages had drifted into asserting
 // Node 20 as a *general* requirement, which is false. A user on Node 18 who
 // followed the site and chose Gemini hit the wall at runtime with no warning.
@@ -32,8 +32,10 @@ const ok = (cond, msg) => (cond ? pass(msg) : fail(msg));
   ok(v.pass === false, 'Node 18 + Gemini fails');
   ok(v.label.includes(String(GEMINI_MIN_MAJOR)), 'the failure names the required major');
   ok(v.label.includes('18.20.4'), 'and names the version actually found');
-  ok(Array.isArray(v.fix) && v.fix.length >= 2, 'it offers a fix');
-  ok(v.fix.some((f) => /another CLI/i.test(f)), 'including the way out that does not require upgrading Node');
+  ok(Array.isArray(v.fix) && v.fix.length >= 1, 'it offers a fix');
+  // Since #4801 the project floor (22.13) is above Gemini's, so switching CLI
+  // no longer rescues a Node 18 user. The fix must not suggest it does.
+  ok(!v.fix.some((f) => /another CLI/i.test(f)), 'it does not offer another CLI as a way out (none exists below the project floor)');
 
   const boundary = geminiNodeFloor('gemini', '19.9.0');
   ok(boundary.pass === false, 'Node 19 still fails (the floor is 20, not "recent enough")');

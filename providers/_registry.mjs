@@ -51,19 +51,22 @@ export async function loadProviders(dir) {
 }
 
 /**
- * Resolve which provider handles a tracked_companies entry.
+ * Resolve which provider handles a portals.yml entry (tracked_companies or job_boards).
  *   1. Explicit `provider:` field wins (skips detect()).
  *   2. local-parser when parser.command + script are configured (before API detect).
  *   3. Otherwise each provider's detect() runs in load order; first hit wins.
  *
- * @param {object} entry - tracked_companies entry.
+ * @param {object} entry - portals.yml entry (tracked_companies or job_boards).
  * @param {Map<string, object>} providers - id→provider Map from loadProviders().
  * @param {{skipIds?: string[]}} [opts] - Provider ids to skip (e.g. 'local-parser'
- *   so a network-only health check never execs a configured local command).
+ *   so a network-only health check never execs a configured local command). A
+ *   skipped id is skipped however the entry reached it: an explicit `provider:`
+ *   naming one resolves as if the field were absent, the same way the same
+ *   entry resolves when it relies on detect().
  * @returns {{provider: object}|{error: string}|null}
  */
 export function resolveProvider(entry, providers, { skipIds = [] } = {}) {
-  if (entry.provider) {
+  if (entry.provider && !skipIds.includes(entry.provider)) {
     const p = providers.get(entry.provider);
     if (!p) return { error: `unknown provider: ${entry.provider}` };
     return { provider: p };

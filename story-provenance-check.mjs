@@ -44,7 +44,9 @@
  * back into either "verified" or "not yet checked" through repetition.
  *
  *   existing            — the claim's number (or, for a range, both its
- *                          endpoints) appears in cv.md, OR the story-bank
+ *                          endpoints, in one sentence) appears in cv.md
+ *                          counting the same unit, in a sentence that shares
+ *                          context with the claim's, OR the story-bank
  *                          entry's own Provenance field explicitly reads
  *                          `user-stated YYYY-MM-DD` (the user has already
  *                          confirmed this figure even though cv.md's prose
@@ -154,17 +156,24 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import { flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { getCareerOpsRoot } from './path-resolver.mjs';
+import { splitStoryBlocks, isValidStory, getField, STORY_FIELDS } from './lib/story-bank.mjs';
 
 // ── Config ──────────────────────────────────────────────────────────
 
-const DEFAULT_STORY_BANK_PATH = 'interview-prep/story-bank.md';
-const DEFAULT_CV_PATH = 'cv.md';
+const DATA_ROOT = getCareerOpsRoot();
+const DEFAULT_STORY_BANK_PATH = join(DATA_ROOT, 'interview-prep', 'story-bank.md');
+const DEFAULT_CV_PATH = join(DATA_ROOT, 'cv.md');
 
 // ── Numeric claim patterns ──────────────────────────────────────────
-// Each pattern extracts {kind, text, index, values}. `values` are the
-// numbers a cv.md match must reproduce for the claim to count as `existing`.
+// Each pattern extracts {kind, text, index, values, units}. `values` are the
+// numbers a cv.md match must reproduce for the claim to count as `existing`,
+// and `units` (one per value, normalized by normalizeUnit()) are what each
+// number must be OF there: a story's "40-person team" is not verified by a
+// cv.md "40%", however close the two sit to the word "team".
 
 const CLAIM_PATTERNS = [
   // "cut costs 40%" / "improved completion 12.5%"
@@ -172,15 +181,18 @@ const CLAIM_PATTERNS = [
     kind: 'percent',
     re: /\d+(?:\.\d+)?%/g,
     values: (m) => [parseFloat(m[0])],
+    units: () => ['%'],
   },
   // "500+ employees", "50+ courses" — number, literal +, a following word.
-  // The following word is NOT captured as a required noun (kept loose on
-  // purpose — real prose has too many phrasings to enumerate), it only
-  // anchors the pattern away from bare "50+" with nothing after it.
+  // The following word is NOT required to be a known noun (kept loose on
+  // purpose — real prose has too many phrasings to enumerate), it anchors
+  // the pattern away from bare "50+" with nothing after it, and it is the
+  // unit cv.md has to count in.
   {
     kind: 'plus-noun',
-    re: /\b(\d+)\+\s+[a-zA-Z]+/g,
+    re: /\b(\d+)\+\s+([a-zA-Z]+)/g,
     values: (m) => [parseFloat(m[1])],
+    units: (m) => [normalizeUnit(m[2])],
   },
   // "8 hours to 2 hours", "8 hrs -> 2 hrs" — the classic before/after
   // automation-story shape. Both endpoints must match cv.md for `existing`.
@@ -188,25 +200,66 @@ const CLAIM_PATTERNS = [
     kind: 'hour-range',
     re: /\b(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:→|->|to)\s*(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\b/gi,
     values: (m) => [parseFloat(m[1]), parseFloat(m[2])],
+    units: () => ['hour', 'hour'],
   },
   // "15-person team", "6-member panel"
   {
     kind: 'scale-hyphen',
-    re: /\b(\d+)-(?:person|member)\b/gi,
+    re: /\b(\d+)-(person|member)\b/gi,
     values: (m) => [parseFloat(m[1])],
+    units: (m) => [normalizeUnit(m[2])],
   },
   // "50 students", "200 employees", "12 instructors"
   {
     kind: 'scale-noun',
-    re: /\b(\d+)\s+(?:students?|employees?|people|staff|learners?|instructors?|departments?|cohorts?)\b/gi,
+    re: /\b(\d+)\s+(students?|employees?|people|staff|learners?|instructors?|departments?|cohorts?)\b/gi,
     values: (m) => [parseFloat(m[1])],
+    units: (m) => [normalizeUnit(m[2])],
   },
 ];
 
-// Generic number scanner used to build the set of numeric values present in
-// cv.md. Deliberately permissive (no unit/context requirement) — cv.md is
-// the trust anchor, so over-matching here can only make MORE claims count as
-// `existing`, never fewer, which is the safe direction to err in.
+const HOUR_UNITS = new Set(['h', 'hr', 'hrs', 'hour', 'hours']);
+// Units that say how much but not of what (see hasScopedNumberMatch()), and
+// the words that spell them, which are never context.
+const UNITS_WITHOUT_METRIC = new Set(['%', 'hour']);
+const UNIT_WORDS = new Set([...HOUR_UNITS, 'percent', 'cent']);
+const METRIC_CONTEXT_WORDS = 2;
+const PERSON_UNITS = new Set(['person', 'persons', 'people', 'member', 'members']);
+
+/**
+ * One spelling per unit, so a claim and a cv.md occurrence compare equal when
+ * they count the same thing: every hour spelling is `hour`, every headcount
+ * word `person` ("15-person team" and "a team of 15 people" are one claim), any
+ * other noun loses a plural `s` ("employees" and "employee").
+ * @param {string} word
+ * @returns {string}
+ */
+function normalizeUnit(word) {
+  const w = String(word).toLowerCase();
+  if (HOUR_UNITS.has(w)) return 'hour';
+  if (PERSON_UNITS.has(w)) return 'person';
+  return w.length > 3 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w;
+}
+
+/**
+ * The unit a number in cv.md is followed by: `%` (or "percent"), or the next
+ * word, through a hyphen or a `+` ("15-person", "500+ customers"). null when
+ * nothing unit-like follows — "2019 – 2024" verifies nothing.
+ * @param {string} text
+ * @param {number} end - index just past the number
+ * @returns {string|null}
+ */
+function unitAfter(text, end) {
+  const after = foldForContext(text.slice(end, end + 40));
+  if (/^\s?(?:%|per\s?cent\b)/.test(after)) return '%';
+  const word = after.match(/^(?:-|\+?\s*)(\p{L}+)/u);
+  return word ? normalizeUnit(word[1]) : null;
+}
+
+// Generic number scanner used to find every number in cv.md. Permissive on
+// purpose: it finds the candidates, and buildCvNumberContexts() records the
+// unit and sentence each one sits in, so a claim counts as `existing` only
+// against an occurrence of the same number counting the same thing.
 const NUMBER_SCAN_RE = /\d+(?:\.\d+)?/g;
 
 // Filtered out of context-word overlap so common connective words don't
@@ -221,35 +274,99 @@ const STOPWORDS = new Set([
 ]);
 
 // ── Story-bank parsing ──────────────────────────────────────────────
-// Same block shape match-star.mjs's parseStories() already relies on
-// (`### [Theme] Title` headers, `**Label:** value` lines) — reimplemented
-// narrowly here rather than imported, so this checker doesn't take on a
-// dependency on match-star.mjs's STAR-specific fields it doesn't need.
+// Splitting and validity come from lib/story-bank.mjs, the same definition
+// match-star.mjs and negotiation-roi.mjs use (#4514). What this checker adds
+// is coverage: it keeps EVERY block and every table row outside a block, not
+// only the valid stories, because a figure in a malformed entry is still a
+// figure in story-bank.md. Hiding it from the checker would hide exactly the
+// unverified numbers #2947 exists to surface. Invalid entries are flagged,
+// never dropped.
+
+/** First `**Provenance:**` value in `text`, lowercased, or null. */
+function provenanceIn(text) {
+  // The marker must open its own line (optional indent, at most one list or
+  // quote marker). A `**Provenance:**` quoted inside another field's value is
+  // story text, not the story's marker (issue #4819).
+  const m = text.match(/^[ \t]*(?:[-*+>][ \t]+)?\*\*Provenance:\*\*[ \t]*(.+)$/im);
+  return m ? m[1].trim().toLowerCase() : null;
+}
 
 /**
- * Parse story-bank.md into blocks with title, provenance marker, and body.
+ * Parse story-bank.md into checkable entries: every `### ` block, valid or
+ * not; every run of text a story was cut off from by a table or heading; and
+ * every table row outside a block. Each is attributed to itself, so a figure
+ * is never credited to a field it isn't in.
+ *
+ * Provenance is the exception, on purpose. A story and the text cut off from
+ * it are ONE unit for the marker, as they were before a story ended at a
+ * table or heading: a marker in either covers both. Otherwise a Result line
+ * that happens to sit below a table would lose its story's
+ * `user-cannot-confirm` and come back as derived-unverified, asking the user
+ * to confirm a figure they already said they can't (the decay AGENTS.md's
+ * confirmation invariant forbids). Table rows inherit only that denial, never
+ * `source:` or `user-stated`: rows after a story are often separate Block F
+ * rows, and a denial can only make a classification stricter.
+ *
  * @param {string} content
- * @returns {Array<{title: string, provenance: string|null, body: string}>}
+ * @returns {Array<{kind: 'story'|'trailing'|'table-row', title: string, provenance: string|null, body: string, valid: boolean, line: number, actionAfterCut?: string}>}
  */
 function parseStoryBlocks(content) {
-  const blocks = content.split(/^### /m).slice(1);
-  const stories = [];
+  const { blocks, tableRows, trailing } = splitStoryBlocks(content);
 
-  for (const block of blocks) {
-    const lines = block.trim().split('\n');
-    const header = lines[0].trim();
-    if (!header) continue;
+  // The story's own text first, then its cut-off runs in file order: the
+  // first marker found is the unit's, the same rule as reading the block whole.
+  const unitProvenance = blocks.map((b, i) => [b.raw, ...trailing.filter((t) => t.story === i).map((t) => t.text)]
+    .map(provenanceIn).find((p) => p) ?? null);
 
-    const themeMatch = header.match(/^\[([^\]]+)\]\s*(.+)/);
-    const title = themeMatch ? themeMatch[2].trim() : header;
+  const stories = blocks.map((b, i) => {
+    // An Action below the cut is why such a story reads as invalid; say so
+    // instead of "no Action", which sends the user looking for a missing line.
+    const cut = trailing.find((t) => t.story === i && getField(t.text, STORY_FIELDS.action));
+    return {
+      kind: 'story',
+      title: b.title || `(untitled, line ${b.line})`,
+      provenance: unitProvenance[i],
+      body: b.raw,
+      valid: isValidStory(b),
+      line: b.line,
+      ...(cut ? { actionAfterCut: cut.after } : {}),
+    };
+  });
 
-    const provMatch = block.match(/\*\*Provenance:\*\*\s*(.+)/i);
-    const provenance = provMatch ? provMatch[1].trim().toLowerCase() : null;
+  const cutOff = trailing.map((t) => ({
+    kind: 'trailing',
+    title: `(after ${t.after}, line ${t.line}) in "${stories[t.story].title}"`,
+    provenance: unitProvenance[t.story],
+    body: t.text,
+    valid: false,
+    line: t.line,
+    after: t.after,
+  }));
 
-    stories.push({ title, provenance, body: block });
-  }
+  const rows = tableRows.map((r) => ({
+    kind: 'table-row',
+    title: `(table row, line ${r.line}) ${r.label}`.trim(),
+    provenance: r.story >= 0 && unitProvenance[r.story] === 'user-cannot-confirm' ? 'user-cannot-confirm' : null,
+    body: r.text,
+    valid: false,
+    line: r.line,
+  }));
 
-  return stories;
+  return [...stories, ...cutOff, ...rows];
+}
+
+/**
+ * Entries the other readers cannot see, with why.
+ * @param {ReturnType<typeof parseStoryBlocks>} entries
+ */
+function malformedEntries(entries) {
+  const reason = (e) => {
+    if (e.kind === 'table-row') return 'table row: not a ### block';
+    if (e.kind === 'trailing') return `text after a ${e.after} inside a story: the readers stop at the ${e.after}`;
+    if (e.actionAfterCut) return `its **A (Action):** line comes after a ${e.actionAfterCut}, where the readers stop`;
+    return 'no **A (Action):** line';
+  };
+  return entries.filter((e) => !e.valid).map((e) => ({ title: e.title, kind: e.kind, line: e.line, reason: reason(e) }));
 }
 
 // ── Claim extraction ─────────────────────────────────────────────────
@@ -257,15 +374,15 @@ function parseStoryBlocks(content) {
 /**
  * Extract numeric claims from a story block's body text.
  * @param {string} body
- * @returns {Array<{kind: string, text: string, index: number, values: number[]}>}
+ * @returns {Array<{kind: string, text: string, index: number, values: number[], units: string[]}>}
  */
 function extractClaims(body) {
   const claims = [];
-  for (const { kind, re, values } of CLAIM_PATTERNS) {
+  for (const { kind, re, values, units } of CLAIM_PATTERNS) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(body)) !== null) {
-      claims.push({ kind, text: m[0], index: m.index, values: values(m) });
+      claims.push({ kind, text: m[0], index: m.index, values: values(m), units: units(m) });
     }
   }
   claims.sort((a, b) => a.index - b.index);
@@ -286,16 +403,17 @@ function extractNumbers(text) {
 }
 
 /**
- * Map of numeric value -> array of context-word lists, one per occurrence of
- * that number in cv.md. This scopes the `existing` bucket's number match to
- * the same metric/context, not a bare digit-string coincidence: a story
- * claiming "15-person team" must not count as verified just because cv.md
- * separately says "15 years of experience" with no team/headcount language
- * nearby (issue #2947, CodeRabbit finding — unscoped number matching).
- * Reuses contextWords(), the same mechanism already used to scope the
- * `supportedByResume` bucket below, instead of a second parallel heuristic.
+ * Map of numeric value -> one entry per occurrence of that number in cv.md:
+ * the unit it counts, the sentence it sits in, and that sentence's context
+ * words. This scopes the `existing` bucket's number match to the same metric,
+ * not a bare digit-string coincidence. A story claiming "15-person team" must
+ * not count as verified because cv.md separately says "15 years of experience"
+ * (issue #2947, CodeRabbit finding — unscoped number matching), nor because
+ * cv.md says "cut deploy time 15%" in a sentence that also mentions a team: a
+ * percentage is not a headcount, so the unit has to match as well as the
+ * context.
  * @param {string} cvText
- * @returns {Map<number, string[][]>}
+ * @returns {Map<number, Array<{unit: string|null, sentence: number, words: string[]}>>}
  */
 function buildCvNumberContexts(cvText) {
   const map = new Map();
@@ -303,17 +421,46 @@ function buildCvNumberContexts(cvText) {
   let m;
   while ((m = re.exec(cvText)) !== null) {
     const value = parseFloat(m[0]);
-    const words = contextWords(cvText, m.index, m[0].length);
+    const end = m.index + m[0].length;
+    const occurrence = {
+      unit: unitAfter(cvText, end),
+      sentence: sentenceBounds(cvText, m.index, end).start,
+      words: contextWords(cvText, m.index, m[0].length),
+    };
     if (!map.has(value)) map.set(value, []);
-    map.get(value).push(words);
+    map.get(value).push(occurrence);
   }
   return map;
 }
 
 /**
- * Content words (length >= 4, not a stopword, not itself a number) in a
- * window around a claim's position — the signal used for the
- * `supportedByResume` heuristic.
+ * The sentence around [start, end): from the previous line break or sentence
+ * end (`.`, `!` or `?` followed by whitespace) to the next one. A decimal
+ * point is not a sentence end, so "12.5%" stays whole.
+ * @param {string} text
+ * @param {number} start
+ * @param {number} end
+ * @returns {{start: number, end: number}}
+ */
+function sentenceBounds(text, start, end) {
+  const isEnd = (i) => text[i] === '\n' || (/[.!?]/.test(text[i]) && (i + 1 >= text.length || /\s/.test(text[i + 1])));
+  let s = start;
+  while (s > 0 && !isEnd(s - 1)) s--;
+  let e = end;
+  while (e < text.length && !isEnd(e)) e++;
+  return { start: s, end: e };
+}
+
+/**
+ * Content words (length >= 4, not a stopword, not itself a number) in the
+ * sentence around a number — the signal used for both the `existing` scoping
+ * and the `supportedByResume` heuristic.
+ *
+ * The sentence, not a fixed window of characters either side. A window
+ * reached across sentences and story fields, so "Reduced incident rate 40%"
+ * borrowed "team" from the Action line above it and matched a cv.md "team"
+ * that had nothing to do with incidents. `**R (Result):**`-style field labels
+ * are dropped for the same reason: "result" is a label, not a context word.
  *
  * The strip keeps letters, combining marks and digits of ANY script. It used
  * to be `[^a-z0-9\s]`, which deletes every non-ASCII letter, and that broke
@@ -378,10 +525,9 @@ function foldForContext(text) {
     .replace(/\u0307/gu, '');
 }
 
-function contextWords(body, matchIndex, matchLength, windowChars = 90) {
-  const start = Math.max(0, matchIndex - windowChars);
-  const end = Math.min(body.length, matchIndex + matchLength + windowChars);
-  const snippet = foldForContext(body.slice(start, end))
+function contextWords(body, matchIndex, matchLength) {
+  const { start, end } = sentenceBounds(body, matchIndex, matchIndex + matchLength);
+  const snippet = foldForContext(body.slice(start, end).replace(/\*\*[^*\n]*:\*\*/g, ' '))
     .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ');
   const words = snippet.split(/\s+/).filter(Boolean);
   // `\p{N}` not `\d`: a token of Devanagari or full-width digits is just as
@@ -423,16 +569,32 @@ function hasContextOverlap(words, cvText) {
 }
 
 /**
- * Whether a claim's context words overlap with the context words of at
- * least one cv.md occurrence of the same number — the scoping check that
- * keeps the `existing` bucket from firing on a bare digit-string
- * coincidence (see buildCvNumberContexts() above).
+ * Whether cv.md has the claim's numbers in ONE sentence, each counting the
+ * claim's unit, with enough shared context words to be the same metric — the
+ * scoping check that keeps the `existing` bucket from firing on a digit-string
+ * coincidence (see buildCvNumberContexts() above). One sentence for all of a
+ * range's endpoints: "8 hours of on-call" in one bullet and "a 2 hours
+ * workshop" in another are two facts, not an 8-to-2-hours reduction.
+ *
+ * How much context is "enough" depends on whether the unit names what is
+ * measured. "40 people" or "500+ customers" does, so one shared word placing
+ * it ("team", "onboarded") is enough. "40%" and "8 hours" do not: a percentage
+ * or a duration of what? There one shared word is not evidence. "The team cut
+ * deploy time 40%" and "The team reduced incident rate 40%" share "team" and
+ * nothing about the metric, so these need METRIC_CONTEXT_WORDS shared words,
+ * and the unit's own words ("hours", "percent") never count toward them.
+ * @param {{values: number[], units: string[]}} claim
  * @param {string[]} claimWords
- * @param {string[][]} cvContextLists
+ * @param {ReturnType<typeof buildCvNumberContexts>} cvNumberContexts
  * @returns {boolean}
  */
-function hasScopedNumberMatch(claimWords, cvContextLists) {
-  return cvContextLists.some((cvWords) => cvWords.some((w) => claimWords.includes(w)));
+function hasScopedNumberMatch(claim, claimWords, cvNumberContexts) {
+  const occurrences = (i) => (cvNumberContexts.get(claim.values[i]) || [])
+    .filter((o) => o.unit === claim.units[i]);
+  const needed = claim.units.every((u) => UNITS_WITHOUT_METRIC.has(u)) ? METRIC_CONTEXT_WORDS : 1;
+  const shared = (words) => words.filter((w) => claimWords.includes(w) && !UNIT_WORDS.has(w)).length;
+  return occurrences(0).some((first) => shared(first.words) >= needed
+    && claim.values.every((_, i) => occurrences(i).some((o) => o.sentence === first.sentence)));
 }
 
 const USER_STATED_RE = /^user-stated\s+\d{4}-\d{2}-\d{2}$/;
@@ -447,8 +609,20 @@ const USER_STATED_RE = /^user-stated\s+\d{4}-\d{2}-\d{2}$/;
  * @returns {{existing: object[], supportedByResume: object[], derivedUnverified: object[], userCannotConfirm: object[]}}
  */
 function classifyStoryBank(storyBankText, cvText) {
+  return classifyEntries(parseStoryBlocks(storyBankText), cvText);
+}
+
+/**
+ * classifyStoryBank() over entries already in hand, for a reader that checks
+ * the exact text it is about to print rather than the whole file: match-star
+ * classifies the ATS answer it formats, so every warning is about a figure in
+ * that answer.
+ * @param {Array<{title: string, provenance: string|null, body: string}>} stories
+ * @param {string} cvText
+ * @returns {ReturnType<typeof classifyStoryBank>}
+ */
+function classifyEntries(stories, cvText) {
   const cvNumberContexts = buildCvNumberContexts(cvText);
-  const stories = parseStoryBlocks(storyBankText);
 
   const buckets = { existing: [], supportedByResume: [], derivedUnverified: [], userCannotConfirm: [] };
 
@@ -488,16 +662,12 @@ function classifyStoryBank(storyBankText, cvText) {
 
       const claimWords = contextWords(story.body, claim.index, claim.text.length);
 
-      // Scoped number match: the number must appear in cv.md AND the cv.md
-      // occurrence's own context must share a term with the claim's context
-      // — a bare digit-string coincidence elsewhere in cv.md (e.g. cv.md's
-      // "15 years of experience" against a story's "15-person team") must
-      // not count as `existing`.
-      const matchesCv = claim.values.every((v) => {
-        const cvContextLists = cvNumberContexts.get(v);
-        return cvContextLists ? hasScopedNumberMatch(claimWords, cvContextLists) : false;
-      });
-      if (matchesCv) {
+      // Scoped number match: the number must appear in cv.md counting the
+      // same unit, and that cv.md sentence must share a term with the
+      // claim's sentence — a digit-string coincidence elsewhere in cv.md
+      // (cv.md's "15 years of experience", or "cut deploy time 15%", against
+      // a story's "15-person team") must not count as `existing`.
+      if (hasScopedNumberMatch(claim, claimWords, cvNumberContexts)) {
         buckets.existing.push(entry);
         continue;
       }
@@ -546,7 +716,7 @@ function diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPa
 }
 
 // ── Exports (for test-all.mjs and other consumers) ───────────────────
-export { parseStoryBlocks, extractClaims, extractNumbers, classifyStoryBank, diagnose };
+export { parseStoryBlocks, malformedEntries, extractClaims, extractNumbers, classifyStoryBank, classifyEntries, diagnose };
 
 // ── CLI ──────────────────────────────────────────────────────────────
 
@@ -789,7 +959,25 @@ Brings 15 years of unrelated professional background in adult education prior to
 
 // ── Main ─────────────────────────────────────────────────────────────
 
+// Derived from the flags this file actually accepts, so `--help` cannot
+// describe an option that does not exist.
+const USAGE = `Usage:
+  node story-provenance-check.mjs [--summary] [--story-bank <path>] [--cv <path>] [--self-test]
+
+  --summary            human-readable table instead of JSON
+  --story-bank <path>  override the story-bank path
+  --cv <path>          override the cv.md path
+  --self-test          run the built-in checks
+  --help, -h   print this and exit`;
+
 if (isMainModule(import.meta.url)) {
+  // BEFORE any work. Unhandled, `--help` fell through to the analysis: this
+  // script printed a full report for it, which is not what the flag asks for
+  // and hides that it was never recognised.
+  if (process.argv.slice(2).some((a) => a === '--help' || a === '-h')) {
+    console.log(USAGE);
+    process.exit(0);
+  }
   if (selfTestMode) {
     runSelfTest();
   } else {
@@ -799,7 +987,13 @@ if (isMainModule(import.meta.url)) {
     const cvText = cvExists ? readFileSync(cvPath, 'utf-8') : '';
 
     const result = classifyStoryBank(storyBankText, cvText);
-    const storyCount = storyBankExists ? parseStoryBlocks(storyBankText).length : 0;
+    const entries = storyBankExists ? parseStoryBlocks(storyBankText) : [];
+    // Every `### ` block counts, valid or not: this checker did parse them and
+    // did check their figures. A missing Action is reported in `malformed`,
+    // not as "no stories parsed". Table rows don't count, so a bank of nothing
+    // but table rows is still a low-confidence result.
+    const storyCount = entries.filter((e) => e.kind === 'story').length;
+    const malformed = malformedEntries(entries);
     const claimCount = result.existing.length + result.supportedByResume.length
       + result.derivedUnverified.length + result.userCannotConfirm.length;
     const diagnosis = diagnose(storyBankExists, cvExists, storyCount, claimCount, storyBankPath, cvPath);
@@ -822,6 +1016,13 @@ if (isMainModule(import.meta.url)) {
       printBucket('derived-unverified (only in story-bank.md, unconfirmed)', '⚠️', result.derivedUnverified);
       printBucket('user-cannot-confirm (explicitly marked, durable)', '🔒', result.userCannotConfirm);
 
+      if (malformed.length) {
+        console.log('');
+        console.log(`  🧩 malformed — invisible to npm run star / negotiation-roi (${malformed.length})`);
+        for (const m of malformed) console.log(`     - ${m.title} — ${m.reason}`);
+        console.log('     Convert to the format in templates/story-bank.template.md.');
+      }
+
       if (diagnosis) {
         console.log('');
         console.log('  🚨 LOW CONFIDENCE: this is not a clean result.');
@@ -829,7 +1030,7 @@ if (isMainModule(import.meta.url)) {
         console.log(`     (reason: ${diagnosis.reason})`);
       }
     } else {
-      console.log(JSON.stringify({ ...result, lowConfidence: diagnosis }, null, 2));
+      console.log(JSON.stringify({ ...result, malformed, lowConfidence: diagnosis }, null, 2));
     }
   }
 }

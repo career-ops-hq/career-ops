@@ -88,16 +88,47 @@ try {
     fail(`row 1 location = ${JSON.stringify(jobs[1]?.location)}, expected "Lagos, Lagos, NG, Remote"`);
   }
 
+  // A ready-made name without the country ("Seattle, WA") gets country.name
+  // folded in, so a location_filter.block on "United States" can see it.
+  const countryJobs = parseBreezyResponse([
+    {
+      name: 'Staff Engineer',
+      url: 'https://acme.breezy.hr/p/c0de-staff',
+      location: { name: 'Seattle, WA', city: 'Seattle', state: 'WA', country: { name: 'United States' }, is_remote: true },
+    },
+  ], 'Acme');
+  if (countryJobs[0]?.location === 'Seattle, WA, United States, Remote') {
+    pass('parseBreezyResponse appends country.name to a location.name that lacks it');
+  } else {
+    fail(`country-fold location = ${JSON.stringify(countryJobs[0]?.location)}, expected "Seattle, WA, United States, Remote"`);
+  }
+
   if (jobs[1]?.postedAt === undefined) {
     pass('parseBreezyResponse omits postedAt when published_date is absent');
   } else {
     fail(`row 1 postedAt should be undefined, got ${JSON.stringify(jobs[1]?.postedAt)}`);
   }
 
-  if (parseBreezyResponse(null, 'X').length === 0 && parseBreezyResponse({}, 'X').length === 0) {
-    pass('non-array payload → empty result (no crash)');
-  } else {
-    fail('non-array payload should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parseBreezyResponse([], 'X');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parseBreezyResponse returns [] for []');
+    else fail(`parseBreezyResponse [] → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parseBreezyResponse(body, 'X'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('breezy: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parseBreezyResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parseBreezyResponse throws, naming what it got, for a body that is not a board');
   }
 
   // a row already containing "Remote" must not get a duplicate "Remote" suffix

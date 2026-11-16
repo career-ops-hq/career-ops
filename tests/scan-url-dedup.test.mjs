@@ -33,7 +33,7 @@ import { collectSeenUrls } from '../scan.mjs';
 
 console.log('\nscan.mjs — normalizeUrlForDedup() ignores tracking params, preserves identity');
 try {
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // The reported bug: one StepStone posting, two scans, two `rltr` values.
   const SS = 'https://www.stepstone.de/stellenangebote--AI-Engineer-Berlin-Acme--12345-inline.html';
@@ -54,10 +54,40 @@ try {
   if (gh1 !== gh2) pass('identity params (gh_jid) stay distinct');
   else fail(`collapsed distinct gh_jid postings onto ${gh1}`);
 
-  // A tracking param must not take a real one with it.
-  const mixed = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
-  if (mixed === 'https://jobs.example.com/j?gh_jid=9') pass('only tracking params are dropped from a mixed query');
-  else fail(`mixed query = ${mixed}`);
+  // SPA job routes carry identity in the fragment. Dropping every fragment
+  // makes distinct postings on the same tenant path compare equal.
+  const hashJob1 = normalizeUrlForDedup('https://jobs.example.com/careers#/job/123');
+  const hashJob2 = normalizeUrlForDedup('https://jobs.example.com/careers#/jobs/456');
+  if (hashJob1 !== hashJob2) pass('recognized hash-route job IDs stay distinct');
+  else fail(`collapsed distinct hash-route postings onto ${hashJob1}`);
+
+  const preExistingInternalParam = normalizeUrlForDedup(
+    'https://jobs.example.com/careers?_career_ops_fragment_job_id=query-id#/jobs/hash-id',
+  );
+  const fragmentParams = new URL(preExistingInternalParam).searchParams.getAll('_career_ops_fragment_job_id');
+  if (fragmentParams.includes('query-id') && fragmentParams.includes('hash-id')) {
+    pass('pre-existing internal fragment key is preserved beside promoted hash job ID');
+  } else {
+    fail(`pre-existing fragment query key was overwritten: ${preExistingInternalParam}`);
+  }
+
+  const cosmeticHash = normalizeUrlForDedup('https://jobs.example.com/careers#apply');
+  const fragmentFree = normalizeUrlForDedup('https://jobs.example.com/careers');
+  if (cosmeticHash === fragmentFree) pass('cosmetic fragments still collapse onto the fragment-free key');
+  else fail(`cosmetic fragment changed the key: ${JSON.stringify({ cosmeticHash, fragmentFree })}`);
+
+  // A company-site gh_jid is the Greenhouse posting, so tracking params drop
+  // and the board URL for that id is the same key. A different id stays apart
+  // (asserted above).
+  const mixedUrl = normalizeUrlForDedup('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
+  const boardUrl = normalizeUrlForDedup('https://boards.greenhouse.io/acme/jobs/9');
+  if (mixedUrl.includes('gh_jid=9') && boardUrl.includes('gh_jid') === false && boardUrl.includes('boards.greenhouse.io')) {
+    pass('normalizeUrlForDedup stays a URL and keeps gh_jid');
+  } else fail(`URL shape = ${JSON.stringify({ mixedUrl, boardUrl })}`);
+  const mixed = seenJobKey('https://jobs.example.com/j?gh_jid=9&rltr=abc&utm_source=feed');
+  const board = seenJobKey('https://boards.greenhouse.io/acme/jobs/9');
+  if (mixed === 'greenhouse:9' && mixed === board) pass('gh_jid and the Greenhouse board URL share one same-job key');
+  else fail(`mixed query = ${JSON.stringify({ mixed, board })}`);
 
   // Untracked URLs must keep matching what is already in scan-history.
   const plain = 'https://jobs.ashbyhq.com/acme/abc-123';
@@ -89,7 +119,7 @@ try {
 
 console.log('\nscan.mjs — collectSeenUrls() finds the URL in every documented pipeline.md shape');
 try {
-  const { normalizeUrlForDedup } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+  const { normalizeUrlForDedup, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
   // Transcribed from the docs that specify each shape, so these fail if the
   // documented format changes. Only the first leads with the URL.
@@ -124,7 +154,7 @@ try {
 
   for (const [, url, label] of SHAPES) {
     if (!url) continue;
-    if (seen.has(normalizeUrlForDedup(url))) pass(`pipeline.md: ${label} reaches the URL gate`);
+    if (seen.has(seenJobKey(url))) pass(`pipeline.md: ${label} reaches the URL gate`);
     else fail(`pipeline.md: ${label} did not reach the URL gate — ${url} is missing`);
   }
 
@@ -145,7 +175,7 @@ try {
   else fail(`prose line seeded a URL: [${[...seenUrlsFor(prose + '\n')].join(', ')}]`);
 
   const indented = '  - [ ] https://jobs.example.com/posting/10 | Acme Corp | Staff Engineer';
-  if (seenUrlsFor(indented + '\n').has(normalizeUrlForDedup('https://jobs.example.com/posting/10'))) {
+  if (seenUrlsFor(indented + '\n').has(seenJobKey('https://jobs.example.com/posting/10'))) {
     pass('pipeline.md: an indented entry still reaches the URL gate');
   } else {
     fail('indented entry did not reach the URL gate');
@@ -163,8 +193,8 @@ try {
     ['https://jobs.example.com/jobs/12(eu)', 'a parenthesised suffix survives intact'],
   ]) {
     const got = seenUrlsFor(`- [ ] ${url} | Acme Corp | Staff Engineer\n`);
-    if (got.size === 1 && got.has(normalizeUrlForDedup(url))) pass(`pipeline.md: ${label}`);
-    else fail(`${label} — expected [${normalizeUrlForDedup(url)}], got [${[...got].join(', ')}]`);
+    if (got.size === 1 && got.has(seenJobKey(url))) pass(`pipeline.md: ${label}`);
+    else fail(`${label} — expected [${seenJobKey(url)}], got [${[...got].join(', ')}]`);
   }
 } catch (err) {
   fail(`scan.mjs collectSeenUrls tests crashed: ${err && err.message}`);

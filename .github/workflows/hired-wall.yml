@@ -1,6 +1,8 @@
 # hired-wall — turns a verified "I Got Hired" issue into a permanent entry on
-# the Hired Wall: appends the card to HIRED.md, bumps docs/hired-count.json
-# (what the README badge reads) and regenerates docs/hired-wall.svg (the strip
+# the Hired Wall: appends the card to HIRED.md, bumps docs/hired-count.json,
+# redraws the README badge from it (docs/hired-badge.svg, which GitHub serves
+# itself: a live shields.io badge timed out in GitHub's image proxy and showed
+# broken) and regenerates docs/hired-wall.svg (the strip
 # under the hero, three most recent stories, avatars inlined as base64 because
 # GitHub sanitizes external references inside SVGs).
 #
@@ -30,14 +32,14 @@ jobs:
       group: hired-wall
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.LEDGER_TOKEN || secrets.GITHUB_TOKEN }}
-      - uses: actions/setup-node@v4
-        with: { node-version: 22 }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 24 }
       - name: Parse issue and append entry
         id: entry
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const body = context.payload.issue.body || '';
@@ -109,6 +111,9 @@ jobs:
             [ -n "$E_WEEKS" ] && set -- "$@" --weeks "$E_WEEKS"
             node hired-wall-build.mjs "$@"
           fi
+      - name: Refresh the README badge
+        # A shields.io hiccup keeps the last badge and warns; it never fails the run.
+        run: node .github/scripts/readme-badges.mjs hired
       - name: Commit
         id: commit
         run: |
@@ -116,7 +121,7 @@ jobs:
           # commits belong to @careerops-ledger (whose PAT is LEDGER_TOKEN).
           git config user.name "careerops-ledger"
           git config user.email "careerops-ledger@users.noreply.github.com"
-          git add HIRED.md docs/hired-count.json docs/hired-wall.svg
+          git add HIRED.md docs/hired-count.json docs/hired-wall.svg docs/hired-badge.svg
           if git diff --cached --quiet; then echo "nothing to commit"; exit 0; fi
           N=$(node -e "console.log(JSON.parse(require('fs').readFileSync('docs/hired-count.json','utf8')).count)")
           git commit -m "chore(hired-wall): hire #$N joins the wall"
@@ -124,7 +129,7 @@ jobs:
           echo "n=$N" >> "$GITHUB_OUTPUT"
       - name: Tell them their number
         if: steps.commit.outputs.n
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             await github.rest.issues.createComment({

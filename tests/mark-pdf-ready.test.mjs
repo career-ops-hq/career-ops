@@ -2,14 +2,14 @@
 //
 // mark-pdf-ready.mjs is the canonical write path for the tracker's PDF column
 // (❌→✅), used by the web dashboard's "pdf" mode after the backend confirms a
-// successful render. Same sandboxing pattern as set-status-tests.mjs /
-// tracker-columns-tests.mjs: a throwaway tracker via the CAREER_OPS_TRACKER /
+// successful render. Same sandboxing pattern as tests/set-status.test.mjs /
+// tracker-columns.test.mjs: a throwaway tracker via the CAREER_OPS_TRACKER /
 // CAREER_OPS_TRACKER_LOCK env overrides tracker-utils.mjs already respects.
 //
 // Auto-discovered by test-all.mjs (tests/**/*.test.mjs, #1440) — imported
 // in-process alongside every other discovered suite, so this file must NEVER
 // exit the process itself; only pass()/fail() from ./helpers.mjs.
-import { pass, fail, NODE, ROOT } from './helpers.mjs';
+import { pass, fail, NODE, ROOT, directoryDenyBinds } from './helpers.mjs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync } from 'fs';
@@ -405,6 +405,10 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
 {
   if (process.platform !== 'win32' && process.getuid?.() === 0) {
     pass('write-failure: skipped (running as root — directory permissions are not enforced)');
+  } else if (process.platform === 'win32' && !directoryDenyBinds()) {
+    // Same escape hatch as root above. This suite mirrors set-status-tests.mjs's
+    // write-failure test, and mirrored its Windows blind spot with it (#3423).
+    pass('write-failure: skipped (an icacls write-deny does not bind this token - elevated shell)');
   } else {
     // Given the tracker's directory is readable but not writable
     const dir = mkdtempSync(join(tmpdir(), 'co-markpdf-wf-'));
@@ -415,7 +419,7 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
     const lock = join(dir, 'career-ops-merge-tracker-wf.lock');
     // On Windows, directory read-only bits don't block file creation — deny
     // write-data/append-data for Everyone (*S-1-1-0) via icacls instead
-    // (mirrors set-status-tests.mjs's write-failure test).
+    // (mirrors tests/set-status.test.mjs's write-failure test).
     const denyWrite = () => process.platform === 'win32'
       ? execFileSync('icacls', [roDir, '/deny', '*S-1-1-0:(WD,AD)'])
       : chmodSync(roDir, 0o555);
@@ -439,5 +443,52 @@ const TRACKER_DUP_REPORT = `# Applications Tracker
       restore();
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+}
+
+// ── 15. Usage error honors --json ──
+{
+  // Given no tracker state matters — this fails during arg parsing.
+  // console.log ends stdout with a newline, so the JSON document is the last non-empty line.
+  function lastJson(stdout) {
+    return JSON.parse(stdout.trimEnd().split('\n').pop());
+  }
+
+  const sb = makeSandbox(TRACKER_9);
+  try {
+    // When mark-pdf-ready is run with --json and no positional arguments
+    const noArgs = runMarkPdfReady(['--json'], sb);
+    const noArgsMsg = 'Expected 1 argument: <report#>';
+    let noArgsParsed = null;
+    try { noArgsParsed = lastJson(noArgs.stdout); } catch { /* asserted below */ }
+
+    // Then it exits 1, that last line is the usage payload, and the human line is on stderr
+    if (
+      noArgs.code === 1
+      && JSON.stringify(noArgsParsed) === JSON.stringify({ error: noArgsMsg, code: 'usage' })
+      && noArgs.stderr.includes(`❌ ${noArgsMsg}`)
+    ) {
+      pass('json usage: no args exits 1 with structured payload and ❌ on stderr');
+    } else {
+      fail(`json usage no-args: code=${noArgs.code} json=${JSON.stringify(noArgsParsed)}\nstdout=${noArgs.stdout}\nstderr=${noArgs.stderr}`);
+    }
+
+    // When an unknown flag is seen before --json is parsed (failUsage fires mid-argv)
+    const unknown = runMarkPdfReady(['--not-a-flag', '--json'], sb);
+    const unknownMsg = 'Unknown flag: --not-a-flag';
+    let unknownParsed = null;
+    try { unknownParsed = lastJson(unknown.stdout); } catch { /* asserted below */ }
+
+    if (
+      unknown.code === 1
+      && JSON.stringify(unknownParsed) === JSON.stringify({ error: unknownMsg, code: 'usage' })
+      && unknown.stderr.includes(`❌ ${unknownMsg}`)
+    ) {
+      pass('json usage: unknown flag exits 1 with structured payload and ❌ on stderr');
+    } else {
+      fail(`json usage unknown-flag: code=${unknown.code} json=${JSON.stringify(unknownParsed)}\nstdout=${unknown.stdout}\nstderr=${unknown.stderr}`);
+    }
+  } finally {
+    rmSync(sb.dir, { recursive: true, force: true });
   }
 }

@@ -25,9 +25,11 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { pass, fail, linkRepoPackage, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, linkRepoPackage, ownRootEnv, ROOT, NODE, SANDBOX_DATA_ROOT } from './helpers.mjs';
 
-const outputRoot = join(ROOT, 'output');
+// Under the suite's own data root, not the checkout's output/: that directory
+// is the developer's, and an interrupted run left this fixture in it (#5113).
+const outputRoot = join(SANDBOX_DATA_ROOT, 'output');
 mkdirSync(outputRoot, { recursive: true });
 // realpathSync, not the raw mkdtemp path: Node resolves both `import.meta.url`
 // and a module's node_modules walk from a file's REALPATH, while
@@ -45,10 +47,14 @@ writeFileSync(join(sandbox, 'data', 'pdf-index.tsv'), '', 'utf-8');
 
 copyFileSync(join(ROOT, 'generate-pdf.mjs'), script);
 copyFileSync(join(ROOT, 'theme-style.mjs'), join(sandbox, 'theme-style.mjs'));
+copyFileSync(join(ROOT, 'cv-experience-order.mjs'), join(sandbox, 'cv-experience-order.mjs'));
 copyFileSync(join(ROOT, 'tracker-utils.mjs'), join(sandbox, 'tracker-utils.mjs'));
 copyFileSync(join(ROOT, 'tracker-parse.mjs'), join(sandbox, 'tracker-parse.mjs'));
 copyFileSync(join(ROOT, 'tracker-aliases.json'), join(sandbox, 'tracker-aliases.json'));
 copyFileSync(join(ROOT, 'pipeline-lock.mjs'), join(sandbox, 'pipeline-lock.mjs'));
+// ...and it strips the optional sections that rendered as a bare header via
+// ./cv-sections-core.mjs (#3986), another local sibling this sandbox needs.
+copyFileSync(join(ROOT, 'cv-sections-core.mjs'), join(sandbox, 'cv-sections-core.mjs'));
 // generate-pdf.mjs resolves user-layer paths via path-resolver.mjs
 // (CAREER_OPS_ROOT), so the fixture carries that too.
 copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs'));
@@ -56,6 +62,15 @@ copyFileSync(join(ROOT, 'path-resolver.mjs'), join(sandbox, 'path-resolver.mjs')
 // it the copy dies with ERR_MODULE_NOT_FOUND before parsing an argument.
 mkdirSync(join(sandbox, 'lib'), { recursive: true });
 copyFileSync(join(ROOT, 'lib', 'is-main-module.mjs'), join(sandbox, 'lib', 'is-main-module.mjs'));
+// lib/page-format.mjs owns the paper size generate-pdf.mjs imports at module
+// scope, so the copy needs it for the same reason.
+copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(sandbox, 'lib', 'page-format.mjs'));
+copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'browser-launch.mjs'));
+// pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
+copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
+copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
+// generate-pdf.mjs dates its PDF index row with lib/local-today.mjs.
+copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -158,7 +173,7 @@ function run(args, { env, cwd } = {}) {
     cwd: cwd || sandbox,
     encoding: 'utf-8',
     timeout: 30_000,
-    env: env ? { ...process.env, ...env } : process.env,
+    env: ownRootEnv(env),
   });
   return { ...result, output: `${result.stdout || ''}${result.stderr || ''}` };
 }
@@ -227,6 +242,71 @@ try {
     fail(`single vs batch render diverged: single=${single.status} batch=${singleBatch.status}\n${single.output.trim()}\n${singleBatch.output.trim()}`);
   }
 
+  // A terminal's working directory must not select the candidate's theme.
+  // Capture the HTML passed to Chromium via the stub PDF's Marker field.
+  const workspaceConfig = join(sandbox, 'config');
+  const otherCwd = join(sandbox, 'other-cwd');
+  mkdirSync(workspaceConfig, { recursive: true });
+  mkdirSync(join(otherCwd, 'config'), { recursive: true });
+  writeFileSync(join(workspaceConfig, 'profile.yml'), 'style:\n  accent_color: "#123456"\n  font_family: "Georgia, serif"\n  font_size: "12pt"\n  margin: "0.4in"\n');
+  writeFileSync(join(otherCwd, 'config', 'profile.yml'), 'style:\n  accent_color: "#abcdef"\n  font_family: "Arial, sans-serif"\n  margin: "1in"\n');
+  const themedManifest = join(sandbox, 'themed-batch.json');
+  writeFileSync(themedManifest, JSON.stringify([
+    { input: 'single.html', output: 'out/themed-batch.pdf' },
+    { input: 'single.html', output: 'out/themed-batch-second.pdf' },
+  ]));
+  const themedEnv = { CAREER_OPS_TRACKER: join(sandbox, 'data', 'applications.md') };
+  writeFileSync(themedEnv.CAREER_OPS_TRACKER, '# Applications Tracker\n');
+  const themedSingle = run([join(sandbox, 'single.html'), join(sandbox, 'out', 'themed-single.pdf')], { cwd: otherCwd, env: themedEnv });
+  const themedBatch = run([`--batch=${themedManifest}`], { cwd: otherCwd, env: themedEnv });
+  const renderedHtml = (name) => {
+    const marker = readFileSync(join(sandbox, 'out', name), 'latin1').match(/\/Marker \(([^)]+)\)/)?.[1];
+    return Buffer.from(marker || '', 'base64').toString('utf-8');
+  };
+  const expectedTheme = (html) => html.includes('--accent-color: #123456;')
+    && html.includes('--font-family: Georgia, serif;')
+    && html.includes('--font-size: 12pt;')
+    && html.includes('--page-margin: 0.4in;')
+    && !html.includes('#abcdef');
+  if (themedSingle.status === 0 && themedBatch.status === 0
+      && expectedTheme(renderedHtml('themed-single.pdf'))
+      && renderedHtml('themed-single.pdf') === renderedHtml('themed-batch.pdf')
+      && renderedHtml('themed-batch.pdf') === renderedHtml('themed-batch-second.pdf')) {
+    pass('single and batch renders use the workspace theme from a different working directory');
+  } else {
+    fail(`workspace theme differs between single and batch: single=${themedSingle.status} batch=${themedBatch.status}\n${themedSingle.output}\n${themedBatch.output}`);
+  }
+
+  // Imported callers, including cover-letter generation, share the fallback.
+  // An explicit token map still wins, and {} deliberately disables the theme.
+  const directRunner = join(sandbox, 'render-themed.mjs');
+  writeFileSync(directRunner, `
+import { renderHtmlToPdf } from './generate-pdf.mjs';
+const [outputPath, root, tokens] = process.argv.slice(2);
+await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
+  workspaceRoot: root,
+  ...(tokens === undefined ? {} : { styleTokens: JSON.parse(tokens) }),
+});
+`);
+  for (const [label, tokens, accepts] of [
+    ['default', undefined, expectedTheme],
+    ['explicit', { '--accent-color': '#654321' }, (html) => html.includes('--accent-color: #654321;') && !html.includes('#123456')],
+    ['disabled', {}, (html) => !html.includes('career-ops-dynamic-theme')],
+  ]) {
+    const outputName = `themed-direct-${label}.pdf`;
+    const result = spawnSync(NODE, [directRunner, join(sandbox, 'out', outputName), sandbox,
+      ...(tokens === undefined ? [] : [JSON.stringify(tokens)])], {
+      cwd: otherCwd, encoding: 'utf-8', timeout: 30_000,
+      env: ownRootEnv(themedEnv),
+    });
+    if (result.status === 0 && accepts(renderedHtml(outputName))) {
+      pass(`imported PDF rendering honors ${label} theme selection from a different working directory`);
+    } else {
+      fail(`imported ${label} theme failed: status=${result.status}\n${result.stdout}\n${result.stderr}`);
+    }
+  }
+  rmSync(workspaceConfig, { recursive: true, force: true });
+
   // --- Test 3: an all-success batch exits 0 ---
   const okManifest = join(sandbox, 'ok-batch.json');
   writeFileSync(okManifest, JSON.stringify([
@@ -243,6 +323,81 @@ try {
     pass('generate-pdf --batch exits 0 when every document renders');
   } else {
     fail(`all-success batch did not exit clean: status=${okBatch.status}\n${okBatch.output.trim()}`);
+  }
+
+  // --- Test 3b (#6325): cv.max_pages / cv.strict_pages reach batch CV entries,
+  // the path batch workers use, and leave a cover letter on the default budget.
+  // The stub renders every document at 2 pages.
+  const budgetProfile = join(sandbox, 'budget-profile.yml');
+  writeFileSync(budgetProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n  strict_pages: true\n', 'utf-8');
+  const budgetManifest = join(sandbox, 'budget-batch.json');
+  writeFileSync(budgetManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/budget-cv.pdf', kind: 'cv' },
+    { input: 'c.html', output: 'out/budget-cover.pdf', kind: 'cover' },
+  ]), 'utf-8');
+  const budgetBatch = run([`--batch=${budgetManifest}`], { env: { CAREER_OPS_PROFILE: budgetProfile } });
+  let budgetResults = null;
+  try { budgetResults = JSON.parse(readFileSync(`${budgetManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    budgetBatch.status === 1 &&
+    Array.isArray(budgetResults) && budgetResults.length === 2 &&
+    budgetResults[0].ok === false && /allowed maximum is 1 page/.test(budgetResults[0].error || '') &&
+    budgetResults[1].ok === true &&
+    budgetBatch.output.includes('1 ok, 1 failed')
+  ) {
+    pass('a batch CV entry takes the profile page budget and a cover letter keeps the default');
+  } else {
+    fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
+  }
+
+  // --- Test 3b' (#6377): a warn-only overflow in a batch is still ok, but the
+  // entry's PDF is the sibling draft and nothing lands at its output path.
+  const warnProfile = join(sandbox, 'warn-profile.yml');
+  writeFileSync(warnProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n', 'utf-8');
+  const warnManifest = join(sandbox, 'warn-batch.json');
+  writeFileSync(warnManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/warn-cv.pdf', kind: 'cv' },
+  ]), 'utf-8');
+  const warnBatch = run([`--batch=${warnManifest}`], { env: { CAREER_OPS_PROFILE: warnProfile } });
+  let warnResults = null;
+  try { warnResults = JSON.parse(readFileSync(`${warnManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  const warnDraft = join(sandbox, 'out', 'warn-cv.overflow.pdf');
+  if (
+    warnBatch.status === 0 &&
+    Array.isArray(warnResults) && warnResults.length === 1 &&
+    warnResults[0].ok === true &&
+    warnResults[0].draftPath === warnDraft &&
+    !existsSync(join(sandbox, 'out', 'warn-cv.pdf')) &&
+    existsSync(warnDraft) &&
+    warnBatch.output.includes('1 ok, 0 failed')
+  ) {
+    pass('a batch CV entry over a warn-only budget is ok with its PDF at the draft, never at the output path');
+  } else {
+    fail(`a warn-only batch overflow did not stay off the output path: status=${warnBatch.status}\n${JSON.stringify(warnResults)}\n${warnBatch.output.trim()}`);
+  }
+
+  // --- Test 3c (#6325): an unusable profile budget fails only the CV entries;
+  // the cover letter in the same batch, which never reads cv.*, still renders.
+  const badBudgetProfile = join(sandbox, 'bad-budget-profile.yml');
+  writeFileSync(badBudgetProfile, 'name: Test Candidate\ncv:\n  max_pages: none\n', 'utf-8');
+  const badBudgetManifest = join(sandbox, 'bad-budget-batch.json');
+  writeFileSync(badBudgetManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/bad-budget-cv.pdf', kind: 'cv' },
+    { input: 'c.html', output: 'out/bad-budget-cover.pdf', kind: 'cover' },
+  ]), 'utf-8');
+  const badBudgetBatch = run([`--batch=${badBudgetManifest}`], { env: { CAREER_OPS_PROFILE: badBudgetProfile } });
+  let badBudgetResults = null;
+  try { badBudgetResults = JSON.parse(readFileSync(`${badBudgetManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  if (
+    badBudgetBatch.status === 1 &&
+    Array.isArray(badBudgetResults) && badBudgetResults.length === 2 &&
+    badBudgetResults[0].ok === false && /Invalid page budget in config\/profile\.yml: cv\.max_pages "none"/.test(badBudgetResults[0].error || '') &&
+    !existsSync(join(sandbox, 'out', 'bad-budget-cv.pdf')) &&
+    badBudgetResults[1].ok === true
+  ) {
+    pass('an unusable profile page budget fails the batch CV entry and leaves the cover letter');
+  } else {
+    fail(`an invalid profile page budget was not scoped to batch CV entries: status=${badBudgetBatch.status}\n${badBudgetBatch.output.trim()}`);
   }
 
   // --- Test 4: a shared-browser launch failure yields a complete failed
@@ -363,6 +518,242 @@ try {
     pass('generate-pdf --batch exits 1 when the results manifest write fails despite all renders succeeding');
   } else {
     fail(`results-write failure did not fail the batch: status=${writeFail.status}\n${writeFail.output.trim()}`);
+  }
+
+  // --- Test 9: the experience-order guard holds in batch mode too. A CV with
+  // an older role above a newer one fails its own entry while the rest still
+  // render; --allow-nonchronological downgrades that to a warning. ---
+  writeFileSync(join(sandbox, 'unordered.html'), htmlDoc(
+    '<span class="job-period">2015 – 2018</span><span class="job-period">2019 – 2022</span>',
+  ), 'utf-8');
+  const orderManifest = join(sandbox, 'order.json');
+  writeFileSync(orderManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/order-a.pdf' },
+    { input: 'unordered.html', output: 'out/order-unordered.pdf' },
+  ]), 'utf-8');
+  const unorderedPdf = join(sandbox, 'out', 'order-unordered.pdf');
+  const strictOrder = run([`--batch=${orderManifest}`]);
+  const strictLeftNoPdf = !existsSync(unorderedPdf);
+  if (
+    strictOrder.status === 1 &&
+    strictLeftNoPdf &&
+    existsSync(join(sandbox, 'out', 'order-a.pdf')) &&
+    /not in reverse-chronological order/.test(strictOrder.output) &&
+    strictOrder.output.includes('1 ok, 1 failed')
+  ) {
+    pass('generate-pdf --batch fails an entry whose work experience is out of order and renders the rest');
+  } else {
+    fail(`batch skipped the experience-order guard: status=${strictOrder.status} pdfWritten=${!strictLeftNoPdf}\n${strictOrder.output.trim()}`);
+  }
+  const allowedOrder = run([`--batch=${orderManifest}`, '--allow-nonchronological']);
+  if (
+    allowedOrder.status === 0 &&
+    existsSync(unorderedPdf) &&
+    allowedOrder.output.includes('--allow-nonchronological set')
+  ) {
+    pass('generate-pdf --batch --allow-nonchronological renders the out-of-order CV with a warning');
+  } else {
+    fail(`--allow-nonchronological did not reach the batch path: status=${allowedOrder.status}\n${allowedOrder.output.trim()}`);
+  }
+
+  // --- Test 10: locked sections are enforced in batch mode too. A CV modifying
+  // a locked section fails its own entry while valid entries still render. ---
+  mkdirSync(join(sandbox, 'config'), { recursive: true });
+  writeFileSync(join(sandbox, 'config', 'profile.yml'), 'cv:\n  locked_sections:\n    - Education\n', 'utf-8');
+  writeFileSync(join(sandbox, 'cv.md'), '# Education\n* Bachelor of Science\n\n# Work Experience\n* Software Engineer\n', 'utf-8');
+  writeFileSync(join(sandbox, 'locked-valid.html'), htmlDoc(
+    '<h2 class="section-title">Education</h2><p>Bachelor of Science</p><h2 class="section-title">Work Experience</h2><p>Software Engineer</p>',
+  ), 'utf-8');
+  writeFileSync(join(sandbox, 'locked-modified.html'), htmlDoc(
+    '<h2 class="section-title">Education</h2><p>B.S. altered</p><h2 class="section-title">Work Experience</h2><p>Software Engineer</p>',
+  ), 'utf-8');
+  const lockedBatchManifest = join(sandbox, 'locked-batch.json');
+  writeFileSync(lockedBatchManifest, JSON.stringify([
+    { input: 'locked-valid.html', output: 'out/locked-valid.pdf' },
+    { input: 'locked-modified.html', output: 'out/locked-modified.pdf' },
+  ]), 'utf-8');
+  const lockedBatchRes = run([`--batch=${lockedBatchManifest}`, '--skip-fact-check']);
+  const modifiedLeftNoPdf = !existsSync(join(sandbox, 'out', 'locked-modified.pdf'));
+  if (
+    lockedBatchRes.status === 1 &&
+    modifiedLeftNoPdf &&
+    existsSync(join(sandbox, 'out', 'locked-valid.pdf')) &&
+    /Locked section 'education' was modified during tailoring/.test(lockedBatchRes.output) &&
+    lockedBatchRes.output.includes('1 ok, 1 failed')
+  ) {
+    pass('generate-pdf --batch fails an entry whose locked section was modified and renders the rest');
+  } else {
+    fail(`batch skipped the locked-sections guard: status=${lockedBatchRes.status} pdfWritten=${!modifiedLeftNoPdf}\n${lockedBatchRes.output.trim()}`);
+  }
+  rmSync(join(sandbox, 'config', 'profile.yml'), { force: true });
+  rmSync(join(sandbox, 'cv.md'), { force: true });
+
+  // ── A global flag the batch path drops must be refused, not ignored ────────
+  //
+  // --report already works this way, with the reason written at its check: one
+  // global value cannot label N distinct documents. --kind is the same shape and
+  // was not covered. runBatchFromManifest is called without it, so
+  // `--batch=... --kind=cover` renders the whole batch under filename inference
+  // and any entry whose name does not look cover-ish is filed as a CV. That row
+  // then supersedes the report's real CV slot in pdf-index.tsv, which is the
+  // silent substitution --kind exists to prevent.
+  const flagManifest = join(sandbox, 'flag-batch.json');
+  writeFileSync(flagManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/flag-a.pdf' },
+  ]), 'utf-8');
+
+  const kindInBatch = run([`--batch=${flagManifest}`, '--kind=cover']);
+  if (kindInBatch.status === 1 && /--kind is not valid with --batch/i.test(kindInBatch.output)) {
+    pass('generate-pdf rejects a global --kind in batch mode instead of silently dropping it');
+  } else {
+    fail(`--kind survived batch mode: status=${kindInBatch.status}\n${kindInBatch.output.trim()}`);
+  }
+
+  // The convention this mirrors, pinned here because nothing else asserted it.
+  const reportInBatch = run([`--batch=${flagManifest}`, '--report=7']);
+  if (reportInBatch.status === 1 && /--report is not valid with --batch/i.test(reportInBatch.output)) {
+    pass('generate-pdf rejects a global --report in batch mode');
+  } else {
+    fail(`--report survived batch mode: status=${reportInBatch.status}\n${reportInBatch.output.trim()}`);
+  }
+
+  // An explicitly EMPTY --kind is still a supplied flag. `kindFlag` holds '',
+  // which is falsy, so a guard written as `if (kindFlag)` waves it through and
+  // the batch runs on filename inference anyway — the exact outcome the
+  // rejection above exists to stop, reached by a different spelling. Supplied
+  // and value are separate questions.
+  const emptyKindBatch = run([`--batch=${flagManifest}`, '--kind=']);
+  if (emptyKindBatch.status === 1) {
+    pass('generate-pdf rejects an explicitly empty --kind in batch mode');
+  } else {
+    fail(`--kind= survived batch mode: status=${emptyKindBatch.status}\n${emptyKindBatch.output.trim()}`);
+  }
+
+  // Same hole on the single-render path. The flag was typed, so falling back to
+  // filename inference silently ignores what the caller asked for.
+  const emptyKindSingle = run(['a.html', 'out/empty-kind.pdf', '--kind=']);
+  if (emptyKindSingle.status === 1 && /Invalid --kind/i.test(emptyKindSingle.output)) {
+    pass('generate-pdf rejects an explicitly empty --kind on a single render');
+  } else {
+    fail(`--kind= survived a single render: status=${emptyKindSingle.status}\n${emptyKindSingle.output.trim()}`);
+  }
+
+  // A BARE `--kind`, with no `=`, matches none of the parser's prefix branches and
+  // falls through to the positional arms. Both are already filled here, so it is
+  // dropped on the floor: the caller asked for a kind, the render infers one from
+  // the filename, and that row replaces the report's CV slot. An absent flag and a
+  // flag missing its operand are different things.
+  const bareKind = run(['a.html', 'out/bare-kind.pdf', '--report=7', '--kind']);
+  if (bareKind.status === 1 && /--kind/i.test(bareKind.output)) {
+    pass('generate-pdf rejects a bare --kind with no value');
+  } else {
+    fail(`bare --kind was swallowed: status=${bareKind.status}\n${bareKind.output.trim()}`);
+  }
+
+  // The same empty-versus-absent hole on the per-entry path. `"kind": ""` is a
+  // supplied key, but the validation reads the VALUE, so it skips and inference
+  // takes over. Fixing the global flag without this one fixes an instance rather
+  // than the class.
+  const emptyEntryManifest = join(sandbox, 'empty-entry-kind.json');
+  writeFileSync(emptyEntryManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/empty-entry.pdf', kind: '' },
+  ]), 'utf-8');
+  const emptyEntry = run([`--batch=${emptyEntryManifest}`]);
+  if (emptyEntry.status === 1 && /kind/i.test(emptyEntry.output)) {
+    pass('generate-pdf rejects a manifest entry whose kind is explicitly empty');
+  } else {
+    fail(`empty entry kind was accepted: status=${emptyEntry.status}\n${emptyEntry.output.trim()}`);
+  }
+
+  // Control: an entry that OMITS kind entirely must still render by inference,
+  // so the two rejections above cannot be passing by refusing every manifest.
+  const omittedEntryManifest = join(sandbox, 'omitted-entry-kind.json');
+  writeFileSync(omittedEntryManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/omitted-entry.pdf' },
+  ]), 'utf-8');
+  const omittedEntry = run([`--batch=${omittedEntryManifest}`]);
+  if (omittedEntry.status === 0) {
+    pass('control: an entry that omits kind still renders by inference');
+  } else {
+    fail(`control failed: omitting kind broke the batch: status=${omittedEntry.status}\n${omittedEntry.output.trim()}`);
+  }
+
+  // The two siblings the same sweep found. reportNum keys the manifest row, so an
+  // empty one is the same silent-inference hazard as kind, and a bare --report is
+  // swallowed exactly as a bare --kind was.
+  const emptyReportManifest = join(sandbox, 'empty-entry-report.json');
+  writeFileSync(emptyReportManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/empty-report.pdf', reportNum: '' },
+  ]), 'utf-8');
+  const emptyReport = run([`--batch=${emptyReportManifest}`]);
+  if (emptyReport.status === 1 && /reportNum/i.test(emptyReport.output)) {
+    pass('generate-pdf rejects a manifest entry whose reportNum is explicitly empty');
+  } else {
+    fail(`empty entry reportNum was accepted: status=${emptyReport.status}\n${emptyReport.output.trim()}`);
+  }
+
+  const bareReport = run(['a.html', 'out/bare-report.pdf', '--report']);
+  if (bareReport.status === 1 && /--report/i.test(bareReport.output)) {
+    pass('generate-pdf rejects a bare --report with no value');
+  } else {
+    fail(`bare --report was swallowed: status=${bareReport.status}\n${bareReport.output.trim()}`);
+  }
+
+  // Control: an entry omitting reportNum still renders, so neither rejection is
+  // passing by refusing everything.
+  const omittedReportManifest = join(sandbox, 'omitted-entry-report.json');
+  writeFileSync(omittedReportManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/omitted-report.pdf' },
+  ]), 'utf-8');
+  if (run([`--batch=${omittedReportManifest}`]).status === 0) {
+    pass('control: an entry that omits reportNum still renders');
+  } else {
+    fail('control failed: omitting reportNum broke the batch');
+  }
+
+  // Order matters, and the bare branch only set a SUPPLIED marker. A valued flag
+  // followed by a bare one left the earlier operand in place, so validation read
+  // '7' or 'cover' and waved the missing operand through. The last occurrence of a
+  // flag is the caller's final intent, and that occurrence has no value.
+  for (const [label, args, want] of [
+    ['--report=7 --report', ['a.html', 'out/ord-a.pdf', '--report=7', '--report'], /Invalid --report/i],
+    ['--kind=cover --kind', ['a.html', 'out/ord-b.pdf', '--kind=cover', '--kind'], /Invalid --kind/i],
+  ]) {
+    const r = run(args);
+    if (r.status === 1 && want.test(r.output)) {
+      pass(`generate-pdf rejects a bare flag that follows a valued one (${label})`);
+    } else {
+      fail(`${label} kept the earlier value: status=${r.status}\n${r.output.trim()}`);
+    }
+  }
+
+  // The other order is NOT an error: the last occurrence carries a value, so that
+  // value is the intent. Without this, "reject any bare occurrence" would look
+  // identical to "clear on bare", and only one of them is right.
+  //
+  // The run has to SUCCEED, not merely avoid the validation message: a render
+  // that died for any other reason also has no "Invalid --report" in its
+  // output, so an absence check alone passes on a build that renders nothing.
+  for (const [label, args] of [
+    ['--report --report=7', ['a.html', 'out/ord-c.pdf', '--report', '--report=7']],
+    ['--kind --kind=cover', ['a.html', 'out/ord-d.pdf', '--kind', '--kind=cover']],
+  ]) {
+    const r = run(args);
+    if (r.status === 0 && !/Invalid --(report|kind)/i.test(r.output)) {
+      pass(`control: a valued flag after a bare one is accepted (${label})`);
+    } else {
+      fail(`${label} was wrongly rejected: status=${r.status}\n${r.output.trim()}`);
+    }
+  }
+
+  // A batch with neither global flag still runs, so the guards above reject the
+  // flag rather than the batch. Without this, both checks would pass on a build
+  // that refused every batch outright.
+  const cleanBatch = run([`--batch=${flagManifest}`]);
+  if (cleanBatch.status === 0) {
+    pass('control: the same batch without a global flag still renders');
+  } else {
+    fail(`control failed: a flagless batch did not run, so the rejections above prove nothing: status=${cleanBatch.status}\n${cleanBatch.output.trim()}`);
   }
 } finally {
   rmSync(sandbox, { recursive: true, force: true });
