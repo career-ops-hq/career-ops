@@ -33,10 +33,44 @@ function assertLandingUrl(url) {
 }
 
 // NaN-safe Date.parse.
+/** @param {unknown} value */
 function toEpochMs(value) {
   if (typeof value !== 'string' || !value) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/** @typedef {{ min: number, max: number, currency: string }} SalaryRange */
+
+/**
+ * Parse a posting's gross salary range.
+ * Exported for tests.
+ *
+ * @param {any} j - one posting from the v1 jobs list
+ * @returns {SalaryRange | undefined}
+ */
+export function landingSalary(j) {
+  if (!j || typeof j !== 'object') return undefined;
+
+  /** @param {any} v */
+  const toBound = (v) => {
+    if (v == null) return null;
+    if (typeof v === 'string' && v.trim() === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+
+  const low = toBound(j.gross_salary_low);
+  const high = toBound(j.gross_salary_high);
+  if (low == null && high == null) return undefined;
+
+  const minValue = low == null ? high : high == null ? low : Math.min(low, high);
+  const maxValue = high == null ? low : low == null ? high : Math.max(low, high);
+  if (minValue == null || maxValue == null) return undefined;
+
+  const currency = typeof j.currency_code === 'string' ? j.currency_code.trim().toUpperCase() : '';
+
+  return { min: minValue, max: maxValue, currency };
 }
 
 /**
@@ -76,7 +110,7 @@ export function companyFromUrl(url) {
  *
  * @param {any} j
  * @param {string} [fallbackCompany]
- * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: SalaryRange } | null}
  */
 export function normalizeLandingJob(j, fallbackCompany) {
   if (!j || typeof j !== 'object') return null;
@@ -106,10 +140,14 @@ export function normalizeLandingJob(j, fallbackCompany) {
   const base = [city, country].filter(Boolean).join(', ');
   const location = [base, j.remote === true ? 'Remote' : ''].filter(Boolean).join(', ');
 
-  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number }} */
+  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: SalaryRange }} */
   const job = { title, url, company, location };
   const postedAt = toEpochMs(j.published_at) ?? toEpochMs(j.created_at);
   if (postedAt !== undefined) job.postedAt = postedAt;
+
+  const salary = landingSalary(j);
+  if (salary) job.salary = salary;
+
   return job;
 }
 
@@ -127,6 +165,8 @@ export default {
       );
     }
     const fallbackCompany = entry?.name;
-    return json.map(j => normalizeLandingJob(j, fallbackCompany)).filter(Boolean);
+    return json
+      .map((j) => normalizeLandingJob(j, fallbackCompany))
+      .filter((job) => job !== null);
   },
 };
