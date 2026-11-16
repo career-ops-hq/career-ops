@@ -18,7 +18,7 @@
 
 import path from 'path';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -473,8 +473,9 @@ export function setPluginEnabled(root, id, on, settings) {
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
   mkdirSync(path.join(root, 'config'), { recursive: true });
   const text = '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg);
-  // Node's default mode is 0o666. Copy the existing mode onto the temp file
-  // so a 0600 config stays 0600 after the rename.
+  // Node's default mode is 0o666, and the mode passed to writeFileSync is
+  // still narrowed by the umask. chmod restores the exact bits, so a 0640
+  // config stays 0640 after the rename.
   let mode;
   try {
     mode = statSync(file).mode & 0o777;
@@ -484,6 +485,7 @@ export function setPluginEnabled(root, id, on, settings) {
   const tmp = path.join(root, 'config', `.plugins.yml.${process.pid}.${randomUUID()}.tmp`);
   try {
     writeFileSync(tmp, text, mode == null ? 'utf8' : { encoding: 'utf8', mode });
+    if (mode != null) chmodSync(tmp, mode);
     renameSync(tmp, file);
   } catch (err) {
     try { rmSync(tmp, { force: true }); } catch {}
