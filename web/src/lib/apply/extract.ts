@@ -42,6 +42,17 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       c.querySelectorAll?.("input, select, textarea, option, button, [role=option], [class*='menu' i]").forEach((n) => n.remove());
       return normalize(c.textContent);
     };
+    // A heading that also wraps the radios keeps its own text. Drop each option
+    // label so a star after the question stays at the end.
+    const textWithoutRadios = (node: Element): string => {
+      const copy = node.cloneNode(true) as Element;
+      copy.querySelectorAll("input[type=radio]").forEach((radio) => {
+        const label = radio.closest("label");
+        if (label && label !== copy && copy.contains(label)) label.remove();
+        else radio.remove();
+      });
+      return normalize(copy.textContent);
+    };
 
     // The field WRAPPER (Ashby `ashby-application-form-field-entry`, Greenhouse
     // `select__container`/`field`, generic `form-group`/`fieldset`) — deliberately
@@ -152,15 +163,12 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         );
         for (const c of Array.from(cands)) {
           if (!isVisibleNode(c)) continue;
-          const t = pure(c);
+          const t = c.querySelectorAll("input[type=radio]").length > 1 ? textWithoutRadios(c) : pure(c);
           // Keep a long title. clean() shortens what is shown, and the trailing
           // star is read from this full text. Options are matched on their full
           // text too. The 160-character cut would hide a real question that only
           // shares that prefix with an option, and it would let a long option
           // through as the question.
-          // A wrapper around the radios includes their labels in its text, so
-          // the star sits in the middle and the group looks optional.
-          if (c.querySelectorAll("input[type=radio]").length > 1) continue;
           if (t && t.length > 2 && !optSet.has(t.toLowerCase()) && !isUuid(t) && !isGenericPh(t)) return t;
         }
       }
