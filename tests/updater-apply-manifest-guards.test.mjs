@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   USER_PATHS,
   assertSafeManifestPaths,
+  fallbackCheckoutBatched,
   fallbackCheckoutSpecs,
   isSafeManifestPath,
   rejectUserLayerPaths,
@@ -200,11 +201,11 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
   // Fallback per-path checkout is literal too, fed by fallbackCheckoutSpecs,
   // and no :(exclude) expression reaches it: with --literal-pathspecs git
   // would read an exclusion as a literal filename and fail the checkout.
-  const fallbackLiteralPattern = /gitQuiet\(\s*['"]--literal-pathspecs['"],\s*['"]checkout['"],\s*targetCommit,\s*['"]--['"],\s*\.\.\.fallbackSpecs\s*\)/;
+  const fallbackBatchedPattern = /fallbackCheckoutBatched\(\s*fallbackSpecs,\s*targetCommit\s*\)/;
   check(
-    fallbackLiteralPattern.test(applyBody),
-    'per-path fallback checkout passes "--literal-pathspecs" over fallbackCheckoutSpecs',
-    'per-path fallback checkout is not the literal fallbackCheckoutSpecs form',
+    fallbackBatchedPattern.test(applyBody),
+    'per-path fallback checkout runs through fallbackCheckoutBatched(fallbackSpecs, targetCommit)',
+    'per-path fallback checkout is not the batched fallbackCheckoutBatched form',
   );
   const fallbackExcludePattern = /gitQuiet\(\s*['"]checkout['"],\s*targetCommit,\s*['"]--['"],\s*path,\s*\.\.\.preserveSpecs\s*\)/;
   check(
@@ -235,6 +236,20 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
   );
 }
 
+
+  const helperLiteralPattern = /const fixedArgs = \[\s*'--literal-pathspecs',\s*'checkout',\s*targetCommit,\s*'--'\s*\]/;
+  check(
+    helperLiteralPattern.test(updaterSource),
+    'fallbackCheckoutBatched passes "--literal-pathspecs" with the pinned target and "--"',
+    'fallbackCheckoutBatched lost its literal-pathspecs fixed arguments',
+  );
+  const helperBudgetPattern = /argvBatches\(\s*fallbackSpecs,\s*\{\s*budget:\s*ARGV_BUDGET - fixed\s*\}\s*\)/;
+  check(
+    helperBudgetPattern.test(updaterSource),
+    'fallbackCheckoutBatched batches fallbackSpecs under ARGV_BUDGET minus the fixed arguments',
+    'fallbackCheckoutBatched does not batch fallbackSpecs under the ARGV budget',
+  );
+
 // ── 7. fallbackCheckoutSpecs names concrete files, never exclusion magic ──
 {
   const upstream = ['lib/a.mjs', 'lib/sub/b.mjs', 'lib/c.mjs', 'VERSION'];
@@ -264,4 +279,74 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     'fallbackCheckoutSpecs names the entry itself when the target tree listing is unavailable',
     `unavailable tree listing expanded unexpectedly: ${JSON.stringify(fallbackCheckoutSpecs('lib/', ['lib/a.mjs'], []))}`,
   );
+}
+
+// ── 8. fallbackCheckoutBatched batches a long expansion under the argv budget ──
+{
+  // Reviewer-measured shape: a directory entry expanding to ~1500 preserved-
+  // sibling files (~64,500 argv chars) must not ride on one git call.
+  const specs = [];
+  for (let i = 0; i < 1500; i++) specs.push(`lib/generated/module-${String(i).padStart(4, '0')}.mjs`);
+  const TARGET = 'a'.repeat(40);
+  const calls = [];
+  const recordingGit = (...args) => { calls.push(args); return ''; };
+
+  fallbackCheckoutBatched(specs, TARGET, { git: recordingGit });
+
+  check(calls.length > 1, `long expansion splits into multiple git runs (${calls.length})`, 'long expansion still runs as a single git call');
+  const seen = [];
+  for (const call of calls) {
+    check(
+      call[0] === '--literal-pathspecs' && call[1] === 'checkout' && call[2] === TARGET && call[3] === '--',
+      'each batch passes --literal-pathspecs, checkout, the pinned target, and --',
+      `batch lost its fixed arguments: ${call.slice(0, 5).join(' ')}`,
+    );
+    const argvChars = call.reduce((total, arg) => total + arg.length + 1, 0);
+    check(argvChars <= 8000, `batch stays within the argv budget (${argvChars} chars)`, `batch exceeds the argv budget: ${argvChars} chars`);
+    check(!call.some((arg) => arg.includes(':(exclude')), 'no :(exclude) expression reaches any batch', 'a batch carried an exclusion expression');
+    seen.push(...call.slice(4));
+  }
+  check(
+    JSON.stringify(seen) === JSON.stringify(specs),
+    'every expanded spec is checked out exactly once, in order',
+    `batched specs diverge from the expansion (${seen.length} of ${specs.length})`,
+  );
+
+  // A small expansion still makes exactly one call with identical argv.
+  const small = ['lib/a.mjs', 'lib/c.mjs'];
+  const smallCalls = [];
+  fallbackCheckoutBatched(small, TARGET, { git: (...args) => { smallCalls.push(args); return ''; } });
+  check(
+    smallCalls.length === 1 && JSON.stringify(smallCalls[0]) === JSON.stringify(['--literal-pathspecs', 'checkout', TARGET, '--', ...small]),
+    'a small expansion keeps the previous single-call argv exactly',
+    `small expansion changed shape: ${JSON.stringify(smallCalls)}`,
+  );
+}
+
+// ── 9. fallbackCheckoutBatched propagates batch failures for caller restore ──
+{
+  const specs = [];
+  for (let i = 0; i < 300; i++) specs.push(`lib/generated/module-${String(i).padStart(4, '0')}.mjs`);
+  const TARGET = 'b'.repeat(40);
+
+  // Forced initial-batch failure: nothing is written, the error reaches the
+  // caller's per-path restore.
+  let firstCalls = 0;
+  let firstErr = null;
+  try {
+    fallbackCheckoutBatched(specs, TARGET, { git: () => { firstCalls++; throw new Error('forced initial failure'); } });
+  } catch (err) { firstErr = err; }
+  check(firstErr && firstErr.message === 'forced initial failure', 'an initial batch failure propagates', 'initial batch failure was swallowed');
+  check(firstCalls === 1, 'no later batch runs after the first fails', `unexpected extra batches after initial failure: ${firstCalls}`);
+
+  // Second-batch failure: the first batch WAS written before the failure, so
+  // the caller must restore the path - the helper surfaces the error with the
+  // earlier writes already done.
+  const written = [];
+  let secondErr = null;
+  try {
+    fallbackCheckoutBatched(specs, TARGET, { git: (...args) => { if (written.length > 0) throw new Error('forced second-batch failure'); written.push(args.slice(4)); return ''; } });
+  } catch (err) { secondErr = err; }
+  check(secondErr && secondErr.message === 'forced second-batch failure', 'a second-batch failure propagates after earlier writes', 'second-batch failure was swallowed');
+  check(written.length === 1 && written[0].length > 0, 'the first batch landed before the failure (caller restores it)', 'first batch did not complete before the forced failure');
 }
