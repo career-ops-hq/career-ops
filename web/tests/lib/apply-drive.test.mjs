@@ -27,8 +27,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { executeAction, factsOf } from "../../src/lib/apply/drive-action.mjs";
-import { isSubmitControl } from "../../src/lib/apply/submit-guard.mjs";
+import { executeAction, factsOf, snapshotChoiceLine } from "../../src/lib/apply/drive-action.mjs";
+import { isSubmitControl, snapshotLabel } from "../../src/lib/apply/submit-guard.mjs";
 
 // ── The fake page ──
 
@@ -656,6 +656,12 @@ test("a radio option is the visible choice when the values are machine ids", () 
     globalThis.document.querySelectorAll = () => [ariaYes, ariaNo];
     assert.equal(factsOf(ariaYes, "r3").option, "1");
     assert.equal(factsOf(ariaNo, "r4").option, "0");
+    const shared = factsOf(ariaYes, "r3");
+    assert.equal(snapshotLabel(shared), "Choice");
+    assert.equal(
+      snapshotChoiceLine(shared.ref, "radio", snapshotLabel(shared), shared.option),
+      '[r3] radio "Choice" option "1"',
+    );
     const prompt = (value, text) => ({
       tagName: "INPUT",
       value,
@@ -697,6 +703,7 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   assert.match(DRIVE_CODE, /listedDriveText\(/);
   assert.match(DRIVE_CODE, /listedDriveClick\(/);
   assert.match(DRIVE_CODE, /act\.ensureChecked = true/);
+  assert.match(DRIVE_CODE, /snapshotChoiceLine\(/);
   assert.doesNotMatch(DRIVE_CODE, /slice\(0,\s*300\)/);
 });
 

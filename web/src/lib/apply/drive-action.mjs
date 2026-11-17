@@ -153,6 +153,22 @@ export const factsOf = (el, ref) => {
 };
 
 /**
+ * One snapshot line. When the option differs from the label, name it. Two
+ * radios that share an accessible name would otherwise look identical, and
+ * the planner could not tell which value it is clicking.
+ *
+ * @param {string} ref
+ * @param {string} kind
+ * @param {string} label
+ * @param {string} [option]
+ * @returns {string}
+ */
+export function snapshotChoiceLine(ref, kind, label, option) {
+  const choice = option && option !== label ? ` option "${option}"` : "";
+  return `[${ref}] ${kind} "${label}"${choice}`;
+}
+
+/**
  * Execute one planner action on OUR session — NEVER submit.
  *
  * `actionable` is the set of refs this turn's snapshot offered; an action naming

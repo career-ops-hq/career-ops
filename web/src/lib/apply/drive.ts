@@ -4,7 +4,7 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
-import { executeAction, factsOf } from "./drive-action.mjs";
+import { executeAction, factsOf, snapshotChoiceLine } from "./drive-action.mjs";
 import { listedDriveClick, listedDriveText } from "./blank-unknown.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
@@ -84,7 +84,7 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
     actionable.add(el.ref);
     const kind = el.tag === "input" ? el.type || "text" : el.tag === "a" ? "link" : el.tag === "select" ? "select" : el.tag === "textarea" ? "textarea" : el.role;
     controls.set(el.ref, { kind, label, group: el.group || "", question: el.question || "", option: el.option || "" });
-    lines.push(`[${el.ref}] ${kind} "${label}"`);
+    lines.push(snapshotChoiceLine(el.ref, kind, label, el.option || ""));
   }
   return { text: lines.join("\n"), actionable, controls };
 }
