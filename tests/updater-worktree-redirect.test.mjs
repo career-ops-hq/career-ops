@@ -19,7 +19,7 @@ import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { pass, fail, NODE, ROOT, rmSync, hermeticGitEnv } from './helpers.mjs';
-import { parseWorktreeList, worktreeUpdateTarget } from '../update-system.mjs';
+import { parseWorktreeList, worktreeUpdateTarget, resolveTargetRef } from '../update-system.mjs';
 
 console.log('\n🧪 Testing updater worktree redirect...');
 
@@ -305,6 +305,91 @@ function runUpdater(cwd, args, env) {
       pass('check in linked worktree without main returns worktree-without-main with actionable detail');
     } else {
       fail(`check without main failed: ${check.stdout}`);
+    }
+  } finally {
+    rmSync(fx.base, { recursive: true, force: true });
+  }
+}
+
+// ── 8. Preview and install must describe the same update ──
+{
+  const updateMd = readFileSync(join(ROOT, 'modes', 'update.md'), 'utf-8');
+  const checkCommand = updateMd.match(/Run `(node update-system\.mjs check[^`]+)`/)?.[1] || '';
+  const applyCommand = updateMd.match(/Run `(node update-system\.mjs apply[^`]+)`/)?.[1] || '';
+  if (checkCommand.includes('--channel "$UPDATE_CHANNEL"') &&
+      applyCommand.includes('--channel "$UPDATE_CHANNEL"') &&
+      updateMd.includes('`--channel VALUE` or `--channel=VALUE` wins over `CAREER_OPS_UPDATE_CHANNEL`') &&
+      updateMd.includes('if neither is set, use `release`') &&
+      updateMd.includes('Do not silently substitute `release`') &&
+      updateMd.includes('`main` when `UPDATE_CHANNEL=main`') &&
+      updateMd.includes('`career-ops-v{remote}` when `UPDATE_CHANNEL=release`')) {
+    pass('check, preview and apply share the explicit channel, defaulting to release');
+  } else {
+    fail('check, preview and apply must share the explicit channel, defaulting to release');
+  }
+
+  // Resolve the actual documented command arguments without a shell or network.
+  // This catches a main preview paired with a default-release check/apply.
+  for (const channel of ['release', 'main']) {
+    const argvFor = command => (command.match(/"[^"]*"|\S+/g) || [])
+      .map(arg => arg.replace(/^"|"$/g, '').replace('$UPDATE_CHANNEL', channel));
+    const ctx = { curlGet: async () => JSON.stringify({ tag_name: 'career-ops-v1.40.0' }) };
+    const checkRef = await resolveTargetRef(argvFor(checkCommand), {}, ctx);
+    const applyRef = await resolveTargetRef(argvFor(applyCommand), {}, ctx);
+    const previewRef = channel === 'main' ? 'main' : 'career-ops-v1.40.0';
+    if (checkRef === previewRef && applyRef === previewRef) {
+      pass(`${channel} documented commands resolve the same ref as the preview`);
+    } else {
+      fail(`${channel} preview ${previewRef} differs from check ${checkRef} or apply ${applyRef}`);
+    }
+  }
+
+  // Both flag forms and the environment handoff are supported by the updater.
+  // Keep these controls beside the documentation contract so it cannot narrow
+  // channel selection to only one spelling or silently mask a bad request.
+  for (const [args, env, expected] of [
+    [[], {}, 'career-ops-v1.40.0'],
+    [['--channel', 'main'], {}, 'main'],
+    [['--channel=main'], {}, 'main'],
+    [[], { CAREER_OPS_UPDATE_CHANNEL: 'main' }, 'main'],
+    [['--channel=release'], { CAREER_OPS_UPDATE_CHANNEL: 'main' }, 'career-ops-v1.40.0'],
+  ]) {
+    const ctx = { curlGet: async () => JSON.stringify({ tag_name: 'career-ops-v1.40.0' }) };
+    const actual = await resolveTargetRef(['node', 'update-system.mjs', 'check', ...args], env, ctx);
+    if (actual === expected) pass(`channel selection ${JSON.stringify(args)} with ${JSON.stringify(env)} resolves ${expected}`);
+    else fail(`channel selection resolved ${actual}, expected ${expected}`);
+  }
+  let fetchedInvalidChannel = false;
+  try {
+    await resolveTargetRef(['node', 'update-system.mjs', 'check', '--channel=mian'], {}, {
+      curlGet: async () => { fetchedInvalidChannel = true; return null; },
+    });
+    fail('invalid explicit channel must stop instead of defaulting to release');
+  } catch (err) {
+    if (!fetchedInvalidChannel && err.message.includes('Unknown --channel')) pass('invalid explicit channel stops before network access');
+    else fail(`unexpected invalid-channel behavior: ${err.message}`);
+  }
+
+  const previewCommand = updateMd.split('\n').find(line => line.startsWith('git -C "$TARGET_DIR" diff HEAD..FETCH_HEAD --stat')) || '';
+  if (previewCommand.includes("'*.mjs'")) {
+    pass('preview keeps the script wildcard literal for Git, not the calling shell');
+  } else {
+    fail('preview must quote the script wildcard so the caller cannot expand it');
+  }
+
+  // The target can contain a root script absent from the calling worktree.
+  // A literal Git pathspec includes it even though caller-side expansion cannot.
+  const fx = makeFixture();
+  try {
+    const before = fx.g(fx.main, 'rev-parse', 'HEAD');
+    writeFileSync(join(fx.main, 'target-only.mjs'), '// target script\n');
+    fx.g(fx.main, 'add', 'target-only.mjs');
+    fx.g(fx.main, 'commit', '-qm', 'target-only script');
+    const changed = fx.g(fx.wt, '-C', fx.main, 'diff', `${before}..HEAD`, '--name-only', '--', '*.mjs');
+    if (!existsSync(join(fx.wt, 'target-only.mjs')) && changed.split(/\r?\n/).includes('target-only.mjs')) {
+      pass('literal preview pathspec includes a target script missing from the caller');
+    } else {
+      fail('literal preview pathspec omitted a target-only script');
     }
   } finally {
     rmSync(fx.base, { recursive: true, force: true });

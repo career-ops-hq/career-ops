@@ -4,7 +4,9 @@ When the user runs `/career-ops update`, execute this interactive update flow.
 
 ## Step 1 — Check for Updates
 
-Run `node update-system.mjs check --force` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
+Resolve `UPDATE_CHANNEL` once using the updater's channel precedence: an explicit `--channel VALUE` or `--channel=VALUE` wins over `CAREER_OPS_UPDATE_CHANNEL`; if neither is set, use `release`. Accept only `release` or `main`. If an explicit channel has no value, or the selected value is invalid, stop and ask the user to correct it before check, fetch, or apply. Do not silently substitute `release`. Keep this same validated value for check, preview, and apply.
+
+Run `node update-system.mjs check --force --channel "$UPDATE_CHANNEL"` and parse the JSON output. `--force` because the user asked: a release they said no to earlier is shown too.
 
 - If `up-to-date`: Tell the user "career-ops is up to date (v{version})." and stop.
 - If `offline`: Tell the user "Cannot reach GitHub to check for updates. Try again later." and stop. If the JSON carries a `detail` field, show it verbatim after that sentence: it is a fixed-English diagnostic naming what failed (for example `ENOENT` when curl is not installed, or a proxy or TLS error), and that is what the user needs to fix it.
@@ -35,14 +37,14 @@ git -C "$TARGET_DIR" fetch https://github.com/career-ops-hq/career-ops.git {targ
 }
 ```
 
-where `{target_ref}` is `main` when `--channel main` is requested, or `career-ops-v{remote}` for a release update.
+where `{target_ref}` is `main` when `UPDATE_CHANNEL=main`, or `career-ops-v{remote}` when `UPDATE_CHANNEL=release`.
 
 If the fetch fails, stop Step 2 and tell the user you couldn't preview the changes — don't proceed with a stale `FETCH_HEAD`.
 
 Then, only if the fetch succeeded, for each System Layer file category show a summary against the target checkout's HEAD:
 
 ```bash
-git -C "$TARGET_DIR" diff HEAD..FETCH_HEAD --stat -- modes/ CLAUDE.md AGENTS.md *.mjs batch/ dashboard/ templates/ docs/ VERSION DATA_CONTRACT.md
+git -C "$TARGET_DIR" diff HEAD..FETCH_HEAD --stat -- modes/ CLAUDE.md AGENTS.md '*.mjs' batch/ dashboard/ templates/ docs/ VERSION DATA_CONTRACT.md
 ```
 
 Present to the user as a clear summary:
@@ -92,7 +94,7 @@ If yes:
    ```
    Don't rely on `backup-pre-update-{local}` alone — `update-system.mjs apply` reuses that branch if it already exists, so it may point at an older snapshot. In a linked worktree, capturing `HEAD` in the calling worktree records the feature branch rather than the `main` checkout that `apply` updates.
 2. **Save local CLAUDE.md additions.** CLAUDE.md is a system file. When this install has changed it, `apply` keeps the local version by default: it lists CLAUDE.md under "Keeping your versions" and writes `CLAUDE.md.bak`. It replaces CLAUDE.md with the two-line template (`@AGENTS.md` + the local-additions comment) only with `--force`, or when it does not see the change as a local edit. Before applying, read the current CLAUDE.md in `TARGET_DIR` and save everything after that two-line header, so step 4 can put it back if apply replaced the file. If CLAUDE.md has nothing beyond the two-line header, note that there is nothing to restore.
-3. Run `node update-system.mjs apply --confirm`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently. (From a linked worktree, `update-system.mjs apply` automatically redirects execution to `TARGET_DIR`).
+3. Run `node update-system.mjs apply --confirm --channel "$UPDATE_CHANNEL"`, capturing its exit code without stopping on failure yet — the restore in step 4 must run either way. The `--confirm` flag is required so scheduled checks can never install files silently. (From a linked worktree, `update-system.mjs apply` automatically redirects execution to `TARGET_DIR`).
 4. **Restore local CLAUDE.md additions if apply removed them**, whether step 3 succeeded or failed. Re-read CLAUDE.md in `TARGET_DIR`. If the content saved in step 2 is still in it, which is the default because `apply` kept your version, leave the file as it is: appending the content again would duplicate it, and every later update would add another copy. Only if the saved content is missing, append it after the two-line header.
 5. Now check the exit code captured in step 3:
    - If non-zero, treat apply as failed. Show the captured output and offer:
