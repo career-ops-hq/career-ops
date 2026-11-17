@@ -51,7 +51,7 @@ import path from 'node:path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { captureIdentity, captureSlug, findCaptureForUrl } from './jd-capture.mjs';
+import { captureIdentity, captureSlug, findCaptureForUrl, isSupportedCaptureExtension, validateCaptureUrl } from './jd-capture.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 
 const PIPELINE_SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';
@@ -63,10 +63,14 @@ const PIPELINE_SKELETON = '# Pipeline\n\n## Pending\n\n## Processed\n';
  * pulls in the provider registry and the YAML loader, and a capture must not
  * need those to append one markdown line. Same steps, same guarantees — a
  * reader sees either the old file or the new one, never a truncated mix.
+ * Pipeline writes intentionally follow existing symlinks; JD outputs opt out.
  */
-export function atomicWrite(filePath, text) {
+export function atomicWrite(filePath, text, { followSymlinks = true } = {}) {
   const fileStat = lstatSync(filePath, { throwIfNoEntry: false });
-  const targetPath = fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
+  if (!followSymlinks && fileStat?.isSymbolicLink()) {
+    throw new Error('Refusing atomic write to a symlink capture output');
+  }
+  const targetPath = followSymlinks && fileStat?.isSymbolicLink() ? realpathSync(filePath) : filePath;
   const tempPath = `${targetPath}.tmp-${process.pid}-${randomUUID()}`;
   let fd = null;
   try {
@@ -148,7 +152,11 @@ function companyFromUrl(url) {
     const tenant = parsed.pathname.split('/').filter(Boolean)[0] || '';
     // Skip locale segments (`en_US`, `de-de`) and opaque ids; neither is a company.
     if (tenant && !/^[a-z]{2}([-_][a-z]{2})?$/i.test(tenant) && !/^[0-9a-f-]{16,}$/i.test(tenant)) {
-      return prettifySlug(decodeURIComponent(tenant));
+      try {
+        return prettifySlug(decodeURIComponent(tenant));
+      } catch {
+        return ''; // An undecodable tenant does not identify an employer.
+      }
     }
   }
 
@@ -206,6 +214,14 @@ export function deriveLabels(url, title = '') {
 
 /** The capture filename for a posting, matching archive-posting.mjs's identity. */
 export function captureName({ company, role, url, date, ext = 'md' }) {
+  const parsedDate = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T00:00:00.000Z`) : null;
+  if (!parsedDate || Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+    throw new TypeError('capture date must be a real ISO date (YYYY-MM-DD)');
+  }
+  if (typeof ext !== 'string' || !/^[a-z]+$/.test(ext) || !isSupportedCaptureExtension(`.${ext}`)) {
+    throw new TypeError('capture extension must be md, txt, html, or pdf');
+  }
   const identity = captureIdentity(url);
   const c = captureSlug(company) || 'unknown';
   const r = captureSlug(role) || 'role';
@@ -360,9 +376,11 @@ export function commitCapture({ dataRoot, files, message, push = true }) {
  * @returns {Promise<object>}
  */
 export async function captureJd(input = {}) {
-  const url = String(input.url ?? '').trim();
-  if (!/^https?:\/\//i.test(url)) {
-    return { ok: false, error: 'url must be http(s)' };
+  let url;
+  try {
+    url = validateCaptureUrl(input.url);
+  } catch (error) {
+    return { ok: false, error: error.message };
   }
 
   const dataRoot = input.dataRoot || getCareerOpsRoot();
@@ -372,6 +390,12 @@ export async function captureJd(input = {}) {
   const derived = deriveLabels(url, input.title || '');
   const company = oneLine(input.company, 80) || derived.company;
   const role = oneLine(input.role, 80) || derived.role;
+  let name;
+  try {
+    if (text.trim()) name = captureName({ company, role, url, date });
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
 
   const jdsDir = path.join(dataRoot, 'jds');
   const pipelinePath = path.join(dataRoot, 'data', 'pipeline.md');
@@ -384,9 +408,8 @@ export async function captureJd(input = {}) {
     appendPendingRowUnlocked(pipelinePath, row, url, () => {
       if (!text.trim()) return;
       mkdirSync(jdsDir, { recursive: true });
-      const name = captureName({ company, role, url, date });
       capturePath = path.join(jdsDir, name);
-      atomicWrite(capturePath, captureBody({ url, company, role, date, text }));
+      atomicWrite(capturePath, captureBody({ url, company, role, date, text }), { followSymlinks: false });
       files.push(capturePath);
     }));
   if (appended.appended) files.unshift(pipelinePath);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync, utimesSync, symlinkSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -422,4 +422,185 @@ test('server-side evaluation disable overrides an evaluate request', async () =>
   } finally {
     await new Promise((r) => server.close(r));
   }
+});
+
+// --- R2 URL and capture-file boundary regressions --------------------------
+
+test('invalid capture URLs are refused before any filesystem or Git activity', async () => {
+  const invalidUrls = [
+    'https://', 'https:///acme.test/jobs/1', 'https://[bad', 'https://acme.test:999999/1',
+    'file:///etc/passwd', 'https:/acme.test/jobs/1',
+    'https://user:pass@acme.test/jobs/1', 'https://user@acme.test/1', 'https://@acme.test/1',
+    'https://acme.test/job s/1', 'https://acme.test/jobs/\n1', 'https://acme.test/jobs/\t1',
+    'https://acme.test/jobs/\u00001', 'https://acme.test/jobs/\u007f1',
+    'https:\\\\acme.test\\jobs\\1', 'https://acme.test/jobs/1\\next',
+    'https://acme.test/jobs/1|other', 'https://acme.test/jobs/%ZZ', 'https://acme.test/jobs/%2',
+  ];
+
+  for (const url of invalidUrls) {
+    const root = path.join(sandbox, `invalid-${captureIdentity(url)}`);
+    const result = await captureJd({
+      url, text: 'must not write', dataRoot: root, commit: true,
+      get title() { throw new Error('invalid URL reached label derivation'); },
+    });
+    assert.equal(result.ok, false, `expected rejection for ${JSON.stringify(url)}`);
+    assert.equal(existsSync(root), false, `unexpected filesystem write for ${JSON.stringify(url)}`);
+  }
+});
+
+test('outer URL whitespace is trimmed while valid raw URL identity is preserved', async () => {
+  const root = scratch();
+  const rawUrl = 'HTTPS://Acme.Test:443/jobs/a%2fb?source=career-ops#Here';
+  const result = await captureJd({ url: `  ${rawUrl} \t`, text: 'JD', dataRoot: root, date: '2026-11-12' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.url, rawUrl);
+  assert.ok(result.capture.endsWith(`_${captureIdentity(rawUrl)}.md`));
+  assert.ok(readPipeline(root).includes(`- [ ] ${rawUrl} | Acme | `));
+});
+
+test('captureName rejects impossible dates and unsupported or unsafe extensions', () => {
+  const base = { company: 'Acme', role: 'Engineer', url: 'https://acme.test/jobs/1' };
+  for (const date of ['2026-02-30', '2026-02-29', '2026-13-01', '2026-11-00', '2026-2-03', '../2026-11-12', '2026-11-12/..']) {
+    assert.throws(() => captureName({ ...base, date }), `date ${date}`);
+  }
+  for (const ext of ['exe', '../md', '.md', 'md/../../x']) {
+    assert.throws(() => captureName({ ...base, date: '2026-11-12', ext }), `extension ${ext}`);
+  }
+  assert.equal(captureName({ ...base, date: '2024-02-29' }), `2024-02-29_acme_engineer_${captureIdentity(base.url)}.md`);
+  const safe = captureName({ ...base, date: '2026-11-12', company: '../../Acme\\evil', role: '../Engineer:role' });
+  assert.equal(path.basename(safe), safe);
+  assert.match(safe, /^2026-11-12_[a-z0-9-]+_[a-z0-9-]+_[a-f0-9]{16}\.md$/);
+});
+
+test('invalid capture date is rejected before creating the data root', async () => {
+  const root = path.join(sandbox, 'invalid-date-root');
+  const result = await captureJd({ url: 'https://acme.test/jobs/date', text: 'JD', date: '../escape', dataRoot: root });
+  assert.equal(result.ok, false);
+  assert.equal(existsSync(root), false);
+});
+
+test('findCaptureForUrl only resolves a hash suffix and known archive extensions', () => {
+  const root = scratch();
+  const jds = path.join(root, 'jds');
+  mkdirSync(jds);
+  const url = 'https://acme.test/jobs/exact-suffix';
+  const hash = captureIdentity(url);
+  const names = [
+    `2026-11-12_acme_engineer_${hash}.md`,
+    `064-2026-11-12_acme_engineer_${hash}-2.pdf`,
+    `2026-11-12_acme_${hash}_engineer.md`,
+    `2026-11-12_acme_engineer_${hash}.docx`,
+    `2026-11-12_acme_engineer_x${hash}.txt`,
+    `2026-11-12_acme_engineer_${hash}0.html`,
+    `2026-11-12_acme_engineer_${hash}-extra.md`,
+    `2026-11-12_acme_engineer_${hash}-1.md`,
+  ];
+  for (const name of names) writeFileSync(path.join(jds, name), 'capture');
+
+  const found = findCaptureForUrl(jds, url);
+  assert.equal(found.filename, names[0]);
+  assert.deepEqual(found.candidates, names.slice(0, 2));
+  assert.equal(findCaptureForUrl(jds, url, { extensions: ['.pdf', '.md'] }).filename, names[1]);
+  assert.equal(findCaptureForUrl(jds, url, { extensions: ['.docx'] }), null);
+});
+
+test('findCaptureForUrl rejects invalid URLs even when a matching hash file exists', () => {
+  const root = scratch();
+  const jds = path.join(root, 'jds');
+  mkdirSync(jds);
+  for (const url of ['https://', 'https://user:pass@acme.test/1', 'https://acme.test/%zz']) {
+    writeFileSync(path.join(jds, `2026-11-12_acme_role_${captureIdentity(url)}.md`), 'capture');
+    assert.equal(findCaptureForUrl(jds, url), null);
+  }
+});
+
+test('findCaptureForUrl ignores directories', () => {
+  const root = scratch();
+  const jds = path.join(root, 'jds');
+  mkdirSync(jds);
+  const url = 'https://acme.test/jobs/file-types';
+  const hash = captureIdentity(url);
+  const directoryName = `2026-11-12_acme_engineer_${hash}.md`;
+  mkdirSync(path.join(jds, directoryName));
+  assert.equal(findCaptureForUrl(jds, url), null);
+});
+
+test('findCaptureForUrl ignores symlink captures', (t) => {
+  const root = scratch();
+  const jds = path.join(root, 'jds');
+  mkdirSync(jds);
+  const url = 'https://acme.test/jobs/symlink';
+  const hash = captureIdentity(url);
+  const target = path.join(root, 'target.md');
+  const linkName = `2026-11-12_acme_engineer_${hash}-2.md`;
+  writeFileSync(target, 'not a capture');
+  try {
+    symlinkSync(target, path.join(jds, linkName));
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOSYS', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`symlinks unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  assert.equal(findCaptureForUrl(jds, url), null);
+});
+
+test('malformed percent-encoded ATS tenant does not throw during label derivation', () => {
+  for (const tenant of ['%E0%A4%A', '%FF']) {
+    assert.doesNotThrow(() => deriveLabels(`https://boards.greenhouse.io/${tenant}/jobs/123`));
+    assert.equal(deriveLabels(`https://boards.greenhouse.io/${tenant}/jobs/123`).company, '');
+  }
+});
+
+test('JD output refuses a pre-existing symlink without changing its target or pipeline', async (t) => {
+  const root = scratch();
+  const jds = path.join(root, 'jds');
+  mkdirSync(jds);
+  const input = { url: 'https://acme.test/jobs/output-link', company: 'Acme', role: 'Engineer',
+    date: '2026-11-12', text: 'replacement JD', dataRoot: root, commit: false, push: false };
+  const output = path.join(jds, captureName(input));
+  const target = path.join(root, 'outside-jds.md');
+  writeFileSync(target, 'untouched external target');
+  const pipeline = readPipeline(root);
+  const targetMtime = statSync(target).mtimeMs;
+  try {
+    symlinkSync(target, output);
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOSYS', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`symlinks unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  let failure;
+  try { await captureJd(input); } catch (error) { failure = error; }
+  assert.equal(readFileSync(target, 'utf8'), 'untouched external target');
+  assert.equal(statSync(target).mtimeMs, targetMtime);
+  assert.equal(readPipeline(root), pipeline);
+  assert.equal(lstatSync(output).isSymbolicLink(), true);
+  assert.deepEqual(readdirSync(jds), [path.basename(output)]);
+  assert.match(failure?.message || '', /refus.*symlink/i);
+});
+
+test('pipeline atomic writing retains intentional symlink semantics', async (t) => {
+  const root = scratch();
+  const pipeline = path.join(root, 'data', 'pipeline.md');
+  const target = path.join(root, 'pipeline-target.md');
+  writeFileSync(target, readPipeline(root));
+  rmSync(pipeline);
+  try {
+    symlinkSync(target, pipeline);
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOSYS', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`symlinks unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  const result = await captureJd({ url: 'https://acme.test/jobs/pipeline-link', dataRoot: root, commit: false });
+  assert.equal(result.appended, true);
+  assert.equal(lstatSync(pipeline).isSymbolicLink(), true);
+  assert.ok(readFileSync(target, 'utf8').includes('https://acme.test/jobs/pipeline-link'));
 });
