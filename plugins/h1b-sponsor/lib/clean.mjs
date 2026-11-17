@@ -9,6 +9,9 @@
 // eslint-disable-next-line no-control-regex
 export const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/g;
 
-export function displayClean(s) {
+export function cleanForDisplay(s) {
   return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
 }
+
+export const cleanDisplay = cleanForDisplay;
+export const displayClean = cleanForDisplay;
