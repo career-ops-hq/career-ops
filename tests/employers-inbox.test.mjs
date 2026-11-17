@@ -89,6 +89,34 @@ test('parseInboxName: rejects what is not <date>-<login>[-NNN].ndjson or <date>-
   }
 });
 
+test('parseInboxName: a later contribution of the same day carries .2 to .99 after the login, in every file of it', () => {
+  assert.deepEqual(parseInboxName('2026-11-10-octocat.2.ndjson'), { kind: 'boards', date: DATE, login: 'octocat', part: null, id: '2026-11-10-octocat.2' });
+  assert.deepEqual(parseInboxName('2026-11-10-octo-cat.12-003.ndjson'), { kind: 'boards', date: DATE, login: 'octo-cat', part: 3, id: '2026-11-10-octo-cat.12' });
+  assert.deepEqual(parseInboxName('2026-11-10-octo-cat.99.json'), { kind: 'sheet', date: DATE, login: 'octo-cat', part: null, id: '2026-11-10-octo-cat.99' });
+  // A login that ends in -NNN keeps it: the part number comes after the contribution number.
+  assert.deepEqual(parseInboxName('2026-11-10-octocat-001.2.ndjson'), { kind: 'boards', date: DATE, login: 'octocat-001', part: null, id: '2026-11-10-octocat-001.2' });
+  const number = /the number after the login runs from 2 to 99, with no leading zero; the first contribution of a day has none/;
+  for (const [name, why] of [
+    ['2026-11-10-octocat.1.ndjson', number],
+    ['2026-11-10-octocat.0.ndjson', number],
+    ['2026-11-10-octocat.02.ndjson', number],
+    ['2026-11-10-octocat.100.ndjson', number],
+    ['2026-11-10-octocat.1.json', number],
+    ['2026-11-10-octocat.01-001.ndjson', number],
+    ['2026-11-10-OctoCat.2.ndjson', /lowercase: 2026-11-10-octocat\.2\.ndjson/],
+    ['2026-11-10-octocat..ndjson', /inbox files are named/],
+    ['2026-11-10-octocat.2.3.ndjson', /inbox files are named/],
+    ['2026-11-10-octocat.x.ndjson', /inbox files are named/],
+    ['2026-11-10-octocat.2-001.json', /inbox files are named/], // a manifest has no part number
+    ['2026-11-10-.2.ndjson', /inbox files are named/],
+    ['2026-11-10-octocat.2.csv', /inbox files are named/],
+    ['2026-11-20-octocat.2-000.ndjson', /part numbers start at 001/], // part zero is refused with a number too
+  ]) {
+    const r = parseInboxName(name);
+    assert.match(r.error || '', why, name);
+  }
+});
+
 // ── Lines ──────────────────────────────────────────────────────────────────
 
 test('an inbox line builds its careers URL with the default hosts', () => {
@@ -300,6 +328,38 @@ test('a manifest is checked like contributions/, plus its rows and its login', (
     `${DATE}-orphan.json:0: rows is 1, but 0 line(s) are in its inbox files`,
   ]) assert.ok(lines.includes(want), `missing: ${want}\n${lines.join('\n')}`);
   assert.equal(lines.length, 6, lines.join('\n'));
+}));
+
+// ── Several contributions of one login on one day ─────────────────────────
+
+test('two contributions of one login on one day, each with its own source and manifest, both pass', () => withInbox({
+  [`${DATE}-acme-hr.ndjson`]: UNLISTED.slice(0, 3),
+  [`${DATE}-acme-hr.json`]: sheet(),
+  [`${DATE}-acme-hr.2-001.ndjson`]: UNLISTED.slice(3, 5),
+  [`${DATE}-acme-hr.2-002.ndjson`]: UNLISTED.slice(5),
+  [`${DATE}-acme-hr.2.json`]: sheet({ id: `${DATE}-acme-hr.2`, rows: 3, source: 'web-index:wayback@2026-11-09', origin: 'Board addresses found in a public web archive.' }),
+}, (dir) => {
+  const { errors, warnings, stats } = validate(dir);
+  assert.deepEqual(at(errors), []);
+  assert.deepEqual(at(warnings), []);
+  assert.equal(stats.inboxFiles, 5);
+  assert.equal(run(dir, ['--base', ROOT]).status, 0);
+}));
+
+test('a numbered contribution needs no smaller number, and its manifest is checked against the login without the number', () => withInbox({
+  [`${DATE}-acme-hr.3.ndjson`]: UNLISTED.slice(0, 3),
+  [`${DATE}-acme-hr.3.json`]: sheet({ id: `${DATE}-acme-hr.3` }),
+  [`${DATE}-octocat.2.ndjson`]: UNLISTED.slice(3, 4),
+  [`${DATE}-octocat.2.json`]: sheet({ id: `${DATE}-octocat.2`, contributor: 'someone-else', rows: 1 }),
+  [`${DATE}-bob.4.json`]: sheet({ id: `${DATE}-bob.2`, contributor: 'bob', rows: 1 }),
+}, (dir) => {
+  const lines = at(validate(dir).errors);
+  assert.deepEqual(lines, [
+    `${DATE}-bob.4.json:0: a manifest with no boards: add ${DATE}-bob.4.ndjson (or ${DATE}-bob.4-001.ndjson, …) next to it`,
+    `${DATE}-bob.4.json:0: id "${DATE}-bob.2" does not match the file name (${DATE}-bob.4.json)`,
+    `${DATE}-bob.4.json:0: rows is 1, but 0 line(s) are in its inbox files`,
+    `${DATE}-octocat.2.json:0: contributor "someone-else" is not the login in the file name (octocat)`,
+  ]);
 }));
 
 // ── GitHub Actions output ─────────────────────────────────────────────────
