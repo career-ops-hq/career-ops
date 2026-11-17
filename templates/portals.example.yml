@@ -1361,6 +1361,7 @@ search_queries:
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
 #   taleez          <tenant>.taleez.com                 (or api: field)
+#   inhire          <tenant>.inhire.app                 (or api: field; Brazilian ATS, one list request per tenant)
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
@@ -1506,6 +1507,10 @@ search_queries:
 # - name: Example Homerun Co
 #   careers_url: https://exampleco.homerun.co            # any <slug>.homerun.co host
 #   # Branded careers domain: api: https://feed.homerun.co/exampleco (the feed the careers page links)
+#   enabled: true
+#
+# - name: Example InHire Co
+#   careers_url: https://exampleco.inhire.app             # any <tenant>.inhire.app host
 #   enabled: true
 #
 # - name: Example InRecruiting Co
