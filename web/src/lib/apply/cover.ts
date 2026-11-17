@@ -3,7 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, findApplication, isRegularContainedFile, pdfPathStatusForReport, readReport } from "@/lib/career-ops";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
-import { hasToken, isStandardName, matchesCompanyKeys, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
+import { hasToken, isStandardName, matchesCompanyKeys, matchesTailoredCover, sortNewestFirst, standardKind } from "./cv-match.mjs";
 
 /** The length generate-cover-letter.mjs truncates a role slug to when it builds
  *  a default output filename (`role.slice(0, 30)`). A role longer than this is
@@ -64,7 +64,11 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .filter((f) => matchesCompanyKeys(matchesTailoredCover, f.toLowerCase(), key.keys))
+      // With an application row a standard name is selected by report number
+      // below, not by company: its company segment is the report's slug, which
+      // can carry the role (031-acme-engineer-cover-...) and so differ from the
+      // tracker company's slug.
+      .filter((f) => (app && isStandardName(f.toLowerCase())) || matchesCompanyKeys(matchesTailoredCover, f.toLowerCase(), key.keys))
       // sortNewestFirst drops directories and files that vanish under it, but
       // not a symlink PLACED in output/ that resolves elsewhere: that one stats
       // as a regular file. Same realpath guard /api/cv-pdf applies, here rather
@@ -85,7 +89,7 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
     files = files.filter((f) => {
       const lower = f.toLowerCase();
       if (isStandardName(lower)) {
-        return reportNumber != null && parseInt(lower, 10) === reportNumber;
+        return reportNumber != null && parseInt(lower, 10) === reportNumber && standardKind(lower, null) === "cover";
       }
       return wanted.some((r) => hasToken(lower, r));
     });
