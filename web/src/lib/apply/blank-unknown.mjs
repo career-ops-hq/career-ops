@@ -15,12 +15,16 @@ import { getProfilePath } from "../core/profile-path.mjs";
  * @returns {Record<string, unknown>}
  */
 export function readApplyProfile(root) {
+  const file = getProfilePath(root);
   try {
-    const file = getProfilePath(root);
     const doc = yaml.load(fs.readFileSync(file, "utf8"));
     return doc && typeof doc === "object" ? /** @type {Record<string, unknown>} */ (doc) : {};
-  } catch {
-    return {};
+  } catch (err) {
+    // A missing profile states nothing. A broken or unreadable one must not
+    // look the same, or every stated answer is blanked with no reason.
+    if (/** @type {NodeJS.ErrnoException} */ (err)?.code === "ENOENT") return {};
+    const message = err instanceof Error ? err.message : "could not read the profile";
+    throw new Error(`${file}: ${message}`);
   }
 }
 
@@ -32,13 +36,14 @@ export function classifyApplyQuestion(field) {
   if (!field || field.type === "file") return null;
   const q = String(field.label || "").toLowerCase().replace(/\s+/g, " ").trim();
   if (!q) return null;
-  if (/gender|race|ethnic|veteran|disability|self-identif|pronouns?\b|hispanic|latin[oa]|sexual orientation/.test(q)) return "eeo";
+  if (/gender|\brac(?:e|ial)\b|ethnic|veteran|disability|self-identif|pronouns?\b|hispanic|latin[oa]|sexual orientation/.test(q)) return "eeo";
   if (/felony|conviction|convicted|criminal background/.test(q)) return "legal";
   if (/salary history|compensation history|wage history|pay history|\b(?:current|previous|prior|last) (?:salary|compensation|pay|wage)\b/.test(q)) return "salary-history";
   const visa = visaQuestionKind(q);
   if (visa) return visa;
   if (/salary|compensation|pay expectation|desired pay|\bwage\b/.test(q)) return "salary";
   if (/how did you hear|where did you hear|how did you find|referral source/.test(q)) return "source";
+  if (/years of (?:relevant )?experience (?:with|in|using|as|on)\b/.test(q)) return "years-specific";
   if (/years of experience|years of relevant/.test(q)) return "years";
   if (/start date|earliest start|when can you start|date you can start/.test(q)) return "start-date";
   if (/relocat/.test(q)) return "relocation";
@@ -156,7 +161,7 @@ function digitsForNumberBox(range) {
 
 /**
  * The profile's own answer for this question, or null when it does not state one.
- * EEO and salary-history never come from the profile.
+ * EEO, salary history, and a skill-specific years question never come from the profile.
  *
  * @param {string} category
  * @param {{ type?: string, label?: string, options?: string[] }} field
@@ -171,7 +176,7 @@ export function statedAnswer(category, field, profile) {
   const experience = asRecord(doc.experience);
   const apply = asRecord(doc.apply);
 
-  if (category === "eeo" || category === "salary-history" || category === "legal") return null;
+  if (category === "eeo" || category === "salary-history" || category === "legal" || category === "years-specific") return null;
 
   if (category === "auth-unresolved") return null;
 
@@ -302,16 +307,19 @@ export function blankUnknownDraft(fields, draft, profile = {}) {
  * @param {{ id?: string, label?: string, value?: string }[]} answers
  * @param {Record<string, unknown>} profile
  * @param {string[]} [editedLabels]
+ * @param {{ id?: string, type?: string, label?: string, options?: string[] }[]} [fields]
  * @returns {{ id?: string, label: string, value: string }[]}
  */
-export function prepareLabeledAnswers(answers, profile, editedLabels = []) {
+export function prepareLabeledAnswers(answers, profile, editedLabels = [], fields = []) {
   const edited = new Set(editedLabels.map((label) => String(label || "").toLowerCase()));
+  const byId = new Map(fields.filter((field) => field?.id).map((field) => [String(field.id), field]));
   return (answers || []).flatMap((answer) => {
     const label = String(answer?.label || "");
     const value = String(answer?.value || "");
     const row = answer?.id ? { id: String(answer.id), label, value } : { label, value };
     if (edited.has(label.toLowerCase())) return [row];
-    const field = { id: label, type: "text", label };
+    const known = answer?.id ? byId.get(String(answer.id)) : undefined;
+    const field = known || { id: label, type: "text", label };
     const category = classifyApplyQuestion(field);
     if (!category) return [row];
     const stated = statedAnswer(category, field, profile);

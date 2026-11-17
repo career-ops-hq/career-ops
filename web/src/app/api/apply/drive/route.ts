@@ -21,12 +21,25 @@ export async function POST(req: Request) {
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { sessionId, goal = "reach", answers } = body;
   const editedLabels = Array.isArray(body.editedLabels) ? body.editedLabels.filter((label): label is string => typeof label === "string") : [];
-  const safeAnswers = answers ? prepareLabeledAnswers(answers, readApplyProfile(careerOpsRoot()), editedLabels) : answers;
+  if (answers !== undefined && !Array.isArray(answers)) {
+    return Response.json({ error: "answers must be an array" }, { status: 400 });
+  }
   // Same fallback as the session open that precedes every drive, which is where
   // a substitution is reported (#4607); driveSession() itself needs Claude.
   const cliId = (body.cliId && resolveCliOrFallback(body.cliId)?.spec.id) || body.cliId || "";
   const s = sessionId ? getSession(sessionId) : undefined;
   if (!s) return Response.json({ error: "apply session not found (it may have expired)" }, { status: 404 });
+  let safeAnswers = answers;
+  if (answers) {
+    let profile;
+    try {
+      profile = readApplyProfile(careerOpsRoot());
+    } catch (error) {
+      const message = error instanceof Error ? error.message.slice(0, 200) : "could not read the profile";
+      return Response.json({ error: message }, { status: 500 });
+    }
+    safeAnswers = prepareLabeledAnswers(answers, profile, editedLabels, s.fields);
+  }
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({

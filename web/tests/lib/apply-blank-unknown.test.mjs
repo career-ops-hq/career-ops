@@ -4,7 +4,8 @@
 // Run from web/: node --experimental-strip-types --test tests/lib/apply-blank-unknown.test.mjs
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { test } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ import {
   classifyApplyQuestion,
   prepareFillAnswers,
   prepareLabeledAnswers,
+  readApplyProfile,
   statedAnswer,
 } from "../../src/lib/apply/blank-unknown.mjs";
 
@@ -132,7 +134,9 @@ test("fill, prefill, and drive call the gate", () => {
   const drive = readFileSync(join(root, "src/app/api/apply/drive/route.ts"), "utf8");
   assert.match(fill, /prepareFillAnswers\(/);
   assert.match(prefill, /blankUnknownDraft\(/);
-  assert.match(drive, /prepareLabeledAnswers\(/);
+  assert.match(drive, /prepareLabeledAnswers\(answers, profile, editedLabels, s\.fields\)/);
+  assert.match(drive, /answers must be an array/);
+  assert.match(prefill, /could not read the profile/);
 });
 
 test("authorized to work without sponsorship is Yes when the profile says so", () => {
@@ -402,4 +406,63 @@ test("total years fill only a total-experience question", () => {
   assert.equal(filled.total, "8");
   assert.equal("python" in filled, false);
   assert.equal("address" in filled, false);
+});
+
+test("years with a named skill stay blank, and race is a whole word", () => {
+  const profile = { years_experience: "8" };
+  const python = { id: "python", type: "number", label: "Years of experience with Python" };
+  const embrace = { id: "story", type: "text", label: "Describe a time you had to embrace a new tool" };
+  assert.equal(classifyApplyQuestion(python), "years-specific");
+  assert.equal(classifyApplyQuestion({ type: "select", label: "Race/Ethnicity" }), "eeo");
+  assert.equal(classifyApplyQuestion({ type: "select", label: "Racial background" }), "eeo");
+  assert.equal(classifyApplyQuestion(embrace), null);
+  const gated = blankUnknownDraft(
+    [python, embrace],
+    {
+      python: { value: "5", needs_confirmation: false },
+      story: { value: "I learned the CRM.", needs_confirmation: false },
+    },
+    profile,
+  );
+  assert.equal(gated.python.value, "");
+  assert.equal(gated.python.needs_confirmation, true);
+  assert.equal(gated.story.value, "I learned the CRM.");
+  const filled = prepareFillAnswers({ fields: [python], answers: { python: "5" }, profile });
+  assert.equal(filled.python, "");
+});
+
+test("labeled drive answers use the real field, not a text stand-in", () => {
+  const profile = { compensation: { target_range: "$150K-200K" }, source: "LinkedIn" };
+  const fields = [
+    { id: "pay", type: "number", label: "Desired salary" },
+    { id: "hear", type: "select", label: "How did you hear about us?", options: ["Referral", "Other"] },
+  ];
+  const labeled = prepareLabeledAnswers(
+    [
+      { id: "pay", label: "Desired salary", value: "$150K-200K" },
+      { id: "hear", label: "How did you hear about us?", value: "LinkedIn" },
+    ],
+    profile,
+    [],
+    fields,
+  );
+  assert.deepEqual(labeled, [{ id: "pay", label: "Desired salary", value: "150000" }]);
+});
+
+test("a missing profile is empty and a broken profile is an error", () => {
+  const saved = process.env.CAREER_OPS_PROFILE;
+  delete process.env.CAREER_OPS_PROFILE;
+  const root = mkdtempSync(join(tmpdir(), "apply-profile-"));
+  try {
+    assert.deepEqual(readApplyProfile(root), {});
+    const config = join(root, "config");
+    mkdirSync(config);
+    const file = join(config, "profile.yml");
+    writeFileSync(file, "compensation: [\n  - broken\n");
+    assert.throws(() => readApplyProfile(root), /profile\.yml/);
+  } finally {
+    if (saved === undefined) delete process.env.CAREER_OPS_PROFILE;
+    else process.env.CAREER_OPS_PROFILE = saved;
+    rmSync(root, { recursive: true, force: true });
+  }
 });

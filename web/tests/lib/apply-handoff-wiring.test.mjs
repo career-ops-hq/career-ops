@@ -5,7 +5,7 @@
 // Run: node --test tests/lib/apply-handoff-wiring.test.mjs
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { register } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -14,8 +14,10 @@ import { fileURLToPath } from "node:url";
 import "../helpers/web-ts-alias-loader.mjs";
 
 // Fill and drive blank a screening guess the profile does not state. An empty
-// root keeps this file off a real profile.
+// root keeps this file off a real profile. CAREER_OPS_PROFILE names a file
+// directly and would ignore that root.
 process.env.CAREER_OPS_ROOT = mkdtempSync(join(tmpdir(), "apply-handoff-"));
+delete process.env.CAREER_OPS_PROFILE;
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "../../src");
 
@@ -252,6 +254,46 @@ test("drive read-back uses the agent's answers when no résumé is attached", as
   });
   assert.equal(globalThis.__applyFixture.fillCalls, 0);
   assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { visa: "No" });
+});
+
+test("drive uses the field type, refuses a bad answers body, and reports a broken profile", async () => {
+  resetFixture();
+  const badAnswers = await drivePost(new Request("http://fixture.invalid/api/apply/drive", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId: "sess-1", answers: { a: 1 } }),
+  }));
+  assert.equal(badAnswers.status, 400);
+
+  const root = process.env.CAREER_OPS_ROOT;
+  const config = join(root, "config");
+  mkdirSync(config, { recursive: true });
+  const file = join(config, "profile.yml");
+  try {
+    writeFileSync(file, "compensation:\n  target_range: \"$150K-200K\"\n");
+    globalThis.__applyFixture.session.fields = [
+      { id: "pay", type: "number", label: "Desired salary", required: false },
+    ];
+    await postDrive({
+      answers: [{ id: "pay", label: "Desired salary", value: "$150K-200K" }],
+    });
+    assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { pay: "150000" });
+
+    writeFileSync(file, "compensation: [\n  - broken\n");
+    const broken = await drivePost(new Request("http://fixture.invalid/api/apply/drive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId: "sess-1",
+        answers: [{ id: "pay", label: "Desired salary", value: "1" }],
+      }),
+    }));
+    assert.equal(broken.status, 500);
+    const body = await broken.json();
+    assert.match(body.error, /profile\.yml/);
+  } finally {
+    unlinkSync(file);
+  }
 });
 
 test("drive read-back drops an unedited sponsorship guess", async () => {

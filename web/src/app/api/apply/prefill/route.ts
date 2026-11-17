@@ -133,7 +133,13 @@ export async function POST(req: Request) {
           result.buf.slice(-300),
         );
       }
-      const answers = blankUnknownDraft(s.fields, obj, readApplyProfile(careerOpsRoot()));
+      let profile;
+      try {
+        profile = readApplyProfile(careerOpsRoot());
+      } catch (error) {
+        return fail(error instanceof Error ? error.message.slice(0, 200) : "could not read the profile");
+      }
+      const answers = blankUnknownDraft(s.fields, obj, profile);
       const count = Object.keys(answers).length;
       log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
       emit({ t: "done", answers, truncated, count });
