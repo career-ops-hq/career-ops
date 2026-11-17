@@ -3072,6 +3072,7 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
   if (paths.length === 0) return;
   const stranded = [];
   const unchecked = [];
+  const unrestored = [];
   // A file the update kept out is never one of its additions either.
   if (exclude.length > 0) protectedPaths = new Set([...protectedPaths, ...exclude]);
   // Must restore from HEAD, not from the index (#915 bug 1). After
@@ -3094,18 +3095,27 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
         runGit('checkout', 'HEAD', '--', p, ...kept.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`));
       } catch (err) {
         // Only remove if the path genuinely doesn't exist in HEAD.
-        // Other errors (permissions, corrupt refs) should re-throw.
         let existsInHead = true;
         try { runGit('cat-file', '-e', `HEAD:${pathspec}`); } catch { existsInHead = false; }
-        if (existsInHead) throw err;
-        // A file newly introduced by the update is removed so the working tree
-        // matches HEAD. A directory is not removed wholesale: it may already have
-        // held the user's own untracked files before the update created it
-        // upstream, and deleting it took those along. removeAdditionsNotInHead()
-        // below deletes only what the update added to it.
-        if (!isDirectoryPath(p, join(root, pathspec))) {
-          try { runGit('rm', '-f', '--ignore-unmatch', '--', pathspec); } catch { /* ignore */ }
-          try { rmSync(join(root, pathspec), { force: true }); } catch { /* already gone */ }
+        if (existsInHead) {
+          // A persistent write blocker (an unwritable directory, a file held
+          // open) can defeat the HEAD checkout itself: the old behaviour
+          // rethrew here, which skipped the additions cleanup below and every
+          // path after this one. Record the failure with its specific error
+          // and fall through instead - the update's additions under the path
+          // are still removed, the remaining paths are still restored, and
+          // the caller hears the honest failure once everything was tried.
+          unrestored.push(`${pathspec} (${String(err.message).split('\n')[0]})`);
+        } else {
+          // A file newly introduced by the update is removed so the working tree
+          // matches HEAD. A directory is not removed wholesale: it may already have
+          // held the user's own untracked files before the update created it
+          // upstream, and deleting it took those along. removeAdditionsNotInHead()
+          // below deletes only what the update added to it.
+          if (!isDirectoryPath(p, join(root, pathspec))) {
+            try { runGit('rm', '-f', '--ignore-unmatch', '--', pathspec); } catch { /* ignore */ }
+            try { rmSync(join(root, pathspec), { force: true }); } catch { /* already gone */ }
+          }
         }
       }
     }
@@ -3125,6 +3135,7 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
   // restored first; then the caller hears it failed, so it does not report a
   // full restore and points at `rollback` instead.
   const problems = [];
+  if (unrestored.length > 0) problems.push(`could not restore from HEAD: ${unrestored.join(', ')}`);
   if (stranded.length > 0) problems.push(`could not remove ${stranded.length} file(s) the update added: ${stranded.join(', ')}`);
   if (unchecked.length > 0) problems.push(`could not list what the update added under ${unchecked.join(', ')}`);
   if (problems.length > 0) throw new Error(problems.join('; '));
