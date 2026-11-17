@@ -3,7 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, findApplication, isRegularContainedFile, pdfPathStatusForReport, readReport } from "@/lib/career-ops";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
-import { hasToken, matchesCompanyKeys, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
+import { hasToken, isStandardName, matchesCompanyKeys, matchesTailoredCover, sortNewestFirst } from "./cv-match.mjs";
 
 /** The length generate-cover-letter.mjs truncates a role slug to when it builds
  *  a default output filename (`role.slice(0, 30)`). A role longer than this is
@@ -75,7 +75,16 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
   if (app) {
     const role = companySlug(app.role)?.slug;
     const wanted = role ? [role, role.slice(0, ROLE_SLUG_MAX)] : [];
-    files = files.filter((f) => wanted.some((r) => hasToken(f.toLowerCase(), r)));
+    // A standard name carries the report number, not a role: select it by the
+    // row's mapped report number. Legacy names keep the role-token test.
+    const reportNumber = reportNumberFor(n ?? "", app, null);
+    files = files.filter((f) => {
+      const lower = f.toLowerCase();
+      if (isStandardName(lower)) {
+        return reportNumber != null && parseInt(lower, 10) === reportNumber;
+      }
+      return wanted.some((r) => hasToken(lower, r));
+    });
   }
 
   if (!files.length) return null;
