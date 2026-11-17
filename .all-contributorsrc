@@ -2085,7 +2085,8 @@
         "bug",
         "ideas",
         "infra",
-        "plugin"
+        "plugin",
+        "translation"
       ]
     },
     {
@@ -2115,6 +2116,26 @@
       "contributions": [
         "code",
         "test"
+      ]
+    },
+    {
+      "login": "AnkitParekh007",
+      "name": "Ankit Parekh",
+      "avatar_url": "https://avatars.githubusercontent.com/u/155077196?v=4",
+      "profile": "https://github.com/AnkitParekh007",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "namaserajesh",
+      "name": "Rajesh Namase",
+      "avatar_url": "https://avatars.githubusercontent.com/u/1036445?v=4",
+      "profile": "https://namase.com/",
+      "contributions": [
+        "code",
+        "data"
       ]
     }
   ]

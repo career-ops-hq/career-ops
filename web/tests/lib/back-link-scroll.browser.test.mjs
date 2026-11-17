@@ -31,16 +31,27 @@ test("The in-page back link returns to the list where it was left", { skip: live
   const entryKey = () => page.evaluate(() => window.navigation.currentEntry.key);
 
   await page.goto(`${origin.origin}/pipeline?${query}`);
-  const company = page.getByRole("link", { name: "Fixture Company 60", exact: true });
+  // On a slow runner the page can hold a second, hidden copy of the table for a
+  // moment: match only the visible row, and wait for the list to render before
+  // measuring how far there is to scroll.
+  const company = page.getByRole("link", { name: "Fixture Company 60", exact: true }).filter({ visible: true });
+  await page.getByRole("link", { name: "#1", exact: true }).filter({ visible: true }).waitFor();
   // Off-screen rows are not mounted, so scroll the page until that row exists.
-  const scrollHeight = await page.evaluate(() => document.body.scrollHeight);
+  // The height is read again on every step: it grows as the list settles.
+  const scrollHeight = () => page.evaluate(() => document.body.scrollHeight);
   let mountedCompany = false;
-  for (let y = 0; y <= scrollHeight && !mountedCompany; y += 400) {
+  for (let y = 0; !mountedCompany && y <= await scrollHeight(); y += 400) {
     await page.evaluate((top) => window.scrollTo(0, top), y);
     mountedCompany = await company.waitFor({ state: "attached", timeout: 800 }).then(() => true).catch(() => false);
   }
   assert.equal(mountedCompany, true, "Fixture Company 60 mounts when the list is scrolled");
   await company.scrollIntoViewIfNeeded();
+  // The row can mount in the overscan, still below the fold. scrollIntoView
+  // updates scrollY before its scroll event, and Back restores the offset from
+  // that event. Wait for the event to land.
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
   const before = await page.evaluate(() => window.scrollY);
   assert.ok(before > 1000, `the list scrolled to row 60 (scrollY ${before})`);
   const listKey = await entryKey();

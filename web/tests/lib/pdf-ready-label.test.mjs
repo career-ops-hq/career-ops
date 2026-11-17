@@ -25,3 +25,18 @@ test("the apply checklist is ready only when this report's resume can be downloa
   assert.match(page, /pdfReady=\{resume !== null\}/);
   assert.doesNotMatch(page, /pdfReady=\{disk\.exists\}/);
 });
+
+test("the report Apply button is not ready from a loose cv file", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, "../../src/app/pipeline/[id]/page.tsx"), "utf8");
+  const view = readFileSync(join(here, "../../src/components/report-view.tsx"), "utf8");
+  const home = readFileSync(join(here, "../../src/app/page.tsx"), "utf8");
+  assert.match(page, /applyPdfReady=\{disk\.applyPdfReady\}/);
+  assert.match(view, /pdfReady=\{applyPdfReady\}/);
+  assert.doesNotMatch(view, /pdfReady=\{disk\.exists\}/);
+  assert.match(home, /pdfOnDisk: disks\[app\.n\]\?\.applyPdfReady/);
+  assert.doesNotMatch(home, /pdfOnDisk: disks\[app\.n\]\?\.exists/);
+  assert.match(home, /reportFile: report\?\.file \?\? null/);
+  assert.match(home, /reportNumberFor\(app\.n, app, readApp\(app\)\.reportFile\)/);
+  assert.doesNotMatch(home, /reportNumberFor\(app\.n, app, null\)/);
+});

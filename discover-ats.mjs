@@ -55,6 +55,7 @@ import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { DEFAULT_SMALL_THRESHOLD, isSmallBoard, smallBoardDetail } from './lib/small-board.mjs';
 import { findBlacklistEntry, loadBlacklist } from './scan.mjs';
+import { BOARD_URL_BUILDERS, SLUG_RE } from './lib/ats-board-url.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -65,7 +66,13 @@ const BLACKLIST_PATH = process.env.CAREER_OPS_BLACKLIST || join(DATA_ROOT, 'data
 // with the SLUG_RE guard in scan-ats-full.mjs and seeds/vc-portfolios.mjs — a
 // tampered or malformed input can never inject unexpected characters into a URL.
 // Mixed case is intentional: Ashby boards are case-sensitive (AlephAlpha, DeepL).
-export const SLUG_RE = /^[A-Za-z0-9._-]+$/;
+// Defined in lib/ats-board-url.mjs next to the URL builders it guards.
+export { SLUG_RE };
+
+// The canonical board URL of a registry row ({ats, region, board, workday_host}),
+// built by the same functions VENDORS uses below. employers/ keys every
+// row on it.
+export { buildBoardUrl } from './lib/ats-board-url.mjs';
 
 // Bounded concurrency for live probes — lower than scan-ats-full.mjs's 20
 // because Ashby's provider holds a ~30s connection per board.
@@ -89,23 +96,25 @@ const DEFAULT_CONCURRENCY = 8;
 // present. Those hosts are matched lowercase-only by their providers, so their
 // buildUrl lowercases the slug rather than emitting a URL the provider would
 // then reject (Ashby is the reason slugs are not lowercased globally: its boards
-// are case-sensitive).
+// are case-sensitive). The buildUrl functions live in lib/ats-board-url.mjs, so
+// the employer registry builds its canonical URLs with exactly these.
 const lower = (s) => String(s).toLowerCase();
+const B = BOARD_URL_BUILDERS;
 
 const VENDORS = {
-  gh:    { id: 'greenhouse', provider: greenhouse, host: 'job-boards.greenhouse.io', buildUrl: (s) => `https://job-boards.greenhouse.io/${s}`, api: (s) => `https://boards-api.greenhouse.io/v1/boards/${s}/jobs` },
-  ashby: { id: 'ashby',      provider: ashby,      host: 'jobs.ashbyhq.com',        buildUrl: (s) => `https://jobs.ashbyhq.com/${s}` },
-  lever: { id: 'lever',      provider: lever,      host: 'jobs.lever.co',           buildUrl: (s) => `https://jobs.lever.co/${s}` },
+  gh:    { id: 'greenhouse', provider: greenhouse, host: 'job-boards.greenhouse.io', buildUrl: B.greenhouse, api: (s) => `https://boards-api.greenhouse.io/v1/boards/${s}/jobs` },
+  ashby: { id: 'ashby',      provider: ashby,      host: 'jobs.ashbyhq.com',        buildUrl: B.ashby },
+  lever: { id: 'lever',      provider: lever,      host: 'jobs.lever.co',           buildUrl: B.lever },
 
   // Long tail, probed only after the three above miss (see VENDOR_ORDER).
-  workable:        { id: 'workable',        provider: workable,        host: 'apply.workable.com',          buildUrl: (s) => `https://apply.workable.com/${s}` },
-  smartrecruiters: { id: 'smartrecruiters', provider: smartrecruiters, host: 'careers.smartrecruiters.com', buildUrl: (s) => `https://careers.smartrecruiters.com/${s}` },
-  rippling:        { id: 'rippling',        provider: rippling,        host: 'ats.rippling.com',            buildUrl: (s) => `https://ats.rippling.com/${s}/jobs` },
-  join:            { id: 'join',            provider: joinProvider,            host: 'join.com',                    buildUrl: (s) => `https://join.com/companies/${s}` },
-  recruitee:       { id: 'recruitee',       provider: recruitee,       hostFor: (s) => `${lower(s)}.recruitee.com`,  buildUrl: (s) => `https://${lower(s)}.recruitee.com` },
-  breezy:          { id: 'breezy',          provider: breezy,          hostFor: (s) => `${lower(s)}.breezy.hr`,      buildUrl: (s) => `https://${lower(s)}.breezy.hr` },
-  bamboohr:        { id: 'bamboohr',        provider: bamboohr,        hostFor: (s) => `${lower(s)}.bamboohr.com`,   buildUrl: (s) => `https://${lower(s)}.bamboohr.com` },
-  pinpoint:        { id: 'pinpoint',        provider: pinpoint,        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: (s) => `https://${lower(s)}.pinpointhq.com` },
+  workable:        { id: 'workable',        provider: workable,        host: 'apply.workable.com',          buildUrl: B.workable },
+  smartrecruiters: { id: 'smartrecruiters', provider: smartrecruiters, host: 'careers.smartrecruiters.com', buildUrl: B.smartrecruiters },
+  rippling:        { id: 'rippling',        provider: rippling,        host: 'ats.rippling.com',            buildUrl: B.rippling },
+  join:            { id: 'join',            provider: joinProvider,            host: 'join.com',                    buildUrl: B.join },
+  recruitee:       { id: 'recruitee',       provider: recruitee,       hostFor: (s) => `${lower(s)}.recruitee.com`,  buildUrl: B.recruitee },
+  breezy:          { id: 'breezy',          provider: breezy,          hostFor: (s) => `${lower(s)}.breezy.hr`,      buildUrl: B.breezy },
+  bamboohr:        { id: 'bamboohr',        provider: bamboohr,        hostFor: (s) => `${lower(s)}.bamboohr.com`,   buildUrl: B.bamboohr },
+  pinpoint:        { id: 'pinpoint',        provider: pinpoint,        hostFor: (s) => `${lower(s)}.pinpointhq.com`, buildUrl: B.pinpoint },
 };
 // Slug-resolvable vendors, probed in order for each company (first match wins).
 // Probe order is also a cost decision. resolveCompany probes candidates in this
@@ -1294,13 +1303,19 @@ async function main() {
     if (!written) out.pendingEntries = snippets.join('');
     console.log(JSON.stringify(out, null, 2));
   }
-  process.exit(0);
+  // No process.exit(0) here: main() returns, and the process exits 0 once the
+  // event loop drains. On Windows, Node 24 aborts when process.exit() runs right
+  // after a request (nodejs/node#56645): it prints a libuv assertion and exits
+  // with a crash code instead of 0, the crash reported in #3788. Measured
+  // 2026-11-08 on Node 24.14.1: a run that resolved one BambooHR board, or found
+  // no Greenhouse, Ashby or BambooHR board, aborted 4 times out of 4. The exits
+  // earlier in main() run before any request, so they keep process.exit().
 }
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(`discover-ats: ${err?.stack || err?.message || err}`);
-    process.exit(1);
+    process.exitCode = 1; // not process.exit(1), for the reason given at the end of main()
   });
 }

@@ -61,10 +61,7 @@
 #                  federal level first, state overlays as separate rows
 #   - UK         : Equality Act 2010 — nine protected characteristics, plus
 #                  the s.60 restriction on pre-offer health questions
-#   - DE         : Allgemeines Gleichbehandlungsgesetz (AGG) §§1, 7 — and the
-#                  case-law "right to lie" in response to inadmissible
-#                  questions; verify with official BMAS/ADS guidance
-#   - EU         : equal-treatment directives (2000/43/EC, 2000/78/EC,
+#   - EU        : equal-treatment directives (2000/43/EC, 2000/78/EC,
 #                  2006/54/EC) — transpositions differ; key rows per member
 #                  state, not one EU row
 
@@ -213,14 +210,14 @@ protected_grounds:
           - "Planen Sie in absehbarer Zeit Kinder? / Do you plan to have children soon?"
           - "Wie vereinbaren Sie Beruf und Familie? / How do you balance work and family?"
         legitimate_contexts:
-          - "Pregnancy questions are ALWAYS inadmissible per ADS guidance, even for fixed-term maternity cover or where safety regulations would restrict pregnant employees (BAG 7 AZR 621/01; LAG Köln 6 Sa 641/12)"
+          - "Pregnancy questions are ALWAYS inadmissible per ADS guidance, even where safety regulations would restrict pregnant employees (BAG 2 AZR 621/01) or for fixed-term maternity cover (LAG Köln 6 Sa 641/12)"
           - "Questions about willingness to travel or work overtime are permissible and do not target Geschlecht (ADS 'Fair in den Job' Leitfaden)"
       - topic: "Geschlechtsidentität (gender identity)"
         example_question_patterns:
           - "Sind Sie trans* / inter*? / Are you trans or intersex?"
           - "Welches Geschlecht haben Sie? / What gender are you?"
         legitimate_contexts:
-          - "ADS guidance instructs employers to use the candidate's correct pronoun and address — asking about gender identity directly is inadmissible  (ADS (Antidiskriminierungsstelle des Bundes) (p. 30 of the Leitfaden))"
+          - "ADS guidance instructs employers to use the candidate's correct pronoun and address — asking about gender identity directly is inadmissible (ADS Leitfaden, p. 30)"
       - topic: "Religion oder Weltanschauung (religion or belief)"
         example_question_patterns:
           - "Welcher Konfession gehören Sie an? / What religion do you belong to?"
@@ -270,7 +267,7 @@ protected_grounds:
       discrimination where a neutral criterion disproportionately disadvantages an
       ethnic group and is not objectively justified (§3 Abs. 1-2 AGG).
       The 'right to lie' (Recht zur Lüge) on inadmissible questions is established by BAG
-      case law (Bundesarbeitsgericht, e.g. 7 AZR 621/01 and subsequent decisions): a contract
+      case law (Bundesarbeitsgericht, e.g. 2 AZR 621/01 and subsequent decisions): a contract
       formed after a false answer to an inadmissible question cannot be challenged on that basis.
     sources:
       - "Allgemeines Gleichbehandlungsgesetz (AGG) — gesetze-im-internet.de/agg/ (official statute text)"

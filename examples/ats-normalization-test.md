@@ -3,7 +3,7 @@
 This file is a regression fixture for the text normalization pass in `generate-pdf.mjs` (`normalizeTextForATS`). It lists the Unicode artifacts and markdown leftovers that cause parsing errors or display issues in ATS systems and legacy parsers, with the replacement the normalizer makes for each.
 
 `tests/ats-normalization-fixture.test.mjs` reads the table below and runs every row through `normalizeTextForATS`. Each row must:
-- contain the codepoint it names
+- contain every codepoint it names
 - convert to exactly what the "Converts to" column says
 - report its replacement key
 
@@ -18,13 +18,13 @@ Some characters in the sample lines are invisible: the zero-width space sits bet
 | Em-dash | U+2014 | Built and sold a SaaS — now shipping AI in production. | Built and sold a SaaS - now shipping AI in production. | `em-dash` |
 | En-dash | U+2013 | Shipped 3 releases – all on time. | Shipped 3 releases - all on time. | `en-dash` |
 | Curly double quote | U+201C / U+201D (also U+201E, U+201F) | “Led the migration” was a real bullet. | "Led the migration" was a real bullet. | `smart-double-quote` |
-| Curly single quote | U+2018 / U+2019 (also U+201A, U+201B) | The team’s velocity tripled. | The team's velocity tripled. | `smart-single-quote` |
+| Curly single quote | U+2018 / U+2019 (also U+201A, U+201B) | The team’s ‘velocity’ tripled. | The team's 'velocity' tripled. | `smart-single-quote` |
 | Ellipsis | U+2026 | And so on… | And so on... | `ellipsis` |
 | Zero-width space | U+200B (also U+200C, U+200D, U+2060, U+FEFF) | Hello​world | Helloworld | `zero-width` |
 | Non-breaking space | U+00A0 | 5 years experience | 5 years experience | `nbsp` |
 | Right arrow | U+2192 | Kafka → feature store | Kafka to feature store | `right-arrow` |
 | Left arrow | U+2190 | Revenue ← retention | Revenue from retention | `left-arrow` |
-| Up / down arrow | U+2191 / U+2193 | Churn ↓ 18% | Churn 18% | `vert-arrow` |
+| Up / down arrow | U+2191 / U+2193 | Signups ↑ 30%, churn ↓ 12%. | Signups 30%, churn 12%. | `vert-arrow` |
 | Middle dot | U+00B7 | Python · Go | Python \| Go | `middot` |
 | Bullet | U+2022 | Python • Go | Python \| Go | `bullet` |
 | Euro sign | U+20AC | €90k base | EUR 90k base | `euro` |

@@ -31,6 +31,7 @@ import { fetchTextWithRetry, sleep } from './_http.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { resolveProfileKeywords } from './_profile-keywords.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const SEARCH_URL = 'https://www.jobs.cz/prace/';
 const POSTING_URL_BASE = 'https://www.jobs.cz/rpd/';
@@ -120,7 +121,9 @@ export function parseJobsCzPage(html, nowMs = Date.now()) {
   }
   const digits = /Našli jsme\s+([\d\s]+?)\s*nabíd/.exec(text)?.[1].replace(/\D/g, '');
   if (!digits) throw new Error('jobscz: result count not found — page markup changed?');
-  return { total: Number(digits), jobs };
+  // cardCount is what the source sent, before cards without an id or a title
+  // are dropped: the page-fullness check reads it, not the jobs kept.
+  return { total: Number(digits), jobs, cardCount: cards.length };
 }
 
 /** @type {Provider} */
@@ -146,6 +149,8 @@ export default {
     /** @type {Map<string, any>} */
     const byUrl = new Map();
     const errors = [];
+    // Why part of the board went unread, first cause first; null while it is whole.
+    let partialReason = null;
 
     for (const keyword of keywords) {
       let total = 0;
@@ -160,8 +165,11 @@ export default {
         } catch (err) {
           if (probing) throw err;
           const message = (err && /** @type {Error} */ (err).message) || err;
+          partialReason ??= 'fetch-error';
           if (page === 1) errors.push([keyword, message]);
-          else console.error(`⚠️  jobscz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
+          else {
+            console.error(`⚠️  jobscz: "${keyword}" page ${page} failed (${message}) — kept ${rows} offers`);
+          }
           break;
         }
 
@@ -179,8 +187,11 @@ export default {
           total = parsed.total;
           lastPage = Math.min(Math.ceil(total / PAGE_SIZE), maxPages);
         }
-        if (page === maxPages && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
+        // A short page is the board's natural end even when the total read on
+        // page 1 promised more (it can shrink mid-walk): the cut needs a full page.
+        if (page === maxPages && parsed.cardCount >= PAGE_SIZE && Math.ceil(total / PAGE_SIZE) > maxPages && !probing) {
           console.error(`⚠️  jobscz: ${entryName} truncated at max_pages=${maxPages} (${rows} of ${total} offers for "${keyword}") — narrow the keyword, set jobscz.location, or raise max_pages`);
+          partialReason ??= 'page-cap';
         }
       }
     }
@@ -192,6 +203,12 @@ export default {
       console.error(`⚠️  jobscz: "${keyword}" page 1 failed (${message}) — keyword skipped`);
     }
 
-    return [...byUrl.values()];
+    const jobs = [...byUrl.values()];
+    // Part of the board was never read: a keyword failed on page 1 while another
+    // answered, a later page failed, or max_pages cut a keyword the source says
+    // has more. scan.mjs takes a board's health from the returned array, so the
+    // result says so; unmarked, the board is logged reachable as if fully read.
+    if (partialReason) markTruncated(jobs, partialReason, { fetched: jobs.length });
+    return jobs;
   },
 };

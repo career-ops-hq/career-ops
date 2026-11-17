@@ -19,6 +19,8 @@
 // a short page, or until `max_pages` (default DEFAULT_MAX_PAGES) is reached.
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { parseDate } from '../lib/parse-date.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_URL = 'https://www-api.ibm.com/search/api/v2';
 const PAGE_SIZE = 30;
@@ -49,14 +51,15 @@ export function buildPostFilter(cfg) {
 }
 
 /**
- * Epoch ms for `dcdate` (a plain YYYY-MM-DD, which Date.parse reads as UTC
- * midnight), or undefined when absent or unparseable.
+ * Epoch ms (UTC midnight) for `dcdate`, or undefined when absent or not a real
+ * YYYY-MM-DD calendar day. parseDate round-trips the date, so an impossible one
+ * like 2026-02-30 is rejected instead of rolling over to 2 March.
  * @param {unknown} value
  */
 function toEpochMs(value) {
-  if (typeof value !== 'string' || !value.trim()) return undefined;
-  const parsed = Date.parse(value.trim());
-  return Number.isNaN(parsed) ? undefined : parsed;
+  if (typeof value !== 'string') return undefined;
+  const date = parseDate(value);
+  return date ? date.getTime() : undefined;
 }
 
 /**
@@ -178,6 +181,10 @@ export default {
     if (stopReason === 'cap') {
       console.error(`⚠️  ibm: ${entry.name} truncated at max_pages=${maxPages} (${out.length} jobs) — raise max_pages on this entry for more`);
     }
+    // The stop reason that drives the warnings marks the result too, so scan.mjs
+    // logs a partly read board `partial` instead of `reachable`
+    // (lib/board-truncation.mjs). 'cap' is named page-cap, as in themuse.mjs.
+    if (stopReason !== 'complete') markTruncated(out, stopReason === 'cap' ? 'page-cap' : stopReason, { fetched: out.length });
 
     return out;
   },

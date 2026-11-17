@@ -90,6 +90,28 @@ try {
         }
       },
 
+      // The shape Shopify ships: the only Apply control is an in-page anchor,
+      // "Apply now" -> #apply, in a sticky <nav>. It reads as an Apply control.
+      // A skip link to the same fragment, any other fragment, and the anchor
+      // spelled with the page's address stay chrome.
+      async () => {
+        const [anchor, skip, other] = await Promise.all([
+          check(POSTING_URL, `<nav><a href="#apply">Apply now</a></nav><main>${POSTING}</main>`),
+          check(POSTING_URL, [
+            '<nav><a href="#apply">Skip to apply</a></nav>',
+            `<nav><a href="${POSTING_URL}#apply">Apply now</a></nav>`,
+            `<main>${POSTING}</main>`,
+          ].join('')),
+          check(POSTING_URL, `<nav><a href="#main-content">Apply now</a></nav><main>${POSTING}</main>`),
+        ]);
+        if (anchor.result === 'active' && anchor.code === 'apply_control_visible'
+          && [skip, other].every((r) => r.result === 'uncertain' && r.code === 'no_apply_control')) {
+          pass('a bare #apply anchor in the nav reads as an Apply control; a skip link, another fragment and the absolute-URL spelling do not');
+        } else {
+          fail(`#apply anchor in the nav: ${JSON.stringify(anchor)}, skip link / absolute spelling ${JSON.stringify(skip)}, other fragment ${JSON.stringify(other)}`);
+        }
+      },
+
       // The same inside a same-origin frame, which the walk reads too (iCIMS
       // renders the posting in one). From the frame, a link back into the frame
       // or to the page it sits in is a link into this page, so it stays chrome.

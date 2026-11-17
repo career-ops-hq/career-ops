@@ -11,7 +11,8 @@
 // one of them past a rendering fix, and the registry still read `✓ approved`.
 //
 // Every case below pins one property that makes the check worth having:
-// a SHA that trails its release is stale even when nothing else moved; an
+// a SHA that trails its release is stale even when nothing else moved; a SHA
+// after the release (a tag the author never released) is ahead, not stale; an
 // entry whose author never cut a release is not stale; and a lookup that
 // FAILED is never reported as fresh — a network error that reads as green is
 // the failure mode that let this rot in the first place.
@@ -23,7 +24,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkRegistryFreshness, fetchLatestRelease } from '../validate-plugin-registry.mjs';
+import { checkRegistryFreshness, fetchLatestRelease, fetchPinPosition } from '../validate-plugin-registry.mjs';
 
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
@@ -61,6 +62,7 @@ test('a pin that equals the latest release commit is fresh', async () => {
     });
     assert.equal(res.length, 1);
     assert.equal(res[0].status, 'fresh');
+    assert.equal(res[0].position, 'identical');
     assert.equal(res[0].id, 'alpha');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -70,11 +72,73 @@ test('a pin behind the latest release is stale, and names both commits', async (
   try {
     const res = await checkRegistryFreshness(root, {
       fetchRelease: async () => ({ tag: 'v0.2.0', sha: SHA_B }),
+      comparePin: async () => ({ status: 'behind', aheadBy: 0 }),
     });
     assert.equal(res[0].status, 'stale');
+    assert.equal(res[0].position, 'behind');
+    assert.equal(res[0].detail, 'pin trails v0.2.0');
     assert.equal(res[0].pinnedSha, SHA_A);
     assert.equal(res[0].releaseSha, SHA_B);
     assert.equal(res[0].releaseTag, 'v0.2.0');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a pin AFTER the latest release is ahead, not stale', async () => {
+  // The live case: a plugin author tags v0.1.2 and never publishes a release
+  // for it, so /releases/latest still answers v0.1.0. The registry pins the
+  // newer tag. A SHA mismatch read as "trails" would tell a maintainer to move
+  // the pin back to the older release.
+  const root = makeRegistry([entry('alpha', SHA_A)]);
+  try {
+    const calls = [];
+    const res = await checkRegistryFreshness(root, {
+      fetchRelease: async () => ({ tag: 'v0.1.0', sha: SHA_B }),
+      comparePin: async (repo, base, head) => { calls.push([base, head]); return { status: 'ahead', aheadBy: 2 }; },
+    });
+    assert.equal(res[0].status, 'ahead');
+    assert.equal(res[0].position, 'ahead');
+    assert.notEqual(res[0].status, 'stale');
+    assert.equal(res[0].detail, 'pin is 2 commits after v0.1.0, the latest published release');
+    // release first, pin second: compare/{release}...{pin} reads "pin ahead of release"
+    assert.deepEqual(calls, [[SHA_B, SHA_A]]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a pin that diverged from the latest release is stale, and says so', async () => {
+  const root = makeRegistry([entry('alpha', SHA_A)]);
+  try {
+    const res = await checkRegistryFreshness(root, {
+      fetchRelease: async () => ({ tag: 'v0.2.0', sha: SHA_B }),
+      comparePin: async () => ({ status: 'diverged', aheadBy: 1 }),
+    });
+    assert.equal(res[0].status, 'stale');
+    // The CLI picks its "diverged from" wording from this field, not from the detail text.
+    assert.equal(res[0].position, 'diverged');
+    assert.equal(res[0].detail, 'pin diverged from v0.2.0');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a failed pin comparison reports error, never ahead or fresh', async () => {
+  const root = makeRegistry([entry('alpha', SHA_A)]);
+  try {
+    const res = await checkRegistryFreshness(root, {
+      fetchRelease: async () => ({ tag: 'v0.2.0', sha: SHA_B }),
+      comparePin: async () => { throw new Error('pinned commit aaaaaaaaaa not found in someone/x'); },
+    });
+    assert.equal(res[0].status, 'error');
+    assert.equal(res[0].position, null);
+    assert.match(res[0].detail, /not found/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a fresh pin makes no comparison request', async () => {
+  const root = makeRegistry([entry('alpha', SHA_A)]);
+  try {
+    const res = await checkRegistryFreshness(root, {
+      fetchRelease: async () => ({ tag: 'v0.1.0', sha: SHA_A }),
+      comparePin: async () => { throw new Error('compare must not run for a matching SHA'); },
+    });
+    assert.equal(res[0].status, 'fresh');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -107,6 +171,7 @@ test('every entry is checked, and one bad entry does not mask the rest', async (
         if (repo.endsWith('gamma')) return { tag: 'v9.9.9', sha: SHA_B };
         return { tag: 'v0.1.0', sha: SHA_A };
       },
+      comparePin: async () => ({ status: 'behind', aheadBy: 0 }),
     });
     // Proves the loop actually ran over all three rather than short-circuiting.
     assert.equal(res.length, 3);
@@ -291,5 +356,62 @@ test('the production entry path runs end to end with no injection at all', async
   } finally {
     globalThis.fetch = realFetch;
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ── fetchPinPosition: the compare call, with the HTTP layer injected ─────────
+
+test('fetchPinPosition compares release...pin and returns the status', async () => {
+  const t = transport({
+    '/compare/': { status: 200, body: { status: 'ahead', ahead_by: 2, behind_by: 0 } },
+  });
+  const pos = await fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl });
+  assert.deepEqual(pos, { status: 'ahead', aheadBy: 2 });
+  assert.ok(t.calls[0].endsWith(`/repos/o/career-ops-plugin-x/compare/${SHA_B}...${SHA_A}`), t.calls[0]);
+});
+
+test('fetchPinPosition throws when the pinned commit is not in the repo', async () => {
+  const t = transport({ '/compare/': { status: 404, body: {} } });
+  await assert.rejects(
+    () => fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl }),
+    /not found/,
+  );
+});
+
+test('fetchPinPosition throws on a compare answer with no status', async () => {
+  const t = transport({ '/compare/': { status: 200, body: { ahead_by: 2 } } });
+  await assert.rejects(
+    () => fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl }),
+    /no status/,
+  );
+});
+
+test('fetchPinPosition throws on a status GitHub does not document', async () => {
+  // The caller reads any status it does not know as stale, so an unknown one
+  // would print "pin trails" with nothing behind it. It must be an error.
+  const t = transport({ '/compare/': { status: 200, body: { status: 'sideways', ahead_by: 0, behind_by: 0 } } });
+  await assert.rejects(
+    () => fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl }),
+    /unknown status "sideways"/,
+  );
+});
+
+test('fetchPinPosition throws on ahead with no integer ahead_by', async () => {
+  // Without the count the row would read "pin is undefined commits after".
+  for (const ahead_by of [undefined, '2', 1.5]) {
+    const t = transport({ '/compare/': { status: 200, body: { status: 'ahead', ahead_by } } });
+    await assert.rejects(
+      () => fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl }),
+      /ahead with no ahead_by/,
+      `ahead_by ${JSON.stringify(ahead_by)} must be refused`,
+    );
+  }
+});
+
+test('fetchPinPosition accepts every documented status', async () => {
+  for (const status of ['ahead', 'behind', 'diverged', 'identical']) {
+    const t = transport({ '/compare/': { status: 200, body: { status, ahead_by: 1, behind_by: 1 } } });
+    const pos = await fetchPinPosition('https://github.com/o/career-ops-plugin-x', SHA_B, SHA_A, { fetchImpl: t.fetchImpl });
+    assert.equal(pos.status, status);
   }
 });

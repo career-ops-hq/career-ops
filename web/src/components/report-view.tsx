@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft, FileText, ExternalLink, ChevronDown } from "lucide-react";
 import type { Application } from "@/lib/career-ops";
 import { Badge } from "@/components/ui/badge";
-import { scoreTone, legitimacyTone, parseReport } from "@/lib/format";
+import { legitimacyTone, parseReport } from "@/lib/format";
 import {
   APPLY_LINE,
   applyCtaQuiet,
@@ -51,6 +51,7 @@ export function ReportView({
   report,
   canDelete = false,
   pdfFileReady = false,
+  applyPdfReady = false,
   trackerMarkedPdf = false,
   coverReady = false,
   backHref = "/pipeline",
@@ -66,6 +67,7 @@ export function ReportView({
   canDelete?: boolean;
   /** A tailored CV file is on disk (index or a matching cv-* name). Not the tracker mark. */
   pdfFileReady?: boolean;
+  applyPdfReady?: boolean;
   /** The tracker cell has a PDF mark. That mark can exist with no file. */
   trackerMarkedPdf?: boolean;
   /** A tailored cover letter for THIS application exists in output/ (resolved by
@@ -160,7 +162,6 @@ export function ReportView({
                   <p className="pb-1 text-xs text-muted">Apply line is {APPLY_LINE.toFixed(1)}</p>
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
-                  {score && <Badge tone={scoreTone(score)}>{score}</Badge>}
                   {line && <Badge tone={recommended ? "good" : line === "Below the apply line" ? "muted" : "warn"}>{line}</Badge>}
                   {decision && <Badge tone="info">{decision}</Badge>}
                   {meta?.legitimacy && <Badge tone={legitimacyTone(meta.legitimacy)}>{meta.legitimacy}</Badge>}
@@ -184,7 +185,7 @@ export function ReportView({
                   </Link>
                 )}
                 <MarkPdfReadyButton reportNum={reportNum} ready={disk.exists} trackerMarked={trackerMarkedPdf} />
-                <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={disk.exists} quiet={quietApply} />
+                <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={applyPdfReady} quiet={quietApply} />
                 {coverReady && (
                   <a
                     href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}

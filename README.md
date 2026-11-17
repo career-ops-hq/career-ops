@@ -16,6 +16,7 @@
   <a href="README.ru.md">Русский</a> |
   <a href="README.pl.md">Polski</a> |
   <a href="README.da.md">Dansk</a> |
+  <a href="README.nb.md">Norsk (bokmål)</a> |
   <a href="README.ta.md">தமிழ்</a> |
   <a href="README.ar.md">العربية</a> |
   <a href="README.hi.md">हिन्दी</a> |
@@ -26,7 +27,7 @@
 
 <!-- The non-breaking spaces (&nbsp;) and word joiners (&#8288;) below decide where each line wraps on a phone. Keep them when editing. -->
 
-<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Created by <a href="https://github.com/santifer"><strong>@santifer</strong></a>, with&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders">700+ contributors</a></p>
+<p align="center"><a href="https://github.com/santifer"><img src="docs/avatar-santifer.png" width="48" height="48" align="middle" alt="Santiago Fernández de Valderrama Aparicio"></a>&nbsp;&nbsp;Created by <a href="https://github.com/santifer"><strong>@santifer</strong></a>, with&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/builders-stack-dark.svg"><img src="docs/builders-stack-light.svg" alt="" height="32" align="middle"></picture></a>&nbsp;&nbsp;<a href="https://github.com/career-ops-hq/career-ops#builders">800+ contributors</a></p>
 
 <p align="center">
 <strong>Months of sending CVs into&nbsp;silence.</strong><br>
@@ -64,7 +65,7 @@ It tailors your CV and drafts your&nbsp;answers. <strong>You&nbsp;press&nbsp;Sub
 
 <br>
 
-<p align="center"><a href="HIRED.md"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fcareer-ops-hq%2Fcareer-ops%2Fmain%2Fdocs%2Fhired-count.json&query=%24.count&label=%F0%9F%8E%89%20HIRED%20WITH%20CAREER-OPS&suffix=%20on%20the%20record&color=2ea44f&style=for-the-badge&labelColor=2b3137" alt="Hired with career-ops: public stories on the record"></a></p>
+<p align="center"><a href="HIRED.md"><img src="docs/hired-badge.svg" alt="Hired with career-ops: public stories on the record"></a></p>
 
 <p align="center">The people who came after me wrote down how they got hired.</p>
 
@@ -131,7 +132,7 @@ Hiring will not fix itself. The people going through it can, and they are alread
 
 [This is where the fix gets written](CONTRIBUTING.md). A room, not a club. **Let's build together.**
 
-<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fdiscord.com%2Fapi%2Fv10%2Finvites%2F8pRpHETxa4%3Fwith_counts%3Dtrue&query=%24.approximate_member_count&label=Discord&suffix=%20members&color=5865F2&style=for-the-badge&labelColor=2b3137&logo=discord&logoColor=white" alt="Discord: live member count of the career-ops server"></a></p>
+<p align="center"><a href="https://discord.gg/8pRpHETxa4"><img src="docs/discord-badge.svg" alt="Discord: live member count of the career-ops server"></a></p>
 
 ## Sponsors
 
@@ -189,7 +190,7 @@ It reformulates your CV; it must never fabricate it. A check in code stops a PDF
 | **Interview Story Bank** | Accumulates STAR+Reflection stories across evaluations -- 5-10 master stories you can adapt to the behavioral questions you get                        |
 | **Negotiation Scripts**  | Salary negotiation frameworks, geographic discount pushback, competing offer leverage                                                    |
 | **Application Email Drafts** | Formal recruiter/referral/cold application emails from a report or pasted JD, with subject line, attachment checklist, source-backed fit points, and a profile-driven contact block. Draft-only -- career-ops never sends, submits, or clicks anything. |
-| **Portal Scanner**       | 100+ companies pre-configured (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + custom web-search queries across Ashby, Greenhouse, Lever, Wellfound |
+| **Portal Scanner**       | 180+ companies pre-configured (Anthropic, OpenAI, ElevenLabs, Retool, n8n...) + custom web-search queries across Ashby, Greenhouse, Lever, Wellfound |
 | **Funded Company Discovery** | Review-first `npm run company:funded` script surfaces recently funded companies and source diagnostics from structured public feeds without editing your data |
 | **Batch Processing**     | Parallel evaluation with headless CLI workers (`claude -p` / `opencode run`)                                                             |
 | **Dashboard TUI**        | Terminal UI to browse, filter, and sort your pipeline                                                                                    |
@@ -277,7 +278,7 @@ This installs the `career-ops` binary globally, so you can run `career-ops init 
 
 > **The system is designed to be customized by your AI coding CLI itself.** Modes, archetypes, scoring weights, negotiation scripts -- just ask it to change them. It reads the same files it uses, so it knows exactly what to edit.
 
-See [docs/SETUP.md](docs/SETUP.md) for the full setup guide (including [scanning through an outbound proxy](docs/SETUP.md#scanning-through-an-outbound-proxy)), [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) for how to run career-ops in each supported CLI, and its headless command where it has one, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models (and [docs/FREE_TIER.md](docs/FREE_TIER.md) for running it at zero cost on Antigravity CLI's free tier), [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/KEEPING_PORTALS_LIVE.md](docs/KEEPING_PORTALS_LIVE.md) for keeping your company list current, [docs/BACKUP_STRATEGIES.md](docs/BACKUP_STRATEGIES.md) for backing up your CV, tracker and reports, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) for cross-referencing a LinkedIn connections export against the companies in your funnel, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions, including [how story provenance prevents invented numbers](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Design principles live in [ARCHITECTURE.md](ARCHITECTURE.md); runtime flows in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+See [docs/SETUP.md](docs/SETUP.md) for the full setup guide (including [scanning through an outbound proxy](docs/SETUP.md#scanning-through-an-outbound-proxy)), [docs/SUPPORTED_CLIS.md](docs/SUPPORTED_CLIS.md) for how to run career-ops in each supported CLI, and its headless command where it has one, [docs/RUNNING_ON_A_BUDGET.md](docs/RUNNING_ON_A_BUDGET.md) for instructions on running career-ops cheaply using custom or local models (and [docs/FREE_TIER.md](docs/FREE_TIER.md) for running it at zero cost on Antigravity CLI's free tier), [docs/AUTOMATION.md](docs/AUTOMATION.md) for scheduling recurring scans and a zero-token triage-to-shortlist recipe, [docs/KEEPING_PORTALS_LIVE.md](docs/KEEPING_PORTALS_LIVE.md) for keeping your company list current, [docs/BACKUP_STRATEGIES.md](docs/BACKUP_STRATEGIES.md) for backing up your CV, tracker and reports, [docs/APPLY_AUTOFILL.md](docs/APPLY_AUTOFILL.md) for details on the ATS auto-fill flow, [docs/LINKEDIN_JOIN.md](docs/LINKEDIN_JOIN.md) for cross-referencing a LinkedIn connections export against the companies in your funnel, [docs/LINKEDIN_ALERTS.md](docs/LINKEDIN_ALERTS.md) for adding LinkedIn job-alert emails on the scan schedule, and [docs/FAQ.md](docs/FAQ.md) for answers to common setup questions, including [how story provenance prevents invented numbers](docs/FAQ.md#why-does-career-ops-refuse-to-use-a-number-from-my-story-bank). Design principles live in [ARCHITECTURE.md](ARCHITECTURE.md); runtime flows in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Usage
 
@@ -344,6 +345,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 | [`cover`](modes/cover.md) | Cover letter, from a pasted JD or an evaluated report (`cover {slug}`) |
 | [`email`](modes/email.md) | Formal application email draft. Draft-only: never sends, submits or clicks |
 | [`contacto`](modes/contacto.md) | Find the hiring manager, recruiter or a peer, and draft a LinkedIn message |
+| [`gambit`](modes/gambit.md) | Pitch a role a company has not posted: research an evidenced need, then draft the role, CV, cover letter and pitch. Draft-only: never sends |
 | [`apply`](modes/apply.md) | Live application assistant (Playwright from this checkout). Does not submit |
 
 **Interview**
@@ -398,7 +400,7 @@ All of them share one router, `.agents/skills/career-ops/SKILL.md`, and the same
 
 ## Pre-configured Portals
 
-The scanner comes with **100+ companies** ready to scan and **35+ search queries** across major job boards. Copy `templates/portals.example.yml` to `portals.yml` and add your own:
+The scanner comes with **180+ companies** ready to scan and **40+ search queries** across major job boards. Copy `templates/portals.example.yml` to `portals.yml` and add your own:
 
 **AI Labs:** Anthropic, OpenAI, Mistral, Cohere, LangChain, Pinecone
 **Voice AI:** ElevenLabs, PolyAI, Parloa, Hume AI, Deepgram, Vapi, Bland AI
@@ -514,7 +516,7 @@ The Go dashboard TUI, Node.js scripts, and AI agent modes all automatically resp
 - **Data**: Markdown tables + YAML config + TSV batch files
 
 <p align="center">
-  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="https://img.shields.io/npm/v/%40santifer%2Fcareer-ops?style=for-the-badge&labelColor=2b3137&color=2ea44f&label=release" alt="Latest release"></a>
+  <a href="https://github.com/career-ops-hq/career-ops/releases/latest"><img src="docs/npm-badge.svg" alt="Latest release"></a>
 </p>
 
 <p align="center">
@@ -596,7 +598,7 @@ See [LEGAL_DISCLAIMER.md](LEGAL_DISCLAIMER.md) for full details. This software i
 ## Contributors
 
 <a href="https://github.com/career-ops-hq/career-ops/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops" />
+  <img src="https://contrib.rocks/image?repo=career-ops-hq/career-ops&v=2" />
 </a>
 
 Every person who has shipped code, docs, translations or tests is listed in
@@ -611,6 +613,8 @@ The code is licensed under [MIT](LICENSE). The "career-ops" name and
 brand are governed by the [Trademark Policy](TRADEMARK.md), permissive
 for community use, reserved for commercial product naming and
 endorsement.
+
+Code is MIT; data in [`employers/`](employers/) is [CC BY 4.0](employers/LICENSE).
 
 ## Star history
 

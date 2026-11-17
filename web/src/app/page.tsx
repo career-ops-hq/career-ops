@@ -1,5 +1,5 @@
 import { readApplications, readInbox, requestReportReader, doctorState } from "@/lib/career-ops";
-import { pickAwaitingDecision } from "@/lib/home/awaiting.mjs";
+import { pickAwaitingDecision, pickApplyNext, includeApplyTarget } from "@/lib/home/awaiting.mjs";
 import { cardReason } from "@/lib/machine-summary.mjs";
 import type { CardReason } from "@/lib/machine-summary.mjs";
 import { todaySnapshot } from "@/lib/home/today-snapshot.mjs";
@@ -27,27 +27,49 @@ export default async function Home() {
   const legitimacy: Record<string, string> = {};
   const postingUrls: Record<string, string> = {};
   const readReport = requestReportReader();
-  const awaiting = pickAwaitingDecision(applications, scoreNum);
-  for (const app of awaiting) {
-    const content = readReport(app)?.content ?? "";
-    const reason = cardReason(content);
-    if (reason) reasons[app.n] = reason;
+  const loaded = new Map<string, { reason: CardReason | null; legitimacy: string; reportUrl: string; reportFile: string | null }>();
+  const readApp = (app: (typeof applications)[number]) => {
+    const hit = loaded.get(app.n);
+    if (hit) return hit;
+    const report = readReport(app);
+    const content = report?.content ?? "";
     const parsed = parseReport(content);
-    if (parsed.legitimacy) legitimacy[app.n] = parsed.legitimacy;
-    const reportUrl = parsed.fields.find((field) => field.label === "URL")?.value ?? "";
-    postingUrls[app.n] = applyPostingUrl(reportUrl, app.url, app.applyLink);
+    const entry = {
+      reason: cardReason(content),
+      legitimacy: parsed.legitimacy ?? "",
+      reportUrl: parsed.fields.find((field) => field.label === "URL")?.value ?? "",
+      reportFile: report?.file ?? null,
+    };
+    loaded.set(app.n, entry);
+    return entry;
+  };
+  const shown = pickAwaitingDecision(applications, scoreNum);
+  const applyTarget = pickApplyNext(
+    applications,
+    scoreNum,
+    (app) => readApp(app).reason?.decision ?? "",
+    (app) => readApp(app).legitimacy,
+  );
+  const awaiting = includeApplyTarget(shown, applyTarget);
+  for (const app of awaiting) {
+    const entry = readApp(app);
+    if (entry.reason) reasons[app.n] = entry.reason;
+    if (entry.legitimacy) legitimacy[app.n] = entry.legitimacy;
+    postingUrls[app.n] = applyPostingUrl(entry.reportUrl, app.url, app.applyLink);
   }
   const disks = await readCvDiskForRows(
     awaiting.map((app) => ({
       n: app.n,
       company: app.company,
       trackerMarked: (app.pdf ?? "").includes("✅"),
-      reportNumber: reportNumberFor(app.n, app, null),
+      // An empty report cell still has a file such as 7-fixture.md. The report
+      // number is on that filename, the same read the report page uses.
+      reportNumber: reportNumberFor(app.n, app, readApp(app).reportFile),
     })),
   );
   const applyFacts: Record<string, { pdfOnDisk: boolean; postingUrl: string }> = {};
   for (const app of awaiting) {
-    applyFacts[app.n] = { pdfOnDisk: disks[app.n]?.exists ?? false, postingUrl: postingUrls[app.n] ?? "" };
+    applyFacts[app.n] = { pdfOnDisk: disks[app.n]?.applyPdfReady ?? false, postingUrl: postingUrls[app.n] ?? "" };
   }
   // Established / in-between: the dual-loop retention dashboard. Show the setup
   // banner whenever ANY prereq is missing (mirrors the core doctor.mjs), so a

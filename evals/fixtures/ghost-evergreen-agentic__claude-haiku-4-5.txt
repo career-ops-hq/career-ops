@@ -1,0 +1,15 @@
+# Recorded by evals/record-claude.mjs on 2026-09-28 — model claude-haiku-4-5, rep 1, profile ai-engineer.
+# Report: 001-vortexa-talent-community-2026-09-28.md. Only the block below is parsed by eval-golden.mjs.
+---SCORE_SUMMARY---
+SCORE: 2
+ARCHETYPE: unknown
+ARCHETYPE_RAW: null
+LEGITIMACY: Suspicious
+DECISION: null
+WORK_AUTH: null
+COST_USD: 0.17644390000000001
+TURNS: 13
+CONTRACT: machine_summary=true jd_archive=false tracker=true
+SCHEMA_ISSUES: extra key evaluation; extra key candidate_profile; extra key posting_analysis; extra key interview_risk; extra key recommendation; missing company; missing role; missing score; missing legitimacy_tier; missing archetype; missing final_decision; missing hard_stops; missing soft_gaps; missing top_strengths; missing risk_level; missing confidence; missing next_action; missing work_auth; missing discard_reasons; missing via; missing company_confidential; missing advertised_comp; missing reports_to; missing requirement_importance; missing risk_summary
+EXPECT_FAILURES: none
+---END_SUMMARY---

@@ -258,6 +258,20 @@ func TestParseApplicationsResolvesTrackerRelativeReportLinks(t *testing.T) {
 	}
 }
 
+func TestNormalizeStatusSpeculative(t *testing.T) {
+	cases := map[string]string{
+		"Speculative": "speculative",
+		"speculative": "speculative",
+		"gambit":      "speculative",
+		"spec":        "speculative",
+	}
+	for in, want := range cases {
+		if got := NormalizeStatus(in); got != want {
+			t.Fatalf("NormalizeStatus(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // A report named with parentheses must resolve whole: a `[^)]+` link regex
 // cut `001-acme-(berlin)-….md` at the first `)` (career-ops-hq/career-ops#5482).
 func TestParseApplicationsKeepsParenthesesInReportLink(t *testing.T) {
@@ -292,6 +306,41 @@ func TestParseApplicationsKeepsParenthesesInReportLink(t *testing.T) {
 	}
 	if want := filepath.Join("reports", report); apps[0].ReportPath != want {
 		t.Fatalf("expected report path %q, got %q", want, apps[0].ReportPath)
+	}
+}
+
+// A report link is a tracker cell, not a trusted path: `..` must not let it
+// resolve to a file outside the data root. Every consumer joins ReportPath
+// against careerOpsPath and reads it, and the same package already rejects
+// crafted tracker rows on the PDF path (isSafeRepoRelativePath, pdf.go).
+func TestParseApplicationsRejectsReportPathEscape(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "root")
+	dataDir := filepath.Join(root, "data")
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("failed to create data dir: %v", err)
+	}
+	// The file the escaping link would reach.
+	secret := filepath.Join(base, "secret.md")
+	if err := os.WriteFile(secret, []byte("# Not a report\n"), 0o644); err != nil {
+		t.Fatalf("failed to write file outside the data root: %v", err)
+	}
+	applications := `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-11-15 | Acme | Engineer | 4.0/5 | Evaluated | ❌ | [1](../../secret.md) | escaping link |
+`
+	if err := os.WriteFile(filepath.Join(dataDir, "applications.md"), []byte(applications), 0o644); err != nil {
+		t.Fatalf("failed to write applications tracker: %v", err)
+	}
+
+	apps := mustParseApplications(t, root)
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 parsed application, got %d", len(apps))
+	}
+	if got := apps[0].ReportPath; got != "" {
+		t.Fatalf("a report link that escapes the data root must not resolve, got %q", got)
 	}
 }
 
@@ -687,6 +736,12 @@ func TestNormalizeStatus(t *testing.T) {
 				t.Errorf("NormalizeStatus(%q) = %q; want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStatusPrioritySpeculativeBeatsTerminal(t *testing.T) {
+	if StatusPriority("Speculative") >= StatusPriority("skip") {
+		t.Fatalf("Speculative should sort ahead of skip/rejected/discarded")
 	}
 }
 

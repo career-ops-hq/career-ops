@@ -16,14 +16,15 @@ try {
 
   // normalizeSpeedrunJob — full mapping.
   const full = normalizeSpeedrunJob(
-    { title: '  Founding Engineer  ', url: 'https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123', company: '  Light  ', location: '  New York, NY  ', remote: false, published_at: '2026-07-01T12:00:00.000Z' },
+    { id: 'job-abc123', title: '  Founding Engineer  ', url: 'https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123', company: '  Light  ', location: '  New York, NY  ', remote: false, published_at: '2026-07-01T12:00:00.000Z' },
     'Fallback',
   );
   if (full && full.title === 'Founding Engineer'
       && full.url === 'https://speedrun-talent-network.com/jobs/founding-engineer-light-abc123'
       && full.company === 'Light' && full.location === 'New York, NY'
-      && full.postedAt === Date.parse('2026-07-01T12:00:00.000Z')) {
-    pass('normalizeSpeedrunJob maps title/url/company/location + published_at → postedAt');
+      && full.postedAt === Date.parse('2026-07-01T12:00:00.000Z')
+      && full.externalId === 'job-abc123') {
+    pass('normalizeSpeedrunJob maps title/url/company/location + published_at → postedAt + id → externalId');
   } else {
     fail(`normalizeSpeedrunJob full row = ${JSON.stringify(full)}`);
   }
@@ -45,6 +46,16 @@ try {
     pass('normalizeSpeedrunJob falls back company → entry name → "a16z speedrun talent network"');
   } else {
     fail(`normalizeSpeedrunJob company fallbacks = ${JSON.stringify({ a: coEntry?.company, b: coDefault?.company, c: coBlank?.company })}`);
+  }
+
+  // externalId omitted when the feed carries no usable id (absent / blank / non-string).
+  const noId = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/ni' });
+  const blankId = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/bi', id: '   ' });
+  const objId = normalizeSpeedrunJob({ title: 'T', url: 'https://speedrun-talent-network.com/jobs/oi', id: {} });
+  if (noId && !('externalId' in noId) && blankId && !('externalId' in blankId) && objId && !('externalId' in objId)) {
+    pass('normalizeSpeedrunJob omits externalId when id is absent / blank / non-string');
+  } else {
+    fail(`normalizeSpeedrunJob externalId presence = ${JSON.stringify({ noId, blankId, objId })}`);
   }
 
   // postedAt omitted when published_at absent/unparseable.
@@ -82,7 +93,7 @@ try {
   }
 
   // fetch(): 0-based pagination with source tag, stop on short page; q passthrough.
-  const mk = (i) => ({ title: `Role ${i}`, url: `https://speedrun-talent-network.com/jobs/x${i}`, company: `Co ${i}`, location: 'New York, NY', remote: false, published_at: '2026-07-01T00:00:00.000Z' });
+  const mk = (i) => ({ id: `job-${i}`, title: `Role ${i}`, url: `https://speedrun-talent-network.com/jobs/x${i}`, company: `Co ${i}`, location: 'New York, NY', remote: false, published_at: '2026-07-01T00:00:00.000Z' });
   const page0 = { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 53, page: 0, page_size: 50, total_pages: 2 };
   const page1 = { jobs: [mk(50), mk(51), { title: '', url: 'https://speedrun-talent-network.com/jobs/bad' }], total: 53, page: 1, page_size: 50, total_pages: 2 };
   const calls = [];
@@ -104,6 +115,13 @@ try {
     pass('fetch() paginates 0-based with source=career-ops + q passthrough, stops after total_pages, drops invalid rows');
   } else {
     fail(`fetch() = ${JSON.stringify({ calls, count: jobs.length })}`);
+  }
+
+  // fetch() carries the feed id through to externalId on every returned row.
+  if (jobs[0].externalId === 'job-0' && jobs[51].externalId === 'job-51') {
+    pass('fetch() carries the feed id through as externalId');
+  } else {
+    fail(`fetch() externalId = ${JSON.stringify({ first: jobs[0]?.externalId, last: jobs[51]?.externalId })}`);
   }
 
   // fetch(): max_pages caps ahead of total_pages.
@@ -140,6 +158,9 @@ try {
   else fail(`live-shape pagination = ${JSON.stringify({ calls: liveShapeCalls, jobs: liveShape?.length })}`);
   if (liveWarnings.some((w) => w.includes('truncated at max_pages=2'))) pass('fetch() warns when max_pages truncates the live-shape feed');
   else fail(`live-shape truncation warning missing; captured = ${JSON.stringify(liveWarnings)}`);
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (liveShape.truncated?.reason === 'page-cap' && liveShape.truncated.fetched === 100) pass('fetch() marks the board page-cap when max_pages truncates the feed');
+  else fail(`live-shape cut: truncated = ${JSON.stringify(liveShape.truncated)}`);
 
   // #2547: total_pages outranks the short-page break. On a board that rotates
   // while a sweep runs, a page can legitimately come back 49/50 because a
@@ -175,6 +196,8 @@ try {
   // truncated: no false "raise max_pages" warning on a board read in full.
   if (rotWarnings.length === 0) pass('fetch() does not warn when max_pages exactly covers total_pages');
   else fail(`unexpected warning on a complete sweep = ${JSON.stringify(rotWarnings)}`);
+  if (rotated.truncated === undefined) pass('fetch() leaves a sweep that exactly covers total_pages unmarked');
+  else fail(`complete sweep was marked: ${JSON.stringify(rotated.truncated)}`);
 
   // Trusting total_pages is only safe because an empty page ends iteration
   // unconditionally: an OVER-reporting feed stops at the first empty response

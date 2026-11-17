@@ -227,10 +227,20 @@ async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process
       // parsing or displaying. The status code and its standard reason
       // phrase are what a log line needs; the raw body is still attached as
       // err.body for callers that want to inspect it.
-      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+      //
+      // A Cloudflare challenge is the one case the status alone misreads: a
+      // managed challenge served as 429 reads as a rate limit (#7182), and no
+      // retry clears it. Cloudflare marks it with `cf-mitigated: challenge`,
+      // so the message names it and err.cfMitigated carries the header.
+      const cfMitigated = res.headers.get('cf-mitigated');
+      const challenge = CF_CHALLENGE_RE.test(cfMitigated ?? '')
+        ? ` (Cloudflare challenge, cf-mitigated: ${cfMitigated})`
+        : '';
+      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}${challenge}`);
       err.status = res.status;
       err.body = responseText;
       err.retryAfter = res.headers.get('retry-after');
+      err.cfMitigated = cfMitigated;
       // Only ever populated under redirect:'manual', where the 3xx arrives as a
       // non-ok response instead of being followed or thrown. Attached so a
       // caller can tell WHICH redirect it hit without gaining the ability to
@@ -498,6 +508,72 @@ export async function fetchText(url, opts = {}) {
   return fetchCachedBody(url, opts, resolveMaxBytes(opts.maxBytes), false);
 }
 
+/**
+ * Hand a response body to `onText` piece by piece instead of buffering it.
+ *
+ * For a source that publishes one document far over DEFAULT_MAX_BODY_BYTES
+ * (Workable's job feed is about 870 MB of XML, 140 MB as brotli). The request
+ * goes through the same transport as fetchText: the IP guard, `redirect:
+ * 'error'` by default, the board signal and the negotiated compression, which
+ * the runtime decodes. What changes is the body: it is decoded as UTF-8 chunk
+ * by chunk and never held whole, and it is not stored in the HTTP cache.
+ *
+ * `opts.timeoutMs` bounds the WHOLE transfer, headers and body, so a caller
+ * passes a deadline that fits the document. `opts.maxBytes` bounds the decoded
+ * body; over it the read stops and throws `response_too_large`. `onText`
+ * returning `false` (or a promise of it) stops the read early; the body is
+ * cancelled either way, so the connection is released.
+ *
+ * A conditional request passes its validator in `opts.headers`
+ * (`If-Modified-Since`) together with `opts.acceptNotModified: true`; a 304
+ * then resolves with `notModified: true` and `onText` is never called. The
+ * response's `Last-Modified` comes back as `lastModified` (null when absent),
+ * so the caller can make the next request conditional.
+ *
+ * @param {string} url
+ * @param {FetchOptions} opts
+ * @param {(text: string) => (boolean | void | Promise<boolean | void>)} onText
+ * @returns {Promise<{ bytes: number, complete: boolean, notModified: boolean, lastModified: string | null }>} decoded bytes read, whether the body was read to its end, whether the server answered 304, and its Last-Modified
+ * @throws {HttpError} On a non-2xx response.
+ * @throws {Error} `code: 'response_too_large'` when the body exceeds `opts.maxBytes` (default DEFAULT_MAX_BODY_BYTES).
+ */
+export async function fetchTextStream(url, opts, onText) {
+  if (typeof onText !== 'function') throw new TypeError('fetchTextStream needs an onText callback');
+  const maxBytes = resolveMaxBytes(opts?.maxBytes);
+  return fetchWithTimeout(url, opts ?? {}, async (res) => {
+    const lastModified = res.headers.get('last-modified');
+    if (res.status === 304) return { bytes: 0, complete: true, notModified: true, lastModified };
+    const reader = res.body?.getReader?.();
+    if (!reader) {
+      const text = await res.text();
+      const bytes = Buffer.byteLength(text, 'utf8');
+      if (bytes > maxBytes) throw bodyTooLarge(bytes, maxBytes);
+      if (text) await onText(text);
+      return { bytes, complete: true, notModified: false, lastModified };
+    }
+    const decoder = new TextDecoder('utf-8');
+    let bytes = 0;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        bytes += value.length;
+        if (bytes > maxBytes) throw bodyTooLarge(null, maxBytes);
+        if (await onText(decoder.decode(value, { stream: true })) === false) return { bytes, complete: false, notModified: false, lastModified };
+      }
+      const tail = decoder.decode();
+      if (tail) await onText(tail);
+      return { bytes, complete: true, notModified: false, lastModified };
+    } finally {
+      try {
+        await reader.cancel();
+      } catch {
+        /* body already closed */
+      }
+    }
+  });
+}
+
 // Returns a Response (after the timeout + non-2xx guard) so providers that need
 // response headers — csod.mjs reads Set-Cookie to prime the session its search
 // API requires — can route through ctx instead of re-implementing fetch. Pass
@@ -572,6 +648,10 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
  * (retryable) classification.
  */
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
+
+// Cloudflare's `cf-mitigated` value for a challenge (seen live on Workday and
+// The Muse: `challenge`).
+const CF_CHALLENGE_RE = /\bchallenge\b/i;
 
 /**
  * Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock
@@ -652,6 +732,17 @@ export function isRefusedRedirectError(err) {
 }
 
 /**
+ * Whether a failed request was a Cloudflare challenge, read from the
+ * `cf-mitigated` header fetchInContext keeps on the error.
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isCloudflareChallenge(err) {
+  return typeof err?.cfMitigated === 'string' && CF_CHALLENGE_RE.test(err.cfMitigated);
+}
+
+/**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
  * error (no status — DNS, connection reset, or an abort that did not spend
  * this request's own timer). A 4xx other than 429 is the server telling us
@@ -666,11 +757,17 @@ export function isRefusedRedirectError(err) {
  * but it's deterministic and will never succeed on retry. See
  * isRefusedRedirectError() above for how it's distinguished.
  *
+ * A Cloudflare challenge (`cf-mitigated: challenge`, kept as err.cfMitigated
+ * by fetchInContext) is not retried either, even as a 429 or 503: the client
+ * is being challenged, not throttled, and the same request is challenged
+ * again (#7182).
+ *
  * @param {any} err - A thrown value: an Error with an optional `.status`, or anything else.
  * @returns {boolean}
  */
 export function isRetryableError(err) {
   const status = err?.status;
+  if (isCloudflareChallenge(err)) return false;
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
   if (isRefusedRedirectError(err)) return false;

@@ -29,6 +29,7 @@ import {
   companyRoleDedupKey,
   loadDedupSnapshot,
   appendScanRunSummary,
+  resolveDedupIncludeLocation,
 } from './scan.mjs';
 
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,11 +73,24 @@ export function decodeHtml(text) {
  */
 export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {}) {
   const gate = createAdmissionGate({ config, ...gateOptions });
-  const roles = seenRoles ?? new Set(loadDedupSnapshot({}, normalizeCompanyName).seenCompanyRoles);
+  const includeLocation = resolveDedupIncludeLocation(config);
+  let roles;
+  let locatedBases;
+  if (seenRoles) {
+    roles = seenRoles;
+    locatedBases = new Set();
+  } else {
+    const snapshot = loadDedupSnapshot({}, normalizeCompanyName, { includeLocation });
+    roles = new Set(snapshot.seenCompanyRoles);
+    locatedBases = new Set(snapshot.seenCompanyRoleBases);
+  }
   const counts = gate.counts;
   counts.duplicateRole = 0;
 
-  const roleKey = (offer) => companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName);
+  const baseKeyOf = (offer) => companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName);
+  const roleKey = (offer) => (includeLocation
+    ? companyRoleDedupKey(offer.company, offer.title, normalizeCompanyName, offer.location)
+    : baseKeyOf(offer));
 
   return {
     counts,
@@ -85,13 +99,18 @@ export function createLocalGate({ config = {}, gateOptions = {}, seenRoles } = {
       const reason = gate.check(offer);
       if (reason) return reason;
       const key = roleKey(offer);
-      if (roles.has(key)) {
+      // A tracker row with no city is the wildcard, and a located row is the
+      // wildcard for a later offer that names no city. A different city does
+      // not match either of those.
+      const bare = includeLocation ? baseKeyOf(offer) : key;
+      if (roles.has(key) || (key !== bare && roles.has(bare)) || (key === bare && locatedBases.has(bare))) {
         // gate.check already counted this posting as admitted.
         counts.admitted--;
         counts.duplicateRole++;
         return 'duplicate-role';
       }
       roles.add(key);
+      if (key !== bare) locatedBases.add(bare);
       return null;
     },
   };

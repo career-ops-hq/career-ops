@@ -219,6 +219,58 @@ if (isRefusedRedirectError(transportFailure) === false) {
   }
 }
 
+// A Cloudflare managed challenge served as 429 (#7182, seen live on every
+// Workday tenant from one egress): the error names the challenge, keeps the
+// header, and is not retried. A plain 429 with no cf-mitigated header is still
+// a rate limit and still retried.
+{
+  const realFetch = globalThis.fetch;
+  const { fetchJson, isCloudflareChallenge } = await import(pathToFileURL(join(ROOT, 'providers/_http.mjs')).href);
+  const challengePage = '<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt={cType:\'managed\'}</script></body></html>';
+  try {
+    let requests = 0;
+    globalThis.fetch = async () => {
+      requests++;
+      return new Response(challengePage, { status: 429, statusText: 'Too Many Requests', headers: { server: 'cloudflare', 'cf-mitigated': 'challenge', 'content-type': 'text/html' } });
+    };
+    const ctx = { fetchJson: (u, o) => fetchJson(u, o), sleep: async () => {} };
+    let err = null;
+    try { await fetchJsonWithRetry(ctx, 'https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/acme/jobs', { method: 'POST', body: '{}' }, { retries: 3 }); } catch (e) { err = e; }
+    if (err?.status === 429 && err.cfMitigated === 'challenge' && isCloudflareChallenge(err)) {
+      pass('a challenged 429 carries status 429 and cf-mitigated on the error');
+    } else {
+      fail(`challenged 429 error shape wrong: ${JSON.stringify({ status: err?.status, cfMitigated: err?.cfMitigated })}`);
+    }
+    if (err?.message === 'HTTP 429 Too Many Requests (Cloudflare challenge, cf-mitigated: challenge)') {
+      pass('a challenged 429 names the Cloudflare challenge in its message');
+    } else {
+      fail(`challenged 429 message: ${JSON.stringify(err?.message)}`);
+    }
+    if (requests === 1 && err?.attempts === 1) pass('a challenged 429 is not retried (1 request, not retries + 1)');
+    else fail(`a challenged 429 was retried: requests=${requests}, attempts=${err?.attempts}`);
+
+    requests = 0;
+    globalThis.fetch = async () => {
+      requests++;
+      return new Response('slow down', { status: 429, statusText: 'Too Many Requests' });
+    };
+    err = null;
+    try { await fetchJsonWithRetry(ctx, 'https://example.test/api', {}, { retries: 2 }); } catch (e) { err = e; }
+    if (requests === 3 && err?.message === 'HTTP 429 Too Many Requests' && err.cfMitigated === null) {
+      pass('a plain 429 with no cf-mitigated header is still retried, with the message unchanged');
+    } else {
+      fail(`plain 429: requests=${requests}, message=${JSON.stringify(err?.message)}, cfMitigated=${JSON.stringify(err?.cfMitigated)}`);
+    }
+  } catch (e) {
+    fail(`Cloudflare challenge test threw: ${e.message}`);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  if (isRetryableError({ status: 503, cfMitigated: 'challenge' }) === false) pass('isRetryableError(challenged 503) is false');
+  else fail('isRetryableError(challenged 503) should be false: a retry gets the same challenge');
+}
+
 // The default redirect policy is the SSRF guard's second half (#4079): the
 // ip guard checks the host that was asked for, and only redirect:'error'
 // stops a 3xx from pointing the follow-up request somewhere else. It has to

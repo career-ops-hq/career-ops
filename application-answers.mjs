@@ -401,10 +401,10 @@ function findDraftAnswersHeading(report) {
     h[1].replace(DRAFT_ANSWERS_MARKER_RE, '').replace(HEADING_PREFIX_RE, '').trim(),
   ));
   if (named) return named;
-  // Last resort, and the only path that reads a TRANSLATED heading (#4400).
-  // Neither rule above fires on one today: no mode emits the `(draft)` marker
-  // (`git grep '(draft)' -- 'modes/*'` is empty), and the name rule is the
-  // English words, which sixteen shipped modes translate (modes/es, modes/ru,
+  // Last resort, and the only path that reads a TRANSLATED heading written
+  // before the modes emitted the `(draft)` marker (#4272), which covers every
+  // report already on disk (#4400). The name rule above is the English words,
+  // which sixteen shipped modes translate (modes/es, modes/ru,
   // modes/tr, modes/zh, modes/zh-TW, and since #5843 the eleven that used to
   // write it under `G)`). For those the block silently returned null, which is
   // indistinguishable from a report that has no Block H.

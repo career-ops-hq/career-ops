@@ -21,8 +21,7 @@ that gate is decided on the source's data, not on how the client is written.
 **A single-company ATS adapter** (a new Greenhouse/Workday/Ashby-class
 vendor, or a company on its own careers API) clears this by construction: the
 postings are the employer's own, and the adapter reads exactly one source.
-Nothing to do here — including the `robots.txt` bullet below, which is a
-board/aggregator gate — go to section 1.
+Nothing to do here: go to section 1.
 
 **A job board, aggregator, or talent network** is where the policy bites.
 In short:
@@ -37,16 +36,12 @@ In short:
 - **Complete inventory, no paid placement (rule 3).** The provider must
   traverse the source's full inventory, not a promoted or default-filtered
   view.
-- **`robots.txt`, per path (rule 6).** Check the source's `robots.txt`
-  before writing code. A `Disallow` under `User-agent: *` (or a group
-  matching the scanner) that covers the listing paths the provider reads is
-  a stop (precedent: Lagou); a `Disallow` on routes the parser never touches
-  — `/api`, `/data`, a subscribe form — is not (ITviec, CareerViet route
-  around theirs). A rule that only names an AI/agent crawler (`ClaudeBot`,
-  `anthropic-ai`) doesn't name the scanner — a distinct, bounded
-  `career-ops` fetcher — but a scan can still feed a later model-driven
-  `pipeline` step, so honouring it is a maintainer call on a source
-  proposal, not an automatic no.
+- **Read what is public, and say who is reading (rule 6).** A provider reads only what any visitor
+  sees without signing in, with a bounded number of requests per host,
+  honouring a `Crawl-delay` the source states. A login, a user account or a
+  CAPTCHA in the way is a stop, and so is a source whose operator has asked
+  career-ops not to read it. `robots.txt` is not a gate: it is written for
+  crawlers, and a provider reads for one person who may apply there.
 
 If such a source is operator-run, or its eligibility is not obvious, open a
 [source proposal](../.github/ISSUE_TEMPLATE/source-proposal.yml) before
@@ -115,6 +110,10 @@ export default {
   files itself. Returns a normalized `Job[]`.
 - `Job` — `title`, `url` (required, absolute — this is the dedup key),
   `company`, `location`; optional `postedAt` (epoch ms) and `description`.
+  When the source lists distinct places before joining, set `locations`
+  (string[], places without appended "Remote" or work models; omit when empty).
+  When the source has a dedicated country code field (Lever), set `country`
+  (trimmed, as given; omit when absent or null).
   When the payload has a dedicated field for them, also set `requisitionId`
   (the employer's requisition id — never the posting id, which changes on
   every re-release; `coerceId` from `_ids.mjs`) and `language` (the posting
@@ -125,7 +124,23 @@ export default {
   with a `language` / `lang` / `locale` param returns one Job per version,
   each with `language` set, the posting's own default language first — the
   URL dedup relies on that order, and never reads a candidate's language from
-  its URL (`_types.js`, `language`; reference `providers/personio.mjs`). See
+  its URL (`_types.js`, `language`; reference `providers/personio.mjs`).
+  When the payload has a dedicated employment-type field, spread
+  `...employmentTypeField(raw)` from `_employment-type.mjs` into the Job: it
+  sets `employmentType` to `full_time`, `part_time`, `contract`, `temporary`
+  or `internship`, and leaves the key off for anything else (reference
+  `providers/ashby.mjs`). Never derive it from the title or description.
+  When the payload carries a stable per-posting id, also return
+  `listingIdentity: { ats_provider, board_slug, posting_id }`: the provider
+  id, the board namespace the provider already resolved (company slug,
+  account slug, tenant subdomain), and the payload's own posting id, never
+  parsed out of a URL and never a requisition id. All three are strings,
+  never trimmed or case-folded (an integer id in its decimal form, a string
+  id never coerced from a number); omit the key when any part is missing, empty, padded or
+  carries a control character, so the row falls back to URL dedup. scan.mjs
+  dedups on it next to the URL, so one posting reached at two URLs is one
+  row (`_types.js`, `listingIdentity`; references `providers/lever.mjs`,
+  `providers/join.mjs`; schema in `docs/listing-fingerprint.md`). See
   `_types.js` for the full list of optional fields.
   Populate `description` **only** when the list payload carries it for free
   (no extra per-job request — the scanner is zero-token). The one exception
@@ -143,6 +158,20 @@ export default {
   per-posting detail on every scan, with no config switch, defeats the
   opt-in and puts the per-posting request fan-out back on the default path;
   `detailLimit` is the cap on that loop, never the thing that turns it on.
+- A teaser, summary or excerpt is not a `description`: `content_filter`
+  reads any description as the full JD, so a short blurb that lacks a
+  required keyword drops the posting. When such a blurb states where the
+  job can be done ("can be done remotely anywhere in the United States"),
+  put only that statement in `eligibilityText`, which
+  `country_eligibility_filter` reads and no other filter does. Reference:
+  `teaserLocationClause` in `providers/cryptocurrencyjobs.mjs`. The same
+  statement can also fill `location` when the payload has no location
+  field (`locationFromClause` in the same file); leave `location` empty
+  rather than guessing "Remote" when the blurb says nothing. When the
+  blurb can mention visa sponsorship, put it in `visaText`, which only
+  `visa_filter` reads. The whole blurb may go there, since `visa_filter`
+  matches nothing but its sponsorship keywords. Reference:
+  `providers/startup-jobs.mjs`.
 - When the payload exposes **more than one** candidate URL for a posting —
   typically an aggregator carrying the employer's upstream ATS/application
   link alongside its own posting page — `Job.url` is the employer's link, per
@@ -184,7 +213,10 @@ judge.
   modules (`greenhouse`, `lever`, `ashby`, `workday`, `icims`, `bamboohr`,
   `paylocity`, `join`), each paired with a public company directory (a
   dataset, or for `join` the ATS's own sitemap). No registry lookup;
-  joining it means adding an import and a `SOURCES` entry.
+  joining it means adding an import and a `SOURCES` entry. A ninth entry,
+  `workable`, has no directory: it reads Workable's XML job feed, which
+  already carries every posting, so no provider module's `fetch()` or
+  `enrichDate` runs for it.
 - **The `--history-seeds` pass.** Boards derived from the user's tracker and
   scan history (`history-ats-seeds.mjs`). This one does load the registry,
   but it only reaches a provider whose `id` equals a vendor label from
@@ -465,6 +497,17 @@ this ceiling, never on its own. Reference: `providers/workday.mjs`
 truncated the list, warn the user (`raise max_pages on this entry`) so a
 partial list is not mistaken for a complete one.
 
+Also say it in the return value, so `scan.mjs` can act on it: set
+`jobs.truncated = { reason, fetched?, total? }` on the returned array
+(`markTruncated()` in `lib/board-truncation.mjs` does this), with a short
+machine-readable `reason` such as `'page-cap'` or `'rate-limited'`. A board
+marked this way is logged `partial` in `data/portal-health.tsv` instead of
+`reachable` and listed in the run summary and the `--json` receipt (Google
+AIP-217: a partly successful read must say what it did not reach). It does
+not count toward the persistent-failure streak, because the board answered;
+consecutive partial reads get their own repeat warning instead. The older per-provider tags
+(`workdayTruncated`, `eightfoldTruncated`, ...) are still recognized.
+
 `max_pages` and `ctx.maxPages` count **pages of results**. A one-shot
 bootstrap that carries no listings — a token/cookie primer, a board-id
 lookup — is free and sits outside the count (`providers/csod.mjs`: a
@@ -707,6 +750,14 @@ went through them. Must cover:
   container to type-check, the throwing fixture must carry the listing
   signal (a detail-page href in the HTML) with zero rows parsed, and the
   `[]` fixture must carry neither (`itviec.mjs`).
+- `listingIdentity` (if the provider sets it): `fetch()` returns the exact
+  triple from the fixture's payload id (as `tests/providers/lever.test.mjs`
+  asserts it), a row whose id is missing or unusable carries no
+  `listingIdentity` key, and the same posting at a second URL is already
+  seen (`markOfferSeen` on one row, `isOfferSeen` on the other, from
+  `scan.mjs`). Pick a second URL that URL dedup alone would treat as new;
+  a variation it already normalizes away proves nothing about the identity
+  (`tests/providers/join.test.mjs`).
 - Pagination (if any): the provider's own `DEFAULT_MAX_PAGES` stops it even
   when the source reports more pages; `ctx.maxPages` stops it earlier. For a
   provider that fans out over several query/category passes behind one shared
@@ -748,6 +799,49 @@ chosen) is welcome — it documents that the number is not arbitrary.
 
 Dev loop: `node test-all.mjs --only providers/{name}`. Before a PR: the full
 `node test-all.mjs` (`--only` is not a merge gate).
+
+### Reporting offers a provider drops (`providerStats`)
+
+Most providers return everything the source gave them and leave filtering to
+`scan.mjs`. A provider that drops offers itself (for example because of an
+entry setting such as `workplace`) may say so, so the drops show up in the
+per-source table at the end of the scan. Attach a non-enumerable
+`providerStats` property to the list `fetch()` returns:
+
+```js
+providerStats = { dropped: { reason: count } }
+```
+
+`scan.mjs` reads `jobs.providerStats?.dropped`. It adds the counts to the
+`source` column, adds them to that row's `fetched`, and lists them per reason
+under "Dropped at the source". The property is optional; a provider without it
+is shown with `source` 0. Make it non-enumerable so it is not a field of the
+job list:
+
+```js
+const stats = { dropped: {} };
+// ...in the page loop, the filter counts what it drops:
+//   if (!keep && stats) stats.dropped.workplace = (stats.dropped.workplace || 0) + 1;
+for (const job of parseResponse(json, filters, stats)) {
+  if (seen.has(job.url)) continue;
+  seen.add(job.url);
+  jobs.push(job);
+}
+// Read by scan.mjs for the per-source summary; not part of the job list.
+Object.defineProperty(jobs, 'providerStats', { value: stats, enumerable: false });
+return jobs;
+```
+
+Notes:
+
+- Count only offers the provider itself discards. Do not count offers `scan.mjs`
+  will filter later (title, location, age and so on); it counts those itself.
+- Use one short, stable key per reason, ideally the name of the setting that
+  caused the drop (`workplace`, say). When several filters can drop the same offer, count it
+  under the first one it fails, so the columns still add up.
+- `Total jobs found` and the `--json` receipt's `found` count the returned list,
+  so they exclude these drops, while the table's `fetched` includes them. See
+  [Per-source table](../docs/SCAN_SUMMARY_TABLE.md).
 
 ## 4. Reference modules
 
@@ -812,6 +906,10 @@ provider whose tuning needs differ from the shared default
 - [ ] A config-derived URL segment (`locale`, `office`) is
       `encodeURIComponent`'d once outside the row loop — escaped, and loud
       (throws) on a broken value — not `safeEncodeURIComponent` + drop.
+- [ ] If the payload carries a stable posting id, each row returns
+      `listingIdentity` (provider id, resolved board namespace, payload
+      posting id, all strings, never trimmed or case-folded), and omits it when any part is
+      missing or unusable — never parsed out of a URL, never a requisition id.
 - [ ] Pagination has its own `DEFAULT_MAX_PAGES` — the page count is never
       decided by the source alone (`pageCount` / `total`).
 - [ ] Pagination honors `ctx.maxPages` when present, skips `fetchDetails`

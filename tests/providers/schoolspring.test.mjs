@@ -131,6 +131,9 @@ try {
     else fail(`schoolspring.fetch() ceiling: ${calls.length} calls, ${out.length} jobs`);
     if (warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() warns "raise max_pages" when its ceiling truncated the board');
     else fail(`schoolspring.fetch() ceiling warning missing: ${JSON.stringify(warnings)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (out.truncated?.reason === 'page-cap' && out.truncated.fetched === 2000) pass('schoolspring.fetch() marks the board page-cap when its ceiling truncated it');
+    else fail(`schoolspring.fetch() ceiling cut: truncated = ${JSON.stringify(out.truncated)}`);
 
     // an API that ignores `page` and repeats the same full page: no duplicates, stops early, no max_pages blame
     calls = [];
@@ -143,6 +146,8 @@ try {
     else fail(`schoolspring.fetch() repeated page made ${calls.length} calls (expected 2)`);
     if (!warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() does not blame max_pages when the API just repeated itself');
     else fail('schoolspring.fetch() misfired the max_pages warning on a repeating API');
+    if (out.truncated === undefined) pass('schoolspring.fetch() leaves a board that stopped on a repeated page unmarked');
+    else fail(`schoolspring.fetch() repeating page was marked: ${JSON.stringify(out.truncated)}`);
 
     // overlapping pages: only the new postings from page 2 are added
     calls = [];
@@ -169,6 +174,8 @@ try {
     else fail(`schoolspring.fetch() ctx.maxPages:1 made ${calls.length} calls`);
     if (!warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() does not blame max_pages for a ctx.maxPages probe cap');
     else fail('schoolspring.fetch() warned about max_pages during a probe');
+    if (out.truncated === undefined) pass('schoolspring.fetch() leaves the ctx.maxPages probe unmarked');
+    else fail(`schoolspring.fetch() probe was marked: ${JSON.stringify(out.truncated)}`);
 
     // a ctx.fetch* rejection propagates UNWRAPPED (verify-portals matches the sentinel by identity)
     class ProbeSentinel extends Error {}

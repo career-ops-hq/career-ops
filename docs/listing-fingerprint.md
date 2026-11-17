@@ -7,7 +7,7 @@ across branded/ATS URLs and URL rotations, provided the caller has established
 that both URLs refer to the same ATS-native triple.
 
 V1 supplies a pure function and a local validator. `scan.mjs` uses the strong
-key as an additional dedup token for Greenhouse, Ashby and Lever postings,
+key as an additional dedup token for Greenhouse, Ashby, Lever, SmartRecruiters, JOIN, BambooHR and Workable postings,
 persisting it in the trailing `listing_key` scan-history column. A provider must
 return the complete ATS-native triple; incomplete identities produce no key and
 fall back to existing scan dedup. This integration does not fetch URLs or add

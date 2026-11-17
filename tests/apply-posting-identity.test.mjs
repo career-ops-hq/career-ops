@@ -292,9 +292,11 @@ for (const file of localized) {
   });
 }
 
-ok('modes/sg/apply.md defers to the canonical write rule', () => {
-  assert.ok(read('modes/sg/apply.md').includes(WRITE_RULE));
-});
+for (const file of ['modes/sg/apply.md', 'modes/at/apply.md', 'modes/in/apply.md']) {
+  ok(`${file} defers to the canonical write rule`, () => {
+    assert.ok(read(file).includes(WRITE_RULE));
+  });
+}
 
 ok('modes/nl/solliciteren.md keeps no exact-title guard of its own', () => {
   // The Dutch rule refused an adapted answer set even for a retitled posting,
@@ -392,7 +394,7 @@ ok('modes/nl/solliciteren.md rechecks the posting before each post-apply write',
 // The output template opens with "Based on: Report #NNN | Score | Archetype".
 // An unsaved draft has no report, so each template says what replaces it. The
 // report-number placeholder is the part no translation changes.
-for (const file of ['modes/apply.md', 'modes/sg/apply.md', ...localized]) {
+for (const file of ['modes/apply.md', 'modes/sg/apply.md', 'modes/at/apply.md', 'modes/in/apply.md', ...localized]) {
   ok(`${file}: the output header drops the report on an unsaved draft`, () => {
     const lines = read(file).split('\n');
     const at = lines.findIndex(l => /#(NNN|\{###\})/.test(l));

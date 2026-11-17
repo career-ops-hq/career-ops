@@ -90,6 +90,14 @@ If the JD suggests an agency/recruiter intermediary ("our client", agency domain
 }
 ```
 
+### Step 1.7 — GitHub evidence freshness
+
+The check is opt-in (`evidence_freshness.enabled` in the profile) and runs once per batch run, not once per worker: before the first offer, `batch-runner.sh` runs `node evidence-freshness.mjs` and, when the check is on, appends its JSON to the end of this prompt under **Runtime: GitHub evidence freshness**. Do not run the script yourself and do not open `config/profile.yml` for it; read `status`, `stale` and the one-line `notice` from that section. It says the GitHub evidence behind `cv.md` may be out of date, not what that work shows, so it never stops the worker, never changes the score or legitimacy tier, and never runs `expand` or `github-evidence.mjs`. This worker is unattended, so ask nothing.
+
+Record it in two places:
+- Final JSON `evidence_freshness`: `stale` when it printed `"stale": true`, `fresh` when it printed `"status": "ok"` with `"stale": false`, and `not_evaluated` for every other status (`no-github`, `gh-unavailable`, `gh-query-failed`), or when the section is absent (the check is off, which is the default, or it could not run).
+- Report header: only when `stale` is true, the line `**GitHub evidence:** {notice}` with the notice (printed in English) translated into `language.output`.
+
 ### Step 2 — Single-Pass CV Match Scoring
 
 Bypass the multi-step reasoning chain (Blocks A-G, WebSearch, compensation research, culture screens). In a single inference pass:
@@ -126,6 +134,7 @@ Write the report to `reports/{{REPORT_NUM}}-{company_slug}-{{DATE}}.md` (where `
 **Legitimacy:** {Legitimacy}
 **PDF:** ❌
 **Mode:** Single-Pass Match (Bypassed multi-step reasoning)
+**GitHub evidence:** {the Step 1.7 `notice`, translated into `language.output`; this line only when it reported stale}
 
 ---
 
@@ -181,6 +190,7 @@ Print the final result as a real fenced code block (```json ... ```) on stdout:
   "legitimacy": "{High Confidence | Proceed with Caution | Suspicious}",
   "pdf": null,
   "report": "reports/{{REPORT_NUM}}-{company_slug}-{{DATE}}.md",
+  "evidence_freshness": "{fresh | stale | not_evaluated}",
   "error": null
 }
 ```

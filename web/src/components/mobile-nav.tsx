@@ -195,13 +195,7 @@ export function MobileNav({ followupsEnabled }: { followupsEnabled: boolean }) {
 
         <div className="co-msafe mt-auto space-y-3 border-t border-border px-4 pt-4">
           <UsageMeter />
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-faint">Appearance</span>
-              <span className="font-mono text-[10px] text-faint">THEME</span>
-            </div>
-            <ThemeToggle showLabel className="bg-surface-hover/40" />
-          </div>
+          <ThemeToggle showLabel className="bg-surface-hover/40" />
         </div>
       </aside>
     </>

@@ -31,6 +31,8 @@ import { join, isAbsolute, basename } from 'path';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { extractSkills } from './skill-extract.mjs';
+import { collapseMarkdownLinks } from './verify-cv-facts.mjs';
+import { headingText, normalizePandocLine, toPlainText } from './lib/cv-markdown.mjs';
 
 // A normal path stays readable. A space or other shell syntax is quoted so the
 // example stays one argument.
@@ -144,6 +146,152 @@ export function keywordCount(keyword, text) {
   return total;
 }
 
+// A skill qualifier can itself be a list. Split only between skills so a
+// label such as "Measurement (oscilloscope, spectrum analyzer)" stays intact.
+function splitCvSkillTerms(text) {
+  const items = [];
+  let start = 0;
+  let depth = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '(') depth++;
+    else if (text[i] === ')') depth = Math.max(0, depth - 1);
+    else if (!depth && /[,;|]/.test(text[i])) {
+      items.push(text.slice(start, i));
+      start = i + 1;
+    }
+  }
+  items.push(text.slice(start));
+  return items;
+}
+
+// Read structure rather than delete selected HTML with filtering regexes. A
+// raw-text body ends at an appropriate end tag even when that tag has stray
+// attributes or a slash. Quotes in ordinary attributes can contain > and <.
+// This is a text extractor for local CVs, not an HTML sanitizer.
+function cvHtmlSections(html) {
+  const source = String(html || '');
+  const output = [];
+  let heading = null;
+  const emit = text => (heading ? heading.parts : output).push(text);
+  const endHeading = () => {
+    if (!heading) return;
+    output.push(`\n${'#'.repeat(heading.level)} ${heading.parts.join('').replace(/\s+/g, ' ').trim()}\n`);
+    heading = null;
+  };
+  let rawTag = null;
+  let at = 0;
+  while (at < source.length) {
+    const open = source.indexOf('<', at);
+    if (open === -1) {
+      if (!rawTag) emit(source.slice(at).replace(/\s+/g, ' '));
+      break;
+    }
+    if (!rawTag) emit(source.slice(at, open).replace(/\s+/g, ' '));
+    if (!rawTag && source.startsWith('<!--', open)) {
+      const end = /--!?>/g;
+      end.lastIndex = open + 4;
+      const match = end.exec(source);
+      at = match ? end.lastIndex : source.length;
+      continue;
+    }
+    // Only a name immediately after < or </ starts an element. In raw text,
+    // unrelated < characters must not swallow the real closing tag later.
+    const tag = /^<(\/?)([a-z][a-z0-9:-]*)(?=[\t\n\f\r />])/i.exec(source.slice(open));
+    if (!tag) {
+      if (!rawTag) emit('<');
+      at = open + 1;
+      continue;
+    }
+    const closing = Boolean(tag[1]);
+    const name = tag[2].toLowerCase();
+    if (rawTag && (!closing || name !== rawTag)) {
+      at = open + 1;
+      continue;
+    }
+    let quote = null;
+    let end = open + tag[0].length;
+    for (; end < source.length; end++) {
+      const char = source[end];
+      if (quote) {
+        if (char === quote) quote = null;
+      } else if (char === '"' || char === "'") quote = char;
+      else if (char === '>') break;
+    }
+    if (end === source.length) break;
+    at = end + 1;
+    if (rawTag) {
+      rawTag = null;
+      emit(' ');
+    } else if (!closing && (name === 'script' || name === 'style')) {
+      rawTag = name;
+      emit(' ');
+    } else if (/^h[1-6]$/.test(name)) {
+      endHeading();
+      if (!closing) heading = { level: Number(name[1]), parts: [] };
+    } else if (['br', 'p', 'li', 'div', 'ul', 'ol', 'section', 'article', 'header', 'footer', 'table', 'tr', 'td', 'th', 'dl', 'dt', 'dd', 'hr'].includes(name)) {
+      emit('\n');
+    }
+    // Inline tags contribute no separator: Post<strong>gre</strong>SQL is
+    // one word. Whitespace already present in the text is preserved.
+  }
+  endHeading();
+  return output.join('').split('\n').map(line => htmlToText(line)).join('\n');
+}
+
+/**
+ * CV skills not named by any JD keyword. This is a review list, never a score.
+ * Read explicit Skills / Core Competencies sections, not terms inferred from
+ * experience prose. Keep the CV's spelling, including non-vocabulary skills.
+ *
+ * @param {string[]} keywords
+ * @param {string} cvText - Markdown, or HTML when options.html is true.
+ * @param {{html?: boolean}} [options]
+ * @returns {string[]}
+ */
+export function cvTermsNotInJd(keywords, cvText, { html = false } = {}) {
+  const text = html ? cvHtmlSections(cvText) : collapseMarkdownLinks(
+    String(cvText || '').replace(/<!--[\s\S]*?-->/g, ' '));
+  const terms = new Map();
+  let skillsLevel = null;
+  let fence = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = normalizePandocLine(raw).trim();
+    const marker = /^(`{3,}|~{3,})/.exec(line);
+    if (marker) {
+      const run = marker[1].trim();
+      if (!fence) fence = run;
+      else if (run[0] === fence[0] && run.length >= fence.length && !line.slice(run.length).trim()) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const headingMarker = /^(#{1,6})\s/.exec(line);
+    if (headingMarker) {
+      const level = headingMarker[1].length;
+      const heading = headingText(line, level);
+      if (/^(?:skills?|technical skills|core competencies|competencies)$/i.test(heading || '')) {
+        skillsLevel = skillsLevel === null ? level : Math.min(skillsLevel, level);
+      }
+      else if (skillsLevel !== null && level <= skillsLevel) skillsLevel = null;
+      continue;
+    }
+    if (skillsLevel === null || /^(?:[-*_]\s*){3,}$/.test(line)) continue;
+    const visible = line.replace(/^(?:[-*+]\s+|\d+[.)]\s+)/, '')
+      .replace(/(?<!\\)(\*\*|__)/g, '')
+      .replace(/(`+)([^`]+)\1/g, '$2')
+      .replace(/(?<![\w\\])([*_])(?=\S)(.+?\S|\S)\1(?!\w)/g, '$2');
+    const items = toPlainText(visible).replace(/^[^:]+:\s*/, '');
+    for (const item of splitCvSkillTerms(items)) {
+      const term = item.trim();
+      const key = normalizeText(term);
+      if (key && !terms.has(key)) terms.set(key, term);
+    }
+  }
+  // The review is the opposite direction from coverage: is this CV term
+  // named within any one JD keyword? Do not join distinct JD keywords.
+  return [...terms.values()].filter(term =>
+    !keywords.some(keyword => keywordCount(term, keyword) > 0));
+}
+
 /**
  * Core coverage analysis. Pure: no I/O. `thin` is a SUBSET of `present`
  * (keywords mentioned exactly once); coverage counts thin keywords as present.
@@ -201,6 +349,7 @@ export const KEYWORDS_HEADINGS = [
   'Keywords extracted',             // en, ar, ja — modes/oferta.md, modes/ar/fursah.md, modes/ja/kyujin.md
   'Extracted Keywords',             // en — batch/batch-prompt.md (batch workers)
   'Udtrukne nøgleord',              // da — modes/da/oferta.md
+  'Uttrukne nøkkelord',             // nb — modes/nb/stilling.md
   'Extrahierte Keywords',           // de — modes/de/angebot.md
   'Palabras clave extraídas',       // es — modes/es/oferta.md
   'Mots-cles extraits',             // fr — modes/fr/offre.md
@@ -461,7 +610,7 @@ export function htmlToText(html) {
 /**
  * Render an analyzeCoverage() result as a ready-to-paste report section.
  *
- * @param {ReturnType<typeof analyzeCoverage>} result - Coverage result.
+ * @param {ReturnType<typeof analyzeCoverage> & {cvTermsNotInJd?: string[]}} result - Coverage result.
  * @param {string} [sourceLabel] - Human label for the scanned document.
  * @returns {string} Markdown block.
  */
@@ -486,6 +635,16 @@ export function formatCoverageMarkdown(result, sourceLabel, keywordNote) {
       'experience — reformulated from your background, never fabricated.',
     '',
   );
+  if (Array.isArray(result.cvTermsNotInJd)) {
+    out.push(
+      '### In your CV, not named in this JD (review, keep the differentiators)',
+      '',
+      result.cvTermsNotInJd.join(', ') || 'None found in the recognized skills / competencies sections.',
+      '',
+      'Informational only. These terms do not change coverage. Keep relevant strengths even when the JD does not name them.',
+      '',
+    );
+  }
   return out.join('\n');
 }
 
@@ -720,6 +879,30 @@ function refuseNoSkills(sourceLabel) {
 }
 
 /**
+ * A relative report, CV or JD-text path, resolved the way the modes write it.
+ * The modes pass `reports/{###}-….md` and `jds/{slug}.md` relative to the data
+ * root, which is not the process's working directory when the user layer lives
+ * elsewhere (a `.career-ops-data` marker or CAREER_OPS_ROOT).
+ *
+ * A bare relative path therefore always means the data root, whether or not
+ * the file is there. Falling back to the working directory when the data root
+ * lacks the file would score a stale copy left in the checkout (say, from
+ * before the user layer moved out) instead of saying the report is missing.
+ * A path that starts with `./` or `../` names the working directory on
+ * purpose, so it resolves there. With no data root, the working directory is
+ * used, as before.
+ *
+ * @param {string} arg
+ * @param {string} root
+ * @returns {string}
+ */
+export function resolveUserPath(arg, root) {
+  if (isAbsolute(arg)) return arg;
+  if (!root || /^\.\.?(?:[\\/]|$)/.test(arg)) return join(process.cwd(), arg);
+  return join(root, arg);
+}
+
+/**
  * Resolve keywords + provenance for any MatchInput.
  *
  * @param {MatchInput} input
@@ -747,7 +930,7 @@ export async function resolveKeywords(input, root) {
   }
 
   if (input.kind === 'jd-text') {
-    const textPath = isAbsolute(input.textPath) ? input.textPath : join(process.cwd(), input.textPath);
+    const textPath = resolveUserPath(input.textPath, root);
     const body = await resolveJdTextFile(textPath);
     if (!body.ok) {
       console.error(body.message);
@@ -764,9 +947,12 @@ export async function resolveKeywords(input, root) {
   }
 
   const reportArg = input.reportPath;
-  const reportPath = isAbsolute(reportArg) ? reportArg : join(process.cwd(), reportArg);
+  const reportPath = resolveUserPath(reportArg, root);
   if (!existsSync(reportPath) || !statSync(reportPath).isFile()) {
-    console.error(`Report not found: ${reportArg}`);
+    console.error(`Report not found: ${reportArg} (looked for ${reportPath}).`);
+    if (!isAbsolute(reportArg) && !/^\.\.?(?:[\\/]|$)/.test(reportArg)) {
+      console.error(`A relative path is read from the data root. For a file in the current directory, pass ./${reportArg}.`);
+    }
     console.error(`Example: node keyword-match.mjs ${shellExampleArg(join(getCareerOpsRoot(), 'reports', '001-role.md'))}`);
     process.exit(1);
   }
@@ -891,7 +1077,7 @@ async function runKeywordMatch(args) {
 
   const cvArg = args.cvPath;
   const cvPath = cvArg
-    ? (isAbsolute(cvArg) ? cvArg : join(process.cwd(), cvArg))
+    ? resolveUserPath(cvArg, getCareerOpsRoot())
     : join(getCareerOpsRoot(), 'cv.md');
 
   if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {
@@ -906,10 +1092,16 @@ async function runKeywordMatch(args) {
     console.error(`Unable to read CV: ${cvPath}`);
     process.exit(1);
   }
-  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : rawCv;
+  // The words a reader sees. htmlToText() already drops an HTML CV's hrefs; a
+  // markdown CV kept its link targets, so "[modules](https://…/terraform-modules)"
+  // counted Terraform as present in cv.md and missing in the same CV as HTML.
+  const cvText = /\.html?$/i.test(cvPath) ? htmlToText(rawCv) : collapseMarkdownLinks(rawCv);
   const sourceLabel = cvArg ? basename(cvPath) : 'cv.md (base CV, before per-role tailoring)';
 
-  const result = analyzeCoverage(keywords, cvText);
+  const result = {
+    ...analyzeCoverage(keywords, cvText),
+    cvTermsNotInJd: cvTermsNotInJd(keywords, rawCv, { html: /\.html?$/i.test(cvPath) }),
+  };
   const payload = {
     ...result,
     keywordSource,

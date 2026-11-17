@@ -23,6 +23,7 @@ Export a tailored, ATS-optimized CV as a `.tex` file and compile it to PDF via `
     *(Replace `{candidate}`, `{company}`, `{report}`, `{YYYY-MM-DD}` with actual values. Omit the `-{report}` segment only for a standalone one-off run with no report number at all.)*
     - This runs the CV fact gate (`verify-cv-facts.mjs`) on the `.tex` before compiling, the same hard gate `pdf` mode runs in step 19. A blocked document is not compiled, and the JSON report carries `factCheck.verdict: "block"` with the claims it could not find in `cv.md` / `article-digest.md`.
     - If it blocks, stop and fix the step 11 payload (remove the invented claim, or add verified evidence to `cv.md`, `article-digest.md` or `config/cv-facts.json`), rebuild the `.tex`, and re-run. Never pass `--skip-fact-check` unless the user explicitly asks for it.
+    - A `drift` finding means a bullet opens a clause with a verb its source bullet does not use. Restore the source verb; ask the user before declaring a swap in `allow_swaps`, never add one to get past the gate.
 14. Report: .tex path, .pdf path, file sizes, section count, keyword coverage %
 
 **Requires:** `tectonic` (preferred — auto-downloads packages) or `pdflatex` (MiKTeX / TeX Live). `generate-latex.mjs` uses a repo-local tectonic first, then PATH.

@@ -14,8 +14,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SKILL_ENTRYPOINTS } from '../scaffolder/bin/skill-entrypoints.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SOURCE = join(ROOT, '.agents', 'skills', 'career-ops', 'SKILL.md');
@@ -31,6 +32,16 @@ function findProjectRoot(skillPath) {
     if (parent === current) return null;
     current = parent;
   }
+}
+
+// A checkout without symlink support (core.symlinks=false, as on Windows without
+// the symlink privilege) writes each per-CLI entrypoint as a one-line file holding
+// the link's target: the stub doctor reports and init/update materialize. Read
+// through it the way the link would.
+function readEntrypoint(entry) {
+  const text = readFileSync(entry, 'utf8');
+  const stub = SKILL_ENTRYPOINTS.some((e) => join(ROOT, ...e.path.split('/')) === entry && text.trim() === e.pointer);
+  return stub ? readFileSync(resolve(dirname(entry), text.trim()), 'utf8') : text;
 }
 
 function standaloneBranch(text) {
@@ -77,6 +88,6 @@ test('the standalone branch looks for an install, asks before init and resumes t
 test('every SKILL.md entrypoint carries the same standalone branch', () => {
   const expected = standaloneBranch(readFileSync(SOURCE, 'utf8'));
   for (const entry of ENTRYPOINTS) {
-    assert.equal(standaloneBranch(readFileSync(entry, 'utf8')), expected, `${entry} differs from .agents/skills/career-ops/SKILL.md`);
+    assert.equal(standaloneBranch(readEntrypoint(entry)), expected, `${entry} differs from .agents/skills/career-ops/SKILL.md`);
   }
 });

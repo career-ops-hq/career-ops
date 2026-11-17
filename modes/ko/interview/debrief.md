@@ -22,7 +22,7 @@
 6. **Story bank** — `interview-prep/story-bank.md`. 새 스토리가 나왔다면 추가
 7. **CV** — `cv.md` + `article-digest.md`(있다면). 제안하는 답변을 실제 경험에 근거하기 위해 사용
 8. **Retracted claims** — `interview-prep/retracted-claims.md`(있다면). 절대 기준(hard gate)입니다. 후보자가 면접에서 말했더라도 철회된 주장은 제안하는 답변에 절대 쓰지 않습니다
-9. **역할별 준비 파일** — 디브리프 노트를 덧붙입니다. 면접 내용과 정면으로 어긋나는 기존 사실은 그 자리에서 수정합니다(Step 1b 참고)
+9. **역할별 준비 파일** — 디브리프 노트를 덧붙입니다(재실행이면 이 라운드의 항목을 교체합니다. Step 1d 참고). 면접 내용과 정면으로 어긋나는 기존 사실은 그 자리에서 수정합니다(Step 1b 참고)
 
 ---
 
@@ -52,6 +52,8 @@
 - "면접관이 어떤 부분에 후속 질문을 했나요? 보통 그건 더 듣고 싶었다는 뜻입니다."
 
 명시적인 출처 표시를 설정합니다: **`input_source: recall`**.
+
+**형식과 분위기 (두 경로 공통, 짧은 질문 하나, 건너뛰기 가능).** 한 번만 묻습니다: "라운드 분위기에 대해 짧게 여쭐게요. 형식은 무엇이었나요(recruiter screen / 1:1 / panel / group / take-home review), 통화에 몇 명이 있었나요, 분위기는 어떻게 표현하시겠어요(relaxed-conversational / structured-formal / rapid-fire / adversarial), 얼마나 편안하셨나요(1-5, 또는 직접 몇 마디로)?" 트랜스크립트에서 형식, 인원, 분위기가 보이면 확인용 제안으로 내놓습니다. **편안함은 절대 추론하거나 후보자 대신 채우지 않습니다**: 후보자 본인의 주관적인 보고이므로 본인의 말로만 기록하고, 건너뛰면 쓰지 않습니다. 질문 전체를 건너뛰면 네 값 중 어느 것도 쓰지 않습니다.
 
 어느 경로로 질문/답변 데이터를 얻었든 Step 2 이후는 똑같이 동작합니다 — 정직한 평가, 갭 메우기, question bank/story bank 업데이트는 `input_source: transcript` 디브리프와 `input_source: recall` 디브리프를 구분하지 않습니다. 다만 Step 9가 읽을 수 있도록 표시 자체는 그대로 전달합니다.
 
@@ -90,6 +92,17 @@
 - **후보자의 주장은 범위 밖입니다.** 여기에는 역할에 대한 면접관의 말만 들어갑니다. 후보자가 자신에 대해 한 말은 넣지 않습니다.
 
 이 목록을 Step 6과 Step 8로 넘기고, 트랜스크립트 입력인 경우에만 Step 9로도 넘깁니다.
+
+---
+
+## Step 1d — Check for an Earlier Debrief of This Round
+
+무엇이든 저장하기 전에(Step 8과 Step 9 모두 이 답에 따라 달라집니다), 이번 디브리프가 이미 저장된 것을 다시 실행한 것인지 확인합니다. 회사, 역할, 라운드 유형, 날짜를 알게 되면(모르면 묻습니다) `interview-prep/sessions/`에서 이에 해당하는 기존 세션 파일을 모두 나열합니다. 기본 이름 `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`와 `-2`, `-3`, ... 변형 모두이며, 기본 이름 자체가 없더라도 포함합니다.
+
+- **파일이 없을 때:** `interview-prep/{company-slug}-{role-slug}.md`에 이 라운드와 날짜의 `## Round [N] Debrief — [YYYY-MM-DD]` 항목이 있는지 확인합니다. Step 8 이후 멈춘 이전 실행이 남긴 항목입니다. 있으면 이번 디브리프가 그것을 다시 실행한 것인지 묻습니다. 다시 실행이면 Step 8이 그 항목을 교체하고, 아니면 Step 8이 덧붙입니다. 항목이 없으면 새 라운드이므로 Step 8이 덧붙입니다. 어느 경우든 Step 9는 기본 이름으로 씁니다.
+- **파일이 하나 이상일 때:** 절대 조용히 덮어쓰지 않습니다. 각 파일의 `interviewer_role`과 첫 질문을 함께 보여 주고, 이번 디브리프가 그중 하나를 다시 실행한 것인지 별도의 라운드인지 후보자에게 묻습니다. 또한 준비 파일에서 이 날짜의 `## Round [N] Debrief — [YYYY-MM-DD]` 항목 중 어느 파일과도 맞지 않는 것(Step 8 이후 멈춘 실행이 남김)도 선택지로 보여 줍니다. 후보자가 그것을 고르면 Step 8이 그 항목을 교체하고 Step 9는 다음 빈 번호로 씁니다. 이런 항목은 `**Interviewer:**`와 `**Round type:**` 줄을 함께 보여 주어, 후보자가 중단된 항목과 같은 날짜의 다른 유형 라운드의 완료된 디브리프를 구별할 수 있게 합니다.
+  - **재실행:** 후보자가 고른 파일을 기록해 둡니다. Step 8은 준비 파일에서 그 라운드의 항목을 두 번째 항목을 덧붙이는 대신 교체하고, Step 9는 고른 파일을 재실행 규칙에 따라 그 자리에서 업데이트합니다.
+  - **별도의 라운드:** Step 8은 평소처럼 덧붙이고, Step 9는 다음 빈 번호(`-2`, `-3`, ...)를 `.md` 앞에 붙여 씁니다.
 
 ---
 
@@ -175,7 +188,7 @@ question bank가 없다면 이번 면접의 질문을 시작점으로 새로 만
 
 ## Step 8 — Save Debrief
 
-`interview-prep/{company-slug}-{role-slug}.md`에 덧붙입니다.
+`interview-prep/{company-slug}-{role-slug}.md`에 덧붙입니다. **Step 1d에서 재실행으로 확인되었다면** 대신 그 라운드의 기존 `## Round [N] Debrief — [YYYY-MM-DD]` 항목(제목부터 다음 `## ` 제목 전까지)을 교체해 면접 하나에 항목 하나만 남깁니다. 파일에 그 라운드와 날짜의 항목이 없을 때만 덧붙입니다.
 
 ```markdown
 ## Round [N] Debrief — [YYYY-MM-DD]
@@ -203,17 +216,26 @@ question bank가 없다면 이번 면접의 질문을 시작점으로 새로 만
 **Timeline:** [언급된 날짜나 마감]
 **Other candidates:** [공개되었다면]
 **Next steps:** [면접관이 말한 다음 단계와 그 시점]
+
+### Interview Format and Tone (any round — omit if the candidate skipped it)
+**Interview format and tone:** (후보자가 답한 항목만 나열합니다. 답하지 않은 항목은 자리표시자나 추론한 값 없이 통째로 지웁니다)
+- Format: [recruiter screen / 1:1 / panel / group / take-home review]
+- People on the call: [인원 수]
+- Tone: [relaxed-conversational / structured-formal / rapid-fire / adversarial]
+- Candidate comfort: [1-5 또는 짧은 표현, 후보자 본인의 말로]
 ```
 
-**이번 라운드에서 보상 금액을 구두로 말했다면**(단순히 "보상 이야기가 나왔다"가 아니라 후보자가 숫자를 제시했다면), `data/salary-observations.tsv`에 `stated` 줄을 하나 덧붙입니다(파일이 없으면 생성하고, 형식은 `docs/SCRIPTS.md` → salary-gap을 따릅니다). tracker#, 이번 라운드 날짜, 금액/통화, 출처 `user`, 짧은 메모, 라운드 라벨, 면접관 이름을 기록합니다. 이것이 있어야 `interview/plan`이 다음 라운드 전에 후보자에게 이 숫자를 상기시킬 수 있습니다 — 해당 파일의 Inputs #9 참고.
+**이번 라운드에서 보상 금액을 구두로 말했다면**(단순히 "보상 이야기가 나왔다"가 아니라 후보자가 숫자를 제시했다면), `data/salary-observations.tsv`에 `stated` 줄을 하나 덧붙입니다(파일이 없으면 생성하고, 형식은 `docs/SCRIPTS.md` → salary-gap을 따릅니다). tracker#, 이번 라운드 날짜, 금액/통화, 출처 `user`, 짧은 메모, 라운드 라벨, 면접관 이름을 기록합니다. 이것이 있어야 `interview/plan`이 다음 라운드 전에 후보자에게 이 숫자를 상기시킬 수 있습니다 — 해당 파일의 Inputs #9 참고. 재실행이라면, 파일에 같은 tracker#, 라운드, 날짜, 금액, 통화의 `stated` 줄이 이미 있을 때 이 줄을 건너뜁니다.
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-디브리프가 끝나면, 기계가 읽을 수 있는 세션 트랜스크립트도 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`에 씁니다. 이것은 이후 분석 모드를 위한 라운드의 구조화된 기록입니다. 발화자가 표시된 턴 덕분에, 이 파일을 읽는 쪽은 누가 말했는지 다시 추론하지 않고 어느 쪽 발화든 읽을 수 있습니다. 전체 규약은 `interview-prep/sessions/README.md`에 있습니다.
+디브리프가 끝나면, 기계가 읽을 수 있는 세션 트랜스크립트도 `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`에 씁니다. Step 1d의 답을 사용하고 절대 조용히 덮어쓰지 않습니다. 이전 파일이 없으면 기본 이름으로 쓰고, 별도의 라운드면 다음 빈 번호(`-2`, `-3`, ...)를 `.md` 앞에 붙여 쓰며, 재실행이면 후보자가 고른 파일을 그 자리에서 업데이트합니다. README의 "File names" 섹션을 참고하세요. 이것은 이후 분석 모드를 위한 라운드의 구조화된 기록입니다. 발화자가 표시된 턴 덕분에, 이 파일을 읽는 쪽은 누가 말했는지 다시 추론하지 않고 어느 쪽 발화든 읽을 수 있습니다. 전체 규약은 `interview-prep/sessions/README.md`에 있습니다.
 
-**Step 1에서 설정한 `input_source` 표시를 확인합니다.** `input_source: transcript`라면 재구성을 건너뜁니다. Step 1/Step 2 결과로 트랜스크립트를 다시 만들지 않습니다 — 그러면 원본보다 손실이 큰 사본이 될 뿐입니다. 대신 원본 트랜스크립트를 아래 스키마에 맞게 가볍게 정리해서(발화자 라벨, front-matter, Step 2 평가에서 나온 competency 태그) 그대로 저장합니다. `input_source: recall`이라면 기존처럼 Step 1/Step 2 결과로 트랜스크립트를 재구성합니다 — 회상에는 보존할 원문이 애초에 없습니다.
+**Step 1에서 설정한 `input_source` 표시를 확인합니다.** `input_source: transcript`라면 재구성을 건너뜁니다. Step 1/Step 2 결과로 트랜스크립트를 다시 만들지 않습니다 — 그러면 원본보다 손실이 큰 사본이 될 뿐입니다. 대신 원본 트랜스크립트를 아래 스키마에 맞게 가볍게 정리해서(발화자 라벨, front-matter, Step 2 평가에서 나온 competency 태그) 그대로 저장합니다. `input_source: recall`이라면 기존처럼 Step 1/Step 2 결과로 트랜스크립트를 재구성합니다 — 새 회상 파일에는 보존할 원문이 없습니다.
+
+**재실행 규칙(Step 1d에서 재실행으로 확인된 경우).** 고른 파일에는 이전 트랜스크립트 디브리프의 원문 턴이 들어 있을 수 있으며, 파일 어디에도 그 사실이 표시되지 않습니다. `input_source: transcript`라면 트랜스크립트가 파일의 턴과 `stated_priorities`를 교체합니다. `input_source: recall`이라면 파일의 기존 턴과 `stated_priorities`를 그대로 두고, 회상 실행으로 새로 알게 된 것만 더합니다. 파일에 없는 질문(면접 순서에 맞춘 새 `## Q` 턴), 태그가 없는 답변의 competency 태그, 이번 실행에서 후보자가 답한 형식과 분위기 키입니다. 기존 턴을 회상으로 다시 쓰지 않습니다.
 
 형식:
 
@@ -225,9 +247,13 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [알고 있다면 역할]
 source: debrief
-stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위가 없거나 회상 입력이면 생략 (Step 1c)
-  - speaker: [이름 또는 역할, 아니면 "unknown"]
+stated_priorities:        # 트랜스크립트 입력에서만 씀. 밝힌 우선순위가 없으면 생략 (Step 1c). 회상 재실행은 기존 리스트를 유지
+  - speaker: "[이름 또는 역할, 아니면 unknown]"
     quote: "[짧은 원문 인용, 큰따옴표로 감쌈]"
+format: [recruiter screen | 1:1 | panel | group | take-home review]   # 선택 (Step 1)
+people_on_call: [인원 수]                                              # 선택
+tone: [relaxed-conversational | structured-formal | rapid-fire | adversarial]   # 선택
+candidate_comfort: "[1-5 또는 후보자 본인의 말로 된 짧은 표현]"      # 선택
 ---
 
 ## Q1
@@ -245,7 +271,8 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 - **답변마다 태그를 답니다.** 각 `**Candidate:**` 줄 바로 윗줄에 `<!-- competency: tag[, tag...] -->`를 씁니다 — 소문자 kebab-case, 여러 역량에 걸친 답변은 쉼표로 구분합니다(예: `system-design`, `people-leadership`, `incident-response`). Step 2에서 이미 각 답변을 평가했으므로, 다시 읽지 말고 그 평가를 기준으로 태그를 답니다. 태그는 자유 형식이며, 질문이 실제로 검증한 역량을 고릅니다.
 - **후보자의 턴은 충실하게 재구성합니다.** 이상적인 답변이 아니라 Step 1에서 후보자가 말했다고 한 내용을 사용합니다. Step 2의 "correct/complete answer"는 디브리프 파일에만 들어가고 트랜스크립트에는 절대 들어가지 않습니다 — 트랜스크립트는 실제로 일어난 일을 기록합니다.
 - **`source: debrief`.**
-- **`stated_priorities`는 front matter에 넣습니다** (Step 1c). 스크립트와 `interview/plan`이 본문을 파싱하지 않고 읽을 수 있도록 `speaker` + `quote` 항목의 YAML 리스트로 씁니다. front matter가 유효한 YAML로 남도록 모든 `quote`를 큰따옴표로 감싸고, 파싱 후에도 발언 그대로 복원되도록 합니다. 수동으로 이스케이프할 때는 안쪽 큰따옴표보다 역슬래시를 먼저 이스케이프합니다. 그래야 인용 안의 리터럴 `\n`이 두 글자 그대로 남고 개행 문자로 바뀌지 않습니다. 각 항목의 라운드와 날짜는 파일 자체의 `round`와 `date`입니다. 밝힌 것이 없을 때와 `input_source: recall`일 때는 항상 이 필드를 생략합니다. 연습 세션 파일에는 실제 면접관이 없으므로 우선순위를 절대 넣지 않습니다.
+- **`stated_priorities`는 front matter에 넣습니다** (Step 1c). 스크립트와 `interview/plan`이 본문을 파싱하지 않고 읽을 수 있도록 `speaker` + `quote` 항목의 YAML 리스트로 씁니다. front matter가 유효한 YAML로 남도록 모든 `quote`를 큰따옴표로 감싸고, 파싱 후에도 발언 그대로 복원되도록 합니다. 수동으로 이스케이프할 때는 안쪽 큰따옴표보다 역슬래시를 먼저 이스케이프합니다. 그래야 인용 안의 리터럴 `\n`이 두 글자 그대로 남고 개행 문자로 바뀌지 않습니다. 각 항목의 라운드와 날짜는 파일 자체의 `round`와 `date`입니다. 모든 `speaker`도 큰따옴표로 감싸고 `quote`와 같은 방식으로 이스케이프합니다(안쪽 큰따옴표보다 역슬래시를 먼저). `Hiring Manager: Jane` 같은 값에는 콜론이 있어 따옴표 없이는 유효하지 않은 YAML이 됩니다. 밝힌 것이 없으면 이 필드를 생략하고, `input_source: recall`에서는 절대 쓰지 않습니다. 새 회상 파일에는 넣지 않고, 회상 재실행은 고른 파일의 기존 리스트를 바꾸지 않고 유지합니다. 연습 세션 파일에는 실제 면접관이 없으므로 우선순위를 절대 넣지 않습니다.
+- **`format`, `people_on_call`, `tone`, `candidate_comfort`는 선택 front matter 키입니다**. Step 1 / Step 8의 값을 담아, 이후 모드가 본문을 파싱하지 않고 읽을 수 있게 합니다. 후보자가 답한 키만 쓰고 나머지는 생략하며, 후보자가 밝히지 않았다면 `candidate_comfort`는 절대 쓰지 않습니다. `candidate_comfort`는 큰따옴표로 감쌉니다(자유 텍스트일 수 있음). 수동으로 이스케이프할 때는 `quote`와 마찬가지로 안쪽 큰따옴표보다 역슬래시를 먼저 이스케이프합니다. 연습 세션 파일에는 넣지 않습니다.
 - 세션 파일은 gitignore된 디렉터리에 저장되므로(실명이나 회사명이 버전 관리에 들어가지 않음), 가리지 않고 그대로 씁니다.
 
 ---

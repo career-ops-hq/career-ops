@@ -30,4 +30,5 @@ Estas competências pressupõem que os arquivos abaixo existam (padrões do care
 | `interview-prep/question-bank.md` | Banco de perguntas com rastreamento de lacunas (criado no primeiro uso) |
 | `interview-prep/interview-prep-guide.md` | Princípios gerais de entrevista (opcional) |
 | `interview-prep/{company}-{role}.md` | Arquivo de preparação específico da vaga |
+| `interview-prep/sessions/*.md` | Transcrições por rodada; front matter `stated_priorities` opcional (prioridades da função informadas pelo entrevistador), escrito pelo debrief e lido pelo planejamento e pela simulação |
 | `interview-prep/retracted-claims.md` | Alegações que o candidato rejeitou como indefensáveis — barreira rígida na simulação e no debrief (formato: `**"[claim]"** ([context]). Reason: [one-line reason + correct framing if applicable].`) |

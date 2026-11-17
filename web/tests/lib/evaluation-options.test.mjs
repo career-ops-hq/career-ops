@@ -94,7 +94,9 @@ test("focused market runs retain canonical importance gates and summary semantic
   const instructions = selectedEvaluationInstructions({ ...source, mode: read("modes/de/angebot.md"), sections: [] });
   for (const term of ["Two-pass rule", "Work-authorization check", "Company Type and Compensation Reliability", "Archetype Detection", "#### Score Evidence", "### Evidence confidence", "`advertised_comp` is the JD's", "`risk_summary` mirrors"]) assert.ok(instructions.includes(term), term);
   const application = selectedEvaluationInstructions({ ...source, sections: ["application"] });
-  assert.match(application, /## H\) Draft Application Answers\n\(only if score >= 4\.5/);
+  // The (draft) marker has to reach a focused run too, or its report is found
+  // only by the English name.
+  assert.match(application, /## H\) Draft Application Answers \(draft\)\n\(only if score >= 4\.5/);
   assert.throws(() => selectedEvaluationInstructions({ ...source, canonicalMode: source.canonicalMode.replace("## Block G — Posting Legitimacy", "## Removed"), sections: ["research"] }), /missing/);
 });
 

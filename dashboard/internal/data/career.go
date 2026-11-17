@@ -51,10 +51,23 @@ func resolveReportPath(careerOpsPath, trackerPath, link string) string {
 			resolved = legacy
 		}
 	}
-	if rel, err := filepath.Rel(careerOpsPath, resolved); err == nil {
-		return rel
+	rel, err := filepath.Rel(careerOpsPath, resolved)
+	if err != nil {
+		// Cross-volume (Windows) has no relative form. Keep the legacy raw
+		// link only when it is itself a contained relative path.
+		if isSafeRepoRelativePath(link) {
+			return link
+		}
+		return ""
 	}
-	return link
+	// A `Report` cell is tracker data, not a trusted path. Every consumer
+	// joins the result against careerOpsPath and reads it, so a link that
+	// walks out of the data root must not resolve — the same rule the PDF
+	// path already applies to crafted tracker rows.
+	if !isSafeRepoRelativePath(rel) {
+		return ""
+	}
+	return rel
 }
 
 // repoRootMarker identifies a career-ops checkout. path-resolver.mjs is chosen
@@ -702,27 +715,29 @@ func NormalizeStatus(raw string) string {
 	}
 
 	switch {
-	// Most restrictive first — accepts English, Spanish, and Turkish
-	case s == "hired" || s == "contratado" || s == "contratada" || s == "accepted" || s == "accept" || s == "kabul edildi" || s == "kabul_edildi" || s == "işe alındı" || s == "ise alindi" || s == "işe alindi":
+	// Most restrictive first — accepts English, Spanish, Turkish, and Chinese
+	case s == "hired" || s == "contratado" || s == "contratada" || s == "accepted" || s == "accept" || s == "kabul edildi" || s == "kabul_edildi" || s == "işe alındı" || s == "ise alindi" || s == "işe alindi" || s == "已入职" || s == "已入職":
 		return "hired"
-	case strings.Contains(s, "no aplicar") || strings.Contains(s, "no_aplicar") || s == "skip" || s == "monitor" || strings.Contains(s, "geo blocker") || strings.Contains(s, "geo_blocker") || strings.Contains(s, "uygun değil") || strings.Contains(s, "uygun_değil") || strings.Contains(s, "uygun degil") || strings.Contains(s, "uygun_degil"):
+	case strings.Contains(s, "no aplicar") || strings.Contains(s, "no_aplicar") || s == "skip" || s == "monitor" || strings.Contains(s, "geo blocker") || strings.Contains(s, "geo_blocker") || strings.Contains(s, "uygun değil") || strings.Contains(s, "uygun_değil") || strings.Contains(s, "uygun degil") || strings.Contains(s, "uygun_degil") || s == "不投" || s == "跳过" || s == "跳過":
 		return "skip"
-	case strings.Contains(s, "interview") || strings.Contains(s, "entrevista") || strings.Contains(s, "mülakat") || strings.Contains(s, "mulakat"):
+	case strings.Contains(s, "interview") || strings.Contains(s, "entrevista") || strings.Contains(s, "mülakat") || strings.Contains(s, "mulakat") || s == "面试" || s == "面試":
 		return "interview"
-	case s == "assessment" || s == "screening" || s == "online assessment" || s == "online_assessment" || s == "online screening":
+	case s == "assessment" || s == "screening" || s == "online assessment" || s == "online_assessment" || s == "online screening" || s == "笔试" || s == "测评" || s == "筆試" || s == "測評":
 		return "assessment"
-	case s == "offer" || strings.Contains(s, "oferta") || strings.Contains(s, "teklif"):
+	case s == "offer" || strings.Contains(s, "oferta") || strings.Contains(s, "teklif") || s == "录用" || s == "錄用":
 		return "offer"
-	case strings.Contains(s, "responded") || strings.Contains(s, "respondido") || strings.Contains(s, "yanıt verildi") || strings.Contains(s, "yanıt_verildi") || strings.Contains(s, "yanit verildi") || strings.Contains(s, "yanit_verildi"):
+	case strings.Contains(s, "responded") || strings.Contains(s, "respondido") || strings.Contains(s, "yanıt verildi") || strings.Contains(s, "yanıt_verildi") || strings.Contains(s, "yanit verildi") || strings.Contains(s, "yanit_verildi") || s == "已回复" || s == "已回覆":
 		return "responded"
-	case strings.Contains(s, "applied") || strings.Contains(s, "aplicado") || s == "enviada" || s == "aplicada" || s == "sent" || strings.Contains(s, "başvuruldu") || strings.Contains(s, "basvuruldu"):
+	case strings.Contains(s, "applied") || strings.Contains(s, "aplicado") || s == "enviada" || s == "aplicada" || s == "sent" || strings.Contains(s, "başvuruldu") || strings.Contains(s, "basvuruldu") || s == "已投递" || s == "已申请" || s == "已投遞" || s == "已申請":
 		return "applied"
-	case strings.Contains(s, "rejected") || strings.Contains(s, "rechazado") || s == "rechazada" || strings.Contains(s, "reddedildi"):
+	case strings.Contains(s, "rejected") || strings.Contains(s, "rechazado") || s == "rechazada" || strings.Contains(s, "reddedildi") || s == "已拒绝" || s == "被拒" || s == "已拒絕":
 		return "rejected"
 	case s == "lapsed" || strings.Contains(s, "discarded") || strings.Contains(s, "descartado") || s == "descartada" || s == "cerrada" || s == "cancelada" ||
-		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup") || strings.Contains(s, "iptal edildi") || strings.Contains(s, "iptal_edildi") || strings.Contains(s, "ıptal edildi") || strings.Contains(s, "ıptal_edildi"):
+		strings.HasPrefix(s, "duplicado") || strings.HasPrefix(s, "dup") || strings.Contains(s, "iptal edildi") || strings.Contains(s, "iptal_edildi") || strings.Contains(s, "ıptal edildi") || strings.Contains(s, "ıptal_edildi") || s == "已放弃" || s == "放弃" || s == "已关闭" || s == "已放棄" || s == "放棄" || s == "已關閉":
 		return "discarded"
-	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "evaluar" || s == "verificar" || strings.Contains(s, "değerlendirildi") || strings.Contains(s, "degerlendirildi"):
+	case strings.Contains(s, "speculative") || s == "spec" || s == "gambit":
+		return "speculative"
+	case strings.Contains(s, "evaluated") || strings.Contains(s, "evaluada") || s == "condicional" || s == "hold" || s == "evaluar" || s == "verificar" || strings.Contains(s, "değerlendirildi") || strings.Contains(s, "degerlendirildi") || s == "已评估" || s == "已評估":
 		return "evaluated"
 	default:
 		return s
@@ -981,16 +996,19 @@ func markdownLinkDestination(raw string) (string, bool) {
 var trackerHeaderAliases = map[string]string{
 	"#": "num", "num": "num",
 	"date": "date", "fecha": "date", "datum": "date", "data": "date",
-	"dato": "date", "tanggal": "date",
+	"dato": "date", "tanggal": "date", "tarih": "date",
 	"company": "company", "empresa": "company",
-	"firma": "company", "virksomhed": "company", "perusahaan": "company",
+	"firma": "company", "virksomhed": "company", "virksomhet": "company", "perusahaan": "company",
+	"entreprise": "company", "azienda": "company", "şirket": "company",
 	"via": "via", "role": "role", "puesto": "role",
-	"rolle": "role", "rola": "role", "vaga": "role",
-	"location": "location", "ort": "location", "score": "score", "status": "status",
-	"pdf": "pdf", "materials": "pdf", "report": "report",
+	"rolle": "role", "rola": "role", "vaga": "role", "ruolo": "role", "rol": "role",
+	"location": "location", "ort": "location",
+	"score": "score", "punteggio": "score", "puan": "score",
+	"status": "status", "statut": "status", "stato": "status", "durum": "status",
+	"pdf": "pdf", "materials": "pdf", "report": "report", "rapor": "report",
 	"apply link": "applylink", "apply": "applylink",
 	"follow-up": "followup", "follow up": "followup", "followup": "followup",
-	"notes": "notes", "url": "url",
+	"notes": "notes", "notlar": "notes", "url": "url",
 }
 
 // legacyTrackerColumns is the original fixed layout in splitTrackerRow field
@@ -1089,7 +1107,7 @@ func IsCanonicalStatusName(status string) bool {
 // Reject malformed UI input cheaply; the writer validates against states.yml.
 func isCanonicalStatusName(status string) bool {
 	switch strings.ToLower(status) {
-	case "evaluated", "applied", "responded", "assessment", "interview", "offer", "hired", "rejected", "discarded", "skip":
+	case "evaluated", "speculative", "applied", "responded", "assessment", "interview", "offer", "hired", "rejected", "discarded", "skip":
 		return true
 	}
 	return false
@@ -1122,14 +1140,17 @@ func StatusPriority(status string) int {
 		return 4
 	case "evaluated":
 		return 5
-	case "skip":
+	// Right after evaluated, as in statusGroupOrder.
+	case "speculative":
 		return 6
-	case "rejected":
+	case "skip":
 		return 7
-	case "discarded":
+	case "rejected":
 		return 8
-	default:
+	case "discarded":
 		return 9
+	default:
+		return 10
 	}
 }
 
