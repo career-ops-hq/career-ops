@@ -8,6 +8,7 @@ import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
 import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { cvUploadError, MAX_CV_SOURCE_CHARS } from "@/lib/cv/upload.mjs";
 import { pdfText } from "@/lib/cv/pdf-text.mjs";
 import { cvOutputReader } from "@/lib/cv/ingest-output.mjs";
@@ -135,10 +136,10 @@ export async function POST(req: Request) {
   const substitution = cliSubstitutionNotice(resolved);
   const prompt = ingestPrompt(promptSource);
   const isClaude = cliId === "claude";
-  const args = isClaude
+  const buildArgs = (p: string) => isClaude
     ? [
         "-p",
-        prompt,
+        p,
         "--output-format",
         "stream-json",
         "--verbose",
@@ -152,20 +153,38 @@ export async function POST(req: Request) {
         "--disallowedTools",
         ADVISOR_SCOPE.disallowed,
       ]
-    : spec.args(prompt);
+    : spec.args(p);
 
   let child;
+  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // The prompt inlines the whole CV, up to MAX_CV_SOURCE_CHARS (60,000)
+    // characters. That passes the Windows command-line cap of 32,767 UTF-16
+    // units, and a CV in a script of three UTF-8 bytes a character passes the
+    // POSIX 128 KiB per-argument cap, so the spawn failed with an opaque
+    // ENAMETOOLONG or E2BIG. A launch that would not fit gets the prompt in a
+    // file under the data root (cwd) and a pointer in argv, as /api/run (#6743)
+    // and the apply planner (#7150) do. Every CLI here can read it: the scope
+    // this route grants includes Read, and Codex gets a read-only sandbox. A
+    // prompt that fits is passed as before.
+    spill = spillOversizedPrompt({
+      prompt,
+      buildArgs,
+      binPath,
+      fencing: { cliId, capabilities: CAPS.localReadOnly },
+      root: careerOpsRoot(),
+    });
     // Reads the CV and proposes; cannot write, and does not fetch — the
     // Claude branch denies WebFetch/WebSearch outright, so this is the strictest
     // record and Codex gets a true read-only sandbox.
     child = spawnHeadlessCli(
       binPath,
-      args,
+      spill.args,
       { cwd: careerOpsRoot(), env: process.env },
       { cliId, capabilities: CAPS.localReadOnly },
     );
   } catch (e) {
+    spill?.cleanup?.(); // the spilled prompt holds the CV too
     if (tempFile) cleanupTemp(tempFile); // never leak the CV temp if spawn throws sync
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
   }
@@ -194,6 +213,7 @@ export async function POST(req: Request) {
           closed = true;
           if (killer) clearTimeout(killer);
           if (tempFile) cleanupTemp(tempFile);
+          spill?.cleanup?.();
           try {
             controller.close();
           } catch {
@@ -246,6 +266,7 @@ export async function POST(req: Request) {
         /* ignore */
       }
       if (tempFile) cleanupTemp(tempFile);
+      spill?.cleanup?.();
     },
   });
 

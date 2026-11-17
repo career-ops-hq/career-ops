@@ -51,6 +51,7 @@ export function ReportView({
   report,
   canDelete = false,
   pdfFileReady = false,
+  applyPdfReady = false,
   trackerMarkedPdf = false,
   coverReady = false,
   backHref = "/pipeline",
@@ -66,6 +67,7 @@ export function ReportView({
   canDelete?: boolean;
   /** A tailored CV file is on disk (index or a matching cv-* name). Not the tracker mark. */
   pdfFileReady?: boolean;
+  applyPdfReady?: boolean;
   /** The tracker cell has a PDF mark. That mark can exist with no file. */
   trackerMarkedPdf?: boolean;
   /** A tailored cover letter for THIS application exists in output/ (resolved by
@@ -183,7 +185,7 @@ export function ReportView({
                   </Link>
                 )}
                 <MarkPdfReadyButton reportNum={reportNum} ready={disk.exists} trackerMarked={trackerMarkedPdf} />
-                <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={disk.exists} quiet={quietApply} />
+                <ApplyButton n={id} url={applyUrl} company={companyName} pdfReady={applyPdfReady} quiet={quietApply} />
                 {coverReady && (
                   <a
                     href={`/api/cover-pdf?application=${encodeURIComponent(id)}`}

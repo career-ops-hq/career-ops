@@ -162,7 +162,7 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
   }
 }
 
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string> };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -643,7 +643,17 @@ export async function fillSession(
       } else {
         const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
         if (liveType === "password") continue;
-        await loc.fill(value);
+        const current = (await loc.inputValue().catch(() => "")).trim();
+        // Remember only values this session wrote, without surrounding spaces.
+        // The live value is trimmed too, so a padded answer still matches on
+        // the next run and a dashboard correction can replace it. A different
+        // value already on the form was typed there, so a later run leaves it.
+        const answer = value.trim();
+        const remembered = s.written?.get(fid);
+        if (answer && (!current || current === remembered)) {
+          if (current !== answer) await loc.fill(answer);
+          (s.written ??= new Map()).set(fid, answer);
+        }
       }
       ok = !gaveUp;
     } catch {

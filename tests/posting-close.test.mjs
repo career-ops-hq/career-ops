@@ -128,9 +128,11 @@ test('a field that is not a close-date name is ignored', () => {
   assert.equal(closesAtIso(inherited), '2026-08-08');
 });
 
-test('closes_at is the last scan-history column', () => {
-  assert.equal(SCAN_HISTORY_COLUMNS.at(-1), 'closes_at');
-  assert.equal(SCAN_HISTORY_COLUMNS.at(-2), 'listing_key');
+// Append-only: closes_at was added as column 16, right after listing_key, and
+// a later column (employment_type) goes after it without moving it.
+test('closes_at stays scan-history column 16, after listing_key', () => {
+  assert.equal(SCAN_HISTORY_COLUMNS.indexOf('closes_at'), 15);
+  assert.equal(SCAN_HISTORY_COLUMNS[14], 'listing_key');
 });
 
 function historyRow(cells) {
@@ -233,6 +235,47 @@ test('a later added row still replaces the close day', () => {
     historyRow({ url, status: 'skipped_experience', closes_at: '2027-01-02' }),
   ].join('\n');
   assert.equal(closeDatesByUrl(text).get(url), '2026-11-11');
+});
+
+test('a board URL takes the close day recorded on another shape of the same posting', () => {
+  const embed = 'https://boards.greenhouse.io/embed/job_app?for=acme&token=8028783';
+  const board = 'https://boards.greenhouse.io/acme/jobs/8028783';
+  const apply = 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555/apply';
+  const posting = 'https://jobs.lever.co/acme/11111111-2222-3333-4444-555555555555';
+  const greenhouse = [
+    historyRow({ url: embed, closes_at: '2026-12-01' }),
+  ].join('\n');
+  assert.equal(closeDateForUrl(closeDatesByUrl(greenhouse), board), '2026-12-01');
+  const lever = [
+    historyRow({ url: apply, closes_at: '2026-08-08' }),
+  ].join('\n');
+  assert.equal(closeDateForUrl(closeDatesByUrl(lever), posting), '2026-08-08');
+  const both = [
+    historyRow({ url: embed, closes_at: '2026-12-01' }),
+    historyRow({ url: board, closes_at: '2026-12-15' }),
+  ].join('\n');
+  const index = closeDatesByUrl(both);
+  assert.equal(closeDateForUrl(index, board), '2026-12-15');
+  assert.equal(closeDateForUrl(index, embed), '2026-12-01');
+});
+
+test('a greenhouse src query does not take the close day of the bare posting', () => {
+  const board = 'https://boards.greenhouse.io/acme/jobs/8028783';
+  const text = historyRow({ url: board, closes_at: '2026-12-01' });
+  const index = closeDatesByUrl(text);
+  assert.equal(closeDateForUrl(index, `${board}?src=email`), '');
+  assert.equal(closeDateForUrl(index, `${board}?src=`), '');
+  assert.equal(closeDateForUrl(index, 'https://jobs.example/one?gh_jid=8028783'), '2026-12-01');
+  const encoded = closeDatesByUrl(historyRow({ url: `${board}?src=a%26b`, closes_at: '2026-12-01' }));
+  assert.equal(closeDateForUrl(encoded, `${board}?src=a&src=b`), '');
+  assert.equal(closeDateForUrl(encoded, `${board}?src=a%26b`), '2026-12-01');
+});
+
+test('two known language versions do not share a close day', () => {
+  const text = [
+    historyRow({ url: 'https://jobs.example/role?lang=de', closes_at: '2026-07-07' }),
+  ].join('\n');
+  assert.equal(closeDateForUrl(closeDatesByUrl(text), 'https://jobs.example/role?lang=en'), '');
 });
 
 test('a non-observational later row can still replace an added close day', () => {

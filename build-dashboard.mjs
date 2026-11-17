@@ -10,6 +10,21 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateFlags } from './lib/cli-flags.mjs';
+
+const KNOWN_FLAGS = ['--help', '-h'];
+const USAGE = `Usage:
+  node build-dashboard.mjs           # build the dashboard binary
+  node build-dashboard.mjs --help|-h # print this usage block and exit`;
+
+// validateFlags() names an unknown flag and the valid ones, then exits 1. The
+// usage block goes out with that error too (#3565), so a mistyped call shows
+// how to run the script. Only that exit: the listener is removed once the
+// flags pass, so a failed `go build` below does not print usage.
+const printUsageOnError = (code) => { if (code !== 0) console.error(USAGE); };
+process.once('exit', printUsageOnError);
+validateFlags(process.argv.slice(2), KNOWN_FLAGS, USAGE);
+process.off('exit', printUsageOnError);
 
 const root = dirname(fileURLToPath(import.meta.url));
 const out = process.platform === 'win32' ? 'career-dashboard.exe' : 'career-dashboard';
