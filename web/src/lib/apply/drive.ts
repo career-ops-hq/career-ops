@@ -5,6 +5,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
 import { executeAction, factsOf } from "./drive-action.mjs";
+import { listedDriveText } from "./blank-unknown.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
@@ -184,6 +185,7 @@ export async function driveSession(
     goal === "reach"
       ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
       : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
+Leave blank any field whose answer is not listed below. Never guess or infer a value.
 ANSWERS (match by the field's label):
 ${answersBlock || "(no answers provided — just reach/observe)"}`;
   let resumeId: string | null = null;
@@ -233,6 +235,23 @@ Reply ONE action JSON.`;
       steps.push(s);
       emit(s);
       return { reached: false, turns: turn, reason: act.reason || "stuck", steps };
+    }
+
+    // A prompt line does not stop the model. On a full fill, type and select may
+    // enter only a value from the supplied answers. Empty text clears a field.
+    // Clicks stay clicks: a radio is chosen by click, not by this check.
+    const entered = act.action === "type" ? act.text : act.action === "select" ? act.value : undefined;
+    if (goal === "full" && entered !== undefined && !listedDriveText(entered, answers)) {
+      const s: DriveStep = {
+        turn,
+        action: act.action,
+        detail: "blocked an answer that was not listed",
+        thumb: await shot(),
+        note: "left blank",
+      };
+      steps.push(s);
+      emit(s);
+      continue;
     }
 
     // execute the action on OUR session — NEVER submit. The executor, and the

@@ -43,7 +43,9 @@ export function classifyApplyQuestion(field) {
   if (visa) return visa;
   if (/salary|compensation|pay expectation|desired pay|\bwage\b/.test(q)) return "salary";
   if (/how did you hear|where did you hear|how did you find|referral source/.test(q)) return "source";
-  if (/years of (?:relevant )?experience (?:with|in|using|as|on)\b/.test(q)) return "years-specific";
+  // "in total" / "overall" is the profile total. "with Python" and "for Python"
+  // name a skill the profile does not state, so those stay blank.
+  if (/years of (?:relevant )?experience (?:with|in|using|as|on|for)\b(?!\s+(?:total|overall|altogether)\b)/.test(q)) return "years-specific";
   if (/years of experience|years of relevant/.test(q)) return "years";
   if (/start date|earliest start|when can you start|date you can start/.test(q)) return "start-date";
   if (/relocat/.test(q)) return "relocation";
@@ -310,6 +312,25 @@ export function blankUnknownDraft(fields, draft, profile = {}) {
  * @param {{ id?: string, type?: string, label?: string, options?: string[] }[]} [fields]
  * @returns {{ id?: string, label: string, value: string }[]}
  */
+/**
+ * A full-drive type or select may enter only a value the caller already listed.
+ * Empty text is allowed: clearing a field is leaving it blank. Clicks are not
+ * checked here.
+ *
+ * @param {string | null | undefined} text
+ * @param {{ value?: string }[] | null | undefined} answers
+ * @returns {boolean}
+ */
+export function listedDriveText(text, answers) {
+  const normalized = String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!normalized) return true;
+  if (!Array.isArray(answers)) return false;
+  return answers.some((answer) => {
+    const value = String(answer?.value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    return value !== "" && value === normalized;
+  });
+}
+
 export function prepareLabeledAnswers(answers, profile, editedLabels = [], fields = []) {
   const edited = new Set(editedLabels.map((label) => String(label || "").toLowerCase()));
   const byId = new Map(fields.filter((field) => field?.id).map((field) => [String(field.id), field]));

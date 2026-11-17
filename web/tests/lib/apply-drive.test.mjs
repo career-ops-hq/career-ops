@@ -537,6 +537,8 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   const calls = DRIVE_CODE.match(/\bexecuteAction\(/g) ?? [];
   assert.equal(calls.length, 1, "drive.ts must execute planner actions in exactly one place");
   assert.match(DRIVE_CODE, /await executeAction\(page, frame, act, snap\.actionable\)/);
+  assert.match(DRIVE, /Leave blank any field whose answer is not listed below\. Never guess or infer a value\./);
+  assert.match(DRIVE_CODE, /listedDriveText\(/);
 });
 
 test("drive.ts does nothing to an element itself", () => {

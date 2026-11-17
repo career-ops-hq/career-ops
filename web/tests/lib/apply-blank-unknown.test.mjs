@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
   blankUnknownDraft,
   classifyApplyQuestion,
+  listedDriveText,
   prepareFillAnswers,
   prepareLabeledAnswers,
   readApplyProfile,
@@ -390,20 +391,30 @@ test("total years fill only a total-experience question", () => {
   const profile = { years_experience: "8" };
   const fields = [
     { id: "total", type: "number", label: "Years of experience" },
+    { id: "intotal", type: "number", label: "How many years of experience in total do you have?" },
+    { id: "overall", type: "number", label: "Years of experience overall" },
     { id: "python", type: "number", label: "How many years of Python?" },
     { id: "address", type: "number", label: "How many years have you lived at your current address?" },
   ];
   const draft = {
     total: { value: "", needs_confirmation: true },
+    intotal: { value: "2", needs_confirmation: false },
+    overall: { value: "4", needs_confirmation: false },
     python: { value: "2", needs_confirmation: false },
     address: { value: "3", needs_confirmation: false },
   };
   const gated = blankUnknownDraft(fields, draft, profile);
+  assert.equal(classifyApplyQuestion(fields[1]), "years");
+  assert.equal(classifyApplyQuestion(fields[2]), "years");
   assert.equal(gated.total.value, "8");
+  assert.equal(gated.intotal.value, "8");
+  assert.equal(gated.overall.value, "8");
   assert.equal(gated.python.value, "2");
   assert.equal(gated.address.value, "3");
   const filled = prepareFillAnswers({ fields, profile });
   assert.equal(filled.total, "8");
+  assert.equal(filled.intotal, "8");
+  assert.equal(filled.overall, "8");
   assert.equal("python" in filled, false);
   assert.equal("address" in filled, false);
 });
@@ -411,24 +422,45 @@ test("total years fill only a total-experience question", () => {
 test("years with a named skill stay blank, and race is a whole word", () => {
   const profile = { years_experience: "8" };
   const python = { id: "python", type: "number", label: "Years of experience with Python" };
+  const forPython = { id: "forpy", type: "number", label: "Years of experience for Python" };
   const embrace = { id: "story", type: "text", label: "Describe a time you had to embrace a new tool" };
   assert.equal(classifyApplyQuestion(python), "years-specific");
+  assert.equal(classifyApplyQuestion(forPython), "years-specific");
   assert.equal(classifyApplyQuestion({ type: "select", label: "Race/Ethnicity" }), "eeo");
   assert.equal(classifyApplyQuestion({ type: "select", label: "Racial background" }), "eeo");
   assert.equal(classifyApplyQuestion(embrace), null);
   const gated = blankUnknownDraft(
-    [python, embrace],
+    [python, forPython, embrace],
     {
       python: { value: "5", needs_confirmation: false },
+      forpy: { value: "5", needs_confirmation: false },
       story: { value: "I learned the CRM.", needs_confirmation: false },
     },
     profile,
   );
   assert.equal(gated.python.value, "");
   assert.equal(gated.python.needs_confirmation, true);
+  assert.equal(gated.forpy.value, "");
+  assert.equal(gated.forpy.needs_confirmation, true);
   assert.equal(gated.story.value, "I learned the CRM.");
-  const filled = prepareFillAnswers({ fields: [python], answers: { python: "5" }, profile });
+  const filled = prepareFillAnswers({ fields: [python, forPython], answers: { python: "5", forpy: "5" }, profile });
   assert.equal(filled.python, "");
+  assert.equal(filled.forpy, "");
+});
+
+test("a full drive may type only a listed answer value", () => {
+  const answers = [
+    { label: "Years of experience", value: "8" },
+    { label: "Name", value: "Ada Lovelace" },
+  ];
+  assert.equal(listedDriveText("8", answers), true);
+  assert.equal(listedDriveText("  ada   lovelace ", answers), true);
+  assert.equal(listedDriveText("", answers), true);
+  assert.equal(listedDriveText("   ", answers), true);
+  assert.equal(listedDriveText("I will need sponsorship", answers), false);
+  assert.equal(listedDriveText("8", []), false);
+  assert.equal(listedDriveText("8", null), false);
+  assert.equal(listedDriveText("", null), true);
 });
 
 test("labeled drive answers use the real field, not a text stand-in", () => {
