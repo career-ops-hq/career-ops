@@ -284,6 +284,9 @@ export async function executeAction(page, frame, act, actionable) {
     handle = ref !== null ? await frame.$(`[data-co-ref="${ref}"]`).catch(() => null) : null;
     const now = handle ? await handle.evaluate(factsOf, ref).catch(() => null) : null;
     const label = now ? snapshotLabel(now) : "";
+    // The snapshot stores listedFieldLabel, which can fall through to the
+    // placeholder when the raw identity is empty. Compare that same value.
+    const identity = now ? listedFieldLabel(now) : "";
     const target = now && !isSubmitControl(now) ? handle : null;
     const expected = act.expected;
     const drifted = !!(expected && now && (
@@ -291,7 +294,7 @@ export async function executeAction(page, frame, act, actionable) {
       || (now.group || "") !== (expected.group || "")
       || (now.question || "") !== (expected.question || "")
       || (now.option || "") !== (expected.option || "")
-      || (expected.identity !== undefined && (now.identity || "") !== expected.identity)
+      || (expected.identity !== undefined && identity !== expected.identity)
     ));
     if (act.ref !== undefined && !target) {
       // Three different refusals, told apart: only one of them is the guard

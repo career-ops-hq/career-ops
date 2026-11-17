@@ -674,6 +674,44 @@ test("a type is refused when the wrapper heading changed after the snapshot", as
   assert.deepEqual(page.log, []);
 });
 
+test("a generic placeholder still fills until a heading appears", async () => {
+  const page = new FakePage();
+  page.add("field", { tag: "input", attrs: { type: "text", placeholder: "Select" } });
+  const el = page.el("field");
+  const before = factsOf(el, page.ref("field"));
+  assert.equal(before.identity, "");
+  const identity = listedFieldLabel(before);
+  assert.equal(identity, "Select");
+  const expected = { label: "Select", group: "", question: "", option: "", identity };
+
+  const kept = await act(page, { action: "type", ref: page.ref("field"), text: "Ada", expected });
+  assert.equal(kept.note, "");
+  assert.deepEqual(page.log, ["fill:field=Ada"]);
+
+  const heading = {
+    textContent: "Phone number",
+    offsetParent: {},
+    tagName: "H3",
+    cloneNode() {
+      return { textContent: heading.textContent, querySelectorAll() { return []; } };
+    },
+  };
+  el.parentElement = {
+    parentElement: null,
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes("h3")) return [heading];
+      if (sel.includes("input")) return [el];
+      return [];
+    },
+  };
+  page.log.length = 0;
+  const moved = await act(page, { action: "type", ref: page.ref("field"), text: "Ada", expected });
+  assert.equal(moved.note, "left blank");
+  assert.match(moved.detail, /label changed/);
+  assert.deepEqual(page.log, []);
+});
+
 test("a shared radio is refused when its option changed after the snapshot", async () => {
   const page = new FakePage();
   page.add("yes", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "1" });
