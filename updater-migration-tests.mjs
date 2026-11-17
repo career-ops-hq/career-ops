@@ -553,11 +553,11 @@ const twoPassManifestChecks = [
   },
   {
     // execFileSync inherits stderr, so an expected per-path skip printed git's
-    // raw pathspec error right before the success banner (#1998).
-    // The trailing spread is the #2337 preserve-exclusions; the property this
+    // raw pathspec error right before the success banner (#1998). The spread is
+    // the fallback's literal expansion specs (#3825 review); the property this
     // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('checkout',\s*targetCommit,\s*'--',\s*path(?:,\s*\.\.\.\w+)?\)/,
+    pattern: /gitQuiet\('--literal-pathspecs',\s*'checkout',\s*targetCommit,\s*'--',\s*\.\.\.fallbackSpecs\)/,
   },
   {
     // #2337: a system file this install edited must be listed and backed up
