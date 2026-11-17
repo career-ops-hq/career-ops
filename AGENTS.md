@@ -59,7 +59,7 @@ Auto-memory at `~/.claude/projects/.../memory/` is for **behavioural steering on
 
 Rules belong in files the harness reads automatically (`CLAUDE.md`, `CODEX.md`, `AGENTS.md`, `modes/*.md`, `MEMORY.md`), or in a `modes/` file that AGENTS.md, the router or a mode tells the agent to read at the step that needs it (for example `modes/_onboarding.md` when `doctor.mjs` reports `onboardingNeeded`). Do not create sidecar documentation that nothing tells the agent to load: an agent follows only the rules it reads.
 
-AGENTS.md is loaded whole into every session, so it holds the rules every session needs and stays under 40,000 characters (`tests/agents-md-size.test.mjs`). Reference material one workflow needs goes in a `modes/` file with a pointer here.
+AGENTS.md is loaded whole into every session, so it holds the rules every session needs and stays under 40,000 characters (`tests/agents-md-size.test.mjs`). Reference material one workflow needs goes in a `modes/` file with a pointer here. A change here replaces text or moves it to a `modes/` file; if it adds characters on net, the PR description says why the rule cannot live in a `modes/` file.
 
 ## Untrusted External Content (CRITICAL)
 
