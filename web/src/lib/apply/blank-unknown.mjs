@@ -321,8 +321,9 @@ function driveKey(text) {
 
 /**
  * A full-drive type or select may enter only a value listed for this field.
- * Empty text is allowed: clearing a field is leaving it blank. A non-empty
- * value needs a field label, so an unlabeled box cannot take another field's answer.
+ * Empty text is allowed: clearing a field is leaving it blank. Punctuation
+ * alone is not empty, so a dash is not a clear. A non-empty value needs a
+ * field label, so an unlabeled box cannot take another field's answer.
  *
  * @param {string | null | undefined} text
  * @param {{ label?: string, value?: string }[] | null | undefined} answers
@@ -330,8 +331,10 @@ function driveKey(text) {
  * @returns {boolean}
  */
 export function listedDriveText(text, answers, fieldLabel) {
+  const raw = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (!raw) return true;
   const normalized = driveKey(text);
-  if (!normalized) return true;
+  if (!normalized) return false;
   if (!Array.isArray(answers)) return false;
   const hits = answers.filter((answer) => driveKey(answer?.value) !== "" && driveKey(answer?.value) === normalized);
   if (!hits.length) return false;

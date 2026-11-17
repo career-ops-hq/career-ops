@@ -463,6 +463,11 @@ test("a full drive may type only a listed answer value", () => {
   assert.equal(listedDriveText("8", answers), false);
   assert.equal(listedDriveText("", answers), true);
   assert.equal(listedDriveText("   ", answers), true);
+  assert.equal(listedDriveText("-", []), false);
+  assert.equal(listedDriveText("-", answers, ""), false);
+  assert.equal(listedDriveText("?", null), false);
+  assert.equal(listedDriveText(" - ", []), false);
+  assert.equal(listedDriveText("8.", answers, "Years of experience"), true);
   assert.equal(listedDriveText("I will need sponsorship", answers), false);
   assert.equal(listedDriveText("8", []), false);
   assert.equal(listedDriveText("8", null), false);
@@ -471,6 +476,7 @@ test("a full drive may type only a listed answer value", () => {
   assert.equal(listedDriveText("Yes", [relocate]), false);
   assert.equal(listedDriveText("Yes", [relocate], "Will you require sponsorship?"), false);
   assert.equal(listedDriveText("Yes", [relocate], "Are you willing to relocate?"), true);
+  assert.equal(listedDriveText("Yes!", [relocate], "Are you willing to relocate?"), true);
   assert.equal(listedDriveClick("radio", "Yes", "Will you require sponsorship?", [relocate]), false);
   assert.equal(listedDriveClick("radio", "Yes", "Are you willing to relocate?", [relocate]), true);
   assert.equal(listedDriveClick("radio", "Yes", "", [relocate]), false);
