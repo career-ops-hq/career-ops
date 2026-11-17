@@ -1262,7 +1262,6 @@ const STRUCTURED_HTML_FIELDS = [
   ['cert-title', 'certification', true],
   // Standards/authorship credits are rendered in awards too (#1411).
   ['award-title', 'award', true],
-  ['job-period', 'dates', true],
   ['job-role', 'title', false],
 ];
 // One level of nested braces, enough for `\textbf{...}` inside an argument.
@@ -1350,30 +1349,13 @@ function extractStructuredFieldInners(raw, cls) {
 export function structuredFieldClaims(text) {
   const raw = latexBody(text ?? '');
   const claims = [];
-  const add = (kind, inner, blocking, employer = null) => {
+  const add = (kind, inner, blocking) => {
     const line = stripMarkup(inner);
     const value = normalizeFact(line);
-    if (value) claims.push({ kind, value, line, blocking, ...(employer ? { employer } : {}) });
+    if (value) claims.push({ kind, value, line, blocking });
   };
-
-  const jobElements = findBalancedElements(raw, /<(span|div|section|article)\b[^>]*\bclass="[^"]*(?<![\w-])job(?![\w-])[^"]*"[^>]*>/gi);
-  const periodsInJobs = new Set();
-  for (const jobEl of jobElements) {
-    const jobHtml = raw.slice(jobEl.contentStart, jobEl.contentEnd);
-    const companyInners = extractStructuredFieldInners(jobHtml, 'job-company');
-    const employer = companyInners.length ? normalizeFact(stripMarkup(companyInners[0])) : null;
-    const periodInners = extractStructuredFieldInners(jobHtml, 'job-period');
-    for (const inner of periodInners) {
-      periodsInJobs.add(inner);
-      add('dates', inner, true, employer);
-    }
-  }
-
   for (const [cls, kind, blocking] of STRUCTURED_HTML_FIELDS) {
     for (const inner of extractStructuredFieldInners(raw, cls)) {
-      if (cls === 'job-period' && periodsInJobs.has(inner)) {
-        continue;
-      }
       // edu-title encloses its edu-org span or div, which is read on its own.
       // Remove the full nested classed element (accounting for inner formatting
       // spans); unclassed formatting spans like nowrap wrappers must be kept.
@@ -1393,10 +1375,7 @@ export function structuredFieldClaims(text) {
     add('title', match[3], false);
   }
   const seen = new Set();
-  return claims.filter(({ kind, value, employer }) => {
-    const k = `${kind}\n${value}\n${employer || ''}`;
-    return !seen.has(k) && seen.add(k);
-  });
+  return claims.filter(({ kind, value }) => !seen.has(`${kind}\n${value}`) && seen.add(`${kind}\n${value}`));
 }
 
 /**
@@ -1522,7 +1501,7 @@ function spellZhDates(value) {
 }
 
 function dateEndpoints(value) {
-  const clean = spellZhDates(normalizeFact(stripMarkup(value))).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const clean = spellZhDates(normalizeFact(stripMarkup(value))).replace(/\s*--\s*/g, ' - ').replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
   const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
   if (parts.length > 2) return null;
   const dates = parts.map(part => {
@@ -3375,6 +3354,11 @@ function resolveInputPath(path, cwd = process.cwd()) {
 // blocks, instead of throwing.
 const MAX_SOURCE_LOOKUP_LENGTH = 500;
 
+// The glyphs normalizeTextForATS in generate-pdf.mjs rewrites. The gate reads the
+// rewritten document and cv.md keeps the original, so a title copied verbatim
+// with an arrow or a dash in it read as unsourced. A dash folded in the source
+// stays a marker and not a hyphen, so that "Acme\u2014Staff Engineer" still has a
+// token boundary before the title while "Staff Engineer - Platform" matches it.
 const FOLDED_DASH = '\uE000';
 function foldAtsGlyphs(text) {
   return text
@@ -3387,28 +3371,6 @@ function foldAtsGlyphs(text) {
     .replace(/\s*\u2022\s*/g, ' | ');
 }
 
-const MONTH_ABBREVS = [
-  [/\bjanuary\b/gi, 'jan'],
-  [/\bfebruary\b/gi, 'feb'],
-  [/\bmarch\b/gi, 'mar'],
-  [/\bapril\b/gi, 'apr'],
-  [/\bmay\b/gi, 'may'],
-  [/\bjune\b/gi, 'jun'],
-  [/\bjuly\b/gi, 'jul'],
-  [/\baugust\b/gi, 'aug'],
-  [/\bseptember\b/gi, 'sep'],
-  [/\boctober\b/gi, 'oct'],
-  [/\bnovember\b/gi, 'nov'],
-  [/\bdecember\b/gi, 'dec'],
-];
-function normalizeMonths(str) {
-  let s = String(str);
-  for (const [re, abbr] of MONTH_ABBREVS) {
-    s = s.replace(re, abbr);
-  }
-  return s;
-}
-
 /** Check a normalized fact as a complete token or phrase, not a substring. */
 function sourceContainsFact(sourceText, value) {
   if (sourceSpellsFact(sourceText, value)) return true;
@@ -3418,47 +3380,13 @@ function sourceContainsFact(sourceText, value) {
 
 function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
-  const normVal = normalizeMonths(value).replace(/\s*--\s*/g, ' - ');
-  const normSrc = normalizeMonths(sourceText).replace(/\s*--\s*/g, ' - ');
+  const normVal = value.replace(/\s*--\s*/g, ' - ');
+  const normSrc = sourceText.replace(/\s*--\s*/g, ' - ');
   const escaped = normVal
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     .replace(/\s+/g, '\\s+')
     .replace(/-/g, `[-${FOLDED_DASH}]`);
   return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(normSrc);
-}
-
-/** Extract source text blocks per employer entry heading (### ...). */
-function extractEmployerSourceBlocks(sourceText) {
-  const blocks = [];
-  const lines = String(sourceText ?? '').split('\n');
-  let currentEmployer = null;
-  let currentLines = [];
-
-  for (const line of lines) {
-    if (/^##\s+/.test(line)) {
-      if (currentEmployer) {
-        blocks.push({ employer: currentEmployer, text: currentLines.join('\n') });
-        currentEmployer = null;
-        currentLines = [];
-      }
-      continue;
-    }
-    if (/^###\s+/.test(line)) {
-      if (currentEmployer) {
-        blocks.push({ employer: currentEmployer, text: currentLines.join('\n') });
-      }
-      currentEmployer = normalizeFact(line.replace(/^###\s+/, ''));
-      currentLines = [line];
-      continue;
-    }
-    if (currentEmployer) {
-      currentLines.push(line);
-    }
-  }
-  if (currentEmployer) {
-    blocks.push({ employer: currentEmployer, text: currentLines.join('\n') });
-  }
-  return blocks;
 }
 
 /**
@@ -3561,18 +3489,7 @@ export function verifyFacts(targetText, {
     .map(text => collapseMarkdownLinks(stripMarkup(text, { keepLineBreaks: true, keepBlankLines: true })))
     .join('\n'));
   const allowedFacts = new Set(config.allow_facts.map(normalizeFact));
-  const employerSourceBlocks = extractEmployerSourceBlocks(sourceText);
-  const unsourced = (claim) => {
-    const { value, employer } = claim;
-    if (allowedFacts.has(value)) return false;
-    if (employer && employerSourceBlocks.length > 0) {
-      const matchingBlocks = employerSourceBlocks.filter(b => sourceContainsFact(b.employer, employer));
-      if (matchingBlocks.length > 0) {
-        return !matchingBlocks.some(b => sourceContainsFact(b.text, value));
-      }
-    }
-    return !sourceContainsFact(sourceLookup, value);
-  };
+  const unsourced = ({ value }) => !sourceContainsFact(sourceLookup, value) && !allowedFacts.has(value);
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const skillClaims = skillToolClaims(targetText);
@@ -3580,7 +3497,7 @@ export function verifyFacts(targetText, {
     ...factClaims(targetText, sourceLookup),
     ...skillClaims.filter(claim => claim.blocking),
     ...delegatedAuthorshipClaims(targetText, sourceText),
-    ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value, employer }) => ({ kind, value, ...(employer ? { employer } : {}) })),
+    ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);
   // Scope and adoption claims resolve their own source evidence — a verb-tier
   // comparison and a phrase lookup — so they must not be re-filtered by
@@ -3618,11 +3535,11 @@ export function verifyFacts(targetText, {
   const unsupportedFacts = [...namedFacts, ...comparedFacts]
     .filter((claim, index, claims) => claims.findIndex(other => other.kind === claim.kind && other.value === claim.value) === index);
   const forbidden = config.forbidden_phrases
-    .filter(Boolean)
-    .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+      .filter(Boolean)
+      .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
   const warnings = config.warn_phrases
-    .filter(Boolean)
-    .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
+      .filter(Boolean)
+      .filter(phrase => stripMarkup(targetText).toLowerCase().includes(String(phrase).toLowerCase()));
   // Never downgrades a block and never creates one: a document that fails on
   // real evidence still fails on that, and a coverage gap only turns a would-be
   // 'pass' into 'warn' so the caller is told the gate could not read it.

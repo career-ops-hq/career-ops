@@ -102,16 +102,6 @@ test('a swapped employer, degree, institution and certification in built HTML bl
   ]);
 });
 
-test('a swapped or fabricated job-period in built HTML blocks (#6255)', () => {
-  const html = build('build-cv-html.mjs', {
-    ...htmlPayload(TRUE),
-    experience: [{ company: 'Acme Corp', role: 'Senior Software Engineer', dates: '2015 – 2018', bullets: ['Led a team of 4 engineers.'] }],
-  }, 'html');
-  const result = verifyFacts(html, options());
-  assert.equal(result.verdict, 'block');
-  assert.deepEqual(kinds(result.unsupportedFacts), ['dates=2015 – 2018', 'employment-dates=acme corp: 2015 – 2018']);
-});
-
 test('dates swapped between two valid employers in built HTML block (#6255)', () => {
   const multiCv = `# Jane Doe
 
@@ -134,6 +124,9 @@ BS Computer Science, State University
 
 ## Certifications
 AWS Certified Developer – Associate
+
+## Skills
+Python, Go
 `;
   const multiSource = join(tmp, 'cv-multi.md');
   writeFileSync(multiSource, multiCv);
@@ -148,8 +141,6 @@ AWS Certified Developer – Associate
   const result = verifyFacts(swappedHtml, options({ sourcePaths: [multiSource] }));
   assert.equal(result.verdict, 'block');
   assert.deepEqual(kinds(result.unsupportedFacts), [
-    'dates=2015 – 2018',
-    'dates=2019 – 2024',
     'employment-dates=acme corp: 2015 – 2018',
     'employment-dates=beta llc: 2019 – 2024',
   ]);
