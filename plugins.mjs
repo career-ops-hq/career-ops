@@ -538,10 +538,11 @@ function resolvedConfigFile(file) {
  *
  * @param {string} parentDir
  * @param {string} link
- * @param {Set<string>} seen
+ * @param {Set<string>} expanding
+ * @param {boolean} [intermediate] true when this link is a step, not the final file
  * @returns {string}
  */
-function resolveLinkTarget(parentDir, link, expanding = new Set()) {
+function resolveLinkTarget(parentDir, link, expanding = new Set(), intermediate = false) {
   let base = parentDir;
   try {
     base = realpathSync(parentDir);
@@ -581,7 +582,7 @@ function resolveLinkTarget(parentDir, link, expanding = new Set()) {
       if (expanding.has(next)) throw Object.assign(new Error(`symlink cycle: ${next}`), { code: 'ELOOP' });
       expanding.add(next);
       try {
-        current = resolveLinkTarget(path.dirname(next), readlinkSync(next), expanding);
+        current = resolveLinkTarget(path.dirname(next), readlinkSync(next), expanding, true);
         try {
           current = realpathSync(current);
         } catch (err) {
@@ -613,6 +614,9 @@ function resolveLinkTarget(parentDir, link, expanding = new Set()) {
   if (!lstatSync(probe).isDirectory()) {
     throw Object.assign(new Error(`not a directory: ${current}`), { code: 'ENOTDIR' });
   }
+  // alias -> "nested/" is a directory the rest of the path still walks.
+  // plugins.yml -> "nested/" is the destination, and that stays EISDIR.
+  if (intermediate) return current;
   throw Object.assign(new Error(`directory: ${current}`), { code: 'EISDIR' });
 }
 

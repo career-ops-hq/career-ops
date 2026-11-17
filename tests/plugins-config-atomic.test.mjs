@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync, statSync, symlinkSync, lstatSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync, chmodSync, statSync, symlinkSync, lstatSync, readlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -359,6 +359,57 @@ test('a trailing slash does not overwrite a file', async (t) => {
     );
     assert.equal(readFileSync(regular, 'utf8'), 'keep\n');
     assert.equal(lstatSync(link).isSymbolicLink(), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a directory link with a trailing slash still reaches the next file', async (t) => {
+  if (process.platform === 'win32') {
+    t.skip('Windows may refuse an unprivileged symlink');
+    return;
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'co-plugins-yml-middir-'));
+  const config = join(dir, 'config');
+  const link = join(config, 'plugins.yml');
+  const alias = join(config, 'alias');
+  const nested = join(config, 'nested');
+  const target = join(nested, 'target.yml');
+  try {
+    mkdirSync(nested, { recursive: true });
+    writeFileSync(target, 'plugins:\n  other:\n    enabled: false\n');
+    symlinkSync('nested/', alias);
+    symlinkSync('alias/target.yml', link);
+    const { setPluginEnabled } = await import(`${PLUGINS}?middir=${Date.now()}`);
+    setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' });
+    const saved = readFileSync(target, 'utf8');
+    assert.match(saved, /enabled: true/);
+    assert.match(saved, /other:/);
+    assert.equal(readFileSync(link, 'utf8'), saved);
+    assert.equal(lstatSync(alias).isSymbolicLink(), true);
+    assert.equal(readlinkSync(alias), 'nested/');
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+
+    rmSync(link);
+    symlinkSync('nested/', link);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', false, { region: 'us' }),
+      (err) => err?.code === 'EISDIR',
+    );
+    assert.match(readFileSync(target, 'utf8'), /enabled: true/);
+    assert.equal(lstatSync(nested).isDirectory(), true);
+
+    rmSync(link);
+    rmSync(alias);
+    rmSync(nested, { recursive: true });
+    symlinkSync('nested/', alias);
+    symlinkSync('alias/target.yml', link);
+    assert.throws(
+      () => setPluginEnabled(dir, 'h1b-sponsor', true, { region: 'us' }),
+      (err) => err?.code === 'ENOENT',
+    );
+    assert.equal(existsSync(target), false);
+    assert.equal(lstatSync(alias).isSymbolicLink(), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
