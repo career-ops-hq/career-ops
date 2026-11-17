@@ -368,3 +368,29 @@ test('a legacy key never claims a standard-layout file or a kind word (#6667)', 
   assert.equal(matchesCompanyKeys(matchesTailoredCv, 'cv-acme-2026-11-09.pdf', companySlug('CVé').keys), false);
   assert.equal(matchesCompanyKeys(matchesTailoredCover, 'acme-role-cover.pdf', companySlug('Coveré').keys), false);
 });
+
+test('a standard cover is selected by the row\'s report number, not a role token (#6667)', async () => {
+  await withFixture(
+    [['031-acme-cover-dana-quinn-2026-11-09.pdf'], ['032-acme-cover-dana-quinn-2026-11-09.pdf']],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), join(outputDir, '031-acme-cover-dana-quinn-2026-11-09.pdf'));
+      assert.equal(await resolveTailoredCover(undefined, '32'), join(outputDir, '032-acme-cover-dana-quinn-2026-11-09.pdf'));
+      assert.equal(await resolveTailoredCover(undefined, '33'), null);
+    },
+    [
+      { n: '31', company: 'Acme', role: 'Engineer' },
+      { n: '32', company: 'Acme', role: 'Designer' },
+      { n: '33', company: 'Acme', role: 'Analyst' },
+    ]
+  );
+});
+
+test('Zoë does not claim a standard file written for Zo (#6667)', async () => {
+  const { companySlug } = await import('../../src/lib/company-slug.mjs');
+  const { matchesTailoredCover, matchesTailoredCv, matchesCompanyKeys } = await import('../../src/lib/apply/cv-match.mjs');
+  const { keys } = companySlug('Zoë');
+  assert.deepEqual(keys, ['zoe', 'zo']);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '024-zo-cv-jane-smith-2026-11-07.pdf', keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCover, '024-zo-cover-jane-smith-2026-11-07.pdf', keys), false);
+  assert.equal(matchesCompanyKeys(matchesTailoredCv, '024-zoe-cv-jane-smith-2026-11-07.pdf', keys), true);
+});
