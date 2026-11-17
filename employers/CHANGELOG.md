@@ -8,3 +8,4 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-12 `2026-11-12-namaserajesh` (35 boards, source `community`): Boards for India roles, contributed by @namaserajesh
 - 2026-11-14 `2026-11-14-santifer` (500 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
 - 2026-11-16 `2026-11-16-santifer` (7266 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-17 `2026-11-17-santifer` (2129 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
