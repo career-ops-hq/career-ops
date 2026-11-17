@@ -40,6 +40,11 @@ function run(tsv) {
     timeout: 30_000,
     env: {
       ...process.env,
+      // The data root is the fixture too: the merge reads its ledgers for
+      // occupied numbers, and the developer's own would renumber this row.
+      CAREER_OPS_ROOT: work,
+      CAREER_OPS_DATA_DIR: '',
+      CAREER_OPS_FOLLOWUPS: '',
       CAREER_OPS_TRACKER: tracker,
       CAREER_OPS_ADDITIONS: addsDir,
       CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(addsDir),

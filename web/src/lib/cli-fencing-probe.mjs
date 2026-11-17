@@ -20,11 +20,18 @@
  * and no tools, so there is nothing to fence, and routing it through the agent
  * spawn path would also make cli-fencing ↔ spawn-cli a cycle. stdin is closed
  * here for the same reason spawnHeadlessCli closes it.
+ *
+ * Pi gets a version check instead of a help check (assertPiVersionSupported).
+ * Its fence also depends on behavior, not only on flags: which files Pi loads
+ * before it rejects an unknown flag, and whether it reads AGENTS.md in an
+ * untrusted folder. Help text cannot show either.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
-import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS } from "./cli-fencing.mjs";
+import os from "node:os";
+import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS, PI_MIN_VERSION } from "./cli-fencing.mjs";
+import { prepareCliLaunch } from "./cli-launch.mjs";
 
 /**
  * The stat fields that together say "this is still the same executable".
@@ -298,4 +305,132 @@ export function codexFencingSupported(binPath, { alsoRequiresInExec = [] } = {})
 
   const identity = Object.fromEntries(IDENTITY_FIELDS.map((field) => [field, stats[field]]));
   return readBothHelps(binPath, identity).then((help) => helpSatisfiesFencing(help, alsoRequiresInExec));
+}
+
+/**
+ * Read the first `major.minor.patch` out of a version string.
+ *
+ * @param {string} text
+ * @returns {number[]|null}
+ */
+function parseVersion(text) {
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(text);
+  return match ? match.slice(1, 4).map(Number) : null;
+}
+
+/**
+ * Does this `pi --version` output name a Pi the web can run?
+ *
+ * The POLICY half of the Pi check, kept apart from the spawn for the reason
+ * helpSatisfiesFencing is: it runs everywhere, with no binary. Compares numbers,
+ * not strings, so 0.100.0 is newer than 0.99.0. Output with no version number in
+ * it is not supported: the check fails closed.
+ *
+ * @param {string} output
+ * @returns {{version: string|null, supported: boolean}}
+ */
+export function piVersionSatisfiesFencing(output) {
+  const found = parseVersion(output);
+  if (!found) return { version: null, supported: false };
+  const min = /** @type {number[]} */ (parseVersion(PI_MIN_VERSION));
+  const index = found.findIndex((part, i) => part !== min[i]);
+  return { version: found.join("."), supported: index === -1 || found[index] > min[index] };
+}
+
+/** @type {Map<string, {identity: string, version: string}>} */
+const piVersionCache = new Map();
+
+/**
+ * The stat identity of every file a launch of `binPath` runs: the binary, and on
+ * Windows the script an npm shim resolves to, since upgrading Pi rewrites the
+ * script and can leave the shim byte-identical. stat follows symlinks, so an npm
+ * bin link on POSIX is identified by the script it points at.
+ *
+ * @param {string} binPath
+ * @param {{command: string, args: string[]}} launch
+ * @returns {string|null} null when a file cannot be read.
+ */
+function launchIdentity(binPath, launch) {
+  // prepareCliLaunch hands back the binary itself, a native .exe the shim names,
+  // or node running the .js the shim names.
+  const files = [binPath];
+  if (launch.command !== binPath) files.push(launch.command === process.execPath ? launch.args[0] : launch.command);
+  try {
+    return JSON.stringify(
+      files.map((file) => {
+        const stats = fs.statSync(file);
+        return IDENTITY_FIELDS.map((field) => stats[field]);
+      }),
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Ask a `pi` binary for its version, synchronously.
+ *
+ * Synchronous because its caller is spawnHeadlessCli, the one spawn path, which
+ * every route calls without awaiting. Checking there covers every route; an
+ * async check would need its own await in each route, and a route that forgot it
+ * would run an old Pi. The cost is one blocked `pi --version` per binary (about
+ * as long as Pi takes to start), because a version read from a binary is cached
+ * until the binary changes. An unreadable result is not cached, so the next run
+ * tries again.
+ *
+ * Runs in the OS temp folder, not the user's project: `pi --version` prints and
+ * exits before Pi loads project files (main.ts at v0.79.0 and v1.5.2), and
+ * starting it outside the project keeps that true for any build that does not.
+ *
+ * @param {string} binPath
+ * @returns {string} The binary's stdout, or "" when it did not exit cleanly.
+ */
+function readPiVersionSync(binPath) {
+  let launch;
+  try {
+    launch = prepareCliLaunch(binPath, ["--version"]);
+  } catch {
+    return "";
+  }
+  const identity = launchIdentity(binPath, launch);
+  if (identity === null) return "";
+  const cached = piVersionCache.get(binPath);
+  if (cached && cached.identity === identity) return cached.version;
+
+  const result = spawnSync(launch.command, launch.args, {
+    cwd: os.tmpdir(),
+    env: { ...process.env, NO_COLOR: "1" },
+    encoding: "utf8",
+    timeout: HELP_TIMEOUT_MS,
+    killSignal: "SIGKILL",
+    maxBuffer: HELP_CAPTURE_BYTES,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  // Only a clean exit counts, and only stdout, where `pi --version` prints. A
+  // failed launch can still print a version-shaped string, such as Node's own
+  // "Node.js v22.13.0" on stderr when Pi's entry script crashes, and reading that
+  // as Pi's version would let any crash through the check.
+  const output = !result.error && result.status === 0 ? (result.stdout ?? "") : "";
+  if (parseVersion(output)) piVersionCache.set(binPath, { identity, version: output });
+  return output;
+}
+
+/**
+ * Refuse to run a Pi older than PI_MIN_VERSION, or one whose version cannot be
+ * read. Throws, as spawnHeadlessCli does for a missing capability record, so
+ * each route reports it the way it reports any failure to start.
+ *
+ * @param {string} binPath - Resolved path to the pi binary.
+ */
+export function assertPiVersionSupported(binPath) {
+  const { version, supported } = piVersionSatisfiesFencing(readPiVersionSync(binPath));
+  if (supported) return;
+  throw new Error(
+    version === null
+      ? `Could not read the version of Pi at ${binPath} (\`pi --version\` printed no version number). ` +
+          `career-ops needs Pi ${PI_MIN_VERSION} or later.`
+      : `Pi ${version} is too old for career-ops, which needs Pi ${PI_MIN_VERSION} or later. ` +
+          "Update Pi (`pi update`) and run this again.",
+  );
 }

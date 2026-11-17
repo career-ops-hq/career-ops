@@ -312,6 +312,14 @@ export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_
  * substantive token. An empty stem is the blind-employer `?` marker and every
  * other punctuation-only cell, which must never match a named employer.
  *
+ * A dotted initialism in the tail ("L.L.C.", "S.A.", "G.m.b.H.") tokenizes to
+ * one letter per token, since normalizeTextKey() turns each dot into a
+ * separator. collapseInitialisms() joins each run of single-letter tokens back
+ * into one word, and the tail check applies to that word, so "Acme L.L.C."
+ * matches "Acme" the way "Acme LLC" does. A run that does not spell a form
+ * word ("Acme X Y" → "xy") still fails. Only the tail is collapsed: the stem
+ * must still be a token-for-token prefix of the longer name.
+ *
  * @param {string[]} ta - Tokens of one company cell.
  * @param {string[]} tb - Tokens of the other company cell.
  * @param {Set<string>} [formWords] - Same override as companiesMatchIgnoringCorporateForm.
@@ -322,7 +330,26 @@ export function corporateFormTokensMatch(ta, tb, formWords = CORPORATE_FORM_WORD
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
-  return full.slice(stem.length).every(token => formWords.has(token));
+  return collapseInitialisms(full.slice(stem.length)).every(token => formWords.has(token));
+}
+
+// Joins each run of single-character tokens into one token: ['l', 'l', 'c'] →
+// ['llc'], ['g', 'm', 'b', 'h', 'holdings'] → ['gmbh', 'holdings']. Longer
+// tokens pass through unchanged.
+function collapseInitialisms(tokens) {
+  const out = [];
+  let run = '';
+  for (const token of tokens) {
+    if ([...token].length === 1) {
+      run += token;
+      continue;
+    }
+    if (run) out.push(run);
+    run = '';
+    out.push(token);
+  }
+  if (run) out.push(run);
+  return out;
 }
 
 /**

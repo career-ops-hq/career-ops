@@ -11,6 +11,7 @@
  */
 
 import { buildWorkplacePolicy } from './providers/_country.mjs';
+import { parseEmploymentTypeFilterConfig } from './providers/_employment-type.mjs';
 import { normalizeWorkplaceType } from './providers/_workplace-type.mjs';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join, dirname, resolve } from 'path';
@@ -229,6 +230,7 @@ export const PORTAL_TOP_LEVEL_KEYS = [
   'location_filter',
   'country_eligibility_filter',
   'salary_filter',
+  'employment_type_filter',
   'workplace_filter',
   'experience_filter',
   'portal_prune_quiet_days',
@@ -494,6 +496,16 @@ export async function validatePortalsConfig(config, { providerIds = new Set() } 
       }
       validateKeywordList(config.visa_filter.positive, 'visa_filter.positive', errors);
       validateKeywordList(config.visa_filter.negative, 'visa_filter.negative', errors);
+    }
+  }
+
+  // One parser for scan.mjs and this check, so a block one accepts the other
+  // cannot reject (providers/_employment-type.mjs).
+  if (config.employment_type_filter !== undefined) {
+    try {
+      parseEmploymentTypeFilterConfig(config.employment_type_filter);
+    } catch (err) {
+      add(errors, 'employment_type_filter', err.message);
     }
   }
 

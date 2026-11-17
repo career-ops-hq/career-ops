@@ -25,6 +25,13 @@ const SAME = [
   ['Foo GmbH', 'Foo', true],
   ['Foo SRL', 'Foo', true],
   ['Foo, Inc', 'Foo', true],
+  // #7161: a dotted initialism tokenizes one letter per token and has to
+  // collapse back into its form word before the tail check.
+  ['Acme', 'Acme G.m.b.H.', true],
+  ['Acme', 'Acme L.L.C.', true],
+  ['Acme', 'Acme S.A.', true],
+  ['Acme', 'Acme S.A. Holdings', true],
+  ['Acme L.L.C.', 'Acme', true],
 ];
 const DISTINCT = [
   // Both strip to "acme" under a naive suffix-strip key — the exact fold the
@@ -34,6 +41,12 @@ const DISTINCT = [
   ['Acme Robotics', 'Acme', false],
   // "Barco" merely ends in the letters "co"; no separator-delimited tail.
   ['Barco', 'Bar', false],
+  // #7161: a collapsed run counts only when it spells a form word. "xy" and a
+  // lone "c" do not, and the stem itself is never collapsed, so "Acme S"
+  // leaves a bare "a" tail against "Acme S.A.".
+  ['Acme', 'Acme C', false],
+  ['Acme', 'Acme X Y', false],
+  ['Acme S', 'Acme S.A.', false],
 ];
 for (const [a, b, exp] of [...SAME, ...DISTINCT]) {
   const got = companiesMatchIgnoringCorporateForm(a, b);
@@ -129,5 +142,24 @@ function runDedup(rows) {
     pass('dedup merges "Foo-Bar" / "FooBar" (same normalizeCompany key, different tokens)');
   } else {
     fail(`exact-company twins were split across buckets: ${JSON.stringify(rows)}`);
+  }
+}
+
+// 2e. #7161: dotted legal forms widen the match. The dotted twin of a bare name
+// merges, but rows whose single-letter tail does not spell a form word, and a
+// different employer that shares the stem, must all survive.
+{
+  const { md } = runDedup([
+    row(1, 'Acme', '4.2/5'),
+    row(2, 'Acme L.L.C.', '3.1/5'),
+    row(3, 'Acme X Y', '3.9/5'),
+    row(4, 'Acme Robotics S.A.', '3.8/5'),
+  ]);
+  const rows = dataRows(md);
+  const kept = (name) => rows.some((l) => l.includes(`| ${name} |`));
+  if (rows.length === 3 && kept('Acme') && !kept('Acme L.L.C.') && kept('Acme X Y') && kept('Acme Robotics S.A.')) {
+    pass('dedup merges "Acme" / "Acme L.L.C." and keeps "Acme X Y" and "Acme Robotics S.A." apart');
+  } else {
+    fail(`dotted legal form merged the wrong rows: ${JSON.stringify(rows)}`);
   }
 }

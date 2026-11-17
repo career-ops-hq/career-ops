@@ -9,7 +9,26 @@ import { acquirePipelineLock, lockDirFor, withPipelineLock, LockTimeoutError } f
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test('a symlink to the file shares the pipeline lock with the real path', async () => {
+// A file symlink needs SeCreateSymbolicLinkPrivilege on Windows, which a
+// non-elevated account without Developer Mode lacks, and a junction cannot
+// point at a file. Where symlinkSync throws EPERM every case below needs one,
+// so each skips with that reason instead of failing.
+const canSymlinkFiles = (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'pipeline-symlink-probe-'));
+  try {
+    writeFileSync(join(dir, 'target.md'), '');
+    symlinkSync(join(dir, 'target.md'), join(dir, 'link.md'));
+    return true;
+  } catch (err) {
+    if (err.code === 'EPERM') return false;
+    throw err;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+})();
+const skip = !canSymlinkFiles && 'needs a file symlink, which this account cannot create (EPERM)';
+
+test('a symlink to the file shares the pipeline lock with the real path', { skip }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-'));
   const real = join(root, 'pipeline.md');
   const link = join(root, 'alias.md');
@@ -32,7 +51,7 @@ test('a symlink to the file shares the pipeline lock with the real path', async 
   }
 });
 
-test('a chain of 16 symlinks resolves and a longer chain throws', () => {
+test('a chain of 16 symlinks resolves and a longer chain throws', { skip }, () => {
   const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-chain-'));
   const real = join(root, 'pipeline.md');
   try {
@@ -55,7 +74,7 @@ test('a chain of 16 symlinks resolves and a longer chain throws', () => {
   }
 });
 
-test('a dangling symlink keeps one lock after the target file is created', async () => {
+test('a dangling symlink keeps one lock after the target file is created', { skip }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-dangling-'));
   const real = join(root, 'pipeline.md');
   const link = join(root, 'alias.md');
@@ -81,7 +100,7 @@ test('a dangling symlink keeps one lock after the target file is created', async
   }
 });
 
-test('two writers, one through a file symlink, both keep their offer', async () => {
+test('two writers, one through a file symlink, both keep their offer', { skip }, async () => {
   const root = mkdtempSync(join(tmpdir(), 'pipeline-symlink-append-'));
   const real = join(root, 'pipeline.md');
   const link = join(root, 'alias.md');

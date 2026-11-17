@@ -232,6 +232,9 @@ try {
   check(checkExpect({ ...p, legitimacy: null }, { legitimacy_not: ['High Confidence'] })[0]?.includes('missing or not a tier'),
     'legitimacy_not fails when the report states no tier at all');
   check(checkExpect({ ...p, legitimacy: 'Suspicious' }, { legitimacy_not: ['High Confidence'] }).length === 0, 'legitimacy_not passes on a valid, allowed tier');
+  check(checkExpect({ ...p, score: null }, { score_max: 2 }).length === 1
+    && checkExpect({ ...p, score: 1.5 }, { score_max: 2 }).length === 0,
+  'a score bound fails when the report states no score (null <= 2 is true in JS), and still passes a real one');
 
   // 3b. Only a successful, scored run publishes a replay fixture.
   check(publishesFixture({ score: 4.1, error: null }) && !publishesFixture({ score: 4.1, error: 'cli error: budget exceeded' })
