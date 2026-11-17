@@ -8,7 +8,12 @@ console.log('\nProvider — landingjobs');
 try {
   const ljModule = await import(pathToFileURL(join(ROOT, 'providers/landingjobs.mjs')).href);
   const landingjobs = ljModule.default;
-  const { normalizeLandingJob, companyFromUrl, landingSalary } = ljModule;
+  const {
+  normalizeLandingJob,
+  companyFromUrl,
+  landingSalary,
+  formatLandingSalary,
+} = ljModule;
 
   if (landingjobs.id === 'landingjobs') pass('landingjobs.id is "landingjobs"');
   else fail(`landingjobs.id is ${JSON.stringify(landingjobs.id)}`);
@@ -146,7 +151,28 @@ try {
     else fail(`landingSalary: ${label} should give undefined, got ${JSON.stringify(landingSalary(input))}`);
   }
 
-  // the mapping must actually reach the normalized job
+  // Salary display formatting tests.
+const formatCases = [
+  [{ min: 60000, max: 60000, currency: 'EUR' }, '€60,000'],
+  [{ min: 50000, max: 65000, currency: 'EUR' }, '€50,000 – €65,000'],
+  [{ min: 50000, max: 65000, currency: 'USD' }, '$50,000 – $65,000'],
+  [{ min: 65000, max: 50000, currency: 'EUR' }, '€50,000 – €65,000'],
+  [undefined, ''],
+  [null, ''],
+  [{ min: -5000, max: 60000, currency: 'EUR' }, ''],
+  [{ min: 50000, max: 60000, currency: '' }, ''],
+];
+
+for (const [salary, expected] of formatCases) {
+  const got = formatLandingSalary(salary);
+
+  if (got === expected) {
+    pass(`formatLandingSalary: ${JSON.stringify(salary)} → ${got}`);
+  } else {
+    fail(`formatLandingSalary: got ${JSON.stringify(got)}, expected ${JSON.stringify(expected)}`);
+  }
+}
+// the mapping must actually reach the normalized job
   const withSal = normalizeLandingJob({
     title: 'Senior AI Engineer',
     url: 'https://landing.jobs/at/acme/senior-ai-engineer',
