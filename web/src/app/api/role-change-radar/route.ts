@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server.js";
 import path from "node:path";
 import { careerOpsRoot, findApplication, findReportFile, readReport } from "@/lib/career-ops";
 import { parseReport } from "@/lib/format";
@@ -11,18 +10,18 @@ export async function POST(request: Request) {
   try {
     // Bound streamed input too: Content-Length is not a trustworthy limit.
     const reader = request.body?.getReader();
-    if (!reader) return NextResponse.json({ error: "Missing request" }, { status: 400 });
+    if (!reader) return Response.json({ error: "Missing request" }, { status: 400 });
     const chunks: Uint8Array[] = []; let size = 0;
     while (true) {
       const { done, value } = await reader.read(); if (done) break;
       size += value.length;
-      if (size > 250_000) { await reader.cancel(); return NextResponse.json({ error: "Description too large" }, { status: 413 }); }
+      if (size > 250_000) { await reader.cancel(); return Response.json({ error: "Description too large" }, { status: 413 }); }
       chunks.push(value);
     }
     const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-    if (typeof body.id !== "string" || !/^\d+$/.test(body.id)) return NextResponse.json({ error: "Invalid application" }, { status: 400 });
+    if (typeof body.id !== "string" || !/^\d+$/.test(body.id)) return Response.json({ error: "Invalid application" }, { status: 400 });
     const application = findApplication(body.id);
-    if (!application) return NextResponse.json({ error: "Application not found" }, { status: 404 });
+    if (!application) return Response.json({ error: "Application not found" }, { status: 404 });
     const report = readReport(body.id);
     const reportPath = findReportFile(body.id);
     const meta = parseReport(report?.content || "");
@@ -37,10 +36,10 @@ export async function POST(request: Request) {
       input: JSON.stringify({ app, input: { action: body.action, source: body.source, text: body.text, comparisonId: body.comparisonId } }),
       maxBuffer: 16 * 1024 * 1024,
     });
-    if (result.timedOut || result.spawnFailed) return NextResponse.json({ error: "Unable to check: core process unavailable or timed out. Previous results are preserved." }, { status: 503 });
+    if (result.timedOut || result.spawnFailed) return Response.json({ error: "Unable to check: core process unavailable or timed out. Previous results are preserved." }, { status: 503 });
     const state = JSON.parse(result.stdout);
-    return NextResponse.json(state, { status: result.code === 0 ? 200 : 400 });
+    return Response.json(state, { status: result.code === 0 ? 200 : 400 });
   } catch (error) {
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to check" }, { status: 400 });
+    return Response.json({ error: error instanceof Error ? error.message : "Unable to check" }, { status: 400 });
   }
 }
