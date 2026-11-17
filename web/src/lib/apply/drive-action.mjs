@@ -30,7 +30,7 @@ import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
  * One planner action, as parsed from its reply.
  *
  * @typedef {{ action: string, ref?: string, text?: string, value?: string,
- *            expected?: { label?: string, group?: string, question?: string },
+ *            expected?: { label?: string, group?: string, question?: string, option?: string },
  *            ensureChecked?: boolean }} DriveAction
  */
 
@@ -152,6 +152,25 @@ export const factsOf = (el, ref) => {
   };
 };
 
+function usableName(text) {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return "";
+  if (/^(start typing|select\b|choose|search\b|type\b|--|please select|e\.?g\.?)/i.test(t)) return "";
+  return t.slice(0, 200);
+}
+
+/** The name extraction would give a text field. A real aria name wins, then
+ *  the visible label, then the snapshot fallback. The listed-answer gate uses
+ *  this so it matches the answer list, which is built from the extracted label.
+ *
+ * @param {ElementFacts | { aria?: string, question?: string }} [facts]
+ * @returns {string}
+ */
+export function listedFieldLabel(facts) {
+  return usableName(facts?.aria) || usableName(facts?.question) || snapshotLabel(facts || {});
+}
+
 /**
  * One snapshot line. When the option differs from the label, name it. Two
  * radios that share an accessible name would otherwise look identical, and
@@ -207,6 +226,7 @@ export async function executeAction(page, frame, act, actionable) {
       label !== (expected.label || "")
       || (now.group || "") !== (expected.group || "")
       || (now.question || "") !== (expected.question || "")
+      || (now.option || "") !== (expected.option || "")
     ));
     if (act.ref !== undefined && !target) {
       // Three different refusals, told apart: only one of them is the guard

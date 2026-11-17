@@ -4,7 +4,7 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
-import { executeAction, factsOf, snapshotChoiceLine } from "./drive-action.mjs";
+import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "./drive-action.mjs";
 import { listedDriveClick, listedDriveText } from "./blank-unknown.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
@@ -39,7 +39,7 @@ const MAX_REFS = 70;
  *  A submit control is listed WITHOUT a ref: the planner can see that it exists
  *  and stop, but it has no name for it, so no action can address it. `actionable`
  *  is the set of refs it may use, which every ref-bearing action is held to. */
-async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string>; controls: Map<string, { kind: string; label: string; group: string; question: string; option: string }> }> {
+async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string>; controls: Map<string, { kind: string; label: string; group: string; question: string; option: string; identity: string }> }> {
   // A fresh prefix per snapshot. The guarantee is structural, not statistical:
   // every existing `data-co-ref` is stripped before this turn's are written, so
   // only the current epoch's refs exist on the page, and `actionable` is built
@@ -65,7 +65,7 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
   );
   const lines: string[] = [];
   const actionable = new Set<string>();
-  const controls = new Map<string, { kind: string; label: string; group: string; question: string; option: string }>();
+  const controls = new Map<string, { kind: string; label: string; group: string; question: string; option: string; identity: string }>();
   if (!tagged) return { text: "", actionable, controls };
   // One handle per candidate, read through the same extractor the action path
   // uses. Handles rather than one `$$eval` so there is a single copy of the
@@ -83,7 +83,7 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
     }
     actionable.add(el.ref);
     const kind = el.tag === "input" ? el.type || "text" : el.tag === "a" ? "link" : el.tag === "select" ? "select" : el.tag === "textarea" ? "textarea" : el.role;
-    controls.set(el.ref, { kind, label, group: el.group || "", question: el.question || "", option: el.option || "" });
+    controls.set(el.ref, { kind, label, group: el.group || "", question: el.question || "", option: el.option || "", identity: listedFieldLabel(el) });
     lines.push(snapshotChoiceLine(el.ref, kind, label, el.option || ""));
   }
   return { text: lines.join("\n"), actionable, controls };
@@ -152,7 +152,7 @@ type Action = {
   text?: string;
   value?: string;
   reason?: string;
-  expected?: { label: string; group: string; question: string };
+  expected?: { label: string; group: string; question: string; option: string };
   ensureChecked?: boolean;
 };
 
@@ -252,7 +252,7 @@ Reply ONE action JSON.`;
     // A radio or checkbox click has to be that field's listed option. A button
     // or a link stays a click, so Next and Continue still work.
     const control = act.ref ? snap.controls.get(act.ref) : undefined;
-    const fieldLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.group : control?.question || control?.label;
+    const fieldLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.group : control?.identity || control?.label;
     const optionLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.option || control.label : control?.label;
     const entered = act.action === "type" ? act.text : act.action === "select" ? act.value : undefined;
     const blockedClick = goal === "full" && act.action === "click" && !listedDriveClick(control?.kind, optionLabel, control?.group, answers);
@@ -272,7 +272,7 @@ Reply ONE action JSON.`;
     // execute the action on OUR session — NEVER submit. The executor, and the
     // guard it applies to every action naming a ref, live in drive-action.mjs so
     // a test can drive them: nothing here acts on an element directly.
-    if (control) act.expected = { label: control.label, group: control.group, question: control.question };
+    if (control) act.expected = { label: control.label, group: control.group, question: control.question, option: control.option };
     // A click toggles a checkbox. A listed choice is checked instead, so a box
     // that is already on stays on. A button or a link stays a click.
     if (goal === "full" && act.action === "click" && (control?.kind === "radio" || control?.kind === "checkbox")) {

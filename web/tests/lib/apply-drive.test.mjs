@@ -27,7 +27,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { executeAction, factsOf, snapshotChoiceLine } from "../../src/lib/apply/drive-action.mjs";
+import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "../../src/lib/apply/drive-action.mjs";
 import { isSubmitControl, snapshotLabel } from "../../src/lib/apply/submit-guard.mjs";
 
 // ── The fake page ──
@@ -586,6 +586,54 @@ test("typing into a radio does not click it", async () => {
   assertUntouched(page);
 });
 
+test("a text field is gated on its aria name, not the visible label", () => {
+  assert.equal(
+    listedFieldLabel({ aria: "Email address", question: "Work email", placeholder: "you@example.com", text: "", value: "", name: "email" }),
+    "Email address",
+  );
+  assert.equal(
+    listedFieldLabel({ aria: "Select", question: "Work email", placeholder: "Jane", text: "", value: "", name: "email" }),
+    "Work email",
+  );
+  assert.equal(
+    listedFieldLabel({ aria: "", question: "Work email", placeholder: "Jane", text: "", value: "", name: "email" }),
+    "Work email",
+  );
+});
+
+test("a shared radio is refused when its option changed after the snapshot", async () => {
+  const page = new FakePage();
+  page.add("yes", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "1" });
+  page.add("no", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "0" });
+  const previous = globalThis.document;
+  const previousCss = globalThis.CSS;
+  globalThis.document = {
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return [page.el("yes"), page.el("no")]; },
+  };
+  globalThis.CSS = { escape: (value) => String(value) };
+  const expected = { label: "Choice", group: "", question: "", option: "1" };
+  try {
+    const kept = await act(page, { action: "click", ref: page.ref("yes"), ensureChecked: true, expected });
+    assert.equal(kept.note, "");
+    assert.match(kept.detail, /^check /);
+    assert.deepEqual(page.log, ["check:yes"]);
+
+    page.el("yes").value = "0";
+    page.log.length = 0;
+    const moved = await act(page, { action: "click", ref: page.ref("yes"), ensureChecked: true, expected });
+    assert.equal(moved.note, "left blank");
+    assert.match(moved.detail, /label changed/);
+    assert.deepEqual(page.log, []);
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+    if (previousCss === undefined) delete globalThis.CSS;
+    else globalThis.CSS = previousCss;
+  }
+});
+
 test("a type is refused when the live label is no longer the one that was checked", async () => {
   const page = new FakePage();
   page.add("q", { tag: "input", attrs: { type: "text", "aria-label": "Sponsorship" } });
@@ -704,6 +752,9 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   assert.match(DRIVE_CODE, /listedDriveClick\(/);
   assert.match(DRIVE_CODE, /act\.ensureChecked = true/);
   assert.match(DRIVE_CODE, /snapshotChoiceLine\(/);
+  assert.match(DRIVE_CODE, /identity: listedFieldLabel\(/);
+  assert.match(DRIVE_CODE, /control\?\.identity/);
+  assert.match(DRIVE_CODE, /option: control\.option/);
   assert.doesNotMatch(DRIVE_CODE, /slice\(0,\s*300\)/);
 });
 
