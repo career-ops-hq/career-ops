@@ -197,8 +197,9 @@ export const UPDATE_APPLIED_INSTALL_FAILED_EXIT = 3;
 // directories. Keep this escape hatch small and reviewable: aliases, parents,
 // children, and case/Unicode variants are not overlaps.
 //
-// Rollback reads this list; apply() does not. apply() leaves the user-layer
-// decision to rejectUserLayerPaths, entry by entry.
+// Rollback reads this list, and apply() does too through
+// assertSafeManifestPaths(): the exact overlaps stay allowed while any other
+// user-layer entry in a target manifest aborts the update (#3825).
 export const MANIFEST_USER_PATH_OVERLAPS = Object.freeze([
   'writing-samples/README.md',
   'interview-prep/sessions/.gitkeep',
@@ -2938,6 +2939,31 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
 }
 
 /**
+ * The pathspecs apply()'s per-path fallback checkout names for one manifest
+ * entry, by the same rule checkoutSystemPathsBatched() plans the batched run:
+ * a directory entry with preserved files under it expands to its upstream
+ * files minus the preserved ones; every other entry names itself. The
+ * fallback passes --literal-pathspecs, so no `:(exclude)` spec can reach it —
+ * there it would be read as a literal filename, fail the checkout, and abort
+ * the update (#3825 review). An empty result means the entry's upstream
+ * content is all preserved and there is nothing to check out. An empty
+ * upstreamFiles means the target tree listing is unavailable or the tree is
+ * empty; the entry then names itself and the loop's absent-upstream handling
+ * decides.
+ *
+ * @param {string} path - Manifest entry (`dir/` or a file).
+ * @param {string[]} preservedPaths - Files the update keeps out of the checkout.
+ * @param {string[]} upstreamFiles - Every file in the target tree (`ls-tree -r --name-only`).
+ * @returns {string[]}
+ */
+export function fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles) {
+  if (!path.endsWith('/') || upstreamFiles.length === 0) return [path];
+  if (!preservedPaths.some((file) => file.startsWith(path))) return [path];
+  const preservedSet = new Set(preservedPaths);
+  return upstreamFiles.filter((file) => file.startsWith(path) && !preservedSet.has(file));
+}
+
+/**
  * apply()'s batched system checkout: every path planSystemCheckout() says needs
  * one, in argvBatches() runs so no single git call outgrows a Windows command
  * line, the fixed git arguments counted in the budget. A directory with
@@ -4982,9 +5008,10 @@ async function apply() {
     // The fetched manifest is trusted updater code, but its paths still reach
     // git. Validate their canonical form before even the self-bootstrap
     // checkout, and fail closed when the target updater or its manifest is
-    // missing/corrupt. Whether an entry names the user layer is not decided
-    // here: rejectUserLayerPaths refuses those entry by entry (3a), so one bad
-    // entry cannot block every install.
+    // missing/corrupt. Once effectiveUserPaths() is available below, the same
+    // lists are validated against it too: an entry that names the user layer
+    // aborts the whole update before anything is checked out (#3825), rather
+    // than being refused entry by entry at 3a after the self-bootstrap.
     try {
       git('show', `${targetCommit}:update-system.mjs`);
     } catch (err) {
@@ -5003,8 +5030,23 @@ async function apply() {
     // the local list, which must not be empty on the first upgrade to this layout.
     adoptTargetManifest(remoteSystemPaths);
     const manifestUserPaths = effectiveUserPaths();
+    // A target manifest entry naming the user layer (cv.md, data/, .env) is a
+    // manifest error, not a path to skip: fail closed before the
+    // self-bootstrap checkout or re-exec, while the install is untouched.
+    // MANIFEST_USER_PATH_OVERLAPS keeps the byte-exact system scaffolds
+    // (.gitkeep keepers, dir READMEs) inside user directories allowed.
+    remoteSystemPaths = assertSafeManifestPaths(
+      remoteSystemPaths,
+      manifestUserPaths,
+      `Target SYSTEM_PATHS (${remoteManifestFile})`,
+    );
     const validatedManifestPaths = assertCanonicalManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
+      'Merged updater manifest',
+    );
+    assertSafeManifestPaths(
+      validatedManifestPaths,
+      manifestUserPaths,
       'Merged updater manifest',
     );
 
@@ -5235,10 +5277,13 @@ async function apply() {
       preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
       console.log(`Keeping configured template variant(s) with local content: ${configuredAtRisk.join(', ')}`);
     }
-    // Excluding by pathspec keeps the index and the working tree in agreement:
-    // checking out and restoring afterwards would leave the index holding the
-    // upstream blob, so the scoped commit below would record the very content
-    // the user asked to keep out.
+    // Excluding by pathspec at the scoped commit's staging keeps the index
+    // and the working tree in agreement: checking a preserved file out and
+    // restoring it afterwards would leave the index holding the upstream
+    // blob, so the commit would record the very content the user asked to
+    // keep out. The checkouts themselves leave preserved files out by
+    // expansion instead — see checkoutSystemPathsBatched() and
+    // fallbackCheckoutSpecs().
     const preserveSpecs = preservedPaths.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`);
 
     const preservedSet = new Set(preservedPaths);
@@ -5264,16 +5309,22 @@ async function apply() {
       }
     }
     for (const path of batched ? [] : updatePaths) {
-      // `git checkout <ref> -- <path> :(exclude)<path>` errors with "did not
-      // match any file(s)" when the exclusions cancel the whole pathspec — and
-      // that error is indistinguishable from a genuine failure at the catch
-      // below, so it would abort the entire update. Skip the entry outright
-      // when nothing would be left to check out; when the directory's upstream
-      // content could not be enumerated ('unknown'), still check it out but let
-      // the catch treat a cancel-out error as benign (#3824). It reads the same
-      // pinned target this loop checks out from, not FETCH_HEAD.
+      // An entry whose upstream content is all preserved has nothing to check
+      // out. Skip it outright rather than letting git say so: the checkout
+      // would fail with "did not match any file(s)", which the catch below
+      // cannot tell from a genuine failure, and it would abort the entire
+      // update (#3824). pathFullyPreserved reads the same pinned target this
+      // loop checks out from, not FETCH_HEAD.
       const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit);
       if (preservedState === true) continue;
+      // Name the entry the way checkoutSystemPathsBatched() does — a
+      // directory with preserved files under it expands to its upstream files
+      // minus the preserved ones, and an entry left with nothing to check out
+      // is skipped here — so this checkout can pass --literal-pathspecs: a
+      // `:(exclude)` spec would be read as a literal filename there, fail the
+      // checkout, and abort the update (#3825).
+      const fallbackSpecs = fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles);
+      if (fallbackSpecs.length === 0) continue;
       try {
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
@@ -5281,7 +5332,7 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('checkout', targetCommit, '--', path, ...preserveSpecs);
+        gitQuiet('--literal-pathspecs', 'checkout', targetCommit, '--', ...fallbackSpecs);
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
