@@ -499,3 +499,24 @@ test('a standard cover resolves from the report file when the tracker row has no
     [{ n: '31', company: 'Acme', role: 'Engineer', reportCell: '—', reportFile: '031-acme-2026-11-09.md' }]
   );
 });
+
+test('a standard cover whose report slug carries the role is still found by report number (#6667)', async () => {
+  await withFixture(
+    [
+      ['031-acme-engineer-cover-dana-quinn-2026-11-09.pdf'],
+      ['031-acme-engineer-cv-dana-quinn-2026-11-09.pdf'],
+    ],
+    async (outputDir) => {
+      assert.equal(
+        await resolveTailoredCover(undefined, '31'),
+        join(outputDir, '031-acme-engineer-cover-dana-quinn-2026-11-09.pdf')
+      );
+    },
+    [{ n: '31', company: 'Acme', role: 'Engineer' }]
+  );
+});
+
+test('an ATS CV is never matched as a cover (#6667)', async () => {
+  const { matchesTailoredCover } = await import('../../src/lib/apply/cv-match.mjs');
+  assert.equal(matchesTailoredCover('024-zep-cv-avery-cover-2026-11-07.ats.pdf', 'zep'), false);
+});

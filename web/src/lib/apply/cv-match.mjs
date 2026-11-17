@@ -138,6 +138,9 @@ export function matchesTailoredCv(filenameLower, slug) {
 export function matchesTailoredCover(filenameLower, slug) {
   if (filenameLower.startsWith('cv-')) return false;
   if (isOverflowDraft(filenameLower)) return false;
+  // The ATS copy of a CV (`{stem}.ats.pdf`) is never a cover, whatever tokens
+  // its candidate slug happens to carry.
+  if (/\.ats\.pdf$/.test(filenameLower)) return false;
   if (isStandardName(filenameLower)) return standardKind(filenameLower, slug) === 'cover';
   if (!hasToken(filenameLower, 'cover')) return false;
   return hasToken(filenameLower, slug);
