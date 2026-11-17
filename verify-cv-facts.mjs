@@ -3380,8 +3380,9 @@ function sourceContainsFact(sourceText, value) {
 
 function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
-  const normVal = value.replace(/\s*--\s*/g, ' - ');
-  const normSrc = sourceText.replace(/\s*--\s*/g, ' - ');
+  const isDate = dateEndpoints(value) !== null;
+  const normVal = isDate ? value.replace(/\s*--\s*/g, ' - ') : value;
+  const normSrc = isDate ? sourceText.replace(/\s*--\s*/g, ' - ') : sourceText;
   const escaped = normVal
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     .replace(/\s+/g, '\\s+')
