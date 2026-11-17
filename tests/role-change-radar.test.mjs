@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { compareDescriptions, identityWarnings, MAX_TEXT } from '../lib/role-change-compare.mjs';
 import { radar, discoverBaseline, validateCapture, fetchPosting } from '../role-change-radar.mjs';
 
@@ -16,6 +18,17 @@ function fixture(t, archive = true) {
   return { root, application: { ...app, reportFile: archive ? 'reports/007-fictional-labs-2026-01-01.md' : null } };
 }
 const paste = text => ({ action: 'check', source: 'paste', text });
+test('CLI help exits before reading input or writing data; unknown flags fail', t => {
+  const { root } = fixture(t, false);
+  const script = fileURLToPath(new URL('../role-change-radar.mjs', import.meta.url));
+  for (const flag of ['--help', '-h', '--bogus']) {
+    const result = spawnSync(process.execPath, [script, flag], { input: '{invalid JSON', encoding: 'utf8', timeout: 5000, env: { ...process.env, CAREER_OPS_ROOT: root } });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, flag === '--bogus' ? 1 : 0);
+    assert.match(result.stdout + result.stderr, flag === '--bogus' ? /unrecognized flag/ : /Usage: node role-change-radar/);
+    assert.equal(fs.existsSync(path.join(root, 'data')), false);
+  }
+});
 test('identical and harmless whitespace/presentation changes have no changes', () => {
   for (const text of [original, original.replaceAll('\n', '\r\n\n').replaceAll(' ', '  '), original.replace('Responsibilities', '## Responsibilities')]) assert.equal(compareDescriptions(original, text).changes.length, 0);
 });

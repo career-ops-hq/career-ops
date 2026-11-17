@@ -8,6 +8,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { writeFileAtomic, pathIsInsideCanonical } from './tracker-utils.mjs';
 import { acquireDirLock } from './lib/dir-lock.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { validateFlags } from './lib/cli-flags.mjs';
 import { findCaptureForReport, captureSlug } from './jd-capture.mjs';
 import { hasEmbeddedJdArchive, detectNonContentMarker } from './check-jd-archive.mjs';
 import { JD_HEADING_RE, NEXT_REPORT_SECTION_RE } from './lib/jd-archive-section.mjs';
@@ -147,7 +148,14 @@ export async function radar(root, app, input, { extract = fetchPosting, now = ()
   } finally { lock.release(); }
 }
 if (isMainModule(import.meta.url)) {
+  const args = process.argv.slice(2);
+  validateFlags(args, ['--help', '-h'], `Usage: node role-change-radar.mjs [--help]
+Read one JSON request from stdin: { "app": { "id", "company", "title", "reportNum", "reportFile", "url" }, "input": { "action", "source", "text", "comparisonId" } }.
+Actions: load, check, baseline, review. Sources: public, paste.
+Application metadata must come from the existing tracker/report readers.
+Stores Radar history under the configured data root; does not modify the tracker or reports.`);
   try {
+    if (args.length) throw new Error('Unexpected arguments; pass the request JSON on stdin or use --help');
     let body = '';
     for await (const chunk of process.stdin) { body += chunk; if (Buffer.byteLength(body) > 300_000) throw new Error('Request too large'); }
     const { app, input } = JSON.parse(body);
