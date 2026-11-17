@@ -14,10 +14,16 @@ test("the explore page builds its snapshot with exploreSnapshot()", () => {
 test("exploreSnapshot keeps the fields matching uses", () => {
   const snap = exploreSnapshot(
     [{ url: "https://jobs.example/a", company: "Acme", role: "Engineer", done: false, location: "Remote", compensation: "secret-pay" }],
-    [{ n: "1", company: "Acme", role: "Engineer", notes: "secret-note-token", score: "4.2/5", status: "Applied" }],
+    [
+      { n: "1", company: "Acme", role: "Engineer", url: "https://jobs.example/acme/a", notes: "secret-note-token", score: "4.2/5", status: "Applied" },
+      { n: "2", company: "Northwind", role: "Analyst" },
+    ],
   );
   assert.deepEqual(snap, {
     inboxUrls: ["https://jobs.example/a"],
-    evaluated: [{ n: "1", company: "Acme", role: "Engineer" }],
+    evaluated: [
+      { n: "1", company: "Acme", role: "Engineer", url: "https://jobs.example/acme/a" },
+      { n: "2", company: "Northwind", role: "Analyst", url: "" },
+    ],
   });
 });
