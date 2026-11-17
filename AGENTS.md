@@ -279,7 +279,7 @@ Keep the answers for the writer in Step 3. Archetypes and targeting narrative go
 
 #### Step 3: Portals (recommended)
 If `portals.yml` is missing:
-> "I'll set up the job scanner with 45+ pre-configured companies. Want me to customize the search keywords for your target roles?"
+> "I'll set up the job scanner with 180+ pre-configured companies. Want me to customize the search keywords for your target roles?"
 
 Then write both files in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
 
