@@ -119,10 +119,41 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
     const { result, errors } = await captureConsoleErrors(() =>
       restoreAfterFailedUpdate(['sys/a.md'], new Set(), { what: 'system path(s)', git: failing, root: ctx.root }));
     const text = errors.join('\n');
-    if (result === false && /Could not restore the system path\(s\) \(unable to unlink old/.test(text) && /node update-system\.mjs rollback/.test(text)) {
+    if (result === false && /Could not restore the system path\(s\) \(could not restore from HEAD: sys\/a\.md \(unable to unlink old/.test(text) && /node update-system\.mjs rollback/.test(text)) {
       pass('a failed restore returns false and names `rollback`');
     } else {
       fail(`result ${result}, messages ${JSON.stringify(errors)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+
+// ── 3b. a path whose HEAD checkout is blocked still loses the update's additions, and later paths restore ──
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    // The update had checked out sys/dir/ (adding new.md) and sys/b.md; the
+    // restore's own HEAD checkout of sys/dir/ is then blocked (a persistent
+    // write blocker - the #3825-review finding). The old code rethrew here:
+    // new.md stayed and sys/b.md was never restored.
+    g('checkout', target, '--', 'sys/dir/');
+    g('checkout', target, '--', 'sys/b.md');
+    const failing = (...args) => {
+      if (args[0] === 'checkout' && args.includes('sys/dir/')) throw new Error('unable to unlink old \'sys/dir/old.md\': Permission denied');
+      return g(...args);
+    };
+    const { result, errors } = await captureConsoleErrors(() =>
+      restoreAfterFailedUpdate(['sys/dir/', 'sys/b.md'], new Set(), { what: 'system path(s)', git: failing, root: ctx.root }));
+    const text = errors.join('\n');
+    if (result === false
+      && /could not restore from HEAD: sys\/dir \(unable to unlink old/.test(text)
+      && !existsSync(join(dir, 'sys/dir/new.md'))
+      && read(dir, 'sys/b.md') === 'b v1\n') {
+      pass('a blocked HEAD checkout still loses the update\'s additions, later paths restore, and the failure is named');
+    } else {
+      fail(`result ${result}, new.md ${existsSync(join(dir, 'sys/dir/new.md')) ? 'kept' : 'removed'}, b.md ${JSON.stringify(read(dir, 'sys/b.md'))}, messages ${JSON.stringify(errors)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
