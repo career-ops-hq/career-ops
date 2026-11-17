@@ -3,9 +3,13 @@
  * seeds/employers-inbox.mjs: the contribution inbox of the employer registry,
  * employers/inbox/. A contribution is one new file there, and nothing else:
  *
- *   employers/inbox/<YYYY-MM-DD>-<github-login>[-NNN].ndjson   up to 5,000 boards
- *   employers/inbox/<YYYY-MM-DD>-<github-login>.json           optional: an organization's
- *                                                               contribution manifest
+ *   employers/inbox/<YYYY-MM-DD>-<github-login>[.N][-NNN].ndjson   up to 5,000 boards
+ *   employers/inbox/<YYYY-MM-DD>-<github-login>[.N].json           optional: an organization's
+ *                                                                   contribution manifest
+ *
+ * A contribution has one source. A second contribution of the same login on
+ * the same day, from another source, carries a number after a dot: .2, .3, …
+ * up to .99. The first has none.
  *
  * Each line of an .ndjson file is one board, in the short form a contributor
  * can write by hand:
@@ -54,8 +58,14 @@ export const DEFAULT_WORKDAY_HOST = 'jobs';
 const LOGIN = '[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}';
 const LOGIN_LAZY = '[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}?';
 const DATE = '\\d{4}-\\d{2}-\\d{2}';
-export const INBOX_BOARDS_FILE_RE = new RegExp(`^(${DATE})-(${LOGIN_LAZY})(?:-(\\d{3}))?\\.ndjson$`);
-export const INBOX_SHEET_FILE_RE = new RegExp(`^(${DATE})-(${LOGIN})\\.json$`);
+// The number of a later contribution of the same day: a dot, then 2 to 99
+// with no leading zero. A GitHub login never holds a dot, so the number is
+// never read as part of the login.
+const NUMBER = '\\.([2-9]|[1-9]\\d)';
+export const INBOX_BOARDS_FILE_RE = new RegExp(`^(${DATE})-(${LOGIN_LAZY})(?:${NUMBER})?(?:-(\\d{3}))?\\.ndjson$`);
+export const INBOX_SHEET_FILE_RE = new RegExp(`^(${DATE})-(${LOGIN})(?:${NUMBER})?\\.json$`);
+// A name that would be valid with another number after the dot, to say what is wrong with it.
+const ANY_NUMBER_RE = new RegExp(`^${DATE}-${LOGIN}\\.(\\d+)(?:(?:-\\d{3})?\\.ndjson|\\.json)$`);
 
 /** @param {string} value */
 function isCalendarDate(value) {
@@ -70,12 +80,14 @@ function isCalendarDate(value) {
 
 /**
  * Read an inbox file name. `id` is the contribution the file belongs to,
- * <YYYY-MM-DD>-<login>: every part of one list and its manifest share it.
+ * <YYYY-MM-DD>-<login>, or <YYYY-MM-DD>-<login>.<n> for a later contribution
+ * of the same day: every part of one list and its manifest share it. `login`
+ * never has the number.
  * @param {string} name  the base name, without a directory
  * @returns {InboxName | {error: string}}
  */
 export function parseInboxName(name) {
-  const how = 'inbox files are named <YYYY-MM-DD>-<github-login>.ndjson (or -001.ndjson, -002.ndjson, … for a longer list), and an optional manifest <YYYY-MM-DD>-<github-login>.json';
+  const how = 'inbox files are named <YYYY-MM-DD>-<github-login>.ndjson (or -001.ndjson, -002.ndjson, … for a longer list), and an optional manifest <YYYY-MM-DD>-<github-login>.json; a later contribution of the same day adds .2, .3, … after the login';
   if (typeof name !== 'string' || name.includes('/')) return { error: how };
   if (name !== name.toLowerCase() && (INBOX_BOARDS_FILE_RE.test(name.toLowerCase()) || INBOX_SHEET_FILE_RE.test(name.toLowerCase()))) {
     return { error: `${how}; write the login in lowercase: ${name.toLowerCase()}` };
@@ -83,11 +95,15 @@ export function parseInboxName(name) {
   const b = INBOX_BOARDS_FILE_RE.exec(name);
   const s = b ? null : INBOX_SHEET_FILE_RE.exec(name);
   const m = b || s;
-  if (!m) return { error: how };
-  const [, date, login, part] = m;
+  if (!m) {
+    const n = ANY_NUMBER_RE.exec(name);
+    if (n && !/^(?:[2-9]|[1-9]\d)$/.test(n[1])) return { error: 'the number after the login runs from 2 to 99, with no leading zero; the first contribution of a day has none' };
+    return { error: how };
+  }
+  const [, date, login, number, part] = m;
   if (!isCalendarDate(date)) return { error: `${date} is not a YYYY-MM-DD calendar date` };
   if (part === '000') return { error: 'part numbers start at 001' };
-  return { kind: b ? 'boards' : 'sheet', date, login, part: part ? Number(part) : null, id: `${date}-${login}` };
+  return { kind: b ? 'boards' : 'sheet', date, login, part: part ? Number(part) : null, id: `${date}-${login}${number ? `.${number}` : ''}` };
 }
 
 /**
