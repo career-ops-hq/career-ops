@@ -625,6 +625,13 @@ const twoPassManifestChecks = [
     pattern: /'--diff-filter=A'/,
   },
   {
+    // A persistent write blocker can defeat the restore's own HEAD checkout:
+    // record it, still remove the update's additions, keep restoring the
+    // other paths, and surface the specific error at the end (#3825 review).
+    name: 'revertPaths records a failed HEAD checkout and still cleans additions (#3825)',
+    pattern: /unrestored\.push\(`\$\{pathspec\} \(\$\{String\(err\.message\)/,
+  },
+  {
     // The cleanup must not delete a file the user already had staged before the
     // update ran, only additions the update itself introduced (#2015 review).
     name: 'rollback cleanup skips pre-update staged paths (protectedPaths) (#2015)',
