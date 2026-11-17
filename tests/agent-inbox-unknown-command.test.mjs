@@ -16,9 +16,8 @@ import { spawnSync } from 'node:child_process';
 const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 
 const dir = mkdtempSync(join(tmpdir(), 'agent-inbox-unknown-'));
-const inbox = join(dir, 'agent-inbox.md');
 try {
-  const run = (...args) => {
+  const run = (inbox, ...args) => {
     const r = spawnSync(NODE, [join(ROOT, 'agent-inbox.mjs'), ...args], {
       cwd: dir, encoding: 'utf-8', timeout: 30000,
       env: { ...process.env, CAREER_OPS_INBOX: inbox },
@@ -29,26 +28,26 @@ try {
   console.log('\nagent-inbox — unknown subcommand');
 
   ok('a mistyped subcommand exits 1 and names the word', () => {
-    const r = run('ad', 'evaluate https://acme.example/jobs/42');
+    const inbox = join(mkdtempSync(join(dir, 'ad-')), 'agent-inbox.md');
+    const r = run(inbox, 'ad', 'evaluate https://acme.example/jobs/42');
     assert.strictEqual(r.status, 1, `exit ${r.status}\n${r.stdout}${r.stderr}`);
     assert.match(r.stderr, /unknown command "ad"/, r.stderr);
     assert.match(r.stderr, /Usage:/, 'the usage text goes to stderr with the error');
-  });
-
-  ok('the mistyped subcommand queued nothing', () => {
     assert.strictEqual(existsSync(inbox), false, 'a queue file appeared');
   });
 
   ok('--help, -h and no arguments still print usage and exit 0', () => {
     for (const args of [['--help'], ['-h'], []]) {
-      const r = run(...args);
+      const inbox = join(mkdtempSync(join(dir, 'help-')), 'agent-inbox.md');
+      const r = run(inbox, ...args);
       assert.strictEqual(r.status, 0, `${args.join(' ') || '(none)'}: exit ${r.status}\n${r.stderr}`);
       assert.match(r.stdout, /Usage:/, r.stdout);
     }
   });
 
   ok('premise: a real subcommand still works', () => {
-    const r = run('add', 'evaluate https://acme.example/jobs/42');
+    const inbox = join(mkdtempSync(join(dir, 'add-')), 'agent-inbox.md');
+    const r = run(inbox, 'add', 'evaluate https://acme.example/jobs/42');
     assert.strictEqual(r.status, 0, r.stderr);
     assert.strictEqual(existsSync(inbox), true);
   });
