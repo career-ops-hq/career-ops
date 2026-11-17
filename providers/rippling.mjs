@@ -222,7 +222,10 @@ export default {
     // DEFAULT_MAX_PAGES budget counts as capped — never a probe's ctx.maxPages
     // cap and never a fetch-error stop: this warning means the ceiling
     // truncated a healthy board, not that the board broke.
-    if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages) {
+    // Never during a probe: on a max_pages: 1 entry the probe's one page is also
+    // the entry's last, so pagesToFetch === maxPages alone cannot tell them
+    // apart (#7180).
+    if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages && !probing) {
       stopReason = STOP_REASON.CAP;
       console.error(`⚠️  rippling: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
     }
