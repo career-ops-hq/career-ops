@@ -85,7 +85,9 @@
  *   {tracker#}\t{date}\t{from}\t{to}\t{source}\t
  * Source is `set-status` unless --source names the caller delegating here.
  * Date defaults to today; pass --on YYYY-MM-DD when the transition actually
- * happened earlier ("they replied Tuesday"). The append is observation-only:
+ * happened earlier ("they replied Tuesday"). Rewriting a dated Applied cell
+ * keeps that cell's day on the log when the notes have no Applied date.
+ * The append is observation-only:
  * if it fails, a warning goes to stderr and the exit code is unchanged — the
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  *
@@ -119,7 +121,7 @@ import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, reso
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate, statusDateInCell,
   prependNote, hasNoteEntry, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
@@ -778,6 +780,7 @@ const releaseActivityClaim = flags.dryRun ? () => {} : claimStatusActivity(targe
 
 let statusChanged = false;
 let noteChanged = false;
+let cellAppliedDate = '';
 let statusLogged = false;
 let statusLogRepaired = false;
 let statusLogRepair = null;
@@ -850,6 +853,17 @@ try {
     }
   }
 
+  // A date already on an Applied cell is the day it was sent.
+  // --on stays the only explicit date.
+  if (newStatus === 'Applied' && !flags.on) {
+    const alreadyApplied = resolveCanonicalState(stripStatusDecoration(oldStatus), states) === 'Applied';
+    if (alreadyApplied) {
+      const { isValidCalendarDate } = await import('./followup-seed.mjs');
+      const found = statusDateInCell(oldStatus);
+      if (isValidCalendarDate(found)) cellAppliedDate = found;
+    }
+  }
+
   if ((statusChanged || noteChanged) && !flags.dryRun) {
     if (separator === '\t') {
       const closing = rawLine.trimEnd().endsWith('|');
@@ -903,9 +917,18 @@ try {
     // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
     // time-between-stages, so a future-dated transition skews the interval it
     // measures rather than just looking odd in the file.
+    // Notes that already say "Applied YYYY-MM-DD" own the cadence. The log
+    // then records this edit. With no Applied date in the notes, the log
+    // keeps the day that was on the cell, or the two clocks disagree.
+    let ledgerDate = flags.on ?? localToday();
+    if (!flags.on && cellAppliedDate) {
+      const { parseAppliedDate } = await import('./followup-cadence.mjs');
+      const notesText = colmap.notes == null ? '' : String(parts[colmap.notes] ?? '');
+      if (!parseAppliedDate(notesText)) ledgerDate = cellAppliedDate;
+    }
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
-      date: flags.on ?? localToday(),
+      date: ledgerDate,
       from: ledgerState(oldStatus),
       to: newStatus,
       source: flags.source ?? 'set-status',
@@ -1017,13 +1040,11 @@ let followupSeeded = null;
 if (!undone && (statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
   followupSeeded = await seedFollowupOnApplied(target.num, {
     trackerPath: APPS_FILE,
-    // --on is the day the user says the application was sent. Without it,
-    // a fresh transition passes today as the status-change date, which
-    // resolveAppliedDate ranks below an "Applied YYYY-MM-DD" in the notes and
-    // above the evaluation-date column. A repair retry passes neither,
-    // because the apply happened on an earlier run.
-    date: flags.on,
-    statusChangeDate: statusChanged ? localToday() : undefined,
+    // --on is the only explicit date, so an Applied date in the notes still
+    // outranks the cell. The cell day is the status-change date. A fresh
+    // transition passes today. A repair passes neither.
+    date: flags.on || undefined,
+    statusChangeDate: cellAppliedDate || (statusChanged ? localToday() : undefined),
     dryRun: flags.dryRun,
     quiet: flags.json,
   });

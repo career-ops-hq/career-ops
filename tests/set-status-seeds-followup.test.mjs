@@ -22,6 +22,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
+import { localToday } from '../lib/local-today.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -191,6 +192,95 @@ test('an apply date in the notes outranks today when --on is absent', () => {
   } finally {
     rmSync(fromNotes, { recursive: true, force: true, maxRetries: 10 });
     rmSync(fromOn, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+function northwind(status, notes = 'panel notes') {
+  const dir = mkdtempSync(join(tmpdir(), 'career-ops-applied-day-'));
+  mkdirSync(join(dir, 'data'), { recursive: true });
+  writeFileSync(join(dir, 'data', 'applications.md'), [
+    '# Applications Tracker',
+    '',
+    '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
+    '|---|------|---------|------|-------|--------|-----|--------|-------|',
+    `| 7 | 2026-02-01 | Northwind | Analyst | 4.4/5 | ${status} | — | — | ${notes} |`,
+    '',
+  ].join('\n'));
+  return dir;
+}
+
+const rowLine = (dir) => readFileSync(join(dir, 'data', 'applications.md'), 'utf-8')
+  .split('\n')
+  .find((line) => line.startsWith('| 7 |'));
+const statusCell = (dir) => rowLine(dir).split('|')[6].trim();
+const logDate = (dir) => readFileSync(join(dir, 'data', 'status-log.tsv'), 'utf-8').trim().split('\n').pop().split('\t')[1];
+const pinDate = (dir) => readFileSync(followups(dir), 'utf-8').match(/next #7 (\d{4}-\d{2}-\d{2})/)?.[1] ?? null;
+
+test('rewriting Applied 2026-01-02 keeps that day on the status log and the follow-up pin', () => {
+  const dated = northwind('Applied 2026-01-02');
+  const explicit = northwind('Evaluated');
+  try {
+    const datedRun = setStatus(dated, ['--row', '7', 'Applied', '--json']);
+    assert.equal(datedRun.status, 0, describeSpawn(datedRun));
+    const rewritten = jsonOf(datedRun);
+    const fromOn = jsonOf(setStatus(explicit, ['--row', '7', 'Applied', '--on', '2026-01-02', '--json']));
+    assert.equal(statusCell(dated), 'Applied');
+    assert.equal(logDate(dated), '2026-01-02');
+    assert.equal(pinDate(dated), fromOn.followupSeeded.nextDate);
+    assert.equal(rewritten.followupSeeded.nextDate, fromOn.followupSeeded.nextDate);
+    assert.match(rowLine(dated), /Northwind \| Analyst/);
+    assert.doesNotMatch(rowLine(dated), /Applied 2026-01-02/);
+  } finally {
+    rmSync(dated, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(explicit, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('rewriting a dated Applied cell keeps an Applied date already in the notes', () => {
+  const dated = northwind('Applied 2026-01-02', 'Applied 2026-09-20');
+  const fromNotes = northwind('Evaluated', 'Applied 2026-09-20');
+  try {
+    const rewritten = jsonOf(setStatus(dated, ['--row', '7', 'Applied', '--json']));
+    const noted = jsonOf(setStatus(fromNotes, ['--row', '7', 'Applied', '--json']));
+    assert.equal(rewritten.followupSeeded?.seeded, true, JSON.stringify(rewritten.followupSeeded));
+    assert.equal(statusCell(dated), 'Applied');
+    assert.match(rowLine(dated), /Applied 2026-09-20/);
+    assert.equal(logDate(dated), localToday());
+    assert.notEqual(logDate(dated), '2026-01-02');
+    assert.equal(pinDate(dated), noted.followupSeeded.nextDate);
+    assert.equal(rewritten.followupSeeded.nextDate, noted.followupSeeded.nextDate);
+  } finally {
+    rmSync(dated, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(fromNotes, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('a first change from Evaluated to Applied still uses today', () => {
+  const fresh = northwind('Evaluated');
+  try {
+    const result = jsonOf(setStatus(fresh, ['--row', '7', 'Applied', '--json']));
+    assert.equal(statusCell(fresh), 'Applied');
+    assert.equal(logDate(fresh), localToday());
+    assert.equal(pinDate(fresh), result.followupSeeded.nextDate);
+    assert.equal(result.followupSeeded?.seeded, true);
+  } finally {
+    rmSync(fresh, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('--on wins over the day already on an Applied cell', () => {
+  const dated = northwind('Applied 2026-01-02');
+  const explicit = northwind('Evaluated');
+  try {
+    const rewritten = jsonOf(setStatus(dated, ['--row', '7', 'Applied', '--on', '2026-03-15', '--json']));
+    const fromOn = jsonOf(setStatus(explicit, ['--row', '7', 'Applied', '--on', '2026-03-15', '--json']));
+    assert.equal(statusCell(dated), 'Applied');
+    assert.equal(logDate(dated), '2026-03-15');
+    assert.equal(pinDate(dated), fromOn.followupSeeded.nextDate);
+    assert.equal(rewritten.followupSeeded.nextDate, fromOn.followupSeeded.nextDate);
+  } finally {
+    rmSync(dated, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(explicit, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
