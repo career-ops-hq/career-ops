@@ -240,39 +240,44 @@ function captureBody({ url, company, role, date, text }) {
  * @returns {Promise<{appended: boolean, duplicate: boolean}>}
  */
 export async function appendPendingRow(pipelinePath, row, url) {
-  return withPipelineLock(pipelinePath, async () => {
-    const text = existsSync(pipelinePath) ? readFileSync(pipelinePath, 'utf-8') : PIPELINE_SKELETON;
+  return withPipelineLock(pipelinePath, () => appendPendingRowUnlocked(pipelinePath, row, url));
+}
 
-    if (urlAlreadyPresent(text, url)) return { appended: false, duplicate: true };
+// Caller must hold the pipeline lock. Run capture creation only after dedup,
+// within the same critical section as the row write (no nested lock).
+function appendPendingRowUnlocked(pipelinePath, row, url, beforeAppend = () => {}) {
+  const text = existsSync(pipelinePath) ? readFileSync(pipelinePath, 'utf-8') : PIPELINE_SKELETON;
 
-    const headings = [...text.matchAll(/^##[ \t].*$/gm)];
-    const pending = headings.find((h) => sectionKind(h[0]) === 'pending');
+  if (urlAlreadyPresent(text, url)) return { appended: false, duplicate: true };
 
-    let next;
-    if (!pending) {
-      const processed = headings.find((h) => sectionKind(h[0]) === 'processed');
-      const insertAt = processed ? processed.index : text.length;
-      const head = text.slice(0, insertAt).replace(/\s+$/, '');
-      const tail = text.slice(insertAt).replace(/^\s+/, '');
-      next = `${head}\n\n## Pending\n\n${row}\n\n${tail}`;
-    } else {
-      const afterMarker = pending.index + pending[0].length;
-      const nextSection = text.indexOf('\n## ', afterMarker);
-      const insertAt = nextSection === -1 ? text.length : nextSection;
-      // Normalise the whitespace on both sides of the insert point so repeated
-      // captures produce one row per line, and exactly one blank line under the
-      // `## Pending` heading, matching the format modes/pipeline.md documents.
-      const head = text.slice(0, insertAt).replace(/\s+$/, '');
-      const tail = text.slice(insertAt).replace(/^\s+/, '');
-      const lastLine = head.split('\n').pop() || '';
-      const gap = /^##/.test(lastLine) ? '\n\n' : '\n';
-      next = `${head}${gap}${row}\n\n${tail}`;
-      if (!text.slice(insertAt)) next = `${head}${gap}${row}\n`;
-    }
+  const headings = [...text.matchAll(/^##[ \t].*$/gm)];
+  const pending = headings.find((h) => sectionKind(h[0]) === 'pending');
 
-    atomicWrite(pipelinePath, next);
-    return { appended: true, duplicate: false };
-  });
+  let next;
+  if (!pending) {
+    const processed = headings.find((h) => sectionKind(h[0]) === 'processed');
+    const insertAt = processed ? processed.index : text.length;
+    const head = text.slice(0, insertAt).replace(/\s+$/, '');
+    const tail = text.slice(insertAt).replace(/^\s+/, '');
+    next = `${head}\n\n## Pending\n\n${row}\n\n${tail}`;
+  } else {
+    const afterMarker = pending.index + pending[0].length;
+    const nextSection = text.indexOf('\n## ', afterMarker);
+    const insertAt = nextSection === -1 ? text.length : nextSection;
+    // Normalise the whitespace on both sides of the insert point so repeated
+    // captures produce one row per line, and exactly one blank line under the
+    // `## Pending` heading, matching the format modes/pipeline.md documents.
+    const head = text.slice(0, insertAt).replace(/\s+$/, '');
+    const tail = text.slice(insertAt).replace(/^\s+/, '');
+    const lastLine = head.split('\n').pop() || '';
+    const gap = /^##/.test(lastLine) ? '\n\n' : '\n';
+    next = `${head}${gap}${row}\n\n${tail}`;
+    if (!text.slice(insertAt)) next = `${head}${gap}${row}\n`;
+  }
+
+  beforeAppend();
+  atomicWrite(pipelinePath, next);
+  return { appended: true, duplicate: false };
 }
 
 /** Is this URL already a row (Pending or Processed) in the pipeline text? */
@@ -282,7 +287,11 @@ export function urlAlreadyPresent(text, url) {
     .split(/\r?\n/)
     .filter((line) => /^\s*-\s*\[[ xX!]\]/.test(line))
     .some((line) => {
-      const cell = line.replace(/^\s*-\s*\[[ xX!]\]\s*/, '').split('|')[0].trim();
+      const cells = line.replace(/^\s*-\s*\[[ xX!]\]\s*/, '').split('|');
+      // Completed evaluations prefix the URL with a report number; expired
+      // rows wrap the URL and labels in strikethrough (modes/pipeline.md).
+      const index = /^#\d+$/.test(cells[0].trim()) ? 1 : 0;
+      const cell = (cells[index] || '').trim().replace(/^~~/, '').replace(/~~$/, '');
       return cell.replace(/\/+$/, '') === needle;
     });
 }
@@ -370,16 +379,16 @@ export async function captureJd(input = {}) {
   const files = [];
   let capturePath = null;
 
-  if (text.trim()) {
-    mkdirSync(jdsDir, { recursive: true });
-    const name = captureName({ company, role, url, date });
-    capturePath = path.join(jdsDir, name);
-    atomicWrite(capturePath, captureBody({ url, company, role, date, text }));
-    files.push(capturePath);
-  }
-
   const row = `- [ ] ${url} | ${company} | ${role}${text.trim() ? '' : ' | note: url only'}`;
-  const appended = await appendPendingRow(pipelinePath, row, url);
+  const appended = await withPipelineLock(pipelinePath, () =>
+    appendPendingRowUnlocked(pipelinePath, row, url, () => {
+      if (!text.trim()) return;
+      mkdirSync(jdsDir, { recursive: true });
+      const name = captureName({ company, role, url, date });
+      capturePath = path.join(jdsDir, name);
+      atomicWrite(capturePath, captureBody({ url, company, role, date, text }));
+      files.push(capturePath);
+    }));
   if (appended.appended) files.unshift(pipelinePath);
 
   const result = {
