@@ -188,6 +188,14 @@ test('a LinkedIn title that ends in a year is not a job id', () => {
   assert.equal(webKey('https://www.linkedin.com/jobs/view/2024'), 'linkedin.com:2024');
   assert.equal(webKey('https://www.linkedin.com/jobs/view/data-scientist-1234567'), 'linkedin.com:1234567');
   assert.notEqual(webKey('https://www.linkedin.com/comm/jobs/view/data-scientist-1234567'), 'linkedin.com:1234567');
+  const withQuery = 'https://www.linkedin.com/jobs/view/data-scientist-2024?currentJobId=4402976479';
+  const sameQuery = 'https://www.linkedin.com/jobs/view/engineer-2024?currentJobId=4402976479';
+  assert.equal(webKey(withQuery), 'linkedin.com:4402976479');
+  assert.equal(webKey(sameQuery), webKey(withQuery));
+  assert.equal(
+    webKey('https://www.linkedin.com/jobs/view/data-scientist-1234567?currentJobId=111'),
+    'linkedin.com:1234567',
+  );
 });
 
 test('a missing posting is not a key, and a repeated call on a URL is stable', () => {
