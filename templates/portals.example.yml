@@ -1320,10 +1320,12 @@ search_queries:
 # already know their target careers URL. `args` are optional and can help the
 # parser author (reuse across companies, debug flags, JSON snapshots, etc.).
 #
-# The script must resolve inside the repo root (security boundary in
-# providers/local-parser.mjs). Keep a private, non-contributed parser under a
-# gitignored path — `local/` is ignored by default — so it is never staged;
-# `portals.yml` itself is already gitignored. Use `scripts/parsers/` only for a
+# The script must resolve inside the repo root or the data root's `local/`
+# folder (security boundary in providers/local-parser.mjs). Keep a private,
+# non-contributed parser in `local/`: gitignored in a checkout, so it is never
+# staged, and under the data root in a Claude Code plugin install, where a
+# plugin update replaces the code root. `portals.yml` itself is already
+# gitignored. Use `scripts/parsers/` only for a
 # parser you intend to upstream. See docs/local-parser-cookbook.md.
 #
 # JavaScript parser:
