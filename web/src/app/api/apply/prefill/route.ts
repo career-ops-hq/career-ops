@@ -7,6 +7,7 @@ import { getSession } from "@/lib/apply/session";
 import { resolveSessionCv } from "@/lib/apply/cv";
 import { applyCvSource } from "@/lib/apply/cv-source.mjs";
 import { buildAnswerPrompt } from "@/lib/apply/answer-prompt.mjs";
+import { blankUnknownDraft, readApplyProfile } from "@/lib/apply/blank-unknown.mjs";
 import { runPlanner } from "@/lib/apply/planner";
 import { extractJsonObject } from "@/lib/extract-json-object.mjs";
 import { readJsonObject } from "@/lib/json-body";
@@ -132,9 +133,10 @@ export async function POST(req: Request) {
           result.buf.slice(-300),
         );
       }
-      const count = Object.keys(obj).length;
+      const answers = blankUnknownDraft(s.fields, obj, readApplyProfile(careerOpsRoot()));
+      const count = Object.keys(answers).length;
       log(`Parsed ${count} answers${truncated ? " (RECOVERED from truncated output — some fields may be missing)" : ""}`);
-      emit({ t: "done", answers: obj, truncated, count });
+      emit({ t: "done", answers, truncated, count });
       controller.close();
     },
   });

@@ -5,12 +5,17 @@
 // Run: node --test tests/lib/apply-handoff-wiring.test.mjs
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { register } from "node:module";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import "../helpers/web-ts-alias-loader.mjs";
+
+// Fill and drive blank a screening guess the profile does not state. An empty
+// root keeps this file off a real profile.
+process.env.CAREER_OPS_ROOT = mkdtempSync(join(tmpdir(), "apply-handoff-"));
 
 const src = join(dirname(fileURLToPath(import.meta.url)), "../../src");
 
@@ -158,13 +163,24 @@ test("the fill route does not hand off when a required résumé is missing", asy
   assert.deepEqual(globalThis.__applyFixture.handoffCalls, []);
 });
 
-test("the fill route hands off an answered screening question", async () => {
+test("the fill route blanks an unedited sponsorship guess and hands off one the person edited", async () => {
   resetFixture();
-  const body = await postFill({
+  const guessed = await postFill({
     answers: { visa: "No" },
     fields: [{ id: "visa", type: "text", label: "Will you require visa sponsorship?", required: true }],
   });
-  assert.equal(body.handedOff, true);
+  assert.equal(guessed.handedOff, false);
+  assert.deepEqual(globalThis.__applyFixture.fillAnswers, { visa: "" });
+  assert.deepEqual(globalThis.__applyFixture.handoffCalls, []);
+
+  resetFixture();
+  const typed = await postFill({
+    answers: { visa: "No" },
+    edited: ["visa"],
+    fields: [{ id: "visa", type: "text", label: "Will you require visa sponsorship?", required: true }],
+  });
+  assert.equal(typed.handedOff, true);
+  assert.deepEqual(globalThis.__applyFixture.fillAnswers, { visa: "No" });
   assert.deepEqual(globalThis.__applyFixture.handoffCalls, ["sess-1"]);
 });
 
@@ -218,6 +234,7 @@ test("drive read-back compares the agent's answers and does not type them again"
   ];
   await postDrive({
     answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+    editedLabels: ["Will you require visa sponsorship?"],
   });
   assert.equal(globalThis.__applyFixture.fillCalls, 1);
   assert.deepEqual(globalThis.__applyFixture.fillAnswers, {});
@@ -231,9 +248,23 @@ test("drive read-back uses the agent's answers when no résumé is attached", as
   ];
   await postDrive({
     answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+    editedLabels: ["Will you require visa sponsorship?"],
   });
   assert.equal(globalThis.__applyFixture.fillCalls, 0);
   assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { visa: "No" });
+});
+
+test("drive read-back drops an unedited sponsorship guess", async () => {
+  resetFixture();
+  globalThis.__applyFixture.session.fields = [
+    { id: "visa", type: "radio", label: "Will you require visa sponsorship?", required: true },
+  ];
+  const done = (await postDrive({
+    answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+  })).find((event) => event.t === "done");
+  assert.equal(globalThis.__applyFixture.fillCalls, 0);
+  assert.deepEqual(globalThis.__applyFixture.verifyAnswers, {});
+  assert.equal(done.filled, false);
 });
 
 test("a wrong radio on the drive path stays in the done gaps", async () => {
@@ -246,6 +277,7 @@ test("a wrong radio on the drive path stays in the done gaps", async () => {
   ];
   const done = (await postDrive({
     answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "Yes" }],
+    editedLabels: ["Will you require visa sponsorship?"],
   })).find((event) => event.t === "done");
   assert.deepEqual(globalThis.__applyFixture.verifyAnswers, { visa: "Yes" });
   assert.ok(done.gaps.some((gap) => gap.code === "fill-mismatch"));
@@ -365,6 +397,7 @@ test("a full drive keeps the fencing warning from finalization", async () => {
   ];
   const done = (await postDrive({
     answers: [{ id: "visa", label: "Will you require visa sponsorship?", value: "No" }],
+    editedLabels: ["Will you require visa sponsorship?"],
   })).find((event) => event.t === "done");
   assert.ok(done.gaps.some((gap) => gap.code === "cli-unfenced"));
   assert.equal(done.filled, true);
