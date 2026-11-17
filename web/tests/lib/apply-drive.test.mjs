@@ -526,6 +526,74 @@ test("a scripted planner fills the form and never submits it, however it tries",
   assert.ok(page.handles.every((h) => h.disposed));
 });
 
+test("typing into a radio does not click it", async () => {
+  const page = new FakePage();
+  page.add("yes", { tag: "input", attrs: { type: "radio", name: "sponsor" }, value: "1" });
+  const result = await act(page, { action: "type", ref: page.ref("yes"), text: "" });
+  assert.equal(result.note, "left blank");
+  assert.match(result.detail, /choice control/);
+  assertUntouched(page);
+});
+
+test("a type is refused when the live label is no longer the one that was checked", async () => {
+  const page = new FakePage();
+  page.add("q", { tag: "input", attrs: { type: "text", "aria-label": "Sponsorship" } });
+  const result = await act(page, {
+    action: "type",
+    ref: page.ref("q"),
+    text: "Yes",
+    expected: { label: "Relocation", group: "", question: "" },
+  });
+  assert.equal(result.note, "left blank");
+  assert.match(result.detail, /label changed/);
+  assertUntouched(page);
+});
+
+test("a radio option is the visible choice when the values are machine ids", () => {
+  const labelFor = (text) => ({
+    textContent: text,
+    cloneNode() {
+      return { textContent: text, querySelectorAll() { return []; } };
+    },
+  });
+  const radio = (value, text) => ({
+    tagName: "INPUT",
+    value,
+    textContent: "",
+    placeholder: "",
+    name: "sponsor",
+    form: null,
+    getAttribute(name) {
+      return { type: "radio", name: "sponsor", value }[name] ?? null;
+    },
+    closest(selector) {
+      return selector === "label" ? labelFor(text) : null;
+    },
+  });
+  const yes = radio("1", "Yes");
+  const no = radio("0", "No");
+  const previous = globalThis.document;
+  const previousCss = globalThis.CSS;
+  globalThis.document = {
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return [yes, no]; },
+  };
+  globalThis.CSS = { escape: (value) => String(value) };
+  try {
+    assert.equal(factsOf(yes, "r1").option, "Yes");
+    const sharedYes = radio("Yes", "Will you relocate?");
+    const sharedNo = radio("No", "Will you relocate?");
+    globalThis.document.querySelectorAll = () => [sharedYes, sharedNo];
+    assert.equal(factsOf(sharedYes, "r2").option, "Yes");
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+    if (previousCss === undefined) delete globalThis.CSS;
+    else globalThis.CSS = previousCss;
+  }
+});
+
 // ── The loop uses this executor, and only this executor ──
 
 const DRIVE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/lib/apply/drive.ts"), "utf8");

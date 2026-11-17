@@ -22,7 +22,8 @@ import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
  *
  * @typedef {{ ref: string, tag: string, type: string, role: string, inForm: boolean,
  *             aria: string, placeholder: string, text: string, value: string,
- *             name: string, title: string, alt: string, group: string, question: string }} ElementFacts
+ *             name: string, title: string, alt: string, group: string, question: string,
+ *             option: string }} ElementFacts
  */
 
 /**
@@ -63,6 +64,33 @@ export const factsOf = (el, ref) => {
     const ids = flat(el.getAttribute("aria-labelledby")).split(" ").filter(Boolean);
     aria = flat(ids.map((id) => document.getElementById(id)?.textContent || "").join(" ")).slice(0, 200);
   }
+  const labelText = (node) => {
+    const id = node.getAttribute("id");
+    const external = id && typeof document !== "undefined" ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+    const wrap = node.closest("label");
+    const host = external || wrap;
+    if (!host) return "";
+    const copy = host.cloneNode(true);
+    copy.querySelectorAll("input, select, textarea, button").forEach((control) => control.remove());
+    return flat(copy.textContent).slice(0, 200);
+  };
+  const ownLabel = labelText(el);
+  const option = (() => {
+    const type = flat(el.getAttribute("type")).toLowerCase();
+    if (type !== "radio" && type !== "checkbox") return "";
+    const value = flat(field.value);
+    const name = field.name || "";
+    let labels = [ownLabel];
+    if (name && typeof document !== "undefined") {
+      const nodes = Array.from(document.querySelectorAll(`input[type="${CSS.escape(type)}"][name="${CSS.escape(name)}"]`));
+      if (nodes.length) labels = nodes.map((node) => (node === el ? ownLabel : labelText(node)));
+    }
+    const shared = labels.length > 1 && labels.every((text) => text && text === labels[0]);
+    // Same rule as extract: a shared label is the question, so the value is the
+    // choice. Distinct labels are the choices themselves.
+    if (!ownLabel || ownLabel === name || (shared && value)) return (value || ownLabel).slice(0, 200);
+    return (ownLabel || value).slice(0, 200);
+  })();
   return {
     ref: ref || el.getAttribute("data-co-ref") || "",
     tag,
@@ -96,16 +124,8 @@ export const factsOf = (el, ref) => {
       if (named) return named.slice(0, 200);
       return flat(rg.querySelector("legend")?.textContent || "").slice(0, 200);
     })(),
-    question: (() => {
-      const id = el.getAttribute("id");
-      const external = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
-      const wrap = el.closest("label");
-      const node = external || wrap;
-      if (!node) return "";
-      const copy = node.cloneNode(true);
-      copy.querySelectorAll("input, select, textarea, button").forEach((control) => control.remove());
-      return flat(copy.textContent).slice(0, 200);
-    })(),
+    question: ownLabel,
+    option,
   };
 };
 
@@ -143,6 +163,12 @@ export async function executeAction(page, frame, act, actionable) {
     const now = handle ? await handle.evaluate(factsOf, ref).catch(() => null) : null;
     const label = now ? snapshotLabel(now) : "";
     const target = now && !isSubmitControl(now) ? handle : null;
+    const expected = act.expected;
+    const drifted = !!(expected && now && (
+      label !== (expected.label || "")
+      || (now.group || "") !== (expected.group || "")
+      || (now.question || "") !== (expected.question || "")
+    ));
     if (act.ref !== undefined && !target) {
       // Three different refusals, told apart: only one of them is the guard
       // doing its job, and a UI that calls a vanished element a submit button
@@ -161,25 +187,38 @@ export async function executeAction(page, frame, act, actionable) {
         note = "refused to click a submit control (the human submits)";
         detail = `blocked submit "${label.slice(0, 40)}"`;
       }
+    } else if (drifted && target) {
+      // The ref still points at a node, but the question on it changed while
+      // the planner was thinking. The answer was checked against the old one.
+      note = "left blank";
+      detail = "blocked a field whose label changed";
     } else if (act.action === "click" && target) {
       detail = `click "${label.slice(0, 40)}"`;
       await target.scrollIntoViewIfNeeded().catch(() => {});
       await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), target.click({ timeout: 6000 })]);
     } else if (act.action === "type" && target) {
-      detail = `type into ${label.slice(0, 40) || ref}`;
-      // Same explicit 6s as the click branch above, for a predictable bound
-      // on this fallback's own click: session.ts sets an 8s context default
-      // (`context.setDefaultTimeout(8000)`), so this was already bounded,
-      // just two seconds looser than the action this loop otherwise treats
-      // as its click budget.
-      // The fallback inserts text instead of typing it: keyboard.type presses a real key per
-      // character, so a "\n" or "\r" in the planner's text was an Enter on a focused control,
-      // which is implicit form submission and bypassed the never-submit guard. insertText
-      // dispatches no key events, and line breaks are flattened to spaces before it.
-      await target.fill(act.text || "").catch(async () => {
-        await target.click({ timeout: 6000 });
-        await page.keyboard.insertText(String(act.text || "").replace(/[\r\n]+/g, " "));
-      });
+      const choice = now.type === "radio" || now.type === "checkbox" || now.role === "radio" || now.role === "checkbox";
+      if (choice) {
+        // fill() rejects a radio, and the fallback below would click it.
+        // That click selects the choice. Leave it blank instead.
+        note = "left blank";
+        detail = "type blocked on a choice control";
+      } else {
+        detail = `type into ${label.slice(0, 40) || ref}`;
+        // Same explicit 6s as the click branch above, for a predictable bound
+        // on this fallback's own click: session.ts sets an 8s context default
+        // (`context.setDefaultTimeout(8000)`), so this was already bounded,
+        // just two seconds looser than the action this loop otherwise treats
+        // as its click budget.
+        // The fallback inserts text instead of typing it: keyboard.type presses a real key per
+        // character, so a "\n" or "\r" in the planner's text was an Enter on a focused control,
+        // which is implicit form submission and bypassed the never-submit guard. insertText
+        // dispatches no key events, and line breaks are flattened to spaces before it.
+        await target.fill(act.text || "").catch(async () => {
+          await target.click({ timeout: 6000 });
+          await page.keyboard.insertText(String(act.text || "").replace(/[\r\n]+/g, " "));
+        });
+      }
     } else if (act.action === "select" && target) {
       detail = `select "${act.value}"`;
       await target.selectOption({ label: act.value || "" }, { timeout: 6000 }).catch(() => target.selectOption(act.value || "", { timeout: 6000 }));
