@@ -293,6 +293,64 @@ test('a first change from Evaluated to Applied still uses today', () => {
   }
 });
 
+test('a repair skips status text that was copied into Notes', () => {
+  const dated = northwind('Applied 2026-01-02 via referral', 'Applied 2026-09-20');
+  const fromNotes = northwind('Evaluated', 'Applied 2026-09-20');
+  const fromCell = northwind('Evaluated');
+  try {
+    const first = jsonOf(setStatus(dated, ['--row', '7', 'Applied', '--json']));
+    assert.equal(first.followupSeeded?.seeded, true, JSON.stringify(first.followupSeeded));
+    rmSync(followups(dated), { force: true });
+    const repair = jsonOf(setStatus(dated, ['--row', '7', 'Applied', '--repair-followup', '--json']));
+    const noted = jsonOf(setStatus(fromNotes, ['--row', '7', 'Applied', '--json']));
+    const january = jsonOf(setStatus(fromCell, ['--row', '7', 'Applied', '--on', '2026-01-02', '--json']));
+    assert.equal(repair.followupSeeded?.seeded, true, JSON.stringify(repair.followupSeeded));
+    assert.equal(pinDate(dated), noted.followupSeeded.nextDate);
+    assert.notEqual(pinDate(dated), january.followupSeeded.nextDate);
+    assert.match(rowLine(dated), /Applied 2026-01-02 via referral/);
+  } finally {
+    for (const dir of [dated, fromNotes, fromCell]) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('a repair of an older copied line still prefers the later notes date', () => {
+  const dated = northwind('Applied', 'Applied 2026-01-02 via referral; Applied 2026-09-20');
+  const fromNotes = northwind('Evaluated', 'Applied 2026-09-20');
+  const authoredFirst = northwind('Applied', 'Applied 2026-01-02 via referral; Applied 2026-09-20');
+  const january = northwind('Evaluated');
+  try {
+    writeFileSync(join(dated, 'data', 'status-log.tsv'), '7\t2026-11-01\tApplied\tApplied\tset-status\t\n');
+    writeFileSync(join(authoredFirst, 'data', 'status-log.tsv'), '7\t2026-11-01\tEvaluated\tApplied\tset-status\t\n');
+    const repair = jsonOf(setStatus(dated, ['--row', '7', 'Applied', '--repair-followup', '--json']));
+    const noted = jsonOf(setStatus(fromNotes, ['--row', '7', 'Applied', '--json']));
+    const kept = jsonOf(setStatus(authoredFirst, ['--row', '7', 'Applied', '--repair-followup', '--json']));
+    const fromCell = jsonOf(setStatus(january, ['--row', '7', 'Applied', '--on', '2026-01-02', '--json']));
+    assert.equal(repair.followupSeeded.nextDate, noted.followupSeeded.nextDate);
+    assert.equal(kept.followupSeeded.nextDate, fromCell.followupSeeded.nextDate);
+  } finally {
+    for (const dir of [dated, fromNotes, authoredFirst, january]) rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('--replace-note is the pin date, and the note it removed is not', () => {
+  const replaced = northwind('Evaluated', 'Applied 2026-08-01');
+  const direct = northwind('Evaluated', 'Applied 2026-09-20');
+  try {
+    const result = jsonOf(setStatus(replaced, [
+      '--row', '7', 'Applied', '--replace-note', 'Applied 2026-08-01', '--note', 'Applied 2026-09-20', '--json',
+    ]));
+    const noted = jsonOf(setStatus(direct, ['--row', '7', 'Applied', '--json']));
+    assert.equal(result.followupSeeded?.seeded, true, JSON.stringify(result.followupSeeded));
+    assert.equal(result.followupSeeded.nextDate, noted.followupSeeded.nextDate);
+    assert.equal(logDate(replaced), localToday());
+    assert.match(rowLine(replaced), /Applied 2026-09-20/);
+    assert.doesNotMatch(rowLine(replaced), /2026-08-01/);
+  } finally {
+    rmSync(replaced, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(direct, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
 test('--on wins over the day already on an Applied cell', () => {
   const dated = northwind('Applied 2026-01-02');
   const explicit = northwind('Evaluated');
