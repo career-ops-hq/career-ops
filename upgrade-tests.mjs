@@ -1177,6 +1177,91 @@ function fallbackPersistentRewriteBlockerLeg() {
   process.exit(failures.length ? 1 : 0);
 }
 
+/** Cross-version collision refusal leg (#7250 review): the target ships as a
+ *  directory what the install holds as a preserved local file. Neither the
+ *  primary batched checkout nor the per-path fallback may write over the
+ *  preserved file or silently skip the shipped directory: apply aborts with
+ *  the honest refusal, and the writable entry the fallback loop checked out
+ *  before reaching the collision is restored.
+ *
+ *  Poison: the target gains two manifest entries - zz-writable/ (a plain new
+ *  directory, which sorts first) and collib (a directory in the target tree).
+ *  The install holds collib as a locally added, committed FILE, so the
+ *  update's preserved list names it exactly and the entry collides.
+ */
+function fallbackCollisionRefusalLeg() {
+  const baseSha = git(ROOT, 'rev-parse', 'HEAD');
+  const oldTag = newestAncestorTag(baseSha);
+  if (!oldTag) { console.error('No release tag is an ancestor of HEAD - fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
+
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-collision-')));
+  const failures = [];
+  const ok = (cond, msg) => { console.log(`  ${cond ? 'PASS' : 'FAIL'} [fallback-collision-refusal] ${msg}`); if (!cond) failures.push(msg); };
+  const commit = (cwd, msg) => git(cwd, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', msg);
+  const USER_FILE = 'cv.md';
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+    const wt = join(work, 'poison-wt');
+    git(mirror, 'worktree', 'add', wt, 'main');
+    mkdirSync(join(wt, 'zz-writable'), { recursive: true });
+    writeFileSync(join(wt, 'zz-writable', 'new.md'), '# UPSTREAM v2 writable entry\n');
+    mkdirSync(join(wt, 'collib'), { recursive: true });
+    writeFileSync(join(wt, 'collib', 'a.md'), '# UPSTREAM v2 collib directory content\n');
+    // injectManifestEntry() inserts at the top of SYSTEM_PATHS, so the LAST
+    // injection sorts first: the writable entry precedes the colliding one.
+    injectManifestEntry(wt, 'collib');
+    const manifestFile = injectManifestEntry(wt, 'zz-writable/');
+    git(wt, 'add', '-f', 'zz-writable', 'collib', manifestFile);
+    commit(wt, 'poison: a writable entry, then an entry that is a directory over a local file');
+    const targetSha = git(wt, 'rev-parse', 'HEAD');
+    git(mirror, 'worktree', 'remove', '--force', wt);
+    git(mirror, 'update-ref', 'refs/heads/main', targetSha);
+
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    // The install holds collib as a locally added, committed FILE - exactly
+    // preserved once the update claims the entry.
+    writeFileSync(join(install, 'collib'), '# my local collib file\n');
+    writeFileSync(join(install, USER_FILE), '# my CV - no upstream counterpart\n');
+    git(install, 'add', '-f', 'collib');
+    commit(install, 'fork: keep a local collib file');
+    const collibBefore = sha256(join(install, 'collib'));
+    const cvBefore = sha256(join(install, USER_FILE));
+
+    let exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000, env: hermeticEnv(cfg),
+      });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+
+    ok(exitCode !== 0, `apply aborts on the collision instead of completing (exit ${exitCode})`);
+    ok(output.includes('Cannot check out collib'), 'apply reports the collision refusal honestly');
+    ok(output.includes('Update stopped while checking out collib'), 'apply names the path it stopped on (collib)');
+    ok(existsSync(join(install, 'collib')) && sha256(join(install, 'collib')) === collibBefore, 'the preserved local file is byte-identical: collib');
+    ok(!existsSync(join(install, 'collib', 'a.md')), 'the shipped directory content never landed over the local file');
+    ok(!existsSync(join(install, 'zz-writable', 'new.md')), 'the writable entry checked out before the collision is restored');
+    const staged = git(install, 'status', '--porcelain', '--', 'zz-writable', 'collib');
+    ok(staged === '', 'no staged or dirty entries remain for the writable entry or the collision');
+    ok(existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === cvBefore, `user layer is byte-identical: ${USER_FILE}`);
+
+    if (failures.length && output) {
+      console.log('  --- apply output tail [fallback-collision-refusal] ---');
+      console.log(output.split('\n').slice(-20).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+
+  console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
+  process.exit(failures.length ? 1 : 0);
+}
+
 if (isMainModule(import.meta.url)) {
   const mode = process.argv[2];
   if (mode === '--pr-gate') prGate();
@@ -1188,5 +1273,6 @@ if (isMainModule(import.meta.url)) {
   else if (mode === '--local-edit-canary') localEditCanary();
   else if (mode === '--fallback-batch-failure') fallbackBatchFailureLeg();
   else if (mode === '--fallback-persistent-rewrite-blocker') fallbackPersistentRewriteBlockerLeg();
-  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal | --failed-install | --local-edit | --local-edit-canary | --fallback-batch-failure | --fallback-persistent-rewrite-blocker'); process.exit(1); }
+  else if (mode === '--fallback-collision-refusal') fallbackCollisionRefusalLeg();
+  else { console.error('Usage: node upgrade-tests.mjs --pr-gate | --canary | --local-paths | --user-layer-refusal | --failed-install | --local-edit | --local-edit-canary | --fallback-batch-failure | --fallback-persistent-rewrite-blocker | --fallback-collision-refusal'); process.exit(1); }
 }
