@@ -54,6 +54,20 @@ export function checkboxSelections(value, options) {
 }
 
 /**
+ * Whether this box is one of the requested options.
+ * A 160-character cut can leave a trailing space on the live option.
+ * The selections are already tidied.
+ *
+ * @param {string[]} wanted
+ * @param {string} option
+ * @returns {boolean}
+ */
+export function checkboxOptionWanted(wanted, option) {
+  const shown = String(option ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return (Array.isArray(wanted) ? wanted : []).some((part) => String(part).toLowerCase() === shown);
+}
+
+/**
  * Whether the checkbox ended in the requested state.
  *
  * The first setChecked attempt resolves only when Playwright saw that state.

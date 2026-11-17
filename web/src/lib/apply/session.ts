@@ -8,7 +8,7 @@ import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
-import { checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
+import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
 import { cvUploadFile } from "./upload-name.mjs";
 import { resolveCli } from "../clis";
@@ -618,7 +618,7 @@ export async function fillSession(
           // consent label was replaced by the control's value. The group title
           // does not make the whole group consent. Leave the box untouched.
           if (consent(opt) || (await box.getAttribute("data-co-consent")) === "1") continue;
-          const want = wanted.some((part) => part.toLowerCase() === opt.toLowerCase());
+          const want = checkboxOptionWanted(wanted, opt);
           const did = await confirmCheckbox(
             (state, opts) => box.setChecked(state, opts),
             (opts) => box.isChecked(opts),

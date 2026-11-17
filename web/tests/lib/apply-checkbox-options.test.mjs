@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkboxSelections, confirmCheckbox } from "../../src/lib/apply/checkbox-options.mjs";
+import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "../../src/lib/apply/checkbox-options.mjs";
 
 const teams = ["Sales, Marketing", "Engineering"];
 
@@ -32,6 +32,16 @@ test("an unknown piece is kept so the fill can report it", () => {
 test("an empty answer selects nothing", () => {
   assert.deepEqual(checkboxSelections("  ", teams), []);
   assert.deepEqual(checkboxSelections("", []), []);
+});
+
+test("a label cut on a space still matches the tidied option", () => {
+  const cut = "word ".repeat(32);
+  assert.equal(cut.length, 160);
+  assert.equal(cut.endsWith(" "), true);
+  const wanted = checkboxSelections(cut.trim(), [cut, "Dental"]);
+  assert.deepEqual(wanted, [cut.trim()]);
+  assert.equal(checkboxOptionWanted(wanted, cut), true);
+  assert.equal(checkboxOptionWanted(wanted, "Dental"), false);
 });
 
 test("a checkbox read that fails is not a successful uncheck", async () => {
