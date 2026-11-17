@@ -117,14 +117,51 @@ try {
     fail(`row 2 url = ${JSON.stringify(jobs[2]?.url)}`);
   }
 
-  // Empty input safety
-  if (parseSmartRecruitersResponse({}, 'X').length === 0) pass('empty {} input → empty result');
-  else fail('empty {} input should yield empty result');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty page. Any other
+  // envelope throws, naming the keys (or the type) it got, so a changed API or
+  // an error served with a 200 cannot read as "no open roles".
+  const emptyPage = parseSmartRecruitersResponse({ offset: 0, limit: 100, totalFound: 0, content: [] }, 'X');
+  if (Array.isArray(emptyPage) && emptyPage.length === 0) pass('parseSmartRecruitersResponse returns [] for { content: [] }');
+  else fail(`{ content: [] } → ${JSON.stringify(emptyPage)}`);
 
-  if (parseSmartRecruitersResponse({ content: 'not an array' }, 'X').length === 0) {
-    pass('non-array content → empty result (no crash)');
-  } else {
-    fail('non-array content should yield empty result');
+  const brokenCases = [
+    [{}, '[]'],
+    [{ error: 'rate limited' }, '[error]'],
+    [{ content: null }, '[content]'],
+    [{ content: 'not an array' }, '[content]'],
+    ['oops', '[string]'],
+    [null, '[null]'],
+  ];
+  let brokenOk = true;
+  for (const [body, got] of brokenCases) {
+    let out;
+    let err = null;
+    try { out = parseSmartRecruitersResponse(body, 'Acme'); } catch (e) { err = e; }
+    const msg = String(err?.message || '');
+    if (!err || !msg.startsWith('smartrecruiters: unexpected response for Acme') || !msg.includes(`got: ${got}`)) {
+      brokenOk = false;
+      fail(`parseSmartRecruitersResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+      break;
+    }
+  }
+  if (brokenOk) pass('parseSmartRecruitersResponse throws, naming what it got, for a body that is not { content: [...] }');
+
+  // Through fetch(): a first page that is not a board fails the run instead of
+  // returning an empty board, and so does a later page.
+  for (const [label, firstPage] of [['first', {}], ['later', { content: Array.from({ length: 100 }, (_, i) => ({ id: `F${i}`, name: `Role ${i}` })) }]]) {
+    let err = null;
+    try {
+      await sr.fetch(
+        { name: 'BrokenCo', careers_url: 'https://careers.smartrecruiters.com/broken' },
+        { transport: 'http', sleep: async () => {}, fetchJson: async (url) => (new URL(url).searchParams.get('offset') === '0' ? firstPage : { error: 'upstream' }) },
+      );
+    } catch (e) { err = e; }
+    if (/^smartrecruiters: unexpected response for BrokenCo/.test(String(err?.message))) {
+      pass(`smartrecruiters.fetch() throws when the ${label} page is not a board`);
+    } else {
+      fail(`smartrecruiters.fetch() with a broken ${label} page: ${err ? err.message : 'no throw'}`);
+    }
   }
 
   // careers_url with non-string value → detect() returns null without crashing

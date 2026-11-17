@@ -353,6 +353,25 @@ try {
   } else {
     fail(`aa.fetch() partial-success threw=${partialThrew}, result=${JSON.stringify(partial)}`);
   }
+  // ...but the failed keyword was never read, so the result says the board is
+  // partial: scan.mjs logs it partial instead of reachable (as #6820 did for
+  // platsbanken).
+  if (partial?.truncated?.reason === 'fetch-error' && partial.truncated.fetched === 0) {
+    pass('aa.fetch() marks the board partial (fetch-error) when one keyword fails and another answers');
+  } else {
+    fail(`aa.fetch() partial-success truncated = ${JSON.stringify(partial?.truncated)}`);
+  }
+
+  // Every keyword answering is a complete read: no mark.
+  const bothAnswer = await aa.fetch(
+    { name: 'AA', arbeitsagentur: { keywords: ['OK', 'ALSO'] } },
+    { fetchJson: async (url) => page(v6(new URL(url).searchParams.get('was'), 'ML Engineer', 'Berlin')) },
+  );
+  if (bothAnswer.length === 2 && bothAnswer.truncated === undefined) {
+    pass('aa.fetch() leaves a board unmarked when every keyword answers');
+  } else {
+    fail(`aa.fetch() all-answer result = ${bothAnswer.length} jobs, truncated=${JSON.stringify(bothAnswer.truncated)}`);
+  }
 
   // fetch() — Pass A succeeds with jobs, optional Pass B fails → Pass A jobs kept.
   const passBFail = await aa.fetch(
@@ -367,6 +386,11 @@ try {
     pass('aa.fetch() preserves primary (Pass A) results when the remote pass (Pass B) fails');
   } else {
     fail(`aa.fetch() Pass B failure dropped primary: ${JSON.stringify(passBFail)}`);
+  }
+  if (passBFail.truncated?.reason === 'fetch-error' && passBFail.truncated.fetched === 1) {
+    pass('aa.fetch() marks the board partial when the remote pass (Pass B) fails');
+  } else {
+    fail(`aa.fetch() Pass B failure truncated = ${JSON.stringify(passBFail.truncated)}`);
   }
 
   // angebotsart: default ARBEIT only; a list queries each type and merges.

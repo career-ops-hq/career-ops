@@ -107,8 +107,10 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
   if (res.changelog === '') pass('the git path carries an empty changelog (modes/update.md renders the releases link for it)');
   else fail(`the git path carried changelog ${JSON.stringify(res.changelog)}`);
 
+  // Same version, but curl never read main's commit either, so drift can't be
+  // ruled out: not up-to-date (#7095; section 10 below).
   const current = await run(MAIN, { curl: fakeCurl(), git: fakeGit({ ok: true, version: '1.33.0' }) });
-  if (current.status === 'up-to-date' && current.remote === '1.33.0') pass('curl blocked + git reachable + same version → up-to-date');
+  if (current.status !== 'up-to-date' && current.status !== 'offline' && current.remote === '1.33.0') pass('curl blocked + git reachable + same version → not up-to-date (main\'s commit unknown) and not offline');
   else fail(`curl blocked + git at the same version → ${JSON.stringify(current)}`);
 }
 
@@ -231,5 +233,23 @@ const run = (argv, { curl, git, local = '1.33.0' }) =>
     pass(`gitRemoteVersion() surfaces git's own failure reason (detail: ${JSON.stringify(String(res.detail).slice(0, 60))})`);
   } else {
     fail(`gitRemoteVersion() against a .invalid host → ${JSON.stringify(res)}`);
+  }
+}
+
+// ── 10. --channel main: a failed main-ref lookup is not "up to date" (#7095) ──
+// VERSION and the release can answer while the refs/heads/main lookup fails
+// (an API rate limit, say). Without main's commit the drift check never ran,
+// and a same-version install was told it was current while main carried
+// system changes it lacked. Drift that cannot be ruled out is reported.
+{
+  const curl = fakeCurl({
+    '/main/VERSION': '1.33.0 # x-release-please-version\n',
+    '/releases/latest': JSON.stringify({ tag_name: 'career-ops-v1.33.0', body: '' }),
+  }, 'HTTP 403');
+  const res = await run(MAIN, { curl, git: fakeGit({ ok: true, version: '1.33.0' }) });
+  if (res.status !== 'up-to-date' && res.remote === '1.33.0' && !res.remote_commit) {
+    pass(`--channel main: main-ref lookup failing at the same version → ${res.status}, not up-to-date`);
+  } else {
+    fail(`--channel main, main-ref lookup failed at the same version → ${JSON.stringify(res)}`);
   }
 }

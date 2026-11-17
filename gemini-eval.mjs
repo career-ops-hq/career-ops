@@ -503,6 +503,26 @@ LEGITIMACY: <High Confidence | Proceed with Caution | Suspicious>
 if (!contextOnly) {
 
 // ---------------------------------------------------------------------------
+// Ending a run after a request
+// ---------------------------------------------------------------------------
+// Once the request has been made, the run ends by setting the exit code and
+// letting the event loop drain, not with process.exit(). On Windows, some Node
+// versions can abort in process.exit() after a request (nodejs/node#56645), and
+// the run then ends with exit code 3221226505 instead of 1; ollama-eval.mjs has
+// the versions and the measurement (#7096).
+//
+// This is top-level code, so the caller awaits the promise returned here. It
+// never settles, so nothing after the await runs, and Node exits with
+// process.exitCode once nothing else is pending: an exit code that is already
+// set wins over the unsettled-await code 13. The unref'd timer still ends a run
+// that something holds open, without holding the process open itself.
+function exitWhenDrained(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5_000).unref();
+  return new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Call Gemini API
 // ---------------------------------------------------------------------------
 console.log(`🤖  Calling Gemini (${modelName})... this may take 30-60 seconds.\n`);
@@ -553,7 +573,7 @@ try {
   } else if (sanitizedMsg.includes('quota') || sanitizedMsg.includes('rate')) {
     console.error('    You may have hit the free-tier rate limit. Wait 60s and retry.');
   }
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 evaluationText = normalizeEvaluationText(evaluationText, jdText);
@@ -563,7 +583,7 @@ try {
 } catch (err) {
   console.error('❌  Gemini output failed validation:', err.message);
   console.error('    No report was saved. Retry, lower temperature, or use the Claude pipeline for this JD.');
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // ---------------------------------------------------------------------------

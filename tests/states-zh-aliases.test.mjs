@@ -95,10 +95,10 @@ ok('merge-tracker writes a 面试 addition as Interview, not Evaluated', () => {
   assert.doesNotMatch(output, /Non-canonical status/);
 });
 
-ok('merge-tracker still warns about a status no state lists', () => {
+ok('merge-tracker still warns about a status no state lists, and leaves it pending', () => {
   const { output, byNum } = mergeStatuses(['待定']);
-  assert.deepStrictEqual(byNum, { 1: 'Evaluated' });
-  assert.match(output, /Non-canonical status "待定"/);
+  assert.deepStrictEqual(byNum, {});
+  assert.match(output, /status "待定" is not a tracker state/);
 });
 
 /** Run a tracker script against a data root holding one tracker. */

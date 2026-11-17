@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJsonWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -211,6 +212,9 @@ export default {
         console.error(
           `⚠️  a16z-speedrun-talent: ${name} truncated at max_pages=${maxPages} (${out.length} of ${Number.isInteger(json.total) ? json.total : 'many'} jobs) — raise max_pages on this entry or narrow with q: for more`,
         );
+        // The same cut marks the result, so scan.mjs logs the board partial
+        // instead of reachable (lib/board-truncation.mjs).
+        markTruncated(out, 'page-cap', { fetched: out.length });
       }
     }
     return out;

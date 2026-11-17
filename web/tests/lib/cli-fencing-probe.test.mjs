@@ -19,8 +19,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { codexFencingSupported, helpSatisfiesFencing } from "../../src/lib/cli-fencing-probe.mjs";
-import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS } from "../../src/lib/cli-fencing.mjs";
+import {
+  assertPiVersionSupported,
+  codexFencingSupported,
+  helpSatisfiesFencing,
+  piVersionSatisfiesFencing,
+} from "../../src/lib/cli-fencing-probe.mjs";
+import { CODEX_REQUIRED_EXEC_FLAGS, CODEX_REQUIRED_GLOBAL_FLAGS, PI_MIN_VERSION } from "../../src/lib/cli-fencing.mjs";
 
 const ROUTE_EXEC_FLAGS = ["--ephemeral", "--output-last-message"];
 
@@ -376,4 +381,133 @@ test("a binary that says nothing is retried rather than remembered", needsSpawna
   // Then it fails closed both times, and the second call actually re-read the
   // binary instead of being served from the cache.
   assert.ok(spawnCount() > afterFirst, `expected a re-read, spawns stayed at ${afterFirst}`);
+});
+
+test("the Pi version floor is 0.79.1", () => {
+  // Given 0.79.0 skips AGENTS.md in an untrusted folder, and anything older loads
+  // project extensions before it rejects --no-approve
+  // Then the floor is the first release with neither problem.
+  assert.equal(PI_MIN_VERSION, "0.79.1");
+});
+
+test("a Pi version is compared by number and fails closed", () => {
+  // Given what `pi --version` can print, including output with no version in it
+  const cases = [
+    ["0.79.1\n", true],
+    ["1.5.2\n", true],
+    ["0.80.0", true],
+    ["0.100.0", true],
+    ["v1.0.4", true],
+    ["0.79.0\n", false],
+    ["0.78.9", false],
+    ["0.9.99", false],
+    ["", false],
+    ["pi: command not found", false],
+    ["1.5", false],
+  ];
+  for (const [output, supported] of cases) {
+    // Then only a parsed version at or above the floor passes. 0.100.0 is newer
+    // than 0.79.1 even though "0.100.0" < "0.79.1" as strings.
+    assert.equal(piVersionSatisfiesFencing(output).supported, supported, JSON.stringify(output));
+  }
+  assert.deepEqual(piVersionSatisfiesFencing("pi 1.5.2 (abc)\n"), { version: "1.5.2", supported: true });
+  assert.deepEqual(piVersionSatisfiesFencing("no version here"), { version: null, supported: false });
+});
+
+/**
+ * Write an executable stand-in for `pi` that prints whatever version file says,
+ * and counts its `--version` runs.
+ */
+function stubPi(t, version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-version-probe-"));
+  const bin = path.join(dir, "pi-stub.mjs");
+  const versionFile = path.join(dir, "version.txt");
+  const callLog = path.join(dir, "calls.log");
+  fs.writeFileSync(versionFile, version);
+  fs.writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+fs.appendFileSync(${JSON.stringify(callLog)}, process.argv.slice(2).join(" ") + "\\n");
+process.stdout.write(fs.readFileSync(${JSON.stringify(versionFile)}, "utf8"));
+`,
+  );
+  fs.chmodSync(bin, 0o755);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const spawnCount = () => {
+    try {
+      return fs.readFileSync(callLog, "utf8").trim().split("\n").filter(Boolean).length;
+    } catch {
+      return 0;
+    }
+  };
+  return { bin, versionFile, spawnCount };
+}
+
+test("an old Pi is refused, naming its version and the floor", needsSpawnableStub, (t) => {
+  // Given a Pi binary that reports 0.79.0
+  const { bin } = stubPi(t, "0.79.0\n");
+
+  // Then the check throws a message the user can act on
+  assert.throws(() => assertPiVersionSupported(bin), (error) => {
+    assert.match(error.message, /Pi 0\.79\.0 is too old/);
+    assert.ok(error.message.includes(PI_MIN_VERSION), "the message must name the floor");
+    return true;
+  });
+});
+
+test("a Pi whose version cannot be read is refused", needsSpawnableStub, (t) => {
+  // Given a binary that prints no version, and a path that does not exist
+  const { bin, spawnCount } = stubPi(t, "something went wrong\n");
+
+  // Then both fail closed
+  assert.throws(() => assertPiVersionSupported(bin), /Could not read the version of Pi/);
+  assert.throws(() => assertPiVersionSupported(path.join(os.tmpdir(), "no-such-pi-binary")), /Could not read/);
+  // And an unreadable answer is not remembered: the next run asks again
+  assert.throws(() => assertPiVersionSupported(bin), /Could not read/);
+  assert.equal(spawnCount(), 2, "an unreadable version must be re-read, not cached");
+});
+
+test("a Pi probe that fails is refused even when it prints a version", needsSpawnableStub, (t) => {
+  // Given a launch that crashes: Node prints its own version to stderr and the
+  // process exits nonzero, so the output holds a version-shaped string that is
+  // not Pi's
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-version-crash-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const crashing = path.join(dir, "pi-crash.mjs");
+  fs.writeFileSync(crashing, '#!/usr/bin/env node\nprocess.stderr.write("Node.js v22.13.0\\n");\nprocess.exit(1);\n');
+  fs.chmodSync(crashing, 0o755);
+  // And a failing launch that prints a current-looking version on stdout
+  const failing = path.join(dir, "pi-fail.mjs");
+  fs.writeFileSync(failing, '#!/usr/bin/env node\nprocess.stdout.write("1.5.2\\n");\nprocess.exit(2);\n');
+  fs.chmodSync(failing, 0o755);
+
+  // Then neither passes: only a clean exit's stdout is read as the version
+  for (const bin of [crashing, failing]) {
+    assert.throws(() => assertPiVersionSupported(bin), /Could not read the version of Pi/, path.basename(bin));
+  }
+});
+
+test("a supported Pi is asked once, until the binary changes", needsSpawnableStub, (t) => {
+  // Given a current Pi
+  const { bin, versionFile, spawnCount } = stubPi(t, "1.5.2\n");
+
+  // When several workers start
+  assertPiVersionSupported(bin);
+  assertPiVersionSupported(bin);
+  assertPiVersionSupported(bin);
+
+  // Then the version is read once and cached
+  assert.equal(spawnCount(), 1);
+
+  // When the binary is replaced by an older one (rewriting it changes its identity)
+  fs.writeFileSync(versionFile, "0.78.0\n");
+  const source = fs.readFileSync(bin);
+  fs.rmSync(bin);
+  fs.writeFileSync(bin, source);
+  fs.chmodSync(bin, 0o755);
+
+  // Then the cache does not vouch for it: Pi is asked again, and refused
+  assert.throws(() => assertPiVersionSupported(bin), /Pi 0\.78\.0 is too old/);
+  assert.equal(spawnCount(), 2);
 });

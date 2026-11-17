@@ -104,6 +104,35 @@ export function consumeReexecMarker() {
 
 const BACKUP_BRANCH_RE = /^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/;
 
+/**
+ * Claim `.update-lock` atomically. `flag: 'wx'` is O_EXCL, so the kernel picks
+ * one winner when two `apply` runs start together; a check-then-write let both
+ * observe no lock and both proceed to mutate the same checkout.
+ * @param {string} root
+ * @returns {boolean} true when this run now holds the lock
+ */
+export function claimUpdateLock(root) {
+  try {
+    writeFileSync(join(root, '.update-lock'), new Date().toISOString(), { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Release `.update-lock`, tolerating one that is already gone.
+ * @param {string} root
+ */
+export function releaseUpdateLock(root) {
+  try {
+    unlinkSync(join(root, '.update-lock'));
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
+  }
+}
+
 function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
@@ -4159,10 +4188,12 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // VERSION is release metadata, not a complete description of the system
   // tree. Compare the installed commit with main as well, so same-version
   // manifest/file drift is visible (#2630). A failed commit lookup is
-  // deliberately conservative: version checks still work offline/behind a
-  // restricted git transport. The main-ref lookup runs alongside the version
-  // sources, not after them: sequentially, a black-holed network paid the curl
-  // budget twice before the git fallback even started.
+  // deliberately conservative: drift can't be ruled out, so it is reported
+  // rather than up-to-date (#7095), while the version checks still work
+  // offline/behind a restricted git transport. The main-ref lookup runs
+  // alongside the version sources, not after them: sequentially, a
+  // black-holed network paid the curl budget twice before the git fallback
+  // even started.
   const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
     runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
     runCurlGet(RELEASES_API, [
@@ -4251,7 +4282,11 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   // conservative (drift reported), matching the failed-commit-lookup policy
   // at the top of this function.
   let systemTreeDrift = false;
-  if (localCommit && remoteCommit && localCommit !== remoteCommit) {
+  if (localCommit && !remoteCommit) {
+    // main's commit is unknown (rate limit, filtered API host): nothing to
+    // compare against, so report drift instead of claiming up-to-date (#7095).
+    systemTreeDrift = true;
+  } else if (localCommit && localCommit !== remoteCommit) {
     try {
       // Same explicit refspec as apply() on this channel: `main` alone lets git
       // auto-follow a tag into FETCH_HEAD, and the diff below reads FETCH_HEAD
@@ -4311,6 +4346,17 @@ async function check() {
   // update-available would only lead the agent to offer an update that fails.
   if (outsideGitCheckout()) {
     console.log(JSON.stringify({ status: 'not-a-git-checkout', local: localVersion() }));
+    return;
+  }
+  // A checkout git cannot read: git missing, or refusing the directory (a
+  // container running git as a user other than the checkout's owner gets
+  // "detected dubious ownership"). Both channels would answer without the
+  // local commit, up-to-date included, while apply() fails here.
+  try {
+    gitQuiet('rev-parse', 'HEAD');
+  } catch (err) {
+    const detail = String(err.stderr || '').trim().split(/\r?\n/)[0] || err.message;
+    console.log(JSON.stringify({ status: 'checkout-unreadable', local: localVersion(), detail }));
     return;
   }
 
@@ -4799,16 +4845,10 @@ async function apply() {
     return;
   }
 
-  // Check for lock
-  const lockFile = join(ROOT, '.update-lock');
-  if (existsSync(lockFile) && !isReexec) {
+  // Claim the lock atomically: two concurrent applies must not both win.
+  if (!isReexec && !claimUpdateLock(ROOT)) {
     console.error('Update already in progress (.update-lock exists). If stuck, delete it manually.');
     process.exit(1);
-  }
-
-  // Create lock
-  if (!isReexec) {
-    writeFileSync(lockFile, new Date().toISOString());
   }
 
   try {
@@ -5657,7 +5697,7 @@ async function apply() {
 
   } finally {
     // Remove lock
-    if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);
+    if (!isReexec) releaseUpdateLock(ROOT);
   }
 }
 
