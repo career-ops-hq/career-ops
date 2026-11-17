@@ -2964,6 +2964,29 @@ export function fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles) {
 }
 
 /**
+ * The fallback's literal checkout for one manifest entry, in argvBatches()
+ * runs under the same ARGV_BUDGET rule checkoutSystemPathsBatched() uses: a
+ * directory entry with preserved files under it can expand to thousands of
+ * filenames, and one git call carrying all of them outgrows a Windows
+ * command line, aborting an update that batching would have completed. The
+ * fixed arguments (including the pinned target and the '--' separator)
+ * count against each batch's budget. Throws on the first failed batch; the
+ * caller's per-path restore then covers whatever earlier batches wrote.
+ *
+ * @param {string[]} fallbackSpecs - Output of fallbackCheckoutSpecs() for the entry.
+ * @param {string} targetCommit
+ * @param {{git?: Function}} [ctx] - `git` is a test seam.
+ */
+export function fallbackCheckoutBatched(fallbackSpecs, targetCommit, ctx = {}) {
+  const runGitQuiet = ctx.git || gitQuiet;
+  const fixedArgs = ['--literal-pathspecs', 'checkout', targetCommit, '--'];
+  const fixed = fixedArgs.reduce((total, arg) => total + arg.length + 1, 0);
+  for (const batch of argvBatches(fallbackSpecs, { budget: ARGV_BUDGET - fixed })) {
+    runGitQuiet(...fixedArgs, ...batch);
+  }
+}
+
+/**
  * apply()'s batched system checkout: every path planSystemCheckout() says needs
  * one, in argvBatches() runs so no single git call outgrows a Windows command
  * line, the fixed git arguments counted in the budget. A directory with
@@ -5332,7 +5355,9 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('--literal-pathspecs', 'checkout', targetCommit, '--', ...fallbackSpecs);
+        fallbackCheckoutBatched(fallbackSpecs, targetCommit);
+        // Only after every batch landed: the catch restores this path on any
+        // failed run, including one batch of several.
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
