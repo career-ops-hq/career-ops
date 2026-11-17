@@ -21,7 +21,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo, captureConsoleErrors, rmSync, ROOT } from './helpers.mjs';
-import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles } from '../update-system.mjs';
+import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign } from '../update-system.mjs';
 
 function write(dir, rel, text) {
   mkdirSync(join(dir, rel, '..'), { recursive: true });
@@ -202,6 +202,41 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
     } else {
       fail(`self-reexec catch: backups recorded ${recorded.test(body)}, put back after the HEAD restore ${putBack.test(body)}`);
     }
+  }
+}
+
+// ── 5b. the per-path fallback refuses a file/directory collision before the
+//    exact-preserve skip, inside the try whose catch restores and rethrows
+//    (#7250 review): earlier paths the loop already wrote — or a partial write
+//    the failed primary left — must not survive the refusal, and the refusal
+//    must reach the user as the honest error it is.
+{
+  const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const start = source.indexOf('async function apply() {');
+  const end = source.indexOf('\nfunction rollback(', start);
+  const body = start === -1 || end === -1 ? '' : source.slice(start, end)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n');
+  const refusalFirst = /let preservedState;\s*try \{\s*const collision = preservedCheckoutCollision\(path, preservedPaths, upstreamFiles\);\s*if \(collision\) throw new Error\(`Cannot check out \$\{path\}: \$\{collision\}`\);\s*preservedState = pathFullyPreserved\(/;
+  if (!body) {
+    fail('could not locate apply() in update-system.mjs — update this test');
+  } else if (refusalFirst.test(body)) {
+    pass('the fallback loop refuses a file/directory collision before the exact-preserve skip, inside the restore path');
+  } else {
+    fail('the fallback loop does not refuse a collision before the exact-preserve skip inside the restore path');
+  }
+  // The refusal can never be swallowed as a benign skip: its message carries
+  // no pathspec cancel-out wording, so checkoutErrorIsBenign rejects it under
+  // every combination of the loop's skip evidence.
+  const refusal = new Error('Cannot check out lib: the target ships lib as a directory but a preserved local file stands in its place');
+  const benign = (opts) => checkoutErrorIsBenign(refusal, opts);
+  if (!benign({ absentUpstream: false, preservedState: false })
+    && !benign({ absentUpstream: true, preservedState: false })
+    && !benign({ absentUpstream: false, preservedState: 'unknown' })
+    && !benign({ absentUpstream: true, preservedState: 'unknown' })) {
+    pass('the collision refusal is never a benign skip, whatever the skip evidence says');
+  } else {
+    fail('the collision refusal can be swallowed as a benign skip');
   }
 }
 
