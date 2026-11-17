@@ -286,6 +286,26 @@ function buildTokenLimit(limit, host) {
 }
 
 // ---------------------------------------------------------------------------
+// Ending a run after a request
+// ---------------------------------------------------------------------------
+// Once the request has been made, the run ends by setting the exit code and
+// letting the event loop drain, not with process.exit(). On Windows, some Node
+// versions can abort in process.exit() after a request (nodejs/node#56645), and
+// the run then ends with exit code 3221226505 instead of 1; ollama-eval.mjs has
+// the versions and the measurement (#7096).
+//
+// This is top-level code, so the caller awaits the promise returned here. It
+// never settles, so nothing after the await runs, and Node exits with
+// process.exitCode once nothing else is pending: an exit code that is already
+// set wins over the unsettled-await code 13. The unref'd timer still ends a run
+// that something holds open, without holding the process open itself.
+function exitWhenDrained(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5_000).unref();
+  return new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
 // Digits only (parseInt read "300s" as a 300 ms timeout) and at most 2^31-1 ms:
@@ -350,7 +370,7 @@ try {
       console.error(`    → Not enough credit at ${endpointHost} for the prompt plus the ${maxTokens}-token output cap.`);
       console.error(`      Top up, or lower CAREER_OPS_MAX_TOKENS.`);
     }
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 
   const data = await res.json();
@@ -363,7 +383,7 @@ try {
   if (finishReason === 'length') {
     console.error(`❌  The reply stopped at the ${maxTokens}-token output cap, so the tailored CV is cut short. Nothing was saved.`);
     console.error(`    Raise CAREER_OPS_MAX_TOKENS to allow a longer reply.`);
-    process.exit(1);
+    await exitWhenDrained(1);
   }
   // Any other stated reason than "stop" is a reply that did not finish: a
   // content filter or a provider error mid-generation leaves a partial CV,
@@ -371,15 +391,15 @@ try {
   // the same replies (#3949). A server that omits finish_reason is not refused.
   if (finishReason != null && finishReason !== 'stop') {
     console.error(`❌  The reply ended with finish_reason "${String(finishReason).slice(0, 40)}", not "stop", so the tailored CV may be incomplete. Nothing was saved.`);
-    process.exit(1);
+    await exitWhenDrained(1);
   }
   if (!tailoredHtml) {
     console.error('❌  The endpoint returned an empty response.');
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 } catch (err) {
   console.error(`❌  API call failed: ${err.message}`);
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // Clean up markdown block wrapping if the LLM adds it despite instructions
@@ -434,5 +454,5 @@ try {
 
 } catch (err) {
   console.warn(`⚠️   Could not save HTML: ${err.message}`);
-  process.exit(1);
+  await exitWhenDrained(1);
 }
