@@ -170,3 +170,4 @@ try {
 
 } catch (e) {
   fail(`landingjobs provider tests crashed: ${e.message}`);
+}
