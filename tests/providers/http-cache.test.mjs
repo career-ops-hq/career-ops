@@ -28,6 +28,12 @@ const server = createServer((req, res) => {
       res.end('x'.repeat(50));
       return;
     }
+    if (req.url.startsWith('/public/staffing/v1/job-requisitions')) {
+      // One list URL for every tenant; the `orgoid` header picks the board.
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ tenant: req.headers.orgoid || '' }));
+      return;
+    }
     if (req.headers['if-none-match'] === '"v1"') {
       res.writeHead(304, { etag: '"v1"' });
       res.end();
@@ -131,6 +137,26 @@ const board = `${origin}/v1/boards/northwind/jobs`;
   const got = hits.slice(before).filter((hit) => hit.url === '/postings/keyed');
   if (got.length === 2) pass('two API keys for one URL are two saved responses');
   else fail(`API keys shared a cache entry (${got.length} requests)`);
+}
+
+{
+  // adp-myjobs.mjs reads every tenant from one list URL and names the tenant
+  // only in the `orgoid` header. A key without that header answered the second
+  // and third board of a scan with the first board's postings.
+  const url = `${origin}/public/staffing/v1/job-requisitions?rb=CareerSite&$top=200&$skip=0`;
+  const read = (orgoid) => via(() => cache(() => fetchJson(url, {
+    headers: { accept: 'application/json', 'accept-language': 'en-US', orgoid },
+  })));
+  const before = hits.length;
+  const first = await read('0F18AC8F6B800272');
+  const second = await read('1A29BD9F7C911383');
+  const firstAgain = await read('0F18AC8F6B800272');
+  const got = hits.length - before;
+  if (got === 2 && first.tenant === '0F18AC8F6B800272' && second.tenant === '1A29BD9F7C911383' && firstAgain.tenant === '0F18AC8F6B800272') {
+    pass('two tenants named only in a request header are two saved responses');
+  } else {
+    fail(`a tenant header shared a cache entry (${got} requests, tenants ${first.tenant} / ${second.tenant} / ${firstAgain.tenant})`);
+  }
 }
 
 {
