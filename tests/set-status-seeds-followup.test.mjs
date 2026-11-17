@@ -25,6 +25,14 @@ import { describeSpawn } from './helpers/describe-spawn.mjs';
 import { localToday } from '../lib/local-today.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const followups = (dir) => join(dir, 'data', 'follow-ups.md');
+// A developer shell may point these at real files. The child must not.
+const CLEARED = [
+  'CAREER_OPS_DATA_DIR', 'CAREER_OPS_PIPELINE', 'CAREER_OPS_SCAN_HISTORY',
+  'CAREER_OPS_PORTALS', 'CAREER_OPS_PROFILE', 'CAREER_OPS_REPORTS', 'CAREER_OPS_CV',
+  'CAREER_OPS_JDS', 'CAREER_OPS_ADDITIONS', 'CAREER_OPS_ACTIVITY_DIR',
+  'CAREER_OPS_FOLLOWUPS_LOCK',
+];
 
 function sandbox(status = 'Evaluated', notes = 'notes') {
   const dir = mkdtempSync(join(tmpdir(), 'career-ops-seed-'));
@@ -41,17 +49,22 @@ function sandbox(status = 'Evaluated', notes = 'notes') {
 }
 
 function setStatus(dir, args) {
+  const env = {
+    ...process.env,
+    CAREER_OPS_ROOT: dir,
+    CAREER_OPS_TRACKER: join(dir, 'data', 'applications.md'),
+    CAREER_OPS_FOLLOWUPS: followups(dir),
+  };
+  for (const name of CLEARED) env[name] = '';
   const r = spawnSync(process.execPath, [join(ROOT, 'set-status.mjs'), ...args], {
     cwd: ROOT,
     encoding: 'utf-8',
     timeout: 30_000,
-    env: { ...process.env, CAREER_OPS_TRACKER: join(dir, 'data', 'applications.md') },
+    env,
   });
   assert.equal(r.error, undefined, `spawn failed: ${r.error?.message}`);
   return { ...r, all: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
-
-const followups = (dir) => join(dir, 'data', 'follow-ups.md');
 const pinsFor = (dir, num) => {
   if (!existsSync(followups(dir))) return 0;
   return readFileSync(followups(dir), 'utf-8').split('\n').filter((l) => l.includes(`next #${num} `)).length;
@@ -82,6 +95,32 @@ test('it seeds beside the tracker it just wrote, not beside the repo', () => {
     assert.equal(existsSync(repoFollowups), existedBefore, 'seeding wrote into the repo instead of the configured root');
   } finally {
     rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('a pin stays in the sandbox when the parent follow-ups path and profile point elsewhere', () => {
+  const dir = sandbox();
+  const elsewhere = mkdtempSync(join(tmpdir(), 'career-ops-followups-elsewhere-'));
+  const outsidePins = join(elsewhere, 'follow-ups.md');
+  writeFileSync(join(elsewhere, 'profile.yml'), 'follow_ups:\n  enabled: false\n');
+  const saved = {
+    CAREER_OPS_FOLLOWUPS: process.env.CAREER_OPS_FOLLOWUPS,
+    CAREER_OPS_PROFILE: process.env.CAREER_OPS_PROFILE,
+  };
+  process.env.CAREER_OPS_FOLLOWUPS = outsidePins;
+  process.env.CAREER_OPS_PROFILE = join(elsewhere, 'profile.yml');
+  try {
+    const result = jsonOf(setStatus(dir, ['--row', '7', 'Applied', '--json']));
+    assert.equal(result.followupSeeded?.seeded, true, JSON.stringify(result.followupSeeded));
+    assert.equal(pinsFor(dir, 7), 1);
+    assert.equal(existsSync(outsidePins), false);
+  } finally {
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+    rmSync(elsewhere, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
