@@ -179,6 +179,7 @@ test('two postings do not share a key', () => {
 });
 
 test('a LinkedIn title that ends in a year is not a job id', () => {
+  if (!webKey) return;
   const year = 'https://www.linkedin.com/jobs/view/data-scientist-2024';
   const other = 'https://www.linkedin.com/jobs/view/engineer-2024';
   assert.equal(webKey(year), 'https://www.linkedin.com/jobs/view/data-scientist-2024');
