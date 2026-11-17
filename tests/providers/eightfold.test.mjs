@@ -558,9 +558,9 @@ try {
       ? pass('eightfold tags a max_pages-truncated board eightfoldTruncated, and not a complete one')
       : fail(`max_pages tag: capped=${capped.length}/${capped.eightfoldTruncated} roomy=${roomy.length}/${roomy.eightfoldTruncated}`);
 
-    // Under a probe, the stop is classified by whichever cap limited the walk:
-    // a ctx.maxPages below max_pages is the probe's own budget (no warning, no
-    // tag); one equal to or above it leaves max_pages as the limit.
+    // A probe never reports a max_pages cut (#7180), whichever cap limited the
+    // walk: a ctx.maxPages below, equal to or above max_pages warns nothing and
+    // tags nothing. With max_pages: 1 an equal probe is every probe.
     const errors = [];
     const origError = console.error;
     console.error = (...args) => { errors.push(args.join(' ')); };
@@ -579,8 +579,8 @@ try {
     below.jobs.length === 10 && below.jobs.eightfoldTruncated === undefined && below.warned === 0
       ? pass('eightfold neither tags nor warns when a probe below max_pages stops the walk')
       : fail(`probe below max_pages: ${below.jobs.length} jobs, tag=${below.jobs.eightfoldTruncated}, warnings=${below.warned}`);
-    [equal, above].every((r) => r.jobs.length === 20 && r.jobs.eightfoldTruncated === true && r.warned === 1)
-      ? pass('eightfold tags and warns when max_pages, not the probe, stops the walk')
+    [equal, above].every((r) => r.jobs.length === 20 && r.jobs.eightfoldTruncated === undefined && r.warned === 0)
+      ? pass('eightfold neither tags nor warns when a probe at or above max_pages ends at the cap')
       : fail(`probe at/above max_pages: equal=${equal.jobs.eightfoldTruncated}/${equal.warned} above=${above.jobs.eightfoldTruncated}/${above.warned}`);
   }
 
