@@ -12,7 +12,7 @@
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, linkSync, mkdtempSync, rmSync, readdirSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 
 const LOCK_VERSION = 1;
@@ -85,13 +85,21 @@ export function readLock(dataRoot, root = dataRoot) {
  * recorded consent. Every legacy entry is preserved verbatim through the same
  * write path writeLockEntry() uses. Best-effort by contract: a legacy lock
  * that does not parse is left where it is (readLock's fallback keeps serving
- * it) rather than replaced by an empty one.
+ * it) rather than replaced by an empty one. The publish is atomic and
+ * no-replace (complete temp inside an exclusively created same-dir
+ * directory, then a hard link): a failed write or publish never leaves a
+ * PARTIAL final behind - on failure either the final stays absent (legacy
+ * checks keep running) or it is a concurrent writer's complete lock, which
+ * always wins. Only the directory this call provably owns is ever removed.
  *
- * @param {Function} [writeFile] - injection point for tests (same pattern as
- *   wasEverShippedUpstream's revList); defaults to writeFileSync.
- * @returns {boolean} true when this call wrote the data-root lock.
+ * @param {{writeFile?: Function, link?: Function}} [io] -
+ *   injection point for tests (same pattern as wasEverShippedUpstream's
+ *   revList); defaults to writeFileSync/linkSync.
+ * @returns {boolean} true when this call published the data-root lock.
  */
-export function migrateLegacyLock(dataRoot, root = dataRoot, writeFile = writeFileSync) {
+export function migrateLegacyLock(dataRoot, root = dataRoot, io = {}) {
+  const writeFile = io.writeFile || writeFileSync;
+  const link = io.link || linkSync;
   if (!root || path.resolve(root) === path.resolve(dataRoot)) return false;
   const target = lockPath(dataRoot);
   if (existsSync(target)) return false;
@@ -102,14 +110,42 @@ export function migrateLegacyLock(dataRoot, root = dataRoot, writeFile = writeFi
     return false;
   }
   if (!parsed || typeof parsed !== 'object' || typeof parsed.plugins !== 'object' || parsed.plugins === null) return false;
-  // Create exclusively: a data-root lock that appears between the probe above
-  // and this write holds newer consent than the legacy copy and must win.
+  // Publish atomically: writing the final path directly (even with wx) can
+  // leave a partial file behind when the write fails midway. readLock probes
+  // existence, so a partial final masks the readable legacy lock and parses
+  // to an empty lock — same-version drift then repins as unpinned instead of
+  // failing the integrity check, and later migrations skip the existing
+  // target, so it never heals (#7251 review). Write the complete lock to a
+  // unique same-directory temp first, then publish it with a no-replace hard
+  // link: a lock created concurrently still wins, exactly as wx did. A write
+  // or publish failure removes only our own temp and leaves the final
+  // absent, so the legacy fallback keeps serving the old pins; no fsync or
+  // crash-durability guarantee is claimed beyond writeFileSync's own.
+  // Ownership is structural, never inferred from error codes: the complete
+  // lock is written inside a directory mkdtemp creates exclusively for this
+  // call, then published with a no-replace hard link. Only that owned
+  // directory is ever removed - a partial temp write, a racing winner, or an
+  // unsupported filesystem can never make cleanup touch a foreign file.
+  let tmpDir;
   try {
-    writeFile(target, JSON.stringify({ ...parsed, lockfileVersion: parsed.lockfileVersion ?? LOCK_VERSION }, null, 2) + '\n', { flag: 'wx' });
-  } catch (err) {
-    if (err && err.code === 'EEXIST') return false;
-    throw err;
+    tmpDir = mkdtempSync(path.join(path.dirname(target), `.migrate-${path.basename(target)}-`));
+  } catch {
+    return false; // cannot stage exclusively (permissions, read-only fs): nothing was created
   }
+  try {
+    writeFile(path.join(tmpDir, 'plugins.lock'), JSON.stringify({ ...parsed, lockfileVersion: parsed.lockfileVersion ?? LOCK_VERSION }, null, 2) + '\n', 'utf8');
+    link(path.join(tmpDir, 'plugins.lock'), target);
+  } catch {
+    // Write failure: no final was created. Link EEXIST: a concurrent
+    // writer's complete lock won between the probe and the publish - that
+    // final takes precedence and is left untouched (no legacy fallback
+    // applies over existing consent). EPERM/EXDEV/ENOSYS: this
+    // platform/filesystem cannot hard-link - the final stays absent and the
+    // legacy fallback keeps running.
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* an owned orphan dir is harmless */ }
+    return false;
+  }
+  try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* publish already landed; an owned orphan dir is harmless */ }
   return true;
 }
 
