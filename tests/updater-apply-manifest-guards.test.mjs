@@ -12,6 +12,9 @@ import {
   fallbackCheckoutBatched,
   fallbackCheckoutSpecs,
   isSafeManifestPath,
+  pathFullyPreserved,
+  planSystemCheckout,
+  preservedCheckoutCollision,
   rejectUserLayerPaths,
 } from '../update-system.mjs';
 import assert from 'node:assert/strict';
@@ -278,6 +281,131 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     JSON.stringify(fallbackCheckoutSpecs('lib/', ['lib/a.mjs'], [])) === JSON.stringify(['lib/']),
     'fallbackCheckoutSpecs names the entry itself when the target tree listing is unavailable',
     `unavailable tree listing expanded unexpectedly: ${JSON.stringify(fallbackCheckoutSpecs('lib/', ['lib/a.mjs'], []))}`,
+  );
+  // The validators accept a directory entry without its trailing slash, so the
+  // same preserved-file rule must hold for that spelling (#7250 review).
+  check(
+    JSON.stringify(fallbackCheckoutSpecs('lib', ['lib/sub/b.mjs'], upstream)) === JSON.stringify(['lib/a.mjs', 'lib/c.mjs']),
+    'fallbackCheckoutSpecs expands a slashless directory entry with a preserved file under it',
+    `slashless directory expanded unexpectedly: ${JSON.stringify(fallbackCheckoutSpecs('lib', ['lib/sub/b.mjs'], upstream))}`,
+  );
+  check(
+    fallbackCheckoutSpecs('lib', ['lib/a.mjs', 'lib/sub/b.mjs', 'lib/c.mjs'], upstream).length === 0,
+    'fallbackCheckoutSpecs leaves nothing when a slashless directory entry is fully preserved',
+    'a fully preserved slashless directory should expand to no specs',
+  );
+  check(
+    JSON.stringify(fallbackCheckoutSpecs('lib', [], upstream)) === JSON.stringify(['lib']),
+    'fallbackCheckoutSpecs names a slashless directory without preserved files as itself',
+    `slashless directory without preserved files expanded unexpectedly: ${JSON.stringify(fallbackCheckoutSpecs('lib', [], upstream))}`,
+  );
+  check(
+    JSON.stringify(fallbackCheckoutSpecs('mode', ['modes/b.mjs'], ['modes/a.mjs', 'modes/b.mjs'])) === JSON.stringify(['mode']),
+    'fallbackCheckoutSpecs does not let a slashless entry claim a sibling directory by name prefix',
+    `name prefix over-claimed: ${JSON.stringify(fallbackCheckoutSpecs('mode', ['modes/b.mjs'], ['modes/a.mjs', 'modes/b.mjs']))}`,
+  );
+}
+
+// ── 7b. cross-version file/directory collisions are refused, not resolved ──
+{
+  // preservedPaths describe the LOCAL tree, the listing the TARGET's: across
+  // versions an entry can be a directory locally and a file in the target, or
+  // the reverse. Neither checkout may sweep the preserved side or silently
+  // drop the shipped side (#7250 review).
+  check(
+    JSON.stringify(fallbackCheckoutSpecs('lib', ['lib/local.txt'], ['lib'])) === JSON.stringify(['lib']),
+    'fallbackCheckoutSpecs names a shipped file even when preserved local children sit under its name',
+    `shipped file with preserved local children mishandled: ${JSON.stringify(fallbackCheckoutSpecs('lib', ['lib/local.txt'], ['lib']))}`,
+  );
+  check(
+    typeof preservedCheckoutCollision('lib', ['lib/local.txt'], ['lib']) === 'string',
+    'preservedCheckoutCollision refuses a target file over preserved local children',
+    'target file over preserved local children was not refused',
+  );
+  check(
+    preservedCheckoutCollision('lib', [], ['lib']) === null,
+    'preservedCheckoutCollision passes a shipped file with nothing preserved under its name',
+    'shipped file without preserved children was refused',
+  );
+  check(
+    preservedCheckoutCollision('lib', ['lib/a.mjs'], ['lib/a.mjs', 'lib/b.mjs']) === null,
+    'preservedCheckoutCollision passes a directory with preserved children (normal expansion)',
+    'directory with preserved children was refused',
+  );
+  check(
+    preservedCheckoutCollision('lib', ['lib'], ['lib']) === null,
+    'preservedCheckoutCollision passes a shipped file preserved exactly (the skip case)',
+    'exactly preserved file was refused',
+  );
+  check(
+    typeof preservedCheckoutCollision('lib', ['lib'], ['lib/a.mjs']) === 'string',
+    'preservedCheckoutCollision refuses a target directory over a preserved local file (slashless entry)',
+    'slashless target directory over preserved local file was not refused',
+  );
+  check(
+    typeof preservedCheckoutCollision('lib/', ['lib'], ['lib/a.mjs']) === 'string',
+    'preservedCheckoutCollision refuses a target directory over a preserved local file (dir/ entry)',
+    'dir/ target directory over preserved local file was not refused',
+  );
+  check(
+    typeof preservedCheckoutCollision('lib/', ['lib/local.txt'], ['lib']) === 'string',
+    'preservedCheckoutCollision refuses a target file over preserved local children (dir/ entry)',
+    'dir/ target file over preserved local children was not refused',
+  );
+  check(
+    preservedCheckoutCollision('lib', ['lib/x.mjs'], []) === null,
+    'preservedCheckoutCollision passes an entry absent from an unavailable listing',
+    'absent entry was refused',
+  );
+
+  const seam = (listing) => ({ git: () => listing });
+  const boom = { git: () => { throw new Error('unreadable'); } };
+  const ps = (...files) => files;
+  const set = (files) => new Set(files);
+  check(
+    pathFullyPreserved('lib', ps('lib'), set(['lib']), 'ref', seam('lib')) === true,
+    'pathFullyPreserved skips a slashless entry the target ships as a preserved file',
+    'preserved target file was not skipped',
+  );
+  {
+    // The exact-preserve skip costs no listing call (#2337 / test 9b in
+    // updater-local-system-edits): the string match proves the local content
+    // stays. A target directory in the file's place is refused by the
+    // caller's preservedCheckoutCollision() check, which runs first wherever
+    // a checkout can happen — so this skip can never hide shipped content.
+    let seamCalls = 0;
+    const countingSeam = { git: () => { seamCalls++; return 'lib/a.mjs\nlib/b.mjs'; } };
+    check(
+      pathFullyPreserved('lib', ps('lib'), set(['lib']), 'ref', countingSeam) === true && seamCalls === 0,
+      'pathFullyPreserved skips an exactly preserved file without a listing call; the shipped-directory collision is the caller\'s refusal',
+      `exact-preserve skip consulted the listing (${seamCalls} call(s))`,
+    );
+  }
+  check(
+    pathFullyPreserved('lib', ps('lib'), set(['lib']), 'ref', boom) === true,
+    'pathFullyPreserved never lists an exactly preserved file, so an unreadable target cannot break the skip',
+    'unlistable target changed the exact-preserve skip',
+  );
+  check(
+    planSystemCheckout(['lib'], ['lib'], ['lib/a.mjs']).checkout.includes('lib')
+      && !planSystemCheckout(['lib'], ['lib'], ['lib/a.mjs']).preserved.includes('lib'),
+    'planSystemCheckout routes a colliding entry to checkout (where the refusal throws), never to preserved',
+    `colliding entry misrouted: ${JSON.stringify(planSystemCheckout(['lib'], ['lib'], ['lib/a.mjs']))}`,
+  );
+  check(
+    pathFullyPreserved('lib', ps('lib/a.mjs', 'lib/b.mjs'), set(['lib/a.mjs', 'lib/b.mjs']), 'ref', seam('lib/a.mjs\nlib/b.mjs')) === true,
+    'pathFullyPreserved skips a fully preserved slashless directory entry',
+    'fully preserved slashless directory was not skipped',
+  );
+  check(
+    pathFullyPreserved('lib', ps('lib/a.mjs'), set(['lib/a.mjs']), 'ref', seam('lib/a.mjs\nlib/b.mjs')) === false,
+    'pathFullyPreserved does not skip a partly preserved slashless directory entry',
+    'partly preserved slashless directory was skipped',
+  );
+  check(
+    pathFullyPreserved('lib', ps('lib/local.txt'), set(['lib/local.txt']), 'ref', seam('lib')) === false,
+    'pathFullyPreserved proceeds when the target ships a file over preserved local children',
+    'target file over preserved local children was skipped',
   );
 }
 
