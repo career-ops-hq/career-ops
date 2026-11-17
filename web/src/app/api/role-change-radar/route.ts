@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { findApplication, readReport } from "@/lib/career-ops";
+import { NextResponse } from "next/server.js";
+import path from "node:path";
+import { careerOpsRoot, findApplication, findReportFile, readReport } from "@/lib/career-ops";
 import { parseReport } from "@/lib/format";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { applyPostingUrl } from "@/lib/posting-url.mjs";
@@ -23,11 +24,13 @@ export async function POST(request: Request) {
     const application = findApplication(body.id);
     if (!application) return NextResponse.json({ error: "Application not found" }, { status: 404 });
     const report = readReport(body.id);
+    const reportPath = findReportFile(body.id);
     const meta = parseReport(report?.content || "");
     const app = {
       id: application.n, company: application.company, title: application.role,
       reportNum: reportNumberFor(body.id, application, report?.file ?? null),
-      reportFile: report?.file || null,
+      // report.file is a display basename; preserve the resolver's directory.
+      reportFile: reportPath ? path.relative(careerOpsRoot(), reportPath) : null,
       url: applyPostingUrl(meta.fields.find(f => f.label === "URL")?.value, application.url, application.applyLink),
     };
     const result = await runCoreCli("role-change-radar", [], {

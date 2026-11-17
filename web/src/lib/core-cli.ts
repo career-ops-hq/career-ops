@@ -38,7 +38,7 @@ export function runCoreCli(script: string, args: string[], opts?: { signal?: Abo
         cwd: resolveCodeRoot(process.cwd(), process.env),
         timeout: CORE_CLI_TIMEOUT_MS,
         signal: opts?.signal,
-        maxBuffer: opts?.maxBuffer,
+        ...(opts?.maxBuffer === undefined ? {} : { maxBuffer: opts.maxBuffer }),
         env: { ...coreProfileEnv(careerOpsRoot()), ...boundedLockWait() },
         // windowsHide: see api/doctor/route.ts — a stale inherited console
         // kills every child with 0xC0000142 on Windows; never inherit one.

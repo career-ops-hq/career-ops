@@ -5,8 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { compareDescriptions, identityWarnings, MAX_TEXT } from '../lib/role-change-compare.mjs';
-import { radar, discoverBaseline, validateCapture, fetchPosting } from '../role-change-radar.mjs';
+import { compareDescriptions, identityWarnings, MAX_TEXT, hashText } from '../lib/role-change-compare.mjs';
+import { radar, discoverBaseline, validateCapture, fetchPosting, readRadarRequest } from '../role-change-radar.mjs';
 
 const original = 'Title: Platform Engineer\nCompany: Fictional Labs\nWork arrangement: Remote\nSalary: USD 100,000–120,000 per year, depending on experience\nResponsibilities\nBuild reliable systems.\nMaintain service documentation.\nQualifications\nKnowledge of SQL.\nLocation: London\nFull-time employment.';
 const app = { id: '7', reportNum: 7, company: 'Fictional Labs', title: 'Platform Engineer', url: 'https://example.com/jobs/123' };
@@ -18,6 +18,35 @@ function fixture(t, archive = true) {
   return { root, application: { ...app, reportFile: archive ? 'reports/007-fictional-labs-2026-01-01.md' : null } };
 }
 const paste = text => ({ action: 'check', source: 'paste', text });
+test('singular and plural skill headings classify otherwise unrecognized passages', () => {
+  for (const heading of ['Skill', 'Skills', 'Qualification', 'Qualifications']) {
+    const result = compareDescriptions(`${heading}\nGo.`, `${heading}\nRust.`);
+    assert.equal(result.changes.length, 1);
+    assert.deepEqual(result.changes[0].categories, ['Skills and qualifications']);
+    assert.equal(result.changes[0].before.text, 'Go.');
+    assert.equal(result.changes[0].after.text, 'Rust.');
+  }
+});
+test('split UTF-8 pipe chunks preserve multilingual text and its saved hash', async t => {
+  const { root, application } = fixture(t, false);
+  const text = `${original}\n${'€ ₹ 日本語 हिन्दी 🧑🏽‍💻 '.repeat(1000)}`;
+  const expected = { app: application, input: { action: 'baseline', source: 'paste', text } };
+  const encoded = Buffer.from(JSON.stringify(expected));
+  // Every multibyte character crosses a chunk boundary, independent of OS buffering.
+  async function* chunks() { for (let i = 0; i < encoded.length; i++) yield encoded.subarray(i, i + 1); }
+  const request = await readRadarRequest(chunks());
+  assert.deepEqual(request, expected);
+  const state = await radar(root, request.app, request.input);
+  assert.equal(state.baseline.text, text);
+  assert.equal(state.baseline.hash, hashText(text));
+});
+test('stdin request limit counts original bytes and rejects overflow before parsing', async () => {
+  const encoded = Buffer.from(JSON.stringify({ text: '€'.repeat(50_000) }));
+  const padding = Buffer.alloc(300_000 - encoded.length, 32);
+  assert.equal((await readRadarRequest([encoded, padding])).text, '€'.repeat(50_000));
+  await assert.rejects(readRadarRequest([encoded, padding, Buffer.from(' ')]), /Request too large/);
+  await assert.rejects(readRadarRequest([Buffer.from('{broken')]), SyntaxError);
+});
 test('CLI help exits before reading input or writing data; unknown flags fail', t => {
   const { root } = fixture(t, false);
   const script = fileURLToPath(new URL('../role-change-radar.mjs', import.meta.url));

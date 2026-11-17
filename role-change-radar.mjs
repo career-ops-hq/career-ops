@@ -147,6 +147,18 @@ export async function radar(root, app, input, { extract = fetchPosting, now = ()
     return state;
   } finally { lock.release(); }
 }
+// A pipe can split a UTF-8 character across chunks. Bound the original bytes,
+// then decode once so the archived text and its hash retain the user's input.
+export async function readRadarRequest(stream) {
+  const chunks = []; let bytes = 0;
+  for await (const chunk of stream) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += buffer.length;
+    if (bytes > 300_000) throw new Error('Request too large');
+    chunks.push(buffer);
+  }
+  return JSON.parse(Buffer.concat(chunks, bytes).toString('utf8'));
+}
 if (isMainModule(import.meta.url)) {
   const args = process.argv.slice(2);
   validateFlags(args, ['--help', '-h'], `Usage: node role-change-radar.mjs [--help]
@@ -156,9 +168,7 @@ Application metadata must come from the existing tracker/report readers.
 Stores Radar history under the configured data root; does not modify the tracker or reports.`);
   try {
     if (args.length) throw new Error('Unexpected arguments; pass the request JSON on stdin or use --help');
-    let body = '';
-    for await (const chunk of process.stdin) { body += chunk; if (Buffer.byteLength(body) > 300_000) throw new Error('Request too large'); }
-    const { app, input } = JSON.parse(body);
+    const { app, input } = await readRadarRequest(process.stdin);
     process.stdout.write(JSON.stringify(await radar(getCareerOpsRoot(), app, input)));
   } catch (error) { process.stdout.write(JSON.stringify({ error: error.message })); process.exitCode = 1; }
 }
