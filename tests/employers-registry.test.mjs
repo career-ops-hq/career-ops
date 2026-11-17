@@ -329,10 +329,14 @@ test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real d
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {
   const idPatterns = [manifestSchema.properties.id.pattern, rowSchema.properties.contribution.pattern].map((p) => new RegExp(p));
-  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co'];
+  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co',
+    '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3',
+    '2026-11-20-acme.1', '2026-11-20-acme.0', '2026-11-20-acme.02', '2026-11-20-acme.100', '2026-11-20-acme.', '2026-11-20-acme.2.3', '2026-11-20-acme.2-2', '2026-11-20-.2'];
   for (const s of samples) {
     for (const re of idPatterns) assert.equal(re.test(s), MANIFEST_ID_RE.test(s), s);
   }
+  const accepted = samples.filter((s) => MANIFEST_ID_RE.test(s));
+  assert.deepEqual(accepted, ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3']);
 });
 
 // ── 4. Pull-request rules (--base), the size limit, the CHANGELOG ─────────

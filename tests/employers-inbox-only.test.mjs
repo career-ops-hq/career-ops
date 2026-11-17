@@ -42,6 +42,24 @@ test('yes: new boards files, numbered parts and a manifest, all directly in the 
   });
 });
 
+test('yes: a later contribution of the same day, numbered .2, its parts and its manifest; the login is listed once, without the number', () => {
+  const r = classifyInboxDiff([
+    add(`${IN}/2026-11-10-octocat.ndjson`),
+    add(`${IN}/2026-11-10-octocat.2-001.ndjson`),
+    add(`${IN}/2026-11-10-octocat.2-002.ndjson`),
+    add(`${IN}/2026-11-10-octocat.2.json`),
+  ]);
+  assert.deepEqual(r, {
+    inboxOnly: true,
+    files: [`${IN}/2026-11-10-octocat.2-001.ndjson`, `${IN}/2026-11-10-octocat.2-002.ndjson`, `${IN}/2026-11-10-octocat.2.json`, `${IN}/2026-11-10-octocat.ndjson`],
+    rejected: [],
+    logins: ['octocat'],
+  });
+  const bad = classifyInboxDiff([add(`${IN}/2026-11-10-octocat.1.ndjson`)]);
+  assert.equal(bad.inboxOnly, false);
+  assert.match(bad.rejected[0].reason, /runs from 2 to 99/);
+});
+
 for (const [label, entries, reason] of [
   ['a modified inbox file (M)', [add(`${IN}/2026-11-10-a.ndjson`), { status: 'M', path: `${IN}/2026-11-09-b.ndjson`, mode: '100644' }], /modifies a file/],
   ['a deleted inbox file (D)', [{ status: 'D', path: `${IN}/2026-11-09-b.ndjson`, mode: '000000' }], /deletes a file/],
