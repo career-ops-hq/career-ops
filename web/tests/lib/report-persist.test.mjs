@@ -20,6 +20,7 @@ import {
 } from "../../src/lib/report-persist.mjs";
 import { writeEvaluationArtifacts } from "../../../persist-evaluation-report.mjs";
 import { resolveTsvColumns, TSV_ADDITION_HEADER } from "../../../tracker-parse.mjs";
+import { applyLineLabel } from "../../src/lib/report-sections.mjs";
 
 function fakeChild({ stdout = "", stderr = "", exitCode = 0, spawnError = null, onStdin = null } = {}) {
   const child = new EventEmitter();
@@ -150,6 +151,27 @@ test("formatScore: normalizes to X.X/5", () => {
   assert.equal(formatScore("4/10"), null);
   assert.equal(formatScore(""), null);
   assert.equal(formatScore(null), null);
+});
+
+test("formatScore: 3.95 is not stored as 4.0/5 or called Recommended", () => {
+  assert.equal(formatScore("3.95"), "3.9/5");
+  assert.equal(formatScore("3.95/5"), "3.9/5");
+  assert.equal(applyLineLabel(formatScore("3.95")), "Below the apply line");
+  assert.equal(applyLineLabel(3.95), "Below the apply line");
+  assert.equal(formatScore("4"), "4.0/5");
+  assert.equal(applyLineLabel(formatScore("4")), "Recommended");
+  const meta = parseReportMeta(`# Evaluation: Fixture Co -- Analyst
+
+## Machine Summary
+\`\`\`yaml
+company: Fixture Co
+role: Analyst
+score: 3.95
+\`\`\`
+`);
+  assert.equal(meta.ok, true);
+  assert.equal(meta.score, "3.9/5");
+  assert.equal(applyLineLabel(meta.score), "Below the apply line");
 });
 
 test("parseReportMeta: Machine Summary wins; title is fallback", () => {

@@ -10,6 +10,7 @@
 import { pass, fail } from './helpers.mjs';
 import assert from 'node:assert';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 
 // Pin the shipped domain list, then take a FRESH module instance.
 //
@@ -53,6 +54,34 @@ ok('recognized hash-route job IDs stay distinct', () => {
   assert.notEqual(
     normalizeUrl('https://jobs.example.com/careers#/jobs/123'),
     normalizeUrl('https://jobs.example.com/careers#/jobs/456'));
+});
+ok('a trailing slash does not collapse two fragment jobs', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#/job/111/'),
+    normalizeUrl('https://jobs.example.com/careers#/job/222/'));
+  assert.equal(
+    normalizeUrl('https://jobs.example.com/careers#/job/111/'),
+    'https://jobs.example.com/careers?_career_ops_fragment_job_id=111');
+});
+ok('a hashbang does not collapse two fragment jobs', () => {
+  assert.notEqual(
+    normalizeUrl('https://jobs.example.com/careers#!/job/111'),
+    normalizeUrl('https://jobs.example.com/careers#!/job/222'));
+});
+ok('a language query inside the fragment keeps two versions apart', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers#/jobs/123?lang=de'), 'distinct');
+});
+ok('lang in the fragment and lang in the query name the same job', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers?lang=en#/jobs/123'), 'same');
+});
+ok('a fragment language against the bare fragment job is one-sided', () => {
+  assert.equal(postingUrlRelation(
+    'https://jobs.example.com/careers#/jobs/123?lang=en',
+    'https://jobs.example.com/careers#/jobs/123'), 'one-sided-language');
 });
 ok('pre-existing internal fragment key is preserved beside promoted hash job ID', () => {
   assert.equal(
@@ -227,6 +256,44 @@ ok('Indeed: jk (and vjk on a results page) is the posting id, the region host is
   assert.deepEqual(aggregatorPostingId('https://www.indeed.com/jobs?q=marketing&vjk=abc123'),
     { domain: 'indeed.com', id: 'abc123' });
 });
+ok('Himalayas: company slug + job slug is the posting id; the feed\'s utm params are not', () => {
+  // The feed's guid is /companies/{companySlug}/jobs/{jobSlug}; its applicationLink
+  // is the same URL plus ?utm_source=api. Both are one posting.
+  const id = { domain: 'himalayas.app', id: 'acme/product-manager' };
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager'), id);
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager?utm_source=api'), id);
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager/'), id);
+  // Same company, another job slug: another posting (Himalayas suffixes a
+  // repeated title with a number rather than reusing the slug).
+  assert.deepEqual(aggregatorPostingId('https://himalayas.app/companies/acme/jobs/product-manager-6458775437'),
+    { domain: 'himalayas.app', id: 'acme/product-manager-6458775437' });
+  // Same job slug, another company: another posting.
+  assert.notEqual(aggregatorPostingId('https://himalayas.app/companies/globex/jobs/product-manager').id, id.id);
+});
+ok('Himalayas: anything the liveness resolver refuses stays UNKNOWN', () => {
+  for (const u of [
+    'https://himalayas.app/companies/acme',                              // company page
+    'https://himalayas.app/jobs/product-manager',                        // not a posting path
+    'https://himalayas.app/companies/acme/jobs/product-manager?ref=x',   // non-tracking param
+    'https://www.himalayas.app/companies/acme/jobs/product-manager',     // host the resolver does not accept
+  ]) assert.equal(aggregatorPostingId(u), null, u);
+});
+ok('Jobicy: the leading number of /jobs/{id}-{slug} is the posting id', () => {
+  // Every feed item's url carries its numeric `id` this way.
+  assert.deepEqual(aggregatorPostingId('https://jobicy.com/jobs/161691-product-manager-auth'),
+    { domain: 'jobicy.com', id: '161691' });
+  assert.deepEqual(aggregatorPostingId('https://www.jobicy.com/jobs/161691-product-manager-auth/'),
+    { domain: 'jobicy.com', id: '161691' });
+  // A slug-only path or a bare number is not the feed's shape: UNKNOWN.
+  assert.equal(aggregatorPostingId('https://jobicy.com/jobs/senior-ai-engineer'), null);
+  assert.equal(aggregatorPostingId('https://jobicy.com/jobs/161691'), null);
+});
+ok('the updater ships himalayas-posting.mjs, which url-key.mjs now imports', () => {
+  // url-key.mjs is a system file: an upgraded install whose updater had no entry
+  // for the resolver would check out a url-key.mjs that cannot load.
+  const manifest = readFileSync(fileURLToPath(new URL('../lib/update-manifest.mjs', import.meta.url)), 'utf-8');
+  for (const f of ['himalayas-posting.mjs', 'lib/is-main-module.mjs']) assert.ok(manifest.includes(`'${f}'`), f);
+});
 ok('no extractable id is UNKNOWN, never a guessed one', () => {
   // An aggregator whose id shape this module does not yet know, a URL on a
   // mapped aggregator that carries no id, an employer board, and a non-URL all
@@ -263,6 +330,28 @@ ok('different pages are distinct; no key on either side is no evidence', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'https://acme.recruitee.com/o/b'), 'distinct');
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'N/A'), 'no-key');
   assert.equal(postingUrlRelation('', 'https://acme.recruitee.com/o/a'), 'no-key');
+});
+ok('two spellings canonicalJobKey reads as one posting are the same page', () => {
+  const GH = 'https://boards.greenhouse.io/acme/jobs/4001';
+  assert.equal(postingUrlRelation(GH, 'https://job-boards.greenhouse.io/acme/jobs/4001'), 'same');
+  assert.equal(postingUrlRelation(GH, 'https://careers.acme.example/jobs?gh_jid=4001'), 'same');
+  assert.equal(postingUrlRelation(GH, 'https://boards.greenhouse.io/embed/job_app?for=acme&token=4001'), 'same');
+  assert.equal(postingUrlRelation('https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902',
+    'https://jobs.lever.co/acme/5ac21346-8e0c-4494-8e7a-3eb92ff77902/apply'), 'same');
+  assert.equal(postingUrlRelation(GH, 'https://job-boards.greenhouse.io/acme/jobs/4002'), 'distinct');
+  assert.equal(postingUrlRelation('https://job-boards.greenhouse.io/acme/jobs/4001?lang=de', `${GH}?lang=en`), 'distinct');
+  assert.equal(postingUrlRelation('https://job-boards.greenhouse.io/acme/jobs/4001?lang=de', GH), 'one-sided-language');
+  // canonicalJobKey drops `ref` and `source`, lowercases the path and strips
+  // every trailing slash; on a generic site none of that joins two pages.
+  assert.equal(postingUrlRelation('https://careers.acme.example/job?ref=1', 'https://careers.acme.example/job?ref=2'), 'distinct');
+  assert.equal(postingUrlRelation('https://careers.acme.example/job?source=a1', 'https://careers.acme.example/job'), 'distinct');
+  assert.equal(postingUrlRelation('https://careers.acme.example/openings/AbC', 'https://careers.acme.example/openings/abc'), 'distinct');
+  assert.equal(postingUrlRelation('https://careers.acme.example/openings/123//', 'https://careers.acme.example/openings/123'), 'distinct');
+  // An extracted id names the posting whatever the rest of the query says.
+  assert.equal(postingUrlRelation(`${GH}?ref=1`, `${GH}?ref=2`), 'same');
+  const WD = 'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Data-Engineer_R123';
+  assert.equal(postingUrlRelation(WD, 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R123'), 'same');
+  assert.equal(postingUrlRelation(WD, 'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Data-Engineer_R124'), 'distinct');
 });
 ok('the same page with a language on one side only is its own relation, in either order', () => {
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a', 'https://acme.recruitee.com/o/a?lang=de'), 'one-sided-language');

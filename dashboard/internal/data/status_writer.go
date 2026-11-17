@@ -132,8 +132,9 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	if parseErr != nil || result.Changed == nil || result.NewStatus == "" {
 		return fmt.Errorf("set-status.mjs returned no valid result; reload to check whether the change was applied")
 	}
-	// The CLI treats these as non-fatal after the tracker commit. Surface that
-	// partial success so a missing lifecycle record cannot disappear silently.
+	// A current set-status.mjs fails the command when the ledger cannot be
+	// written, and puts the tracker row back. This branch remains for a writer
+	// that still commits the row and reports statusLogged false.
 	if result.StatusLogged != nil && !*result.StatusLogged {
 		markPending(true, false)
 		return fmt.Errorf("status saved, but status-log append failed: %s", strings.TrimSpace(stderr.String()))

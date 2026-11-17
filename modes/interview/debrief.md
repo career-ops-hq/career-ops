@@ -22,7 +22,7 @@ After a real interview, capture what was asked, assess what landed and what didn
 6. **Story bank** at `interview-prep/story-bank.md` — add new stories if surfaced
 7. **CV** at `cv.md` + `article-digest.md` (if present) — to ground suggested answers in real experience
 8. **Retracted claims** at `interview-prep/retracted-claims.md` (if present) — hard gate; never use a retracted claim in a suggested answer even if the candidate said it in the interview
-9. **Role-specific prep file** — append debrief notes; correct in place any existing fact the interview directly contradicts (see Step 1b)
+9. **Role-specific prep file** — append debrief notes (or replace this round's entry on a re-run, see Step 1d); correct in place any existing fact the interview directly contradicts (see Step 1b)
 
 ---
 
@@ -92,6 +92,17 @@ While capturing what was asked, also capture what the interviewer said the role 
 - **Candidate claims are out of scope.** Only the interviewer's statements about the role belong here, not anything the candidate said about themselves.
 
 Carry the list into Step 6 and Step 8, and into Step 9 for transcript input only.
+
+---
+
+## Step 1d — Check for an Earlier Debrief of This Round
+
+Before anything is saved (Step 8 and Step 9 both depend on the answer), check whether this debrief re-runs one already on disk. Once the company, role, round type and date are known (ask if they are not), list every existing session file for them in `interview-prep/sessions/`: the base name `{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md` and any `-2`, `-3`, ... variants, even when the base name itself is missing.
+
+- **No file:** check `interview-prep/{company-slug}-{role-slug}.md` for a `## Round [N] Debrief — [YYYY-MM-DD]` entry for this round and date, which an earlier run leaves behind when it stopped after Step 8. If there is one, ask whether this debrief re-runs it; on yes, Step 8 replaces that entry. Otherwise this is a new round and Step 8 appends. Either way, Step 9 writes the base name.
+- **One or more files:** never overwrite silently. Show the files with each one's `interviewer_role` and first question, and ask the candidate whether this debrief re-runs one of them or is a separate round.
+  - **Re-run:** note the file the candidate picks. Step 8 replaces that round's entry in the prep file instead of appending a second one, and Step 9 updates the picked file in place under its re-run rule.
+  - **Separate round:** Step 8 appends as usual, and Step 9 writes the next free counter (`-2`, `-3`, ...) before `.md`.
 
 ---
 
@@ -177,7 +188,7 @@ Be honest. A probability range with clear reasoning is more useful than false co
 
 ## Step 8 — Save Debrief
 
-Append to `interview-prep/{company-slug}-{role-slug}.md`:
+Append to `interview-prep/{company-slug}-{role-slug}.md`. **If Step 1d confirmed a re-run**, replace that round's existing `## Round [N] Debrief — [YYYY-MM-DD]` entry (the heading and everything up to the next `## ` heading) instead, so one interview keeps one entry; append only when the file has no entry for that round and date.
 
 ```markdown
 ## Round [N] Debrief — [YYYY-MM-DD]
@@ -214,15 +225,17 @@ Append to `interview-prep/{company-slug}-{role-slug}.md`:
 - Candidate comfort: [1-5, or a short phrase, in the candidate's own words]
 ```
 
-**If a compensation number was verbally stated this round** (the candidate gave a figure, not just "comp came up"), append one `stated` line to `data/salary-observations.tsv` (create the file if missing; format per `docs/SCRIPTS.md` → salary-gap) with the tracker#, this round's date, the amount/currency, source `user`, a short note, the round label, and the interviewer's name. This is what lets `interview/plan` remind the candidate of it before the next round — see Inputs #9 there.
+**If a compensation number was verbally stated this round** (the candidate gave a figure, not just "comp came up"), append one `stated` line to `data/salary-observations.tsv` (create the file if missing; format per `docs/SCRIPTS.md` → salary-gap) with the tracker#, this round's date, the amount/currency, source `user`, a short note, the round label, and the interviewer's name. This is what lets `interview/plan` remind the candidate of it before the next round — see Inputs #9 there. On a re-run, skip the line when the file already holds the same figure for this round and date.
 
 ---
 
 ## Step 9 — Write Session Transcript
 
-After the debrief, also write a machine-readable session transcript to `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Before writing, list every existing file for this company, role, round and date (the base name and any `-2`, `-3`, ... variants, even when the base name itself is missing). If there is none, write the base name. Otherwise never overwrite silently: show the files with each one's `interviewer_role` and first question, and ask the candidate whether this debrief re-runs one of them (update the file they pick in place) or is a separate round (write the next free counter, `-2`, `-3`, ..., before `.md`). See the README's "File names" section. This is a structured record of the round for downstream analysis modes; the speaker-labelled turns let a consumer read either side without re-inferring who spoke. The full contract lives in `interview-prep/sessions/README.md`.
+After the debrief, also write a machine-readable session transcript to `interview-prep/sessions/{company-slug}-{role-slug}-{round}-{YYYY-MM-DD}.md`. Use the Step 1d answer, never a silent overwrite: with no earlier file, write the base name; for a separate round, write the next free counter (`-2`, `-3`, ...) before `.md`; for a re-run, update the file the candidate picked in place. See the README's "File names" section. This is a structured record of the round for downstream analysis modes; the speaker-labelled turns let a consumer read either side without re-inferring who spoke. The full contract lives in `interview-prep/sessions/README.md`.
 
-**Check the `input_source` marker set in Step 1.** If `input_source: transcript`, skip reconstruction: don't regenerate the transcript from Step 1/Step 2 output — that would be a lossier copy of the real source it came from. Instead, save the original transcript directly, lightly normalized to match the schema below (speaker labels, front-matter, competency tags from the Step 2 assessment). If `input_source: recall`, reconstruct the transcript from Step 1/Step 2 output as before — recall never has a verbatim original to preserve.
+**Check the `input_source` marker set in Step 1.** If `input_source: transcript`, skip reconstruction: don't regenerate the transcript from Step 1/Step 2 output — that would be a lossier copy of the real source it came from. Instead, save the original transcript directly, lightly normalized to match the schema below (speaker labels, front-matter, competency tags from the Step 2 assessment). If `input_source: recall`, reconstruct the transcript from Step 1/Step 2 output as before — a new recall file has no verbatim original to preserve.
+
+**Re-run rule (Step 1d confirmed a re-run).** The picked file may hold verbatim turns from an earlier transcript debrief, and nothing in it says which. With `input_source: transcript`, the transcript replaces the file's turns and `stated_priorities`. With `input_source: recall`, keep the file's existing turns and `stated_priorities` exactly as they are, and add only what the recall run learned: questions the file lacks (as new `## Q` turns in interview order), competency tags on answers that have none, and the format and tone keys the candidate gave in this run. Never rewrite an existing turn from recall.
 
 Format:
 
@@ -234,7 +247,7 @@ round: [screen | hiring-manager | technical | system-design | behavioral | onsit
 date: YYYY-MM-DD
 interviewer_role: [role, if known]
 source: debrief
-stated_priorities:        # transcript input only; omit if none were stated or for recall input (Step 1c)
+stated_priorities:        # written from transcript input only; omit if none were stated (Step 1c); a recall re-run keeps the existing list
   - speaker: "[name or role, or unknown]"
     quote: "[short verbatim quote, double-quoted]"
 format: [recruiter screen | 1:1 | panel | group | take-home review]   # optional (Step 1)
@@ -258,7 +271,7 @@ Rules for the transcript:
 - **Tag each answer.** On the line directly above each `**Candidate:**` line, emit `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case, comma-separated for multi-competency answers (e.g. `system-design`, `people-leadership`, `incident-response`). You already assessed each answer in Step 2, so tag from that assessment rather than re-reading. Tags are free-form; pick the competency the question actually tested.
 - **Reconstruct the candidate turn faithfully.** Use what the candidate reported saying in Step 1, not an idealized answer. The "correct/complete answer" from Step 2 belongs in the debrief file, never in the transcript — the transcript records what happened.
 - **`source: debrief`.**
-- **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Double-quote every `speaker` too: a value such as `Hiring Manager: Jane` contains a colon and is invalid YAML unquoted. Omit the field when nothing was stated and whenever `input_source: recall`. Never put priorities in a practice-session file, since those have no real interviewer.
+- **`stated_priorities` goes in the front matter** (Step 1c), as a YAML list of `speaker` + `quote` items, so scripts and `interview/plan` can read it without parsing the body. Double-quote every `quote` so the front matter stays valid YAML and parses back to the exact spoken value: if escaping manually, escape backslashes before escaping inner double quotes, so a literal `\n` in the quote stays two characters instead of becoming a newline. The item's round and date are the file's own `round` and `date`. Double-quote every `speaker` too, escaped the same way as `quote` (backslashes first, then inner double quotes): a value such as `Hiring Manager: Jane` contains a colon and is invalid YAML unquoted. Omit the field when nothing was stated, and never write it from `input_source: recall`: a new recall file gets none, and a recall re-run keeps the picked file's existing list unchanged. Never put priorities in a practice-session file, since those have no real interviewer.
 - **`format`, `people_on_call`, `tone` and `candidate_comfort` are optional front-matter keys** carrying the Step 1 / Step 8 values, so downstream modes can read them without parsing prose. Write only the keys the candidate answered; omit the rest, and never write `candidate_comfort` unless the candidate gave it. Double-quote `candidate_comfort` (it may be free text); if escaping manually, escape backslashes before inner double quotes, as for `quote`. Practice-session files do not carry them.
 - The session file lands in a gitignored directory (real names/companies never enter version control); write it without redacting.
 

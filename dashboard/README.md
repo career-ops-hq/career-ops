@@ -20,8 +20,10 @@ value.
 ### Inbox tab
 
 The INBOX tab, left of ALL, lists the unchecked rows of the Pending section of
-`data/pipeline.md`: rank, company, role, location, posted date and batch
-status. ALL stays the tab the dashboard opens on. The rank is the first-pass
+`data/pipeline.md`: rank, company, role, batch status, location and posted
+date, in the tracker tabs' column order and with their company, location and
+posted widths. A row with no rank shows the tracker's `—`. ALL stays the tab
+the dashboard opens on. The rank is the first-pass
 rank `rank-pipeline.mjs` writes (`rank: 4.2/5 — reason`), not an evaluation
 score; rows are ordered by it, highest first, with unranked rows after them,
 and the preview shows the rank reason and the URL. The status is what
@@ -29,12 +31,31 @@ and the preview shows the rank reason and the URL. The status is what
 (Queued, Running, Paused, Needs answer, Failed or Done), read from the same
 place the tracker's URL lookup reads them.
 
-The tab is read only. It changes no file, and no key on it skips, queues or
-evaluates a row: navigation, tabs, `/`, `s`, `r`, `o` (http(s) rows only),
-`p`, `S`, `m`, `t`, `?` and `q` work, and every other key does nothing. The
-rows are read at startup and on each reload (`r`, or after a status change),
-never on a timer. A missing `pipeline.md` is an empty Inbox; one that cannot
-be read keeps the rows already shown and says why.
+Three keys act on a row. `e` queues the selected row for evaluation. It runs
+`sync-batch-input.mjs --url <url>`, which appends that one row to
+`batch/batch-input.tsv`. The footer then names `batch/batch-runner.sh` as the
+command to run; the dashboard never runs it and starts no evaluation. A row
+the batch files already hold is left alone and the footer says so (for a
+Failed row, it points to `batch/batch-runner.sh --retry-failed`). So is a row
+that is not an http(s) URL, or one whose URL does not come first after
+`- [ ] `, which the script cannot read.
+
+`x` skips the selected row: it runs `inbox-skip.mjs --url <url>`, which turns
+that row's `- [ ]` into `- [x]` in `data/pipeline.md` under the pipeline lock,
+the same change the web inbox's Skip makes, with the same code. The
+row leaves the Inbox. `u` undoes the last `x` of this session, whichever row
+is selected: `inbox-skip.mjs --url <url> --undo` unchecks every Pending row
+with that URL, as the web inbox's Undo does. There is no history beyond that
+one skip. As with `e`, a row whose URL does not come
+first after `- [ ] ` is left alone and the footer says why. `e`, `x` and `u`
+do nothing on the tracker tabs.
+
+Otherwise the tab changes no file, and no key on it evaluates a row:
+navigation, tabs, `/`, `s`, `r`, `o` (http(s) rows only), `e`, `x`, `u`, `p`,
+`S`, `m`, `t`, `?` and `q` work, and every other key does nothing. The rows
+are read at startup, on each reload (`r`, or after a status change) and after
+`e`, `x` and `u`, never on a timer. A missing `pipeline.md` is an empty Inbox;
+one that cannot be read keeps the rows already shown and says why.
 
 The tab reads `data/pipeline.md` under the data root, as the web inbox does.
 It does not follow `CAREER_OPS_PIPELINE`: a second search lane's inbox is not

@@ -446,16 +446,48 @@ try {
 
   // ── fetch(): recall-first — one failed keyword does not abort the others ──
   {
-    const fetched = await platsbanken.fetch(
-      { provider: 'platsbanken', name: 'Partial failure', platsbanken: { keywords: ['bad', 'good'] } },
-      {
-        sleep: async () => {},
-        fetchJson: async (url) => {
-          if (new URL(url).searchParams.get('q') === 'bad') throw new Error('network error');
-          return response([ad({ id: '12345678', headline: 'ok' })]);
+    const captureStderr = async (run) => {
+      const original = console.error;
+      const lines = [];
+      console.error = (...args) => lines.push(args.join(' '));
+      try {
+        await run();
+      } finally {
+        console.error = original;
+      }
+      return lines;
+    };
+
+    let fetched;
+    const warnings = await captureStderr(async () => {
+      fetched = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'Partial failure', platsbanken: { keywords: ['bad', 'good'] } },
+        {
+          sleep: async () => {},
+          fetchJson: async (url) => {
+            if (new URL(url).searchParams.get('q') === 'bad') throw new Error('network error');
+            return response([ad({ id: '12345678', headline: 'ok' })]);
+          },
         },
-      },
-    );
+      );
+    });
+    // The marker below only reaches scan.mjs; the person scanning has to be
+    // told which keyword was not read, and why.
+    if (warnings.length === 1 && /Partial failure/.test(warnings[0]) && /"bad": network error/.test(warnings[0]) && !/"good"/.test(warnings[0])) {
+      pass('platsbanken.fetch() warns once, naming the entry and the failed keyword, when the board comes back partial');
+    } else {
+      fail(`a failed keyword should be named in one warning, got ${JSON.stringify(warnings)}`);
+    }
+
+    const quiet = await captureStderr(async () => {
+      await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'All answer', platsbanken: { keywords: ['a', 'b'] } },
+        { sleep: async () => {}, fetchJson: async () => response([ad({ id: '12345678', headline: 'ok' })]) },
+      );
+    });
+    if (quiet.length === 0) pass('platsbanken.fetch() prints nothing when every keyword answers');
+    else fail(`platsbanken.fetch() printed with every keyword answering: ${JSON.stringify(quiet)}`);
+
     if (fetched.length === 1 && fetched[0].title === 'ok') {
       pass('platsbanken.fetch(): a failed keyword does not abort keywords that still succeed');
     } else {

@@ -365,6 +365,40 @@ try {
     fail(`lever.fetch() workplaceType locations = ${JSON.stringify(workplaceLocs)}`);
   }
 
+  // workplaceType (#6909): dedicated field mapped to 'remote' | 'hybrid' | 'onsite'.
+  // Case/whitespace trimmed and folded, 'on-site' mapped to 'onsite'. Blank/unspecified/unknown omitted.
+  const leverWtJobs = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    {
+      fetchJson: async () => [
+        { text: 'Remote', hostedUrl: 'https://jobs.lever.co/acme/w1', workplaceType: 'remote' },
+        { text: 'Remote caps', hostedUrl: 'https://jobs.lever.co/acme/w2', workplaceType: '  Remote  ' },
+        { text: 'Hybrid', hostedUrl: 'https://jobs.lever.co/acme/w3', workplaceType: 'hybrid' },
+        { text: 'Onsite', hostedUrl: 'https://jobs.lever.co/acme/w4', workplaceType: 'onsite' },
+        { text: 'On-site hyphen', hostedUrl: 'https://jobs.lever.co/acme/w5', workplaceType: 'on-site' },
+        { text: 'Blank', hostedUrl: 'https://jobs.lever.co/acme/w6', workplaceType: '   ' },
+        { text: 'Unspecified', hostedUrl: 'https://jobs.lever.co/acme/w7', workplaceType: 'unspecified' },
+        { text: 'Unknown', hostedUrl: 'https://jobs.lever.co/acme/w8', workplaceType: 'flexible' },
+        { text: 'None', hostedUrl: 'https://jobs.lever.co/acme/w9' },
+      ],
+    },
+  );
+  if (
+    leverWtJobs[0]?.workplaceType === 'remote'
+    && leverWtJobs[1]?.workplaceType === 'remote'
+    && leverWtJobs[2]?.workplaceType === 'hybrid'
+    && leverWtJobs[3]?.workplaceType === 'onsite'
+    && leverWtJobs[4]?.workplaceType === 'onsite'
+    && !('workplaceType' in leverWtJobs[5])
+    && !('workplaceType' in leverWtJobs[6])
+    && !('workplaceType' in leverWtJobs[7])
+    && !('workplaceType' in leverWtJobs[8])
+  ) {
+    pass('lever.fetch() maps workplaceType (remote/hybrid/onsite), trims/lowercases, normalizes on-site, and omits unknown/blank');
+  } else {
+    fail(`lever.fetch() workplaceType = ${JSON.stringify(leverWtJobs.map(j => [j.title, j.workplaceType]))}`);
+  }
+
   // salaryRange (#6907) — Lever's public postings API documents an optional
   // salaryRange ({ currency, interval, min, max }) on each posting. It maps
   // to Job.salary annualized, the way parseCompensation() in ashby.mjs does:
@@ -431,6 +465,56 @@ try {
     pass('lever.fetch() leaves salary off for an interval naming an inherited Object property');
   } else {
     fail(`lever.fetch() inherited-name salaries = ${JSON.stringify([salaryRows[11]?.salary, salaryRows[12]?.salary])}`);
+  }
+
+  // locations and country (#6910)
+  const locRows = await lever.fetch(
+    { name: 'Acme', careers_url: 'https://jobs.lever.co/acme' },
+    {
+      fetchJson: async () => [
+        { text: 'Austin Role', hostedUrl: 'https://jobs.lever.co/acme/l1', country: 'US', categories: { location: 'Austin' } },
+        { text: 'Null Country', hostedUrl: 'https://jobs.lever.co/acme/l2', country: null, categories: { location: 'Austin' } },
+        { text: 'Missing Country', hostedUrl: 'https://jobs.lever.co/acme/l3', categories: { location: 'Austin' } },
+        { text: 'Multi Remote', hostedUrl: 'https://jobs.lever.co/acme/l4', categories: { location: 'Barcelona', allLocations: ['Barcelona', 'Madrid'] }, workplaceType: 'remote' },
+        { text: 'Bare Remote', hostedUrl: 'https://jobs.lever.co/acme/l5', categories: { location: 'Remote' } },
+        { text: 'London Remote', hostedUrl: 'https://jobs.lever.co/acme/l6', categories: { location: 'London', allLocations: ['London', 'Remote'] } },
+      ],
+    },
+  );
+  if (locRows[0]?.country === 'US'
+      && Array.isArray(locRows[0]?.locations)
+      && locRows[0]?.locations.length === 1
+      && locRows[0]?.locations[0] === 'Austin'
+      && locRows[0]?.location === 'Austin') {
+    pass('lever.fetch() maps country "US" and categories.location "Austin" to country "US", locations ["Austin"], location "Austin"');
+  } else {
+    fail(`lever.fetch() country/location row 0 = ${JSON.stringify(locRows[0])}`);
+  }
+
+  if (!('country' in locRows[1]) && !('country' in locRows[2])) {
+    pass('lever.fetch() omits country key when country is null or missing');
+  } else {
+    fail(`lever.fetch() null/missing country = ${JSON.stringify([locRows[1]?.country, locRows[2]?.country])}`);
+  }
+
+  if (locRows[3]?.location === 'Barcelona; Madrid; Remote'
+      && JSON.stringify(locRows[3]?.locations) === JSON.stringify(['Barcelona', 'Madrid'])) {
+    pass('lever.fetch() gives locations without "Remote" while location ends in "; Remote" on multi-location remote posting');
+  } else {
+    fail(`lever.fetch() multi-location remote = location: ${JSON.stringify(locRows[3]?.location)}, locations: ${JSON.stringify(locRows[3]?.locations)}`);
+  }
+
+  if (locRows[4]?.location === 'Remote' && !('locations' in locRows[4])) {
+    pass('lever.fetch() gives location "Remote" and omits locations when categories.location is "Remote"');
+  } else {
+    fail(`lever.fetch() bare remote = location: ${JSON.stringify(locRows[4]?.location)}, locations: ${JSON.stringify(locRows[4]?.locations)}`);
+  }
+
+  if (locRows[5]?.location === 'London; Remote'
+      && JSON.stringify(locRows[5]?.locations) === JSON.stringify(['London'])) {
+    pass('lever.fetch() gives location "London; Remote" and locations ["London"] when allLocations has "Remote"');
+  } else {
+    fail(`lever.fetch() London remote = location: ${JSON.stringify(locRows[5]?.location)}, locations: ${JSON.stringify(locRows[5]?.locations)}`);
   }
 
 } catch (e) {

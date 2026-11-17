@@ -28,6 +28,7 @@ import { FollowupsTableRowsSkeleton } from "@/components/page-loading-skeletons"
 import { startRouteProgress } from "@/components/route-progress";
 import { selectUpcomingFollowups } from "@/lib/core/followup-view.mjs";
 import { followupsSummarySlot } from "@/lib/followups-summary-slot.mjs";
+import { FOLLOWUPS_NETWORK_ERROR, followupsAfterRefreshFailure } from "@/lib/followups-refresh.mjs";
 
 // The /followups tracker: WHO needs a nudge today, HOW urgent, WHEN the next
 // touch is due, and the permanent history of every follow-up sent. The verdict
@@ -84,6 +85,7 @@ type CadenceResponse = {
   metadata: CadenceMetadata | null;
   entries: CadenceEntry[];
   upcoming?: CadenceEntry[];
+  refreshFailed?: boolean;
 };
 
 export function FollowupsView() {
@@ -100,9 +102,12 @@ export function FollowupsView() {
 
   const refetch = useCallback(() => {
     fetch("/api/followups?full=1")
-      .then((r) => r.json())
-      .then((d: CadenceResponse) => setData(d))
-      .catch(() => setData({ available: false, metadata: null, entries: [] }));
+      .then((r) => {
+        if (!r.ok) throw new Error(String(r.status));
+        return r.json();
+      })
+      .then((d: CadenceResponse) => setData({ ...d, refreshFailed: false }))
+      .catch(() => setData((current) => followupsAfterRefreshFailure(current)));
   }, []);
   useEffect(refetch, [refetch]);
 
@@ -145,6 +150,9 @@ export function FollowupsView() {
   const meta = data?.available ? data.metadata : null;
 
   const filtering = tab !== "ALL" || q.trim().length > 0;
+  // A failed refresh with no list yet is not an empty cadence. A retained list
+  // still shows "No matches" when the filter hides every row.
+  const refreshWithoutAList = Boolean(data?.refreshFailed && !meta && entries.length === 0);
   const filtered = useMemo(() => {
     let rows = entries;
     if (tab !== "ALL") rows = rows.filter((e) => e.urgency.toUpperCase() === tab);
@@ -194,6 +202,8 @@ export function FollowupsView() {
     <span className="inline-flex items-center gap-1.5">
       <Loader2 className="size-3.5 animate-spin" /> Computing cadence…
     </span>
+  ) : data.refreshFailed && !meta ? (
+    "Couldn't refresh"
   ) : !data.available || !meta ? (
     "Cadence unavailable"
   ) : (
@@ -258,10 +268,13 @@ export function FollowupsView() {
       </div>
 
       {actionError && <p className="mt-3 text-xs text-red-500">{actionError}</p>}
+      {data?.refreshFailed && (
+        <p role="alert" className="mt-3 text-sm text-red-700 dark:text-red-400">{FOLLOWUPS_NETWORK_ERROR}</p>
+      )}
 
-      {data && !data.available ? (
+      {data && !data.available && !data.refreshFailed ? (
         <EmptyPanel title="Cadence unavailable" body="The cadence engine (followup-cadence.mjs) returned nothing — check that the core scripts are present." />
-      ) : data && !isPending && filtered.length === 0 ? (
+      ) : refreshWithoutAList ? null : data && !isPending && filtered.length === 0 ? (
         filtering ? (
           <EmptyPanel title="No matches" body="Try a different urgency filter or clear the search." />
         ) : (
@@ -294,7 +307,9 @@ export function FollowupsView() {
                     </th>
                   );
                 })}
-                <th className="px-2.5 py-2.5 font-medium">Action</th>
+                <th className="sticky right-0 z-10 bg-background px-2.5 py-2.5 font-medium shadow-[-10px_0_12px_-10px_rgb(28_25_23/0.25)]">
+                  Actions
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border" aria-busy={!data || isPending}>
@@ -457,7 +472,7 @@ function FollowupRow({
         <td className={cn("px-2.5 py-3 tabular-nums", daysHeatClass(e.daysSinceLastFollowup))}>
           {e.daysSinceLastFollowup == null ? <span className="text-faint">—</span> : e.daysSinceLastFollowup}
         </td>
-        <td className="whitespace-nowrap px-2.5 py-3">
+        <td className="sticky right-0 z-10 whitespace-nowrap bg-background px-2.5 py-3 shadow-[-10px_0_12px_-10px_rgb(28_25_23/0.25)]">
           <span className="inline-flex items-center gap-0.5">
             <button
               type="button"
@@ -474,12 +489,12 @@ function FollowupRow({
               aria-label={`Next date for ${e.company}`}
               title={e.nextOverride ? `Next date pinned to ${e.nextOverride} — change or clear` : "Pin a custom next follow-up date"}
               className={cn(
-                "rounded-md p-1 transition-colors hover:bg-brand-soft hover:text-brand-text",
-                e.nextOverride ? "text-brand-text" : "text-faint",
+                "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-brand-soft hover:text-brand-text",
+                e.nextOverride ? "text-brand-text" : "text-muted",
               )}
             >
               <CalendarClock className="size-3.5" />
-              <span className="hidden xl:inline">Next date</span>
+              Next date
             </button>
           </span>
         </td>

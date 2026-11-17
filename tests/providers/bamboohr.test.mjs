@@ -80,11 +80,27 @@ try {
   if (jobs[1]?.url === 'https://acme.bamboohr.com/careers/22') pass('parseBambooHRResponse coerces numeric id to URL');
   else fail(`parseBambooHRResponse numeric-id url was ${jobs[1]?.url}`);
 
-  // empty / malformed payloads → []
-  if (parseBambooHRResponse({}, 'X', 'https://x.bamboohr.com').length === 0) pass('parseBambooHRResponse empty {} → []');
-  else fail('parseBambooHRResponse should return [] for {}');
-  if (parseBambooHRResponse({ result: null }, 'X', 'https://x.bamboohr.com').length === 0) pass('parseBambooHRResponse result:null → []');
-  else fail('parseBambooHRResponse should return [] for result:null');
+  // Empty vs broken (#6906, ADDING_A_PROVIDER.md "Defensive parsing"): only the
+  // documented container, present and empty, is an empty board. Any other body
+  // throws, naming the keys (or the type) it got.
+  {
+    const emptyBoard = parseBambooHRResponse({ meta: { totalCount: 0 }, result: [] }, 'X', 'https://x.bamboohr.com');
+    if (Array.isArray(emptyBoard) && emptyBoard.length === 0) pass('parseBambooHRResponse returns [] for { meta: { totalCount: 0 }, result: [] }');
+    else fail(`parseBambooHRResponse { meta: { totalCount: 0 }, result: [] } → ${JSON.stringify(emptyBoard)}`);
+    let brokenOk = true;
+    for (const [body, got] of [[{}, '[]'], [{ error: 'rate limited' }, '[error]'], [{ meta: {}, result: null }, '[meta, result]'], ['oops', '[string]'], [null, '[null]']]) {
+      let out;
+      let err = null;
+      try { out = parseBambooHRResponse(body, 'X', 'https://x.bamboohr.com'); } catch (e) { err = e; }
+      const msg = String(err?.message || '');
+      if (!err || !msg.startsWith('bamboohr: unexpected response for X') || !msg.includes(`got: ${got}`)) {
+        brokenOk = false;
+        fail(`parseBambooHRResponse body=${JSON.stringify(body)} should throw naming ${got}; got ${err ? JSON.stringify(msg) : `a return of ${JSON.stringify(out)}`}`);
+        break;
+      }
+    }
+    if (brokenOk) pass('parseBambooHRResponse throws, naming what it got, for a body that is not a board');
+  }
 
   // fetch() — via mock ctx, asserts the resolved URL + SSRF redirect pinning + parsing
   let fetchedUrl = '';

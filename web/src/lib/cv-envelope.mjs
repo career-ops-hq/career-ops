@@ -19,7 +19,7 @@
  * injected closer truncates instead of escaping), and more than one envelope is
  * refused outright rather than guessed at.
  */
-import { PAGE_FORMATS, PAGE_WIDTHS } from "./page-formats.mjs";
+import { PAGE_FORMATS } from "./page-formats.mjs";
 
 // Markers must own their line — otherwise an agent merely *mentioning* the
 // syntax in its prose (or a CLI echoing the prompt, as `codex exec` does) would
@@ -30,13 +30,15 @@ import { PAGE_FORMATS, PAGE_WIDTHS } from "./page-formats.mjs";
 // pdf run at runtime with the whole suite still green.
 export const OPEN_MARK = "<<cv-html";
 export const CLOSE_MARK = "<</cv-html>>";
+export const JSON_OPEN_MARK = "<<cv-json";
+export const JSON_CLOSE_MARK = "<</cv-json>>";
 
 // One pattern source per marker. The closer needs two compiled flavours because
 // `exec` on a global regex advances `lastIndex` between calls, so the single-shot
 // lookup and the scanning one must not share an object; the opener is only ever
 // scanned with `matchAll`, which clones and needs just the one.
-const OPENER_SRC = String.raw`^<<cv-html(?:[ \t]+format="([^"\n]*)")?(?:[ \t]+country="([^"\n]*)")?>>[ \t]*$`;
-const CLOSER_SRC = String.raw`^<<\/cv-html>>[ \t]*$`;
+const OPENER_SRC = String.raw`^<<cv-(html|json)(?:[ \t]+format="([^"\n]*)")?(?:[ \t]+country="([^"\n]*)")?>>[ \t]*$`;
+const CLOSER_SRC = String.raw`^<<\/cv-(html|json)>>[ \t]*$`;
 const OPENER = new RegExp(OPENER_SRC, "gm");
 const CLOSER = new RegExp(CLOSER_SRC, "m");
 const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
@@ -72,23 +74,25 @@ const CLOSER_ALL = new RegExp(CLOSER_SRC, "gm");
  * @returns {string}
  */
 export function cvEnvelopeInstruction({ setting = null, letterCountries = [] } = {}) {
-  return `Do NOT save or edit any file — the platform persists your output for you. Instead OUTPUT the finished HTML inline, between two marker lines. ${pageFormatSentences(setting, letterCountries)} Then the complete HTML document, then a final line containing only \`${CLOSE_MARK}\`. Each marker appears exactly once. Emit the WHOLE document from <!DOCTYPE html> to </html> — never abbreviate, summarize, or write "unchanged"; the platform renders exactly these bytes and nothing else.`;
+  return `Do NOT save or edit any file. The platform persists your output for you. Instead OUTPUT one JSON object, the modes/pdf.md JSON Input Schema, between two marker lines. ${pageFormatSentences(setting, letterCountries)} Then the JSON object alone, with no markdown fence and no HTML, then a final line containing only \`${JSON_CLOSE_MARK}\`. Each marker appears exactly once. The platform builds the HTML from this JSON and runs the same checks as the CLI. Keep experience roles newest-first. Reorder bullets inside a role, never the roles themselves.`;
 }
 
 function pageFormatSentences(setting, letterCountries) {
   if (setting === "a4" || setting === "letter") {
-    return `The first line contains only the opening marker \`${OPEN_MARK} format="${setting}">>\`, and nothing else on that line. The user's profile sets page_format to ${setting}, so do not choose a page size yourself, and fill the template's {{PAGE_WIDTH}} with ${PAGE_WIDTHS[setting]}.`;
+    return `The first line contains only the opening marker \`${JSON_OPEN_MARK} format="${setting}">>\`, and nothing else on that line. The user's profile sets page_format to ${setting}, so do not choose a page size yourself.`;
   }
   if (setting === "auto" && letterCountries.length > 0) {
-    return `The user's profile sets page_format to auto: the page size follows the hiring entity's country, and the platform picks it from the code you give. Read that country from the evaluation report's market signals (jurisdiction, currency, benefits and legal vocabulary; for a remote role, the entity that receives the CV). The first line contains only the opening marker carrying its ISO 3166-1 alpha-2 code, for example \`${OPEN_MARK} country="DE">>\`, and nothing else on that line. If you cannot tell the country, use \`${OPEN_MARK}>>\` instead. Fill the template's {{PAGE_WIDTH}} with ${PAGE_WIDTHS.letter} when the code is one of ${letterCountries.join(", ")}, or when you named no country, and with ${PAGE_WIDTHS.a4} otherwise.`;
+    return `The user's profile sets page_format to auto: the page size follows the hiring entity's country, and the platform picks it from the code you give. Read that country from the evaluation report's market signals (jurisdiction, currency, benefits and legal vocabulary; for a remote role, the entity that receives the CV). The first line contains only the opening marker carrying its ISO 3166-1 alpha-2 code, for example \`${JSON_OPEN_MARK} country="DE">>\`, and nothing else on that line. If you cannot tell the country, use \`${JSON_OPEN_MARK}>>\` instead.`;
   }
-  return `The first line contains only the opening marker carrying your chosen page format — \`${OPEN_MARK} format="a4">>\` or \`${OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4, and fill the template's {{PAGE_WIDTH}} to match: ${PAGE_WIDTHS.letter} for letter, ${PAGE_WIDTHS.a4} for a4.`;
+  return `The first line contains only the opening marker carrying your chosen page format, \`${JSON_OPEN_MARK} format="a4">>\` or \`${JSON_OPEN_MARK} format="letter">>\`, and nothing else on that line. Choose letter for a US/Canada company, otherwise a4.`;
 }
 
 /**
  * @typedef {Object} CvEnvelope
  * @property {true} ok
- * @property {string} html - The tailored CV HTML, byte-exact as emitted.
+ * @property {"html"|"json"} kind
+ * @property {string} [html] - Legacy tailored CV HTML, byte-exact as emitted.
+ * @property {object} [payload] - CLI JSON payload. Present only for a cv-json envelope.
  * @property {"a4"|"letter"|null} format - The page format the agent declared, or
  *   null when it declared none it may use. Not yet the sheet: the profile can
  *   outrank it (core/page-format.mjs resolveRenderPageFormat).
@@ -98,7 +102,7 @@ function pageFormatSentences(setting, letterCountries) {
  */
 
 /**
- * Extract the tailored CV HTML and page format from an agent's full output.
+ * Extract the tailored CV and page format from an agent's full output.
  *
  * Returns a result rather than throwing so the caller (the /api/run close
  * handler) can route the failure through the same honesty gate as every other
@@ -117,49 +121,61 @@ export function parseCvEnvelope(text) {
 
   const openers = [...normalized.matchAll(OPENER)];
   if (openers.length === 0) {
-    return { ok: false, error: "The agent emitted no <<cv-html>> envelope, so there is no CV to render." };
+    return { ok: false, error: "The agent emitted no CV envelope, so there is no CV to render." };
   }
   if (openers.length > 1) {
-    // Choosing one would be choosing blind — an injected envelope looks exactly
-    // like the real one from here.
-    return { ok: false, error: `Found ${openers.length} <<cv-html>> envelopes; refusing to guess which is the real CV.` };
+    const label = openers.every((opener) => opener[1] === "html") ? "<<cv-html>>" : "CV";
+    return { ok: false, error: `Found ${openers.length} ${label} envelopes; refusing to guess which is the real CV.` };
   }
 
   const opener = openers[0];
+  const kind = opener[1] === "json" ? "json" : "html";
   const afterOpener = normalized.slice(opener.index + opener[0].length);
   const closer = CLOSER.exec(afterOpener);
   if (!closer) {
-    return { ok: false, error: "The <<cv-html>> envelope was never closed — the CV output is incomplete." };
+    return { ok: false, error: `The <<cv-${kind}>> envelope was never closed. The CV output is incomplete.` };
+  }
+  if (closer[1] !== kind) {
+    return { ok: false, error: `The <<cv-${kind}>> envelope was closed by <</cv-${closer[1]}>>.` };
   }
 
   // The opener match stops before its newline and the closer starts on its own
   // line, so exactly one delimiting newline sits on each side of the body.
-  const html = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
-  if (!html.trim()) {
-    return { ok: false, error: "The <<cv-html>> envelope was empty — no CV was tailored." };
-  }
-  // A closing </html> is what distinguishes a whole document from one the agent
-  // cut off mid-emission — the realistic failure when emitting 15-25 KB inline.
-  // This belongs here, not in the caller: the caller reports THIS error string, so
-  // splitting the rule out would leave the user with a generic message.
-  if (!/<\/html\s*>/i.test(html)) {
-    return { ok: false, error: "The CV was cut off before its closing </html> tag — the output is incomplete." };
+  const body = afterOpener.slice(0, closer.index).replace(/^\n/, "").replace(/\n$/, "");
+  if (!body.trim()) {
+    return { ok: false, error: `The <<cv-${kind}>> envelope was empty. No CV was tailored.` };
   }
 
   // What to do about a missing format, or a country, depends on the profile,
   // which this pure parser does not read: it reports what was declared and
   // resolveRenderPageFormat ranks it.
   const warnings = [];
-  const declared = opener[1];
+  const declared = opener[2];
   let format = null;
   if (declared !== undefined) {
     const lower = declared.trim().toLowerCase();
     if (PAGE_FORMATS.has(lower)) format = lower;
     else warnings.push(`Unrecognized page format "${declared}"; ignoring it.`);
   }
-  const country = opener[2] === undefined ? null : opener[2].trim() || null;
+  const country = opener[3] === undefined ? null : opener[3].trim() || null;
 
-  return { ok: true, html, format, country, warnings };
+  if (kind === "html") {
+    if (!/<\/html\s*>/i.test(body)) {
+      return { ok: false, error: "The CV was cut off before its closing </html> tag. The output is incomplete." };
+    }
+    return { ok: true, kind, html: body, format, country, warnings };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return { ok: false, error: "The <<cv-json>> envelope was not valid JSON, so there is no CV to render." };
+  }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, error: "The <<cv-json>> envelope must hold one JSON object, so there is no CV to render." };
+  }
+  return { ok: true, kind, payload, format, country, warnings };
 }
 
 /**
@@ -172,12 +188,8 @@ export function parseCvEnvelope(text) {
  * @returns {boolean}
  */
 function couldBecomeMarker(line) {
-  return (
-    // Still growing into a marker (`<`, `<<c`)...
-    OPEN_MARK.startsWith(line) || CLOSE_MARK.startsWith(line) ||
-    // ...or already past it and still growing towards `>>`.
-    line.startsWith(OPEN_MARK) || line.startsWith(CLOSE_MARK)
-  );
+  const marks = [OPEN_MARK, CLOSE_MARK, JSON_OPEN_MARK, JSON_CLOSE_MARK];
+  return marks.some((mark) => mark.startsWith(line) || line.startsWith(mark));
 }
 
 /**

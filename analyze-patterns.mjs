@@ -311,7 +311,7 @@ const ADVANCED_STATUSES = new Set(['responded', 'assessment', 'interview', 'offe
 
 // Print order for the CONVERSION FUNNEL summary. A status absent here is
 // silently omitted from the printed funnel, so this must track states.yml.
-const FUNNEL_ORDER = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+const FUNNEL_ORDER = ['evaluated', 'speculative', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
 
 function normalizeList(value) {
   if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
@@ -1208,7 +1208,7 @@ function classifyCompanySize(teamSize) {
   if (!teamSize) return 'unknown';
   const lower = teamSize.toLowerCase();
   // Extract numbers
-  const nums = lower.match(/[\d,]+/g);
+  const nums = lower.match(/\d[\d,]*/g);
   if (nums) {
     const max = Math.max(...nums.map(n => parseInt(n.replace(/,/g, ''))));
     if (max <= 50) return 'startup';
