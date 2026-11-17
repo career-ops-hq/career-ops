@@ -23,7 +23,7 @@ import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
  * @typedef {{ ref: string, tag: string, type: string, role: string, inForm: boolean,
  *             aria: string, placeholder: string, text: string, value: string,
  *             name: string, title: string, alt: string, group: string, question: string,
- *             option: string }} ElementFacts
+ *             option: string, identity: string }} ElementFacts
  */
 
 /**
@@ -114,6 +114,69 @@ export const factsOf = (el, ref) => {
     if (!ownChoice || ownChoice === name || (shared && value)) return (value || ownChoice).slice(0, 200);
     return (ownChoice || value).slice(0, 200);
   })();
+  // Same order as extraction's labelFor. A heading in the field wrapper is the
+  // name when the control has no aria name and no label element. Placeholder
+  // and the input name come after that, so they cannot hide the heading.
+  const pure = (node) => {
+    if (!node) return "";
+    if (typeof node.cloneNode !== "function") return flat(node.textContent);
+    const copy = node.cloneNode(true);
+    if (copy.querySelectorAll) copy.querySelectorAll("input, select, textarea, option, button, [role=option]").forEach((control) => control.remove());
+    return flat(copy.textContent);
+  };
+  const shown = (node) => {
+    let current = node;
+    const body = typeof document !== "undefined" ? document.body : null;
+    while (current && current !== body) {
+      if (current.offsetParent != null) return true;
+      if (typeof getComputedStyle !== "function") return false;
+      if (getComputedStyle(current).display !== "contents") return false;
+      current = current.parentElement;
+    }
+    return body != null && current === body;
+  };
+  const otherControl = (container) => {
+    if (!container?.querySelectorAll) return false;
+    const ownName = field.name || "";
+    for (const node of Array.from(container.querySelectorAll("input, textarea, select"))) {
+      if (node === el) continue;
+      const nodeType = flat(node.getAttribute?.("type")).toLowerCase();
+      const nodeTag = String(node.tagName || "").toLowerCase();
+      if (nodeTag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(nodeType)) continue;
+      if (node.offsetParent == null && nodeType !== "radio" && nodeType !== "checkbox") continue;
+      if (typeof node.closest === "function" && node.closest('[class*="autofill" i]')) continue;
+      if (nodeType === "radio" && ownName && (node.name || "") === ownName) continue;
+      const shell = typeof node.closest === "function" && node.closest('[class*="select__"], .select-shell');
+      if (shell && node.getAttribute?.("role") !== "combobox" && el.getAttribute("role") === "combobox") continue;
+      return true;
+    }
+    return false;
+  };
+  const firstShown = (container, selector) => {
+    if (!container?.querySelectorAll) return "";
+    const lab = Array.from(container.querySelectorAll(selector)).find((node) => shown(node));
+    return lab ? usable(pure(lab)) : "";
+  };
+  const identity = (() => {
+    const named = usable(aria);
+    if (named) return named;
+    const fromLabel = usable(ownLabel);
+    if (fromLabel) return fromLabel;
+    const grp = typeof el.closest === "function"
+      ? el.closest('[class*="field-entry" i], [class*="fieldEntry" i], [class*="form-group" i], [class*="question" i], [class*="field__" i], [class*="__field" i], fieldset, [class*="field" i]')
+      : null;
+    if (grp && !otherControl(grp)) {
+      const fromGroup = firstShown(grp, 'label, legend, [class*="question-title" i], [class*="heading" i], [class*="label" i], [class*="title" i]');
+      if (fromGroup) return fromGroup;
+    }
+    let parent = el.parentElement;
+    for (let i = 0; i < 4 && parent; i += 1, parent = parent.parentElement) {
+      if (otherControl(parent)) break;
+      const fromParent = firstShown(parent, 'label, legend, [class*="label" i], [class*="title" i], h3, h4, h5');
+      if (fromParent) return fromParent;
+    }
+    return usable(field.placeholder) || usable(field.name);
+  })();
   return {
     ref: ref || el.getAttribute("data-co-ref") || "",
     tag,
@@ -149,6 +212,7 @@ export const factsOf = (el, ref) => {
     })(),
     question: ownLabel,
     option,
+    identity,
   };
 };
 
@@ -160,15 +224,15 @@ function usableName(text) {
   return t.slice(0, 200);
 }
 
-/** The name extraction would give a text field. A real aria name wins, then
- *  the visible label, then the snapshot fallback. The listed-answer gate uses
- *  this so it matches the answer list, which is built from the extracted label.
+/** The name extraction would give a text field. factsOf stores that name on
+ *  `identity`, including a heading in the field wrapper. A partial fact falls
+ *  back to the aria name, then the visible label, then the snapshot.
  *
- * @param {ElementFacts | { aria?: string, question?: string }} [facts]
+ * @param {ElementFacts | { aria?: string, question?: string, identity?: string }} [facts]
  * @returns {string}
  */
 export function listedFieldLabel(facts) {
-  return usableName(facts?.aria) || usableName(facts?.question) || snapshotLabel(facts || {});
+  return facts?.identity || usableName(facts?.aria) || usableName(facts?.question) || snapshotLabel(facts || {});
 }
 
 /**

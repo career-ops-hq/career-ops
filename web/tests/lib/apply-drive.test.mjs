@@ -601,6 +601,44 @@ test("a text field is gated on its aria name, not the visible label", () => {
   );
 });
 
+test("a wrapper heading names the field before its placeholder", () => {
+  const heading = (text) => ({
+    textContent: text,
+    offsetParent: {},
+    tagName: "H3",
+    cloneNode() {
+      return { textContent: text, querySelectorAll() { return []; } };
+    },
+  });
+  const control = (tag, placeholder) => {
+    const node = {
+      tagName: tag,
+      name: "email",
+      placeholder,
+      value: "",
+      textContent: "",
+      form: null,
+      parentElement: null,
+      getAttribute() { return null; },
+      closest() { return null; },
+    };
+    const box = {
+      parentElement: null,
+      querySelectorAll(selector) {
+        if (String(selector).includes("h3")) return [heading("Email address")];
+        if (String(selector).includes("input")) return [node];
+        return [];
+      },
+    };
+    node.parentElement = box;
+    return node;
+  };
+  const input = control("INPUT", "Jane Doe");
+  assert.equal(listedFieldLabel(factsOf(input, "e1")), "Email address");
+  const select = control("SELECT", "Jane Doe");
+  assert.equal(listedFieldLabel(factsOf(select, "e2")), "Email address");
+});
+
 test("a shared radio is refused when its option changed after the snapshot", async () => {
   const page = new FakePage();
   page.add("yes", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "1" });
