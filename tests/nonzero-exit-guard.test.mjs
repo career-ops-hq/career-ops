@@ -52,6 +52,8 @@ const KNOWN_NOT_A_SPAWN_RESULT = new Map([
     'asserts a SIGTERM-terminated child "must not look successful" — termination IS the point there'],
   ['web/tests/lib/scan-schedule-scripts.test.mjs',
     'web/ keeps to its own test tree and does not import tests/helpers; needs its own copy or a shared move first'],
+  ['web/tests/lib/core-cli-output-limit.test.mjs',
+    'runCoreCli returns a custom CliResult, not a spawn result; this test asserts its code field'],
 ]);
 
 // Where a `/` can only begin a regex literal, never division. The usual

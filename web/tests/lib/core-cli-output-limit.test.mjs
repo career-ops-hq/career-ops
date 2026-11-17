@@ -7,7 +7,7 @@ import '../helpers/web-ts-alias-loader.mjs';
 
 test('core CLI bounds stdout and stderr by default and honors an explicit larger limit', async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-cli-output-'));
-  const env = { CAREER_OPS_ROOT: root, CAREER_OPS_CODE_ROOT: root };
+  const env = { CAREER_OPS_CODE_ROOT: root };
   const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
   Object.assign(process.env, env);
   t.after(() => {
