@@ -3137,6 +3137,11 @@ tracked_companies:
     notes: "Paris FR. AI-native contact center (CCaaS) platform — Frost & Sullivan 2026 AI CX Leader in Europe; hybrid LLM/SLM architecture powering Agent Assist, Voice Analytics, and automated QA."
     enabled: true
 
+  - name: Doctolib
+    careers_url: https://jobs.ashbyhq.com/doctolib
+    notes: "Paris FR / Berlin DE / Nantes / Milan. European healthtech: patient booking, practice software, AI medical assistant."
+    enabled: true
+
   # -- UK & Ireland AI (EU-friendly hiring) --
 
   - name: Wayve
