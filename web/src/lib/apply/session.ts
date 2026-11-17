@@ -8,7 +8,7 @@ import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
-import { checkboxSelections } from "./checkbox-options.mjs";
+import { checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
 import { cvUploadFile } from "./upload-name.mjs";
 import { resolveCli } from "../clis";
@@ -619,10 +619,11 @@ export async function fillSession(
           // does not make the whole group consent. Leave the box untouched.
           if (consent(opt) || (await box.getAttribute("data-co-consent")) === "1") continue;
           const want = wanted.some((part) => part.toLowerCase() === opt.toLowerCase());
-          const did = await box.setChecked(want, { timeout: 3000 }).then(() => true).catch(async () => {
-            await box.setChecked(want, { force: true, timeout: 1000 }).catch(() => {});
-            return (await box.isChecked({ timeout: 1000 }).catch(() => false)) === want;
-          });
+          const did = await confirmCheckbox(
+            (state, opts) => box.setChecked(state, opts),
+            (opts) => box.isChecked(opts),
+            want,
+          );
           if (!did) missed += 1;
           else if (want) checked += 1;
         }

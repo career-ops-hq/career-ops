@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkboxSelections } from "../../src/lib/apply/checkbox-options.mjs";
+import { checkboxSelections, confirmCheckbox } from "../../src/lib/apply/checkbox-options.mjs";
 
 const teams = ["Sales, Marketing", "Engineering"];
 
@@ -32,4 +32,15 @@ test("an unknown piece is kept so the fill can report it", () => {
 test("an empty answer selects nothing", () => {
   assert.deepEqual(checkboxSelections("  ", teams), []);
   assert.deepEqual(checkboxSelections("", []), []);
+});
+
+test("a checkbox read that fails is not a successful uncheck", async () => {
+  const fail = async () => {
+    throw new Error("unreadable");
+  };
+  assert.equal(await confirmCheckbox(fail, fail, false), false);
+  assert.equal(await confirmCheckbox(fail, fail, true), false);
+  assert.equal(await confirmCheckbox(fail, async () => false, false), true);
+  assert.equal(await confirmCheckbox(fail, async () => true, false), false);
+  assert.equal(await confirmCheckbox(async () => {}, fail, true), true);
 });

@@ -52,3 +52,36 @@ export function checkboxSelections(value, options) {
   }
   return wanted;
 }
+
+/**
+ * Whether the checkbox ended in the requested state.
+ *
+ * The first setChecked attempt resolves only when Playwright saw that state.
+ * After it throws, a second attempt is forced and the box is read. A failed
+ * read is null. null is not an unchecked box, so a deselection whose state
+ * cannot be read does not count as done.
+ *
+ * @param {(want: boolean, options: {timeout?: number, force?: boolean}) => Promise<void>} setChecked
+ * @param {(options: {timeout?: number}) => Promise<boolean>} isChecked
+ * @param {boolean} want
+ * @returns {Promise<boolean>}
+ */
+export async function confirmCheckbox(setChecked, isChecked, want) {
+  try {
+    await setChecked(want, { timeout: 3000 });
+    return true;
+  } catch {
+    try {
+      await setChecked(want, { force: true, timeout: 1000 });
+    } catch {
+      // The forced attempt failed too. The read below decides the result.
+    }
+    let seen = null;
+    try {
+      seen = await isChecked({ timeout: 1000 });
+    } catch {
+      seen = null;
+    }
+    return seen === want;
+  }
+}
