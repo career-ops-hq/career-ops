@@ -604,17 +604,27 @@ export async function fillSession(
           await loc.selectOption(value);
         });
       } else if (meta.type === "checkbox" && meta.options?.length) {
-        const wanted = value.split(",").map((part) => part.trim()).filter(Boolean);
+        const trimmed = value.trim();
+        const exact = meta.options.find((option) => option.toLowerCase() === trimmed.toLowerCase());
+        const wanted = exact ? [exact] : value.split(",").map((part) => part.trim()).filter(Boolean);
+        const consent = (label: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(label);
+        const boxes = s.frame.locator(`[data-co-field="${cssAttr(fid)}"]`);
+        const count = await boxes.count();
         let checked = 0;
-        for (const opt of wanted) {
-          const box = s.frame.locator(`[data-co-field="${cssAttr(fid)}"][data-co-option="${cssAttr(opt)}"]`).first();
-          const did = await box.check({ timeout: 3000 }).then(() => true).catch(async () => {
-            await box.check({ force: true, timeout: 1000 }).catch(() => {});
-            return box.isChecked({ timeout: 1000 }).catch(() => false);
+        for (let i = 0; i < count; i++) {
+          const box = boxes.nth(i);
+          const opt = (await box.getAttribute("data-co-option")) || "";
+          // A consent option keeps its own words. The group title does not.
+          if (consent(opt)) continue;
+          const want = wanted.some((part) => part.toLowerCase() === opt.toLowerCase());
+          const did = await box.setChecked(want, { timeout: 3000 }).then(() => true).catch(async () => {
+            await box.setChecked(want, { force: true, timeout: 1000 }).catch(() => {});
+            return (await box.isChecked({ timeout: 1000 }).catch(() => false)) === want;
           });
-          if (did) checked += 1;
+          if (want && did) checked += 1;
         }
-        gaveUp = checked !== wanted.length;
+        const actionable = wanted.filter((opt) => !consent(opt));
+        gaveUp = checked !== actionable.length || actionable.length !== wanted.length;
       } else if (meta.type === "checkbox") {
         const want = ["true", "1", "yes", "on", "checked"].includes(value.toLowerCase());
         let done = false;

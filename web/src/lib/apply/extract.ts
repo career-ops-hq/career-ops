@@ -262,14 +262,27 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
             continue;
           }
           seenCheckbox.add(boxName);
-          const fullLabels = boxes.map((box) => normalize(labelFor(box) || (box as HTMLInputElement).value));
-          const shown = fullLabels.map((full) => clean(full));
+          const fullLabels = boxes.map((box) => normalize(labelFor(box)));
+          // The same text on every box is the question or the input name, not a
+          // choice. Use each input's value so health and dental stay distinct.
+          const shared = fullLabels.length > 1 && fullLabels.every((text) => text && text === fullLabels[0]);
+          const optionText = (box: Element, i: number) => {
+            const value = clean((box as HTMLInputElement).value);
+            const full = fullLabels[i] || "";
+            const text = clean(full);
+            const rawName = (box as HTMLInputElement).name || "";
+            if (!full || full === rawName || (shared && value)) return value || text;
+            return text || value;
+          };
+          const options = boxes.map((box, i) => optionText(box, i)).filter(Boolean);
           boxes.forEach((box, i) => {
             box.setAttribute("data-co-field", fid);
-            box.setAttribute("data-co-option", shown[i] || String(i));
+            box.setAttribute("data-co-option", optionText(box, i) || String(i));
           });
-          const options = shown.filter(Boolean);
-          const boxRaw = groupLabel(el, fullLabels.filter(Boolean));
+          const matchTexts = shared
+            ? options
+            : fullLabels.map((full, i) => full || normalize((boxes[i] as HTMLInputElement).value)).filter(Boolean);
+          const boxRaw = groupLabel(el, matchTexts.length ? matchTexts : options);
           const boxLabel = clean(boxRaw) || boxName;
           fields.push({ id: fid, type: "checkbox", label: boxLabel, required: requiredFor(clean(boxRaw) ? boxRaw : (boxName || "")), options });
           continue;

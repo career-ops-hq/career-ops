@@ -322,7 +322,7 @@ export function comboboxDisplayMatches(actual: string, intended: string): boolea
  *  still empty? any validation error visible? — the self-verification a blind
  *  selector script can't do. Returns warnings to show BEFORE the human submits. */
 export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Record<string, string>): Promise<ApplyIssue[]> {
-  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
+  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox, options: f.options ?? [] }));
   type Combo = { label: string; intended: string; actual: string; required: boolean };
   type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[]; comboboxes: Combo[] };
   let readFailed = false;
@@ -359,6 +359,17 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             const filesEl = el as HTMLInputElement;
             const has = !!(filesEl.files && filesEl.files.length > 0);
             if (f.required && !has) requiredEmpty.push(f.label);
+            continue;
+          }
+          if (f.type === "checkbox" && Array.isArray(f.options) && f.options.length) {
+            const grp = Array.from(document.querySelectorAll(`[data-co-field="${f.id}"]`)) as HTMLInputElement[];
+            const selected = grp.filter((box) => box.checked).map((box) => norm(box.getAttribute("data-co-option") || box.value || ""));
+            const trimmed = (intended || "").trim();
+            const exact = f.options.find((option) => norm(option) === norm(trimmed));
+            const wanted = exact ? [norm(exact)] : trimmed.split(",").map((part) => norm(part)).filter(Boolean);
+            const same = selected.length === wanted.length && wanted.every((part) => selected.includes(part));
+            if (wanted.length && !same) mismatches.push(f.label);
+            if (f.required && selected.length === 0) requiredEmpty.push(f.label);
             continue;
           }
           if (f.type === "checkbox") {
