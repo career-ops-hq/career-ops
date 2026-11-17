@@ -603,6 +603,18 @@ export async function fillSession(
         await loc.selectOption({ label: value }).catch(async () => {
           await loc.selectOption(value);
         });
+      } else if (meta.type === "checkbox" && meta.options?.length) {
+        const wanted = value.split(",").map((part) => part.trim()).filter(Boolean);
+        let checked = 0;
+        for (const opt of wanted) {
+          const box = s.frame.locator(`[data-co-field="${cssAttr(fid)}"][data-co-option="${cssAttr(opt)}"]`).first();
+          const did = await box.check({ timeout: 3000 }).then(() => true).catch(async () => {
+            await box.check({ force: true, timeout: 1000 }).catch(() => {});
+            return box.isChecked({ timeout: 1000 }).catch(() => false);
+          });
+          if (did) checked += 1;
+        }
+        gaveUp = checked !== wanted.length;
       } else if (meta.type === "checkbox") {
         const want = ["true", "1", "yes", "on", "checked"].includes(value.toLowerCase());
         let done = false;

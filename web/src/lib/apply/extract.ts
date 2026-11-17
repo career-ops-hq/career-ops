@@ -183,6 +183,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
     const fields: Array<Record<string, unknown>> = [];
     const seenRadio = new Set<string>();
+    const seenCheckbox = new Set<string>();
     const els = Array.from(document.querySelectorAll("input, textarea, select"));
     let n = 0;
 
@@ -248,6 +249,31 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         const radioLabel = clean(radioRaw) || name;
         fields.push({ id: fid, type: "radio", label: radioLabel, required: requiredFor(clean(radioRaw) ? radioRaw : (name || "")), options });
         continue;
+      }
+
+      if (itype === "checkbox") {
+        const boxName = (el as HTMLInputElement).name;
+        const boxes = boxName
+          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`))
+          : [el];
+        if (boxes.length > 1) {
+          if (seenCheckbox.has(boxName)) {
+            n--;
+            continue;
+          }
+          seenCheckbox.add(boxName);
+          const fullLabels = boxes.map((box) => normalize(labelFor(box) || (box as HTMLInputElement).value));
+          const shown = fullLabels.map((full) => clean(full));
+          boxes.forEach((box, i) => {
+            box.setAttribute("data-co-field", fid);
+            box.setAttribute("data-co-option", shown[i] || String(i));
+          });
+          const options = shown.filter(Boolean);
+          const boxRaw = groupLabel(el, fullLabels.filter(Boolean));
+          const boxLabel = clean(boxRaw) || boxName;
+          fields.push({ id: fid, type: "checkbox", label: boxLabel, required: requiredFor(clean(boxRaw) ? boxRaw : (boxName || "")), options });
+          continue;
+        }
       }
 
       el.setAttribute("data-co-field", fid);
