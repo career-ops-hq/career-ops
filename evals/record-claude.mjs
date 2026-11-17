@@ -374,8 +374,15 @@ export function checkExpect(parsed, expect) {
   if (!expect) return [];
   const fails = [];
   const s = parsed.score;
-  if (expect.score_min != null && !(s >= expect.score_min)) fails.push(`score ${s} < ${expect.score_min}`);
-  if (expect.score_max != null && !(s <= expect.score_max)) fails.push(`score ${s} > ${expect.score_max}`);
+  // A report that states no score has not met a score bound. `null <= 3` is
+  // true in JS, so comparing it would pass every score_max case — the same
+  // hole legitimacy_not closes for a missing tier just below.
+  if ((expect.score_min != null || expect.score_max != null) && s == null) {
+    fails.push('score missing');
+  } else {
+    if (expect.score_min != null && !(s >= expect.score_min)) fails.push(`score ${s} < ${expect.score_min}`);
+    if (expect.score_max != null && !(s <= expect.score_max)) fails.push(`score ${s} > ${expect.score_max}`);
+  }
   const legit = String(parsed.legitimacy || '').toLowerCase();
   if (expect.legitimacy && !expect.legitimacy.some((l) => legit.includes(l.toLowerCase()))) {
     fails.push(`legitimacy "${parsed.legitimacy}" not in [${expect.legitimacy.join(', ')}]`);

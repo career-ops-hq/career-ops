@@ -114,12 +114,17 @@ async function withFixture(files, fn, rows, manifest) {
         '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |',
         '|---|------|---------|------|-------|--------|-----|--------|-------|',
         ...rows.map(
-          ({ n, company, role }) =>
-            `| ${n} | 2026-01-01 | ${company} | ${role} | 4.5/5 | Applied | ✅ | [${n}](../reports/${n}-x-2026-01-01.md) | |`
+          ({ n, company, role, reportCell }) =>
+            `| ${n} | 2026-01-01 | ${company} | ${role} | 4.5/5 | Applied | ✅ | ${reportCell ?? `[${n}](../reports/${n}-x-2026-01-01.md)`} | |`
         ),
         '',
       ].join('\n')
     );
+  }
+  for (const { n, reportFile } of rows ?? []) {
+    if (!reportFile) continue;
+    mkdirSync(join(root, 'reports'), { recursive: true });
+    writeFileSync(join(root, 'reports', reportFile), `# Report ${n}\n`);
   }
   if (manifest) {
     mkdirSync(join(root, 'data'), { recursive: true });
@@ -473,4 +478,24 @@ test('Zoë does not claim a standard file written for Zo (#6667)', async () => {
   assert.equal(matchesCompanyKeys(matchesTailoredCv, '024-zo-cv-jane-smith-2026-11-07.pdf', keys), false);
   assert.equal(matchesCompanyKeys(matchesTailoredCover, '024-zo-cover-jane-smith-2026-11-07.pdf', keys), false);
   assert.equal(matchesCompanyKeys(matchesTailoredCv, '024-zoe-cv-jane-smith-2026-11-07.pdf', keys), true);
+});
+
+test('a legacy cover keeps the unfolded role spelling the writer emits (#6667)', async () => {
+  await withFixture(
+    [['acme-d-veloppeur-cover.pdf']],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), join(outputDir, 'acme-d-veloppeur-cover.pdf'));
+    },
+    [{ n: '31', company: 'Acme', role: 'Développeur' }]
+  );
+});
+
+test('a standard cover resolves from the report file when the tracker row has no report link (#6667)', async () => {
+  await withFixture(
+    [['031-acme-cover-dana-quinn-2026-11-09.pdf']],
+    async (outputDir) => {
+      assert.equal(await resolveTailoredCover(undefined, '31'), join(outputDir, '031-acme-cover-dana-quinn-2026-11-09.pdf'));
+    },
+    [{ n: '31', company: 'Acme', role: 'Engineer', reportCell: '—', reportFile: '031-acme-2026-11-09.md' }]
+  );
 });

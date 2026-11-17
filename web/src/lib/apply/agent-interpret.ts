@@ -5,6 +5,7 @@ import { careerOpsRoot } from "@/lib/career-ops";
 import type { ApplyField } from "./extract";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
+import { spillOversizedPrompt } from "../oversized-prompt.mjs";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
 // that spelled its own omitted MultiEdit, which --permission-mode acceptEdits
@@ -91,16 +92,37 @@ Return ONLY a JSON array, no prose, no code fence:
 // keeps the two from disagreeing about which CLI is being run.
 function runPlanner(binPath: string, cliId: string, argsFor: (p: string) => string[], prompt: string): Promise<string> {
   const isClaude = cliId === "claude";
-  const args = isClaude ? ["-p", prompt, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed] : argsFor(prompt);
+  const buildArgs = (p: string) =>
+    isClaude ? ["-p", p, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed] : argsFor(p);
   return new Promise((resolve) => {
+    // The prompt has one line per control on the form, with no cap on how many,
+    // so a long application form takes the launch past the Windows command line
+    // (32,767 UTF-16 units, an opaque `spawn ENAMETOOLONG`). A launch that would
+    // not fit gets the prompt in a file under the data root (cwd) and a pointer
+    // in argv, as the pre-fill planner (#7150) and /api/run (#6743) do; this
+    // worker is allowed Read. A prompt that fits is passed as before. A throw
+    // here or from the spawn rejects the promise, as a spawn throw did before.
+    const spill = spillOversizedPrompt({
+      prompt,
+      buildArgs,
+      binPath,
+      fencing: { cliId, capabilities: CAPS.localReadOnly },
+      root: careerOpsRoot(),
+    });
     // Reads the captured controls and returns JSON — the narrowest scope here:
     // the Claude branch allows Read alone and denies fetching outright.
-    const child = spawnHeadlessCli(
-      binPath,
-      args,
-      { cwd: careerOpsRoot(), env: process.env },
-      { cliId, capabilities: CAPS.localReadOnly },
-    );
+    let child: ReturnType<typeof spawnHeadlessCli>;
+    try {
+      child = spawnHeadlessCli(
+        binPath,
+        spill.args,
+        { cwd: careerOpsRoot(), env: process.env },
+        { cliId, capabilities: CAPS.localReadOnly },
+      );
+    } catch (e) {
+      spill.cleanup?.();
+      throw e;
+    }
     let buf = "";
     child.stdout.on("data", (d: Buffer) => (buf += d.toString()));
     child.stderr.on("data", () => {});
@@ -113,10 +135,12 @@ function runPlanner(binPath: string, cliId: string, argsFor: (p: string) => stri
     }, 150_000);
     child.on("close", () => {
       clearTimeout(killer);
+      spill.cleanup?.();
       resolve(buf);
     });
     child.on("error", () => {
       clearTimeout(killer);
+      spill.cleanup?.();
       resolve(buf);
     });
   });

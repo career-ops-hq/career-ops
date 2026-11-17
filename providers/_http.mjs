@@ -227,10 +227,20 @@ async function fetchInContext(url, { timeoutMs = resolveDefaultTimeoutMs(process
       // parsing or displaying. The status code and its standard reason
       // phrase are what a log line needs; the raw body is still attached as
       // err.body for callers that want to inspect it.
-      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}`);
+      //
+      // A Cloudflare challenge is the one case the status alone misreads: a
+      // managed challenge served as 429 reads as a rate limit (#7182), and no
+      // retry clears it. Cloudflare marks it with `cf-mitigated: challenge`,
+      // so the message names it and err.cfMitigated carries the header.
+      const cfMitigated = res.headers.get('cf-mitigated');
+      const challenge = CF_CHALLENGE_RE.test(cfMitigated ?? '')
+        ? ` (Cloudflare challenge, cf-mitigated: ${cfMitigated})`
+        : '';
+      const err = new Error(`HTTP ${res.status}${res.statusText ? ` ${res.statusText}` : ''}${challenge}`);
       err.status = res.status;
       err.body = responseText;
       err.retryAfter = res.headers.get('retry-after');
+      err.cfMitigated = cfMitigated;
       // Only ever populated under redirect:'manual', where the 3xx arrives as a
       // non-ok response instead of being followed or thrown. Attached so a
       // caller can tell WHICH redirect it hit without gaining the ability to
@@ -639,6 +649,10 @@ const RETRY_DEFAULTS = { retries: 2, baseDelayMs: 500, maxDelayMs: 8_000 };
  */
 const REDIRECT_REFUSAL_CAUSE_MESSAGE = 'unexpected redirect';
 
+// Cloudflare's `cf-mitigated` value for a challenge (seen live on Workday and
+// The Muse: `challenge`).
+const CF_CHALLENGE_RE = /\bchallenge\b/i;
+
 /**
  * Awaitable sleep that honours a ctx-supplied clock, so tests never wall-clock
  * wait. `ctx` is the SECOND argument — a swapped `sleep(ctx, ms)` hands an
@@ -718,6 +732,17 @@ export function isRefusedRedirectError(err) {
 }
 
 /**
+ * Whether a failed request was a Cloudflare challenge, read from the
+ * `cf-mitigated` header fetchInContext keeps on the error.
+ *
+ * @param {any} err
+ * @returns {boolean}
+ */
+export function isCloudflareChallenge(err) {
+  return typeof err?.cfMitigated === 'string' && CF_CHALLENGE_RE.test(err.cfMitigated);
+}
+
+/**
  * Whether a failed request is worth retrying: 429, any 5xx, or a transport
  * error (no status — DNS, connection reset, or an abort that did not spend
  * this request's own timer). A 4xx other than 429 is the server telling us
@@ -732,11 +757,17 @@ export function isRefusedRedirectError(err) {
  * but it's deterministic and will never succeed on retry. See
  * isRefusedRedirectError() above for how it's distinguished.
  *
+ * A Cloudflare challenge (`cf-mitigated: challenge`, kept as err.cfMitigated
+ * by fetchInContext) is not retried either, even as a 429 or 503: the client
+ * is being challenged, not throttled, and the same request is challenged
+ * again (#7182).
+ *
  * @param {any} err - A thrown value: an Error with an optional `.status`, or anything else.
  * @returns {boolean}
  */
 export function isRetryableError(err) {
   const status = err?.status;
+  if (isCloudflareChallenge(err)) return false;
   if (status === 429) return true;
   if (typeof status === 'number' && status >= 500) return true;
   if (isRefusedRedirectError(err)) return false;

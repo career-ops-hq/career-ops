@@ -44,8 +44,10 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
   const app = n ? findApplication(n) : null;
   if (n && !app) return null;
 
+  // Resolved once: the index lookup and the standard-name filter below must
+  // agree on which report this row is, including the report-file fallback.
+  const reportNumber = n && app ? reportNumberFor(n, app, readReport(n)?.file ?? null) : null;
   if (n && app) {
-    const reportNumber = reportNumberFor(n, app, readReport(n)?.file ?? null);
     if (reportNumber != null) {
       const indexed = await pdfPathStatusForReport(String(reportNumber), "cover");
       if (indexed.status === "found") return indexed.path;
@@ -73,11 +75,13 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
   }
 
   if (app) {
-    const role = companySlug(app.role)?.slug;
-    const wanted = role ? [role, role.slice(0, ROLE_SLUG_MAX)] : [];
+    const roleKey = companySlug(app.role);
+    // Legacy names carry the unfolded spelling the writer emits (`d-veloppeur`
+    // for Développeur), so accept it alongside the folded slug.
+    const roles = roleKey ? [...new Set([roleKey.slug, roleKey.legacy])] : [];
+    const wanted = roles.flatMap((r) => [r, r.slice(0, ROLE_SLUG_MAX)]);
     // A standard name carries the report number, not a role: select it by the
     // row's mapped report number. Legacy names keep the role-token test.
-    const reportNumber = reportNumberFor(n ?? "", app, null);
     files = files.filter((f) => {
       const lower = f.toLowerCase();
       if (isStandardName(lower)) {
