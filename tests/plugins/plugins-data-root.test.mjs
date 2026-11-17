@@ -14,12 +14,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { ROOT } from '../helpers.mjs';
+import { ROOT, linkNodeModules } from '../helpers.mjs';
 import { describeSpawn } from '../helpers/describe-spawn.mjs';
 import {
   pluginRoots,
@@ -38,14 +38,56 @@ import {
   writeLockEntry,
   removeLockEntry,
   hashPluginTree,
+  migrateLegacyLock,
 } from '../../plugins/_lock.mjs';
 import { scaffoldNew } from '../../plugin-install.mjs';
-
-const PLUGINS_CLI = join(ROOT, 'plugins.mjs');
 
 function makeSandbox(prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   return dir;
+}
+
+// The CLI test runs plugins.mjs from a DISPOSABLE checkout, the way
+// plugins-run-failure-exit.test.mjs does: started from the real checkout it
+// would read the developer's own plugins.local/ and legacy plugins.lock
+// through the code-root fallback, and its "nothing written to the code root"
+// assertions would fail on a machine that already has them.
+function importClosure(entry) {
+  const seen = new Set();
+  const queue = [entry];
+  const spec = /(?:from\s+|import\s*\(\s*|import\s+)['"]([^'"]+)['"]/g;
+  while (queue.length) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    if (!existsSync(file)) continue;
+    seen.add(file);
+    let src;
+    try { src = readFileSync(file, 'utf8'); } catch { continue; }
+    for (const m of src.matchAll(spec)) {
+      const s = m[1];
+      if (!s.startsWith('.')) continue;
+      queue.push(join(dirname(file), s));
+    }
+  }
+  return [...seen];
+}
+
+function disposableCheckout() {
+  const checkout = mkdtempSync(join(tmpdir(), 'plugins-data-root-checkout-'));
+  for (const file of importClosure(join(ROOT, 'plugins.mjs'))) {
+    const rel = relative(ROOT, file);
+    if (rel.startsWith('..')) continue;
+    const dest = join(checkout, rel);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(file, dest);
+  }
+  // Runtime reads, not imports: the scaffold template for `new`, and the
+  // tracker alias data plugins.mjs loads.
+  cpSync(join(ROOT, 'plugins', '_template'), join(checkout, 'plugins', '_template'), { recursive: true });
+  cpSync(join(ROOT, 'tracker-aliases.json'), join(checkout, 'tracker-aliases.json'));
+  const linkReason = linkNodeModules(checkout, ROOT);
+  if (linkReason) throw new Error(`linkNodeModules could not give the fixture a dependency tree: ${linkReason}`);
+  return checkout;
 }
 
 function writePlugin(parentDir, id, { hooks = ['ingest'], isProvider = false, version = '1.0.0' } = {}) {
@@ -344,6 +386,10 @@ test('warnConfigLeftInCodeRoot does not warn if codeRoot === dataRoot', () => {
 
 test('CLI commands (new, enable, trust, remove) in plugins.mjs respect CAREER_OPS_ROOT', () => {
   const dataRoot = makeSandbox('co-test-cli-data-');
+  // A disposable checkout: the real one's plugins.local/ and legacy
+  // plugins.lock would leak into both the run and the assertions.
+  const checkout = disposableCheckout();
+  const cli = join(checkout, 'plugins.mjs');
 
   try {
     mkdirSync(join(dataRoot, 'config'), { recursive: true });
@@ -352,8 +398,8 @@ test('CLI commands (new, enable, trust, remove) in plugins.mjs respect CAREER_OP
     writeFileSync(join(dataRoot, 'data', 'pipeline.md'), '# Pipeline\n');
 
     const runCli = (args) => {
-      const r = spawnSync(process.execPath, [PLUGINS_CLI, ...args], {
-        cwd: ROOT,
+      const r = spawnSync(process.execPath, [cli, ...args], {
+        cwd: checkout,
         encoding: 'utf-8',
         timeout: 30_000,
         env: { ...process.env, CAREER_OPS_ROOT: dataRoot, NO_COLOR: '1' },
@@ -366,13 +412,13 @@ test('CLI commands (new, enable, trust, remove) in plugins.mjs respect CAREER_OP
     const rNew = runCli(['new', 'cli-plug']);
     assert.equal(rNew.status, 0, describeSpawn(rNew, 'new cli-plug'));
     assert.equal(existsSync(join(dataRoot, 'plugins.local', 'cli-plug', 'manifest.json')), true);
-    assert.equal(existsSync(join(ROOT, 'plugins.local', 'cli-plug')), false);
+    assert.equal(existsSync(join(checkout, 'plugins.local', 'cli-plug')), false);
 
     // 2. `enable --confirm` records consent in dataRoot/plugins.lock and enables in dataRoot/config/plugins.yml
     const rEnable = runCli(['enable', 'cli-plug', '--confirm']);
     assert.equal(rEnable.status, 0, describeSpawn(rEnable, 'enable cli-plug --confirm'));
     assert.equal(existsSync(join(dataRoot, 'plugins.lock')), true);
-    assert.equal(existsSync(join(ROOT, 'plugins.lock', 'cli-plug')), false);
+    assert.equal(existsSync(join(checkout, 'plugins.lock')), false);
 
     const lock = readLock(dataRoot);
     assert.ok(lock.plugins['cli-plug']);
@@ -393,6 +439,176 @@ test('CLI commands (new, enable, trust, remove) in plugins.mjs respect CAREER_OP
     const lockAfterRemove = readLock(dataRoot);
     assert.equal(lockAfterRemove.plugins['cli-plug'], undefined);
   } finally {
+    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(checkout, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+test('a checkout root named plugins.local keeps its bundled plugins bundled', () => {
+  // plugins.local/ must match at or below a plugin root, never as an ancestor
+  // of the checkout itself (#7177 review): a root named plugins.local would
+  // otherwise reclassify every bundled plugin as local, and lockGate would
+  // fail same-version bundled changes instead of repinning them.
+  const parent = makeSandbox('co-test-pl-root-');
+  try {
+    const root = join(parent, 'plugins.local', 'career-ops');
+    const { manifest } = writePlugin(join(root, 'plugins'), 'bundled-inside-pl-root');
+
+    assert.equal(pluginSource(manifest, root), 'bundled');
+    assert.equal(classifySource(manifest, root, null), 'bundled');
+
+    // A plugin in the actual local root stays local, and a plugins.local
+    // directory INSIDE the bundled tree still cannot claim bundled trust.
+    const { manifest: localMan } = writePlugin(join(root, 'plugins.local'), 'real-local');
+    assert.equal(pluginSource(localMan, root), 'local');
+    const tricky = { ...manifest, dir: join(root, 'plugins', 'plugins.local', 'tricky') };
+    assert.equal(pluginSource(tricky, root), 'local');
+    assert.equal(classifySource(tricky, root, null), 'unverified');
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('lockGate migrates a legacy code-root lock into the data root before relying on it', () => {
+  const codeRoot = makeSandbox('co-test-code-migrate-');
+  const dataRoot = makeSandbox('co-test-data-migrate-');
+
+  try {
+    // Legacy layout: the only lock lives in the code root, holding a pin and
+    // recorded consent for a plugin the data root does not know yet.
+    writeLockEntry(codeRoot, 'legacy-plugin', {
+      source: 'local',
+      version: '1.0.0',
+      integrity: 'sha256-legacy',
+      files: { 'index.mjs': 'sha256-legacy-file' },
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false);
+
+    // Fully pinned control: the gated plugin is pinned in the legacy lock with
+    // its real integrity, so the gate is a match and no re-pin writes a
+    // data-root lock — only the migration can create it.
+    const { manifest } = writePlugin(join(dataRoot, 'plugins.local'), 'gated-plugin');
+    const tree = hashPluginTree(manifest.dir);
+    writeLockEntry(codeRoot, 'gated-plugin', {
+      source: 'local',
+      version: manifest.version || '0.0.0',
+      integrity: tree.integrity,
+      files: tree.files,
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+    const legacyBefore = readFileSync(join(codeRoot, 'plugins.lock'), 'utf8');
+    const gateResult = lockGate(manifest, codeRoot, dataRoot);
+    assert.equal(gateResult.load, true);
+
+    // The legacy lock was persisted into the data root with every entry kept:
+    // the legacy pin/consent survives replacing the code checkout.
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), true);
+    const migrated = readLock(dataRoot);
+    assert.ok(migrated.plugins['legacy-plugin'], 'legacy entry should be migrated');
+    assert.equal(migrated.plugins['legacy-plugin'].integrity, 'sha256-legacy');
+    assert.deepEqual(migrated.plugins['legacy-plugin'].consent.allowedHosts, ['api.example.com']);
+    assert.equal(migrated.plugins['gated-plugin'].integrity, tree.integrity, 'the pinned control entry migrates verbatim');
+
+    // The code-root lock is left as it was, and a second gate does not rewrite.
+    assert.equal(readFileSync(join(codeRoot, 'plugins.lock'), 'utf8'), legacyBefore);
+    const before = readFileSync(join(dataRoot, 'plugins.lock'), 'utf8');
+    lockGate(manifest, codeRoot, dataRoot);
+    assert.equal(readFileSync(join(dataRoot, 'plugins.lock'), 'utf8'), before);
+
+    // migrateLegacyLock refuses to shadow an unparseable legacy lock.
+    const codeRoot2 = makeSandbox('co-test-code-migrate-corrupt-');
+    const dataRoot2 = makeSandbox('co-test-data-migrate-corrupt-');
+    try {
+      writeFileSync(join(codeRoot2, 'plugins.lock'), 'not json\n');
+      assert.equal(migrateLegacyLock(dataRoot2, codeRoot2), false);
+      assert.equal(existsSync(join(dataRoot2, 'plugins.lock')), false);
+    } finally {
+      rmSync(codeRoot2, { recursive: true, force: true });
+      rmSync(dataRoot2, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('migrateLegacyLock leaves an existing data-root lock untouched', () => {
+  const codeRoot = makeSandbox('co-test-code-exists-');
+  const dataRoot = makeSandbox('co-test-data-exists-');
+
+  try {
+    writeLockEntry(codeRoot, 'legacy-plugin', {
+      source: 'local', version: '1.0.0', integrity: 'sha256-legacy', files: {},
+    });
+    writeLockEntry(dataRoot, 'newer-plugin', {
+      source: 'local', version: '2.0.0', integrity: 'sha256-newer', files: {},
+    });
+    const newerBefore = readFileSync(join(dataRoot, 'plugins.lock'), 'utf8');
+
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot), false);
+    assert.equal(readFileSync(join(dataRoot, 'plugins.lock'), 'utf8'), newerBefore);
+    assert.deepEqual(Object.keys(readLock(dataRoot).plugins), ['newer-plugin']);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('migrateLegacyLock loses a race with a concurrent data-root lock create (wx, never overwrites newer consent)', () => {
+  const codeRoot = makeSandbox('co-test-code-race-');
+  const dataRoot = makeSandbox('co-test-data-race-');
+
+  try {
+    writeLockEntry(codeRoot, 'legacy-plugin', {
+      source: 'local', version: '1.0.0', integrity: 'sha256-legacy', files: {},
+    });
+    const target = join(dataRoot, 'plugins.lock');
+    let migrated = null;
+    // Interleave a concurrent create between migrateLegacyLock's existsSync
+    // probe and its write: the racing writer lands first, then the migration
+    // write runs. With a plain writeFileSync this replaced the newer lock;
+    // with the exclusive create it must refuse.
+    const racingWriter = (file, data, options) => {
+      writeFileSync(file, JSON.stringify({ lockfileVersion: 1, plugins: { 'newer-plugin': { source: 'local', version: '2.0.0', integrity: 'sha256-newer', files: {} } } }, null, 2) + '\n', 'utf8');
+      writeFileSync(file, data, options);
+    };
+    migrated = migrateLegacyLock(dataRoot, codeRoot, racingWriter);
+
+    assert.equal(migrated, false, 'migration must defer to the concurrently created lock');
+    const served = readLock(dataRoot);
+    assert.deepEqual(Object.keys(served.plugins), ['newer-plugin'], 'the newer lock wins the race');
+    assert.equal(served.plugins['newer-plugin'].integrity, 'sha256-newer');
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('lockGate still checks a readable legacy lock when the migration write fails (injected denial + legacy drift)', () => {
+  const codeRoot = makeSandbox('co-test-code-denied-');
+  const dataRoot = makeSandbox('co-test-data-denied-');
+
+  try {
+    // Pin the plugin in the legacy lock with a stale integrity: same version,
+    // changed files — drift the gate must keep catching.
+    const { manifest } = writePlugin(join(dataRoot, 'plugins.local'), 'drifted-plugin');
+    writeLockEntry(codeRoot, 'drifted-plugin', {
+      source: 'local',
+      version: manifest.version || '0.0.0',
+      integrity: 'sha256-stale',
+      files: { 'index.mjs': 'sha256-stale-file' },
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+    // Deterministic write denial, portable to every platform: the migration
+    // write throws EACCES through the injected seam.
+    const deniedWrite = () => { throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }); };
+
+    const gateResult = lockGate(manifest, codeRoot, dataRoot, { writeFile: deniedWrite });
+    assert.equal(gateResult.load, false, 'legacy drift must still block the load when the migration write fails');
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
     rmSync(dataRoot, { recursive: true, force: true });
   }
 });
