@@ -5,9 +5,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { register } from 'node:module';
 import '../helpers/web-ts-alias-loader.mjs';
 
 const codeRoot = fileURLToPath(new URL('../../../', import.meta.url));
+register(`data:text/javascript,${encodeURIComponent(`
+  export const NextResponse = {
+    json(body, init = {}) {
+      const headers = new Headers(init.headers || {});
+      if (!headers.has("content-type")) headers.set("content-type", "application/json");
+      return new Response(JSON.stringify(body), { status: init.status ?? 200, headers });
+    }
+  };
+`)}`, import.meta.url);
 const description = 'Title: Engineer\nCompany: Fictional Labs\nWork arrangement: Remote\nResponsibilities\nBuild reliable systems and maintain service documentation.\nQualifications\nKnowledge of SQL and testing.';
 function fixture(t, reportFile, archived) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-route-'));
