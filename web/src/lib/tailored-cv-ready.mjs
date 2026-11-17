@@ -11,8 +11,9 @@ export const TAILORED_CV_MISSING =
  * mark is not a file and is not an input here.
  *
  * indexStatus is pdfPathStatusForReport's status. A rejected index row makes
- * /api/cv-pdf answer 404 without trying names, so it is not ready either.
+ * /api/cv-pdf answer 404 without trying names, so the view link stays off.
  * Only a report with no usable index row falls back to the filename match.
+ * That match can open a file. It is not the PDF Apply attaches.
  *
  * @param {{ indexStatus?: "found" | "rejected" | "not-found" | "invalid", filenames?: string[], company?: string }} input
  * @returns {boolean}
@@ -27,4 +28,8 @@ export function tailoredCvOnDisk({ indexStatus = "not-found", filenames = [], co
     if (matchesTailoredCv(name.toLowerCase(), key.slug)) return true;
   }
   return false;
+}
+
+export function reportApplyPdfReady(indexStatus) {
+  return indexStatus === "found";
 }
