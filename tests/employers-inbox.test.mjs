@@ -110,6 +110,7 @@ test('parseInboxName: a later contribution of the same day carries .2 to .99 aft
     ['2026-11-10-octocat.2-001.json', /inbox files are named/], // a manifest has no part number
     ['2026-11-10-.2.ndjson', /inbox files are named/],
     ['2026-11-10-octocat.2.csv', /inbox files are named/],
+    ['2026-11-20-octocat.2-000.ndjson', /part numbers start at 001/], // part zero is refused with a number too
   ]) {
     const r = parseInboxName(name);
     assert.match(r.error || '', why, name);

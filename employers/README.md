@@ -78,7 +78,10 @@ the inbox into them.
 Name it `inbox/<YYYY-MM-DD>-<github-username>.ndjson`, with the date and your
 GitHub username in lowercase: `inbox/2026-11-20-octocat.ndjson`. A file holds
 up to 5,000 boards. For a longer list, number the files:
-`inbox/2026-11-20-octocat-001.ndjson`, `-002.ndjson`, and so on.
+`inbox/2026-11-20-octocat-001.ndjson`, `-002.ndjson`, and so on. A username
+that itself ends in a hyphen and three digits, such as `octocat-001`, always
+writes the part number, even for a single file:
+`inbox/2026-11-20-octocat-001-001.ndjson`.
 
 A contribution has one source (see [the manifest](#the-contribution-manifest)).
 To add boards from another source on the same day, make a second
