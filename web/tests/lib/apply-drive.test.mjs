@@ -588,7 +588,7 @@ test("typing into a radio does not click it", async () => {
 
 test("a text field is gated on its aria name, not the visible label", () => {
   assert.equal(
-    listedFieldLabel({ aria: "Email address", question: "Work email", placeholder: "you@example.com", text: "", value: "", name: "email" }),
+    listedFieldLabel({ aria: "Email address", question: "Work email", placeholder: "type here", text: "", value: "", name: "email" }),
     "Email address",
   );
   assert.equal(
