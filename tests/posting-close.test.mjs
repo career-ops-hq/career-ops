@@ -128,9 +128,11 @@ test('a field that is not a close-date name is ignored', () => {
   assert.equal(closesAtIso(inherited), '2026-08-08');
 });
 
-test('closes_at is the last scan-history column', () => {
-  assert.equal(SCAN_HISTORY_COLUMNS.at(-1), 'closes_at');
-  assert.equal(SCAN_HISTORY_COLUMNS.at(-2), 'listing_key');
+// Append-only: closes_at was added as column 16, right after listing_key, and
+// a later column (employment_type) goes after it without moving it.
+test('closes_at stays scan-history column 16, after listing_key', () => {
+  assert.equal(SCAN_HISTORY_COLUMNS.indexOf('closes_at'), 15);
+  assert.equal(SCAN_HISTORY_COLUMNS[14], 'listing_key');
 });
 
 function historyRow(cells) {
