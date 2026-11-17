@@ -363,6 +363,7 @@ const BOOTSTRAP_PATHS = [
  */
 export const USER_PATHS = [
   '.career-ops-web/',
+  '.env',
   'cv.md',
   'config/profile.yml',
   'modes/_profile.md',
@@ -576,6 +577,13 @@ function unsafeManifestPathReason(path, userPaths) {
  * Whether a manifest entry is canonical and cannot address user data.
  * Comparisons against protected paths are segment-based, NFC-normalized, and
  * case-folded so filesystem aliases fail closed on macOS and Windows.
+ *
+ * Trust model:
+ * A self-updater that re-execs the fetched update-system.mjs trusts upstream,
+ * and no guard changes that. The manifest guards defend against a mis-authored
+ * or corrupted manifest and against user-layer paths ever entering the write
+ * set, not against an adversarial release. .env is protected as user-owned in
+ * practice even though only .env.example is shipped in SYSTEM_PATHS.
  */
 export function isSafeManifestPath(path, userPaths = USER_PATHS) {
   return unsafeManifestPathReason(path, userPaths) === null;
@@ -598,7 +606,7 @@ function filterSafeManifestPaths(paths, userPaths, onRejected = () => {}) {
   return safe;
 }
 
-function assertSafeManifestPaths(paths, userPaths, label) {
+export function assertSafeManifestPaths(paths, userPaths, label) {
   if (!Array.isArray(paths) || paths.length === 0) {
     throw new Error(`${label} is missing or empty; refusing to update`);
   }
@@ -4995,8 +5003,14 @@ async function apply() {
     // the local list, which must not be empty on the first upgrade to this layout.
     adoptTargetManifest(remoteSystemPaths);
     const manifestUserPaths = effectiveUserPaths();
-    const validatedManifestPaths = assertCanonicalManifestPaths(
+    remoteSystemPaths = assertSafeManifestPaths(
+      remoteSystemPaths,
+      manifestUserPaths,
+      `Target SYSTEM_PATHS (${remoteManifestFile})`,
+    );
+    const validatedManifestPaths = assertSafeManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
+      manifestUserPaths,
       'Merged updater manifest',
     );
 
@@ -5273,7 +5287,7 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('checkout', targetCommit, '--', path, ...preserveSpecs);
+        gitQuiet('--literal-pathspecs', 'checkout', targetCommit, '--', path, ...preserveSpecs);
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch
