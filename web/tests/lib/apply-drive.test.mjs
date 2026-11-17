@@ -639,6 +639,41 @@ test("a wrapper heading names the field before its placeholder", () => {
   assert.equal(listedFieldLabel(factsOf(select, "e2")), "Email address");
 });
 
+test("a type is refused when the wrapper heading changed after the snapshot", async () => {
+  const page = new FakePage();
+  page.add("email", { tag: "input", attrs: { type: "text", name: "email", placeholder: "Jane Doe" } });
+  const el = page.el("email");
+  const heading = {
+    textContent: "Email address",
+    offsetParent: {},
+    tagName: "H3",
+    cloneNode() {
+      return { textContent: heading.textContent, querySelectorAll() { return []; } };
+    },
+  };
+  el.parentElement = {
+    parentElement: null,
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes("h3")) return [heading];
+      if (sel.includes("input")) return [el];
+      return [];
+    },
+  };
+  const expected = { label: "Jane Doe", group: "", question: "", option: "", identity: "Email address" };
+
+  const kept = await act(page, { action: "type", ref: page.ref("email"), text: "Ada", expected });
+  assert.equal(kept.note, "");
+  assert.deepEqual(page.log, ["fill:email=Ada"]);
+
+  heading.textContent = "Phone number";
+  page.log.length = 0;
+  const moved = await act(page, { action: "type", ref: page.ref("email"), text: "Ada", expected });
+  assert.equal(moved.note, "left blank");
+  assert.match(moved.detail, /label changed/);
+  assert.deepEqual(page.log, []);
+});
+
 test("a shared radio is refused when its option changed after the snapshot", async () => {
   const page = new FakePage();
   page.add("yes", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "1" });
@@ -793,6 +828,7 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   assert.match(DRIVE_CODE, /identity: listedFieldLabel\(/);
   assert.match(DRIVE_CODE, /control\?\.identity/);
   assert.match(DRIVE_CODE, /option: control\.option/);
+  assert.match(DRIVE_CODE, /identity: control\.identity/);
   assert.doesNotMatch(DRIVE_CODE, /slice\(0,\s*300\)/);
 });
 

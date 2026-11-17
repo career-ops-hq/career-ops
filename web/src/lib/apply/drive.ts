@@ -152,7 +152,7 @@ type Action = {
   text?: string;
   value?: string;
   reason?: string;
-  expected?: { label: string; group: string; question: string; option: string };
+  expected?: { label: string; group: string; question: string; option: string; identity: string };
   ensureChecked?: boolean;
 };
 
@@ -272,7 +272,7 @@ Reply ONE action JSON.`;
     // execute the action on OUR session — NEVER submit. The executor, and the
     // guard it applies to every action naming a ref, live in drive-action.mjs so
     // a test can drive them: nothing here acts on an element directly.
-    if (control) act.expected = { label: control.label, group: control.group, question: control.question, option: control.option };
+    if (control) act.expected = { label: control.label, group: control.group, question: control.question, option: control.option, identity: control.identity };
     // A click toggles a checkbox. A listed choice is checked instead, so a box
     // that is already on stays on. A button or a link stays a click.
     if (goal === "full" && act.action === "click" && (control?.kind === "radio" || control?.kind === "checkbox")) {

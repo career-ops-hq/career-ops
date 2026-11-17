@@ -30,7 +30,7 @@ import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
  * One planner action, as parsed from its reply.
  *
  * @typedef {{ action: string, ref?: string, text?: string, value?: string,
- *            expected?: { label?: string, group?: string, question?: string, option?: string },
+ *            expected?: { label?: string, group?: string, question?: string, option?: string, identity?: string },
  *            ensureChecked?: boolean }} DriveAction
  */
 
@@ -291,6 +291,7 @@ export async function executeAction(page, frame, act, actionable) {
       || (now.group || "") !== (expected.group || "")
       || (now.question || "") !== (expected.question || "")
       || (now.option || "") !== (expected.option || "")
+      || (expected.identity !== undefined && (now.identity || "") !== expected.identity)
     ));
     if (act.ref !== undefined && !target) {
       // Three different refusals, told apart: only one of them is the guard
