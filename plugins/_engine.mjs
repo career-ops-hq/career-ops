@@ -719,7 +719,7 @@ export function lockGate(manifest, root, dataRoot = root, io = {}) {
   // failed migration leaves the legacy lock in place and the read below still
   // falls back to it, so the drift check runs against the same pins as when
   // no migration existed.
-  try { migrateLegacyLock(dataRoot, root, io.writeFile); } catch { /* best-effort write; the fallback read still applies */ }
+  try { migrateLegacyLock(dataRoot, root, io); } catch { /* best-effort write; the fallback read still applies */ }
   let lock;
   try {
     lock = readLock(dataRoot, root);
