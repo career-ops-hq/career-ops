@@ -75,6 +75,44 @@ export function readLock(dataRoot, root = dataRoot) {
   }
 }
 
+/**
+ * Persist a legacy code-root lock into the data root BEFORE lockGate relies on
+ * the readLock fallback (#7177 review). Without it, a split layout whose
+ * plugins all still match their legacy pins never writes
+ * dataRoot/plugins.lock: moving plugins.local as warned then leaves the only
+ * lock inside the replaceable code checkout, and the next load treats every
+ * plugin as unpinned — accepting its current files instead of checking the
+ * recorded consent. Every legacy entry is preserved verbatim through the same
+ * write path writeLockEntry() uses. Best-effort by contract: a legacy lock
+ * that does not parse is left where it is (readLock's fallback keeps serving
+ * it) rather than replaced by an empty one.
+ *
+ * @param {Function} [writeFile] - injection point for tests (same pattern as
+ *   wasEverShippedUpstream's revList); defaults to writeFileSync.
+ * @returns {boolean} true when this call wrote the data-root lock.
+ */
+export function migrateLegacyLock(dataRoot, root = dataRoot, writeFile = writeFileSync) {
+  if (!root || path.resolve(root) === path.resolve(dataRoot)) return false;
+  const target = lockPath(dataRoot);
+  if (existsSync(target)) return false;
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(lockPath(root), 'utf8'));
+  } catch {
+    return false;
+  }
+  if (!parsed || typeof parsed !== 'object' || typeof parsed.plugins !== 'object' || parsed.plugins === null) return false;
+  // Create exclusively: a data-root lock that appears between the probe above
+  // and this write holds newer consent than the legacy copy and must win.
+  try {
+    writeFile(target, JSON.stringify({ ...parsed, lockfileVersion: parsed.lockfileVersion ?? LOCK_VERSION }, null, 2) + '\n', { flag: 'wx' });
+  } catch (err) {
+    if (err && err.code === 'EEXIST') return false;
+    throw err;
+  }
+  return true;
+}
+
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
 export function writeLockEntry(dataRoot, id, entry, root = dataRoot) {
   const lock = readLock(dataRoot, root);
