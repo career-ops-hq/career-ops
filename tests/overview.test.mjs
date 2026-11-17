@@ -13,6 +13,12 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'overview.mjs');
 const TODAY = '2026-10-24'; // Saturday (ISO week 2026-10-19 to 2026-10-25)
 
+/** Returns clean process.env stripped of any inherited CAREER_OPS_* variables. */
+const cleanEnv = (overrides = {}) => ({
+  ...Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('CAREER_OPS_'))),
+  ...overrides,
+});
+
 const SAMPLE_TRACKER = `
 # Applications Tracker
 
@@ -231,7 +237,7 @@ test('CLI: executes against temp data root and outputs valid JSON and summary', 
     writeFileSync(join(tmp, 'data', 'status-log.tsv'), SAMPLE_STATUS_LOG);
     writeFileSync(join(tmp, 'data', 'pipeline.md'), SAMPLE_PIPELINE);
 
-    const env = { ...process.env, CAREER_OPS_ROOT: tmp, CAREER_OPS_TRACKER: '', CAREER_OPS_FOLLOWUPS: '' };
+    const env = cleanEnv({ CAREER_OPS_ROOT: tmp });
 
     // 1. JSON output
     const jsonRun = spawnSync(process.execPath, [SCRIPT, '--today', TODAY], { encoding: 'utf-8', env });
@@ -287,18 +293,161 @@ test('resolveOverviewPaths: resolves explicit options and environment overrides'
     assert.equal(resBeside.followupsFile, customFollowups);
 
     // 3. Environment variable overrides via CLI
-    const env = {
-      ...process.env,
+    const env = cleanEnv({
       CAREER_OPS_ROOT: tmp,
       CAREER_OPS_TRACKER: customTracker,
       CAREER_OPS_FOLLOWUPS: customFollowups,
-    };
+    });
     const cliRun = spawnSync(process.execPath, [SCRIPT, '--today', TODAY], { encoding: 'utf-8', env });
     assert.equal(cliRun.status, 0);
     const parsed = JSON.parse(cliRun.stdout);
     assert.equal(parsed.metadata.sources.tracker, true);
     assert.equal(parsed.metadata.sources.followups, true);
     assert.equal(parsed.tracker.total, 5);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('computeOverview: honors --today evaluation date in follow-up cadence calculations', () => {
+  const tracker = `
+# Applications Tracker
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 1 | 2026-10-01 | Test Corp | Backend Engineer | 4.0/5 | Applied | ❌ | — | |
+`;
+  // As of 2026-10-03 (2 days later), it should be 'waiting'
+  const resultEarly = computeOverview({
+    appsContent: tracker,
+    today: '2026-10-03',
+  });
+  assert.equal(resultEarly.followups.urgent.length, 0);
+  assert.equal(resultEarly.followups.overdue.length, 0);
+  assert.equal(resultEarly.followups.counts.waiting, 1);
+
+  // As of 2026-10-24 (23 days later), it should be 'overdue'
+  const resultLate = computeOverview({
+    appsContent: tracker,
+    today: '2026-10-24',
+  });
+  assert.equal(resultLate.followups.overdue.length, 1);
+  assert.equal(resultLate.followups.overdue[0].company, 'Test Corp');
+  assert.equal(resultLate.followups.overdue[0].daysSinceApplication, 23);
+});
+
+test('computeOverview: folds status-log retractions and corrections for weekly activity', () => {
+  // Within week 2026-10-19 to 2026-10-25:
+  // Row 1: Applied on 2026-10-20, then retracted with to: '-' on 2026-10-21
+  // Row 2: Applied on 2026-10-20, then corrected with date 2026-10-22
+  // Row 3: Applied outside the week (2026-10-10), then corrected with date inside week (2026-10-21)
+  const statusLog = [
+    '1\t2026-10-20\tEvaluated\tApplied\tmanual\tapplied',
+    '1\t2026-10-21\tApplied\t-\tmanual\tretracted mistake',
+    '2\t2026-10-20\tEvaluated\tApplied\tmanual\tapplied',
+    '2\t2026-10-22\tEvaluated\tApplied\tcorrection\tfixed date',
+    '3\t2026-10-10\tEvaluated\tApplied\tmanual\tearly app',
+    '3\t2026-10-21\tEvaluated\tApplied\tcorrection\tactually applied this week',
+  ].join('\n');
+
+  const result = computeOverview({
+    appsContent: SAMPLE_TRACKER,
+    statusLogContent: statusLog,
+    today: TODAY,
+  });
+
+  // Row 1 retracted -> not counted
+  // Row 2 corrected date within week -> counted once (not twice)
+  // Row 3 corrected date moved into week -> counted once
+  assert.equal(result.weeklyActivity.applied, 2);
+});
+
+test('computeOverview: resolves status aliases such as Sent and localized states in weekly activity', () => {
+  const statusLog = [
+    '1\t2026-10-20\tEvaluated\tSent\tmanual\tsent application',
+    '2\t2026-10-21\tEvaluated\tAplicado\tmanual\tspanish alias',
+    '3\t2026-10-22\tApplied\tEntrevista\tmanual\tspanish interview',
+  ].join('\n');
+
+  const result = computeOverview({
+    appsContent: SAMPLE_TRACKER,
+    statusLogContent: statusLog,
+    today: TODAY,
+  });
+
+  // 'Sent' and 'Aplicado' both resolve to 'applied'
+  assert.equal(result.weeklyActivity.applied, 2);
+  // 'Entrevista' resolves to 'interview' (a response/movement)
+  assert.equal(result.weeklyActivity.responses, 1);
+});
+
+test('computeOverview: weekly interviews count only completed/held rounds, not scheduled or cancelled', () => {
+  const activeInterviews = `
+# Active Interviews
+
+| Company | Role | Round | Date/Time | Interviewer | Status | Notes |
+|---------|------|-------|-----------|-------------|--------|-------|
+| Held Corp | Staff Engineer | Technical | 2026-10-21 14:00 | Alice | Completed | Finished round |
+| Done Inc | Senior Dev | Screening | 2026-10-22 10:00 | Bob | Passed | Cleared |
+| Future Co | Architect | System Design | 2026-10-25 11:00 | Carol | Scheduled | Upcoming |
+| Skip LLC | Backend Dev | Final | 2026-10-24 16:00 | Dave | Cancelled | Candidate withdrew |
+`;
+
+  const result = computeOverview({
+    appsContent: SAMPLE_TRACKER,
+    intsContent: activeInterviews,
+    today: TODAY,
+  });
+
+  // Only 'Completed' and 'Passed' are counted as held interviews
+  assert.equal(result.weeklyActivity.interviews, 2);
+  // While upcoming count should only find 'Scheduled'
+  assert.equal(result.interviews.upcomingCount, 1);
+  assert.equal(result.interviews.upcoming[0].company, 'Future Co');
+});
+
+test('resolveOverviewPaths: respects CAREER_OPS_PROFILE while preserving explicit dataRoot behavior', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'overview-profile-test-'));
+  const customProfile = join(tmp, 'my-custom-profile.yml');
+  writeFileSync(customProfile, 'follow_ups:\n  enabled: false\n');
+
+  try {
+    // 1. Without dataRoot and with CAREER_OPS_PROFILE set: honors CAREER_OPS_PROFILE
+    const origProfile = process.env.CAREER_OPS_PROFILE;
+    process.env.CAREER_OPS_PROFILE = customProfile;
+    try {
+      const resEnv = resolveOverviewPaths({});
+      assert.equal(resEnv.profileFile, customProfile);
+    } finally {
+      if (origProfile !== undefined) process.env.CAREER_OPS_PROFILE = origProfile;
+      else delete process.env.CAREER_OPS_PROFILE;
+    }
+
+    // 2. With explicit dataRoot: preserves dataRoot behavior (points to dataRoot/config/profile.yml)
+    const resDataRoot = resolveOverviewPaths({ dataRoot: tmp });
+    assert.equal(resDataRoot.profileFile, join(tmp, 'config', 'profile.yml'));
+
+    // 3. With explicit profileFile: honors profileFile directly
+    const resExplicit = resolveOverviewPaths({ profileFile: customProfile });
+    assert.equal(resExplicit.profileFile, customProfile);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI: temporary profile with follow_ups disabled turns followups off', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'overview-disabled-profile-'));
+  mkdirSync(join(tmp, 'data'), { recursive: true });
+  mkdirSync(join(tmp, 'config'), { recursive: true });
+
+  try {
+    writeFileSync(join(tmp, 'data', 'applications.md'), SAMPLE_TRACKER);
+    writeFileSync(join(tmp, 'data', 'follow-ups.md'), SAMPLE_FOLLOWUPS);
+    writeFileSync(join(tmp, 'config', 'profile.yml'), 'follow_ups:\n  enabled: false\n');
+
+    const env = cleanEnv({ CAREER_OPS_ROOT: tmp });
+    const run = spawnSync(process.execPath, [SCRIPT, '--summary', '--today', TODAY], { encoding: 'utf-8', env });
+    assert.equal(run.status, 0);
+    assert.ok(run.stdout.includes('Follow-ups: turned off (follow_ups.enabled: false in config/profile.yml)'));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

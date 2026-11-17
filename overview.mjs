@@ -39,7 +39,7 @@ import {
 import { classifyRows, interviewCompanies, DEFAULT_DAYS } from './close-stale.mjs';
 import { parseActiveInterviews, findColumn } from './process-quality.mjs';
 import { computeDefaultRange } from './weekly-digest.mjs';
-import { loadCanonicalStates } from './tracker-utils.mjs';
+import { loadCanonicalStates, resolveCanonicalStateId } from './tracker-utils.mjs';
 import { parseStatusLog, foldObservations } from './funnel-velocity.mjs';
 
 const CODE_ROOT = dirname(fileURLToPath(import.meta.url));
@@ -100,6 +100,7 @@ export function computeOverview({
     const cadence = analyzeFromContent(appsContent, followupsContent || '', {
       enabled: followupsEnabled,
       statusLogContent: statusLogContent || '',
+      today,
     });
     if (!cadence.error) {
       urgentFollowups = cadence.entries.filter((e) => e.urgency === 'urgent');
@@ -208,16 +209,17 @@ export function computeOverview({
   let weeklyResponses = 0;
   let weeklyRejections = 0;
   if (statusLogContent) {
-    const lines = statusLogContent.replace(/\r/g, '').split('\n');
-    for (const line of lines) {
-      const parts = line.split('\t').map((s) => s.trim());
-      if (parts.length < 4) continue;
-      const [, date, , to] = parts;
-      if (date >= weekWindow.from && date <= weekWindow.to) {
-        const toNorm = to.toLowerCase();
-        if (toNorm === 'applied') weeklyApplied++;
-        else if (['responded', 'assessment', 'interview', 'offer'].includes(toNorm)) weeklyResponses++;
-        else if (['rejected', 'discarded'].includes(toNorm)) weeklyRejections++;
+    const { observations } = parseStatusLog(statusLogContent, loadedStates);
+    const foldedByNum = foldObservations(observations);
+    for (const timeline of foldedByNum.values()) {
+      for (const event of timeline) {
+        if (event.date >= weekWindow.from && event.date <= weekWindow.to) {
+          const toId = resolveCanonicalStateId(event.to, loadedStates)
+            || String(event.to || '').toLowerCase().trim();
+          if (toId === 'applied') weeklyApplied++;
+          else if (['responded', 'assessment', 'interview', 'offer', 'hired'].includes(toId)) weeklyResponses++;
+          else if (['rejected', 'discarded'].includes(toId)) weeklyRejections++;
+        }
       }
     }
   }
@@ -233,9 +235,13 @@ export function computeOverview({
     const parsedInts = parseActiveInterviews(intsContent);
     for (const row of parsedInts) {
       const dt = findColumn(row, 'date/time') || findColumn(row, 'date');
+      const statusRaw = findColumn(row, 'status');
+      const statusNorm = statusRaw.toLowerCase().trim();
       const m = /\d{4}-\d{2}-\d{2}/.exec(dt);
       if (m && m[0] >= weekWindow.from && m[0] <= weekWindow.to) {
-        weeklyInterviewsHeld++;
+        if (['completed', 'passed', 'done'].includes(statusNorm)) {
+          weeklyInterviewsHeld++;
+        }
       }
     }
   }
@@ -525,7 +531,8 @@ export function resolveOverviewPaths(options = {}) {
           ? join(dataRoot, 'pipeline.md')
           : join(dataRoot, 'data', 'pipeline.md'));
 
-  const profileFile = options.profileFile || getProfilePath(dataRoot);
+  const profileFile = options.profileFile
+    || (options.dataRoot ? getProfilePath(options.dataRoot) : getProfilePath());
 
   return {
     dataRoot,
