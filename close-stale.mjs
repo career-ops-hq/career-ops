@@ -48,6 +48,8 @@
  * rejections and found again if a reply arrives later. Re-running changes
  * nothing: closed rows are no longer Applied. When the status-log lines cannot
  * be written, the tracker is put back and the command fails: nothing is closed.
+ * If the failed write left lines in the log that could not be removed, the
+ * rows stay closed to match them, and the command still fails and says so.
  *
  * Run: node close-stale.mjs                        (dry run, JSON to stdout)
  *      node close-stale.mjs --summary              (dry run, human-readable)
@@ -59,7 +61,7 @@
  * Paths follow CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / CAREER_OPS_TRACKER.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -300,6 +302,18 @@ function fail(message, code = 2) {
 }
 
 /**
+ * The status log's size in bytes: 0 while it does not exist, null when it
+ * cannot be measured.
+ */
+function ledgerSize(path) {
+  try {
+    return statSync(path).size;
+  } catch (err) {
+    return err?.code === 'ENOENT' ? 0 : null;
+  }
+}
+
+/**
  * Contents of a file that may legitimately not exist yet.
  *
  * ENOENT is the only failure that means '' here. A user who has never logged a
@@ -452,21 +466,36 @@ if (isMainModule(import.meta.url)) {
         // counts the row as no_response from it, and a set-status undo reads it.
         // A closure the ledger did not record is a plain Discarded row, so a
         // failed append puts the tracker back and the command fails, as
-        // set-status.mjs does since #7143. appendLedgerRows() leaves the ledger
-        // at the size it had before.
+        // set-status.mjs does since #7143.
+        //
+        // appendLedgerRows() puts the ledger back to its old size when the
+        // append fails, and throws a "could not be put back" error when that
+        // truncate fails too. That error does not say whether any line landed:
+        // a read-only ledger fails both calls with nothing written. The size
+        // does. Every ledger writer appends inside the tracker lock, which this
+        // run holds, so nothing else changes it between the two reads.
+        const logPath = statusLogPath(trackerPath);
+        const sizeBefore = ledgerSize(logPath);
         try {
           const text = classified.candidates
             .map((c) => `${c.num}\t${today}\tApplied\t${targetStatus}\t${LEDGER_SOURCE}\t${cell(`${days}d`)}\n`)
             .join('');
-          appendLedgerRows(statusLogPath(trackerPath), text);
+          appendLedgerRows(logPath, text);
         } catch (err) {
+          // Lines did land. Putting the tracker back would leave close-stale
+          // lines naming Applied rows, and the next run would skip those rows
+          // for good as previously auto-closed. The rows stay closed to match.
+          const sizeAfter = ledgerSize(logPath);
+          if (sizeAfter === null || sizeAfter !== sizeBefore) {
+            throw new Error(`Could not write the status log (${err.message}). ${closed} row(s) stay closed, because ${logPath} may now hold part or all of their ${LEDGER_SOURCE} lines. Check its last lines before running close-stale again.`);
+          }
           let restored = false;
           try {
             tx.replace(content);
             restored = true;
           } catch { /* reported below */ }
           throw new Error(restored
-            ? `Could not write the status log (${err.message}), so no row was closed.`
+            ? `Could not write the status log (${err.message}). The log is unchanged, so no row was closed.`
             : `Could not write the status log (${err.message}), and could not put the tracker back: ${closed} row(s) now read ${targetStatus} with no status-log line.`);
         }
       }
