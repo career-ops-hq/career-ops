@@ -43,10 +43,13 @@ const ARTIFACT_EXT = /\.(pdf|html|tex|md)$/i;
 const CLAIMS_STANDARD = /^\d+-.*\d{4}-\d{2}-\d{2}/;
 // generate-pdf.mjs keeps a render that ran over its page budget beside the
 // deliverable as `{name}.overflow.pdf`, then `.overflow-2.pdf` (modes/pdf.md).
-// A draft is renderer-owned and temporary, so it is not judged. The ATS copy of
-// a CV is `{cv-stem}.ats.pdf` (modes/pdf.md): the suffix is intentional, keeps
-// Apply from uploading it as the styled CV, and is not judged either.
-const OVERFLOW_DRAFT = /\.(?:overflow(?:-\d+)?|ats)\.pdf$/i;
+// A draft is renderer-owned and temporary, so it is not judged.
+const OVERFLOW_DRAFT = /\.overflow(-\d+)?\.pdf$/i;
+// The ATS copy of a CV is `{cv-stem}.ats.pdf` (modes/pdf.md): the suffix is
+// intentional, keeps Apply from uploading it as the styled CV, and is
+// stripped before the name is parsed, so the file is still checked against its
+// report. Findings keep the original name.
+const ATS_PDF = /\.ats\.pdf$/i;
 
 /**
  * Read a name against its report. Either slug can contain `cv` or `cover`, so
@@ -114,7 +117,7 @@ export function checkOutputNames(outputDir, reportsDir) {
     checked++;
     const num = /^(\d{3,})-/.exec(file)?.[1];
     const reportSlug = num ? slugFromReport(num, reportsDir) : null;
-    const parsed = parseAgainstReport(file, reportSlug);
+    const parsed = parseAgainstReport(file.replace(ATS_PDF, '.pdf'), reportSlug);
     if (!parsed) {
       findings.push({
         file,
@@ -159,7 +162,9 @@ function selfTest() {
       '024-zep-cv-cover-dana-2026-11-07.pdf',     // ok: kind token inside the candidate
       '024-zep-cv-david-gitman-2026-11-07.overflow.pdf', // renderer draft: not judged
       '024-zep-cv-david-gitman-2026-11-07.overflow-2.pdf',
-      '024-zep-cv-david-gitman-2026-11-07.ats.pdf', // ATS copy: intentional suffix, not judged
+      '024-zep-cv-david-gitman-2026-11-07.ats.pdf', // ok: ATS copy, intentional suffix
+      '099-zep-cv-david-gitman-2026-11-07.ats.pdf', // unknown report, ATS copy
+      '024-acme-cv-david-gitman-2026-11-07.ats.pdf', // slug mismatch, ATS copy
       '024-zep-cv-avery_quinn-2026-11-07.pdf',    // not kebab-case: not standard
       '024-acme-cv-david-gitman-2026-11-07.pdf',  // slug mismatch
       '099-zep-cv-david-gitman-2026-11-07.pdf',   // unknown report
@@ -177,8 +182,8 @@ function selfTest() {
     mkdirSync(join(dir, 'output', 'scratch'));      // flagged
     const { checked, findings } = checkOutputNames(join(dir, 'output'), join(dir, 'reports'));
     const codes = Object.fromEntries(findings.map((f) => [f.file, f.code]));
-    expect(checked === 11, `checked=${checked}`);
-    expect(findings.length === 6, `findings=${findings.length}`);
+    expect(checked === 14, `checked=${checked}`);
+    expect(findings.length === 8, `findings=${findings.length}`);
     expect(codes['scratch'] === 'unexpected-subdir', 'unexpected-subdir');
     expect(!('diagnostics' in codes), 'diagnostics allowed');
     expect(codes['024-acme-cv-david-gitman-2026-11-07.pdf'] === 'slug-mismatch', 'slug-mismatch');
@@ -186,7 +191,9 @@ function selfTest() {
     expect(codes['024-zep-resume-2026-11-07.pdf'] === 'not-standard', 'not-standard');
     expect(codes['024-zep-cv-avery_quinn-2026-11-07.pdf'] === 'not-standard', 'malformed slug');
     expect(!('024-zep-cv-david-gitman-2026-11-07.overflow.pdf' in codes), 'overflow draft ignored');
-    expect(!('024-zep-cv-david-gitman-2026-11-07.ats.pdf' in codes), 'ats pdf ignored');
+    expect(!('024-zep-cv-david-gitman-2026-11-07.ats.pdf' in codes), 'ats pdf accepted');
+    expect(codes['099-zep-cv-david-gitman-2026-11-07.ats.pdf'] === 'unknown-report', 'ats pdf checked against its report');
+    expect(codes['024-acme-cv-david-gitman-2026-11-07.ats.pdf'] === 'slug-mismatch', 'ats pdf company checked');
     expect(!('031-acme-cv-tools-cv-jane-smith-2026-11-09.pdf' in codes), 'kind token in company');
     expect(!('024-zep-cv-cover-dana-2026-11-07.pdf' in codes), 'kind token in candidate');
     expect(!('github-evidence-2026-11-07.json' in codes) && !('github-evidence-2026-11-07.md' in codes), 'github-evidence exempt');
