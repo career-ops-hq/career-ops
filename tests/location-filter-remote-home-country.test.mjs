@@ -77,3 +77,25 @@ test('a remote title does not rescue a place outside the home countries', () => 
   assert.equal(accepts('Springfield', '', 'Analyst - Remote'), true);
   assert.equal(buildLocationFilter({ allow: ['Remote'] })('Hong Kong', '', 'Analyst - Remote'), true);
 });
+
+test('Georgia is ambiguous: foreign to a German list, home to a US one', () => {
+  assert.equal(buildLocationFilter(remoteGermany)('Remote - Georgia', '', 'Analyst'), false);
+  assert.equal(buildLocationFilter(remoteGermany)('Remote - Atlanta, Georgia', '', 'Analyst'), false);
+  assert.equal(buildLocationFilter(chicagoOrRemoteUs)('Remote - Georgia', '', 'Analyst'), true);
+});
+
+test('a US marker in one segment does not hide a home city in another', () => {
+  const accepts = buildLocationFilter(remoteGermany);
+  assert.equal(accepts('Remote (Berlin); Remote (US)', '', 'Analyst'), true);
+  assert.equal(accepts('Remote (London); Remote (US)', '', 'Analyst'), false);
+  assert.equal(buildLocationFilter(chicagoOrRemoteUs)('Remote - London, KY', '', 'Analyst'), true);
+});
+
+test('a Workday URL hint naming a foreign place rejects a bare Remote', () => {
+  const accepts = buildLocationFilter({ allow: ['Remote', 'United States'] });
+  const url = (place) => `https://acme.wd1.myworkdayjobs.com/en-US/careers/job/${place}/Analyst_R-1`;
+  assert.equal(accepts('Remote', url('Hong-Kong'), 'Analyst'), false);
+  assert.equal(accepts('Remote', url('Austin-TX'), 'Analyst'), true);
+  assert.equal(accepts('Remote', '', 'Analyst'), true);
+  assert.equal(accepts('Remote, United States', url('Hong-Kong'), 'Analyst'), true);
+});

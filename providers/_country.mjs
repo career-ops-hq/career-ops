@@ -285,6 +285,7 @@ const NORTH_AMERICA = new Set(['US', 'CA']);
 const REGION_KEYWORD = /^(?:eu|european union|europe|emea|apac|asia|africa|latam|(?:north|south|latin) america|worldwide|global|international)$/;
 // "New Mexico", "New Jersey" and "Georgia" contain a country word.
 const US_STATE_NAMES_WITH_COUNTRY_WORD = /(?<![\p{L}\p{N}])(?:new mexico|new jersey|georgia)(?![\p{L}\p{N}])/gu;
+const GEORGIA = /(?<![\p{L}\p{N}])georgia(?![\p{L}\p{N}])/u;
 const US_MARKER = /(?<![\p{L}\p{N}])(?:united states(?: of america)?|usa|u\.s\.a?\.?|us)(?![\p{L}\p{N}])/u;
 
 /**
@@ -307,18 +308,27 @@ export function homeCountryCodes(keywords, usStateNames = new Set()) {
 /**
  * @param {unknown} location
  * @param {Set<string>} home ISO codes from homeCountryCodes
- * @param {boolean} namesUsState whether the caller found a US state name
+ * @param {boolean | ((segment: string) => boolean)} namesUsState whether the
+ *   caller found a US state name, or a test run on each `;` segment
  * @returns {boolean} whether the text names a place and none of them is home.
  */
 export function namesPlaceOutsideHome(location, home, namesUsState = false) {
   if (!home.size) return false;
-  const text = fold(location).replace(US_STATE_NAMES_WITH_COUNTRY_WORD, ' ');
+  const text = fold(location);
   if (!text) return false;
-  const named = PLACES.filter(p => p.match.test(text)).map(p => p.codes);
-  // "Bremen, DE" stays Germany for a German home; elsewhere ", DE" is Delaware.
-  const usStateCode = [...USPS_STATE_CODES].some(code => !home.has(isoCountryCode(code)) && new RegExp(`,\\s*${code}(?![\\p{L}\\p{N}])`, 'u').test(text));
-  if (namesUsState || usStateCode || US_MARKER.test(text)) named.push(['US']);
-  else named.push(...AMBIGUOUS_CITIES.filter(p => p.match.test(text)).map(p => p.codes));
+  const named = [];
+  // A US marker in one `;` segment must not hide a city named in another.
+  for (const segment of text.split(';')) {
+    // "Georgia" is the country or the state: foreign to a German home, home to a US one.
+    if (GEORGIA.test(segment)) named.push(['GE', 'US']);
+    const part = segment.replace(US_STATE_NAMES_WITH_COUNTRY_WORD, ' ');
+    named.push(...PLACES.filter(p => p.match.test(part)).map(p => p.codes));
+    // "Bremen, DE" stays Germany for a German home; elsewhere ", DE" is Delaware.
+    const usStateCode = [...USPS_STATE_CODES].some(code => !home.has(isoCountryCode(code)) && new RegExp(`,\\s*${code}(?![\\p{L}\\p{N}])`, 'u').test(part));
+    const usState = typeof namesUsState === 'function' ? namesUsState(segment) : namesUsState;
+    if (usState || usStateCode || US_MARKER.test(part)) named.push(['US']);
+    else named.push(...AMBIGUOUS_CITIES.filter(p => p.match.test(part)).map(p => p.codes));
+  }
   if (REGION_LABEL.test(text) && [...home].every(code => NORTH_AMERICA.has(code))) named.push([]);
   return named.length > 0 && !named.some(codes => codes.some(code => home.has(code)));
 }

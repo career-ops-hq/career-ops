@@ -780,7 +780,8 @@ export function buildLocationFilter(locationFilter) {
   // country to read, matching is unchanged.
   const genericRemoteAllow = new Set(allow.filter((_, i) => GENERIC_REMOTE_ALLOW.has(allowKeywords[i])));
   const homeCountries = genericRemoteAllow.size > 0 ? homeCountryCodes([...alwaysAllowKeywords, ...allowKeywords], US_STATE_NAMES) : new Set();
-  const outsideHome = (original, lower) => namesPlaceOutsideHome(original, homeCountries, US_STATE_NAME_MATCHERS.some(m => m(lower)));
+  // The URL hint can name a place the display string leaves out ("Remote").
+  const outsideHome = (original, hint) => namesPlaceOutsideHome(hint ? `${original}; ${hint}` : original, homeCountries, segment => US_STATE_NAME_MATCHERS.some(m => m(segment)));
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
@@ -823,13 +824,13 @@ export function buildLocationFilter(locationFilter) {
     if (allow.length === 0) return true;
     const allowHits = allow.filter(matches);
     if (allowHits.some(m => !genericRemoteAllow.has(m))) return true;
-    if (allowHits.length > 0) return !outsideHome(original, lower);
+    if (allowHits.length > 0) return !outsideHome(original, hint);
     if (!strict && countryOnlyAllow && WORLDWIDE_LOCATION_LABELS.has(lower)) return true;
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
     // Nor can a remote title admit a place outside the home countries.
-    if (outsideHome(original, lower)) return false;
+    if (outsideHome(original, hint)) return false;
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
   // Detail readers may recheck this opt-in policy without repeating legacy
