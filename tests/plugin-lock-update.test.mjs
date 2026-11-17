@@ -2,10 +2,11 @@
 // writing that back would drop every other pin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readLock, writeLockEntry, removeLockEntry } from '../plugins/_lock.mjs';
+import { lockGate } from '../plugins/_engine.mjs';
 
 function freshRoot() {
   return mkdtempSync(join(tmpdir(), 'co-lock-'));
@@ -56,6 +57,43 @@ test('a torn plugins.lock is left unchanged when an update is refused', () => {
     assert.equal(readFileSync(file, 'utf8'), torn);
     assert.deepEqual(readLock(root).plugins, {});
     assert.equal(readdirSync(root).some((name) => name.endsWith('.tmp')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a torn plugins.lock blocks load and is not rewritten', () => {
+  const root = freshRoot();
+  try {
+    const dir = join(root, 'plugins.local', 'lp');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'index.mjs'), 'export default {};\n');
+    const file = join(root, 'plugins.lock');
+    const torn = '{not-json';
+    writeFileSync(file, torn);
+    const result = lockGate({
+      id: 'lp', version: '1.0.0', dir, hooks: [], requiredEnv: [], allowedHosts: [],
+    }, root);
+    assert.equal(result.load, false);
+    assert.equal(readFileSync(file, 'utf8'), torn);
+    assert.equal(readdirSync(root).some((name) => name.startsWith('.plugins.lock.')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an absent plugins.lock is still pinned on first load', () => {
+  const root = freshRoot();
+  try {
+    const dir = join(root, 'plugins.local', 'lp');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'index.mjs'), 'export default {};\n');
+    const result = lockGate({
+      id: 'lp', version: '1.0.0', dir, hooks: [], requiredEnv: [], allowedHosts: [],
+    }, root);
+    assert.equal(result.load, true);
+    const parsed = JSON.parse(readFileSync(join(root, 'plugins.lock'), 'utf8'));
+    assert.equal(typeof parsed.plugins.lp.integrity, 'string');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
