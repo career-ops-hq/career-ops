@@ -557,7 +557,7 @@ const twoPassManifestChecks = [
     // the fallback's literal expansion specs (#3825 review); the property this
     // pins is the runner (gitQuiet, not git) and the ref, not the arity.
     name: 'per-path checkout pipes stderr so expected skips stay quiet (#1998)',
-    pattern: /gitQuiet\('--literal-pathspecs',\s*'checkout',\s*targetCommit,\s*'--',\s*\.\.\.fallbackSpecs\)/,
+    pattern: /fallbackCheckoutBatched\(\s*fallbackSpecs,\s*targetCommit\s*\)/,
   },
   {
     // #2337: a system file this install edited must be listed and backed up
