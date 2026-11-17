@@ -229,6 +229,16 @@
 # structured location only. Reverse scans do not consume those field gates;
 # unlike the shared location filter, that alternative does not use URL hints.
 #
+# A generic allow entry ("Remote", "Remote work", "Work from home", "Anywhere",
+# "Distributed") says nothing about where the role is. When always_allow or
+# allow also names a country ("United States", "Germany") or a US state name,
+# that entry no longer admits a location that names only other places: with
+# the example below, "Remote (Hong Kong)" and "Remote - Toronto" are rejected,
+# and a Remote title cannot rescue them either. "Remote" alone and "Remote -
+# Austin, TX" still pass. A bare two-letter code does not count as a country
+# here, because US lists use them for states. A list with no country, or with a
+# region ("Europe", "EMEA", "Worldwide"), matches as before.
+#
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography. Keywords match whole words
 # and take no `word:`/`stem:` prefix. A Chinese or Japanese keyword matches

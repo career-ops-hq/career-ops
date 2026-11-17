@@ -37,7 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { buildWorkplacePolicy, isCountryKeyword } from './providers/_country.mjs';
+import { buildWorkplacePolicy, homeCountryCodes, isCountryKeyword, namesPlaceOutsideHome } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -744,6 +744,10 @@ const WORLDWIDE_LOCATION_LABELS = new Set([
   'remote (worldwide)',
 ]);
 
+const GENERIC_REMOTE_ALLOW = new Set(['remote', 'remote work', 'work from home', 'anywhere', 'distributed']);
+const US_STATE_NAMES = new Set(USPS_STATES.map(([name]) => name).filter(name => !US_STATE_NAMES_ALSO_COUNTRIES.has(name)));
+const US_STATE_NAME_MATCHERS = [...US_STATE_NAMES].map(compileLocationKeyword);
+
 // `url` and `title` are optional. Callers that omit them get the original
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
@@ -770,6 +774,13 @@ export function buildLocationFilter(locationFilter) {
   if (usExpansion && allow.length > 0) {
     allow.push(...US_STATE_ALLOW_MATCHERS);
   }
+  // A bare work-arrangement token says nothing about where the role is. When
+  // the lists also name a home country, it cannot admit a location that names
+  // only other places ("Remote (Hong Kong)" for a US list). With no home
+  // country to read, matching is unchanged.
+  const genericRemoteAllow = new Set(allow.filter((_, i) => GENERIC_REMOTE_ALLOW.has(allowKeywords[i])));
+  const homeCountries = genericRemoteAllow.size > 0 ? homeCountryCodes([...alwaysAllowKeywords, ...allowKeywords], US_STATE_NAMES) : new Set();
+  const outsideHome = (original, lower) => namesPlaceOutsideHome(original, homeCountries, US_STATE_NAME_MATCHERS.some(m => m(lower)));
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
@@ -810,11 +821,15 @@ export function buildLocationFilter(locationFilter) {
     if (alwaysAllow.length > 0 && alwaysAllow.some(matches)) return true;
     if (block.length > 0 && block.some(matches)) return false;
     if (allow.length === 0) return true;
-    if (allow.some(matches)) return true;
+    const allowHits = allow.filter(matches);
+    if (allowHits.some(m => !genericRemoteAllow.has(m))) return true;
+    if (allowHits.length > 0) return !outsideHome(original, lower);
     if (!strict && countryOnlyAllow && WORLDWIDE_LOCATION_LABELS.has(lower)) return true;
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
+    // Nor can a remote title admit a place outside the home countries.
+    if (outsideHome(original, lower)) return false;
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
   // Detail readers may recheck this opt-in policy without repeating legacy
