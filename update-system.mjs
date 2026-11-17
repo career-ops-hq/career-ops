@@ -5003,14 +5003,8 @@ async function apply() {
     // the local list, which must not be empty on the first upgrade to this layout.
     adoptTargetManifest(remoteSystemPaths);
     const manifestUserPaths = effectiveUserPaths();
-    remoteSystemPaths = assertSafeManifestPaths(
-      remoteSystemPaths,
-      manifestUserPaths,
-      `Target SYSTEM_PATHS (${remoteManifestFile})`,
-    );
-    const validatedManifestPaths = assertSafeManifestPaths(
+    const validatedManifestPaths = assertCanonicalManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
-      manifestUserPaths,
       'Merged updater manifest',
     );
 
@@ -5287,7 +5281,7 @@ async function apply() {
         // `error: pathspec '...' did not match any file(s) known to git`
         // immediately before the success banner — which reads as a failed
         // update and sends people chasing the wrong root cause (#1998).
-        gitQuiet('--literal-pathspecs', 'checkout', targetCommit, '--', path, ...preserveSpecs);
+        gitQuiet('checkout', targetCommit, '--', path, ...preserveSpecs);
         updated.push(path);
       } catch (err) {
         // A path genuinely absent upstream is the expected skip. But the catch

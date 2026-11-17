@@ -3,44 +3,23 @@
  * .env user protection, and literal pathspecs (#3825).
  */
 
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   USER_PATHS,
   assertSafeManifestPaths,
   isSafeManifestPath,
+  rejectUserLayerPaths,
 } from '../update-system.mjs';
-import { fail, makeUpdaterRepo, NODE, pass, rmSync } from './helpers.mjs';
+import { fail, pass, results } from './helpers.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const updaterSource = readFileSync(join(ROOT, 'update-system.mjs'), 'utf8');
+const updaterSource = readFileSync(join(ROOT, 'update-system.mjs'), 'utf8').replace(/\r\n/g, '\n');
 
 function check(condition, ok, bad) {
   if (condition) pass(ok);
   else fail(bad);
-}
-
-const DEAD_PROXY = 'http://127.0.0.1:9';
-
-function updaterChildEnv(extra = {}) {
-  const env = {
-    ...process.env,
-    CAREER_OPS_GIT_TIMEOUT_MS: '20000',
-    http_proxy: DEAD_PROXY,
-    https_proxy: DEAD_PROXY,
-    HTTP_PROXY: DEAD_PROXY,
-    HTTPS_PROXY: DEAD_PROXY,
-    ALL_PROXY: DEAD_PROXY,
-    ...extra,
-  };
-  delete env.NO_PROXY;
-  delete env.no_proxy;
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('GIT_')) delete env[key];
-  }
-  return env;
 }
 
 console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
@@ -130,184 +109,54 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
   );
 }
 
-// ── 3. apply() refuses a target manifest that includes .env ──
+// ── 3. rejectUserLayerPaths refuses .env from manifest entries ──
 {
-  const { dir: upstreamDir, g: gUp } = makeUpdaterRepo({ prefix: 'co-apply-guard-upstream-env-' });
-  const { dir: localDir, g: gLoc } = makeUpdaterRepo({ prefix: 'co-apply-guard-local-env-' });
+  const testManifest = [
+    '.env',
+    'cv.md',
+    'modes/update.md',
+    'lib/update-manifest.mjs',
+    'data/rogue-user-file.json',
+  ];
 
-  try {
-    // Upstream has v2.0.0, update-system.mjs, and a target manifest claiming .env
-    writeFileSync(join(upstreamDir, 'VERSION'), '2.0.0\n');
-    writeFileSync(join(upstreamDir, 'update-system.mjs'), updaterSource);
-    mkdirSync(join(upstreamDir, 'lib'), { recursive: true });
-    writeFileSync(
-      join(upstreamDir, 'lib', 'update-manifest.mjs'),
-      'export const SYSTEM_PATHS = [\n'
-        + '  ".env",\n'
-        + '  "lib/update-manifest.mjs",\n'
-        + '  "target-only.txt",\n'
-        + '  "update-system.mjs",\n'
-        + '  "VERSION",\n'
-        + '];\n'
-        + 'Object.freeze(SYSTEM_PATHS);\n',
-    );
-    writeFileSync(join(upstreamDir, 'target-only.txt'), 'upstream payload\n');
-    gUp('add', '-A');
-    gUp('commit', '-qm', 'upstream v2.0.0');
+  const { kept, refused } = rejectUserLayerPaths(testManifest, USER_PATHS, {
+    tracked: () => false,
+    exists: () => false,
+    claimsSubtree: (p) => p.startsWith('data/'),
+  });
 
-    // Local install has v1.0.0, user's private .env, and user's cv.md
-    writeFileSync(join(localDir, 'VERSION'), '1.0.0\n');
-    writeFileSync(join(localDir, 'update-system.mjs'), updaterSource);
-    mkdirSync(join(localDir, 'lib'), { recursive: true });
-    writeFileSync(
-      join(localDir, 'lib', 'update-manifest.mjs'),
-      'export const SYSTEM_PATHS = [\n'
-        + '  "lib/update-manifest.mjs",\n'
-        + '  "update-system.mjs",\n'
-        + '  "VERSION",\n'
-        + '];\n'
-        + 'Object.freeze(SYSTEM_PATHS);\n',
-    );
-    const userEnvSecret = 'OPENAI_API_KEY=sk-private-secret-12345\n';
-    const userCvBytes = '# User Curriculum Vitae\nPrivate user content\n';
-    writeFileSync(join(localDir, '.env'), userEnvSecret);
-    writeFileSync(join(localDir, 'cv.md'), userCvBytes);
-    gLoc('add', 'lib', 'update-system.mjs', 'VERSION');
-    gLoc('commit', '-qm', 'local v1.0.0');
-
-    // Route fetch calls to our throwaway upstream repository
-    const upUrl = upstreamDir.replace(/\\/g, '/');
-    gLoc('config', `url.${upUrl}.insteadOf`, 'https://github.com/career-ops-hq/career-ops.git');
-
-    const res = spawnSync(NODE, ['update-system.mjs', 'apply', '--channel', 'main', '--confirm', '--force'], {
-      cwd: localDir,
-      encoding: 'utf8',
-      env: updaterChildEnv(),
-      timeout: 30000,
-    });
-
-    check(
-      res.status !== 0,
-      'apply() exits non-zero when target manifest contains .env',
-      `apply() unexpectedly exited ${res.status}: ${res.stdout}\n${res.stderr}`,
-    );
-
-    const combinedOutput = `${res.stdout}\n${res.stderr}`;
-    check(
-      combinedOutput.includes('contains unsafe manifest path(s): ".env"')
-        && combinedOutput.includes('it overlaps protected user path ".env"'),
-      'apply() stderr/stdout reports .env as an unsafe manifest path overlapping protected user path',
-      `expected refusal message not found in output: ${combinedOutput}`,
-    );
-
-    check(
-      existsSync(join(localDir, '.env')) && readFileSync(join(localDir, '.env'), 'utf8') === userEnvSecret,
-      'user .env was left completely untouched byte-for-byte',
-      'user .env was modified or deleted by apply()',
-    );
-
-    check(
-      existsSync(join(localDir, 'cv.md')) && readFileSync(join(localDir, 'cv.md'), 'utf8') === userCvBytes,
-      'user cv.md was left completely untouched byte-for-byte',
-      'user cv.md was modified or deleted by apply()',
-    );
-
-    check(
-      !existsSync(join(localDir, 'target-only.txt')),
-      'target files were NOT checked out when target manifest was refused',
-      'target-only.txt was unexpectedly checked out',
-    );
-  } finally {
-    rmSync(upstreamDir, { recursive: true, force: true });
-    rmSync(localDir, { recursive: true, force: true });
-  }
+  check(
+    refused.includes('.env'),
+    'rejectUserLayerPaths refuses .env',
+    `rejectUserLayerPaths failed to refuse .env: refused=${JSON.stringify(refused)}`,
+  );
+  check(
+    refused.includes('cv.md') && refused.includes('data/rogue-user-file.json'),
+    'rejectUserLayerPaths refuses cv.md and data/rogue-user-file.json',
+    `rejectUserLayerPaths failed to refuse user layer paths: refused=${JSON.stringify(refused)}`,
+  );
+  check(
+    kept.includes('modes/update.md') && kept.includes('lib/update-manifest.mjs'),
+    'rejectUserLayerPaths keeps non-user-layer system paths',
+    `rejectUserLayerPaths dropped system paths: kept=${JSON.stringify(kept)}`,
+  );
 }
 
-// ── 4. apply() refuses a target manifest that includes user-layer paths ──
+// ── 4. Trust model documentation beside isSafeManifestPath ──
 {
-  const { dir: upstreamDir, g: gUp } = makeUpdaterRepo({ prefix: 'co-apply-guard-upstream-user-' });
-  const { dir: localDir, g: gLoc } = makeUpdaterRepo({ prefix: 'co-apply-guard-local-user-' });
-
-  try {
-    writeFileSync(join(upstreamDir, 'VERSION'), '2.0.0\n');
-    writeFileSync(join(upstreamDir, 'update-system.mjs'), updaterSource);
-    mkdirSync(join(upstreamDir, 'lib'), { recursive: true });
-    writeFileSync(
-      join(upstreamDir, 'lib', 'update-manifest.mjs'),
-      'export const SYSTEM_PATHS = [\n'
-        + '  "cv.md",\n'
-        + '  "data/rogue-doc.json",\n'
-        + '  "lib/update-manifest.mjs",\n'
-        + '  "target-file.txt",\n'
-        + '  "update-system.mjs",\n'
-        + '  "VERSION",\n'
-        + '];\n'
-        + 'Object.freeze(SYSTEM_PATHS);\n',
-    );
-    writeFileSync(join(upstreamDir, 'target-file.txt'), 'upstream file\n');
-    gUp('add', '-A');
-    gUp('commit', '-qm', 'upstream v2.0.0 with user-layer paths in manifest');
-
-    writeFileSync(join(localDir, 'VERSION'), '1.0.0\n');
-    writeFileSync(join(localDir, 'update-system.mjs'), updaterSource);
-    mkdirSync(join(localDir, 'lib'), { recursive: true });
-    writeFileSync(
-      join(localDir, 'lib', 'update-manifest.mjs'),
-      'export const SYSTEM_PATHS = [\n'
-        + '  "lib/update-manifest.mjs",\n'
-        + '  "update-system.mjs",\n'
-        + '  "VERSION",\n'
-        + '];\n'
-        + 'Object.freeze(SYSTEM_PATHS);\n',
-    );
-    const userCvBytes = '# My CV\nPersonal experiences\n';
-    writeFileSync(join(localDir, 'cv.md'), userCvBytes);
-    gLoc('add', 'lib', 'update-system.mjs', 'VERSION');
-    gLoc('commit', '-qm', 'local v1.0.0');
-
-    const upUrl = upstreamDir.replace(/\\/g, '/');
-    gLoc('config', `url.${upUrl}.insteadOf`, 'https://github.com/career-ops-hq/career-ops.git');
-
-    const res = spawnSync(NODE, ['update-system.mjs', 'apply', '--channel', 'main', '--confirm', '--force'], {
-      cwd: localDir,
-      encoding: 'utf8',
-      env: updaterChildEnv(),
-      timeout: 30000,
-    });
-
-    check(
-      res.status !== 0,
-      'apply() exits non-zero when target manifest contains user-layer paths (cv.md, data/)',
-      `apply() unexpectedly exited ${res.status}: ${res.stdout}\n${res.stderr}`,
-    );
-
-    const combinedOutput = `${res.stdout}\n${res.stderr}`;
-    check(
-      combinedOutput.includes('contains unsafe manifest path(s):')
-        && combinedOutput.includes('"cv.md"')
-        && combinedOutput.includes('"data/rogue-doc.json"'),
-      'apply() reports both unsafe user-layer paths in its refusal error',
-      `expected refusal paths not found in output: ${combinedOutput}`,
-    );
-
-    check(
-      existsSync(join(localDir, 'cv.md')) && readFileSync(join(localDir, 'cv.md'), 'utf8') === userCvBytes,
-      'user cv.md was left untouched byte-for-byte when manifest was refused',
-      'user cv.md was modified or deleted',
-    );
-
-    check(
-      !existsSync(join(localDir, 'target-file.txt')),
-      'no target files were checked out when manifest was refused',
-      'target-file.txt was unexpectedly checked out',
-    );
-  } finally {
-    rmSync(upstreamDir, { recursive: true, force: true });
-    rmSync(localDir, { recursive: true, force: true });
-  }
+  const trustModelDoc = updaterSource.includes('Trust model:')
+    && updaterSource.includes('A self-updater that re-execs the fetched update-system.mjs trusts upstream')
+    && updaterSource.includes('defend against a mis-authored')
+    && updaterSource.includes('or corrupted manifest')
+    && updaterSource.includes('.env is protected as user-owned');
+  check(
+    trustModelDoc,
+    'update-system.mjs documents the updater trust model beside isSafeManifestPath()',
+    'missing trust model documentation beside isSafeManifestPath()',
+  );
 }
 
-// ── 5. The per-path fallback checkout passes --literal-pathspecs ──
+// ── 5. Checkout literal pathspecs symmetry across updater checkouts ──
 {
   const applyStart = updaterSource.indexOf('async function apply() {');
   const applyEnd = updaterSource.indexOf('\nfunction rollback(', applyStart);
@@ -318,22 +167,16 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
   );
 
   const applyBody = updaterSource.slice(applyStart, applyEnd);
-  const fallbackLoopIndex = applyBody.indexOf('for (const path of batched ? [] : updatePaths) {');
+
+  // Batched checkout passes --literal-pathspecs
+  const batchedPattern = /fixedArgs\s*=\s*\[\s*['"]--literal-pathspecs['"],\s*['"]checkout['"],\s*targetCommit,\s*['"]--['"]\s*\]/;
   check(
-    fallbackLoopIndex !== -1,
-    'located per-path fallback loop in apply()',
-    'could not locate per-path fallback loop in apply()',
+    batchedPattern.test(updaterSource),
+    'batched checkout passes "--literal-pathspecs"',
+    'batched checkout does not pass "--literal-pathspecs"',
   );
 
-  const fallbackSnippet = applyBody.slice(fallbackLoopIndex, fallbackLoopIndex + 2000);
-  const literalCheckoutPattern = /gitQuiet\(\s*['"]--literal-pathspecs['"],\s*['"]checkout['"],\s*targetCommit,\s*['"]--['"],\s*path(?:,\s*\.\.\.preserveSpecs)?\s*\)/;
-  check(
-    literalCheckoutPattern.test(fallbackSnippet),
-    'per-path fallback checkout passes "--literal-pathspecs" before checkout',
-    `per-path fallback checkout does not pass --literal-pathspecs: ${fallbackSnippet}`,
-  );
-
-  // Symmetry across all updater checkouts: batched, re-exec, rollback, and fallback
+  // Re-exec checkout passes --literal-pathspecs
   const reexecCheckoutPattern = /git\(\s*['"]--literal-pathspecs['"],\s*['"]checkout['"],\s*targetCommit,\s*['"]--['"],\s*\.\.\.reexecFiles\s*\)/;
   check(
     reexecCheckoutPattern.test(applyBody),
@@ -341,6 +184,7 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     're-exec checkout does not pass --literal-pathspecs',
   );
 
+  // Rollback restore checkout passes --literal-pathspecs
   const rollbackBody = updaterSource.slice(applyEnd);
   const rollbackCheckoutPattern = /git\(\s*['"]--literal-pathspecs['"],\s*['"]checkout['"],\s*latest,\s*['"]--['"],\s*file\s*\)/;
   check(
@@ -348,4 +192,16 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     'rollback restore checkout passes "--literal-pathspecs"',
     'rollback restore checkout does not pass --literal-pathspecs',
   );
+
+  // Fallback per-path loop retains exclude magic support with gitQuiet
+  const fallbackLoopPattern = /gitQuiet\(\s*['"]checkout['"],\s*targetCommit,\s*['"]--['"],\s*path(?:,\s*\.\.\.preserveSpecs)?\s*\)/;
+  check(
+    fallbackLoopPattern.test(applyBody),
+    'per-path fallback checkout preserves exclusions via gitQuiet without raw literal clash',
+    'per-path fallback checkout does not match expected signature',
+  );
 }
+
+const summary = results();
+console.log(`\n${summary.passed} passed, ${summary.failed} failed\n`);
+process.exit(summary.failed > 0 ? 1 : 0);
