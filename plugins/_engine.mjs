@@ -30,7 +30,7 @@ import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
-import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
+import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface, migrateLegacyLock } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -694,7 +694,14 @@ export function pluginSource(manifest, root) {
   if (!manifest?.dir) return 'local';
   const normDir = path.resolve(manifest.dir);
   const normBundled = path.resolve(root, 'plugins');
-  if (normDir.split(path.sep).includes('plugins.local')) return 'local';
+  // A plugins.local/ directory marks a local plugin wherever it sits at or
+  // below the checkout — including inside plugins/ itself, so nothing under a
+  // plugins.local name can claim bundled trust. Segments ABOVE root are not
+  // the plugin's own path: a checkout whose directory is itself named
+  // plugins.local must not have its bundled plugins reclassified (#7177
+  // review).
+  const belowRoot = path.relative(path.resolve(root), normDir).split(path.sep);
+  if (belowRoot.includes('plugins.local')) return 'local';
   if (normDir === normBundled || normDir.startsWith(normBundled + path.sep)) return 'bundled';
   return 'local';
 }
@@ -704,10 +711,19 @@ export function pluginSource(manifest, root) {
  * defense). Returns { load }. Re-pins the lock on the benign cases (silent).
  * Fail-open on the engine itself (a lock-read error never blocks).
  */
-export function lockGate(manifest, root, dataRoot = root) {
+export function lockGate(manifest, root, dataRoot = root, io = {}) {
   const source = pluginSource(manifest, root);
+  // Persist a legacy code-root lock into the data root before relying on
+  // readLock's fallback, so the pins and consent it holds survive the code
+  // checkout being replaced (#7177 review). Best-effort on the WRITE only: a
+  // failed migration leaves the legacy lock in place and the read below still
+  // falls back to it, so the drift check runs against the same pins as when
+  // no migration existed.
+  try { migrateLegacyLock(dataRoot, root, io.writeFile); } catch { /* best-effort write; the fallback read still applies */ }
   let lock;
-  try { lock = readLock(dataRoot, root); } catch { return { load: true }; }
+  try {
+    lock = readLock(dataRoot, root);
+  } catch { return { load: true }; }
   const entry = lock.plugins?.[manifest.id];
   let d;
   try { d = diffPlugin(manifest, entry); }
