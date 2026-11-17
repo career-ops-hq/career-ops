@@ -1,16 +1,36 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { captureJd, captureName, commitCapture, deriveLabels, appendPendingRow, urlAlreadyPresent, today } from '../capture-jd.mjs';
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
 import { ensureToken, createServer } from '../capture-server.mjs';
 
+// Isolate every Git subprocess, including production calls inheriting process.env.
+for (const key of Object.keys(process.env)) {
+  if (/^GIT_/i.test(key)) delete process.env[key];
+}
+const sandbox = mkdtempSync(path.join(tmpdir(), 'capture-jd-suite-'));
+const hooks = path.join(sandbox, 'empty-hooks');
+mkdirSync(hooks);
+Object.assign(process.env, {
+  GIT_CONFIG_NOSYSTEM: '1',
+  GIT_CONFIG_GLOBAL: path.join(sandbox, 'no-global-config'),
+  GIT_CONFIG_COUNT: '1',
+  GIT_CONFIG_KEY_0: 'core.hooksPath',
+  GIT_CONFIG_VALUE_0: hooks,
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ALLOW_PROTOCOL: 'file',
+  // A broken server-side guard must never launch a real, potentially paid CLI.
+  CAREER_OPS_CLI: path.join(sandbox, 'forbidden-evaluation'),
+});
+test.after(() => rmSync(sandbox, { recursive: true, force: true }));
+
 function scratch({ pipeline = '# Pipeline\n\n## Pending\n\n## Processed\n' } = {}) {
-  const root = mkdtempSync(path.join(tmpdir(), 'capture-jd-'));
+  const root = mkdtempSync(path.join(sandbox, 'data-'));
   mkdirSync(path.join(root, 'data'), { recursive: true });
   writeFileSync(path.join(root, 'data', 'pipeline.md'), pipeline);
   return root;
@@ -178,6 +198,115 @@ test('company and role overrides win over the title', async () => {
   assert.match(rowLines(root)[0], /\| Acme \| Head of AI( \| note: url only)?$/);
 });
 
+// --- R1 duplicate-preservation regressions ---------------------------------
+
+test('duplicate text capture preserves original bytes, mtime and file count', async () => {
+  const root = scratch();
+  const input = { url: 'https://acme.test/jobs/preserve', text: 'original', company: 'Acme', role: 'Engineer', date: '2026-11-12', dataRoot: root };
+  const first = await captureJd(input);
+  utimesSync(first.capture, new Date('2020-01-01'), new Date('2020-01-01'));
+  const before = readFileSync(first.capture);
+  const mtime = statSync(first.capture).mtimeMs;
+  const pipeline = readPipeline(root);
+  const second = await captureJd({ ...input, text: 'replacement' });
+  assert.equal(second.duplicate, true);
+  assert.deepEqual(readFileSync(first.capture), before);
+  assert.equal(statSync(first.capture).mtimeMs, mtime);
+  assert.equal(readdirSync(path.join(root, 'jds')).length, 1);
+  assert.equal(readPipeline(root), pipeline);
+  assert.equal(second.capture, null);
+});
+
+test('duplicate on a different day and labels produces no new archive', async () => {
+  const root = scratch();
+  const url = 'https://acme.test/jobs/labels';
+  await captureJd({ url, text: 'original', company: 'Acme', role: 'Engineer', date: '2026-11-12', dataRoot: root });
+  const before = readdirSync(path.join(root, 'jds'));
+  const second = await captureJd({ url, text: 'changed', company: 'Other', role: 'Lead', date: '2026-11-13', dataRoot: root });
+  assert.equal(second.duplicate, true);
+  assert.deepEqual(readdirSync(path.join(root, 'jds')), before);
+});
+
+test('URL-only then text duplicate creates no jds directory', async () => {
+  const root = scratch();
+  const url = 'https://acme.test/jobs/url-only';
+  await captureJd({ url, dataRoot: root });
+  const before = readPipeline(root);
+  const second = await captureJd({ url, text: 'later text', dataRoot: root });
+  assert.equal(second.duplicate, true);
+  assert.equal(existsSync(path.join(root, 'jds')), false);
+  assert.equal(readPipeline(root), before);
+});
+
+for (const row of [
+  '- [x] #143 | https://acme.test/jobs/processed | Acme | Engineer | 4.2/5 | PDF ✅',
+  '- [x] ~~https://acme.test/jobs/processed | Acme | Engineer~~ — posting expired (liveness sweep)',
+]) {
+  test(`documented Processed row is a genuine no-op: ${row}`, async () => {
+    const root = scratch({ pipeline: `# Pipeline\n\n## Pending\n\n## Processed\n\n${row}\n` });
+    const before = readPipeline(root);
+    const result = await captureJd({ url: 'https://acme.test/jobs/processed/', text: 'must not archive', dataRoot: root });
+    assert.equal(result.duplicate, true);
+    assert.equal(readPipeline(root), before);
+    assert.equal(existsSync(path.join(root, 'jds')), false);
+  });
+}
+
+test('concurrent same URL distinct texts labels and days keep only winner capture', async () => {
+  const root = scratch();
+  const url = 'https://acme.test/jobs/race';
+  const results = await Promise.all(Array.from({ length: 6 }, (_, i) => captureJd({
+    url, text: `JD contender ${i}`, company: `Company ${i}`, role: `Role ${i}`,
+    date: `2026-11-${12 + i}`, dataRoot: root,
+  })));
+  const winners = results.filter((r) => r.appended);
+  assert.equal(winners.length, 1);
+  assert.equal(rowLines(root).length, 1);
+  assert.deepEqual(readdirSync(path.join(root, 'jds')), [path.basename(winners[0].capture)]);
+  assert.ok(results.filter((r) => r.duplicate).every((r) => r.capture === null));
+  assert.ok(readPipeline(root).includes(`| ${winners[0].company} | ${winners[0].role}`));
+  assert.ok(readFileSync(winners[0].capture, 'utf8').includes(`JD contender ${results.indexOf(winners[0])}`));
+});
+
+test('independent processes racing one URL keep exactly the winner archive', async () => {
+  const root = scratch();
+  const moduleUrl = new URL('../capture-jd.mjs', import.meta.url).href;
+  const script = `import { captureJd } from ${JSON.stringify(moduleUrl)};
+    console.log(JSON.stringify(await captureJd(JSON.parse(process.argv[1]))));`;
+  const results = await Promise.all(Array.from({ length: 4 }, (_, i) => new Promise((resolve, reject) => {
+    const input = { url: 'https://acme.test/jobs/process-race', text: `process ${i}`,
+      company: `Company ${i}`, role: `Role ${i}`, date: `2026-11-${12 + i}`,
+      dataRoot: root, commit: false, push: false };
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(input)], {
+      cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`child exited ${code}: ${stderr}`));
+      try { resolve(JSON.parse(stdout)); } catch (error) { reject(error); }
+    });
+  })));
+  const winners = results.filter((r) => r.appended);
+  assert.equal(winners.length, 1);
+  assert.equal(rowLines(root).length, 1);
+  assert.deepEqual(readdirSync(path.join(root, 'jds')), [path.basename(winners[0].capture)]);
+  assert.ok(results.filter((r) => r.duplicate).every((r) => r.capture === null));
+  assert.ok(readPipeline(root).includes(`| ${winners[0].company} | ${winners[0].role}`));
+  assert.ok(readFileSync(winners[0].capture, 'utf8').includes(`process ${results.indexOf(winners[0])}`));
+});
+
+test('capture creates a nonexistent data directory within the lock boundary', async () => {
+  const root = path.join(scratch(), 'new-root');
+  const result = await captureJd({ url: 'https://acme.test/jobs/new-root', text: 'JD', dataRoot: root });
+  assert.equal(result.appended, true);
+  assert.equal(rowLines(root).length, 1);
+  assert.equal(existsSync(result.capture), true);
+});
+
 // --- commit guard ---------------------------------------------------------
 
 function initRepo(root) {
@@ -190,7 +319,7 @@ function initRepo(root) {
 }
 
 test('a data root nested inside another repository is never committed into it', () => {
-  const outer = mkdtempSync(path.join(tmpdir(), 'capture-outer-'));
+  const outer = mkdtempSync(path.join(sandbox, 'outer-'));
   initRepo(outer);
   const nested = path.join(outer, 'nested-data');
   mkdirSync(nested, { recursive: true });
@@ -249,7 +378,7 @@ test('the capture endpoint refuses a request without the token', async () => {
     const noToken = await fetch(`http://127.0.0.1:${port}/capture`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://acme.com/jobs/8' }),
+      body: JSON.stringify({ url: 'https://acme.com/jobs/8', commit: false, push: false, evaluate: false }),
     });
     assert.equal(noToken.status, 401);
     assert.equal(rowLines(root).length, 0);
@@ -257,7 +386,7 @@ test('the capture endpoint refuses a request without the token', async () => {
     const ok = await fetch(`http://127.0.0.1:${port}/capture`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Capture-Token': token },
-      body: JSON.stringify({ url: 'https://acme.com/jobs/8', title: 'Engineer at Acme', text: 'jd' }),
+      body: JSON.stringify({ url: 'https://acme.com/jobs/8', title: 'Engineer at Acme', text: 'jd', commit: false, push: false, evaluate: false }),
     });
     assert.equal(ok.status, 200);
     const body = await ok.json();
@@ -274,7 +403,7 @@ test('the capture endpoint refuses a request without the token', async () => {
   }
 });
 
-test('an evaluation is not started when it is disabled', async () => {
+test('server-side evaluation disable overrides an evaluate request', async () => {
   const root = scratch();
   const token = ensureToken(root);
   const server = createServer({ dataRoot: root, token, evalEnabled: false });
@@ -285,7 +414,7 @@ test('an evaluation is not started when it is disabled', async () => {
     const res = await fetch(`http://127.0.0.1:${port}/capture`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Capture-Token': token },
-      body: JSON.stringify({ url: 'https://acme.com/jobs/11', evaluate: true }),
+      body: JSON.stringify({ url: 'https://acme.com/jobs/11', commit: false, push: false, evaluate: true }),
     });
     const body = await res.json();
     assert.equal(body.evaluation, null);

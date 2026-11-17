@@ -58,16 +58,66 @@ Out of scope (explicitly deferred):
 
 ## Tasks
 
-- [x] T1 — `findCaptureForUrl()` in `jd-capture.mjs`, matching the
-      `sha256(url)[0:16]` identity `archive-posting.mjs` already writes.
-- [x] T2 — `capture-jd.mjs`: capture file, pipeline row, dedup, scoped commit/push.
-- [x] T3 — `capture-server.mjs`: token-guarded localhost receiver, CORS for the
-      extension, optional detached evaluation.
-- [x] T4 — `chrome-extension/`: manifest, service worker, three context menus,
-      options page for the token.
-- [x] T5 — `modes/capture.md` + Step 0 capture reuse in `auto-pipeline.md` and
-      `pipeline.md`, mode registered in `SKILL.md`.
-- [x] T6 — `tests/capture-jd.test.mjs` + `package.json` scripts.
+T1–T6 below describe the implementation in `91bfc34a`, not verified readiness.
+The resume audit invalidated the earlier completion claims; they remain open
+until their corresponding recovery units have evidence.
+
+- [ ] T1 — Harden URL-based capture resolution and validate file boundaries.
+- [ ] T2 — Make capture idempotent and concurrent-safe; separate safe Git policy.
+- [ ] T3 — Harden the localhost receiver and optional evaluation launcher.
+- [ ] T4 — Verify the independent Chrome integration and durable failure feedback.
+- [ ] T5 — Verify lightweight mode routing, capture reuse and fresh liveness checks.
+- [ ] T6 — Make the test harness hermetic and record actual applicable checks.
+
+### Recovery work units
+
+- [ ] R1 — Hermetic capture tests and a genuine locked duplicate no-op, including
+      Pending/Processed forms and concurrent requests. Route: delegated direct;
+      preparation and 2+ non-trivial file triggers. Checks: focused Node runner,
+      source syntax, and duplicate/concurrency runtime fixtures. Commit: pending.
+- [ ] R2 — Strict URL and capture-file boundary validation. Route: delegated direct;
+      preparation and 2+ non-trivial file triggers. Acceptance/checks to be scoped
+      before implementation. Commit: pending.
+- [ ] R3 — Explicit Git opt-in and isolation from unrelated work/index/environment.
+      Route: delegated direct; preparation and 2+ non-trivial file triggers.
+      Must never push real data during tests. Commit: pending.
+- [ ] R4 — Receiver/authentication and safe, honest optional launcher behavior.
+      Route: delegated direct; preparation and 2+ non-trivial file triggers.
+      No real evaluation, paid model call or remote session is authorized.
+      Commit: pending.
+- [ ] R5 — Independent extension actions, durable recovery/status, and installation
+      checks. Route: delegated direct; preparation and 2+ non-trivial file triggers.
+      Browser installation/use needs its own explicit scope. Commit: pending.
+- [ ] R6 — Upstream-core packaging and fresh-verification integration, independently
+      of extension acceptance. Route: delegated direct; preparation and 2+ file
+      triggers. Wait for maintainer feedback before an upstream PR. Commit: pending.
+
+## Execution configuration
+
+- TDD: **on**, explicitly selected by the user in the resume question. Source:
+  current-session parent question answer `TDD (Recommended)`. Require observed
+  RED, GREEN, then REFACTOR for behavior changes. Historical task prose and the
+  mere presence of tests do not establish the mode.
+- Exact focused runner: `node --test tests/capture-jd.test.mjs`.
+- RDD: **off**, read from `gentle-ai review mode status`; deciding source global.
+  Keep ordinary functional and independent verification; do not launch RDD.
+- Delivery strategy: `ask-on-risk`; user selected **core first**, mapped to
+  `chain_strategy: stacked-to-main`: independently deliverable core first, optional
+  extension later (in the fork if upstream declines it). No shared integration
+  branch. Preserve the existing prototype history; extract clean delivery branches
+  before any PR, not by rewriting the prototype. No push/PR/merge authorized.
+  Existing prototype: 1704 authored additions/deletions. R1 is its own correction
+  work unit; later upstream slices must include only their own core behavior,
+  tests and docs, not the extension/server history. Commit boundaries will be
+  recorded below; forecast and count are evidence, not code-golf targets.
+  About 400 lines per task is advisory, not a reason to remove tests or split
+  behavior artificially.
+- Upstream proposal: https://github.com/career-ops-hq/career-ops/issues/7007.
+  Core capture targets zero model calls; an agent invoking it still costs tokens.
+  Extension, Git synchronization and remote evaluation are independent follow-ups.
+- Initial missing Engram task mirror recovered: the parent created observation
+  #222 at `odd/capture-jd/tasks`; the worker synchronized the full task and
+  verified normalized content against disk by readback. Keep this mirror current.
 
 ## Authorized scope
 
@@ -116,7 +166,81 @@ This worktree (`t3/selected-jd-capture-data-dir`) for code; the data root
   exactly `data/pipeline.md` + the capture, leaving `data/applications.md` dirty.
 - `git -C C:\Users\nessu rev-list --all --count` → 0 after cleanup.
 
+## Resume audit
+
+- HEAD and branch verified: `91bfc34a`, `t3/selected-jd-capture-data-dir`.
+- Read-only mapper found JD writes preceding deduplication, incomplete Processed
+  matching, unsafe ambient Git assumptions, implicit HTTP commit/push, and
+  shell-based Windows evaluation launch. No behavioral tests were run unchanged
+  because their Git isolation was not proven safe.
+- Previous syntax/test outcomes above are historical, not proof of readiness for
+  production data. Do not merge or install based on those outcomes.
+- Authorized current edits are this worktree only. Tests must use disposable
+  scratch data, isolate inherited Git variables/config/hooks, and forbid real
+  push/evaluation. Never modify the personal data checkout or home repository.
+
+## R1 evidence — independently verified, pending commit decision
+
+- 2026-11-13 — Skills resolved from the injected `work-unit-commits/SKILL.md`
+  and `cognitive-doc-design/SKILL.md` paths. TDD on; RDD off. No delegation
+  by the worker; the parent used a delegated writer and independent verifier.
+- Harness isolated **before the first test run**: inherited `GIT_*` removed;
+  global/system config and hooks disabled; explicit local scratch Git identity;
+  all scratch roots under one newly created disposable directory, removed by
+  the suite's after hook. No `tests/helpers.mjs`, home Git inspection, personal
+  data access, real push, browser, evaluation, or dependency installation.
+  Initial HTTP fixtures explicitly used `commit:false,push:false,evaluate:false`;
+  the disabled-server-evaluation regression was subsequently restored below.
+- RED: `node --test tests/capture-jd.test.mjs` exited 1: **24 pass, 6 fail**.
+  Named failures: original bytes/mtime/file-count preservation; different
+  day/labels archive count; URL-only then text no archive; numbered Processed
+  row; strikethrough Processed row; concurrent distinct-text/labels/day capture.
+- GREEN: same command exited 0: **30 pass, 0 fail**. Duplicate decision now
+  precedes any JD write under the existing pipeline lock. A private unlocked
+  helper prevents nested non-reentrant locking; exported `appendPendingRow`
+  remains compatible. Duplicate results carry `capture:null` and do not commit.
+- REFACTOR: normalized helper indentation and added an independent four-process
+  race fixture. Final `node --test tests/capture-jd.test.mjs` exited 0:
+  **31 pass, 0 fail**. Runtime fixtures prove one row and exactly the winning
+  archive, unchanged original bytes/mtime, trailing-slash deduplication, and
+  creation of an absent data directory through the lock's parent creation.
+- `node --check capture-jd.mjs` and `node --check tests/capture-jd.test.mjs`
+  both exited 0. `node scripts/check-syntax.mjs` exited 0: **1627 files passed**.
+- Processed forms are sourced from `modes/pipeline.md` lines 13, 38, 69–70:
+  numbered URL cells and expired strikethrough rows. No markdown-link URL form
+  was documented there, so no new link grammar was invented for R1.
+- Independent verification (parent-reported): a fresh general verifier ran
+  **31/31 tests**, both source syntax checks, and `git diff --check`; no R1
+  production blocker was found. The verifier identified weakened coverage of
+  the server's disabled-evaluation guard in the capture-only fixture.
+- Parent correction and spot check (parent-reported): restored `evaluate:true`
+  with server `evalEnabled:false`, while keeping `commit:false,push:false`.
+  The fixture sets `CAREER_OPS_CLI` to an absolute nonexistent path under its
+  disposable sandbox, so a broken guard cannot launch a real paid CLI.
+  After correction, `node --test tests/capture-jd.test.mjs` exited 0:
+  **31 pass, 0 fail**; `node --check capture-jd.mjs` and
+  `node --check tests/capture-jd.test.mjs` exited 0;
+  `node scripts/check-syntax.mjs` passed **1627 files**;
+  `git diff --check` exited 0 (CRLF informational warning only).
+- Native risk assessment (parent-reported): **high/unassessable** because of the
+  existing untracked `.atl/` inventory. RDD remains globally off; no native
+  review status/start was invoked. This is not an R1 production blocker or
+  authorization to alter `.atl/`, commit, or bypass delivery slicing.
+- Limitations: the two filesystem writes are serialized, not a crash-atomic
+  transaction; a write failure after JD creation can leave an orphan archive.
+  Git/index isolation in production, strict URL/file validation, receiver policy,
+  and launcher redesign remain R2–R4. Full runner and real-data/manual checks
+  were not run; dependency-dependent integration remains pending, not a pass.
+- Rollback: reverse only the R1 changes in `capture-jd.mjs`,
+  `tests/capture-jd.test.mjs`, and this evidence/next-step section. Preserve the
+  parent's existing task edits and unrelated `.atl/`. No commit was created;
+  human delivery-slicing decision and work-unit commit remain required.
+  R1 stays unchecked solely for that delivery boundary, not missing verification.
+
 ## Next step
 
-Merge into the checkout the user actually runs (`D:\Repos\career-ops`), then load
-the extension unpacked and do one real capture against a live posting.
+Decide delivery slicing before authorizing a work-unit commit; no commit is
+currently permitted. Independent verification and parent spot checks are complete.
+R1 and all T1–T6 remain unchecked; proceed to separately scoped R2–R6 only
+after parent coordination. Do not install the extension, merge into another
+checkout, touch real personal data, or publish changes.
