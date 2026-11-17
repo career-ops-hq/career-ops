@@ -34,7 +34,7 @@ Create `cv.md` from whatever they provide — clean markdown with standard secti
 #### Step 2: Profile (required)
 If `node doctor.mjs --json` `warnings` says the data-root `.env` sets `CAREER_OPS_PROFILE`, do not copy the example profile. Ask the user to export that variable in the shell (or shell profile) that starts the agent, then restart the session from it, or to remove the line from `.env`. A shell export does not reach an agent session that is already running, so run doctor again only after that.
 
-If `config/profile.yml` is missing, ask:
+If `config/profile.yml` is missing, or `unpersonalized` lists it (the file holds only comments), ask:
 > "I need a few details to personalize the system:
 > - Your full name and email
 > - Your location and timezone
@@ -51,7 +51,7 @@ If `config/profile.yml` is missing, ask:
 Keep the answers for the writer in Step 3. Archetypes and targeting narrative go to `modes/_profile.md` or `config/profile.yml` — never `modes/_shared.md`.
 
 #### Step 3: Portals (recommended)
-If `portals.yml` is missing:
+If `portals.yml` is missing, or `unpersonalized` lists it (the file holds only comments):
 > "I'll set up the job scanner with 180+ pre-configured companies. Want me to customize the search keywords for your target roles?"
 
 Then write both files in one run. Do not copy or hand-edit the templates. `templates/portals.example.yml` is about 160 KB, and the writer changes only the answered fields:
@@ -83,6 +83,8 @@ JSON
 - `max_posting_age_days` defaults to 45. Tell them it also hides long-open roles on a company's own board. Set 0 only when they ask for older postings.
 - Contact fields they did not give are blanked, so the example person never reaches a CV.
 - Existing files are kept. Pass `--force` only when the user asks to redo setup. `node onboard-write.mjs --help` shows every field.
+- The writer keeps a comments-only `config/profile.yml` or `portals.yml` too, so a plain run leaves it as it was. Write each of those two files that `unpersonalized` lists with `--force --only profile` or `--force --only portals`, and the missing files in a separate run without `--force`. `--only` keeps `--force` off the other file. Run `node doctor.mjs --json` again right before a forced write, and force only a file it still lists: the user may have filled it in while answering.
+- The writer checks every required answer even with `--only portals`. When Step 2 asked nothing because the profile has settings, copy `candidate` (`full_name`, `email`, `location`), `target_roles` (from `target_roles.primary`), `compensation` (`target_range`, `currency`) and `location` (`country`, `timezone`) from `config/profile.yml`, and ask the user for any of them it lacks.
 
 The writer prints `{"written": [...], "kept": [...]}`. Do not read the templates first, and do not edit `portals.yml` or the answered profile fields afterward. To change an answer, rerun with `--force --only profile` or `--force --only portals` for the file that answer lives in. Leave `minimum` out when they gave none.
 

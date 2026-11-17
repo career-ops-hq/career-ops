@@ -357,6 +357,18 @@ test('the onboarding steps call the writer and build the finish from doctor', ()
   assert.match(step6, /playwright install chromium/);
 });
 
+test('onboarding asks for and rewrites a comments-only profile or portals file (#7256)', () => {
+  const onboarding = readOnboarding();
+  const step2 = onboarding.split('#### Step 2: Profile')[1].split('#### Step 3')[0];
+  const step3 = onboarding.split('#### Step 3: Portals')[1].split('#### Step 4')[0];
+  assert.match(step2, /`config\/profile\.yml` is missing, or `unpersonalized` lists it/);
+  assert.match(step3, /`portals\.yml` is missing, or `unpersonalized` lists it/);
+  assert.match(step3, /`unpersonalized` lists with `--force --only profile` or `--force --only portals`/);
+  assert.match(step3, /`node doctor\.mjs --json` again right before a forced write/);
+  assert.match(step3, /checks every required answer even with `--only portals`/);
+  assert.match(step3, /copy `candidate`[\s\S]*?from `config\/profile\.yml`, and ask the user for any of them it lacks/);
+});
+
 test('the Step 3 yaml example is what the writer writes for a US-only answer', () => {
   const step3 = readOnboarding().split('#### Step 3: Portals')[1].split('#### Step 4')[0];
   const example = yaml.load(step3.match(/```yaml\n([\s\S]*?)```/)[1]);
