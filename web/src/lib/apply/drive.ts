@@ -153,6 +153,7 @@ type Action = {
   value?: string;
   reason?: string;
   expected?: { label: string; group: string; question: string };
+  ensureChecked?: boolean;
 };
 
 function parseAction(out: string): Action | null {
@@ -272,6 +273,11 @@ Reply ONE action JSON.`;
     // guard it applies to every action naming a ref, live in drive-action.mjs so
     // a test can drive them: nothing here acts on an element directly.
     if (control) act.expected = { label: control.label, group: control.group, question: control.question };
+    // A click toggles a checkbox. A listed choice is checked instead, so a box
+    // that is already on stays on. A button or a link stays a click.
+    if (goal === "full" && act.action === "click" && (control?.kind === "radio" || control?.kind === "checkbox")) {
+      act.ensureChecked = true;
+    }
     const { detail, note, refusal } = await executeAction(page, frame, act, snap.actionable);
     await page.waitForTimeout(700);
     const s: DriveStep = { turn, action: act.action, detail, thumb: await shot(), note: note || undefined, refusal };

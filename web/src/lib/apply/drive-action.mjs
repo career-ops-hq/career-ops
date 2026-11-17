@@ -29,7 +29,9 @@ import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
 /**
  * One planner action, as parsed from its reply.
  *
- * @typedef {{ action: string, ref?: string, text?: string, value?: string }} DriveAction
+ * @typedef {{ action: string, ref?: string, text?: string, value?: string,
+ *            expected?: { label?: string, group?: string, question?: string },
+ *            ensureChecked?: boolean }} DriveAction
  */
 
 /**
@@ -193,9 +195,29 @@ export async function executeAction(page, frame, act, actionable) {
       note = "left blank";
       detail = "blocked a field whose label changed";
     } else if (act.action === "click" && target) {
-      detail = `click "${label.slice(0, 40)}"`;
-      await target.scrollIntoViewIfNeeded().catch(() => {});
-      await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), target.click({ timeout: 6000 })]);
+      // A listed choice is checked, not clicked. check() leaves a box that is
+      // already on alone. A role widget has no check(), so it is clicked only
+      // when it does not already say it is on. Anything else stays a click,
+      // which is how Next and Continue still move.
+      const nativeChoice = now.type === "radio" || now.type === "checkbox";
+      const roleChoice = now.role === "radio" || now.role === "checkbox";
+      const listedOn = act.ensureChecked && roleChoice
+        ? await target.evaluate((el) => el.getAttribute("aria-checked") === "true").catch(() => false)
+        : false;
+      if (act.ensureChecked && !nativeChoice && !roleChoice) {
+        note = "left blank";
+        detail = "check blocked on a control that is not a choice";
+      } else if (act.ensureChecked && nativeChoice) {
+        detail = `check "${label.slice(0, 40)}"`;
+        await target.scrollIntoViewIfNeeded().catch(() => {});
+        await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), target.check({ timeout: 6000 })]);
+      } else if (listedOn) {
+        detail = `check "${label.slice(0, 40)}"`;
+      } else {
+        detail = `click "${label.slice(0, 40)}"`;
+        await target.scrollIntoViewIfNeeded().catch(() => {});
+        await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => {}), target.click({ timeout: 6000 })]);
+      }
     } else if (act.action === "type" && target) {
       const choice = now.type === "radio" || now.type === "checkbox" || now.role === "radio" || now.role === "checkbox";
       if (choice) {

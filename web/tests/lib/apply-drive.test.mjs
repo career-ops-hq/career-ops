@@ -75,6 +75,15 @@ class FakeHandle {
     if (this.el.clickFails) throw new Error("Timeout 6000ms exceeded while waiting for the element to be visible and enabled");
     this.page.log.push(`click:${this.el.id}`);
     if (this.el.submits) this.el.form.submits++;
+    // A checkbox click toggles. The listed-choice path must not use this.
+    if (String(this.el.attrs.type || "").toLowerCase() === "checkbox") this.el.checked = !this.el.checked;
+  }
+  async check() {
+    if (this.el.clickFails) throw new Error("Timeout 6000ms exceeded while waiting for the element to be visible and enabled");
+    const type = String(this.el.attrs.type || "").toLowerCase();
+    if (type !== "checkbox" && type !== "radio") throw new Error("Not a checkbox or radio button");
+    this.el.checked = true;
+    this.page.log.push(`check:${this.el.id}`);
   }
   async fill(text) {
     const { tag, attrs } = this.el;
@@ -526,6 +535,48 @@ test("a scripted planner fills the form and never submits it, however it tries",
   assert.ok(page.handles.every((h) => h.disposed));
 });
 
+test("a listed checkbox click checks it and leaves a checked box checked", async () => {
+  const page = new FakePage();
+  page.add("perk", { tag: "input", attrs: { type: "checkbox", name: "benefits", "aria-label": "Dental" }, value: "dental" });
+  const el = page.el("perk");
+  el.checked = true;
+
+  const on = await act(page, { action: "click", ref: page.ref("perk"), ensureChecked: true });
+
+  assert.equal(el.checked, true);
+  assert.equal(on.note, "");
+  assert.match(on.detail, /^check "/);
+  assert.deepEqual(page.log, ["check:perk"]);
+
+  el.checked = false;
+  page.log.length = 0;
+  const off = await act(page, { action: "click", ref: page.ref("perk"), ensureChecked: true });
+  assert.equal(el.checked, true);
+  assert.match(off.detail, /^check "/);
+  assert.deepEqual(page.log, ["check:perk"]);
+});
+
+test("a listed role checkbox that already says it is on is not clicked", async () => {
+  const page = new FakePage();
+  page.add("perk", { tag: "div", attrs: { role: "checkbox", "aria-checked": "true", "aria-label": "Dental" } });
+
+  const result = await act(page, { action: "click", ref: page.ref("perk"), ensureChecked: true });
+
+  assert.equal(result.note, "");
+  assert.match(result.detail, /^check "/);
+  assert.deepEqual(page.log, []);
+});
+
+test("a click that was meant to check a button is left blank", async () => {
+  const page = applicationForm();
+
+  const result = await act(page, { action: "click", ref: page.ref("next"), ensureChecked: true });
+
+  assert.equal(result.note, "left blank");
+  assert.match(result.detail, /not a choice/);
+  assert.deepEqual(page.log, []);
+});
+
 test("typing into a radio does not click it", async () => {
   const page = new FakePage();
   page.add("yes", { tag: "input", attrs: { type: "radio", name: "sponsor" }, value: "1" });
@@ -608,6 +659,7 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   assert.match(DRIVE, /Leave blank any field whose answer is not listed below\. Never guess or infer a value\./);
   assert.match(DRIVE_CODE, /listedDriveText\(/);
   assert.match(DRIVE_CODE, /listedDriveClick\(/);
+  assert.match(DRIVE_CODE, /act\.ensureChecked = true/);
   assert.doesNotMatch(DRIVE_CODE, /slice\(0,\s*300\)/);
 });
 
