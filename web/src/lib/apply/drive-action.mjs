@@ -22,7 +22,7 @@ import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
  *
  * @typedef {{ ref: string, tag: string, type: string, role: string, inForm: boolean,
  *             aria: string, placeholder: string, text: string, value: string,
- *             name: string, title: string, alt: string }} ElementFacts
+ *             name: string, title: string, alt: string, group: string, question: string }} ElementFacts
  */
 
 /**
@@ -86,6 +86,26 @@ export const factsOf = (el, ref) => {
     // Same 200-char cap and the same caveat as `text` above.
     title: flat(el.getAttribute("title")).slice(0, 200),
     alt: flat(el.getAttribute("alt")).slice(0, 200),
+    group: (() => {
+      const rg = el.closest("[role=radiogroup], fieldset");
+      if (!rg) return "";
+      const own = flat(rg.getAttribute("aria-label"));
+      if (own) return own.slice(0, 200);
+      const ids = flat(rg.getAttribute("aria-labelledby")).split(" ").filter(Boolean);
+      const named = flat(ids.map((id) => document.getElementById(id)?.textContent || "").join(" "));
+      if (named) return named.slice(0, 200);
+      return flat(rg.querySelector("legend")?.textContent || "").slice(0, 200);
+    })(),
+    question: (() => {
+      const id = el.getAttribute("id");
+      const external = id ? document.querySelector(`label[for="${CSS.escape(id)}"]`) : null;
+      const wrap = el.closest("label");
+      const node = external || wrap;
+      if (!node) return "";
+      const copy = node.cloneNode(true);
+      copy.querySelectorAll("input, select, textarea, button").forEach((control) => control.remove());
+      return flat(copy.textContent).slice(0, 200);
+    })(),
   };
 };
 

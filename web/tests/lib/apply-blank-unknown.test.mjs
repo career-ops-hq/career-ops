@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import {
   blankUnknownDraft,
   classifyApplyQuestion,
+  listedDriveClick,
   listedDriveText,
   prepareFillAnswers,
   prepareLabeledAnswers,
@@ -423,17 +424,20 @@ test("years with a named skill stay blank, and race is a whole word", () => {
   const profile = { years_experience: "8" };
   const python = { id: "python", type: "number", label: "Years of experience with Python" };
   const forPython = { id: "forpy", type: "number", label: "Years of experience for Python" };
+  const rewards = { id: "rewards", type: "number", label: "Years of experience in Total Rewards" };
   const embrace = { id: "story", type: "text", label: "Describe a time you had to embrace a new tool" };
   assert.equal(classifyApplyQuestion(python), "years-specific");
   assert.equal(classifyApplyQuestion(forPython), "years-specific");
+  assert.equal(classifyApplyQuestion(rewards), "years-specific");
   assert.equal(classifyApplyQuestion({ type: "select", label: "Race/Ethnicity" }), "eeo");
   assert.equal(classifyApplyQuestion({ type: "select", label: "Racial background" }), "eeo");
   assert.equal(classifyApplyQuestion(embrace), null);
   const gated = blankUnknownDraft(
-    [python, forPython, embrace],
+    [python, forPython, rewards, embrace],
     {
       python: { value: "5", needs_confirmation: false },
       forpy: { value: "5", needs_confirmation: false },
+      rewards: { value: "8", needs_confirmation: false },
       story: { value: "I learned the CRM.", needs_confirmation: false },
     },
     profile,
@@ -442,6 +446,7 @@ test("years with a named skill stay blank, and race is a whole word", () => {
   assert.equal(gated.python.needs_confirmation, true);
   assert.equal(gated.forpy.value, "");
   assert.equal(gated.forpy.needs_confirmation, true);
+  assert.equal(gated.rewards.value, "");
   assert.equal(gated.story.value, "I learned the CRM.");
   const filled = prepareFillAnswers({ fields: [python, forPython], answers: { python: "5", forpy: "5" }, profile });
   assert.equal(filled.python, "");
@@ -461,6 +466,13 @@ test("a full drive may type only a listed answer value", () => {
   assert.equal(listedDriveText("8", []), false);
   assert.equal(listedDriveText("8", null), false);
   assert.equal(listedDriveText("", null), true);
+  const relocate = { label: "Are you willing to relocate?", value: "Yes" };
+  assert.equal(listedDriveText("Yes", [relocate], "Will you require sponsorship?"), false);
+  assert.equal(listedDriveText("Yes", [relocate], "Are you willing to relocate?"), true);
+  assert.equal(listedDriveClick("radio", "Yes", "Will you require sponsorship?", [relocate]), false);
+  assert.equal(listedDriveClick("radio", "Yes", "Are you willing to relocate?", [relocate]), true);
+  assert.equal(listedDriveClick("radio", "Yes", "", [relocate]), false);
+  assert.equal(listedDriveClick("button", "Next", "", [relocate]), true);
 });
 
 test("labeled drive answers use the real field, not a text stand-in", () => {

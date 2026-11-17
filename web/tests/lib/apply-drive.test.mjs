@@ -539,6 +539,8 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   assert.match(DRIVE_CODE, /await executeAction\(page, frame, act, snap\.actionable\)/);
   assert.match(DRIVE, /Leave blank any field whose answer is not listed below\. Never guess or infer a value\./);
   assert.match(DRIVE_CODE, /listedDriveText\(/);
+  assert.match(DRIVE_CODE, /listedDriveClick\(/);
+  assert.doesNotMatch(DRIVE_CODE, /slice\(0,\s*300\)/);
 });
 
 test("drive.ts does nothing to an element itself", () => {

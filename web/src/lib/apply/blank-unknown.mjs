@@ -43,9 +43,12 @@ export function classifyApplyQuestion(field) {
   if (visa) return visa;
   if (/salary|compensation|pay expectation|desired pay|\bwage\b/.test(q)) return "salary";
   if (/how did you hear|where did you hear|how did you find|referral source/.test(q)) return "source";
-  // "in total" / "overall" is the profile total. "with Python" and "for Python"
-  // name a skill the profile does not state, so those stay blank.
-  if (/years of (?:relevant )?experience (?:with|in|using|as|on|for)\b(?!\s+(?:total|overall|altogether)\b)/.test(q)) return "years-specific";
+  // "in total do you have" and a bare "overall" are the profile total.
+  // "in Total Rewards" names a discipline, so it stays blank, as do "with Python"
+  // and "for Python".
+  if (/years of (?:relevant )?experience in total(?:\s+do\s+you\s+have\b)?(?:\s*[?.!]|$)/.test(q)) return "years";
+  if (/years of (?:relevant )?experience (?:overall|altogether)\b/.test(q)) return "years";
+  if (/years of (?:relevant )?experience (?:with|in|using|as|on|for)\b/.test(q)) return "years-specific";
   if (/years of experience|years of relevant/.test(q)) return "years";
   if (/start date|earliest start|when can you start|date you can start/.test(q)) return "start-date";
   if (/relocat/.test(q)) return "relocation";
@@ -312,23 +315,49 @@ export function blankUnknownDraft(fields, draft, profile = {}) {
  * @param {{ id?: string, type?: string, label?: string, options?: string[] }[]} [fields]
  * @returns {{ id?: string, label: string, value: string }[]}
  */
+function driveKey(text) {
+  return String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase().replace(/[\s*?:.!-]+$/g, "").trim();
+}
+
 /**
- * A full-drive type or select may enter only a value the caller already listed.
- * Empty text is allowed: clearing a field is leaving it blank. Clicks are not
- * checked here.
+ * A full-drive type or select may enter only a value listed for this field.
+ * Empty text is allowed: clearing a field is leaving it blank. With no field
+ * label, a value that belongs to exactly one answer is still allowed.
  *
  * @param {string | null | undefined} text
- * @param {{ value?: string }[] | null | undefined} answers
+ * @param {{ label?: string, value?: string }[] | null | undefined} answers
+ * @param {string | null | undefined} [fieldLabel]
  * @returns {boolean}
  */
-export function listedDriveText(text, answers) {
-  const normalized = String(text ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+export function listedDriveText(text, answers, fieldLabel) {
+  const normalized = driveKey(text);
   if (!normalized) return true;
   if (!Array.isArray(answers)) return false;
-  return answers.some((answer) => {
-    const value = String(answer?.value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-    return value !== "" && value === normalized;
-  });
+  const hits = answers.filter((answer) => driveKey(answer?.value) !== "" && driveKey(answer?.value) === normalized);
+  if (!hits.length) return false;
+  const label = driveKey(fieldLabel);
+  if (!label) return hits.length === 1;
+  return hits.some((answer) => driveKey(answer?.label) === label);
+}
+
+/**
+ * A radio or checkbox click on a full drive has to be the listed answer for
+ * that question. A button or a link is navigation and stays available. A radio
+ * or checkbox with no question label is not clicked.
+ *
+ * @param {string | null | undefined} kind
+ * @param {string | null | undefined} optionLabel
+ * @param {string | null | undefined} groupLabel
+ * @param {{ label?: string, value?: string }[] | null | undefined} answers
+ * @returns {boolean}
+ */
+export function listedDriveClick(kind, optionLabel, groupLabel, answers) {
+  const control = driveKey(kind);
+  if (control !== "radio" && control !== "checkbox") return true;
+  const group = driveKey(groupLabel);
+  const option = driveKey(optionLabel);
+  if (!group || !option || !Array.isArray(answers)) return false;
+  return answers.some((answer) => driveKey(answer?.label) === group && driveKey(answer?.value) === option);
 }
 
 export function prepareLabeledAnswers(answers, profile, editedLabels = [], fields = []) {
