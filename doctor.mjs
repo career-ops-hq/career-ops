@@ -1970,7 +1970,7 @@ function onboardingState(root) {
     // Travels in the JSON so a consumer can tell "nothing enabled" from "the
     // config did not parse" — the two used to be the same empty list.
     pluginConfigError = error;
-    plugins = activePlugins(codeRoot).map((m) => {
+    plugins = activePlugins(codeRoot, root).map((m) => {
       const s = pluginState(m, cfg);
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });
