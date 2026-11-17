@@ -108,7 +108,7 @@ export function parseAlibabaResponse(json, companyName) {
       postedAt: Number(p.publishTime) || Number(p.modifyTime) || undefined,
     });
   }
-  return { jobs, total };
+  return { jobs, total, rawCount: list.length };
 }
 
 /** @type {Provider} */
@@ -140,6 +140,9 @@ export default {
     /** @type {Map<string, import('./_types.js').Job>} */
     const seen = new Map();
     let firstRequest = true;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'page-cap' | null} */
+    let partialReason = null;
     let succeededOnce = false;
 
     for (const keyword of keywords) {
@@ -172,25 +175,35 @@ export default {
           console.error(`  ⚠ alibaba: keyword "${keyword}" page ${page} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
           // The rest of the board was never read: the result says so, so scan.mjs
           // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-          return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
+          return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
         }
         succeededOnce = true;
-        const { jobs, total } = parseAlibabaResponse(json, entry.name || '阿里巴巴');
+        const { jobs, total, rawCount } = parseAlibabaResponse(json, entry.name || '阿里巴巴');
         if (jobs.length === 0) break;
 
         for (const job of jobs) {
           if (!seen.has(job.url)) seen.set(job.url, job);
         }
 
-        if (page * PAGE_SIZE >= total) break;
+        // Past the end: the reported total says so, or, when the source sent
+        // no total, a short page (meituan reads a missing total the same way).
+        // A missing total used to end the walk after page 1, unmarked.
+        if (total > 0 ? page * PAGE_SIZE >= total : rawCount < PAGE_SIZE) break;
         // The page cap, not the board, ended this keyword. Stay quiet when the
         // cap is the health probe's, not max_pages.
-        if (page === maxPages && probeMaxPages > entryMaxPages) {
-          console.error(`  ⚠ alibaba: keyword "${keyword}" truncated at ${page * PAGE_SIZE} of ${total} postings — raise max_pages on this entry for complete coverage`);
+        // A short page is the board's natural end, even at the cap: the cut needs
+        // a full page by the source's own row count, not the filtered jobs.
+        if (page === maxPages && rawCount >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
+          console.error(`  ⚠ alibaba: keyword "${keyword}" truncated at ${page * PAGE_SIZE}${total > 0 ? ` of ${total}` : ''} postings — raise max_pages on this entry for complete coverage`);
+          partialReason ??= 'page-cap';
         }
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    // A keyword max_pages cut is a page-cap stop: the warning above says so, and
+    // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };

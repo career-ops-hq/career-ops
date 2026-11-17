@@ -125,6 +125,11 @@ export default {
   each with `language` set, the posting's own default language first — the
   URL dedup relies on that order, and never reads a candidate's language from
   its URL (`_types.js`, `language`; reference `providers/personio.mjs`).
+  When the payload has a dedicated employment-type field, spread
+  `...employmentTypeField(raw)` from `_employment-type.mjs` into the Job: it
+  sets `employmentType` to `full_time`, `part_time`, `contract`, `temporary`
+  or `internship`, and leaves the key off for anything else (reference
+  `providers/ashby.mjs`). Never derive it from the title or description.
   When the payload carries a stable per-posting id, also return
   `listingIdentity: { ats_provider, board_slug, posting_id }`: the provider
   id, the board namespace the provider already resolved (company slug,
