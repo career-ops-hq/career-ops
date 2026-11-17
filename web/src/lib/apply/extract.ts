@@ -275,9 +275,16 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
             return text || value;
           };
           const options = boxes.map((box, i) => optionText(box, i)).filter(Boolean);
+          // Same words the fill step treats as consent. Kept here because this
+          // callback runs in the page and cannot import the Node helper.
+          const consentLabel = (text: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(text);
           boxes.forEach((box, i) => {
             box.setAttribute("data-co-field", fid);
-            box.setAttribute("data-co-option", optionText(box, i) || String(i));
+            const shown = optionText(box, i) || String(i);
+            box.setAttribute("data-co-option", shown);
+            // A shared consent sentence is stored as the control value above.
+            // Mark the box from the original words so fill leaves it alone.
+            if (consentLabel(fullLabels[i] || "") || consentLabel(shown)) box.setAttribute("data-co-consent", "1");
           });
           const matchTexts = shared
             ? options
