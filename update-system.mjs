@@ -2823,9 +2823,22 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ref, ctx 
   if (preservedSet.size === 0) return false;
   const runGitQuiet = ctx.git || gitQuiet;
   const isDirectory = path.endsWith('/');
-  const preservedHere = preservedPaths.filter((f) => (isDirectory ? f.startsWith(path) : f === path));
+  // A slashless entry can still claim a directory: the validators accept that
+  // spelling, so a preserved file under `entry/` marks the directory case,
+  // while an exact match marks the file case. preservedPaths describe the
+  // LOCAL tree; when the TARGET ships the other kind, the caller's
+  // preservedCheckoutCollision() check has already refused the entry before
+  // this skip can hide it.
+  const preservedHere = isDirectory
+    ? preservedPaths.filter((f) => f.startsWith(path))
+    : preservedPaths.filter((f) => f === path || f.startsWith(`${path}/`));
   if (preservedHere.length === 0) return false;
-  if (!isDirectory) return true;
+  // An exactly preserved file skips WITHOUT an upstream lookup: the string
+  // match already proves the local content stays, and the lookup both cost a
+  // round-trip per preserved file and broke the update when it failed (#2337
+  // / test 9b). A target directory in the file's place never reaches here —
+  // the collision check runs first at every call site that holds the listing.
+  if (!isDirectory && preservedHere.includes(path)) return true;
   let upstreamFiles = [];
   try {
     upstreamFiles = runGitQuiet('ls-tree', '-r', '--name-only', ref, '--', path)
@@ -2929,6 +2942,14 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
   for (const path of updatePaths) {
     const spec = path.endsWith('/') ? path.slice(0, -1) : path;
     const upstream = upstreamFiles.filter((f) => f === spec || f.startsWith(`${spec}/`));
+    // A cross-version file/directory collision is classified before the
+    // fully-preserved shortcut, so the exact-preserve skip can never hide a
+    // shipped directory. The entry routes to checkout, where
+    // checkoutSystemPathsBatched() refuses it before any git run.
+    if (preservedCheckoutCollision(path, preservedPaths, upstreamFiles)) {
+      plan.checkout.push(path);
+      continue;
+    }
     // The loop's rule, fed this listing instead of a per-directory ls-tree.
     const fullyPreserved = pathFullyPreserved(path, preservedPaths, preservedSet, '', { git: () => upstream.join('\n') });
     if (fullyPreserved === true) plan.preserved.push(path);
@@ -2939,10 +2960,47 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
 }
 
 /**
+ * Whether a manifest entry cannot be checked out safely because the LOCAL
+ * preserved layout and the TARGET tree disagree about what the entry is: one
+ * side holds a file where the other holds a directory. preservedPaths
+ * describe the local tree, upstreamFiles the target's, and across versions an
+ * entry can change kind. Neither checkout resolution is acceptable — naming
+ * the bare entry would write the target's content over the preserved side,
+ * and expanding would silently skip what the target ships — so the caller
+ * refuses before any git run. Returns a short reason string, or null when the
+ * entry is safe to check out. An empty listing bounds the guarantee: a
+ * genuinely empty target tree and an unavailable listing are indistinguishable
+ * here, so no collision is asserted then and the entry proceeds under the
+ * caller's existing absent-upstream handling.
+ *
+ * @param {string} path - Manifest entry (`dir/` or a file, either spelling).
+ * @param {string[]} preservedPaths - Files the update keeps out of the checkout.
+ * @param {string[]} upstreamFiles - Every file in the target tree (`ls-tree -r --name-only`).
+ * @returns {string | null}
+ */
+export function preservedCheckoutCollision(path, preservedPaths, upstreamFiles) {
+  if (upstreamFiles.length === 0) return null;
+  const dir = path.endsWith('/') ? path : `${path}/`;
+  const spec = path.endsWith('/') ? path.slice(0, -1) : path;
+  const preservedChildren = preservedPaths.some((file) => file.startsWith(dir));
+  const preservedExact = preservedPaths.includes(spec);
+  const targetFile = upstreamFiles.includes(spec);
+  const targetDir = upstreamFiles.some((file) => file.startsWith(dir));
+  if (preservedChildren && targetFile && !targetDir) {
+    return `the target ships ${spec} as a file but preserved local files sit under it as a directory`;
+  }
+  if (preservedExact && targetDir && !targetFile) {
+    return `the target ships ${spec} as a directory but a preserved local file stands in its place`;
+  }
+  return null;
+}
+
+/**
  * The pathspecs apply()'s per-path fallback checkout names for one manifest
  * entry, by the same rule checkoutSystemPathsBatched() plans the batched run:
- * a directory entry with preserved files under it expands to its upstream
- * files minus the preserved ones; every other entry names itself. The
+ * a directory entry with preserved files under it, spelled `dir/` or `dir`,
+ * expands to its upstream files minus the preserved ones; every other entry
+ * names itself. The
  * fallback passes --literal-pathspecs, so no `:(exclude)` spec can reach it —
  * there it would be read as a literal filename, fail the checkout, and abort
  * the update (#3825 review). An empty result means the entry's upstream
@@ -2957,10 +3015,20 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
  * @returns {string[]}
  */
 export function fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles) {
-  if (!path.endsWith('/') || upstreamFiles.length === 0) return [path];
-  if (!preservedPaths.some((file) => file.startsWith(path))) return [path];
+  if (upstreamFiles.length === 0) return [path];
+  // A directory entry need not end in '/': the manifest validators accept the
+  // slashless spelling, so directory-ness is read from the TARGET listing —
+  // the entry claims a directory exactly when the listing ships children
+  // under `dir/`. preservedPaths describe the local tree; when the two trees
+  // disagree about the entry's kind the entry names itself here and
+  // preservedCheckoutCollision() makes the caller refuse. Matching `dir/`
+  // with its slash keeps `mode` from claiming `modes/`.
+  const dir = path.endsWith('/') ? path : `${path}/`;
+  const targetChildren = upstreamFiles.filter((file) => file.startsWith(dir));
+  if (targetChildren.length === 0) return [path];
+  if (!preservedPaths.some((file) => file.startsWith(dir))) return [path];
   const preservedSet = new Set(preservedPaths);
-  return upstreamFiles.filter((file) => file.startsWith(path) && !preservedSet.has(file));
+  return targetChildren.filter((file) => !preservedSet.has(file));
 }
 
 /**
@@ -3010,13 +3078,29 @@ export function checkoutSystemPathsBatched(updatePaths, preservedPaths, upstream
   const attempted = ctx.attempted || [];
   const plan = planSystemCheckout(updatePaths, preservedPaths, upstreamFiles);
   const preservedSet = new Set(preservedPaths);
+  // Refuse a cross-version file/directory collision before any git run: the
+  // checkout would either write the target over the preserved local side or
+  // silently skip what the target ships. Every entry is preflighted before
+  // the first batch writes anything, so a collision late in the list cannot
+  // leave a partial primary write behind. In normal apply the fallback
+  // loop's own collision check runs before the pathFullyPreserved skip, so
+  // the refusal speaks there too.
+  for (const path of plan.checkout) {
+    const collision = preservedCheckoutCollision(path, preservedPaths, upstreamFiles);
+    if (collision) throw new Error(`Cannot check out ${path}: ${collision}`);
+  }
   // Each pathspec, and the manifest entry it came from. A file entry that is
-  // itself preserved never reaches plan.checkout, so only a directory entry can
-  // have preserved files under it.
+  // itself preserved reaches plan.checkout only in the collision shape just
+  // refused, so below only a directory entry can have preserved files under
+  // it.
   const entryOf = new Map();
   for (const path of plan.checkout) {
-    const hasPreserved = path.endsWith('/') && preservedPaths.some((file) => file.startsWith(path));
-    const specs = hasPreserved ? upstreamFiles.filter((file) => file.startsWith(path) && !preservedSet.has(file)) : [path];
+    // Either directory spelling: a slashless entry with preserved files under
+    // it must expand the same way, or the bare-directory checkout would write
+    // upstream's files over the preserved ones.
+    const dir = path.endsWith('/') ? path : `${path}/`;
+    const hasPreserved = preservedPaths.some((file) => file.startsWith(dir));
+    const specs = hasPreserved ? upstreamFiles.filter((file) => file.startsWith(dir) && !preservedSet.has(file)) : [path];
     for (const spec of specs) entryOf.set(spec, path);
   }
   // Literal: with no `:(exclude)` magic left, a file name from the target tree
@@ -5343,23 +5427,36 @@ async function apply() {
       }
     }
     for (const path of batched ? [] : updatePaths) {
-      // An entry whose upstream content is all preserved has nothing to check
-      // out. Skip it outright rather than letting git say so: the checkout
-      // would fail with "did not match any file(s)", which the catch below
-      // cannot tell from a genuine failure, and it would abort the entire
-      // update (#3824). pathFullyPreserved reads the same pinned target this
-      // loop checks out from, not FETCH_HEAD.
-      const preservedState = pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit);
-      if (preservedState === true) continue;
-      // Name the entry the way checkoutSystemPathsBatched() does — a
-      // directory with preserved files under it expands to its upstream files
-      // minus the preserved ones, and an entry left with nothing to check out
-      // is skipped here — so this checkout can pass --literal-pathspecs: a
-      // `:(exclude)` spec would be read as a literal filename there, fail the
-      // checkout, and abort the update (#3825).
-      const fallbackSpecs = fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles);
-      if (fallbackSpecs.length === 0) continue;
+      // In the catch's non-benign branch this loop restores what it wrote;
+      // the collision refusal below throws inside the same try so an earlier
+      // path's writes — or a partial write the primary attempt left — are
+      // restored before the error rethrows.
+      let preservedState;
       try {
+        // Refuse a cross-version file/directory collision before the
+        // exact-preserve skip and before touching the worktree: neither the
+        // skip (which would hide what the target ships) nor the checkout
+        // (which would write over the preserved side) is acceptable. The
+        // refusal message never matches the benign-cancel regex, so the catch
+        // below rethrows it instead of reporting a silent skip.
+        const collision = preservedCheckoutCollision(path, preservedPaths, upstreamFiles);
+        if (collision) throw new Error(`Cannot check out ${path}: ${collision}`);
+        // An entry whose upstream content is all preserved has nothing to check
+        // out. Skip it outright rather than letting git say so: the checkout
+        // would fail with "did not match any file(s)", which the catch below
+        // cannot tell from a genuine failure, and it would abort the entire
+        // update (#3824). pathFullyPreserved reads the same pinned target this
+        // loop checks out from, not FETCH_HEAD.
+        preservedState = pathFullyPreserved(path, preservedPaths, preservedSet, targetCommit);
+        if (preservedState === true) continue;
+        // Name the entry the way checkoutSystemPathsBatched() does — a
+        // directory with preserved files under it expands to its upstream files
+        // minus the preserved ones, and an entry left with nothing to check out
+        // is skipped here — so this checkout can pass --literal-pathspecs: a
+        // `:(exclude)` spec would be read as a literal filename there, fail the
+        // checkout, and abort the update (#3825).
+        const fallbackSpecs = fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles);
+        if (fallbackSpecs.length === 0) continue;
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
         // but execFileSync inherits stderr by default, so git printed
