@@ -55,7 +55,17 @@ function disposableCheckout() {
   const linkReason = linkNodeModules(checkout, ROOT);
   if (linkReason) throw new Error(`linkNodeModules could not give the fixture a dependency tree: ${linkReason}`);
 
-  const plugin = join(checkout, 'plugins.local', 'fixture-run');
+  return checkout;
+}
+
+function dataRoot(indexCode = null) {
+  const root = mkdtempSync(join(tmpdir(), 'fixture-run-'));
+  mkdirSync(join(root, 'config'), { recursive: true });
+  mkdirSync(join(root, 'data'), { recursive: true });
+  writeFileSync(join(root, 'data', 'applications.md'), '# Applications\n');
+  writeFileSync(join(root, 'data', 'pipeline.md'), '# Pipeline\n');
+
+  const plugin = join(root, 'plugins.local', 'fixture-run');
   mkdirSync(plugin, { recursive: true });
   writeFileSync(join(plugin, 'manifest.json'), JSON.stringify({
     id: 'fixture-run',
@@ -69,22 +79,14 @@ function disposableCheckout() {
     humanInTheLoop: true,
     entry: 'index.mjs',
   }));
-  writeFileSync(join(plugin, 'index.mjs'), `export default { async ingest(ctx) {
+  const code = indexCode || `export default { async ingest(ctx) {
   if (ctx.settings?.mode !== 'list') {
     throw new Error('settings.mode must be list. Set plugins.fixture-run.mode: list in config/plugins.yml.');
   }
   return [];
 }};
-`);
-  return checkout;
-}
-
-function dataRoot() {
-  const root = mkdtempSync(join(tmpdir(), 'fixture-run-'));
-  mkdirSync(join(root, 'config'), { recursive: true });
-  mkdirSync(join(root, 'data'), { recursive: true });
-  writeFileSync(join(root, 'data', 'applications.md'), '# Applications\n');
-  writeFileSync(join(root, 'data', 'pipeline.md'), '# Pipeline\n');
+`;
+  writeFileSync(join(plugin, 'index.mjs'), code);
   return root;
 }
 
@@ -137,9 +139,8 @@ test('an enabled plugin whose hook does not load exits 1 and does not claim zero
   guardRealCheckout(t);
   const checkout = disposableCheckout();
   t.after(() => rmSync(checkout, { recursive: true, force: true }));
-  writeFileSync(join(checkout, 'plugins.local', 'fixture-run', 'index.mjs'), 'export default { ingest: "not a function" };\n');
 
-  const root = dataRoot();
+  const root = dataRoot('export default { ingest: "not a function" };\n');
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'config', 'plugins.yml'), 'plugins:\n  fixture-run:\n    enabled: true\n    mode: list\n');
   const failed = run(checkout, root);
@@ -153,9 +154,8 @@ test('an ingest hook that returns a non-array exits 1 and does not claim zero jo
   guardRealCheckout(t);
   const checkout = disposableCheckout();
   t.after(() => rmSync(checkout, { recursive: true, force: true }));
-  writeFileSync(join(checkout, 'plugins.local', 'fixture-run', 'index.mjs'), 'export default { async ingest() { return { jobs: [] }; } };\n');
 
-  const root = dataRoot();
+  const root = dataRoot('export default { async ingest() { return { jobs: [] }; } };\n');
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'config', 'plugins.yml'), 'plugins:\n  fixture-run:\n    enabled: true\n    mode: list\n');
   const failed = run(checkout, root);

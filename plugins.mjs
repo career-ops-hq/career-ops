@@ -26,7 +26,7 @@ import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
   runHook, filterResultsForId, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
-  warnConfigLeftInCodeRoot, ID_RE,
+  warnConfigLeftInCodeRoot, ID_RE, pluginSource,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
@@ -198,8 +198,8 @@ async function cmdList() {
   warnConfigLeftInCodeRoot(ROOT, DATA_ROOT);
   const cfg = await loadPluginConfig(DATA_ROOT);
   await loadDotenvOnce(DATA_ROOT);
-  const overridden = resolveSuccessorIds(ROOT); // ids where an installed successor is active
-  const manifests = discoverPlugins(pluginRoots(ROOT), overridden);
+  const overridden = resolveSuccessorIds(ROOT, DATA_ROOT); // ids where an installed successor is active
+  const manifests = discoverPlugins(pluginRoots(ROOT, DATA_ROOT), overridden);
   if (manifests.length === 0) {
     console.log('No plugins discovered. Bundled plugins live in plugins/; your own in plugins.local/.');
     return;
@@ -211,7 +211,7 @@ async function cmdList() {
       : !configured ? '○ disabled (config/plugins.yml)'
         : `⚠️  missing env: ${missingEnv.join(', ')}`;
     // Annotate the seed/successor relationship.
-    const isLocal = !m.dir.startsWith(path.join(ROOT, 'plugins') + path.sep);
+    const isLocal = pluginSource(m, ROOT) === 'local';
     const succ = successorFor(ROOT, m.id);
     const tag = overridden.has(m.id) && isLocal ? '  🔁 maintained successor (overriding the bundled reference)'
       : succ ? `  🔁 reference seed — maintained version available: ${succ.name}`
@@ -352,7 +352,7 @@ function exitIfPluginDidNotRun(results, id, hook) {
 }
 
 function findManifest(id) {
-  return discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id) || null;
+  return discoverPlugins(pluginRoots(ROOT, DATA_ROOT), resolveSuccessorIds(ROOT, DATA_ROOT)).find(m => m.id === id) || null;
 }
 
 // The registry lists `career-ops-plugin-<id>`, and `plugins.mjs available`
@@ -527,7 +527,7 @@ async function cmdAvailable() {
 function cmdSkill(args) {
   const id = args[0];
   if (!id) {
-    const withSkill = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).filter(m => m.skill);
+    const withSkill = discoverPlugins(pluginRoots(ROOT, DATA_ROOT), resolveSuccessorIds(ROOT, DATA_ROOT)).filter(m => m.skill);
     console.log(withSkill.length ? 'Plugins that ship a skill:\n' + withSkill.map(m => `  ${m.id}`).join('\n') + '\n\nRead one: node plugins.mjs skill <id>' : 'No installed plugin ships a skill.');
     return;
   }
@@ -549,7 +549,7 @@ function cmdEnable(args) {
   if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
   const m = resolved.manifest;
   const id = m.id;
-  const lock = readLock(ROOT);
+  const lock = readLock(DATA_ROOT, ROOT);
   const entry = lock.plugins?.[id];
   const source = classifySource(m, ROOT, entry);
   if (!confirm) {
@@ -559,12 +559,12 @@ function cmdEnable(args) {
     return;
   }
   const tree = hashPluginTree(m.dir);
-  writeLockEntry(ROOT, id, {
+  writeLockEntry(DATA_ROOT, id, {
     source: source === 'bundled' ? 'bundled' : 'local',
     repo: entry?.repo || null, sha: entry?.sha || null,
     version: m.version || '0.0.0', integrity: tree.integrity, files: tree.files,
     consent: { ...consentSurface(m), acceptedAt: new Date().toISOString() },
-  });
+  }, ROOT);
   setEnabled(id, true);
   console.log(`✅ Enabled ${id}.${m.requiredEnv.length ? ' Add its keys to .env: ' + m.requiredEnv.join(', ') : ''}`);
 }
@@ -575,8 +575,8 @@ function cmdTrust(args) {
   const m = resolved.manifest;
   const id = m.id;
   const tree = hashPluginTree(m.dir);
-  const entry = readLock(ROOT).plugins?.[id] || {};
-  writeLockEntry(ROOT, id, { ...entry, source: classifySource(m, ROOT, entry) === 'bundled' ? 'bundled' : 'local', version: m.version || '0.0.0', integrity: tree.integrity, files: tree.files, consent: { ...consentSurface(m), acceptedAt: new Date().toISOString() } });
+  const entry = readLock(DATA_ROOT, ROOT).plugins?.[id] || {};
+  writeLockEntry(DATA_ROOT, id, { ...entry, source: classifySource(m, ROOT, entry) === 'bundled' ? 'bundled' : 'local', version: m.version || '0.0.0', integrity: tree.integrity, files: tree.files, consent: { ...consentSurface(m), acceptedAt: new Date().toISOString() } }, ROOT);
   console.log(`✓ Re-pinned ${id} to its current files — it will load again.`);
 }
 
@@ -593,9 +593,9 @@ function cmdRemove(args) {
   if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
   const id = resolved.manifest.id;
   if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
-  const dir = path.join(ROOT, 'plugins.local', id);
+  const dir = path.join(DATA_ROOT, 'plugins.local', id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  removeLockEntry(ROOT, id);
+  removeLockEntry(DATA_ROOT, id, ROOT);
   // The files and the lock entry are already gone, so a config problem must not
   // fail the command — but it must not be invisible either. This catch used to
   // swallow nothing worth seeing; now it can catch a real, actionable one, and
@@ -615,7 +615,7 @@ function cmdNew(args) {
   const name = args[0];
   if (!name) { console.error('Usage: node plugins.mjs new <name>'); process.exit(1); }
   let dest;
-  try { dest = scaffoldNew(ROOT, name); } catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+  try { dest = scaffoldNew(DATA_ROOT, name, ROOT); } catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
   console.log(`✓ Scaffolded plugins.local/${name}/`);
   console.log('  Next: edit manifest.json + index.mjs, then either');
   console.log(`    A) develop locally:  node plugins.mjs enable ${name}`);
@@ -642,14 +642,14 @@ async function cmdAdd(args) {
 
   console.log(`Cloning ${url} @ ${String(useSha).slice(0, 10)} …`);
   let installed;
-  try { installed = installFromRepo(ROOT, { url, sha: useSha }); }
+  try { installed = installFromRepo(DATA_ROOT, { url, sha: useSha }); }
   catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
 
-  writeLockEntry(ROOT, installed.id, {
+  writeLockEntry(DATA_ROOT, installed.id, {
     source: 'local', repo: installed.repo, sha: installed.sha,
     version: installed.manifest.version || '0.0.0', integrity: installed.integrity, files: installed.files,
     consent: consentSurface(installed.manifest),
-  });
+  }, ROOT);
   console.log(`✓ Installed plugins.local/${installed.id}  (${approved ? '✓ approved' : '❓ unverified'}, pinned ${String(useSha).slice(0, 7)})`);
   console.log(capabilityCard(installed.manifest, approved ? 'approved' : 'unverified'));
   if (confirm) { setEnabled(installed.id, true); console.log(`\n✅ Enabled.${installed.manifest.requiredEnv.length ? ' Add keys to .env: ' + installed.manifest.requiredEnv.join(', ') : ''}`); }

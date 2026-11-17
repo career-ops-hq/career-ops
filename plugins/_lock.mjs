@@ -17,8 +17,8 @@ import path from 'node:path';
 
 const LOCK_VERSION = 1;
 
-export function lockPath(root) {
-  return path.join(root, 'plugins.lock');
+export function lockPath(dataRoot) {
+  return path.join(dataRoot, 'plugins.lock');
 }
 
 function sha256(buf) {
@@ -59,8 +59,12 @@ export function hashPluginTree(dir) {
 }
 
 /** Read plugins.lock (fail-open to an empty lock — like the rest of the engine). */
-export function readLock(root) {
-  const file = lockPath(root);
+export function readLock(dataRoot, root = dataRoot) {
+  let file = lockPath(dataRoot);
+  if (!existsSync(file) && root && path.resolve(root) !== path.resolve(dataRoot)) {
+    const fallback = lockPath(root);
+    if (existsSync(fallback)) file = fallback;
+  }
   if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
@@ -72,16 +76,16 @@ export function readLock(root) {
 }
 
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
-export function writeLockEntry(root, id, entry) {
-  const lock = readLock(root);
+export function writeLockEntry(dataRoot, id, entry, root = dataRoot) {
+  const lock = readLock(dataRoot, root);
   lock.lockfileVersion = LOCK_VERSION;
   lock.plugins[id] = entry;
-  writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8');
+  writeFileSync(lockPath(dataRoot), JSON.stringify(lock, null, 2) + '\n', 'utf8');
 }
 
-export function removeLockEntry(root, id) {
-  const lock = readLock(root);
-  if (lock.plugins[id]) { delete lock.plugins[id]; writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8'); }
+export function removeLockEntry(dataRoot, id, root = dataRoot) {
+  const lock = readLock(dataRoot, root);
+  if (lock.plugins[id]) { delete lock.plugins[id]; writeFileSync(lockPath(dataRoot), JSON.stringify(lock, null, 2) + '\n', 'utf8'); }
 }
 
 /**

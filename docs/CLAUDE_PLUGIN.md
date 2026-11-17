@@ -31,7 +31,7 @@ Then start a new session. The first start takes a few seconds longer while the p
 |------|-------|---------------------------|
 | career-ops code | `~/.claude/plugins/cache/career-ops/career-ops/<version>/` (Customize installs: `~/.claude/plugins/synced/`) | No, it is replaced |
 | Node packages | `${CLAUDE_PLUGIN_DATA}/node_modules`: `~/.claude/plugins/data/career-ops-career-ops/` for a `/plugin` install, `~/.claude/plugins/data/career-ops-synced/` for a Customize install | Yes |
-| Your CV, profile, tracker, reports | `~/career-ops-data` | Yes, Claude Code never touches it |
+| Your CV, profile, tracker, reports, local plugins (`plugins.local/`), integrity lock (`plugins.lock`) | `~/career-ops-data` | Yes, Claude Code never touches it |
 
 Claude Code replaces the code folder on every plugin update, so career-ops never keeps your files there. `path-resolver.mjs` detects a plugin install and uses `~/career-ops-data` when nothing else names a data folder.
 

@@ -210,6 +210,18 @@ export function warnConfigLeftInCodeRoot(root, dataRoot) {
       console.warn(`⚠️  ${name} is in the code folder, not the data folder, so plugins do not read it: ${hint(left, target)}`);
     }
   }
+  const legacyLocal = path.join(root, 'plugins.local');
+  if (existsSync(legacyLocal)) {
+    let hasPlugins = false;
+    try {
+      const entries = readdirSync(legacyLocal, { withFileTypes: true });
+      hasPlugins = entries.some(e => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.') && !e.name.startsWith('_'));
+    } catch {}
+    if (hasPlugins) {
+      const targetLocal = path.join(dataRoot, 'plugins.local');
+      console.warn(`⚠️  plugins.local is in the code folder, not the data folder, so plugins do not read it: move ${legacyLocal} to ${targetLocal}`);
+    }
+  }
 }
 
 /**
@@ -408,14 +420,14 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
  * @param {string} root
  * @returns {Set<string>}
  */
-export function resolveSuccessorIds(root) {
+export function resolveSuccessorIds(root, dataRoot = root) {
   const ids = new Set();
   try {
     const reg = loadRegistry(root);
-    const lock = readLock(root);
+    const lock = readLock(dataRoot, root);
     for (const e of reg.plugins) {
       if (e.supersedesBundled !== true || typeof e.id !== 'string') continue;
-      const localManifest = path.join(root, 'plugins.local', e.id, 'manifest.json');
+      const localManifest = path.join(dataRoot, 'plugins.local', e.id, 'manifest.json');
       const installedSha = lock?.plugins?.[e.id]?.sha;
       if (existsSync(localManifest) && installedSha && installedSha === e.sha) ids.add(e.id);
     }
@@ -429,9 +441,10 @@ export function resolveSuccessorIds(root) {
  * The standard pair of roots for a project: bundled plugins/ then user
  * plugins.local/ (the latter only matters when it exists).
  * @param {string} root
+ * @param {string} [dataRoot]
  */
-export function pluginRoots(root) {
-  return [path.join(root, 'plugins'), path.join(root, 'plugins.local')];
+export function pluginRoots(root, dataRoot = root) {
+  return [path.join(root, 'plugins'), path.join(dataRoot, 'plugins.local')];
 }
 
 /**
@@ -675,9 +688,15 @@ export function loadSkill(manifest, root) {
  * Derive a plugin's trust source from the FILESYSTEM, never from plugins.lock
  * (a USER-writable file that could spoof `source: "bundled"` to dodge the
  * rug-pull gate). A dir under plugins/ is bundled; anything else is local.
+ * A plugin loaded from plugins.local/ can NEVER claim bundled trust.
  */
-function pluginSource(manifest, root) {
-  return manifest.dir.startsWith(path.join(root, 'plugins') + path.sep) ? 'bundled' : 'local';
+export function pluginSource(manifest, root) {
+  if (!manifest?.dir) return 'local';
+  const normDir = path.resolve(manifest.dir);
+  const normBundled = path.resolve(root, 'plugins');
+  if (normDir.split(path.sep).includes('plugins.local')) return 'local';
+  if (normDir === normBundled || normDir.startsWith(normBundled + path.sep)) return 'bundled';
+  return 'local';
 }
 
 /**
@@ -685,10 +704,10 @@ function pluginSource(manifest, root) {
  * defense). Returns { load }. Re-pins the lock on the benign cases (silent).
  * Fail-open on the engine itself (a lock-read error never blocks).
  */
-export function lockGate(manifest, root) {
+export function lockGate(manifest, root, dataRoot = root) {
   const source = pluginSource(manifest, root);
   let lock;
-  try { lock = readLock(root); } catch { return { load: true }; }
+  try { lock = readLock(dataRoot, root); } catch { return { load: true }; }
   const entry = lock.plugins?.[manifest.id];
   let d;
   try { d = diffPlugin(manifest, entry); }
@@ -697,10 +716,10 @@ export function lockGate(manifest, root) {
   const repin = () => {
     try {
       const tree = hashPluginTree(manifest.dir);
-      writeLockEntry(root, manifest.id, {
+      writeLockEntry(dataRoot, manifest.id, {
         source, version: manifest.version || '0.0.0',
         integrity: tree.integrity, files: tree.files, consent: consentSurface(manifest),
-      });
+      }, root);
     } catch { /* best-effort; never block load on a write failure */ }
   };
 
@@ -721,12 +740,12 @@ export function lockGate(manifest, root) {
 
 export async function loadPlugins(kind, { root, dataRoot = root, dryRun = false, pluginId = null }) {
   const cfg = await loadPluginConfig(dataRoot);
-  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  let manifests = discoverPlugins(pluginRoots(root, dataRoot), resolveSuccessorIds(root, dataRoot)).filter(m => m.hooks.includes(kind));
   if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
-    if (!lockGate(manifest, root).load) continue;
+    if (!lockGate(manifest, root, dataRoot).load) continue;
     const hook = await importHook(manifest, kind);
     if (!hook) continue;
     out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, dataRoot, settings: pluginSettings(manifest.id, cfg) }) });
@@ -839,7 +858,7 @@ export async function mergeProviderPlugins(providersMap, { root, dataRoot = root
   // untouched — fail-open is enforced structurally here, not just emergently.
   try {
     const cfg = await loadPluginConfig(dataRoot);
-    const providerManifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes('provider'));
+    const providerManifests = discoverPlugins(pluginRoots(root, dataRoot), resolveSuccessorIds(root, dataRoot)).filter(m => m.hooks.includes('provider'));
     if (providerManifests.length === 0) return;
 
     // Only the plugins the user actually switched on in plugins.yml matter.
@@ -859,7 +878,7 @@ export async function mergeProviderPlugins(providersMap, { root, dataRoot = root
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, reason)); // (5)
         continue;
       }
-      if (!lockGate(manifest, root).load) {
+      if (!lockGate(manifest, root, dataRoot).load) {
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, 'integrity/consent check failed — see ⚠️ above; run `node plugins.mjs trust ' + manifest.id + '` or `enable ' + manifest.id + '`'));
         continue;
       }

@@ -103,10 +103,7 @@ posting link's href. `pipeline` holds `{ url }` per `data/pipeline.md` entry.
 
 ## Your own plugins → `plugins.local/`
 
-Put private or experimental plugins in **`plugins.local/`** (a sibling of
-`plugins/`), never in `plugins/`. `plugins.local/` is gitignored and never
-auto-updated, so updates can't clobber it and a same-id bundled plugin can't be
-shadowed by it. Bundled plugins always win an id collision.
+Put private or experimental plugins in **`plugins.local/`** (located in your data root, e.g. `~/career-ops-data`, or beside `plugins/` in a single checkout), never in `plugins/`. `plugins.local/` and `plugins.lock` are user-layer assets (gitignored and never auto-updated), so plugin updates can't clobber them and a same-id bundled plugin can't be shadowed by them. Bundled plugins always win an id collision.
 
 ## Trust model (read this)
 

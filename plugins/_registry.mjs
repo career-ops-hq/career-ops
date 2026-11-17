@@ -90,8 +90,14 @@ export function findInRegistry(root, nameOrId) {
  * @returns {'bundled'|'approved'|'off-registry'|'unverified'}
  */
 export function classifySource(manifest, root, lockEntry) {
-  if (manifest.dir.startsWith(path.join(root, 'plugins') + path.sep) ||
-      manifest.dir.startsWith(path.join(CODEBASE_ROOT, 'plugins') + path.sep)) return 'bundled';
+  if (!manifest?.dir) return 'unverified';
+  const normDir = path.resolve(manifest.dir);
+  const normBundled = path.resolve(root, 'plugins');
+  const normCodebase = path.resolve(CODEBASE_ROOT, 'plugins');
+  const inLocal = normDir.split(path.sep).includes('plugins.local');
+  if (!inLocal && (normDir.startsWith(normBundled + path.sep) || normDir.startsWith(normCodebase + path.sep))) {
+    return 'bundled';
+  }
   const reg = findInRegistry(root, manifest.id);
   if (!reg) return 'unverified';
   if (lockEntry && lockEntry.sha && reg.sha && lockEntry.sha !== reg.sha) return 'off-registry';
