@@ -34,6 +34,7 @@ import { cvDiskState } from "@/lib/cv-disk-state.mjs";
 import { reportSpendActions } from "@/lib/report-spend-actions.mjs";
 import { applyPostingUrl } from "@/lib/posting-url.mjs";
 import { PageFrame } from "@/components/page-frame";
+import { RoleChangeRadar } from "@/components/role-change-radar";
 
 // Progressive disclosure of the report. Current oferta.md writes letter F as
 // Interview Plan (STAR+R), not a verdict — never promote by letter (#3416).
@@ -131,6 +132,7 @@ export function ReportView({
           </div>
         )}
       </header>
+      {app && <RoleChangeRadar id={id} company={app.company} title={app.role} />}
 
       {report ? (
         <>
