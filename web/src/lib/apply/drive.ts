@@ -146,7 +146,14 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
   });
 }
 
-type Action = { action: string; ref?: string; text?: string; value?: string; reason?: string };
+type Action = {
+  action: string;
+  ref?: string;
+  text?: string;
+  value?: string;
+  reason?: string;
+  expected?: { label: string; group: string; question: string };
+};
 
 function parseAction(out: string): Action | null {
   const m = out.match(/\{[\s\S]*?\}/);
