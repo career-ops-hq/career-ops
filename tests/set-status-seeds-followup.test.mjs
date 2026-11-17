@@ -236,6 +236,31 @@ test('rewriting Applied 2026-01-02 keeps that day on the status log and the foll
   }
 });
 
+test('text moved out of a dated Applied cell is not a notes date', () => {
+  const dated = northwind('Applied 2026-01-02 via referral');
+  const explicit = northwind('Evaluated');
+  const noted = northwind('Applied 2026-01-02 via referral');
+  const fromNotes = northwind('Evaluated', 'Applied 2026-09-20');
+  try {
+    const rewritten = jsonOf(setStatus(dated, ['--row', '7', 'Applied', '--json']));
+    const fromOn = jsonOf(setStatus(explicit, ['--row', '7', 'Applied', '--on', '2026-01-02', '--json']));
+    assert.equal(statusCell(dated), 'Applied');
+    assert.match(rowLine(dated), /Applied 2026-01-02 via referral/);
+    assert.equal(logDate(dated), '2026-01-02');
+    assert.equal(pinDate(dated), fromOn.followupSeeded.nextDate);
+    assert.equal(rewritten.followupSeeded.nextDate, fromOn.followupSeeded.nextDate);
+    const withNote = jsonOf(setStatus(noted, ['--row', '7', 'Applied', '--note', 'Applied 2026-09-20', '--json']));
+    assert.equal(logDate(noted), localToday());
+    assert.notEqual(logDate(noted), '2026-01-02');
+    assert.match(rowLine(noted), /Applied 2026-09-20/);
+    assert.equal(withNote.followupSeeded.nextDate, jsonOf(setStatus(fromNotes, ['--row', '7', 'Applied', '--json'])).followupSeeded.nextDate);
+  } finally {
+    for (const dir of [dated, explicit, noted, fromNotes]) {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10 });
+    }
+  }
+});
+
 test('rewriting a dated Applied cell keeps an Applied date already in the notes', () => {
   const dated = northwind('Applied 2026-01-02', 'Applied 2026-09-20');
   const fromNotes = northwind('Evaluated', 'Applied 2026-09-20');

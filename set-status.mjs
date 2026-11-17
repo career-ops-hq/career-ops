@@ -781,6 +781,8 @@ const releaseActivityClaim = flags.dryRun ? () => {} : claimStatusActivity(targe
 let statusChanged = false;
 let noteChanged = false;
 let cellAppliedDate = '';
+// Notes as the user wrote them, before any automatic status text is moved in.
+let userNotes = '';
 let statusLogged = false;
 let statusLogRepaired = false;
 let statusLogRepair = null;
@@ -807,6 +809,8 @@ try {
 
   statusChanged = parts[colmap.status].trim() !== newStatus;
   if (statusChanged) replaceCellValue(colmap.status, newStatus);
+
+  userNotes = colmap.notes == null ? '' : String(parts[colmap.notes] ?? '');
 
   // Text after a date in the old cell is no part of any state, and replacing the
   // cell would lose it. It moves to Notes, as normalize-statuses.mjs moves it,
@@ -917,13 +921,14 @@ try {
     // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
     // time-between-stages, so a future-dated transition skews the interval it
     // measures rather than just looking odd in the file.
-    // Notes that already say "Applied YYYY-MM-DD" own the cadence. The log
-    // then records this edit. With no Applied date in the notes, the log
-    // keeps the day that was on the cell, or the two clocks disagree.
+    // Notes the user wrote, or --note, that already say "Applied YYYY-MM-DD"
+    // own the cadence. The log then records this edit. Text moved out of the
+    // old status cell is not a note the user wrote. With no Applied date in
+    // those notes, the log keeps the day that was on the cell.
     let ledgerDate = flags.on ?? localToday();
     if (!flags.on && cellAppliedDate) {
       const { parseAppliedDate } = await import('./followup-cadence.mjs');
-      const notesText = colmap.notes == null ? '' : String(parts[colmap.notes] ?? '');
+      const notesText = note ? `${userNotes}; ${note}` : userNotes;
       if (!parseAppliedDate(notesText)) ledgerDate = cellAppliedDate;
     }
     statusLogged = appendStatusTransition(APPS_FILE, {
@@ -1040,10 +1045,13 @@ let followupSeeded = null;
 if (!undone && (statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
   followupSeeded = await seedFollowupOnApplied(target.num, {
     trackerPath: APPS_FILE,
-    // --on is the only explicit date, so an Applied date in the notes still
-    // outranks the cell. The cell day is the status-change date. A fresh
-    // transition passes today. A repair passes neither.
+    // --on is the only explicit date. An Applied date in the notes the user
+    // wrote, or in --note, still outranks the cell. Text moved out of the old
+    // status cell is in the file now, and it is not one of those notes. The
+    // cell day is the status-change date. A fresh transition passes today. A
+    // repair passes neither.
     date: flags.on || undefined,
+    authoredNotes: note ? `${userNotes}; ${note}` : userNotes,
     statusChangeDate: cellAppliedDate || (statusChanged ? localToday() : undefined),
     dryRun: flags.dryRun,
     quiet: flags.json,
