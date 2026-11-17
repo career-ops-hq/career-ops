@@ -77,21 +77,42 @@ export const factsOf = (el, ref) => {
     return flat(copy.textContent).slice(0, 200);
   };
   const ownLabel = labelText(el);
+  // Extraction names a choice from aria-label before the visible label. A
+  // shared accessible name is the question, so the value is the choice. A
+  // UUID or a generic prompt is not a name, and the visible label is used.
+  const usable = (s) => {
+    const t = flat(s);
+    if (!t) return "";
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(t)) return "";
+    if (/^(start typing|select\b|choose|search\b|type\b|--|please select|e\.?g\.?)/i.test(t)) return "";
+    return t.slice(0, 200);
+  };
+  const choiceLabel = (node) => {
+    const named = usable(node.getAttribute("aria-label"));
+    if (named) return named;
+    const ids = flat(node.getAttribute("aria-labelledby")).split(" ").filter(Boolean);
+    if (ids.length && typeof document !== "undefined") {
+      const fromIds = usable(ids.map((id) => document.getElementById(id)?.textContent || "").join(" "));
+      if (fromIds) return fromIds;
+    }
+    return labelText(node);
+  };
   const option = (() => {
     const type = flat(el.getAttribute("type")).toLowerCase();
     if (type !== "radio" && type !== "checkbox") return "";
     const value = flat(field.value);
     const name = field.name || "";
-    let labels = [ownLabel];
+    const ownChoice = choiceLabel(el);
+    let labels = [ownChoice];
     if (name && typeof document !== "undefined") {
       const nodes = Array.from(document.querySelectorAll(`input[type="${CSS.escape(type)}"][name="${CSS.escape(name)}"]`));
-      if (nodes.length) labels = nodes.map((node) => (node === el ? ownLabel : labelText(node)));
+      if (nodes.length) labels = nodes.map((node) => choiceLabel(node));
     }
     const shared = labels.length > 1 && labels.every((text) => text && text === labels[0]);
     // Same rule as extract: a shared label is the question, so the value is the
     // choice. Distinct labels are the choices themselves.
-    if (!ownLabel || ownLabel === name || (shared && value)) return (value || ownLabel).slice(0, 200);
-    return (ownLabel || value).slice(0, 200);
+    if (!ownChoice || ownChoice === name || (shared && value)) return (value || ownChoice).slice(0, 200);
+    return (ownChoice || value).slice(0, 200);
   })();
   return {
     ref: ref || el.getAttribute("data-co-ref") || "",

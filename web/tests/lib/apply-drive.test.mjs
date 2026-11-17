@@ -637,6 +637,43 @@ test("a radio option is the visible choice when the values are machine ids", () 
     const sharedNo = radio("No", "Will you relocate?");
     globalThis.document.querySelectorAll = () => [sharedYes, sharedNo];
     assert.equal(factsOf(sharedYes, "r2").option, "Yes");
+    const named = (value, text) => ({
+      tagName: "INPUT",
+      value,
+      textContent: "",
+      placeholder: "",
+      name: "sponsor",
+      form: null,
+      getAttribute(attr) {
+        return { type: "radio", name: "sponsor", value, "aria-label": "Choice" }[attr] ?? null;
+      },
+      closest(selector) {
+        return selector === "label" ? labelFor(text) : null;
+      },
+    });
+    const ariaYes = named("1", "Yes");
+    const ariaNo = named("0", "No");
+    globalThis.document.querySelectorAll = () => [ariaYes, ariaNo];
+    assert.equal(factsOf(ariaYes, "r3").option, "1");
+    assert.equal(factsOf(ariaNo, "r4").option, "0");
+    const prompt = (value, text) => ({
+      tagName: "INPUT",
+      value,
+      textContent: "",
+      placeholder: "",
+      name: "sponsor",
+      form: null,
+      getAttribute(attr) {
+        return { type: "radio", name: "sponsor", value, "aria-label": "Select" }[attr] ?? null;
+      },
+      closest(selector) {
+        return selector === "label" ? labelFor(text) : null;
+      },
+    });
+    const promptYes = prompt("1", "Yes");
+    const promptNo = prompt("0", "No");
+    globalThis.document.querySelectorAll = () => [promptYes, promptNo];
+    assert.equal(factsOf(promptYes, "r5").option, "Yes");
   } finally {
     if (previous === undefined) delete globalThis.document;
     else globalThis.document = previous;
