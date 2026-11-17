@@ -14,7 +14,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -555,7 +555,7 @@ test('migrateLegacyLock leaves an existing data-root lock untouched', () => {
   }
 });
 
-test('migrateLegacyLock loses a race with a concurrent data-root lock create (wx, never overwrites newer consent)', () => {
+test('migrateLegacyLock loses a race with a concurrent data-root lock create (no-replace publish, never overwrites newer consent)', () => {
   const codeRoot = makeSandbox('co-test-code-race-');
   const dataRoot = makeSandbox('co-test-data-race-');
 
@@ -564,21 +564,23 @@ test('migrateLegacyLock loses a race with a concurrent data-root lock create (wx
       source: 'local', version: '1.0.0', integrity: 'sha256-legacy', files: {},
     });
     const target = join(dataRoot, 'plugins.lock');
-    let migrated = null;
     // Interleave a concurrent create between migrateLegacyLock's existsSync
-    // probe and its write: the racing writer lands first, then the migration
-    // write runs. With a plain writeFileSync this replaced the newer lock;
-    // with the exclusive create it must refuse.
-    const racingWriter = (file, data, options) => {
-      writeFileSync(file, JSON.stringify({ lockfileVersion: 1, plugins: { 'newer-plugin': { source: 'local', version: '2.0.0', integrity: 'sha256-newer', files: {} } } }, null, 2) + '\n', 'utf8');
-      writeFileSync(file, data, options);
+    // probe and its publish: the racing writer lands the final path while the
+    // migration's complete temp is being written. The no-replace link must
+    // refuse (EEXIST), defer to the winner, and clean up only its own temp.
+    const racingIo = {
+      writeFile: (file, data, options) => {
+        writeFileSync(target, JSON.stringify({ lockfileVersion: 1, plugins: { 'newer-plugin': { source: 'local', version: '2.0.0', integrity: 'sha256-newer', files: {} } } }, null, 2) + '\n', 'utf8');
+        writeFileSync(file, data, options);
+      },
     };
-    migrated = migrateLegacyLock(dataRoot, codeRoot, racingWriter);
+    const migrated = migrateLegacyLock(dataRoot, codeRoot, racingIo);
 
     assert.equal(migrated, false, 'migration must defer to the concurrently created lock');
     const served = readLock(dataRoot);
     assert.deepEqual(Object.keys(served.plugins), ['newer-plugin'], 'the newer lock wins the race');
     assert.equal(served.plugins['newer-plugin'].integrity, 'sha256-newer');
+    assert.equal(readdirSync(dataRoot).filter((f) => f.startsWith('.migrate-')).length, 0, 'no migration temp dir left behind');
   } finally {
     rmSync(codeRoot, { recursive: true, force: true });
     rmSync(dataRoot, { recursive: true, force: true });
@@ -607,6 +609,105 @@ test('lockGate still checks a readable legacy lock when the migration write fail
     const gateResult = lockGate(manifest, codeRoot, dataRoot, { writeFile: deniedWrite });
     assert.equal(gateResult.load, false, 'legacy drift must still block the load when the migration write fails');
     assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('migrateLegacyLock leaves no partial final when the write fails midway (injected ENOSPC) and heals on retry', () => {
+  const codeRoot = makeSandbox('co-test-code-partial-');
+  const dataRoot = makeSandbox('co-test-data-partial-');
+
+  try {
+    writeLockEntry(codeRoot, 'legacy-plugin', {
+      source: 'local', version: '1.0.0', integrity: 'sha256-legacy', files: {},
+    });
+    const target = join(dataRoot, 'plugins.lock');
+    // A write that lands 17 bytes of the requested file and then fails: the
+    // old wx-to-final shape left that partial file as the data-root lock.
+    const partialWrite = (file, data) => { writeFileSync(file, data.slice(0, 17)); throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }); };
+
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot, { writeFile: partialWrite }), false, 'failed write must not report a migration');
+    assert.equal(existsSync(target), false, 'no partial final lock may remain');
+    assert.equal(readdirSync(dataRoot).filter((f) => f.startsWith('.migrate-')).length, 0, 'owned temp dir removed');
+    // The readable legacy lock keeps serving its pins (no empty-lock masking).
+    assert.equal(readLock(dataRoot, codeRoot).plugins['legacy-plugin'].integrity, 'sha256-legacy', 'legacy fallback still serves the old pins');
+    // Nothing partial masks a later attempt: a clean retry migrates.
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot), true, 'retry after a failed write still migrates');
+    assert.equal(readLock(dataRoot).plugins['legacy-plugin'].integrity, 'sha256-legacy');
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('migrateLegacyLock keeps the final absent when the platform cannot hard-link (injected EPERM)', () => {
+  const codeRoot = makeSandbox('co-test-code-nolink-');
+  const dataRoot = makeSandbox('co-test-data-nolink-');
+
+  try {
+    writeLockEntry(codeRoot, 'legacy-plugin', {
+      source: 'local', version: '1.0.0', integrity: 'sha256-legacy', files: {},
+    });
+    const noLink = { link: () => { throw Object.assign(new Error('EPERM: operation not permitted'), { code: 'EPERM' }); } };
+
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot, noLink), false, 'unsupported atomic publish must not report a migration');
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false, 'final stays absent so legacy checks keep running');
+    assert.equal(readdirSync(dataRoot).filter((f) => f.startsWith('.migrate-')).length, 0, 'owned temp dir removed');
+    assert.equal(readLock(dataRoot, codeRoot).plugins['legacy-plugin'].integrity, 'sha256-legacy', 'legacy fallback still serves the old pins');
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('lockGate still fails drift when the migration publish fails after a partial temp write', () => {
+  const codeRoot = makeSandbox('co-test-code-partgate-');
+  const dataRoot = makeSandbox('co-test-data-partgate-');
+
+  try {
+    const { manifest } = writePlugin(join(dataRoot, 'plugins.local'), 'drifted-plugin');
+    writeLockEntry(codeRoot, 'drifted-plugin', {
+      source: 'local',
+      version: manifest.version || '0.0.0',
+      integrity: 'sha256-stale',
+      files: { 'index.mjs': 'sha256-stale-file' },
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+    const partialWrite = (file, data) => { writeFileSync(file, data.slice(0, 17)); throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }); };
+
+    const gateResult = lockGate(manifest, codeRoot, dataRoot, { writeFile: partialWrite });
+    assert.equal(gateResult.load, false, 'a partial migration must not mask legacy drift');
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false, 'no partial final lock may remain');
+    assert.equal(readdirSync(dataRoot).filter((f) => f.startsWith('.migrate-')).length, 0, 'owned temp dir removed');
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('migrateLegacyLock never removes a foreign orphan migration dir (ownership is structural)', () => {
+  const codeRoot = makeSandbox('co-test-code-orphan-');
+  const dataRoot = makeSandbox('co-test-data-orphan-');
+
+  try {
+    writeLockEntry(codeRoot, 'legacy-plugin', {
+      source: 'local', version: '1.0.0', integrity: 'sha256-legacy', files: {},
+    });
+    // A foreign migration directory (another migrator's orphan) with a
+    // sentinel inside: our cleanup must never touch it, whatever fails.
+    const foreignDir = join(dataRoot, '.migrate-plugins.lock-foreign');
+    mkdirSync(foreignDir, { recursive: true });
+    writeFileSync(join(foreignDir, 'plugins.lock'), 'SENTINEL-OTHER-WRITER\n');
+    const partialWrite = (file, data) => { writeFileSync(file, data.slice(0, 17)); throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }); };
+
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot, { writeFile: partialWrite }), false, 'failed write must not report a migration');
+    assert.equal(readFileSync(join(foreignDir, 'plugins.lock'), 'utf8'), 'SENTINEL-OTHER-WRITER\n', 'foreign orphan dir is preserved');
+    // Only our own dir was removed: exactly the foreign orphan remains.
+    assert.deepEqual(readdirSync(dataRoot).filter((f) => f.startsWith('.migrate-')), ['.migrate-plugins.lock-foreign'], 'only the foreign orphan remains');
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false, 'no final lock created');
+    assert.equal(readLock(dataRoot, codeRoot).plugins['legacy-plugin'].integrity, 'sha256-legacy', 'legacy fallback still serves the old pins');
   } finally {
     rmSync(codeRoot, { recursive: true, force: true });
     rmSync(dataRoot, { recursive: true, force: true });
