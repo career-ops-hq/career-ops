@@ -1481,6 +1481,12 @@ search_queries:
 # origin. A custom frontend merely handing applications to Eploy (for example,
 # Specsavers' Attrax jobs page) is not the same protocol and is not supported.
 #
+# viterbit is explicit-only as well: the career sites on Viterbit (a Spanish ATS) run
+# on the employer's own domain (careers.prosegur.com), and its vendor-hosted
+# <slug>.viterbit.site hosts answer a Cloudflare challenge to a plain request, so
+# there is no host to claim. Set `provider: viterbit` + `careers_url` (any path;
+# the board is read from the site's home page).
+#
 # sitemap is explicit-only too: it reads an employer's own careers-site job
 # sitemap (sitemaps.org XML, as announced by a `Sitemap:` line in robots.txt)
 # for an employer with no public ATS API or whose ATS API host disallows
@@ -1589,6 +1595,11 @@ search_queries:
 #
 # - name: Example Factorial Co
 #   careers_url: https://exampleco.factorialhr.com        # or exampleco.factorial.com, exampleco.factorialhr.pt, ...; any path
+#   enabled: true
+#
+# - name: Example Viterbit Co
+#   careers_url: https://careers.exampleco.com            # the employer's own domain; any path, the board is read from the home page
+#   provider: viterbit
 #   enabled: true
 #
 # - name: Example HiBob Co
@@ -3374,6 +3385,14 @@ tracked_companies:
     api: https://boards-api.greenhouse.io/v1/boards/amplemarket/jobs
     notes: "Lisbon PT / Remote. AI-native sales platform."
     enabled: true
+
+  # -- Spain (Viterbit career sites) --
+
+  - name: Prosegur
+    careers_url: https://careers.prosegur.com/
+    provider: viterbit
+    notes: "Madrid. Security and cash logistics group; the whole board (all countries) in one request."
+    enabled: false
 
   # -- Italy (Zucchetti InRecruiting career pages) --
 
