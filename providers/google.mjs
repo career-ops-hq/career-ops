@@ -35,6 +35,22 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 //     location: "United States"      # optional
 //     queries: ["business strategy", "business operations", ...]
 //   max_pages: 10                     # optional, per query
+//
+// FULL BOARD (opt-in, `google: { full_board: true }`). The query walk reads
+// only what the queries match, and nothing reports the titles it never
+// matched (#7315). Google publishes every open posting in one jobs sitemap:
+//   GET https://www.google.com/about/careers/applications/jobs/sitemap.xml
+//   -> one <loc> per posting, .../jobs/results/{id}-{slug}/  (3,240 on 2026-11-18)
+// so full_board lists the whole board from it in one request. A <loc> carries
+// only the id and a title slug; the real title, employer and locations come
+// from the posting page's `ds:0` data blob, fetched only for postings the
+// scan's title filter keeps (ctx.titleWanted), paced and retried, up to
+// `detail_limit` (default DEFAULT_DETAIL_LIMIT, cap DETAIL_LIMIT_CAP). A row
+// past the limit keeps its slug title and no location, and the board is
+// marked partial ('detail-cap'). `queries` and `location` are not used.
+//   google:
+//     full_board: true
+//     detail_limit: 200               # optional
 
 const BASE = 'https://www.google.com/about/careers/applications/jobs/results/';
 // A full results page carries 20 cards; a shorter page is the last one for that
@@ -118,6 +134,146 @@ export function parseResultsPage(html) {
   return cards;
 }
 
+// ── Full board (google.full_board) ──────────────────────────────────────────
+const SITEMAP_URL = 'https://www.google.com/about/careers/applications/jobs/sitemap.xml';
+// A <loc> names the posting under careers.google.com or the google.com path;
+// either way the URL is rebuilt from BASE.
+const SITEMAP_LOC_RE = /<loc>\s*https:\/\/(?:careers\.google\.com|www\.google\.com\/about\/careers\/applications)\/jobs\/results\/(\d+)-([a-z0-9-]+)\/?\s*<\/loc>/g;
+const DEFAULT_DETAIL_LIMIT = 200;
+const DETAIL_LIMIT_CAP = 1000;
+const DETAIL_DELAY_MS = 500;
+const DS0_MARKER = "AF_initDataCallback({key: 'ds:0'";
+
+/** @param {any} entry @returns {number} */
+export function resolveDetailLimit(entry) {
+  const v = entry?.google?.detail_limit;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, DETAIL_LIMIT_CAP);
+  return DEFAULT_DETAIL_LIMIT;
+}
+
+/**
+ * Every posting the jobs sitemap lists, first occurrence of each id.
+ * Exported for tests.
+ * @param {string} xml
+ * @returns {{id: string, slug: string}[]}
+ */
+export function parseJobsSitemap(xml) {
+  const out = new Map();
+  for (const m of String(xml).matchAll(SITEMAP_LOC_RE)) if (!out.has(m[1])) out.set(m[1], m[2]);
+  return [...out].map(([id, slug]) => ({ id, slug }));
+}
+
+/**
+ * The JSON array that follows `data:` at `start`, read string-aware so a `]`
+ * inside a description does not end it early. Returns null when unbalanced.
+ * @param {string} s
+ * @param {number} start index of the opening `[`
+ */
+function balancedArray(s, start) {
+  if (s[start] !== '[') return null;
+  let depth = 0;
+  let inStr = false;
+  for (let i = start; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (c === '\\') i++;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '[') depth++;
+    else if (c === ']' && --depth === 0) return s.slice(start, i + 1);
+  }
+  return null;
+}
+
+/**
+ * Title, employer and locations of posting `id` from its page's `ds:0` blob,
+ * or null when the blob is missing, malformed, or describes another posting.
+ * The record is positional: [0] id, [1] title, [7] employer, [9] a list of
+ * locations whose first element is the display string. Exported for tests.
+ * @param {string} html
+ * @param {string} id
+ * @returns {{title: string, employer: string, locations: string[]} | null}
+ */
+export function parsePostingBlob(html, id) {
+  const page = String(html);
+  const at = page.indexOf(DS0_MARKER);
+  if (at === -1) return null;
+  const dataAt = page.indexOf('data:', at);
+  if (dataAt === -1) return null;
+  const raw = balancedArray(page, dataAt + 5);
+  if (!raw) return null;
+  let data;
+  try { data = JSON.parse(raw); } catch { return null; }
+  const rec = Array.isArray(data) && Array.isArray(data[0]) ? data[0] : null;
+  if (!rec || String(rec[0]) !== id || typeof rec[1] !== 'string' || !rec[1].trim()) return null;
+  const employer = typeof rec[7] === 'string' ? rec[7].trim() : '';
+  const locations = Array.isArray(rec[9])
+    ? [...new Set(rec[9].map((l) => (Array.isArray(l) && typeof l[0] === 'string' ? l[0].trim() : '')).filter(Boolean))]
+    : [];
+  return { title: rec[1].trim(), employer, locations };
+}
+
+/**
+ * The whole board from the jobs sitemap, with posting-page detail for the
+ * postings the scan keeps.
+ * @param {any} entry
+ * @param {any} ctx
+ */
+async function fetchFullBoard(entry, ctx) {
+  const probing = Number(ctx?.maxPages) > 0;
+  // A probe's rejection propagates unwrapped; a scan's does too, since a board
+  // with no sitemap has nothing to keep.
+  const xml = await fetchTextWithRetry(ctx, SITEMAP_URL, { redirect: 'error' });
+  const rows = parseJobsSitemap(xml);
+  if (rows.length === 0) {
+    const kind = /<urlset\b/.test(String(xml)) ? 'a sitemap with no posting <loc>' : `${typeof xml} without a <urlset>`;
+    throw new Error(`google: ${SITEMAP_URL} listed no postings (got ${kind}) — the sitemap format changed`);
+  }
+  const wanted = !probing && typeof ctx?.titleWanted === 'function' ? ctx.titleWanted : null;
+  const limit = resolveDetailLimit(entry);
+  /** @type {import('./_types.js').Job[]} */
+  const jobs = [];
+  let wantedCount = 0;
+  let detailed = 0;
+  let requests = 0;
+  for (const { id, slug } of rows) {
+    const job = {
+      title: titleFromSlug(slug),
+      url: `${BASE}${id}-${slug}`,
+      company: entry.name,
+      location: '',
+      ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
+    };
+    if (wanted && wanted(job.title)) {
+      wantedCount++;
+      if (requests < limit) {
+        if (requests > 0) await sleep(DETAIL_DELAY_MS, ctx);
+        requests++;
+        try {
+          const d = parsePostingBlob(await fetchTextWithRetry(ctx, job.url, { redirect: 'error' }), id);
+          if (d) {
+            job.title = d.title;
+            if (d.employer) job.company = d.employer;
+            job.location = d.locations.join('; ');
+            detailed++;
+          }
+        } catch (err) {
+          // Enrichment is never fatal to the board: the sitemap row stays.
+          console.error(`⚠️  google: ${entry.name} could not read posting ${id} (${err instanceof Error ? err.message : String(err)}); kept from the sitemap`);
+        }
+      }
+    }
+    jobs.push(job);
+  }
+  if (wantedCount > limit) {
+    console.error(`⚠️  google: ${entry.name} read ${limit} of ${wantedCount} title-matched postings (detail_limit) — the rest keep their sitemap title and no location; raise google.detail_limit for more (up to ${DETAIL_LIMIT_CAP})`);
+    markTruncated(jobs, 'detail-cap', { fetched: detailed, total: wantedCount });
+  }
+  return jobs;
+}
+
 /** @type {Provider} */
 
 export default {
@@ -128,6 +284,7 @@ export default {
   },
 
   async fetch(entry, ctx) {
+    if (entry?.google?.full_board === true) return fetchFullBoard(entry, ctx);
     const { location, queries } = getConfig(entry);
     // `ctx.maxPages` means verify-portals is probing, not scanning: walk one
     // query and one page, so a liveness check costs one request instead of

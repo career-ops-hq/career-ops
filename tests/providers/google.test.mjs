@@ -294,6 +294,123 @@ try {
       : fail(`google probe rejection: ${threw?.message}`);
   }
 
+  // ── full_board: the whole board from the jobs sitemap ──
+  {
+    const { parseJobsSitemap, parsePostingBlob, resolveDetailLimit } = mod;
+    const SITEMAP = 'https://www.google.com/about/careers/applications/jobs/sitemap.xml';
+    const loc = (id, slug, host = 'https://careers.google.com/jobs/results/') => `<url><loc>${host}${id}-${slug}/</loc></url>`;
+    const sitemap = (n, extra = '') => `<?xml version="1.0"?><urlset>${Array.from({ length: n }, (_, i) => loc(String(1000 + i), i % 2 ? 'strategy-associate' : 'software-engineer')).join('')}${extra}</urlset>`;
+    // A posting page whose ds:0 record is [id, title, ..., employer@7, ..., locations@9];
+    // the description carries a "]" and a quote so a naive bracket count would break.
+    const blob = (id, title, employer, locs) => {
+      const rec = [id, title, 'https://example.com/apply', [null, 'Own the plan [end-to-end] and "ship"'], [null, ''], 'projects/x', null, employer, 'en-US', locs.map((l) => [l, [l], l.split(',')[0], null, '', 'US'])];
+      return `<html><script>AF_initDataCallback({key: 'ds:0', hash: '1', data:${JSON.stringify([rec, [['999', 'Related role']]])}, sideChannel: {}});</script></html>`;
+    };
+    const FULL = { name: 'Acme', google: { full_board: true } };
+
+    const rows = parseJobsSitemap(sitemap(2, loc('1000', 'software-engineer') + loc('2000', 'ops-lead', 'https://www.google.com/about/careers/applications/jobs/results/') + '<url><loc>https://evil.example.com/jobs/results/3000-x/</loc></url>'));
+    if (rows.length === 3 && rows[2].id === '2000' && rows[2].slug === 'ops-lead') pass('parseJobsSitemap() reads both URL forms, dedupes ids, ignores other hosts');
+    else fail(`parseJobsSitemap() = ${JSON.stringify(rows)}`);
+
+    const d = parsePostingBlob(blob('1001', 'Strategy Associate, YouTube', 'YouTube', ['San Bruno, CA, USA', 'New York, NY, USA', 'San Bruno, CA, USA']), '1001');
+    if (d?.title === 'Strategy Associate, YouTube' && d.employer === 'YouTube' && d.locations.join('|') === 'San Bruno, CA, USA|New York, NY, USA') {
+      pass('parsePostingBlob() reads title, employer and deduped locations string-aware');
+    } else {
+      fail(`parsePostingBlob() = ${JSON.stringify(d)}`);
+    }
+    if (parsePostingBlob(blob('1001', 'X', 'Y', []), '9999') === null && parsePostingBlob('<html></html>', '1') === null
+        && parsePostingBlob("AF_initDataCallback({key: 'ds:0', data:[[\"1\", \"t\"", '1') === null) {
+      pass('parsePostingBlob() returns null for another posting, no blob, or a truncated blob');
+    } else {
+      fail('parsePostingBlob() should return null for mismatched or broken blobs');
+    }
+    if (resolveDetailLimit({}) === 200 && resolveDetailLimit({ google: { detail_limit: 50 } }) === 50 && resolveDetailLimit({ google: { detail_limit: 99999 } }) === 1000) {
+      pass('resolveDetailLimit() defaults to 200 and caps at 1000');
+    } else {
+      fail('resolveDetailLimit() mapping wrong');
+    }
+
+    const fullCtx = (n, calls, extra = {}) => ({
+      sleep: async () => {},
+      titleWanted: (t) => /strategy/i.test(t),
+      fetchText: async (url, opts) => {
+        calls.push({ url, opts });
+        if (url === SITEMAP) return sitemap(n);
+        const id = url.match(/results\/(\d+)-/)[1];
+        return blob(id, `Strategy Associate ${id}, YouTube`, 'YouTube', ['San Bruno, CA, USA']);
+      },
+      ...extra,
+    });
+    const quietRun = async (fn) => {
+      const lines = []; const orig = console.error;
+      console.error = (...a) => { lines.push(a.join(' ')); };
+      try { return { result: await fn(), lines }; } finally { console.error = orig; }
+    };
+
+    const calls = [];
+    const full = await quietRun(() => provider.fetch(FULL, fullCtx(10, calls)));
+    const detailed = full.result.filter((j) => j.company === 'YouTube');
+    if (full.result.length === 10 && detailed.length === 5 && calls.length === 6 && calls[0].url === SITEMAP
+        && calls.every((c) => c.opts?.redirect === 'error') && !full.result.truncated && full.lines.length === 0
+        && detailed[0].location === 'San Bruno, CA, USA' && detailed[0].title.startsWith('Strategy Associate')) {
+      pass('full_board lists every sitemap posting and reads detail (title, employer, location) only for title-matched ones, redirect:"error" throughout');
+    } else {
+      fail(`full_board: ${full.result.length} rows, ${detailed.length} detailed, ${calls.length} calls, lines ${JSON.stringify(full.lines)}`);
+    }
+    const plain = full.result.find((j) => j.company !== 'YouTube');
+    if (plain?.company === 'Acme' && plain.title === 'Software Engineer' && plain.location === '' && plain.url.startsWith('https://www.google.com/about/careers/applications/jobs/results/')) {
+      pass('full_board keeps an unmatched posting with its slug title, the entry name and no detail request');
+    } else {
+      fail(`full_board unmatched row = ${JSON.stringify(plain)}`);
+    }
+
+    const capCalls = [];
+    const capped = await quietRun(() => provider.fetch({ name: 'Acme', google: { full_board: true, detail_limit: 2 } }, fullCtx(10, capCalls)));
+    if (capCalls.length === 3 && capped.result.length === 10 && capped.result.truncated?.reason === 'detail-cap'
+        && capped.result.truncated?.fetched === 2 && capped.result.truncated?.total === 5 && capped.lines.some((l) => l.includes('detail_limit'))) {
+      pass('full_board stops detail reads at detail_limit and marks the board detail-cap (fetched of wanted)');
+    } else {
+      fail(`detail cap: ${capCalls.length} calls, ${JSON.stringify(capped.result.truncated)}, ${JSON.stringify(capped.lines)}`);
+    }
+
+    // A detail fetch that keeps failing is not fatal: the sitemap row stays.
+    let detailTries = 0;
+    const flaky = await quietRun(() => provider.fetch(FULL, fullCtx(4, [], {
+      fetchText: async (url) => {
+        if (url === SITEMAP) return sitemap(4);
+        detailTries++;
+        throw Object.assign(new Error('HTTP 503'), { status: 503 });
+      },
+    })));
+    if (flaky.result.length === 4 && detailTries > 2 && flaky.result.every((j) => j.company === 'Acme')) {
+      pass('full_board retries a failed detail read, then keeps the sitemap row');
+    } else {
+      fail(`full_board failed detail: ${flaky.result.length} rows, ${detailTries} tries`);
+    }
+
+    // Probe: one sitemap request, no detail reads, silent.
+    const probeCalls = [];
+    const probe = await quietRun(() => provider.fetch(FULL, { ...fullCtx(10, probeCalls), maxPages: 1 }));
+    if (probeCalls.length === 1 && probe.result.length === 10 && !probe.result.truncated && probe.lines.length === 0) {
+      pass('full_board under ctx.maxPages reads only the sitemap');
+    } else {
+      fail(`full_board probe: ${probeCalls.length} calls`);
+    }
+    const boom = new Error('budget');
+    let thrown = null;
+    try { await provider.fetch(FULL, { maxPages: 1, sleep: async () => {}, fetchText: async () => { throw boom; } }); } catch (e) { thrown = e; }
+    if (thrown === boom) pass('full_board propagates a sitemap rejection unwrapped during a probe');
+    else fail(`full_board probe rejection: ${thrown}`);
+
+    // Broken sitemap: loud, named.
+    let broken = 0;
+    for (const body of ['<html>not a sitemap</html>', '<urlset></urlset>', '']) {
+      try { await provider.fetch(FULL, { sleep: async () => {}, fetchText: async () => body }); } catch (e) { if (/google: .*sitemap/.test(e.message)) broken++; }
+    }
+    if (broken === 3) pass('full_board throws a named error when the sitemap lists no postings');
+    else fail(`full_board broken sitemap: ${broken}/3 threw`);
+  }
+
 } catch (e) {
   fail(`google provider tests crashed: ${e.message}`);
 }

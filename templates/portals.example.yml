@@ -1997,6 +1997,17 @@ search_queries:
 #   max_pages: 20          # optional page cap (100 postings/page, default 20, max 100)
 #   enabled: true
 #
+# - name: Google                          # Google Careers (Alphabet companies included)
+#   provider: google
+#   google:
+#     queries: ["business strategy", "business operations"]   # query mode (the default)
+#     location: "United States"
+#     # full_board: true     # list every posting from the jobs sitemap instead of
+#     #                      # querying; queries/location are then unused
+#     # detail_limit: 200    # full_board: posting pages read for title-matched rows (max 1000)
+#   max_pages: 10          # query mode: pages per query (20 cards/page, default 10, max 50)
+#   enabled: true
+#
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
 #
 # - name: Amazon / AWS                    # global amazon.jobs board
