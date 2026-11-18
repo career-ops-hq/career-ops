@@ -19496,6 +19496,11 @@ try {
   } else {
     fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
   }
+  if (mainFilesRows.some((row) => row.startsWith('| `add-entry.mjs` |'))) {
+    pass('AGENTS.md Main Files table lists add-entry.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing add-entry.mjs');
+  }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold
   // are readFileSync / readdirSync / existsSync. No write-capable named
