@@ -21,7 +21,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo, captureConsoleErrors, rmSync, ROOT } from './helpers.mjs';
-import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign } from '../update-system.mjs';
+import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign, capturePreUpdateIndex, restoreWrittenDirtyState, locallyModifiedSystemFiles, parsePorcelainStatus } from '../update-system.mjs';
 
 function write(dir, rel, text) {
   mkdirSync(join(dir, rel, '..'), { recursive: true });
@@ -191,8 +191,8 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
     // content already matched the target is never reset to HEAD. The first
     // list is everything already written: the loop's `updated`, plus any
     // path a failed batched checkout had started before the loop took over.
-    const child = /if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]*?const written = mergePathLists\(updated, batchAttempted\)\.filter\(\(p\) => p !== path\);\n\s*restoreAfterFailedUpdate\(written, initialStatusPaths,[^\n]*exclude: restoreExclusions \}\);\n\s*restoreAfterFailedUpdate\(\[path\], initialStatusPaths,[^\n]*exclude: restoreExclusions \}\);\n\s*throw err;\s*\n\s*\}/;
-    if (child.test(body)) pass('a non-benign checkout error restores the paths already updated, preserved files excluded, then rethrows');
+    const child = /if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]*?const written = mergePathLists\(updated, batchAttempted\)\.filter\(\(p\) => p !== path\);\n\s*restoreAfterFailedUpdate\(written, initialStatusPaths,[^\n]*exclude: restoreExclusions \}\);\n\s*restoreAfterFailedUpdate\(\[path\], initialStatusPaths,[^\n]*exclude: restoreExclusions \}\);\n\s*[\s\S]*?restoreWrittenDirtyState\(mergePathLists\(written, \[path\]\), \{ initialStatusPaths, initialIndexState, backupByFile, preservedSet \}\);\n\s*throw err;\s*\n\s*\}/;
+    if (child.test(body)) pass('a non-benign checkout error restores the paths already updated, preserved files excluded and pre-update dirty state restored, then rethrows');
     else fail('the step-3 checkout loop rethrows without restoring what it had updated, or restores without excluding the preserved files');
 
     // The parent again: each successful bootstrap backup is recorded where it is
@@ -464,6 +464,306 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
       pass('control: without the pre-update-dirty exclusion the restore resets to HEAD');
     } else {
       fail(`control unexpectedly kept the edit: ${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  // capturePreUpdateIndex records mode+blob for paths that were STAGED before
+  // apply; unstaged and untracked paths need no record (their restore is a
+  // plain `git reset -q HEAD -- <path>`).
+  const state = capturePreUpdateIndex([
+    { code: 'M ', path: 'sys/a.md' },
+    { code: ' M', path: 'sys/b.md' },
+    { code: '??', path: 'sys/new.md' },
+  ], { gitRaw: () => '100644 abc1234 0\tsys/a.md\x00100644 def5678 0\tsys/c.md\x00' });
+  if (state.get('sys/a.md')?.sha === 'abc1234' && state.get('sys/a.md')?.mode === '100644' &&
+      !state.has('sys/b.md') && !state.has('sys/c.md')) {
+    pass('capturePreUpdateIndex records the pre-update staged entry only');
+  } else {
+    fail(`capturePreUpdateIndex wrong: ${JSON.stringify([...state.entries()])}`);
+  }
+}
+
+{
+  // A --force-overwritten local edit: the checkout put the target blob in the
+  // worktree AND the index. The failed-update restore must return the local
+  // bytes from the .bak and the index to HEAD's entry, so nothing of the
+  // failed update stays (#7250 review).
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a local fix\n');
+    write(dir, 'sys/a.md.bak', 'a local fix\n');
+    g('checkout', target, '--', 'sys/a.md');
+    const unrestored = restoreWrittenDirtyState(['sys/'], {
+      initialStatusPaths: new Set(['sys/a.md']),
+      initialIndexState: new Map(),
+      backupByFile: new Map([['sys/a.md', 'sys/a.md.bak']]),
+      preservedSet: new Set(),
+    }, { ...ctx });
+    const headEntry = g('rev-parse', 'HEAD:sys/a.md').trim();
+    if (unrestored.length === 0 &&
+        read(dir, 'sys/a.md') === 'a local fix\n' &&
+        g('rev-parse', ':sys/a.md').trim() === headEntry) {
+      pass('a forced-overwritten local edit returns to worktree and index after a failed update');
+    } else {
+      fail(`forced-overwrite restore wrong: content=${JSON.stringify(read(dir, 'sys/a.md'))} index=${g('rev-parse', ':sys/a.md').trim()} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  // An edit STAGED before apply keeps its staged blob: the restore re-stages
+  // the recorded index entry instead of leaving the blob the checkout staged.
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a staged fix\n');
+    g('add', 'sys/a.md');
+    const stagedSha = g('rev-parse', ':sys/a.md').trim();
+    const indexState = capturePreUpdateIndex(
+      [{ code: 'M ', path: 'sys/a.md' }],
+      { gitRaw: (...a) => g(...a) },
+    );
+    g('checkout', target, '--', 'sys/a.md');
+    write(dir, 'sys/a.md', 'a staged fix\n');
+    const unrestored = restoreWrittenDirtyState(['sys/'], {
+      initialStatusPaths: new Set(['sys/a.md']),
+      initialIndexState: indexState,
+    }, { ...ctx });
+    if (unrestored.length === 0 && g('rev-parse', ':sys/a.md').trim() === stagedSha) {
+      pass('an edit staged before apply keeps its staged blob after the failed-update restore');
+    } else {
+      fail(`staged-edit restore wrong: index=${g('rev-parse', ':sys/a.md').trim()} want=${stagedSha}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  // An equal-content pre-update edit (the install's edit already matched the
+  // target): the checkout staged the target blob over it. The restore unstages
+  // back to HEAD's entry, so `git status` shows the edit exactly as the user
+  // had it — unstaged — instead of a staged blob they never staged (#7250 review).
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v2\n');
+    g('checkout', target, '--', 'sys/a.md');
+    const unrestored = restoreWrittenDirtyState(['sys/'], {
+      initialStatusPaths: new Set(['sys/a.md']),
+      initialIndexState: new Map(),
+    }, { ...ctx });
+    const headEntry = g('rev-parse', 'HEAD:sys/a.md').trim();
+    const porcelain = g('status', '--porcelain', '--', 'sys/a.md').trim();
+    if (unrestored.length === 0 &&
+        g('rev-parse', ':sys/a.md').trim() === headEntry &&
+        read(dir, 'sys/a.md') === 'a v2\n' &&
+        porcelain === 'M sys/a.md') {
+      pass('an equal-content pre-update edit returns to unstaged after the failed-update restore');
+    } else {
+      fail(`equal-content restore wrong: status=${JSON.stringify(porcelain)} content=${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  // apply()'s failure paths all restore the pre-update dirty state: the
+  // bootstrap catch, the per-path checkout catch, and both abort restores.
+  const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const calls = source.match(/restoreWrittenDirtyState\(/g) || [];
+  if (calls.length >= 5) {
+    pass('every failed-update restore also restores the pre-update dirty state');
+  } else {
+    fail(`expected restoreWrittenDirtyState at every failure restore site, found ${calls.length} call(s)`);
+  }
+}
+
+// ── 14. a file the user staged as NEW at a path the target ships: the whole
+//    real-apply chain — at-risk attribution, .bak, forced overwrite, failure
+//    restore — returns the exact pre-update index AND worktree (#7250 review).
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/dir/new.md', 'my staged new file\n');
+    g('add', 'sys/dir/new.md');
+    const stagedSha = g('rev-parse', ':sys/dir/new.md').trim();
+    // apply() snapshots status at the start, before any scan or backup.
+    const statusEntries = parsePorcelainStatus(g('status', '--porcelain', '-z', '--untracked-files=all'));
+    const initialStatusPaths = new Set(statusEntries.map((entry) => entry.path));
+    const initialIndexState = capturePreUpdateIndex(statusEntries, { gitRaw: (...a) => g(...a) });
+    // Attribution: the real scanner must flag the staged-new file at-risk, so
+    // the default route preserves it and --force backs it up. diff against the
+    // baseline lists an index addition; the untracked sweep skips it (it is in
+    // ls-files), so this pins the diff path, not the sweep.
+    const atRisk = locallyModifiedSystemFiles(['sys/'], target, ctx);
+    if (!atRisk.includes('sys/dir/new.md')) {
+      fail(`staged-new file not flagged at-risk: ${JSON.stringify(atRisk)}`);
+    } else {
+      pass('a staged-new file at a target path is flagged at-risk');
+    }
+    // --force route: .bak first, then the checkout overwrites worktree+index.
+    backupSystemFiles(['sys/dir/new.md'], ctx);
+    if (initialIndexState.get('sys/dir/new.md')?.sha !== stagedSha) {
+      fail(`capturePreUpdateIndex missed the staged-new entry: ${JSON.stringify([...initialIndexState.entries()])}`);
+    }
+    g('checkout', target, '--', 'sys/dir/new.md');
+    const unrestored = restoreWrittenDirtyState(['sys/'], {
+      initialStatusPaths,
+      initialIndexState,
+      backupByFile: new Map([['sys/dir/new.md', 'sys/dir/new.md.bak']]),
+      preservedSet: new Set(),
+    }, { ...ctx });
+    const porcelain = g('status', '--porcelain', '--', 'sys/dir/new.md').trim();
+    if (unrestored.length === 0 &&
+        read(dir, 'sys/dir/new.md') === 'my staged new file\n' &&
+        g('rev-parse', ':sys/dir/new.md').trim() === stagedSha &&
+        porcelain === 'A  sys/dir/new.md') {
+      pass('a forced-overwritten staged-new file returns to its exact pre-update index and worktree');
+    } else {
+      fail(`staged-new restore wrong: status=${JSON.stringify(porcelain)} content=${JSON.stringify(read(dir, 'sys/dir/new.md'))} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 15. an UNTRACKED file at a target path, forced and failed: bytes back
+//    from the .bak, index entry the checkout staged dropped — status is `??`
+//    again, not a staged blob the user never staged (#7250 review).
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/dir/new.md', 'my untracked file\n');
+    const statusEntries = parsePorcelainStatus(g('status', '--porcelain', '-z', '--untracked-files=all'));
+    const initialStatusPaths = new Set(statusEntries.map((entry) => entry.path));
+    const initialIndexState = capturePreUpdateIndex(statusEntries, { gitRaw: (...a) => g(...a) });
+    const atRisk = locallyModifiedSystemFiles(['sys/'], target, ctx);
+    if (!atRisk.includes('sys/dir/new.md')) {
+      fail(`untracked file not flagged at-risk: ${JSON.stringify(atRisk)}`);
+    }
+    backupSystemFiles(['sys/dir/new.md'], ctx);
+    g('checkout', target, '--', 'sys/dir/new.md');
+    const unrestored = restoreWrittenDirtyState(['sys/'], {
+      initialStatusPaths,
+      initialIndexState,
+      backupByFile: new Map([['sys/dir/new.md', 'sys/dir/new.md.bak']]),
+      preservedSet: new Set(),
+    }, { ...ctx });
+    const porcelain = g('status', '--porcelain', '--', 'sys/dir/new.md').trim();
+    if (unrestored.length === 0 &&
+        read(dir, 'sys/dir/new.md') === 'my untracked file\n' &&
+        porcelain === '?? sys/dir/new.md') {
+      pass('a forced-overwritten untracked file returns to untracked with its bytes after a failed update');
+    } else {
+      fail(`untracked restore wrong: status=${JSON.stringify(porcelain)} content=${JSON.stringify(read(dir, 'sys/dir/new.md'))} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 15b. the self-bootstrap catch restores an IGNORED forced updater file:
+//    the bootstrap at-risk scan is the same #5088 scanner (untracked + ignored
+//    sweep), the .bak lands in bootstrapBackups, and the catch's own order —
+//    HEAD restore (which deletes the staged addition the ignored file became),
+//    then restoreBootstrapBackups, then restoreWrittenDirtyState without
+//    backupByFile — returns its bytes with nothing left staged (#7250 review).
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    // sys/fresh/up.md exists at the target but not in HEAD: the install never
+    // tracked it, the user created and ignored it — the #5088 shape.
+    write(dir, '.gitignore', 'sys/fresh/up.md\n');
+    g('add', '.gitignore');
+    g('commit', '-qm', 'ignore the local note');
+    write(dir, 'sys/fresh/up.md', 'my ignored updater file\n');
+    g('check-ignore', 'sys/fresh/up.md');
+    const statusEntries = parsePorcelainStatus(g('status', '--porcelain', '-z', '--untracked-files=all'));
+    const initialStatusPaths = new Set(statusEntries.map((entry) => entry.path));
+    if (initialStatusPaths.has('sys/fresh/up.md')) {
+      fail('fixture wrong: the ignored updater file showed in --untracked-files=all status');
+    }
+    const initialIndexState = capturePreUpdateIndex(statusEntries, { gitRaw: (...a) => g(...a) });
+    // The bootstrap's own scan and backup, through the real functions.
+    const atRisk = locallyModifiedSystemFiles(['sys/fresh/up.md'], target, ctx);
+    if (!atRisk.includes('sys/fresh/up.md')) {
+      fail(`ignored updater file not flagged at-risk: ${JSON.stringify(atRisk)}`);
+    }
+    const bootstrapBackups = backupSystemFiles(atRisk, ctx).filter((r) => !r.error);
+    if (bootstrapBackups.length !== 1) fail(`bootstrap backup wrong: ${JSON.stringify(bootstrapBackups)}`);
+    // The bootstrap checkout overwrites and stages it, then the child fails.
+    g('checkout', target, '--', 'sys/fresh/up.md');
+    // The catch's three steps, in apply()'s order and shapes.
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/fresh/up.md'], initialStatusPaths, { what: 'updater file(s) loaded to run the new version', exclude: [...initialStatusPaths], ...ctx }));
+    if (existsSync(join(dir, 'sys/fresh/up.md'))) {
+      fail('fixture wrong: revertPaths kept the staged addition the ignored file became');
+    }
+    const putBackFailed = restoreBootstrapBackups(bootstrapBackups, ctx);
+    const unrestored = restoreWrittenDirtyState(['sys/fresh/up.md'], { initialStatusPaths, initialIndexState }, { ...ctx });
+    let staged = true;
+    try { g('ls-files', '--error-unmatch', '--', 'sys/fresh/up.md'); } catch { staged = false; }
+    if (putBackFailed.length === 0 && unrestored.length === 0 &&
+        read(dir, 'sys/fresh/up.md') === 'my ignored updater file\n' && !staged) {
+      pass('the bootstrap catch restores an ignored forced updater file from its .bak, unstaged');
+    } else {
+      fail(`bootstrap ignored restore wrong: content=${existsSync(join(dir, 'sys/fresh/up.md')) ? JSON.stringify(read(dir, 'sys/fresh/up.md')) : '<missing>'} staged=${staged} putBack=${JSON.stringify(putBackFailed)} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 16. an IGNORED file at a target path, forced and failed, through the REAL
+//    two-stage restore: --untracked-files=all never lists it, so revertPaths
+//    removes it as the update's own addition — the .bak copy-back afterwards
+//    must still return its bytes, with nothing left staged (#7250 review).
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, '.gitignore', 'sys/dir/new.md\n');
+    g('add', '.gitignore');
+    g('commit', '-qm', 'ignore the local note');
+    write(dir, 'sys/dir/new.md', 'my ignored file\n');
+    g('check-ignore', 'sys/dir/new.md');
+    const statusEntries = parsePorcelainStatus(g('status', '--porcelain', '-z', '--untracked-files=all'));
+    const initialStatusPaths = new Set(statusEntries.map((entry) => entry.path));
+    if (initialStatusPaths.has('sys/dir/new.md')) {
+      fail('fixture wrong: the ignored file showed in --untracked-files=all status');
+    }
+    const initialIndexState = capturePreUpdateIndex(statusEntries, { gitRaw: (...a) => g(...a) });
+    const atRisk = locallyModifiedSystemFiles(['sys/'], target, ctx);
+    if (!atRisk.includes('sys/dir/new.md')) {
+      fail(`ignored file not flagged at-risk: ${JSON.stringify(atRisk)}`);
+    }
+    backupSystemFiles(['sys/dir/new.md'], ctx);
+    g('checkout', target, '--', 'sys/dir/new.md');
+    // Stage one of the real failure path: the HEAD restore, which removes the
+    // staged addition (the ignored file is in no exclusion list).
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/'], initialStatusPaths, { what: 'system path(s) it had already updated', exclude: [], ...ctx }));
+    if (existsSync(join(dir, 'sys/dir/new.md'))) {
+      fail('fixture wrong: revertPaths kept the staged addition the ignored file became');
+    }
+    // Stage two: the dirty-state restore puts the user's bytes back.
+    const unrestored = restoreWrittenDirtyState(['sys/'], {
+      initialStatusPaths,
+      initialIndexState,
+      backupByFile: new Map([['sys/dir/new.md', 'sys/dir/new.md.bak']]),
+      preservedSet: new Set(),
+    }, { ...ctx });
+    let staged = true;
+    try { g('ls-files', '--error-unmatch', '--', 'sys/dir/new.md'); } catch { staged = false; }
+    if (unrestored.length === 0 &&
+        read(dir, 'sys/dir/new.md') === 'my ignored file\n' &&
+        !staged) {
+      pass('a forced-overwritten ignored file returns from its .bak, unstaged, after the two-stage restore');
+    } else {
+      fail(`ignored restore wrong: content=${existsSync(join(dir, 'sys/dir/new.md')) ? JSON.stringify(read(dir, 'sys/dir/new.md')) : '<missing>'} staged=${staged} unrestored=${JSON.stringify(unrestored)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
