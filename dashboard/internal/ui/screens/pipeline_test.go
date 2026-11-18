@@ -985,3 +985,79 @@ func TestWithReloadedDataFallsBackToCompanyAndRole(t *testing.T) {
 		t.Fatalf("want the Globex row selected, got %+v (ok=%v)", app, ok)
 	}
 }
+
+// A duplicate tracker # (#1704) makes two unrelated rows answer to the same
+// `--row 32`. Identity alone cannot pick between them, so company and role
+// decide among exactly those rows.
+func TestWithReloadedDataPicksAmongRowsSharingATrackerNumber(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Interview"},
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Applied"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.sortMode = sortStatus
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Acme" {
+			pm.cursor = i
+		}
+	}
+	if app, _ := pm.CurrentApp(); app.Company != "Acme" {
+		t.Fatalf("premise: the cursor is on Acme, got %q", app.Company)
+	}
+
+	// Acme moves to Discarded, which sorts it behind Beta — so the first row
+	// answering to `--row 32` is now the unrelated one.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Discarded"},
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Applied"},
+	}, model.PipelineMetrics{Total: 2})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Company != "Acme" {
+		t.Fatalf("the cursor moved to %q; the pre-identity lookup kept Acme", app.Company)
+	}
+}
+
+// When an identified row is gone from the filtered list, a sibling sharing its
+// company and role is a different opening. Fall through to the index instead of
+// selecting it: the cursor is what a retry after a partial save writes to.
+func TestWithReloadedDataDoesNotFallBackToASiblingOfAnIdentifiedRow(t *testing.T) {
+	// No scores, so the default score sort is stable and keeps input order.
+	initial := []model.CareerApplication{
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 40, Company: "Zeta", Role: "Ops", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			pm.cursor = i
+		}
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: #32 sits at index 1, got %d", pm.cursor)
+	}
+
+	// #32 is gone from the reloaded set; its sibling #33 is now at index 0, so
+	// the company-and-role fallback and the retained index name different rows.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 40, Company: "Zeta", Role: "Ops", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 2})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number == 33 {
+		t.Fatal("the cursor landed on the sibling #33; a status write there hits a different opening")
+	}
+	if app.Number != 40 {
+		t.Fatalf("want the retained index (#40), got #%d", app.Number)
+	}
+}

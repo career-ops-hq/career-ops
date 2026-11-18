@@ -6197,8 +6197,23 @@ try {
   // EVERY flag-shaped literal in the function, however it is written: a regex
   // keyed to one return shape skips a branch spelled differently, and a skipped
   // bad branch beside a good one reads as a pass.
-  const selectorFlags = [...selectorBody.replace(/^\s*\/\/.*$/gm, '').matchAll(/"(--[a-z-]+)"/g)]
-    .map((m) => m[1]);
+  const selectorSource = selectorBody.replace(/^\s*\/\/.*$/gm, '');
+  const selectorFlags = [...selectorSource.matchAll(/"(--[a-z-]+)"/g)].map((m) => m[1]);
+  // A flag-shaped literal ANYWHERE in the function is not the flag that gets
+  // sent: that is whatever sits in the first field of each trackerIdentity
+  // construction, and an expression there can rewrite a literal which still
+  // reads as correct — `strings.Replace("--row", "row", "report", 1)` keeps the
+  // `--row` the check above wants and sends `--report` (#7331 review). So read
+  // that field and require a BARE literal: an expression the guard cannot
+  // resolve fails it, rather than passing on the literal inside it.
+  // Keyed fields (`flag: "--row"`) are a legitimate spelling, so read both.
+  const identityFlagField = (construction) => {
+    const flag = construction.split(',')[0].trim();
+    const bare = flag.match(/^(?:flag\s*:\s*)?"(--[a-z-]+)"$/);
+    return bare ? bare[1] : null;
+  };
+  const selectorFlagFields = [...selectorSource.matchAll(/trackerIdentity\{([^}]*)\}/g)]
+    .map((m) => identityFlagField(m[1]));
   const argsStart = runWriterBody.indexOf('args := []string{');
   const argvLiteral = argsStart === -1
     ? ''
@@ -6209,15 +6224,41 @@ try {
     && argvLiteral.includes('ids[0].value')
     && !/"--(?:row|report|report-link)"/.test(argvLiteral)
     && selectorFlags.every((flag) => flag === '--report-link' || flag === '--row')
+    // Every identity the selector builds must name its flag with a literal the
+    // guard can read, and there must be at least the two.
+    && selectorFlagFields.length >= 2
+    && selectorFlagFields.every((flag) => flag === '--report-link' || flag === '--row')
     // Both must survive: losing --row is the bug #7331 fixed, and losing
     // --report-link would renumber every existing row's writes.
-    && selectorFlags.includes('--report-link')
-    && selectorFlags.includes('--row')
+    && selectorFlagFields.includes('--report-link')
+    && selectorFlagFields.includes('--row')
     && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
   if (delegatesToCanonicalWriter) {
     pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
   } else {
     fail('dashboard status writer bypasses the shared set-status transaction scope');
+  }
+
+  // The guard above is only as good as that flag-field read, and its failure
+  // mode is silent: a selector it cannot resolve would pass on a literal that
+  // merely sits nearby. So check the read itself against the shapes that
+  // motivated it — each one sends a flag the repo does not accept while leaving
+  // an acceptable literal in the text (#7331 review).
+  const resolvableFlagFields = [
+    ['a bare literal', '"--row", strconv.Itoa(app.Number)', '--row'],
+    ['keyed fields', 'flag: "--report-link", value: app.ReportNumber', '--report-link'],
+    ['rewritten at runtime', 'strings.Replace("--row", "row", "report", 1), strconv.Itoa(app.Number)', null],
+    ['built from a variable', 'rowFlag, strconv.Itoa(app.Number)', null],
+    ['concatenated', '"--" + "report", strconv.Itoa(app.Number)', null],
+    ['parenthesized', '("--report"), strconv.Itoa(app.Number)', null],
+  ];
+  const flagFieldMisreads = resolvableFlagFields
+    .filter(([, construction, want]) => identityFlagField(construction) !== want)
+    .map(([name]) => name);
+  if (flagFieldMisreads.length === 0) {
+    pass('dashboard selector guard resolves every tracker-identity flag or fails closed');
+  } else {
+    fail(`dashboard selector guard misreads a tracker-identity flag: ${flagFieldMisreads.join(', ')}`);
   }
 
 } catch (e) {

@@ -517,24 +517,55 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	// its bare title) both match, and a status change can reorder them, so the
 	// cursor could land on the sibling. That matters beyond navigation — a retry
 	// after a partial save writes to whatever the cursor is on.
-	for i, app := range reloaded.filtered {
-		if selectedReportPath != "" {
+	if selectedReportPath != "" {
+		for i, app := range reloaded.filtered {
 			if app.ReportPath == selectedReportPath {
 				reloaded.cursor = i
 				reloaded.adjustScroll()
 				return reloaded
 			}
-			continue
 		}
-		if data.HasTrackerIdentity(selectedApp) && data.SameTrackerRow(app, selectedApp) {
-			reloaded.cursor = i
+	} else if data.HasTrackerIdentity(selectedApp) {
+		matches := []int{}
+		for i, app := range reloaded.filtered {
+			if data.SameTrackerRow(app, selectedApp) {
+				matches = append(matches, i)
+			}
+		}
+		if len(matches) == 1 {
+			reloaded.cursor = matches[0]
 			reloaded.adjustScroll()
 			return reloaded
 		}
+		// Several rows answer to the selector, so the tracker holds a duplicate
+		// # (#1704). Company and role then decide among exactly those rows, and
+		// only when one of them matches — never across the whole table, which
+		// is how the cursor used to reach an unrelated row carrying the same #.
+		if len(matches) > 1 {
+			narrowed := -1
+			for _, i := range matches {
+				if reloaded.filtered[i].Company != selectedCompany || reloaded.filtered[i].Role != selectedRole {
+					continue
+				}
+				if narrowed >= 0 {
+					narrowed = -1
+					break
+				}
+				narrowed = i
+			}
+			if narrowed >= 0 {
+				reloaded.cursor = narrowed
+				reloaded.adjustScroll()
+				return reloaded
+			}
+		}
 	}
 	// Then company and role, which is all a row with neither a report link nor a
-	// usable # has — and still better than an index into a re-sorted table.
-	if selectedReportPath == "" {
+	// usable # has — and still better than an index into a re-sorted table. A row
+	// that HAS an identity is deliberately excluded: if its own row is gone from
+	// the filtered list, a sibling sharing its company and role is a different
+	// opening, and the cursor is what a retry after a partial save writes to.
+	if selectedReportPath == "" && !data.HasTrackerIdentity(selectedApp) {
 		for i, app := range reloaded.filtered {
 			if app.Company == selectedCompany && app.Role == selectedRole {
 				reloaded.cursor = i
