@@ -84,7 +84,7 @@ import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHis
 import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, canonicalizeKnownPostingUrl } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, canonicalizeKnownPostingUrl, googleCareersJobId } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
@@ -3024,13 +3024,17 @@ export const ANY_REQUISITION = '*';
  *   from the file. Forms read from a URL or from text must contain a digit;
  * - a Workday URL, via `workdayDedupKey` (the same parse the provider uses for
  *   cross-site dedupe, #3439, including its `-N` repost-suffix stripping);
+ * - a Google Careers URL, via `googleCareersJobId` (url-key.mjs): the job id in
+ *   the path is Google's only identifier for an opening, so it is read the way
+ *   a Workday id is;
  * - labelled free text (tracker Notes, a posting title) via the tracker's own
  *   `extractReqNumber`, the vocabulary merge-tracker.mjs already relies on to
  *   keep same-title rows apart (#1524).
  *
  * Only these explicit forms count. A generic board's numeric posting ID is not
  * read: a repost gets a new one, and treating it as a requisition would disable
- * the company+role key it is layered on.
+ * the company+role key it is layered on. Google is the exception because its id
+ * is the only thing that tells two same-titled openings in one city apart.
  *
  * A labelled ID with a trailing `-N` is ambiguous. On Workday the suffix is a
  * cross-site repost disambiguator and `JR25919-1` IS JR25919 (the URL path
@@ -3069,6 +3073,12 @@ export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
   const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
+  // Google Careers has no requisition field: the job id in the URL path is the
+  // posting's only identifier. Without it a second Google opening with the same
+  // title and city (another team, or a re-listing under a new id) matched the
+  // first one's company+role key and was dropped as a duplicate for good.
+  const googleId = googleCareersJobId(url);
+  if (googleId) return [googleId];
   let raws;
   if (workdayKey) {
     // `workday:{hostname}:{reqId}` — a hostname has no colon, so the ID is
