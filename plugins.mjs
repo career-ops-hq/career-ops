@@ -739,18 +739,19 @@ function cmdRemove(args) {
   if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
   const id = resolved.manifest.id;
   if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
-  // A torn lock throws from removeLockEntry. Checking it after the directory
-  // is gone skips the disable step and reports failure for a plugin that is
-  // already deleted.
+  // The lock entry goes before the folder. With the folder deleted first, a
+  // torn lock or a failed lock save left a pin for a plugin whose manifest was
+  // already gone, and a second remove could no longer find it to finish the
+  // job. Nothing has changed when this fails, and removeLockEntry is a no-op
+  // for a missing entry, so remove can always be run again.
   try {
-    readLockForUpdate(DATA_ROOT, ROOT);
+    removeLockEntry(DATA_ROOT, id, ROOT);
   } catch (err) {
     console.error(`✗ ${err.message}`);
     process.exit(1);
   }
   const dir = path.join(DATA_ROOT, 'plugins.local', id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  removeLockEntry(DATA_ROOT, id, ROOT);
   // The files and the lock entry are already gone, so a config problem must not
   // fail the command — but it must not be invisible either. This catch used to
   // swallow nothing worth seeing; now it can catch a real, actionable one, and
@@ -808,11 +809,20 @@ async function cmdAdd(args) {
   try { installed = installFromRepo(DATA_ROOT, { url, sha: useSha }); }
   catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
 
-  writeLockEntry(DATA_ROOT, installed.id, {
-    source: 'local', repo: installed.repo, sha: installed.sha,
-    version: installed.manifest.version || '0.0.0', integrity: installed.integrity, files: installed.files,
-    consent: consentSurface(installed.manifest),
-  }, ROOT);
+  // installFromRepo refuses an existing plugins.local/<id>, so this folder is
+  // the clone made just now. Without its pin it cannot load, and it would stop
+  // the next add at "already exists": take it back out so add can run again.
+  try {
+    writeLockEntry(DATA_ROOT, installed.id, {
+      source: 'local', repo: installed.repo, sha: installed.sha,
+      version: installed.manifest.version || '0.0.0', integrity: installed.integrity, files: installed.files,
+      consent: consentSurface(installed.manifest),
+    }, ROOT);
+  } catch (err) {
+    rmSync(installed.manifest.dir, { recursive: true, force: true });
+    console.error(`✗ ${installed.id} was not installed: its pin could not be written (${err.message})`);
+    process.exit(1);
+  }
   console.log(`✓ Installed plugins.local/${installed.id}  (${approved ? '✓ approved' : '❓ unverified'}, pinned ${String(useSha).slice(0, 7)})`);
   console.log(capabilityCard(installed.manifest, approved ? 'approved' : 'unverified'));
   if (confirm) { setEnabled(installed.id, true); console.log(`\n✅ Enabled.${installed.manifest.requiredEnv.length ? ' Add keys to .env: ' + installed.manifest.requiredEnv.join(', ') : ''}`); }

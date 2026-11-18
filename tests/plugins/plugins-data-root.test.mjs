@@ -20,7 +20,7 @@ import { dirname, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { ROOT, linkNodeModules } from '../helpers.mjs';
-import { describeSpawn } from '../helpers/describe-spawn.mjs';
+import { describeSpawn, exitedNonZero } from '../helpers/describe-spawn.mjs';
 import {
   pluginRoots,
   resolveSuccessorIds,
@@ -525,6 +525,112 @@ test('CLI commands (new, enable, trust, remove) in plugins.mjs respect CAREER_OP
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
     rmSync(checkout, { recursive: true, force: true, maxRetries: 10 });
+  }
+});
+
+// Fails the plugins.lock save inside the CLI process (FAIL_LOCK_SAVE), the
+// way add-entry-concurrent.test.mjs pauses its child: a read-only folder would
+// do the same on POSIX, but Windows ignores chmod. It also stands in for git
+// (FAKE_CLONE_SRC), since safeClone refuses local remotes by design and a
+// test must not need the network.
+function writeCliPreload(dir) {
+  const preload = join(dir, 'preload.mjs');
+  writeFileSync(preload, `import fs from 'node:fs';
+import cp from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+const rename = fs.renameSync;
+fs.renameSync = function(from, to) {
+  if (process.env.FAIL_LOCK_SAVE && String(to).endsWith('plugins.lock')) {
+    throw Object.assign(new Error('EACCES: permission denied (injected)'), { code: 'EACCES' });
+  }
+  return rename.call(this, from, to);
+};
+const execFile = cp.execFileSync;
+cp.execFileSync = function(file, args = [], ...rest) {
+  if (file !== 'git' || !process.env.FAKE_CLONE_SRC) return execFile.call(this, file, args, ...rest);
+  const at = args.indexOf('-C');
+  if (at !== -1 && args[at + 2] === 'checkout') fs.cpSync(process.env.FAKE_CLONE_SRC, args[at + 1], { recursive: true });
+  return Buffer.alloc(0);
+};
+syncBuiltinESMExports();
+`);
+  return preload;
+}
+
+function cliFixture(prefix) {
+  const dataRoot = makeSandbox(`co-test-${prefix}-data-`);
+  const tools = makeSandbox(`co-test-${prefix}-tools-`);
+  const checkout = disposableCheckout();
+  mkdirSync(join(dataRoot, 'config'), { recursive: true });
+  mkdirSync(join(dataRoot, 'data'), { recursive: true });
+  writeFileSync(join(dataRoot, 'data', 'applications.md'), '# Applications\n');
+  writeFileSync(join(dataRoot, 'data', 'pipeline.md'), '# Pipeline\n');
+  const preload = writeCliPreload(tools);
+  const run = (args, env = {}) => {
+    const r = spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, join(checkout, 'plugins.mjs'), ...args], {
+      cwd: checkout,
+      encoding: 'utf-8',
+      timeout: 30_000,
+      env: { ...process.env, CAREER_OPS_ROOT: dataRoot, NO_COLOR: '1', ...env },
+    });
+    assert.equal(r.error, undefined, describeSpawn(r, args.join(' ')));
+    return r;
+  };
+  const cleanup = () => {
+    rmSync(dataRoot, { recursive: true, force: true });
+    rmSync(tools, { recursive: true, force: true });
+    rmSync(checkout, { recursive: true, force: true, maxRetries: 10 });
+  };
+  return { dataRoot, tools, run, cleanup };
+}
+
+test('remove keeps the folder and its pin when the lock save fails, so a second remove finishes', () => {
+  const { dataRoot, run, cleanup } = cliFixture('remove-retry');
+  try {
+    const { dir } = writePlugin(join(dataRoot, 'plugins.local'), 'retry-plug');
+    const tree = hashPluginTree(dir);
+    writeLockEntry(dataRoot, 'retry-plug', {
+      source: 'local', version: '1.0.0', integrity: tree.integrity, files: tree.files,
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+
+    const failed = run(['remove', 'retry-plug'], { FAIL_LOCK_SAVE: '1' });
+    assert.ok(exitedNonZero(failed), describeSpawn(failed, 'remove with a failing lock save'));
+    assert.match(failed.stderr, /EACCES/);
+    assert.equal(existsSync(join(dir, 'manifest.json')), true, 'the folder must survive, or a second remove cannot find the plugin');
+    assert.ok(readLock(dataRoot).plugins['retry-plug'], 'the pin must survive a failed save');
+
+    const retried = run(['remove', 'retry-plug']);
+    assert.equal(retried.status, 0, describeSpawn(retried, 'remove retry'));
+    assert.equal(existsSync(dir), false);
+    assert.equal(readLock(dataRoot).plugins['retry-plug'], undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test('add takes the fresh clone back out when its pin cannot be written, so add can run again', () => {
+  const { dataRoot, tools, run, cleanup } = cliFixture('add-pin');
+  try {
+    const { dir: src } = writePlugin(join(tools, 'src'), 'pinfail');
+    writeFileSync(join(src, 'README.md'), '# pinfail\n');
+    writeFileSync(join(src, 'LICENSE'), 'MIT\n');
+    const sha = 'a'.repeat(40);
+    const args = ['add', 'someone/career-ops-plugin-pinfail', '--sha', sha];
+    const installed = join(dataRoot, 'plugins.local', 'pinfail');
+
+    const failed = run(args, { FAKE_CLONE_SRC: src, FAIL_LOCK_SAVE: '1' });
+    assert.ok(exitedNonZero(failed), describeSpawn(failed, 'add with a failing pin write'));
+    assert.match(failed.stderr, /pinfail was not installed/);
+    assert.equal(existsSync(installed), false, 'a clone with no pin must not stay installed');
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false);
+
+    const retried = run(args, { FAKE_CLONE_SRC: src });
+    assert.equal(retried.status, 0, describeSpawn(retried, 'add retry'));
+    assert.equal(existsSync(join(installed, 'manifest.json')), true);
+    assert.equal(readLock(dataRoot).plugins.pinfail.sha, sha);
+  } finally {
+    cleanup();
   }
 });
 

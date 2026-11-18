@@ -174,7 +174,11 @@ export function readLockForUpdate(dataRoot, root = dataRoot) {
     if (legacy === 'error') throw unreadable(fallback);
     if (legacy === 'present') file = fallback;
   }
-  if (fileState(file) !== 'present') return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  // Only an absent file is an empty lock. An unreadable one here would drop
+  // a stale pin's drift check, the same reason the probes above throw.
+  const state = fileState(file);
+  if (state === 'error') throw unreadable(file);
+  if (state !== 'present') return { lockfileVersion: LOCK_VERSION, plugins: {} };
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'));
