@@ -59,6 +59,7 @@ const SUITES = {
   "cv-preview-lines": { url: "CV_PREVIEW_LINES_TEST_URL", fixture: "blank" },
   "cv-studio-keep": { url: "CV_STUDIO_KEEP_TEST_URL", root: "CV_STUDIO_KEEP_TEST_ROOT", fixture: "cv-studio" },
   "cv-studio-preview": { url: "CV_STUDIO_PREVIEW_TEST_URL", fixture: "cv-studio-preview" },
+  "cv-studio-restore-move": { url: "CV_STUDIO_RESTORE_TEST_URL", root: "CV_STUDIO_RESTORE_TEST_ROOT", fixture: "cv-studio-restore" },
   "cv-studio-undo": { url: "CV_STUDIO_UNDO_TEST_URL", root: "CV_STUDIO_UNDO_TEST_ROOT", fixture: "cv-studio" },
   "cv-upload": { url: "CV_UPLOAD_TEST_URL", root: "CV_UPLOAD_TEST_ROOT", fixture: "cv-upload" },
   "dialog-focus": { url: "DIALOG_FOCUS_TEST_URL", fixture: "pipeline-status" },
