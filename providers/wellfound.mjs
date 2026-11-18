@@ -50,8 +50,10 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // cache would return foreign jobs.
 //
 // Both lists paginate with ?page=N, 20 per page. A board page past
-// `pageCount` answers 303 to page 1, so the walk stops at `pageCount`; a 303
-// on a later page means the list shrank during the walk and ends it. On page
+// `pageCount` answers 303 to page 1, so the walk stops at `pageCount`. A later
+// page is requested with redirect: 'manual': that 303 means the list shrank
+// during the walk and ends it, and any other redirect leaves the result
+// partial. A later page that is not a results page does too. On page
 // 1 a 303 or a 404 means a slug Wellfound does not know: an unknown role or
 // location in a combined form redirects to a broader page instead of failing,
 // so it is reported as a configuration error, never read as a result.
@@ -85,7 +87,8 @@ const BOARD_DEFAULT_MAX_PAGES = 10;
 const BOARD_MAX_PAGES_CAP = 250;
 const DEFAULT_MAX_COMPANIES = 25;
 const MAX_COMPANIES_CAP = 100;
-// One request per filter combination and page, so the combinations are capped.
+// Search URLs (filter combinations) per board entry; each one is walked up to
+// max_pages.
 const MAX_BOARD_URLS = 20;
 // No Crawl-delay in robots.txt and no throttling observed.
 const INTER_REQUEST_DELAY_MS = 250;
@@ -414,7 +417,7 @@ export function resolveBoardConfig(entry) {
     for (const r of roles) urls.push({ path: `/role/r/${enc(r)}`, label: `remote role "${r}"` });
   }
   if (urls.length > MAX_BOARD_URLS) {
-    throw new Error(`wellfound: ${name} — ${urls.length} board pages to read; at most ${MAX_BOARD_URLS} (fewer roles x locations, or split the entry)`);
+    throw new Error(`wellfound: ${name} — ${urls.length} search URLs; at most ${MAX_BOARD_URLS} (fewer roles x locations, or split the entry)`);
   }
   return { urls, maxCompanies };
 }
@@ -439,6 +442,26 @@ function isSlugError(err) {
   return isRefusedRedirectError(err) || /** @type {any} */ (err)?.status === 404;
 }
 
+/** @typedef {'complete' | 'cap' | 'fetch-error' | 'unrecognised-page'} StopReason */
+
+/**
+ * Whether a refused redirect on a later board page is the 303 a page past
+ * the end answers: back to page 1 of the same search, with no query.
+ * @param {unknown} err  a ctx.fetchText rejection under redirect: 'manual'
+ * @param {string} path  the search path the page belongs to
+ */
+export function isPastEndRedirect(err, path) {
+  const e = /** @type {any} */ (err);
+  if (e?.status !== 303 || typeof e.location !== 'string') return false;
+  let target;
+  try {
+    target = new URL(e.location, ORIGIN);
+  } catch {
+    return false;
+  }
+  return target.origin === ORIGIN && target.pathname === path && target.search === '';
+}
+
 /**
  * A configuration error for a wrong slug, keeping the HTTP status for
  * verify-portals.
@@ -461,7 +484,7 @@ function slugError(message, err) {
  * @param {string} name  the entry name, for messages and as fallback company name
  * @param {number} maxPages  entry page budget
  * @param {number} ctxCap  ctx.maxPages, or Infinity
- * @returns {Promise<{jobs: any[], stopReason: 'complete' | 'cap' | 'fetch-error', liveCount: number | null, rawTotal: number}>}
+ * @returns {Promise<{jobs: any[], stopReason: StopReason, liveCount: number | null, rawTotal: number}>}
  */
 async function walkCompany(ctx, pace, slug, name, maxPages, ctxCap) {
   const pages = Math.min(maxPages, ctxCap);
@@ -471,7 +494,7 @@ async function walkCompany(ctx, pace, slug, name, maxPages, ctxCap) {
   let lastRaw = 0;
   let total = null;
   let page = 1;
-  /** @type {'complete' | 'cap' | 'fetch-error'} */
+  /** @type {StopReason} */
   let stopReason = 'complete';
   for (; page <= pages; page++) {
     // The slug matches SLUG_RE (safe path characters), so it needs no encoding.
@@ -491,7 +514,18 @@ async function walkCompany(ctx, pace, slug, name, maxPages, ctxCap) {
       stopReason = 'fetch-error';
       break;
     }
-    const parsed = parseCompanyPage(html, slug, name);
+    let parsed;
+    try {
+      parsed = parseCompanyPage(html, slug, name);
+    } catch (err) {
+      // Page 1 in that shape is a markup change; a later page in it (a
+      // challenge or error page answered with 200) ends the walk with the
+      // pages already read.
+      if (page === 1 || ctxCap !== Infinity) throw err;
+      console.error(`⚠️  wellfound: ${name} — company "${slug}" truncated at page ${page} (${jobs.length} jobs): ${errText(err)}`);
+      stopReason = 'unrecognised-page';
+      break;
+    }
     if (page === 1) {
       liveCount = parsed.liveCount;
       total = parsed.totalPageCount;
@@ -518,8 +552,8 @@ async function fetchCompany(entry, ctx, slug, pace, ctxCap) {
   if (stopReason === 'cap') {
     console.error(`⚠️  wellfound: ${name} truncated at max_pages=${maxPages} (${jobs.length}${liveCount !== null ? ` of ${liveCount}` : ''} jobs) — raise max_pages on this entry for more`);
     markTruncated(jobs, 'page-cap', { fetched: jobs.length, ...(liveCount !== null ? { total: liveCount } : {}) });
-  } else if (stopReason === 'fetch-error') {
-    markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+  } else if (stopReason !== 'complete') {
+    markTruncated(jobs, stopReason, { fetched: jobs.length });
   } else if (ctxCap === Infinity && liveCount !== null && rawTotal < liveCount) {
     console.error(`⚠️  wellfound: ${name} — read ${rawTotal} of the ${liveCount} jobs the company page counts`);
   }
@@ -554,26 +588,38 @@ async function fetchBoard(entry, ctx, pace, ctxCap) {
     let lastRawCompanies = 0;
     const atLimit = [];
     let page = 1;
+    /** @type {StopReason} */
     let stopped = 'complete';
     for (; page <= pages; page++) {
       const url = `${ORIGIN}${path}${page > 1 ? `?page=${page}` : ''}`;
       await pace();
       let html;
       try {
-        html = await fetchTextWithRetry(ctx, url, { redirect: 'error' });
+        // Past page 1 the redirect is inspected, never followed: the 303 a
+        // page past the end answers must be told apart from any other one.
+        html = await fetchTextWithRetry(ctx, url, { redirect: page > 1 ? 'manual' : 'error' });
       } catch (err) {
         if (page === 1 && isSlugError(err)) {
           throw slugError(`wellfound: ${name} — ${path} (${label}) is not a Wellfound search page; check the slugs`, err);
         }
-        // Past page 1, a refused redirect is the 303 a page past the end
-        // answers: the list shrank while it was read.
-        if (isRefusedRedirectError(err)) break;
+        // The list shrank while it was read: this page is past its end now.
+        if (page > 1 && isPastEndRedirect(err, path)) break;
         if (probing || jobs.length === 0) throw err;
         console.error(`⚠️  wellfound: ${name} — ${label} truncated at page ${page} (${jobs.length} jobs so far): ${errText(err)}`);
         stopped = 'fetch-error';
         break;
       }
-      const parsed = parseBoardPage(html, `${name} ${path}`);
+      let parsed;
+      try {
+        parsed = parseBoardPage(html, `${name} ${path}`);
+      } catch (err) {
+        // Page 1 in that shape is a markup change; a later page in it ends
+        // the walk with the pages already read.
+        if (page === 1 || probing) throw err;
+        console.error(`⚠️  wellfound: ${name} — ${label} truncated at page ${page} (${jobs.length} jobs so far): ${errText(err)}`);
+        stopped = 'unrecognised-page';
+        break;
+      }
       if (page === 1) {
         total = parsed.totalJobCount;
         pageCount = parsed.pageCount;
@@ -590,8 +636,7 @@ async function fetchBoard(entry, ctx, pace, ctxCap) {
       stopped = 'cap';
       console.error(`⚠️  wellfound: ${name} — ${label} truncated at max_pages=${maxPages}${pageCount !== null ? ` of ${pageCount} pages` : ''} — raise max_pages on this entry, or narrow the roles and locations`);
     }
-    if (stopped === 'cap') partialReason ??= 'page-cap';
-    if (stopped === 'fetch-error') partialReason ??= 'fetch-error';
+    if (stopped !== 'complete') partialReason ??= stopped === 'cap' ? 'page-cap' : stopped;
     if (total !== null && shown < total) {
       for (const c of atLimit) if (!expand.has(c.slug)) expand.set(c.slug, c);
     }
@@ -612,7 +657,7 @@ async function fetchBoard(entry, ctx, pace, ctxCap) {
       partialReason ??= 'fetch-error';
       continue;
     }
-    if (result.stopReason !== 'complete') partialReason ??= result.stopReason === 'cap' ? 'page-cap' : 'fetch-error';
+    if (result.stopReason !== 'complete') partialReason ??= result.stopReason === 'cap' ? 'page-cap' : result.stopReason;
     for (const job of result.jobs) add(job);
   }
 

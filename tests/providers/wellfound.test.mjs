@@ -16,7 +16,7 @@ const mod = await import(pathToFileURL(join(ROOT, 'providers/wellfound.mjs')).hr
 const wf = mod.default;
 const {
   companySlugFromUrl, wellfoundListingIdentity, parseCompensation, formatLocation,
-  extractApolloState, parseCompanyPage, parseBoardPage, resolveBoardConfig, workplaceTypeOf,
+  extractApolloState, parseCompanyPage, parseBoardPage, resolveBoardConfig, workplaceTypeOf, isPastEndRedirect,
 } = mod;
 const { isOfferSeen, markOfferSeen, listingIdentityToken } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
 
@@ -126,7 +126,10 @@ const fullBoardCompanies = (start) => Array.from({ length: 20 }, (_, i) => ({
   slug: `co-${start + i}`, name: `Co ${start + i}`, jobs: [result(start + i)],
 }));
 
+// What ctx.fetchText throws for a 3xx under redirect: 'error' (refused) and
+// under redirect: 'manual' (inspected: status and Location kept).
 const redirectError = () => new TypeError('fetch failed', { cause: new Error('unexpected redirect') });
+const manualRedirect = (status, location) => Object.assign(new Error(`HTTP ${status}`), { status, location });
 const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
 
 /** A ctx whose fetchText answers from `route(url, n)`; records every call. */
@@ -420,6 +423,21 @@ try {
       `n=${out?.length} trunc=${JSON.stringify(out?.truncated)} lines=${lines}`);
   }
   {
+    // A later page that is not a jobs page (200, no __NEXT_DATA__): page 1 is
+    // kept, for a tracked company and for a company the board expands.
+    const route = (url) => (url.includes('page=2')
+      ? '<html><body>Just a moment...</body></html>'
+      : companyPage({ totalPageCount: 3, jobs: Array.from({ length: 20 }, (_, i) => listing(100 + i)) }));
+    const { value: out, error } = await captureErrors(() => wf.fetch(companyEntry, makeCtx(route)));
+    const board = boardPage({ total: 30, companies: [{ slug: 'acme', name: 'Acme', jobs: [result(100), result(101), result(102)] }] });
+    const { value: boardOut } = await captureErrors(() => wf.fetch(boardEntry({ roles: ['qa-engineer'] }),
+      makeCtx((url) => (url.includes('/company/') ? route(url) : board))));
+    check(!error && out?.length === 20 && out.truncated?.reason === 'unrecognised-page'
+      && boardOut?.length === 20 && boardOut.truncated?.reason === 'unrecognised-page',
+      'company page: an unparseable later page keeps the pages read and marks unrecognised-page, also when the board expands the company',
+      `error=${error?.message} n=${out?.length} trunc=${JSON.stringify(out?.truncated)} board=${boardOut?.length} ${JSON.stringify(boardOut?.truncated)}`);
+  }
+  {
     const ctx = makeCtx(() => companyPage({ totalPageCount: 1, live: 5, jobs: [listing(1), listing(2)] }));
     const { lines } = await captureErrors(() => wf.fetch(companyEntry, ctx));
     check(lines.some((l) => /read 2 of the 5 jobs/.test(l)), 'fewer jobs than liveJobListingsCount warns and does not fail', lines.join(' | '));
@@ -504,15 +522,58 @@ try {
       return boardPage({ total: 60, pageCount: 3, companies: fullBoardCompanies(n * 100) });
     });
     const out = await wf.fetch(boardEntry({ roles: ['qa-engineer'] }), ctx);
-    check(ctx.calls.length === 3 && ctx.calls[2].url === 'https://wellfound.com/role/qa-engineer?page=3' && out.length === 60,
-      'board pages: ?page=2…pageCount, never past it', `calls=${ctx.calls.map((c) => c.url)} n=${out.length}`);
+    check(ctx.calls.length === 3 && ctx.calls[2].url === 'https://wellfound.com/role/qa-engineer?page=3' && out.length === 60
+      && ctx.calls.map((c) => c.opts?.redirect).join(',') === 'error,manual,manual',
+      'board pages: ?page=2…pageCount, never past it; pages after the first inspect a redirect instead of refusing it',
+      `calls=${ctx.calls.map((c) => `${c.url} ${c.opts?.redirect}`)} n=${out.length}`);
   }
   {
-    // pageCount shrank during the walk: page 2 answers 303 (a refused redirect).
-    const ctx = makeCtx((url) => (url.includes('page=2') ? redirectError() : boardPage({ total: 40, pageCount: 2, companies: fullBoardCompanies(100) })));
+    const path = '/role/l/qa-engineer/germany';
+    const yes = [manualRedirect(303, `https://wellfound.com${path}`), manualRedirect(303, path)];
+    const no = [
+      manualRedirect(302, `https://wellfound.com${path}`),
+      manualRedirect(303, `https://wellfound.com${path}?page=1`),
+      manualRedirect(303, 'https://wellfound.com/login'),
+      manualRedirect(303, `https://evil.example${path}`),
+      manualRedirect(303, null),
+      redirectError(),
+      httpError(500),
+    ];
+    check(yes.every((e) => isPastEndRedirect(e, path)) && no.every((e) => !isPastEndRedirect(e, path)),
+      'isPastEndRedirect(): only a 303 back to page 1 of the same search on wellfound.com',
+      JSON.stringify({ yes: yes.map((e) => isPastEndRedirect(e, path)), no: no.map((e) => isPastEndRedirect(e, path)) }));
+  }
+  {
+    // pageCount shrank during the walk: page 2 answers 303 back to page 1.
+    const ctx = makeCtx((url) => (url.includes('page=2')
+      ? manualRedirect(303, 'https://wellfound.com/role/qa-engineer')
+      : boardPage({ total: 40, pageCount: 2, companies: fullBoardCompanies(100) })));
     const { value: out, lines } = await captureErrors(() => wf.fetch(boardEntry({ roles: ['qa-engineer'] }), ctx));
     check(out?.length === 20 && out.truncated === undefined && lines.length === 0,
-      'board: a 303 on a later page ends the walk as complete (the list shrank)', `n=${out?.length} trunc=${JSON.stringify(out?.truncated)} lines=${lines}`);
+      'board: a 303 back to page 1 on a later page ends the walk as complete (the list shrank)', `n=${out?.length} trunc=${JSON.stringify(out?.truncated)} lines=${lines}`);
+  }
+  {
+    // Any other redirect on a later page leaves the result partial.
+    const ctx = makeCtx((url) => (url.includes('page=2')
+      ? manualRedirect(302, 'https://wellfound.com/login')
+      : boardPage({ total: 40, pageCount: 2, companies: fullBoardCompanies(100) })));
+    const { value: out, lines } = await captureErrors(() => wf.fetch(boardEntry({ roles: ['qa-engineer'] }), ctx));
+    check(out?.length === 20 && out.truncated?.reason === 'fetch-error' && lines.some((l) => /truncated at page 2/.test(l)),
+      'board: another redirect on a later page keeps page 1 and marks fetch-error', `n=${out?.length} trunc=${JSON.stringify(out?.truncated)}`);
+  }
+  {
+    // A later page that is not a results page (200, no __NEXT_DATA__).
+    const ctx = makeCtx((url) => (url.includes('page=2')
+      ? '<html><body>Just a moment...</body></html>'
+      : boardPage({ total: 40, pageCount: 2, companies: fullBoardCompanies(100) })));
+    const { value: out, error } = await captureErrors(() => wf.fetch(boardEntry({ roles: ['qa-engineer'] }), ctx));
+    let firstPageError = null;
+    try {
+      await wf.fetch(boardEntry({ roles: ['qa-engineer'] }), makeCtx(() => '<html>no data</html>'));
+    } catch (err) { firstPageError = err; }
+    check(!error && out?.length === 20 && out.truncated?.reason === 'unrecognised-page' && /__NEXT_DATA__/.test(firstPageError?.message),
+      'board: an unparseable later page keeps the pages read and marks unrecognised-page; an unparseable first page throws',
+      `error=${error?.message} n=${out?.length} trunc=${JSON.stringify(out?.truncated)} first=${firstPageError?.message}`);
   }
   {
     const errs = [];

@@ -319,6 +319,6 @@ Startup jobs. The provider reads Wellfound in two ways: the jobs page of one com
 
 **Rule 5 (aggregation stays in core).** The provider reads only wellfound.com.
 
-**Rule 6 (read what is public).** No page needs a login, and no request got a CAPTCHA. career-ops' default User-Agent gets the same pages as a browser. `robots.txt` (checked 2026-11-12) has only a `User-agent: *` group and no `Crawl-delay`, and disallows none of the paths the provider reads (`/company/<slug>/jobs`, `/role/…`, `/location/…`). The provider waits 250 ms between requests and bounds them with `max_pages`, `wellfound.max_companies` and at most 20 search pages per entry.
+**Rule 6 (read what is public).** No page needs a login, and no request got a CAPTCHA. career-ops' default User-Agent gets the same pages as a browser. `robots.txt` (checked 2026-11-12) has only a `User-agent: *` group and no `Crawl-delay`, and disallows none of the paths the provider reads (`/company/<slug>/jobs`, `/role/…`, `/location/…`). The provider waits 250 ms between requests and bounds them with at most 20 search URLs per entry, each read up to `max_pages`, and with `wellfound.max_companies`.
 
 **Not in this PR.** AGENTS.md ("Aggregator Listings — Confirm at the Employer") names Wellfound, and a job with no `atsSource` may exist only on Wellfound. The maintainers chose a separate PR for that rule and for passing `atsSource` on with each job (#4903).
