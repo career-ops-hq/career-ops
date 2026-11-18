@@ -11,7 +11,7 @@ These files contain your personal data, customizations, and work product. Update
 | `.career-ops-web/chats/*.json` | Local assistant conversation history (gitignored, not verified profile facts); only the chat API writes these files |
 | `.career-ops-web/cv-studio/*.json` | Your CV Studio edits to a tailored CV, one file per report number (gitignored); only the CV Studio API writes these files |
 | `cv.md` | Your CV in markdown |
-| `config/profile.yml` | Your identity, targets, comp range |
+| `config/profile.yml` | Your identity, targets, comp range. Its `re_apply_windows` section is also written by `set-status.mjs --cooldown-days` (a row moved to Rejected): a text edit of that one company's block that keeps every other line and comment, and refuses rather than rewrites a shape it cannot place |
 | `config/cv-facts.json` | Your CV fact-check allowlist and forbidden phrases |
 | `config/benchmarks.yml` | Your market calibration benchmark overrides (optional; copy `templates/benchmarks.yml` here and edit — read by `funnel-velocity.mjs`) |
 | `config/local-paths.txt` | Files *this clone* owns that upstream does not ship — one repo-relative path per line (optional; copy `config/local-paths.example.txt` here and edit). See [Fork-local paths](#fork-local-paths) below |

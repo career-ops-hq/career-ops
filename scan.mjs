@@ -78,6 +78,7 @@ import { compileKeyword, compilePositiveKeyword, compileContentKeyword, buildTit
 import { flagValue, hasFlag, validateFlags } from './lib/cli-flags.mjs';
 import { withPortalHealthLock } from './portal-health-lock.mjs';
 import { localToday } from './lib/local-today.mjs';
+import { addDays, windowStart } from './lib/reapply-windows.mjs';
 import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHistoryLine, parsedScanHistory, scanHistoryDataLines } from './lib/scan-history-columns.mjs';
@@ -1670,11 +1671,10 @@ export function companyMatch(jobCompany, windowCompany) {
   return bounded(c2WithSpaces).test(c1WithSpaces) || bounded(c1WithSpaces).test(c2WithSpaces);
 }
 
-export function addDays(dateStr, days) {
-  const date = new Date(`${dateStr}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
+// addDays lives with the rest of the re-apply window logic, which
+// set-status.mjs and precheck-duplicate.mjs share; re-exported for callers
+// and tests that import it from here.
+export { addDays };
 
 // Reads config/profile.yml's `location.country` (already a documented
 // profile field — see config/profile.example.yml) for the country-
@@ -1724,9 +1724,8 @@ export function loadReApplyWindows(profilePath = PROFILE_PATH) {
     const validWindows = {};
     for (const [company, win] of Object.entries(windows)) {
       if (!win || typeof win !== 'object') continue;
-      const lastApplyDate = win.last_apply_date;
-      if (typeof lastApplyDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(lastApplyDate)) continue;
-      if (isNaN(Date.parse(lastApplyDate))) continue;
+      // cooldown_from (the decision date) or the original last_apply_date.
+      if (!windowStart(win)) continue;
 
       const sameRoleDays = win.same_role_days;
       if (sameRoleDays !== undefined && (!Number.isInteger(sameRoleDays) || sameRoleDays < 0)) continue;
@@ -1735,6 +1734,7 @@ export function loadReApplyWindows(profilePath = PROFILE_PATH) {
       if (win.applied_to !== undefined && win.applied_to.some(x => typeof x !== 'string')) continue;
 
       if (win.cross_role_bucket !== undefined && typeof win.cross_role_bucket !== 'string') continue;
+      if (win.scope !== undefined && win.scope !== 'role' && win.scope !== 'company') continue;
 
       validWindows[company] = win;
     }
@@ -1757,13 +1757,18 @@ export function buildCooldownFilter(windows, today) {
 
     for (const [windowCompany, window] of Object.entries(windows)) {
       if (companyMatch(jobCompany, windowCompany)) {
-        const lastApplyDate = window.last_apply_date;
+        const start = windowStart(window);
         const sameRoleDays = Number(window.same_role_days || 0);
-        if (!lastApplyDate) continue;
+        if (!start) continue;
 
-        const cooldownUntil = addDays(lastApplyDate, sameRoleDays);
+        const cooldownUntil = addDays(start, sameRoleDays);
         if (today >= cooldownUntil) {
           continue;
+        }
+
+        // A company-wide cooldown: every role there waits out the window.
+        if (window.scope === 'company') {
+          return { skip: true, reason: `cooldown:${windowCompany}:${cooldownUntil}`, cooldownUntil };
         }
 
         if (Array.isArray(window.applied_to)) {

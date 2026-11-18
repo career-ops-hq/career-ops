@@ -128,7 +128,9 @@ import {
 import { getCareerOpsRoot, resolveTrackerPathForWrite } from './path-resolver.mjs';
 import {
   claimStatusActivity, appendStatusTransition, statusLogPath, seedFollowupOnApplied, archiveJdOnInterview,
+  recordCooldownOnRejected,
 } from './lib/status-hooks.mjs';
+import { COOLDOWN_SCOPES, MAX_COOLDOWN_DAYS } from './lib/reapply-windows.mjs';
 import { parseStatusLog, replayObservations } from './funnel-velocity.mjs';
 
 // Two roots. CODE_ROOT holds templates/states.yml, which ships with the code;
@@ -188,6 +190,12 @@ const USAGE = `Usage: node set-status.mjs <tracker#|company> <state> [--note "..
   --detach-jd-archive  On a transition into Interview, start the JD archive in the
                      background instead of waiting for it (used by the web UI
                      and the dashboard, whose status calls time out at 30s)
+  --cooldown-days N  With Rejected only: record a re-apply cooldown of N days in
+                     config/profile.yml re_apply_windows, counted from the
+                     rejection date (--on, else today). scan.mjs skips postings
+                     inside it; precheck-duplicate.mjs warns. 0 records nothing
+  --cooldown-scope role|company  With --cooldown-days: role (default) covers this
+                     role's title; company covers every role at the company
   --json             Machine-readable output on stdout (errors included)
 
   Tracker row IDs and report IDs are separate counters that diverge permanently
@@ -198,6 +206,7 @@ Examples:
   node set-status.mjs --report 12 Applied
   node set-status.mjs --report 12 Interview --note "recruiter screen booked"
   node set-status.mjs "Acme Corp" Rejected --on 2026-08-01
+  node set-status.mjs --row 9 Rejected --cooldown-days 180 --cooldown-scope company
   node set-status.mjs "Acme Corp" Applied --role "Platform Engineer"
   node set-status.mjs --row 7 Discarded --dry-run
   node set-status.mjs --row 7 --undo`;
@@ -238,8 +247,8 @@ function renderStatesSection() {
 
 const rawArgs = process.argv.slice(2);
 const positional = [];
-const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null };
-const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker', '--expect-row': 'expectRow', '--expect-status': 'expectStatus' };
+const flags = { note: null, replaceNote: null, role: null, on: null, row: null, report: null, reportLink: null, source: null, force: false, dryRun: false, undo: false, repairStatusLog: false, repairFollowup: false, detachJdArchive: false, json: false, expectTracker: null, expectRow: null, expectStatus: null, cooldownDays: null, cooldownScope: null };
+const VALUE_FLAGS = { '--note': 'note', '--replace-note': 'replaceNote', '--role': 'role', '--on': 'on', '--row': 'row', '--report': 'report', '--report-link': 'reportLink', '--source': 'source', '--expect-tracker': 'expectTracker', '--expect-row': 'expectRow', '--expect-status': 'expectStatus', '--cooldown-days': 'cooldownDays', '--cooldown-scope': 'cooldownScope' };
 
 /**
  * Is the caller asking for help, rather than passing "--help" as a VALUE?
@@ -307,6 +316,12 @@ for (let i = 0; i < rawArgs.length; i++) {
     if ((a === '--expect-tracker' || a === '--expect-row') && (value.length !== 64 || !/^[a-f0-9]{64}$/.test(value))) {
       failUsage(`${a} expects a lowercase SHA-256 hash (64 hex characters)`);
     }
+    if (a === '--cooldown-days' && (!/^\d+$/.test(value) || Number(value) > MAX_COOLDOWN_DAYS)) {
+      failUsage(`--cooldown-days expects a whole number of days from 0 to ${MAX_COOLDOWN_DAYS}, got "${value}"`);
+    }
+    if (a === '--cooldown-scope' && !COOLDOWN_SCOPES.includes(value)) {
+      failUsage(`--cooldown-scope expects one of ${COOLDOWN_SCOPES.join(', ')}, got "${value}"`);
+    }
     flags[VALUE_FLAGS[a]] = value;
     i++;
   }
@@ -328,6 +343,9 @@ if (flags.replaceNote !== null && (!cell(flags.replaceNote) || flags.note === nu
 // --row and --report ARE the selector, so they replace the positional one.
 // Accepting both would leave two competing answers to "which row?"; refuse
 // rather than pick, since picking wrong writes to the wrong application.
+if (flags.cooldownScope !== null && flags.cooldownDays === null) {
+  failUsage('--cooldown-scope needs --cooldown-days');
+}
 if ([flags.row, flags.report, flags.reportLink].filter(value => value !== null).length > 1) {
   failUsage('--row, --report and --report-link are mutually exclusive selectors');
 }
@@ -337,6 +355,7 @@ if (flags.undo) {
   const conflicting = [
     [flags.note !== null, '--note'], [flags.replaceNote !== null, '--replace-note'], [flags.on !== null, '--on'],
     [flags.repairStatusLog, '--repair-status-log'], [flags.repairFollowup, '--repair-followup'],
+    [flags.cooldownDays !== null, '--cooldown-days'], [flags.cooldownScope !== null, '--cooldown-scope'],
   ].filter(([set]) => set).map(([, name]) => name);
   if (conflicting.length) failUsage(`--undo cannot be combined with ${conflicting.join(', ')}`);
   if (positional.length !== (explicitSelector ? 0 : 1)) {
@@ -392,6 +411,11 @@ const requestedStatus = flags.undo ? null : resolveCanonicalState(stateInput, st
 if (!flags.undo && !requestedStatus) {
   const valid = states.map(s => s.label).join(' · ');
   failWith(EXIT_USAGE, 'invalid-state', `"${stateInput}" is not a canonical state. Valid states: ${valid}`);
+}
+// A cooldown is the company's rule after ITS decision, so it rides on Rejected
+// only. Refused before the tracker is touched, like a bad state.
+if (flags.cooldownDays !== null && requestedStatus !== 'Rejected') {
+  failWith(EXIT_USAGE, 'usage', `--cooldown-days applies to Rejected only, not ${requestedStatus}`);
 }
 
 // "14,78" is one argv token. It is not a company, and this command writes one
@@ -1125,6 +1149,26 @@ if (!undone && statusChanged && newStatus === 'Interview' && !flags.dryRun) {
   });
 }
 
+// ── re-apply cooldown on Rejected ───────────────────────────────────
+//
+// Many employers bar a rejected candidate from another interview loop for a
+// period. The moment the candidate learns that is the rejection, so the window
+// is recorded here, next to the status write every caller (CLI, agent modes,
+// web /api/status) already goes through. Opt-in per call (--cooldown-days):
+// cooldowns are company policy, never guessed. Not gated on statusChanged, so
+// re-running on a row that is already Rejected records a window it lacks.
+// Same never-fails-the-status-change policy as the hooks above.
+let cooldownRecorded = null;
+if (!undone && newStatus === 'Rejected' && flags.cooldownDays !== null) {
+  cooldownRecorded = recordCooldownOnRejected(target, {
+    days: Number(flags.cooldownDays),
+    scope: flags.cooldownScope || 'role',
+    date: flags.on || localToday(),
+    dryRun: flags.dryRun,
+  });
+  if (!cooldownRecorded.recorded && cooldownRecorded.error) console.error(`⚠ cooldown not recorded: ${cooldownRecorded.error}`);
+}
+
 // ── report ───────────────────────────────────────────────────────
 
 const result = {
@@ -1147,6 +1191,7 @@ const result = {
   ...(!undone && statusChanged && newStatus === 'Applied' ? { followupSeedCandidate: true } : {}),
   ...(followupSeeded ? { followupSeeded } : {}),
   ...(jdArchiveTriggered ? { jdArchiveTriggered } : {}),
+  ...(cooldownRecorded ? { cooldownRecorded } : {}),
   ...(statusChanged && !flags.dryRun ? { statusLogged } : {}),
   ...(statusLogRepaired ? { statusLogRepaired } : {}),
   ...(statusLogRepair ? { statusLogRepair } : {}),
@@ -1164,6 +1209,10 @@ if (flags.json) {
 } else {
   const verb = undone ? (flags.dryRun ? 'would undo' : 'undid') : flags.dryRun ? 'would set' : changed ? 'set' : 'already';
   console.log(`✅ #${target.num} ${target.company} — ${target.role}: ${verb} ${oldStatus} → ${newStatus}${note ? ` (note: ${note})` : ''}`);
+  if (cooldownRecorded?.until) {
+    const what = cooldownRecorded.scope === 'company' ? 'all roles' : 'this role';
+    console.log(`⏳ ${cooldownRecorded.dryRun ? 'would record' : 'cooldown recorded'}: ${cooldownRecorded.company}, ${what}, eligible again ${cooldownRecorded.until}`);
+  }
   // Only when seeding did NOT happen. The advisory predates the seeding above
   // and asked the user to do by hand what now runs for them; leaving it
   // unconditional would read as a contradiction right under "Follow-up seeded".

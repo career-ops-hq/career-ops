@@ -95,3 +95,8 @@ tracker and writes an atomic receipt in Notes to prevent repeated delivery from
 reapplying the same email. If the row changed during review, review again;
 do not retry with `--force` or remove its receipt. The drop directory follows
 the configured Data Root, and proposals for another tracker are rejected.
+
+After a `Rejected` update is accepted, ask whether that company has a re-apply
+cooldown, and with an answer record it on the now-Rejected row:
+`node set-status.mjs --row <#> Rejected --cooldown-days N [--cooldown-scope company] [--on YYYY-MM-DD]`
+(the status is unchanged; only the window in `config/profile.yml` is written).
