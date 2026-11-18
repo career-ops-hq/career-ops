@@ -245,7 +245,9 @@ console.log('\n🧪 Testing updater git-status path parsing...');
       buf: 'R  modes/new.md\x00modes/old.md\x00',
       want: [
         { code: 'R ', path: 'modes/new.md' },
-        { code: 'R ', path: 'modes/old.md' },
+        // The origin is marked: it alone is gone from the index and the disk,
+        // which a failed update's restore has to put back (a copy's is not).
+        { code: 'R ', path: 'modes/old.md', renameOrigin: true },
       ],
     },
     {
