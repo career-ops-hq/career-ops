@@ -229,14 +229,14 @@ ok('the supplement survives: boards the shared list deliberately omits', () => {
 console.log('\naggregatorPostingId()');
 ok('LinkedIn: bare id, title slug and currentJobId are one posting id', () => {
   // The three shapes liveness-api.mjs already resolves to a single posting.
-  assert.deepEqual(aggregatorPostingId('https://www.linkedin.com/jobs/view/4001'),
-    { domain: 'linkedin.com', id: '4001' });
-  assert.deepEqual(aggregatorPostingId('https://uk.linkedin.com/jobs/view/director-of-marketing-at-acme-4001/'),
-    { domain: 'linkedin.com', id: '4001' });
-  assert.deepEqual(aggregatorPostingId('https://www.linkedin.com/jobs/search/?currentJobId=4001&keywords=x'),
-    { domain: 'linkedin.com', id: '4001' });
+  assert.deepEqual(aggregatorPostingId('https://www.linkedin.com/jobs/view/4000001'),
+    { domain: 'linkedin.com', id: '4000001' });
+  assert.deepEqual(aggregatorPostingId('https://uk.linkedin.com/jobs/view/director-of-marketing-at-acme-4000001/'),
+    { domain: 'linkedin.com', id: '4000001' });
+  assert.deepEqual(aggregatorPostingId('https://www.linkedin.com/jobs/search/?currentJobId=4000001&keywords=x'),
+    { domain: 'linkedin.com', id: '4000001' });
   // Different ids are different postings — that is the whole point.
-  assert.notEqual(aggregatorPostingId('https://www.linkedin.com/jobs/view/4002').id, '4001');
+  assert.notEqual(aggregatorPostingId('https://www.linkedin.com/jobs/view/4000002').id, '4000001');
 });
 ok('LinkedIn: the /comm/ link an alert email carries is the same posting id', () => {
   // linkedin.com answers /comm/jobs/view/{id} with a 307 whose session_redirect
