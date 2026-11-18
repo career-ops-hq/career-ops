@@ -17,7 +17,7 @@ It is NOT:
 
 1. `/career-ops proposal {NNN}`
    - Read `reports/{NNN}-*.md`. Use the archived JD, the Verdict, the Risk Summary and the red-flag answers.
-   - If the report has no embedded `## Job Description (archived verbatim)` section, read the equivalent capture in `jds/` resolved by report number instead. Use the report's own content when it is present.
+   - Accept both `## Job Description (archived verbatim)` and the plain `## Job Description` heading as an embedded archive. If the report has neither, or the section holds only a pointer to a capture instead of the archived text, read the equivalent capture in `jds/` resolved by report number. Use the report's embedded text when it actually contains the archived job description.
    - Use the report number as the entry number in the filename and summary.
 
 2. `/career-ops proposal {NNN} {NNN+1}` or `/career-ops proposal {NNN}-{MMM}`
