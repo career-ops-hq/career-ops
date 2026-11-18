@@ -743,7 +743,10 @@ function cmdRemove(args) {
   // torn lock or a failed lock save left a pin for a plugin whose manifest was
   // already gone, and a second remove could no longer find it to finish the
   // job. Nothing has changed when this fails, and removeLockEntry is a no-op
-  // for a missing entry, so remove can always be run again.
+  // for a missing entry, so remove can always be run again. The pin is kept
+  // at hand so the reverse failure — the folder refusing to go once the pin
+  // is already gone — can put it back.
+  const previousPin = readLock(DATA_ROOT, ROOT).plugins?.[id];
   try {
     removeLockEntry(DATA_ROOT, id, ROOT);
   } catch (err) {
@@ -751,7 +754,30 @@ function cmdRemove(args) {
     process.exit(1);
   }
   const dir = path.join(DATA_ROOT, 'plugins.local', id);
-  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  try {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    // The pin is gone but the files are not. Left like this, the still-enabled
+    // plugin would pin whatever survived on its next run and load that. Put
+    // the pin back so the leftover files stay checked against it; with no pin
+    // to restore, disable the plugin so it cannot load unpinned files.
+    if (previousPin) {
+      try {
+        writeLockEntry(DATA_ROOT, id, previousPin, ROOT);
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  The pin was put back; fix the folder and run remove again.`);
+      } catch (restoreErr) {
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  Putting the pin back failed too: ${restoreErr.message}`);
+      }
+    } else {
+      try {
+        setEnabled(id, false);
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  There was no pin to put back, so ${id} was disabled; fix the folder and run remove again.`);
+      } catch (disableErr) {
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  There was no pin to put back, and disabling ${id} failed too: ${disableErr.message}`);
+      }
+    }
+    process.exit(1);
+  }
   // The files and the lock entry are already gone, so a config problem must not
   // fail the command — but it must not be invisible either. This catch used to
   // swallow nothing worth seeing; now it can catch a real, actionable one, and
