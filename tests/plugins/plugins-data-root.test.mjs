@@ -265,6 +265,56 @@ test('lockGate pins to dataRoot/plugins.lock', () => {
   }
 });
 
+test('lockGate keeps the plugin unloaded and the lock untouched when the data-root lock is torn', () => {
+  const codeRoot = makeSandbox('co-test-code-torn-');
+  const dataRoot = makeSandbox('co-test-data-torn-');
+  try {
+    const { manifest } = writePlugin(join(dataRoot, 'plugins.local'), 'torn-gated');
+    const torn = '{not-json';
+    writeFileSync(join(dataRoot, 'plugins.lock'), torn);
+    assert.equal(lockGate(manifest, codeRoot, dataRoot).load, false);
+    assert.equal(readFileSync(join(dataRoot, 'plugins.lock'), 'utf8'), torn);
+    assert.throws(() => writeLockEntry(dataRoot, 'x', {}, codeRoot), /not valid JSON/);
+    assert.throws(() => removeLockEntry(dataRoot, 'x', codeRoot), /not valid JSON/);
+    assert.equal(readFileSync(join(dataRoot, 'plugins.lock'), 'utf8'), torn);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('lockGate keeps the plugin unloaded through legacy-lock migration when the legacy lock is torn', () => {
+  const codeRoot = makeSandbox('co-test-code-torn-legacy-');
+  const dataRoot = makeSandbox('co-test-data-torn-legacy-');
+  try {
+    const { manifest } = writePlugin(join(dataRoot, 'plugins.local'), 'torn-legacy');
+    const torn = '{"plugins": ';
+    writeFileSync(join(codeRoot, 'plugins.lock'), torn);
+    assert.equal(lockGate(manifest, codeRoot, dataRoot).load, false);
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false, 'a torn legacy lock must not be migrated or replaced by a fresh pin');
+    assert.equal(readFileSync(join(codeRoot, 'plugins.lock'), 'utf8'), torn);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('lockGate migrates a valid legacy lock and still loads', () => {
+  const codeRoot = makeSandbox('co-test-code-ok-legacy-');
+  const dataRoot = makeSandbox('co-test-data-ok-legacy-');
+  try {
+    const { manifest } = writePlugin(join(dataRoot, 'plugins.local'), 'ok-legacy');
+    writeFileSync(join(codeRoot, 'plugins.lock'), JSON.stringify({ lockfileVersion: 1, plugins: { other: { version: '1.0.0' } } }));
+    assert.equal(lockGate(manifest, codeRoot, dataRoot).load, true);
+    const lock = JSON.parse(readFileSync(join(dataRoot, 'plugins.lock'), 'utf8'));
+    assert.ok(lock.plugins.other, 'the other legacy pin survives');
+    assert.ok(lock.plugins['ok-legacy']);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test('loadPlugins loads plugins from dataRoot/plugins.local and passes dataRoot in ctx', async () => {
   const codeRoot = makeSandbox('co-test-code-load-');
   const dataRoot = makeSandbox('co-test-data-load-');
