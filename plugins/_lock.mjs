@@ -12,7 +12,7 @@
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, linkSync, mkdtempSync, rmSync, renameSync, readdirSync, lstatSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, linkSync, mkdtempSync, rmSync, renameSync, readdirSync, lstatSync, statSync } from 'node:fs';
 import path from 'node:path';
 
 const LOCK_VERSION = 1;
@@ -58,14 +58,24 @@ export function hashPluginTree(dir) {
   return { files, integrity: sha256(Buffer.from(aggregate)) };
 }
 
+// A path counts as absent only when the OS says it does not exist. Any other
+// stat failure (permissions, I/O) means the file's state is unknown, so the
+// legacy fallback must not stand in for it.
+function fileState(file) {
+  try { statSync(file); return 'present'; }
+  catch (err) { return err && (err.code === 'ENOENT' || err.code === 'ENOTDIR') ? 'absent' : 'error'; }
+}
+
 /** Read plugins.lock (fail-open to an empty lock — like the rest of the engine). */
 export function readLock(dataRoot, root = dataRoot) {
   let file = lockPath(dataRoot);
-  if (!existsSync(file) && root && path.resolve(root) !== path.resolve(dataRoot)) {
+  const primary = fileState(file);
+  if (primary === 'error') return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  if (primary === 'absent' && root && path.resolve(root) !== path.resolve(dataRoot)) {
     const fallback = lockPath(root);
-    if (existsSync(fallback)) file = fallback;
+    if (fileState(fallback) === 'present') file = fallback;
   }
-  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  if (fileState(file) !== 'present') return { lockfileVersion: LOCK_VERSION, plugins: {} };
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf8'));
     if (!parsed || typeof parsed !== 'object' || typeof parsed.plugins !== 'object') return { lockfileVersion: LOCK_VERSION, plugins: {} };
@@ -102,14 +112,14 @@ export function migrateLegacyLock(dataRoot, root = dataRoot, io = {}) {
   const link = io.link || linkSync;
   if (!root || path.resolve(root) === path.resolve(dataRoot)) return false;
   const target = lockPath(dataRoot);
-  if (existsSync(target)) return false;
+  if (fileState(target) !== 'absent') return false;
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(lockPath(root), 'utf8'));
   } catch {
     return false;
   }
-  if (!parsed || typeof parsed !== 'object' || typeof parsed.plugins !== 'object' || parsed.plugins === null) return false;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) return false;
   // Publish atomically: writing the final path directly (even with wx) can
   // leave a partial file behind when the write fails midway. readLock probes
   // existence, so a partial final masks the readable legacy lock and parses
@@ -155,11 +165,16 @@ export function migrateLegacyLock(dataRoot, root = dataRoot, io = {}) {
 // instead of being migrated or re-pinned as if it were empty.
 export function readLockForUpdate(dataRoot, root = dataRoot) {
   let file = lockPath(dataRoot);
-  if (!existsSync(file) && root && path.resolve(root) !== path.resolve(dataRoot)) {
+  const unreadable = (f) => new Error(`plugins.lock at ${f} could not be checked, so it was left unchanged.`);
+  const primary = fileState(file);
+  if (primary === 'error') throw unreadable(file);
+  if (primary === 'absent' && root && path.resolve(root) !== path.resolve(dataRoot)) {
     const fallback = lockPath(root);
-    if (existsSync(fallback)) file = fallback;
+    const legacy = fileState(fallback);
+    if (legacy === 'error') throw unreadable(fallback);
+    if (legacy === 'present') file = fallback;
   }
-  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  if (fileState(file) !== 'present') return { lockfileVersion: LOCK_VERSION, plugins: {} };
   let parsed;
   try {
     parsed = JSON.parse(readFileSync(file, 'utf8'));
