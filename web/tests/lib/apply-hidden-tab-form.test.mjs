@@ -114,9 +114,89 @@ test("tryApplyTrigger clicks Apply instead of following a vendor homepage link",
   try {
     const acted = await tryApplyTrigger(page);
     assert.ok(acted && typeof acted === "object" && "followed" in acted, "the Apply control should have been used");
-    assert.deepEqual(requested.filter((u) => u.includes("recruitee.com")), []);
+    assert.deepEqual(requested.filter(isRecruiteeHost), []);
     const form = await extractForm(page);
     assert.deepEqual(form.fields.map((f) => f.type), ["text", "email", "file", "radio", "textarea", "checkbox"]);
+  } finally {
+    await close();
+  }
+});
+
+function isRecruiteeHost(u) {
+  const host = new URL(u).hostname;
+  return host === "recruitee.com" || host.endsWith(".recruitee.com");
+}
+
+test("tryApplyTrigger follows a later application link when the first ATS link is a vendor homepage", async (t) => {
+  const html = `<!doctype html><body>
+    <a href="https://recruitee.com/">Powered by Recruitee</a>
+    <a href="https://acme.recruitee.com/o/android-developer/c/new">Continue</a>
+  </body>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, requested, close } = fx;
+  try {
+    const acted = await tryApplyTrigger(page);
+    assert.ok(acted && typeof acted === "object" && "followed" in acted, "the application link should have been followed");
+    assert.deepEqual(requested.filter(isRecruiteeHost), ["https://acme.recruitee.com/o/android-developer/c/new"]);
+  } finally {
+    await close();
+  }
+});
+
+test("a styled checkbox in a hidden wrapper counts when its label[for] is visible", async (t) => {
+  const html = `<!doctype html><form>
+    <label for="email">Email</label><input id="email" type="email">
+    <div style="display:none"><input type="checkbox" id="news" name="news"></div>
+    <label for="news">Keep me informed</label>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => f.type), ["email", "checkbox"]);
+  } finally {
+    await close();
+  }
+});
+
+test("a label in a visibility:hidden panel does not keep its styled checkbox", async (t) => {
+  const html = `<!doctype html>
+    <div style="visibility:hidden"><form>
+      <label><input type="checkbox" name="consent" style="display:none"><span>I consent</span></label>
+    </form></div>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields, []);
+  } finally {
+    await close();
+  }
+});
+
+test("a radio or checkbox option in a hidden panel is not offered with the visible ones", async (t) => {
+  const html = `<!doctype html><form>
+    <fieldset><legend>Based in the Netherlands?</legend>
+      <label><input type="radio" name="nl" value="yes">Yes</label>
+      <div hidden><label><input type="radio" name="nl" value="no">No</label></div>
+    </fieldset>
+    <fieldset><legend>Which benefits?</legend>
+      <label><input type="checkbox" name="perks" value="health">Health</label>
+      <label><input type="checkbox" name="perks" value="dental">Dental</label>
+      <div hidden><label><input type="checkbox" name="perks" value="gym">Gym</label></div>
+    </fieldset>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => [f.type, f.options]), [["radio", ["Yes"]], ["checkbox", ["Health", "Dental"]]]);
+    const tagged = await page.evaluate(() => [...document.querySelectorAll("[data-co-field]")].map((e) => e.getAttribute("value")));
+    assert.deepEqual(tagged, ["yes", "health", "dental"]);
   } finally {
     await close();
   }

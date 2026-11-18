@@ -184,18 +184,23 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
   try {
     // 1) Most reliable: an <a> linking straight to a known ATS application (e.g.
     //    openai.com → jobs.ashbyhq.com/…/application). Navigate there in-tab.
-    const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]').first();
-    if (await atsLink.count().catch(() => 0)) {
-      const href = await atsLink.getAttribute("href").catch(() => null);
-      if (href && isApplicationHref(href)) {
-        const blocked = await blockedTriggerHref(page, href);
-        if (blocked) return { blocked };
-        const before = urlSnapshot(page);
-        await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-        const landed = await blockedAfterAction(page, before, false);
-        if (landed) return { blocked: landed };
-        return { followed: before };
-      }
+    //    A link that fails isApplicationHref (a "Powered by" logo pointing at
+    //    the vendor's homepage) is skipped, and the next one is checked.
+    const atsLinks = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]');
+    const linkCount = Math.min(await atsLinks.count().catch(() => 0), 20);
+    let href: string | null = null;
+    for (let i = 0; i < linkCount && !href; i++) {
+      const candidate = await atsLinks.nth(i).getAttribute("href").catch(() => null);
+      if (candidate && isApplicationHref(candidate)) href = candidate;
+    }
+    if (href) {
+      const blocked = await blockedTriggerHref(page, href);
+      if (blocked) return { blocked };
+      const before = urlSnapshot(page);
+      await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
+      const landed = await blockedAfterAction(page, before, false);
+      if (landed) return { blocked: landed };
+      return { followed: before };
     }
     // 2) Otherwise click a visible Apply CTA (never a submit). dropNewTabs() has
     //    already neutralised target=_blank / window.open so it stays in-tab.

@@ -82,9 +82,14 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         // wrapper renders. A control inside a hidden container (a Recruitee
         // "Apply" tab panel) does not: keeping it would pass a few hidden
         // radios off as the form and skip opening the real one.
+        // Its labels count wherever they sit (a wrapping label or a
+        // label[for] outside a hidden wrapper). A box alone is not proof:
+        // a visibility:hidden panel keeps its boxes.
         if (type !== "radio" && type !== "checkbox") return false;
-        const shown = node.closest("label") ?? node.parentElement;
-        if (!shown || shown.getClientRects().length === 0) return false;
+        const rendered = (proxy: Element | null) =>
+          !!proxy && proxy.getClientRects().length > 0 && getComputedStyle(proxy).visibility !== "hidden";
+        const labels = Array.from((node as HTMLInputElement).labels ?? []);
+        if (!labels.some(rendered) && !rendered(node.parentElement)) return false;
       }
       if (node.closest('[class*="autofill" i]')) return false;
       return true;
@@ -231,7 +236,8 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           continue;
         }
         if (name) seenRadio.add(name);
-        const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
+        // Only the options the person can see: a hidden choice gets no handle.
+        const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`)).filter(isEligibleControl);
         const fullLabels = group.map((r) => normalize(labelFor(r)));
         // The same text on every radio is the question or the input name, not a
         // choice. Use each input's value so Yes and No stay distinct.
@@ -263,7 +269,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       if (itype === "checkbox") {
         const boxName = (el as HTMLInputElement).name;
         const boxes = boxName
-          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`))
+          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`)).filter(isEligibleControl)
           : [el];
         if (boxes.length > 1) {
           if (seenCheckbox.has(boxName)) {
