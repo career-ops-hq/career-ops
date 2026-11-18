@@ -30,7 +30,7 @@ import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
-import { readLock, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
+import { readLock, readLockForUpdate, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -683,12 +683,18 @@ function pluginSource(manifest, root) {
 /**
  * Integrity gate run on an ENABLED plugin before importing it (the rug-pull
  * defense). Returns { load }. Re-pins the lock on the benign cases (silent).
- * Fail-open on the engine itself (a lock-read error never blocks).
+ * An absent lock is a first pin. A damaged lock is not an empty one: loading
+ * would skip the drift check, so the plugin stays unloaded until the file is repaired.
  */
 export function lockGate(manifest, root) {
   const source = pluginSource(manifest, root);
   let lock;
-  try { lock = readLock(root); } catch { return { load: true }; }
+  try {
+    lock = readLockForUpdate(root);
+  } catch (err) {
+    warnSkip(manifest.id, `plugins.lock is damaged, so this plugin will not load until it is repaired — ${err.message}`);
+    return { load: false };
+  }
   const entry = lock.plugins?.[manifest.id];
   let d;
   try { d = diffPlugin(manifest, entry); }

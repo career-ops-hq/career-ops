@@ -9,7 +9,7 @@
 //
 // Each case runs the real CLI against its own temp tracker and asserts on the
 // files afterwards, because the bytes left on disk are what the user can restore.
-import { pass, fail, rmSync, ROOT, NODE } from './helpers.mjs';
+import { pass, fail, warn, rmSync, ROOT, NODE } from './helpers.mjs';
 import assert from 'node:assert';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,7 +17,10 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { describeSpawn } from './helpers/describe-spawn.mjs';
 
-const ok = (name, fn) => { try { fn(); pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
+// A case that could not run here warns and returns SKIP, so it is not also
+// counted as a pass.
+const SKIP = Symbol('skip');
+const ok = (name, fn) => { try { if (fn() !== SKIP) pass(name); } catch (e) { fail(`${name} — ${e.message}`); } };
 
 const TRACKER = [
   '# Applications Tracker',
@@ -95,7 +98,11 @@ ok('a second delete replaces the .bak with the tracker as it was before THAT del
 // read inside the lock, next to the path the transaction actually replaces.
 ok('a symlinked tracker gets its .bak beside the real file', () => sandbox(({ dir, tracker, cli }) => {
   const link = join(dir, 'linked.md');
-  try { symlinkSync(tracker, link); } catch { return; } // Windows without the symlink privilege
+  try { symlinkSync(tracker, link); } catch (e) {
+    if (e.code !== 'EPERM' && e.code !== 'EACCES') throw e;
+    warn(`a symlinked tracker gets its .bak beside the real file: not run, this account cannot create a symlink (${e.code})`);
+    return SKIP;
+  }
   const r = cli(link, '--num', '42');
   assert.equal(r.status, 0, describeSpawn(r));
   assert.ok(existsSync(`${tracker}.bak`), 'no .bak beside the real tracker');

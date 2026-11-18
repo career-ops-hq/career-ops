@@ -2,6 +2,7 @@ import type { Page, Frame } from "playwright-core";
 import type { ApplyField } from "./extract";
 import type { ApplyIssue } from "./issue";
 import { pickComboboxOption } from "./option-match.mjs";
+import { checkboxSelections } from "./checkbox-options.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 
 export type { ApplyIssue };
@@ -322,13 +323,19 @@ export function comboboxDisplayMatches(actual: string, intended: string): boolea
  *  still empty? any validation error visible? — the self-verification a blind
  *  selector script can't do. Returns warnings to show BEFORE the human submits. */
 export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Record<string, string>): Promise<ApplyIssue[]> {
-  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox }));
+  const meta = fields.map((f) => ({ id: f.id, label: f.label || "this field", type: f.type, required: !!f.required, combobox: !!f.combobox, options: f.options ?? [] }));
+  const normOption = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
+  const checkboxWanted = Object.fromEntries(
+    meta
+      .filter((f) => f.type === "checkbox" && f.options.length)
+      .map((f) => [f.id, checkboxSelections(answers[f.id] || "", f.options).map(normOption)]),
+  );
   type Combo = { label: string; intended: string; actual: string; required: boolean };
   type R = { mismatches: string[]; requiredEmpty: string[]; unverified: string[]; valErrors: string[]; comboboxes: Combo[] };
   let readFailed = false;
   const res = await frame
     .evaluate(
-      ({ meta, answers }): R => {
+      ({ meta, answers, checkboxWanted }): R => {
         const norm = (s: string | null | undefined) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
         const checkedWord = (s: string | null | undefined) => /^(true|yes|1|on|checked)$/.test(norm(s));
         const mismatches: string[] = [];
@@ -361,6 +368,15 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             if (f.required && !has) requiredEmpty.push(f.label);
             continue;
           }
+          if (f.type === "checkbox" && Array.isArray(f.options) && f.options.length) {
+            const grp = Array.from(document.querySelectorAll(`[data-co-field="${f.id}"]`)) as HTMLInputElement[];
+            const selected = grp.filter((box) => box.checked).map((box) => norm(box.getAttribute("data-co-option") || box.value || ""));
+            const wanted = checkboxWanted[f.id] || [];
+            const same = selected.length === wanted.length && wanted.every((part) => selected.includes(part));
+            if (wanted.length && !same) mismatches.push(f.label);
+            if (f.required && selected.length === 0) requiredEmpty.push(f.label);
+            continue;
+          }
           if (f.type === "checkbox") {
             const on = (el as HTMLInputElement).checked;
             if (intended && intended.trim() && checkedWord(intended) !== on) mismatches.push(f.label);
@@ -376,6 +392,9 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             const matches = !!(intended && intended.trim() && chosen && (norm(actual) === norm(intended) || norm(chosen.value) === norm(intended)));
             if (intended && intended.trim()) {
               if (!matches) mismatches.push(f.label);
+            } else if (chosen) {
+              // A selected radio with no intended answer was not one we listed.
+              mismatches.push(f.label);
             } else if (f.required && !chosen) requiredEmpty.push(f.label);
             continue;
           }
@@ -421,7 +440,7 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
         }
         return { mismatches, requiredEmpty, unverified, valErrors: Array.from(new Set(valErrors)).slice(0, 5), comboboxes };
       },
-      { meta, answers },
+      { meta, answers, checkboxWanted },
     )
     .catch(() => {
       readFailed = true;

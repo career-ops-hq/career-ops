@@ -11,6 +11,7 @@ import { CAPS } from "@/lib/worker-capabilities.mjs";
 import { scopeFrom } from "@/lib/claude-invocation.mjs";
 import { fencingReport } from "@/lib/cli-fencing.mjs";
 import { codexFencingSupported } from "@/lib/cli-fencing-probe.mjs";
+import { spillOversizedPrompt } from "@/lib/oversized-prompt.mjs";
 import { readJsonObject } from "@/lib/json-body";
 
 // Deny list DERIVED, never hand-written: every one of the six advisor argvs
@@ -118,10 +119,10 @@ export async function POST(req: Request) {
     ? path.join(childCwd, "final-response.txt")
     : undefined;
 
-  const args = isClaude
+  const buildArgs = (p: string) => isClaude
     ? [
         "-p",
-        prompt,
+        p,
         "--output-format",
         "stream-json",
         "--verbose",
@@ -148,9 +149,9 @@ export async function POST(req: Request) {
           ...CODEX_ISOLATION_FLAGS,
           CODEX_OUTPUT_FLAG,
           codexResultFile!,
-          prompt,
+          p,
         ]
-      : spec.args(prompt);
+      : spec.args(p);
 
   // POSIX detached children become process-group leaders. Keeping stdio
   // piped means Node still tracks the Codex process normally.
@@ -177,10 +178,25 @@ export async function POST(req: Request) {
   // for a writable workspace. Claude is unaffected; its tools are not sandboxed
   // and it still gets WebFetch (see ADVISOR_SCOPE).
   let child;
+  let spill: ReturnType<typeof spillOversizedPrompt> | undefined;
   try {
+    // The prompt carries the whole modes/_profile.md (readMemory) after the
+    // discover mode, the same profile /api/run spills for (#6743). A long one
+    // takes the launch past the Windows command line (32,767 UTF-16 units, an
+    // opaque `spawn ENAMETOOLONG`). A launch that would not fit gets the prompt
+    // in a file in the worker's own cwd, with a pointer in argv; the scope here
+    // includes Read, and Codex reads its own temporary workspace. A prompt that
+    // fits is passed as before.
+    spill = spillOversizedPrompt({
+      prompt,
+      buildArgs,
+      binPath,
+      fencing: { cliId, capabilities: CAPS.webSearchOnly },
+      root: childCwd,
+    });
     child = spawnHeadlessCli(
       binPath,
-      args,
+      spill.args,
       { cwd: childCwd, env: process.env, detached: useCodexProcessGroup },
       { cliId, capabilities: CAPS.webSearchOnly },
     );
@@ -188,6 +204,7 @@ export async function POST(req: Request) {
     // Fencing refuses an argv that contradicts the capability record. Report it
     // in this route's own error shape rather than letting the throw escape POST
     // as an unhandled rejection and an unstructured 500.
+    spill?.cleanup?.();
     cleanupChildCwd();
     return Response.json({ error: e instanceof Error ? e.message : "failed to start the CLI" }, { status: 500 });
   }
@@ -350,12 +367,15 @@ export async function POST(req: Request) {
       child.on("error", (e) => {
         safeEnqueue(`
 [error launching ${spec.name}: ${e.message}]`);
+        spill?.cleanup?.();
         cleanupChildCwd();
         safeClose();
       });
 
       child.on("close", (code) => {
         clearTerminationTimers();
+        // The worker is gone, so its spilled prompt is no longer needed.
+        spill?.cleanup?.();
 
         if (closed) {
           cleanupChildCwd();

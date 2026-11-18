@@ -348,7 +348,7 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     for (const r of healthRecords) {
       // Mirrors scan.mjs computeConsecutiveFailures: reached statuses reset
       // (a `partial` board answered, it was only cut short), every other
-      // status (slug_gone/network/auth/server/unknown) counts.
+      // status (slug_gone/network/auth/server/rate_limit/unknown) counts.
       if (r.status === 'reachable' || r.status === 'empty' || r.status === 'partial') {
         streaks.set(r.company, 0);
       } else {
@@ -419,7 +419,7 @@ export function computePortalRecommendations(portalsContent, scanContent, health
   const healthRows = [];
   for (const line of String(healthContent ?? '').split('\n')) {
     const [date, company, status] = line.trimEnd().split('\t');
-    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown', 'partial'].includes(status)) continue;
+    if (!validDate(date) || !company || !['reachable', 'empty', 'slug_gone', 'network', 'auth', 'server', 'unknown', 'rate_limit', 'unverified_zero', 'partial'].includes(status)) continue;
     healthRows.push({ date, company, status });
   }
   healthRows.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
@@ -447,7 +447,12 @@ export function computePortalRecommendations(portalsContent, scanContent, health
     const lastProduced = lastMatch.get(key) || null;
     const row = { company: company.name, ...h, lastProduced };
     if (produced.has(key) && h.streak >= threshold) {
-      buckets.rotted.push({ ...row, recommendation: 'Verify reachability and find the current ATS slug before considering removal; failures do not prove closure.' });
+      // A 429 does not mean the slug changed. Slug guidance stays for the
+      // other failures, where the board itself may have moved.
+      const recommendation = h.status === 'rate_limit'
+        ? 'Retry later or reduce request frequency before considering removal; a rate limit does not prove the slug is wrong.'
+        : 'Verify reachability and find the current ATS slug before considering removal; failures do not prove closure.';
+      buckets.rotted.push({ ...row, recommendation });
     } else if (!produced.has(key) && Date.parse(h.firstObserved) <= cutoff) {
       buckets.neverProduced.push({ ...row, recommendation: 'Review title_filter and company-name matching before considering removal; no recorded matches does not prove a dead board.' });
     } else if (produced.has(key) && lastProduced && Date.parse(lastProduced) <= cutoff && h.streak === 0) {

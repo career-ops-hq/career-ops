@@ -78,7 +78,30 @@ the inbox into them.
 Name it `inbox/<YYYY-MM-DD>-<github-username>.ndjson`, with the date and your
 GitHub username in lowercase: `inbox/2026-11-20-octocat.ndjson`. A file holds
 up to 5,000 boards. For a longer list, number the files:
-`inbox/2026-11-20-octocat-001.ndjson`, `-002.ndjson`, and so on.
+`inbox/2026-11-20-octocat-001.ndjson`, `-002.ndjson`, and so on. A username
+that itself ends in a hyphen and three digits, such as `octocat-001`, always
+writes the part number, even for a single file:
+`inbox/2026-11-20-octocat-001-001.ndjson`.
+
+A contribution has one source (see [the manifest](#the-contribution-manifest)).
+To add boards from another source on the same day, make a second
+contribution: put `.2` after your username, then `.3`, and so on up to `.99`.
+Every file of that contribution carries the number:
+
+```
+inbox/2026-11-20-octocat.ndjson      first contribution of the day
+inbox/2026-11-20-octocat.json        its manifest
+inbox/2026-11-20-octocat.2.ndjson    second contribution, from another source
+inbox/2026-11-20-octocat.2.json      its manifest
+```
+
+A longer list is numbered the same way: `inbox/2026-11-20-octocat.2-001.ndjson`.
+A GitHub username never has a dot, so the number is never read as part of
+it. The first contribution of a day has no number, and `.1`, `.0` or `.02`
+are errors. A number does not need the ones below it: `.3` is fine without
+`.2`, because contributions are folded in one by one and an earlier one may
+already have taken `.2`. A number already in `contributions/` is an error:
+pick another.
 
 One board per line, one JSON object per line:
 
@@ -137,11 +160,13 @@ request.
 ### For an organization
 
 An organization adds its manifest next to its boards files, under the same
-name without a part number: `inbox/<YYYY-MM-DD>-<github-username>.json`. It
-has the fields of [the contribution manifest](#the-contribution-manifest);
-`contributor` is the username in the file name, and `rows` counts the lines
-of all its files. Without a manifest, the contribution is credited to the
-username in the file name, with source `community`.
+name without a part number: `inbox/<YYYY-MM-DD>-<github-username>.json`, or
+`inbox/<YYYY-MM-DD>-<github-username>.2.json` for a second contribution of the
+day. It has the fields of [the contribution manifest](#the-contribution-manifest);
+`contributor` is the username in the file name (without the number), and
+`rows` counts the lines of all its files. Without a manifest, the
+contribution is credited to the username in the file name, with source
+`community`.
 
 ### What happens next
 
@@ -150,8 +175,9 @@ whether the pull request only adds files to `inbox/`. A maintainer reviews it
 and merges it, then folds the inbox in: each line becomes a row with its
 `source`, `contribution` and `added` date, boards already in the registry are
 skipped, the manifest moves to `contributions/`, and `CHANGELOG.md` gets the
-credit line. If the contribution id is already taken (the same username on
-the same date), the fold adds `-2`, `-3`, and so on.
+credit line. If a contribution id without a number is already taken (the
+same username on the same date), the fold adds `-2`, `-3`, and so on. A
+numbered id is never changed.
 
 What does not get in:
 
@@ -172,9 +198,11 @@ being redistributed and that it holds no personal data.
 ## The contribution manifest
 
 Every contribution is recorded in one manifest,
-`contributions/<YYYY-MM-DD>-<github-username>.json`, and each row it adds names
-it in `contribution`. The manifest is the row's provenance: who contributed
-it, where the list came from, and the license it was granted under. The pull
+`contributions/<YYYY-MM-DD>-<github-username>.json` (or
+`<YYYY-MM-DD>-<github-username>.<n>.json` for a later contribution of the same
+day), and each row it adds names it in `contribution`. The manifest is the
+row's provenance: who contributed it, where the list came from, and the
+license it was granted under. The pull
 request that adds it is opened from the account named in `contributor`, and
 opening it is how the manifest is signed.
 
@@ -195,7 +223,7 @@ account, and the source is `community`. Both are public: the username and
 
 | Field | Rule |
 |---|---|
-| `id` | `<YYYY-MM-DD>-<slug>`, the same as the file name. |
+| `id` | `<YYYY-MM-DD>-<slug>`, or `<YYYY-MM-DD>-<slug>.<n>` with `n` from 2 to 99 for a later contribution of the same day; the same as the file name. |
 | `contributor` | The GitHub username of the account that opens the pull request. |
 | `on_behalf_of` | Optional: the organization the list comes from. |
 | `signed_by` | Who grants the license. For an organization, a founder or an officer with authority to do so. |
@@ -242,8 +270,9 @@ the workflow run. The checks:
 11. The inbox: file names, at most 5,000 lines a file, the line format above,
     the same board rules, each board once across the inbox, and an
     organization's manifest (same rules, `rows` equal to its lines,
-    `contributor` equal to the username in the file name). A board already in
-    the registry is a warning.
+    `contributor` equal to the username in the file name). A numbered
+    contribution id already in `contributions/` is an error. A board already
+    in the registry is a warning.
 
 `CHANGELOG.md` is not checked against the manifests: a contribution does not
 edit it, and maintainers regenerate it on main.

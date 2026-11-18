@@ -32,6 +32,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { runInThisContext } from 'node:vm';
 import { USER_PATHS } from '../update-system.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -56,10 +57,9 @@ function loadGuard() {
   assert.ok(end > start, `${WORKFLOW} no longer consumes USER_PATHS via "const bad = files"`);
   const src = yaml.slice(start, end);
   assert.match(src, /isScaffold/, 'the extracted slice is missing the isScaffold exemption');
-  // eslint-disable-next-line no-new-func
-  return new Function(
-    `${src}\nreturn (f) => USER_PATHS.some((re) => re.test(f)) && !isScaffold(f);`,
-  )();
+  return runInThisContext(
+    `(() => {\n${src}\nreturn (f) => USER_PATHS.some((re) => re.test(f)) && !isScaffold(f);\n})()`,
+  );
 }
 
 /** @returns {string[]} Repo-relative paths git tracks under `dir`. */

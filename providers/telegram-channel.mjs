@@ -656,8 +656,10 @@ export default {
     }
     // Cap warning (same pattern as a16z-speedrun-talent/jibeapply/workday):
     // the window was not reached, so the inventory is a prefix. Silent under
-    // ctx.maxPages, which is verify-portals asking for one page on purpose.
-    if (page >= maxPages && !reachedCutoff && maxPages === entryPages) {
+    // ctx.maxPages, which is verify-portals asking for one page on purpose:
+    // with max_pages: 1 on the entry, maxPages === entryPages holds under the
+    // probe too, so the probe is excluded by name (#7180).
+    if (page >= maxPages && !reachedCutoff && maxPages === entryPages && ctx.maxPages == null) {
       console.error(`⚠️  telegram-channel: ${label} truncated at max_pages=${maxPages} (${read} posts read, none older than since_days=${windowDays} yet) — raise max_pages on this entry for the full window`);
     }
     return jobs;

@@ -452,6 +452,8 @@ export default {
   async fetch(entry, ctx) {
     const { queries, categories, maxPages: entryMax, host, scope } = readConfig(entry);
     const maxPages = effectiveMaxPages(entryMax, ctx);
+    // ctx.maxPages is set only by verify-portals.mjs's bounded health probe.
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
     const label = entry?.name ?? 'entry';
 
     if (host === null) {
@@ -494,7 +496,13 @@ export default {
             { redirect: 'error', headers: { 'User-Agent': BROWSER_LIKE_USER_AGENT } },
             RETRY_POLICY,
           ));
-        } catch {
+        } catch (err) {
+          // A probe must see the rejection itself (#3096's rule, and
+          // vdab.mjs's probing branch): verify-portals names a live-but-capped
+          // board by its budget-cutoff error, and a broken one by the error
+          // itself. Swallowed here, either reads as a board with no postings.
+          // A real scan (no ctx.maxPages) keeps recall-first tolerance.
+          if (probing) throw err;
           break; // network/HTTP error (e.g. past the last page) — stop this base
         }
         const jobs = parseListPage(html);

@@ -580,6 +580,9 @@ const MCP_CONFIGS = [
   // configured" (#2252).
   { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'], userFiles: () => opencodeUserConfigFiles() },
   { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json', 'mcp.json', '.mcp.json'] },
+  // Antigravity (agy) keeps its servers in one user-level file, which
+  // `agy mcp add` writes. It has no project-level MCP file.
+  { cli: 'antigravity', files: [], antigravityUser: true },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package,
@@ -618,6 +621,24 @@ function readConfigIfPresent(file) {
 // the tests point it at a tmpdir so this never reads the real machine.
 function claudeConfigDir() {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+// Antigravity's user-level MCP file, written by `agy mcp add`. The shape is
+// `{ "mcpServers": { "<name>": { "command", "args", "disabled" } } }`: the same
+// bucket Claude uses, but a server is switched off with `disabled: true`
+// (`agy mcp disable`), not `enabled: false`.
+function antigravityUserConfigFiles() {
+  return [join(homedir(), '.gemini', 'config', 'mcp_config.json')];
+}
+
+function hasPlaywrightInAntigravity(configs) {
+  return configs.some((cfg) => {
+    const servers = cfg && typeof cfg === 'object' ? cfg.mcpServers : null;
+    if (!servers || typeof servers !== 'object') return false;
+    return Object.values(servers).some((def) => def
+      && def.disabled !== true && def.disabled !== 'true'
+      && isPlaywrightServer(def, { allowDisabled: true }));
+  });
 }
 
 // OpenCode's USER-level config sources, in ASCENDING precedence order
@@ -989,6 +1010,9 @@ function isPlaywrightMcpFromClaudeJson(root) {
 function isPlaywrightMcpConfigured(root, activeCli) {
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
   if (!entry) return false; // known CLI but no MCP file mapping; caller warns
+  if (entry.antigravityUser) {
+    return hasPlaywrightInAntigravity(antigravityUserConfigFiles().map(readConfigIfPresent).filter(Boolean));
+  }
   // OpenCode reads every source below (user-level configs, then the project)
   // and MERGES them, so the question is about the effective server map — not
   // whether any one file mentions the package (hasPlaywrightInMergedOpenCode).
@@ -1165,11 +1189,15 @@ function checkPlaywrightMcp(root, activeCli) {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
-      entry.plugins
+      activeCli === 'antigravity'
+        ? 'No enabled Playwright MCP server was found in ~/.gemini/config/mcp_config.json (the file `agy mcp add` writes).'
+        : entry.plugins
         ? `No project-level MCP config, no server in .claude.json (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json when set), and no enabled plugin providing one, was detected for ${activeCli}.`
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (project; see opencode.example.json) or to the global ~/.config/opencode/opencode.json[c] (or $OPENCODE_CONFIG), or pass --cli <name> if you actually run a different CLI.'
+        : activeCli === 'antigravity'
+          ? 'Add it with: agy mcp add playwright -- npx @playwright/mcp@latest (add --browser msedge to use Edge), or pass --cli <name> if you actually run a different CLI.'
         : activeCli === 'omp'
           ? 'Add the Playwright MCP server to .omp/mcp.json, or pass --cli <name> if you actually run a different CLI.'
           : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,

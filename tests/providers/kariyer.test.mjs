@@ -427,6 +427,24 @@ try {
   if (boardTruncation(fullPageProbe) === null) pass('fetch() does not mark a probe that stopped on a full page at the cap');
   else fail(`fetch() marked a capped probe = ${JSON.stringify(boardTruncation(fullPageProbe))}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so it stays quiet and unmarked (#7180).
+  const probeAtCapWarnings = [];
+  let probeAtCap;
+  try {
+    console.error = (...args) => probeAtCapWarnings.push(args.join(' '));
+    probeAtCap = await kariyer.fetch({ name: 'Kariyer.net', max_pages: 1 }, {
+      transport: 'http',
+      maxPages: 1,
+      sleep: noSleep,
+      fetchJson: async () => envelope(Array.from({ length: 2000 }, (_, i) => mkItem(i)), 1),
+    });
+  } finally {
+    console.error = realConsoleError;
+  }
+  if (probeAtCapWarnings.length === 0 && boardTruncation(probeAtCap) === null) pass('fetch() stays quiet and unmarked for a probe on a max_pages: 1 entry');
+  else fail(`fetch() probe at max_pages: 1 = ${JSON.stringify({ warnings: probeAtCapWarnings, marker: boardTruncation(probeAtCap) })}`);
+
   // A ctx.fetch rejection while probing must propagate unwrapped, so
   // verify-portals reads a budget cut-off as a live board.
   const sentinel = new Error('ProbePageBudgetReached');

@@ -348,6 +348,16 @@ try {
     if (errors.some((e) => /raise max_pages/.test(e)) && jobs.truncated?.reason === 'page-cap') pass('rexx.fetch() warns "raise max_pages" and marks the board truncated (page-cap) when the cap cut a full page');
     else fail(`rexx.fetch() cap signal wrong: ${JSON.stringify(errors)} ${JSON.stringify(jobs.truncated)}`);
 
+    // max_pages: 1 on the entry: a probe's one page is also the entry's last.
+    // It is still a probe, so nothing warns and nothing is marked (#7180).
+    const probeCtx = makeCtx(routes, { maxPages: 1 });
+    const probed = await captureConsoleErrors(() => rexx.fetch({ name: 'Acme', careers_url: LIST, max_pages: 1 }, probeCtx));
+    if (probeCtx.calls.length === 1 && !probed.errors.some((e) => /raise max_pages/.test(e)) && probed.result.truncated === undefined) pass('rexx.fetch() warns nothing and marks nothing for a probe on a max_pages: 1 entry');
+    else fail(`rexx.fetch() probe at max_pages: 1: truncated=${JSON.stringify(probed.result.truncated)}, errors ${JSON.stringify(probed.errors)}`);
+    const scanned = await captureConsoleErrors(() => rexx.fetch({ name: 'Acme', careers_url: LIST, max_pages: 1 }, makeCtx(routes)));
+    if (scanned.errors.some((e) => /raise max_pages/.test(e)) && scanned.result.truncated?.reason === 'page-cap') pass('rexx.fetch() still warns and marks page-cap for a real scan of a max_pages: 1 entry');
+    else fail(`rexx.fetch() scan at max_pages: 1: truncated=${JSON.stringify(scanned.result.truncated)}, errors ${JSON.stringify(scanned.errors)}`);
+
     // A short final page at the cap boundary is a natural end.
     const shortCtx = makeCtx({ [LIST]: routes[LIST], [`${LIST}?start=2`]: listPage([newCard(3, 'C', 'X')]) });
     const short = await captureConsoleErrors(() => rexx.fetch({ name: 'Acme', careers_url: LIST, max_pages: 2 }, shortCtx));

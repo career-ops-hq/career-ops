@@ -175,3 +175,35 @@ test('CLI help is input-independent and refuses unknown combined flags', () => {
     assert.deepEqual(fs.readdirSync(root), []);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
+
+test('a description made of hostile markup is stripped in linear time', () => {
+  // Growth, not a wall-clock limit, as tests/verify-cv-facts-tool-fragments
+  // measures it: ten times the input may take about ten times as long, while
+  // the lazy-regex strip rescanned the remainder per start and took about a
+  // hundred. A slow runner alone does not fail it — the large run must also be
+  // slow in absolute terms.
+  const timeRun = description => {
+    const body = clone();
+    body.job.description = description;
+    const started = performance.now();
+    classifyHimalayasPosting(source, 200, body, { retrievedAt });
+    return performance.now() - started;
+  };
+  const prose = 'We build tooling for small teams. '.repeat(20);
+  timeRun(prose + '<'.repeat(500));
+  const smallRun = Math.max(timeRun(prose + '<'.repeat(5000)), 1);
+  const largeRun = timeRun(prose + '<'.repeat(50000));
+  assert.ok(largeRun < 1000 || largeRun / smallRun < 40,
+    `a run of unclosed "<" scaled superlinearly: ${Math.round(smallRun)} ms for 5,000, ${Math.round(largeRun)} ms for 50,000`);
+  timeRun(prose + '<script>'.repeat(200));
+  const smallScripts = Math.max(timeRun(prose + '<script>'.repeat(2000)), 1);
+  const largeScripts = timeRun(prose + '<script>'.repeat(20000));
+  assert.ok(largeScripts < 1000 || largeScripts / smallScripts < 40,
+    `a run of unclosed "<script>" scaled superlinearly: ${Math.round(smallScripts)} ms for 2,000, ${Math.round(largeScripts)} ms for 20,000`);
+});
+
+test('an unclosed script tag keeps its payload counted, as it was before the linear strip', () => {
+  const body = clone();
+  body.job.description = '<script>We build tooling for small teams. '.repeat(20);
+  assert.equal(classifyHimalayasPosting(source, 200, body, { retrievedAt }).publisherStatus, 'open');
+});

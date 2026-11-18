@@ -5,7 +5,7 @@
 // https://landing.jobs/api/v1/jobs
 // Response shape: a JSON ARRAY of
 //   { id, title, url, locations: [{ city, country_code }], remote, published_at,
-//     created_at, type, tags, gross_salary_low, gross_salary_high, ... }
+//     created_at, type, tags, gross_salary_low, gross_salary_high, currency_code, ... }
 //
 // NOTE: the v1 feed carries no company-name field — the employer slug only
 // appears in the posting URL path (`https://landing.jobs/at/<slug>/<job>`), so
@@ -37,6 +37,39 @@ function toEpochMs(value) {
   if (typeof value !== 'string' || !value) return undefined;
   const parsed = Date.parse(value);
   return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+/**
+ * Map a Landing.jobs posting's gross salary fields to the Job.salary shape
+ * ({ min, max, currency }), or undefined when the posting carries no usable
+ * range. Follows leverSalary() in lever.mjs and parseCompensation() in
+ * ashby.mjs: only a real number counts, a one-sided range fills the missing
+ * bound from the other, and bounds are ordered.
+ *
+ * No annualization table here, unlike Lever and Ashby: the v1 feed exposes no
+ * interval field, and `gross_salary_low` / `gross_salary_high` are gross
+ * annual figures, so there is nothing to convert and nothing to guess.
+ *
+ * Exported for tests.
+ *
+ * @param {any} j - one posting from the v1 jobs list
+ * @returns {{min: number, max: number, currency: string} | undefined}
+ */
+export function landingSalary(j) {
+  if (!j || typeof j !== 'object') return undefined;
+  /** @param {unknown} v */
+  const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+  const lowValue = num(j.gross_salary_low);
+  const highValue = num(j.gross_salary_high);
+  if (lowValue === undefined && highValue === undefined) return undefined;
+  const resolvedMin = /** @type {number} */ (lowValue ?? highValue);
+  const resolvedMax = /** @type {number} */ (highValue ?? lowValue);
+  const currency = typeof j.currency_code === 'string' ? j.currency_code.trim().toUpperCase() : '';
+  return {
+    min: Math.min(resolvedMin, resolvedMax),
+    max: Math.max(resolvedMin, resolvedMax),
+    currency,
+  };
 }
 
 /**
@@ -73,10 +106,12 @@ export function companyFromUrl(url) {
  *   - location: first `locations[]` entry as "city, country_code"; "Remote" is
  *               appended when `remote` is true.
  *   - postedAt: `published_at` (else `created_at`) ISO date → epoch ms.
+ *   - salary:   `{ min, max, currency }` from `gross_salary_low` / `gross_salary_high`
+ *               and `currency_code` (omitted when absent/invalid).
  *
  * @param {any} j
  * @param {string} [fallbackCompany]
- * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number } | null}
+ * @returns {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: { min: number, max: number, currency: string } } | null}
  */
 export function normalizeLandingJob(j, fallbackCompany) {
   if (!j || typeof j !== 'object') return null;
@@ -106,10 +141,16 @@ export function normalizeLandingJob(j, fallbackCompany) {
   const base = [city, country].filter(Boolean).join(', ');
   const location = [base, j.remote === true ? 'Remote' : ''].filter(Boolean).join(', ');
 
-  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number }} */
+  /** @type {{ title: string, url: string, company: string, location: string, postedAt?: number, salary?: { min: number, max: number, currency: string } }} */
   const job = { title, url, company, location };
   const postedAt = toEpochMs(j.published_at) ?? toEpochMs(j.created_at);
   if (postedAt !== undefined) job.postedAt = postedAt;
+  // The feed publishes a gross annual range on roughly a quarter of postings.
+  // Without it salary_filter has nothing to compare (a posting with no salary
+  // always passes) and the compensation column stays empty for a board that
+  // did publish the figures.
+  const salary = landingSalary(j);
+  if (salary !== undefined) job.salary = salary;
   return job;
 }
 

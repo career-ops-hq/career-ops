@@ -23,6 +23,7 @@ import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
 import { getCareerOpsRoot } from "./path-resolver.mjs";
+import { buildOutputName, slugFromReport } from "./lib/output-names.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // output/ is a USER-layer directory. Anchoring it to the script directory made
@@ -546,6 +547,40 @@ export async function coverLetterVoiceNotes(html, { root = getCareerOpsRoot(), p
   return notes;
 }
 
+function localDate() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Default output basename when neither --out nor payload.output_path is set.
+ * With --report and a report file to read the company slug from, this is the
+ * standard artifact name (lib/output-names.mjs, #6667). Otherwise it is the
+ * legacy `{company}-{role}-cover.pdf`, so a run without a report is unchanged.
+ */
+function defaultCoverName(payload, report) {
+  if (report) {
+    const company = slugFromReport(report, resolve(getCareerOpsRoot(), "reports"));
+    const candidate = payload.candidate?.name;
+    if (company && typeof candidate === "string" && candidate.trim()) {
+      try {
+        return buildOutputName({ report, company, kind: "cover", candidate, date: localDate() });
+      } catch {
+        // fall through to the legacy name
+      }
+    }
+  }
+  const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 30);
+  return `${company}-${role}-cover.pdf`;
+}
+
 const USAGE = `
 Usage:
   node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN] [--max-pages N] [--strict-pages]
@@ -556,7 +591,9 @@ Usage:
                   config/profile.yml page_format, then letter.
   --country       Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
                   only when page_format is "auto". Defaults to the payload's country.
-  --report        Link the PDF to a tracker report number in data/pdf-index.tsv
+  --report        Link the PDF to a tracker report number in data/pdf-index.tsv.
+                  With no --out or output_path, also names the file
+                  {NNN}-{company}-cover-{candidate}-{date}.pdf
   --max-pages     Preferred letter length in pages (default: ${DEFAULT_COVER_MAX_PAGES})
   --strict-pages  Fail instead of warning when the letter is longer than --max-pages
 `;
@@ -659,14 +696,7 @@ async function main() {
   }
 
   if (!payload.output_path) {
-    const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-");
-    const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .slice(0, 30);
-    payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
+    payload.output_path = join(OUTPUT_ROOT, defaultCoverName(payload, args.report));
   } else {
     try {
       payload.output_path = safeOutputPath(payload.output_path);
