@@ -41,6 +41,7 @@ import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerL
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { syncTrackerPdfFlags } from './sync-pdf-flags.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
 import { occupiedTrackerNumbersFromLedgers } from './reserve-report-num.mjs';
@@ -565,6 +566,29 @@ export async function mergeTracker(options = {}) {
     return normalizeUrl(raw) ? { url: raw, reason: 'ok' } : { url: '', reason: 'no-url' };
   }
 
+  /**
+   * The work location the linked report records in its Machine Summary
+   * (`posting_location`, the JD's own words), or '' when there is no report,
+   * no summary, or the value is null (remote, or no location stated).
+   *
+   * Evaluations write this field but not the TSV `location` field, so without
+   * this read a new row never carries its city, and the dashboard's LOCATION
+   * column shows only the work mode.
+   *
+   * @param {string} reportField - Report cell, e.g. `[42](reports/042-acme.md)`.
+   * @returns {string}
+   */
+  function reportPostingLocation(reportField) {
+    const reportPath = resolveReportPath(reportField);
+    if (!reportPath) return '';
+    const fence = machineSummarySection(readFileSync(reportPath, 'utf-8'))
+      .match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i);
+    const m = fence && fence[1].match(/^posting_location:[ \t]*(.*)$/m);
+    if (!m) return '';
+    const value = m[1].trim().replace(/^(["'])(.*)\1$/, '$2').trim();
+    return value === 'null' || value === '~' ? '' : value;
+  }
+
   // A row's posting URL for the URL guards: its URL cell, else the URL its
   // report names, the same key an addition gets from its own report. The
   // default nine-column tracker has no URL cell, so without the report the
@@ -939,7 +963,8 @@ export async function mergeTracker(options = {}) {
     put('company', cell(o.company));
     put('via', cell(o.via) || '—');
     put('role', cell(o.role));
-    put('location', cell(o.location) || '—');
+    const location = cell(o.location);
+    const locationWritten = put('location', location || '—');
     put('score', o.score);
     put('status', o.status);
     put('pdf', o.pdf);
@@ -958,6 +983,13 @@ export async function mergeTracker(options = {}) {
       const link = String(o.report).trim();
       if (notes && !notes.includes(link)) notes = `${notes.replace(/\s*$/, '')} Report: ${link}.`;
       else if (!notes) notes = `Report: ${link}.`;
+    }
+    // Same for a layout with no Location column: the value goes into Notes as a
+    // `Location:` segment, the label the dashboard already reads there. It goes
+    // last and unterminated, since the dashboard's reader takes everything up to
+    // the next `;` or the end of the cell.
+    if (!locationWritten && location && location !== '—' && !/\blocation:/i.test(notes)) {
+      notes = notes ? `${notes.replace(/[\s;]*$/, '')}; Location: ${location}` : `Location: ${location}`;
     }
     put('notes', notes);
 
@@ -2383,7 +2415,11 @@ export async function mergeTracker(options = {}) {
           // the existing role, since there the pairing is only a guess.
           role: (reportNumMatched || dupReason === 'url') ? addition.role : duplicate.role,
           via: addition.via || duplicate.via || '—',
-          location: addition.location || duplicate.location || '—',
+          // A value already on the row (typed by hand, or an earlier merge) wins
+          // over the report's; the report only fills a row that has none.
+          location: addition.location
+            || (duplicate.location && duplicate.location !== '—' ? duplicate.location : '')
+            || reportPostingLocation(addition.report) || '—',
           score: addition.score, status: duplicate.status, pdf,
           report: addition.report,
           notes: updatedNotes,
@@ -2446,7 +2482,7 @@ export async function mergeTracker(options = {}) {
         const newLine = buildRow({
           num: entryNum, date: addition.date, company: addition.company, role: addition.role,
           via: addition.via || '—',
-          location: addition.location || '—',
+          location: addition.location || reportPostingLocation(addition.report) || '—',
           score: addition.score, status: addition.status, pdf,
           report: addition.report, notes: addition.notes,
           // Write the key on the way in. Backfill is the one-time EXPAND phase for
