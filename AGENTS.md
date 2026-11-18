@@ -101,7 +101,7 @@ Every supported CLI reaches the same router, `.agents/skills/career-ops/SKILL.md
 
 ### Main Files
 
-`modes/_files.md` lists every script and data file with what it does, and the `jds/` capture filenames. Read it when a task needs a script or data file that this document or the current mode does not name. `docs/SCRIPTS.md` has the npm commands and flags.
+`modes/_files.md` lists the main scripts and data files with what each does, and the `jds/` capture filenames. Read it when a task needs a script or data file that this document or the current mode does not name. `docs/SCRIPTS.md` has the npm commands and flags.
 
 ### Plugins (optional)
 
@@ -305,7 +305,7 @@ career-ops asks for a GitHub star, a manifesto signature and a Hired Wall story,
 
 ## Headless / Batch Mode
 
-`modes/_headless.md` has the headless command for each CLI, the headless worker permissions rule (#2876) and report-number reservation for parallel fan-outs. Read it before spawning a worker, before a parallel fan-out, and before writing code that launches an agent CLI headless. Two rules hold everywhere: never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--yolo`, …) to a new spawner, and reserve report numbers with `node reserve-report-num.mjs --count N` before spawning parallel evaluators.
+`modes/_headless.md` has the headless command for each CLI, the headless worker permissions rule (#2876) and report-number reservation for parallel fan-outs. Read it before spawning a worker, before a parallel fan-out, and before writing or reviewing code that launches an agent CLI headless. Two rules hold everywhere: never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--yolo`, …) to a new spawner, and reserve report numbers with `node reserve-report-num.mjs --count N` before spawning parallel evaluators.
 
 ## Stack and Conventions
 
