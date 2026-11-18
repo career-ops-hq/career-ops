@@ -5,8 +5,10 @@ URLs whenever, then runs the pipeline to process them in one batch.
 
 ## Base workflow
 
-Follow `modes/pipeline.md` verbatim: search `data/pipeline.md` for `- [ ] ` lines, batch after batch until none remain → reserve report
-numbers → extract each JD (Playwright → WebFetch → WebSearch) → full A-H
+Follow the **Which inbox** procedure in `modes/pipeline.md`, then search the
+resolved inbox with `grep -n -m 20 '^- \[ \] ' -- "{INBOX}"` (replace the
+placeholder with the resolved path as one shell-safe argument). Process each
+batch until none remain → reserve report numbers → extract each JD (Playwright → WebFetch → WebSearch) → full A-H
 evaluation via `modes/sg/offer.md` → report + tracker → move to Processed →
 summary table. The notes below are Singapore-specific.
 

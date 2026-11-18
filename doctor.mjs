@@ -13,7 +13,9 @@ import { fileURLToPath } from 'url';
 import { findTitleFilterConflicts } from './lib/title-filter-conflicts.mjs';
 import { sectionState, scanHeadings, SECTIONS } from './lib/personalization.mjs';
 import { discoverPlugins, pluginRoots, pluginStatus, resolveSuccessorIds } from './plugins/_engine.mjs';
-import { getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy } from './path-resolver.mjs';
+import {
+  getCareerOpsRoot, getProfilePath, hasProfileOverride, isPluginInstallCopy, resolvePipelinePath,
+} from './path-resolver.mjs';
 import { parseConfigByExtension } from './jsonc-parse.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { geminiNodeFloor } from './lib/gemini-node-floor.mjs';
@@ -1451,9 +1453,15 @@ Paste job URLs below as \`- [ ] {url}\` then run \`/career-ops pipeline\`.
 ## Processed
 `;
 
+/**
+ * Checks the resolved pipeline inbox and creates its default skeleton if missing.
+ *
+ * @returns {{pass: boolean, label: string, fix?: string}} Inbox status for doctor output.
+ */
 function checkPipelineFile() {
-  const filePath = process.env.CAREER_OPS_PIPELINE || join(projectRoot, 'data', 'pipeline.md');
-  const shown = process.env.CAREER_OPS_PIPELINE ? filePath : 'data/pipeline.md';
+  const override = process.env.CAREER_OPS_PIPELINE?.trim();
+  const filePath = resolvePipelinePath(override, projectRoot);
+  const shown = override ? filePath : 'data/pipeline.md';
   if (existsSync(filePath)) {
     return { pass: true, label: `${shown} ready` };
   }
@@ -1465,8 +1473,8 @@ function checkPipelineFile() {
     return {
       pass: false,
       label: `${shown} could not be created`,
-      fix: process.env.CAREER_OPS_PIPELINE
-        ? `Run: mkdir -p "$(dirname "$CAREER_OPS_PIPELINE")" && touch "$CAREER_OPS_PIPELINE"`
+      fix: override
+        ? `Create the inbox at ${filePath}.`
         : 'Run: mkdir -p data && touch data/pipeline.md',
     };
   }

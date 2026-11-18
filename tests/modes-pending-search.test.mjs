@@ -13,7 +13,6 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const MODES = join(ROOT, 'modes');
-const PENDING_SEARCH = "grep -n -m 20 '^- \\[ \\] ' data/pipeline.md";
 const RESOLVED_PENDING_SEARCH = "grep -n -m 20 '^- \\[ \\] ' -- \"{INBOX}\"";
 
 const pipelineModes = [
@@ -27,12 +26,22 @@ test('the pipeline mode and its translations exist', () => {
   assert.ok(pipelineModes.length >= 19, `found ${pipelineModes.length}`);
 });
 
+/**
+ * Verifies that a pipeline mode searches the resolved inbox as one shell argument.
+ * @param {string} rel Pipeline mode path relative to modes/.
+ * @param {object} [_testContext] Node.js test context.
+ * @returns {void}
+ */
+function pipelineModeUsesResolvedInbox(rel, _testContext) {
+  const source = readFileSync(join(MODES, rel), 'utf-8');
+  assert.ok(source.includes(RESOLVED_PENDING_SEARCH), `${rel} does not search the resolved inbox`);
+}
+
 for (const rel of pipelineModes) {
-  if (rel === join('sg', 'pipeline.md')) continue;
-  test(`modes/${rel} finds pending items with the bounded search`, () => {
-    const source = readFileSync(join(MODES, rel), 'utf-8');
-    assert.ok(source.includes(rel === 'pipeline.md' ? RESOLVED_PENDING_SEARCH : PENDING_SEARCH));
-  });
+  test(
+    `modes/${rel} searches the resolved inbox with the bounded command`,
+    pipelineModeUsesResolvedInbox.bind(null, rel),
+  );
 }
 
 test('the pipeline mode stops once only items it left in Pending come back', () => {

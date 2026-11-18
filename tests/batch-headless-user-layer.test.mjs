@@ -48,7 +48,7 @@ for (const file of ['modes/_shared.md', 'modes/pdf.md']) {
     const sentences = read(file).split(/(?<=\.\*{0,2})\s+/);
     const direct = sentences.filter((s) => /write (it|them) (to|into) `modes\/_custom\.md`/.test(s));
     assert.deepEqual(direct, [], `${file} still writes a preference straight to _custom.md instead of through retro`);
-    const viaRetro = sentences.filter((s) => /`retro`/.test(s) && /`modes\/_custom\.md`/.test(s));
+    const viaRetro = sentences.filter(isInteractiveRetroSentence);
     assert.ok(viaRetro.length > 0, `${file} no longer tells the agent where lasting preferences go; update this test`);
     for (const s of viaRetro) {
       assert.match(s, /interactive session/i, `this retro instruction has no interactive-only scope: ${s}`);
@@ -61,6 +61,16 @@ for (const file of ['modes/_shared.md', 'modes/pdf.md']) {
       }
     }
   });
+}
+
+/**
+ * Identifies the retro instruction that names the user-layer custom rules file.
+ * @param {string} sentence Instruction sentence to inspect.
+ * @returns {boolean} Whether the sentence describes the interactive retro path.
+ */
+function isInteractiveRetroSentence(sentence) {
+  return /`retro`/.test(sentence) &&
+    (sentence.includes('`modes/_custom.md`') || sentence.includes('`{DATA_ROOT}/modes/_custom.md`'));
 }
 
 const RUNNER_SRC = read('batch/batch-runner.sh');

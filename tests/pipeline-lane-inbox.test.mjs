@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipelineRunHint } from '../scan.mjs';
+import { resolvePipelinePath } from '../path-resolver.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = readFileSync(join(ROOT, 'modes', 'pipeline.md'), 'utf-8');
@@ -25,15 +26,43 @@ function section(text, start, end) {
   return text.slice(from, to);
 }
 
-test('the scan hint names the lane inbox when CAREER_OPS_PIPELINE is set', () => {
+/**
+ * Verifies the scan hint names the data-root-resolved lane inbox.
+ * @returns {void}
+ */
+function scanHintNamesResolvedLaneInbox() {
   const hint = pipelineRunHint('data/pipeline.bridge.md', ROOT);
   assert.ok(hint.includes(`/career-ops pipeline "${resolve(ROOT, 'data/pipeline.bridge.md')}" `));
-});
+}
 
-test('the scan hint preserves an absolute lane inbox path', () => {
+test('the scan hint names the lane inbox when CAREER_OPS_PIPELINE is set', scanHintNamesResolvedLaneInbox);
+
+/**
+ * Verifies the scan hint preserves an absolute lane inbox path.
+ * @returns {void}
+ */
+function scanHintPreservesAbsoluteLaneInboxPath() {
   const absolute = resolve(ROOT, 'data', 'bridge inbox.md');
   assert.ok(pipelineRunHint(absolute).includes(`/career-ops pipeline "${absolute}" `));
-});
+}
+
+test('the scan hint preserves an absolute lane inbox path', scanHintPreservesAbsoluteLaneInboxPath);
+
+/**
+ * Verifies shared resolution for default, relative, and absolute inbox paths.
+ * @returns {void}
+ */
+function sharedPipelinePathResolverPreservesPathSemantics() {
+  const dataRoot = resolve(ROOT, 'data-root');
+  const absolute = resolve(dataRoot, 'lane inbox.md');
+  assert.equal(resolvePipelinePath(undefined, dataRoot), resolve(dataRoot, 'data', 'pipeline.md'));
+  assert.equal(resolvePipelinePath('data/pipeline.bridge.md', dataRoot), resolve(dataRoot, 'data/pipeline.bridge.md'));
+  assert.equal(resolvePipelinePath(absolute, dataRoot), absolute);
+  assert.equal(resolvePipelinePath('   ', dataRoot), resolve(dataRoot, 'data', 'pipeline.md'));
+  assert.equal(resolvePipelinePath('C:\\career-ops\\pipeline.md', dataRoot), 'C:\\career-ops\\pipeline.md');
+}
+
+test('the shared pipeline path resolver preserves path semantics', sharedPipelinePathResolverPreservesPathSemantics);
 
 test('the scan hint is unchanged without a lane', () => {
   // '' and not undefined: undefined takes the default, process.env.CAREER_OPS_PIPELINE,

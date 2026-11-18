@@ -85,7 +85,9 @@ import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, googleCareersJobId } from './url-key.mjs';
-import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
+import {
+  getCareerOpsRoot, getProfilePath, hasProfileOverride, resolvePipelinePath,
+} from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
@@ -139,21 +141,7 @@ const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DA
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
 
-/**
- * Resolves a pipeline override relative to the user's data root.
- *
- * @param {string | undefined} lane Optional pipeline path override.
- * @param {string} dataRoot Root for user data and relative pipeline paths.
- * @returns {string} Absolute pipeline path, preserving absolute overrides.
- */
-function resolvePipelinePath(lane, dataRoot = DATA_ROOT) {
-  const file = lane?.trim();
-  if (!file) return path.join(dataRoot, 'data/pipeline.md');
-  if (path.isAbsolute(file) || path.win32.isAbsolute(file)) return file;
-  return path.resolve(dataRoot, file);
-}
-
-export const PIPELINE_PATH = resolvePipelinePath(process.env.CAREER_OPS_PIPELINE);
+export const PIPELINE_PATH = resolvePipelinePath(process.env.CAREER_OPS_PIPELINE, DATA_ROOT);
 
 // The closing hint names the lane's inbox when CAREER_OPS_PIPELINE is set.
 // `/career-ops pipeline` alone reads data/pipeline.md unless the agent's own

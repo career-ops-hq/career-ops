@@ -1,4 +1,4 @@
-import { resolve, dirname, join, basename, parse, sep, relative, isAbsolute } from 'path';
+import { resolve, dirname, join, basename, parse, sep, relative, isAbsolute, win32 } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import { homedir } from 'os';
@@ -153,6 +153,22 @@ export function getCareerOpsRoot() {
     return pluginDefaultDataRoot();
   }
   return __dirname;
+}
+
+/**
+ * Resolves the pipeline inbox override against the selected data root.
+ * Absolute POSIX and Windows paths are preserved; a blank override uses the
+ * default inbox under the data root.
+ *
+ * @param {string | undefined} lane Pipeline path override.
+ * @param {string} [dataRoot=getCareerOpsRoot()] Root for relative overrides.
+ * @returns {string} Absolute path to the pipeline inbox.
+ */
+export function resolvePipelinePath(lane, dataRoot = getCareerOpsRoot()) {
+  const file = lane?.trim();
+  if (!file) return join(dataRoot, 'data', 'pipeline.md');
+  if (isAbsolute(file) || win32.isAbsolute(file)) return file;
+  return resolve(dataRoot, file);
 }
 
 /**

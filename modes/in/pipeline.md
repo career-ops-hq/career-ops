@@ -6,7 +6,7 @@ URLs whenever, then runs the pipeline to process them in one batch.
 ## Base workflow
 
 Follow `modes/pipeline.md` verbatim. Find pending items with
-`grep -n -m 20 '^- \[ \] ' data/pipeline.md` (or the lane file the inbox
+`grep -n -m 20 '^- \[ \] ' -- "{INBOX}"` (or the lane file the inbox
 resolves to), search again after each batch, and repeat until the search
 prints only items you left in Pending this run; never read the whole file.
 Then reserve report numbers → extract each JD (Playwright → WebFetch →

@@ -70,3 +70,23 @@ test('doctor creates the CAREER_OPS_PIPELINE parent when the override file is mi
   assert.match(human.stdout, new RegExp(`${escaped} ready \\(auto-created\\)`));
   assert.equal(existsSync(join(dataRoot, 'data', 'pipeline.md')), false);
 });
+
+/**
+ * Verifies that doctor resolves a relative pipeline override under the data root.
+ * @param {object} t Node.js test context.
+ * @returns {void}
+ */
+function doctorResolvesRelativePipelineOverrideUnderDataRoot(t) {
+  const { dataRoot, env } = fixture(t);
+  env.CAREER_OPS_PIPELINE = 'lanes/pipeline.md';
+  const expected = join(dataRoot, 'lanes', 'pipeline.md');
+  const human = runDoctor(env);
+  assert.equal(existsSync(expected), true, human.stdout + human.stderr);
+  assert.ok(human.stdout.includes(`✓ ${expected} ready (auto-created)`), human.stdout);
+  assert.equal(existsSync(join(dataRoot, 'data', 'pipeline.md')), false);
+}
+
+test(
+  'doctor resolves a relative CAREER_OPS_PIPELINE under the data root',
+  doctorResolvesRelativePipelineOverrideUnderDataRoot,
+);
