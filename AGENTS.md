@@ -93,7 +93,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (`docs/SUPPORTED_CLIS.md` lists them). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (`docs/SUPPORTED_CLIS.md` lists them).
 
 ### CLI invocation
 
@@ -297,7 +297,7 @@ This is a confirmation step, not a replacement for `check-liveness.mjs` — run 
 
 - **GitHub Actions** run `test-all.mjs` on every PR; `main` takes no direct pushes.
 - **Contributing:** changing the repo itself (code, tests, docs) rather than running career-ops? Before the first edit, read these `CONTRIBUTING.md` sections: "Before Submitting a PR" (issue-first rules, owner-reviewed paths), "Guidelines", and "Development" (test layout, what to run before a PR). In short, a new feature, mode or command, or architecture change starts with an issue → discussion → PR with linked issue. Bug fixes, zero-auth scanner providers, docs and translations go straight to a PR, unless they change an owner-reviewed path; a typo fix goes straight to a PR on any path. Every PR: CI passes → maintainer review → merge.
-- **Governance:** `GOVERNANCE.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), `SUPPORT.md` (help questions go to Discord or Discussions, not issues). Discord: https://discord.gg/8pRpHETxa4
+- **Governance:** `GOVERNANCE.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), `SUPPORT.md` (help questions go to Discord or Discussions, not issues).
 
 ## Community asks (one at a time, once each)
 
@@ -305,7 +305,7 @@ career-ops asks for a GitHub star, a manifesto signature and a Hired Wall story,
 
 ## Headless / Batch Mode
 
-`modes/_headless.md` has the headless command for each CLI, the headless worker permissions rule (#2876) and report-number reservation for parallel fan-outs. Read it before spawning a worker, before a parallel fan-out, and before writing or reviewing code that launches an agent CLI headless. Two rules hold everywhere: never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--yolo`, …) to a new spawner, and reserve report numbers with `node reserve-report-num.mjs --count N` before spawning parallel evaluators.
+`modes/_headless.md` has each CLI's headless command, the worker permissions rule (#2876) and report-number reservation. Read it before spawning a worker, before a parallel fan-out, and before writing or reviewing code that launches an agent CLI headless. Three rules hold everywhere: never add a blanket auto-approve flag (`--dangerously-skip-permissions`, `--yolo`, …) to a new spawner; reserve report numbers with `node reserve-report-num.mjs --count N` before spawning parallel evaluators; and never run evaluations (`oferta`, `auto-pipeline`, batch), research, cover letters or CV PDFs headless under Pi: it never asks before using bash, edit or write.
 
 ## Stack and Conventions
 

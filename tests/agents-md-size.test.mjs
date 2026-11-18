@@ -64,6 +64,12 @@ test('every modes/_*.md file AGENTS.md points to exists and ships with updates',
   }
 });
 
+// A headless Pi worker given a plain prompt may never open modes/_headless.md,
+// so this ban has to stay in the file every session loads.
+test('AGENTS.md itself bans evaluations and other restricted workers headless under Pi', () => {
+  assert.match(section('## Headless / Batch Mode'), /never run evaluations[^\n]*research, cover letters or CV PDFs headless under Pi/);
+});
+
 test('the router sends a first run to the onboarding steps', () => {
   const router = read('.agents/skills/career-ops/SKILL.md');
   assert.match(router, /onboardingNeeded[^\n]*`modes\/_onboarding\.md`/);
