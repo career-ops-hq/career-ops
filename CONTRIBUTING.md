@@ -19,7 +19,7 @@ New to all this? That's the point. Claim a good-first-issue by commenting `/assi
 
 **For a new feature, a new mode or command, or an architecture change, please open an issue first.** It saves you from investing time in something we'd have to redirect, and lets us align on direction before you write code.
 
-**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want.
+**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want. The one exception is a change to an [owner-reviewed path](#owner-reviewed-paths): open an issue first there, even for a bug fix or a docs change. A typo fix there needs no issue.
 
 A large *feature* PR that skipped this step may be asked to start with an issue if it doesn't fit the architecture or roadmap — that's a scope conversation, never a judgment on your work.
 
@@ -30,6 +30,26 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - Addresses a feature request that was discussed and approved
 - Includes a clear description of what changed and why
 - Follows the existing code style and project philosophy (simple, minimal, quality over quantity)
+
+### Owner-reviewed paths
+
+[`.github/CODEOWNERS`](.github/CODEOWNERS) sends a change to any of these paths to a maintainer for review. A bad change here usually passes CI, so that review is the real check.
+
+- Repo docs and governance: `README*.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `ARCHITECTURE.md`, `.github/CODEOWNERS`
+- Coding-agent configuration: `.github/copilot-instructions.md`, `.github/agents/`
+- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`
+- Scoring and the data contract: `modes/_shared.md`, `DATA_CONTRACT.md`
+- The self-updater: `update-system.mjs`, `lib/update-manifest.mjs`, `updater-migration-tests.mjs`
+- Plugin governance: `plugins-registry/`, `validate-plugin-registry.mjs`, `plugin-install.mjs`, `plugin-audit.mjs`, `plugins/_engine.mjs`, `plugins/_lock.mjs`, `plugins/_net.mjs`, `plugins/_registry.mjs`, `.github/workflows/`, `docs/PLUGIN_REVIEW.md`
+- The employer registry: `employers/`, `seeds/employers-validate.mjs`, `lib/ats-board-url.mjs`
+- The web UI: `web/`
+
+What that means depends on who makes the change:
+
+- **A contributor**, working by hand or with a coding agent they are directing: open an issue first and link it from the PR, then expect a closer review. A typo fix needs no issue and goes straight to a PR. These paths are not off limits; several plugin-engine fixes landed this way.
+- **An unattended coding agent**, a session no person is watching (the Copilot cloud agent, for one): leave these paths alone. Stop and explain in the report why the task needs them, so a person can open the issue.
+
+The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/contributing-owner-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
 
 ## Quick Start
 
