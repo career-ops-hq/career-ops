@@ -138,11 +138,20 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
   const same = requisitionIdsForDedup({ url: `${G}100000000000000001` });
   if (!isDistinctRequisition(seeded, same)) pass('the same Google job id, slugged or not, is still a duplicate');
   else fail('the same Google job id was treated as a distinct requisition');
-  // A history row with no URL names no requisition, so the key keeps its
-  // historical answer: a duplicate.
-  const unlabelled = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
-  if (!isDistinctRequisition(unlabelled.requisitionsByBase.get(unlabelled.base), other)) pass('a Google row with no job id keeps the duplicate');
+  // A Google URL that names no posting (the results page) is a real row that
+  // names no requisition: it must seed the wildcard, and the key keeps its
+  // historical answer, a duplicate.
+  const noId = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${G}?q=software-engineer\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
+  const wildcard = noId.requisitionsByBase.get(noId.base);
+  if (wildcard && wildcard.size === 1 && wildcard.has(ANY_REQUISITION)) pass('a Google URL with no job id seeds the wildcard requisition');
+  else fail(`a Google URL with no job id seeded [${wildcard ? [...wildcard].join(', ') : 'nothing'}], want [${ANY_REQUISITION}]`);
+  if (wildcard && !isDistinctRequisition(wildcard, other)) pass('a Google row with no job id keeps the duplicate');
   else fail('a Google row with no job id was treated as distinct');
+  // A row with an empty URL is skipped by the seeder outright, so it seeds
+  // nothing at all (kept apart from the wildcard case above).
+  const noUrl = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
+  if (noUrl.requisitionsByBase.get(noUrl.base) === undefined) pass('a scan-history row with an empty URL seeds nothing');
+  else fail('a scan-history row with an empty URL was seeded');
 }
 
 // ── 3b. A tracker with a URL column passes the URL through ───────────────────
