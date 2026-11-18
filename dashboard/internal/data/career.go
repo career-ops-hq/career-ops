@@ -1129,13 +1129,25 @@ func HasTrackerIdentity(app model.CareerApplication) bool {
 }
 
 // SameTrackerRow reports whether one selector addresses both rows, so a caller
-// can find a row again after re-reading the tracker. It compares the identity a
-// write would use, not the row's contents — a status write changes Status and
+// can find a row again after re-reading the tracker. It compares the identities
+// a write could use, not the row's contents — a status write changes Status and
 // Notes. A row with no identity matches nothing, including itself.
+//
+// It intersects the identity SETS rather than comparing the preferred selector
+// of each, because the preferred one can change under a row while the row stays
+// the same: a merge that attaches report #7 to tracker row #32 moves it from
+// `--row 32` to `--report-link 7`, and comparing first-to-first would stop
+// recognising the row the cursor was on (#7331 review). The flag is part of each
+// key, so `--row 32` and `--report-link 32` are still two different rows.
 func SameTrackerRow(a, b model.CareerApplication) bool {
-	aFlag, aValue, aOK := trackerSelector(a)
-	bFlag, bValue, bOK := trackerSelector(b)
-	return aOK && bOK && aFlag == bFlag && aValue == bValue
+	for _, want := range trackerIdentities(a) {
+		for _, got := range trackerIdentities(b) {
+			if want == got {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // UpdateApplicationStatusAndNotes delegates to the canonical writer so status,

@@ -6206,14 +6206,38 @@ try {
   // `--row` the check above wants and sends `--report` (#7331 review). So read
   // that field and require a BARE literal: an expression the guard cannot
   // resolve fails it, rather than passing on the literal inside it.
-  // Keyed fields (`flag: "--row"`) are a legitimate spelling, so read both.
+  // Keyed fields are a legitimate spelling and carry no order (`{value: v,
+  // flag: "--row"}` is the same selector), so find the named field wherever it
+  // sits and fall back to the first positional field.
+  const identityField = (construction, name, position) => {
+    const fields = construction.split(',').map((f) => f.trim());
+    const keyed = fields.find((f) => new RegExp(`^${name}\\s*:`).test(f));
+    if (keyed !== undefined) return keyed.replace(new RegExp(`^${name}\\s*:\\s*`), '');
+    // A positional construction cannot mix in keys: Go rejects that outright.
+    if (fields.some((f) => /^[a-z]\w*\s*:/.test(f))) return null;
+    return fields[position] ?? null;
+  };
   const identityFlagField = (construction) => {
-    const flag = construction.split(',')[0].trim();
-    const bare = flag.match(/^(?:flag\s*:\s*)?"(--[a-z-]+)"$/);
+    const flag = identityField(construction, 'flag', 0);
+    const bare = flag === null ? null : flag.match(/^"(--[a-z-]+)"$/);
     return bare ? bare[1] : null;
   };
-  const selectorFlagFields = [...selectorSource.matchAll(/trackerIdentity\{([^}]*)\}/g)]
-    .map((m) => identityFlagField(m[1]));
+  const selectorIdentities = [...selectorSource.matchAll(/trackerIdentity\{([^}]*)\}/g)]
+    .map((m) => ({
+      flag: identityFlagField(m[1]),
+      value: identityField(m[1], 'value', 1),
+    }));
+  const selectorFlagFields = selectorIdentities.map((id) => id.flag);
+  // Presence of both flags is not enough: branches that SWAP their flag
+  // literals while keeping their values pass every presence check, and then a
+  // report linked as #7 on tracker row #32 sends `--row 7`, which the CLI
+  // accepts as a tracker selector (#7331 review). So pair each flag with the
+  // field it must carry.
+  const selectorPairs = { '--report-link': 'ReportNumber', '--row': 'Number' };
+  const mispaired = selectorIdentities
+    .filter(({ flag, value }) => flag !== null
+      && (value === null || !value.includes(selectorPairs[flag] ?? '\u0000')))
+    .map(({ flag }) => flag);
   const argsStart = runWriterBody.indexOf('args := []string{');
   const argvLiteral = argsStart === -1
     ? ''
@@ -6232,6 +6256,7 @@ try {
     // --report-link would renumber every existing row's writes.
     && selectorFlagFields.includes('--report-link')
     && selectorFlagFields.includes('--row')
+    && mispaired.length === 0
     && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
   if (delegatesToCanonicalWriter) {
     pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
@@ -6247,6 +6272,7 @@ try {
   const resolvableFlagFields = [
     ['a bare literal', '"--row", strconv.Itoa(app.Number)', '--row'],
     ['keyed fields', 'flag: "--report-link", value: app.ReportNumber', '--report-link'],
+    ['keyed fields in the other order', 'value: strconv.Itoa(app.Number), flag: "--row"', '--row'],
     ['rewritten at runtime', 'strings.Replace("--row", "row", "report", 1), strconv.Itoa(app.Number)', null],
     ['built from a variable', 'rowFlag, strconv.Itoa(app.Number)', null],
     ['concatenated', '"--" + "report", strconv.Itoa(app.Number)', null],

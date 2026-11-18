@@ -986,39 +986,130 @@ func TestWithReloadedDataFallsBackToCompanyAndRole(t *testing.T) {
 	}
 }
 
-// A duplicate tracker # (#1704) makes two unrelated rows answer to the same
+// A duplicate tracker # (#1704) makes several unrelated rows answer to the same
 // `--row 32`. Identity alone cannot pick between them, so company and role
 // decide among exactly those rows.
+//
+// The fixture forces BOTH fields to be used: one twin shares only the company,
+// another only the role, so narrowing on either alone stays ambiguous. A fourth
+// row shares both fields but carries a different #, to check that narrowing
+// never reaches outside the identity matches.
 func TestWithReloadedDataPicksAmongRowsSharingATrackerNumber(t *testing.T) {
 	initial := []model.CareerApplication{
 		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Interview"},
-		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Applied"},
+		{Number: 32, Company: "Acme", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Zeta", Role: "Engineer", Status: "Interview"},
+		{Number: 40, Company: "Acme", Role: "Engineer", Status: "Interview"},
 	}
 	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
-	pm.sortMode = sortStatus
 	pm.applyFilterAndSort()
 	for i, app := range pm.filtered {
-		if app.Company == "Acme" {
+		if app.Number == 32 && app.Company == "Acme" && app.Role == "Engineer" {
 			pm.cursor = i
 		}
 	}
-	if app, _ := pm.CurrentApp(); app.Company != "Acme" {
-		t.Fatalf("premise: the cursor is on Acme, got %q", app.Company)
+	if app, _ := pm.CurrentApp(); app.Number != 32 || app.Company != "Acme" || app.Role != "Engineer" {
+		t.Fatalf("premise: the cursor is on #32 Acme/Engineer, got #%d %s/%s", app.Number, app.Company, app.Role)
 	}
 
-	// Acme moves to Discarded, which sorts it behind Beta — so the first row
-	// answering to `--row 32` is now the unrelated one.
+	// The selected row is now last among the rows answering to `--row 32`, so a
+	// first-match restore would land on a twin.
 	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Zeta", Role: "Engineer", Status: "Interview"},
+		{Number: 40, Company: "Acme", Role: "Engineer", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Analyst", Status: "Interview"},
 		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Discarded"},
-		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Applied"},
+	}, model.PipelineMetrics{Total: 4})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 || app.Company != "Acme" || app.Role != "Engineer" {
+		t.Fatalf("the cursor moved to #%d %s/%s; want #32 Acme/Engineer", app.Number, app.Company, app.Role)
+	}
+}
+
+// Ambiguity is a property of the tracker, not of the visible rows. A tab filter
+// that hides a row's twin must not make a duplicate # look like a unique match.
+func TestWithReloadedDataCountsDuplicateTrackerNumbersOutsideTheFilter(t *testing.T) {
+	interviewTab := 0
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterInterview {
+			interviewTab = i
+		}
+	}
+	// Gamma keeps the retained index pointing somewhere other than Beta, so the
+	// identity restore and the index fallback name different rows.
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Delta", Role: "Platform", Status: "Interview"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.activeTab = interviewTab
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Delta" {
+			pm.cursor = i
+		}
+	}
+	if app, _ := pm.CurrentApp(); app.Company != "Delta" {
+		t.Fatalf("premise: the cursor is on Delta, got %q", app.Company)
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: Delta sits at index 1, got %d", pm.cursor)
+	}
+
+	// Delta leaves the Interview tab, so Beta is the only visible `--row 32` —
+	// but the tracker still holds two, so the selector is still ambiguous.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Delta", Role: "Platform", Status: "Rejected"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Company == "Beta" {
+		t.Fatal("the cursor landed on the hidden twin's row Beta; it is a different opening")
+	}
+	if app.Company != "Gamma" {
+		t.Fatalf("want the retained index (Gamma), got %q", app.Company)
+	}
+}
+
+// A merge that attaches a report link to the selected row changes which selector
+// a write would prefer, from `--row 32` to `--report-link 7`. The row is the same
+// one, so the cursor must stay on it.
+func TestWithReloadedDataFollowsARowThatGainsAReportLink(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Evaluated"},
+		{Number: 33, Company: "Other Co", Role: "Ops", Status: "Evaluated"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			pm.cursor = i
+		}
+	}
+
+	// #32 now links report #7, and sorts second, so the retained index alone
+	// would select the other row.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 33, Company: "Other Co", Role: "Ops", Status: "Evaluated"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Evaluated", ReportNumber: "7"},
 	}, model.PipelineMetrics{Total: 2})
 
 	app, ok := reloaded.CurrentApp()
 	if !ok {
 		t.Fatal("no row selected after the reload")
 	}
-	if app.Company != "Acme" {
-		t.Fatalf("the cursor moved to %q; the pre-identity lookup kept Acme", app.Company)
+	if app.Number != 32 {
+		t.Fatalf("the cursor moved to #%d; the row only gained a report link", app.Number)
 	}
 }
 

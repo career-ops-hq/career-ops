@@ -151,3 +151,28 @@ func TestSameTrackerRowComparesOneNumberSpace(t *testing.T) {
 		t.Fatal("a tracker # and a report link are both identities")
 	}
 }
+
+// A merge can attach a report link to a row that had none, which changes the
+// selector a write would PREFER without changing the row. Comparing the
+// preferred selector of each would stop recognising it, so the sets intersect.
+func TestSameTrackerRowFollowsARowThatGainsAReportLink(t *testing.T) {
+	before := model.CareerApplication{Number: 32}
+	after := model.CareerApplication{Number: 32, ReportNumber: "7", Status: "Applied"}
+
+	if !SameTrackerRow(before, after) {
+		t.Fatal("a row that gained a report link is still the same row")
+	}
+	if !SameTrackerRow(after, before) {
+		t.Fatal("the comparison must not depend on argument order")
+	}
+	// The flag is part of each key, so the two counters still never collide: a
+	// row numbered #7 is not the row linking report #7.
+	if SameTrackerRow(after, model.CareerApplication{Number: 7}) {
+		t.Fatal("report #7 must not match row #7")
+	}
+	// Writes still prefer the report link once there is one.
+	flag, value, ok := trackerSelector(after)
+	if !ok || flag != "--report-link" || value != "7" {
+		t.Fatalf("want --report-link 7, got %s %s (ok=%v)", flag, value, ok)
+	}
+}
