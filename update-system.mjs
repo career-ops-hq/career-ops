@@ -1664,10 +1664,12 @@ export function parsePorcelainStatus(status) {
     const code = field.slice(0, 2);
     entries.push({ code, path: field.slice(3) });
     // R (rename) and C (copy) always sit in the first status column and are
-    // followed by one extra field — the origin path. Emit it too.
+    // followed by one extra field — the origin path. Emit it too. A rename's
+    // origin is marked: it is gone from the index and the disk, which a
+    // restore has to put back, where a copy's origin still exists.
     if (code[0] === 'R' || code[0] === 'C') {
       const origin = fields[++i];
-      if (origin) entries.push({ code, path: origin });
+      if (origin) entries.push(code[0] === 'R' ? { code, path: origin, renameOrigin: true } : { code, path: origin });
     }
   }
   return entries;
@@ -3455,11 +3457,15 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
   // - `MD` / `AD`: an edit was staged, then the file deleted. The staged blob
   //   is recorded below; the file is absent (deleted: true).
   // - ` D`: an unstaged deletion. The index is HEAD's; the file is absent.
+  // - a rename's origin: the entry moved to the destination and the file with
+  //   it. It is the staged deletion's shape, or a checkout that recreates it
+  //   is undone as a HEAD reset — which resurrects the file and degrades the
+  //   staged rename to a copy.
   // A checkout that recreated an absent file is then undone as a deletion
   // instead of being reset to HEAD's entry (which would resurrect the file).
   const untracked = new Set(statusEntries.filter((entry) => entry.code === '??').map((entry) => entry.path));
   for (const entry of statusEntries) {
-    const stagedDeletion = entry.code[0] === 'D';
+    const stagedDeletion = entry.code[0] === 'D' || entry.renameOrigin === true;
     if (stagedDeletion || entry.code[1] === 'D') {
       state.set(entry.path, { deleted: !untracked.has(entry.path), stagedDeletion });
       if (stagedDeletion) staged.delete(entry.path);
@@ -3558,6 +3564,7 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
   }
   for (const file of writtenDirty) {
     const staged = state.initialIndexState.get(file);
+    const backup = backupByFile.get(file);
     try {
       // The file the checkout recreated is removed below, and a symlinked
       // parent would point that delete outside the worktree: refuse it here,
@@ -3569,8 +3576,22 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
       // `git rm --cached` refuses content that differs from HEAD and the
       // index), a staged edit had its recorded blob, anything else HEAD's.
       if (staged?.stagedDeletion) runGit('update-index', '--force-remove', '--', file);
-      else if (staged?.sha) runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
-      else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
+      else if (staged?.sha) {
+        runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
+        // The worktree can still hold the checkout's bytes: the .bak put back
+        // above covers an at-risk edit, but an edit attributed to a previous
+        // update gets no backup (locallyModifiedSystemFiles credits the
+        // update, not the install), so nothing else returns its bytes. The
+        // staged blob is in the object store; restore --worktree writes the
+        // index entry back over the checkout's. Skipped when the bytes
+        // already match (an equal-content edit), and refused through a
+        // symlinked parent for restoreBytesWithoutFollowingLinks()'s reason.
+        if (!backup && runGit('hash-object', '--', file) !== staged.sha) {
+          const linkedParent = symlinkedAncestor(file, root);
+          if (linkedParent) throw new Error(`${linkedParent} is a symlink; the staged blob was not put back`);
+          runGit('--literal-pathspecs', 'restore', '--worktree', '--', file);
+        }
+      } else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
       // Then the worktree: a file absent before the update is removed again.
       // An untracked replacement (deleted: false) was put back from its .bak.
       if (staged?.deleted) rmSync(join(root, ...file.split('/')), { force: true });
