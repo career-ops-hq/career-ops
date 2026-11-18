@@ -10,8 +10,10 @@
  *
  * Run from the root of a checkout. What it does, in order:
  *   1. Validates the registry, inbox included. Any error stops it.
- *   2. Groups the inbox by contribution (<YYYY-MM-DD>-<login>: the boards
- *      files, their numbered parts and the optional manifest).
+ *   2. Groups the inbox by contribution (<YYYY-MM-DD>-<login>, or
+ *      <YYYY-MM-DD>-<login>.<n> for a later one of the same day: the boards
+ *      files, their numbered parts and the optional manifest), in id order
+ *      (compareContributionIds: <id>.2 before <id>.10).
  *   3. Turns each line into a full row (inboxLineToRow): careers_url, and the
  *      provenance fields source, contribution and added (the contribution
  *      date). A board already in boards/, retired or not, is skipped.
@@ -20,8 +22,10 @@
  *   5. Writes each contribution's manifest to contributions/: the
  *      organization's own, with rows set to the boards it really added, or,
  *      for a contribution without one, a short manifest that credits the
- *      login in the file name. A contribution id that is already taken gets
- *      -2, -3, … A contribution whose boards were all known adds no manifest.
+ *      login in the file name. A contribution id without a number that is
+ *      already taken gets -2, -3, …; a numbered one is never changed (the
+ *      validator refuses a taken one). A contribution whose boards were all
+ *      known adds no manifest.
  *   6. Regenerates CHANGELOG.md, deletes the folded inbox files (and inbox/
  *      when it is empty), and validates again.
  *
@@ -44,6 +48,7 @@ import {
   REGISTRY_DIR,
   boardIdentity,
   boardInitial,
+  compareContributionIds,
   compareRows,
   readInbox,
   renderChangelog,
@@ -158,7 +163,7 @@ export function planFold({ root = process.cwd(), today = new Date() } = {}) {
   /** @type {Map<string, string>} manifest path → text */
   const newManifests = new Map();
 
-  for (const inboxId of [...groups.keys()].sort()) {
+  for (const inboxId of [...groups.keys()].sort(compareContributionIds)) {
     const g = /** @type {NonNullable<ReturnType<typeof groups.get>>} */ (groups.get(inboxId));
     const sheet = inbox.sheets.get(inboxId) || null;
     let id = inboxId;

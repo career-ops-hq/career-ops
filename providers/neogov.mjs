@@ -129,7 +129,10 @@ export default {
         break;
       }
     }
-    if (!stoppedOnEmpty && lastPageFull && pagesFetched >= ceiling && !(ctxMax > 0 && ctxMax < ceiling)) {
+    // Never during a ctx.maxPages probe: on a max_pages: 1 entry the probe ends
+    // on the entry's own last page too, so a probe cap below the ceiling is not
+    // the only one to exclude (#7180).
+    if (!stoppedOnEmpty && lastPageFull && pagesFetched >= ceiling && !(ctxMax > 0)) {
       console.warn(`neogov: ${entry.name}: stopped at ${ceiling} pages (${ceiling * PAGE_SIZE} postings); raise max_pages on this entry`);
       // The same cut marks the result, so scan.mjs logs the board partial
       // instead of reachable (lib/board-truncation.mjs).

@@ -13,7 +13,7 @@ Headless worker command per CLI:
 | Gemini CLI | `gemini -p "prompt"` |
 | Grok Build CLI | `grok -p "prompt"` |
 | **OpenCode** | `opencode run "prompt"` (falls back to `ollama launch opencode -y -- run "prompt"` if `opencode` binary is not in PATH) |
-| Pi | `pi -a -p "prompt"` |
+| Pi | `pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops <request>"` (Pi 0.79.1+; no `evaluate`, `research`, `cover` or `pdf` worker: see `docs/SUPPORTED_CLIS.md`) |
 | Qwen | `qwen -p "prompt"` |
 
 **Headless worker permissions — one rule for every entry point (#2876).** A worker never gets more write power headless than the web grants the same worker kind. The web's grant is the audited one: `WRITE_CAPABLE_TOOLS` and the per-kind deny lists in `web/src/lib/claude-invocation.mjs` (`pdf` has had no Bash since #2172 and must never regain it).

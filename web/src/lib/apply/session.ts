@@ -8,6 +8,7 @@ import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
+import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
 import { cvUploadFile } from "./upload-name.mjs";
 import { resolveCli } from "../clis";
@@ -603,6 +604,31 @@ export async function fillSession(
         await loc.selectOption({ label: value }).catch(async () => {
           await loc.selectOption(value);
         });
+      } else if (meta.type === "checkbox" && meta.options?.length) {
+        const wanted = checkboxSelections(value, meta.options);
+        const consent = (label: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(label);
+        const boxes = s.frame.locator(`[data-co-field="${cssAttr(fid)}"]`);
+        const count = await boxes.count();
+        let checked = 0;
+        let missed = 0;
+        for (let i = 0; i < count; i++) {
+          const box = boxes.nth(i);
+          const opt = (await box.getAttribute("data-co-option")) || "";
+          // A consent option keeps its own words, or the mark set when a shared
+          // consent label was replaced by the control's value. The group title
+          // does not make the whole group consent. Leave the box untouched.
+          if (consent(opt) || (await box.getAttribute("data-co-consent")) === "1") continue;
+          const want = checkboxOptionWanted(wanted, opt);
+          const did = await confirmCheckbox(
+            (state, opts) => box.setChecked(state, opts),
+            (opts) => box.isChecked(opts),
+            want,
+          );
+          if (!did) missed += 1;
+          else if (want) checked += 1;
+        }
+        const actionable = wanted.filter((opt) => !consent(opt));
+        gaveUp = missed > 0 || checked !== actionable.length || actionable.length !== wanted.length;
       } else if (meta.type === "checkbox") {
         const want = ["true", "1", "yes", "on", "checked"].includes(value.toLowerCase());
         let done = false;
