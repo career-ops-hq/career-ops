@@ -420,6 +420,11 @@ export default {
     // endpoints' orderings together (duplicated or skipped postings).
     let api = 'v2';
     let rateLimited = false;
+    // Pages read, and whether the last one was full by the source's own row
+    // count: with no `count` in the responses, a walk that read every page
+    // max_pages allows and ended on a full one may have left postings unread.
+    let pagesRead = 0;
+    let lastPageFull = false;
 
     for (let page = 0; page < maxPages; page++) {
       const start = page * PAGE_SIZE;
@@ -506,6 +511,8 @@ export default {
       if (total === null && typeof json?.count === 'number' && Number.isFinite(json.count)) {
         total = json.count;
       }
+      pagesRead += 1;
+      lastPageFull = positions.length >= PAGE_SIZE;
 
       // Stop conditions, in the order they can be trusted:
       //   - an empty or short page is the end of the board;
@@ -527,6 +534,12 @@ export default {
       // Same tag as the 429 branch above: the page cap cuts a board short just
       // as a rate limit does (2,000 of 2,083 on a real tenant), and a caller
       // that cannot see the stderr line must still be able to tell.
+      /** @type {any} */ (all).eightfoldTruncated = true;
+    } else if (!probing && total === null && pagesRead === maxPages && lastPageFull) {
+      // No `count` to compare with, but the walk read every page max_pages
+      // allows and the last one was full: the board may go on, so this is
+      // the same cut, warned about and tagged the same way.
+      console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} jobs; the response gave no count) — raise max_pages on this entry for more`);
       /** @type {any} */ (all).eightfoldTruncated = true;
     }
 

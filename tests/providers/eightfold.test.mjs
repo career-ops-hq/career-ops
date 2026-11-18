@@ -558,6 +558,28 @@ try {
       ? pass('eightfold tags a max_pages-truncated board eightfoldTruncated, and not a complete one')
       : fail(`max_pages tag: capped=${capped.length}/${capped.eightfoldTruncated} roomy=${roomy.length}/${roomy.eightfoldTruncated}`);
 
+    // A response with no `count`: a walk that stops at max_pages on a full page
+    // is still a cut, warned about and tagged; a short page at the ceiling is
+    // still the board's own end.
+    const noCountErrors = [];
+    const errorBefore = console.error;
+    console.error = (...args) => { noCountErrors.push(args.join(' ')); };
+    let noCount;
+    let noCountShort;
+    try {
+      noCount = await ef.fetch({ ...TENANT, max_pages: 2 }, recording((c) => ({ positions: page(Number(new URL(c.url).searchParams.get('start') || 0)) })).ctx);
+      noCountShort = await ef.fetch({ ...TENANT, max_pages: 2 }, recording((c) => {
+        const start = Number(new URL(c.url).searchParams.get('start') || 0);
+        return { positions: start < 10 ? page(start) : page(start).slice(0, 5) };
+      }).ctx);
+    } finally {
+      console.error = errorBefore;
+    }
+    noCount.length === 20 && noCount.eightfoldTruncated === true && noCountShort.length === 15 && noCountShort.eightfoldTruncated === undefined
+      && noCountErrors.length === 1 && /truncated at max_pages=2 \(20 jobs; the response gave no count\)/.test(noCountErrors[0])
+      ? pass('eightfold warns and tags a max_pages cut when the response gives no count, and not a short last page')
+      : fail(`no-count cut: capped=${noCount?.length}/${noCount?.eightfoldTruncated} short=${noCountShort?.length}/${noCountShort?.eightfoldTruncated} errors=${JSON.stringify(noCountErrors)}`);
+
     // A probe never reports a max_pages cut (#7180), whichever cap limited the
     // walk: a ctx.maxPages below, equal to or above max_pages warns nothing and
     // tags nothing. With max_pages: 1 an equal probe is every probe.
