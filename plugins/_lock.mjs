@@ -11,8 +11,8 @@
 // mutation, and a community plugin whose files changed since you trusted it
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, linkSync, mkdtempSync, rmSync, readdirSync, lstatSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, linkSync, mkdtempSync, rmSync, renameSync, readdirSync, lstatSync } from 'node:fs';
 import path from 'node:path';
 
 const LOCK_VERSION = 1;
@@ -149,17 +149,54 @@ export function migrateLegacyLock(dataRoot, root = dataRoot, io = {}) {
   return true;
 }
 
+// A torn file is not an empty lock. Reading it as empty and writing it back
+// would drop every other pin. Reads the same file readLock does (the data-root
+// lock, else a legacy code-root lock), so a damaged legacy lock is refused too
+// instead of being migrated or re-pinned as if it were empty.
+export function readLockForUpdate(dataRoot, root = dataRoot) {
+  let file = lockPath(dataRoot);
+  if (!existsSync(file) && root && path.resolve(root) !== path.resolve(dataRoot)) {
+    const fallback = lockPath(root);
+    if (existsSync(fallback)) file = fallback;
+  }
+  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error(`plugins.lock at ${file} is not valid JSON, so it was left unchanged.`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) {
+    throw new Error(`plugins.lock at ${file} has no plugins map, so it was left unchanged.`);
+  }
+  return parsed;
+}
+
+function saveLock(dataRoot, lock) {
+  const file = lockPath(dataRoot);
+  const tmp = path.join(dataRoot, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n', 'utf8');
+    renameSync(tmp, file);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the temp file may not exist */ }
+    throw err;
+  }
+}
+
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
 export function writeLockEntry(dataRoot, id, entry, root = dataRoot) {
-  const lock = readLock(dataRoot, root);
+  const lock = readLockForUpdate(dataRoot, root);
   lock.lockfileVersion = LOCK_VERSION;
   lock.plugins[id] = entry;
-  writeFileSync(lockPath(dataRoot), JSON.stringify(lock, null, 2) + '\n', 'utf8');
+  saveLock(dataRoot, lock);
 }
 
 export function removeLockEntry(dataRoot, id, root = dataRoot) {
-  const lock = readLock(dataRoot, root);
-  if (lock.plugins[id]) { delete lock.plugins[id]; writeFileSync(lockPath(dataRoot), JSON.stringify(lock, null, 2) + '\n', 'utf8'); }
+  const lock = readLockForUpdate(dataRoot, root);
+  if (!lock.plugins[id]) return;
+  delete lock.plugins[id];
+  saveLock(dataRoot, lock);
 }
 
 /**

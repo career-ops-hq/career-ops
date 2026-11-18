@@ -656,8 +656,8 @@ ok('different IDs across the /jobs/view and ?currentJobId= shapes stay TWO rows'
 
 ok('slug-vs-id spellings of ONE LinkedIn posting still collapse to ONE row', () => {
   const rows = mergeTwoWithUrls(
-    'https://www.linkedin.com/jobs/view/4001',
-    'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4001');
+    'https://www.linkedin.com/jobs/view/4000001',
+    'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4000001');
   assertMerged(rows, 'same posting id → not evidence → fuzzy tier decides');
 });
 

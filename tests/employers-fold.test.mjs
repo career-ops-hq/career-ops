@@ -20,7 +20,7 @@ import { listTree } from '../lib/walk-tree.mjs';
 
 import { applyFold, formatManifest, looseManifest, planFold } from '../seeds/employers-fold.mjs';
 import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
-import { validateRegistry } from '../seeds/employers-validate.mjs';
+import { compareContributionIds, validateRegistry } from '../seeds/employers-validate.mjs';
 
 const FOLD = join(ROOT, 'seeds', 'employers-fold.mjs');
 const IMPORTER = join(ROOT, 'seeds', 'employers-import.mjs');
@@ -163,9 +163,9 @@ test('idempotent and deterministic: a second fold changes nothing, and two copie
   assert.deepEqual(folded[0], folded[1]);
 });
 
-// A committed contribution id whose -2 is still free.
+// A committed contribution id without a number whose -2 is still free.
 const TAKEN = readdirSync(join(ROOT, 'employers/contributions')).map((f) => f.replace(/\.json$/, ''))
-  .sort().find((id) => !existsSync(join(ROOT, 'employers/contributions', `${id}-2.json`)));
+  .sort().find((id) => !id.includes('.') && !existsSync(join(ROOT, 'employers/contributions', `${id}-2.json`)));
 const [TAKEN_DATE, TAKEN_LOGIN] = [TAKEN.slice(0, 10), TAKEN.slice(11)];
 
 test('a taken contribution id gets -2, and an organization manifest is rewritten with the rows it really added', () => withInbox({
@@ -179,6 +179,88 @@ test('a taken contribution id gets -2, and an organization manifest is rewritten
   assert.deepEqual([m.id, m.rows, m.contributor, m.signed_by], [`${TAKEN}-2`, 1, TAKEN_LOGIN, 'A founder of Acme']);
   assert.deepEqual(validateRegistry({ root: dir, base: ROOT, today: TODAY }).errors, []);
 }));
+
+// Three contributions of one login on one day: the first with no number, then
+// .2 from another source, then .10 with no manifest of its own (.3 to .9 need
+// not exist).
+const DAY = [unlisted({ ats: 'ashby', board: 'Aardvark', name: 'Aardvark' })];
+const DAY2 = [unlisted({ ats: 'lever', region: 'eu', board: 'eurocorp', name: 'Eurocorp' })];
+const DAY10 = [unlisted({ ats: 'greenhouse', board: 'notion-labs', name: 'Notion Labs' })];
+const DAY_INBOX = {
+  [`${DATE}-acme-hr.10.ndjson`]: DAY10,
+  [`${DATE}-acme-hr.2.json`]: sheet({ id: `${DATE}-acme-hr.2`, rows: 1, source: `web-index:wayback@${DATE}`, attribution: 'Archived pages contributed by Acme' }),
+  [`${DATE}-acme-hr.2.ndjson`]: DAY2,
+  [`${DATE}-acme-hr.json`]: sheet({ rows: 1 }),
+  [`${DATE}-acme-hr.ndjson`]: DAY,
+};
+
+test('several contributions of one login on one day: each folds with its own id, source, manifest and credit line, in number order', () => withInbox(DAY_INBOX, (dir) => {
+  const { errors, plan } = planFold({ root: dir, today: TODAY });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(plan.contributions.map((c) => [c.inboxId, c.id, c.login, c.source, c.added, c.manifest]), [
+    [`${DATE}-acme-hr`, `${DATE}-acme-hr`, 'acme-hr', 'employer-list:acme', 1, 'organization'],
+    [`${DATE}-acme-hr.2`, `${DATE}-acme-hr.2`, 'acme-hr', `web-index:wayback@${DATE}`, 1, 'organization'],
+    [`${DATE}-acme-hr.10`, `${DATE}-acme-hr.10`, 'acme-hr', 'community', 1, 'written'],
+  ]);
+  applyFold(plan, dir);
+
+  assert.deepEqual([DAY[0], DAY2[0], DAY10[0]].map((l) => { const r = foldedRow(dir, l); return [r.contribution, r.source, r.added]; }), [
+    [`${DATE}-acme-hr`, 'employer-list:acme', DATE],
+    [`${DATE}-acme-hr.2`, `web-index:wayback@${DATE}`, DATE],
+    [`${DATE}-acme-hr.10`, 'community', DATE],
+  ]);
+  assert.equal(readFileSync(join(dir, `employers/contributions/${DATE}-acme-hr.2.json`), 'utf8'), DAY_INBOX[`${DATE}-acme-hr.2.json`]);
+  // A numbered contribution without a manifest credits the login, not the id.
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, `employers/contributions/${DATE}-acme-hr.10.json`), 'utf8')),
+    looseManifest({ id: `${DATE}-acme-hr.10`, login: 'acme-hr', date: DATE, rows: 1 }));
+
+  const changelog = readFileSync(join(dir, 'employers/CHANGELOG.md'), 'utf8').split('\n');
+  const lines = [
+    `- ${DATE} \`${DATE}-acme-hr\` (1 board, source \`employer-list:acme\`): Employer pages contributed by Acme`,
+    `- ${DATE} \`${DATE}-acme-hr.2\` (1 board, source \`web-index:wayback@${DATE}\`): Archived pages contributed by Acme`,
+    `- ${DATE} \`${DATE}-acme-hr.10\` (1 board, source \`community\`): Boards contributed by @acme-hr`,
+  ].map((l) => changelog.indexOf(l));
+  assert.ok(lines.every((i) => i > 0), JSON.stringify(lines));
+  assert.deepEqual(lines, [lines[0], lines[0] + 1, lines[0] + 2]);
+
+  const after = validateRegistry({ root: dir, base: ROOT, today: TODAY });
+  assert.deepEqual(after.errors, []);
+  assert.deepEqual(after.warnings, []);
+}));
+
+test('a numbered id already in contributions/ is an error that names a free number, and the fold refuses it', () => withInbox(DAY_INBOX, (dir) => {
+  applyFold(planFold({ root: dir, today: TODAY }).plan, dir);
+  const again = {
+    [`${DATE}-acme-hr.2.ndjson`]: [unlisted({ ats: 'recruitee', board: 'tinyco', name: 'TinyCo' })],
+    [`${DATE}-acme-hr.ndjson`]: [unlisted({ ats: 'workday', board: 'acmeco/wd3/Careers', name: 'AcmeCo' })],
+  };
+  mkdirSync(join(dir, INBOX_DIR));
+  for (const [name, lines] of Object.entries(again)) writeFileSync(join(dir, INBOX_DIR, name), `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
+  // Only the numbered id is an error: one without a number keeps today's rule and is folded in as -2.
+  assert.deepEqual(validateRegistry({ root: dir, today: TODAY }).errors.map((e) => `${e.file}: ${e.message}`), [
+    `${INBOX_DIR}/${DATE}-acme-hr.2.ndjson: contribution ${DATE}-acme-hr.2 is already in the registry (contributions/${DATE}-acme-hr.2.json): give this one another number; the next free one is ${DATE}-acme-hr.3`,
+  ]);
+  const before = snapshot(dir);
+  const r = node(FOLD, ['--apply'], dir);
+  assert.equal(r.status, 1);
+  assert.deepEqual(snapshot(dir), before);
+
+  // Renamed to .3, both fold: the unnumbered one as -2, the numbered one as it is.
+  writeFileSync(join(dir, INBOX_DIR, `${DATE}-acme-hr.3.ndjson`), readFileSync(join(dir, INBOX_DIR, `${DATE}-acme-hr.2.ndjson`)));
+  rmSync(join(dir, INBOX_DIR, `${DATE}-acme-hr.2.ndjson`));
+  const { errors, plan } = planFold({ root: dir, today: TODAY });
+  assert.deepEqual(errors, []);
+  assert.deepEqual(plan.contributions.map((c) => [c.inboxId, c.id]), [[`${DATE}-acme-hr`, `${DATE}-acme-hr-2`], [`${DATE}-acme-hr.3`, `${DATE}-acme-hr.3`]]);
+}));
+
+test('ids without a number keep their order: compareContributionIds sorts them as plain text', () => {
+  const committed = readdirSync(join(ROOT, 'employers/contributions')).map((f) => f.replace(/\.json$/, ''));
+  const plain = [...committed, '2026-11-10-octocat', '2026-11-10-octocat-2', '2026-11-10-octo', '2026-11-10-octo-cat', '2026-11-09-zed', '2026-11-10-a1', '2026-11-10-a-1'];
+  assert.deepEqual([...plain].sort(compareContributionIds), [...plain].sort());
+  const numbered = ['2026-11-10-octocat.10', '2026-11-10-octocat-2', '2026-11-10-octocat.2', '2026-11-10-octocat', '2026-11-10-octocat.9'];
+  assert.deepEqual([...numbered].sort(compareContributionIds),
+    ['2026-11-10-octocat', '2026-11-10-octocat.2', '2026-11-10-octocat.9', '2026-11-10-octocat.10', '2026-11-10-octocat-2']);
+});
 
 test('a contribution whose boards are all listed adds no manifest and no credit line', () => withInbox({
   [`${DATE}-octocat.ndjson`]: [{ ats: 'greenhouse', board: 'anthropic', name: 'Anthropic' }],

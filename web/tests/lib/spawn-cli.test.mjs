@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
@@ -303,4 +303,67 @@ test("a detached descendant that ignores SIGTERM still gets the follow-up SIGKIL
     }
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/**
+ * Write a stand-in `pi` that reports `version` to `--version` and, for any other
+ * argv, logs it and prints it back as JSON.
+ */
+function stubPi(t, version) {
+  const dir = mkdtempSync(join(tmpdir(), "spawn-cli-pi-"));
+  const bin = join(dir, "pi-stub.mjs");
+  const runLog = join(dir, "runs.log");
+  writeFileSync(
+    bin,
+    `#!/usr/bin/env node
+import fs from "node:fs";
+const argv = process.argv.slice(2);
+if (argv[0] === "--version") {
+  process.stdout.write(${JSON.stringify(version)});
+} else {
+  fs.appendFileSync(${JSON.stringify(runLog)}, JSON.stringify(argv) + "\\n");
+  process.stdout.write(JSON.stringify(argv));
+}
+`,
+  );
+  chmodSync(bin, 0o755);
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return { bin, runLog };
+}
+
+const posixOnly = { skip: process.platform === "win32" ? "Windows cannot spawn a shebang script as a binary" : false };
+
+test("spawnHeadlessCli refuses a Pi older than the floor before starting the worker", posixOnly, (t) => {
+  // Given a Pi that reports 0.79.0, one release short of the floor
+  const { bin, runLog } = stubPi(t, "0.79.0\n");
+
+  // Then every worker is refused, writing or not...
+  for (const capabilities of Object.values(CAPS)) {
+    assert.throws(
+      () => spawnHeadlessCli(bin, ["--no-session", "-p", "PROMPT"], { cwd: process.cwd(), env: process.env }, { cliId: "pi", capabilities }),
+      /Pi 0\.79\.0 is too old/,
+    );
+  }
+  // ...and no worker process ever started
+  assert.equal(existsSync(runLog), false);
+});
+
+test("spawnHeadlessCli starts a supported Pi with its fence applied", posixOnly, async (t) => {
+  // Given a current Pi
+  const { bin } = stubPi(t, "1.5.2\n");
+
+  // When the pdf worker's record is spawned
+  const child = spawnHeadlessCli(bin, ["--no-session", "-p", "PROMPT"], { cwd: process.cwd(), env: process.env }, {
+    cliId: "pi",
+    capabilities: CAPS.localReadOnly,
+  });
+  let stdout = "";
+  child.stdout.on("data", (chunk) => (stdout += chunk));
+  await new Promise((resolve) => child.on("close", resolve));
+
+  // Then the worker ran with the fenced argv
+  const argv = JSON.parse(stdout);
+  assert.deepEqual(argv.slice(0, 2), ["--tools", "read,grep,find,ls"]);
+  assert.ok(argv.includes("--no-approve"));
+  assert.deepEqual(argv.slice(-2), ["-p", "PROMPT"]);
 });

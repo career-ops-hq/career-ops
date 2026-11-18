@@ -375,6 +375,12 @@ export default {
     if (succeeded === 0 && errors.length) {
       throw new Error(`platsbanken: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
     }
+    // Some keywords answered and some did not. The fetch-error marker below only
+    // reaches scan.mjs, so name the unread keywords for the person scanning too,
+    // as arbeitsagentur.mjs does.
+    if (errors.length) {
+      console.error(`⚠️  platsbanken: "${entryName}" returned partial results — ${errors.join('; ')}`);
+    }
 
     const jobs = [...byUrl.values()];
     if (truncatedReason) markTruncated(jobs, truncatedReason, { fetched: jobs.length });

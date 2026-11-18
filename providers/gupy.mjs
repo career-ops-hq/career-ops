@@ -473,7 +473,7 @@ export default {
         // either this entry's max_pages or the API's own ceiling stopped us.
         // Not warned when ctx.maxPages did the cutting; a probe is not a
         // misconfiguration.
-        if (page + 1 >= maxPages) {
+        if (page + 1 >= maxPages && !probing) {
           const remedy = maxPages < MAX_PAGES_CAP
             ? 'raise max_pages on this entry for more'
             : `the API serves no deeper, so split "${keyword}" into narrower keywords`;

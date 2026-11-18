@@ -22,7 +22,7 @@
 // CAREER_OPS_TRACKER hook. The status-log and follow-ups land next to it.
 import { pass, fail, rmSync, ROOT } from './helpers.mjs';
 import assert from 'node:assert';
-import { existsSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, statSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -114,4 +114,32 @@ ok("a dated keeper cell is logged as its state, not as unknown", () => {
   assert.strictEqual(statusOf(rows[0]), 'Applied');
   assert.match(dedupLine(ledger) ?? '', /\tEvaluated\tApplied\tdedup-tracker\t/,
     `from must be Evaluated, got ${JSON.stringify(dedupLine(ledger))}`);
+});
+
+ok('a status log that cannot be written puts the tracker back and fails the run', () => {
+  // A promoted status the ledger does not hold cannot be undone, so dedup must
+  // not keep it (set-status.mjs since #7143). A directory in place of the log
+  // makes the append fail on every platform; dedup reads no ledger before it.
+  const dir = mkdtempSync(join(tmpdir(), 'dedup-promotion-test-'));
+  const tracker = join(dir, 'applications.md');
+  try {
+    const text = ['# Applications Tracker', '', HEADER, SEP,
+      '| 7 | 2026-10-01 | Acme | Platform Engineer | 4.5/5 | Evaluated | ❌ | [40](reports/040-acme.md) |  |',
+      '| 9 | 2026-01-02 | Acme | Platform Engineer | 4.0/5 | Applied | ❌ | [40](reports/040-acme.md) |  |',
+      ''].join('\n');
+    writeFileSync(tracker, text);
+    mkdirSync(join(dir, 'status-log.tsv'));
+    const r = spawnSync(process.execPath, [DEDUP], {
+      encoding: 'utf-8',
+      env: { ...process.env, CAREER_OPS_TRACKER: tracker },
+    });
+    assert.strictEqual(r.status, 1, `dedup-tracker exited ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /Could not write the status log \(.+\), so the tracker was put back: no duplicate was removed\./);
+    assert.doesNotMatch(r.stdout, /Written to/);
+    assert.strictEqual(readFileSync(tracker, 'utf-8'), text, 'both rows are still there, #7 still Evaluated');
+    assert.ok(statSync(join(dir, 'status-log.tsv')).isDirectory());
+    assert.strictEqual(existsSync(join(dir, 'follow-ups.md')), false, 'no follow-up is seeded for a promotion that was put back');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
