@@ -59,7 +59,32 @@ test('repeated rate limits count as failures, not as a quiet empty board', () =>
   const limitedResult = computePortalRecommendations(config, scan, limited, now);
   const emptyResult = computePortalRecommendations(config, scan, empty, now);
   assert.deepEqual(limitedResult.rotted.map((row) => row.company), ['Fixture Co']);
+  assert.match(limitedResult.rotted[0].recommendation, /reduce request frequency/);
+  assert.doesNotMatch(limitedResult.rotted[0].recommendation, /ATS slug/);
   assert.deepEqual(limitedResult.healthyButQuiet, []);
   assert.deepEqual(emptyResult.rotted, []);
   assert.deepEqual(emptyResult.healthyButQuiet.map((row) => row.company), ['Fixture Co']);
+});
+
+test('unverified_zero counts in the failure streak', () => {
+  const now = Date.parse('2026-09-22T12:00:00Z');
+  const config = 'tracked_companies:\n  - {name: Fixture Co}\n';
+  const scan = 'https://jobs.example.com/1\t2026-07-01\tats\tEngineer\tFixture Co\tadded\n';
+  const mixed = [
+    '2026-09-20\tFixture Co\trate_limit',
+    '2026-09-21\tFixture Co\tunverified_zero',
+    '2026-09-22\tFixture Co\trate_limit',
+  ].join('\n');
+  const onlyZero = [
+    '2026-09-20\tFixture Co\tunverified_zero',
+    '2026-09-21\tFixture Co\tunverified_zero',
+    '2026-09-22\tFixture Co\tunverified_zero',
+  ].join('\n');
+  const mixedResult = computePortalRecommendations(config, scan, mixed, now);
+  const zeroResult = computePortalRecommendations(config, scan, onlyZero, now);
+  assert.deepEqual(mixedResult.rotted.map((row) => row.company), ['Fixture Co']);
+  assert.equal(mixedResult.rotted[0].streak, 3);
+  assert.match(mixedResult.rotted[0].recommendation, /reduce request frequency/);
+  assert.deepEqual(zeroResult.rotted.map((row) => row.company), ['Fixture Co']);
+  assert.match(zeroResult.rotted[0].recommendation, /ATS slug/);
 });
