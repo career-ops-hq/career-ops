@@ -5,7 +5,10 @@
 //   2. Agrupar por `head_sha` en local: un SHA → una decisión, aunque tenga 3 runs (matriz) esperando.
 //   3. Aprobar solo si: la PR está ABIERTA · el run es del `head.sha` ACTUAL de la PR · el autor no es bot ·
 //      la PR no toca `.github/**` ni `package.json`/`package-lock.json` (un run aprobado ejecuta el código del
-//      fork) · pudimos leer sus ficheros (lista vacía = "no pude ver", nunca "inocuo").
+//      fork) · pudimos leer sus ficheros (lista vacía = "no pude ver", nunca "inocuo") · la lista está
+//      COMPLETA (`changed_files`, leído del detalle de la PR), porque una lista cortada esconde justo lo
+//      que no se revisó y un recuento desconocido no permite saber si lo está · la lista y el recuento
+//      son del head que se aprueba: el detalle se relee después y `headNow` tiene que seguir siendo `sha`.
 //   4. Tope 20 aprobaciones por ejecución. El resto se queda para la siguiente pasada (*/30).
 // Env: GITHUB_TOKEN (o CI_APPROVE_TOKEN, ver ci-approve.yml) · GITHUB_REPOSITORY · DRY_RUN · CI_APPROVE_MAX (20)
 
@@ -91,6 +94,23 @@ export function decide({ sha, pr, files }) {
   if (pr.head.sha !== sha) return { ok: false, why: `SHA no es el head actual de #${pr.number} (${pr.head.sha.slice(0, 7)})` };
   if (isBot(pr.user)) return { ok: false, why: `autor bot (${pr.user.login})` };
   if (!files || !files.length) return { ok: false, why: `#${pr.number}: no pude leer sus ficheros, no apruebo a ciegas` };
+  // Una lista corta no es una lista limpia. `pulls/{n}/files` tiene tope, así que
+  // un PR grande devuelve menos entradas de las que declara `changed_files`: el
+  // fichero que importa puede estar justo en el tramo que no se leyó. Comparar los
+  // dos números es la única forma de distinguir "no toca nada prohibido" de "no
+  // vi todo lo que toca" (un run aprobado ejecuta el código del fork).
+  //
+  // El número viene del detalle de la PR (`GET pulls/{n}`), no de la lista de PRs
+  // abiertas: esa lista no trae `changed_files`, así que leerlo de ahí dejaba la
+  // comprobación sin efecto. Si el detalle no lo trae, no se aprueba: no saber
+  // cuántos ficheros hay es el caso "no pude ver", no el caso "inocuo".
+  const declared = Number(pr.changed_files);
+  if (!Number.isFinite(declared)) {
+    return { ok: false, why: `#${pr.number}: no pude leer cuántos ficheros declara, no apruebo a ciegas` };
+  }
+  if (files.length < declared) {
+    return { ok: false, why: `#${pr.number}: la lista de ficheros está incompleta (${files.length} de ${declared}), no apruebo a ciegas` };
+  }
   const bad = touchesForbidden(files);
   if (bad.length) return { ok: false, why: `#${pr.number} toca ${bad.slice(0, 3).map((f) => f.filename || f).join(', ')}` };
   return { ok: true, why: `#${pr.number} abierta, head actual, autor ${pr.user.login}, ${files.length} ficheros seguros` };
@@ -121,12 +141,27 @@ export async function main() {
     const pr = bySha.get(sha) || null;
     if (!pr) { orphans++; continue; } // no es el head de ninguna PR abierta (push encima, cerrada o fusionada): nada que aprobar
     let files = [];
-    try { files = await getAll(`repos/${REPO}/pulls/${pr.number}/files`); }
-    catch (e) {
+    let declaredFiles;
+    let headNow;
+    try {
+      // La lista de ficheros y el recuento tienen que salir del MISMO head que se
+      // aprueba. El detalle va DESPUÉS de la lista a propósito: `pulls/{n}` trae el
+      // head actual, así que un push ocurrido entre las dos lecturas deja
+      // `headNow !== sha` y se ve antes de aprobar. Al revés (detalle primero) esa
+      // ventana quedaba invisible y se aprobaba un head con los ficheros de otro.
+      files = await getAll(`repos/${REPO}/pulls/${pr.number}/files`);
+      const detail = await rest('GET', `repos/${REPO}/pulls/${pr.number}`);
+      headNow = detail.data?.head?.sha;
+      declaredFiles = detail.data?.changed_files;
+    } catch (e) {
       if (e.rateLimited) { stop = 'rate'; log(`#${pr.number} ${sha.slice(0, 7)}: límite de tasa de GitHub al leer sus ficheros (${e.status}): se para la pasada; la siguiente lo reintenta`); break; }
       log(`#${pr.number} ${sha.slice(0, 7)}: no pude leer sus ficheros (${e.message.slice(0, 80)}): no apruebo`); continue;
     }
-    const d = decide({ sha, pr, files });
+    if (headNow !== sha) {
+      log(`#${pr.number}: el head cambió mientras leía sus ficheros (${sha.slice(0, 7)} → ${String(headNow).slice(0, 7)}): este SHA ya no es el head actual`);
+      continue;
+    }
+    const d = decide({ sha, pr: { ...pr, changed_files: declaredFiles }, files });
     if (!d.ok) { log(`#${pr.number} ${sha.slice(0, 7)}: no : ${d.why}`); continue; }
     tried++;
     let all = true;
