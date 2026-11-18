@@ -242,12 +242,12 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     'apply() still aborts on a user-layer merged manifest entry instead of refusing it per entry',
   );
 
-  const refusal = /rejectUserLayerPaths\(\s*mergePathLists\(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS\)/;
+  const refusal = /rejectUserLayerPaths\(\s*mergePathLists\(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS\),\s*effectiveUserPaths\(\)/;
   const refusalAt = applyBody.search(refusal);
   check(
     refusalAt !== -1,
-    'apply() refuses user-layer entries from the merged manifest before checkout (#3782)',
-    'apply() no longer refuses user-layer entries from the merged manifest',
+    'apply() refuses user-layer entries from the merged manifest, against the effective user paths, before checkout (#3782)',
+    'apply() no longer refuses merged-manifest entries against the effective user paths',
   );
 
   const checkoutAt = applyBody.indexOf('checkoutSystemPathsBatched(updatePaths, preservedPaths, upstreamFiles, targetCommit');
@@ -270,6 +270,25 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     helperBudgetPattern.test(updaterSource),
     'fallbackCheckoutBatched batches fallbackSpecs under ARGV_BUDGET minus the fixed arguments',
     'fallbackCheckoutBatched does not batch fallbackSpecs under the ARGV budget',
+  );
+
+  const probeTreePattern = /ls-tree', '-z', '-t'/;
+  check(
+    probeTreePattern.test(updaterSource),
+    'the slashless staging probe keeps parent tree records (-t)',
+    'the slashless staging probe lost -t: a parent+nested manifest drops the parent tree record',
+  );
+  const probeBatchPattern = /argvBatches\(\s*slashless,\s*\{\s*budget:\s*ARGV_BUDGET - fixed\s*\}\s*\)/;
+  check(
+    probeBatchPattern.test(updaterSource),
+    'the slashless staging probe batches under ARGV_BUDGET minus the fixed arguments',
+    'the slashless staging probe is one unbudgeted ls-tree call',
+  );
+  const literalCommitPattern = /commitPathspecs\(\s*`chore: auto-update system files to v\$\{remote\}`,\s*expandedPathsToStage,\s*\{\s*literal:\s*true\s*\}\s*\)/;
+  check(
+    literalCommitPattern.test(updaterSource),
+    'the scoped update commit passes { literal: true }',
+    'the scoped update commit lost literal pathspec handling',
   );
 
 // ── 7. fallbackCheckoutSpecs names concrete files, never exclusion magic ──
