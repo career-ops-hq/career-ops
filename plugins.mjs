@@ -30,7 +30,7 @@ import {
   warnConfigLeftInCodeRoot, ID_RE,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
-import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
+import { readLock, readLockForUpdate, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
 import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
@@ -739,6 +739,15 @@ function cmdRemove(args) {
   if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
   const id = resolved.manifest.id;
   if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
+  // A torn lock throws from removeLockEntry. Checking it after the directory
+  // is gone skips the disable step and reports failure for a plugin that is
+  // already deleted.
+  try {
+    readLockForUpdate(ROOT);
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exit(1);
+  }
   const dir = path.join(ROOT, 'plugins.local', id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   removeLockEntry(ROOT, id);

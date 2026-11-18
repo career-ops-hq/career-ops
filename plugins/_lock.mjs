@@ -11,8 +11,8 @@
 // mutation, and a community plugin whose files changed since you trusted it
 // WITHOUT a version bump (the postmark-mcp class). Stated plainly in README.
 
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, readdirSync, lstatSync, renameSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 const LOCK_VERSION = 1;
@@ -71,17 +71,48 @@ export function readLock(root) {
   }
 }
 
+// A torn file is not an empty lock. Reading it as empty and writing it back
+// would drop every other pin.
+export function readLockForUpdate(root) {
+  const file = lockPath(root);
+  if (!existsSync(file)) return { lockfileVersion: LOCK_VERSION, plugins: {} };
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error(`plugins.lock at ${file} is not valid JSON, so it was left unchanged.`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || !parsed.plugins || typeof parsed.plugins !== 'object' || Array.isArray(parsed.plugins)) {
+    throw new Error(`plugins.lock at ${file} has no plugins map, so it was left unchanged.`);
+  }
+  return parsed;
+}
+
+function saveLock(root, lock) {
+  const file = lockPath(root);
+  const tmp = path.join(root, `.plugins.lock.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, JSON.stringify(lock, null, 2) + '\n', 'utf8');
+    renameSync(tmp, file);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch { /* the temp file may not exist */ }
+    throw err;
+  }
+}
+
 /** Merge a single entry into plugins.lock (never clobber other plugins' entries). */
 export function writeLockEntry(root, id, entry) {
-  const lock = readLock(root);
+  const lock = readLockForUpdate(root);
   lock.lockfileVersion = LOCK_VERSION;
   lock.plugins[id] = entry;
-  writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8');
+  saveLock(root, lock);
 }
 
 export function removeLockEntry(root, id) {
-  const lock = readLock(root);
-  if (lock.plugins[id]) { delete lock.plugins[id]; writeFileSync(lockPath(root), JSON.stringify(lock, null, 2) + '\n', 'utf8'); }
+  const lock = readLockForUpdate(root);
+  if (!lock.plugins[id]) return;
+  delete lock.plugins[id];
+  saveLock(root, lock);
 }
 
 /**
