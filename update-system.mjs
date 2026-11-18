@@ -525,6 +525,12 @@ export function effectiveUserPaths(root = ROOT) {
   return [...USER_PATHS, ...localUserPaths(root)];
 }
 
+/** A path folded segment by segment the way manifest screening folds it. */
+function foldedPath(path) {
+  return path.split('/').map((segment) =>
+    segment.normalize('NFC').toLowerCase().toUpperCase().toLowerCase()).join('/');
+}
+
 function manifestPathSegments(path) {
   const withoutTrailingSlash = path.endsWith('/') ? path.slice(0, -1) : path;
   return withoutTrailingSlash.split('/').map((segment) =>
@@ -2987,6 +2993,17 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
   return plan;
 }
 
+const foldedUpstreamCache = new WeakMap();
+/** Folded copy of an upstream listing, computed once per listing (callers pass the same array for every manifest entry). */
+function foldedListing(files) {
+  let folded = foldedUpstreamCache.get(files);
+  if (!folded) {
+    folded = files.map(foldedPath);
+    foldedUpstreamCache.set(files, folded);
+  }
+  return folded;
+}
+
 /**
  * Whether a manifest entry cannot be checked out safely because the LOCAL
  * preserved layout and the TARGET tree disagree about what the entry is: one
@@ -3008,12 +3025,17 @@ export function planSystemCheckout(updatePaths, preservedPaths, upstreamFiles) {
  */
 export function preservedCheckoutCollision(path, preservedPaths, upstreamFiles) {
   if (upstreamFiles.length === 0) return null;
-  const dir = path.endsWith('/') ? path : `${path}/`;
-  const spec = path.endsWith('/') ? path.slice(0, -1) : path;
-  const preservedChildren = preservedPaths.some((file) => file.startsWith(dir));
-  const preservedExact = preservedPaths.includes(spec);
-  const targetFile = upstreamFiles.includes(spec);
-  const targetDir = upstreamFiles.some((file) => file.startsWith(dir));
+  // Folded like manifest screening: on a case-insensitive filesystem
+  // `lib/Local` and `lib/local` are one location. The folding is conservative
+  // (it can only add aliases), which is safe on case-sensitive ones too.
+  const fold = foldedPath;
+  const dir = fold(path.endsWith('/') ? path : `${path}/`);
+  const spec = fold(path.endsWith('/') ? path.slice(0, -1) : path);
+  const preservedChildren = preservedPaths.some((file) => fold(file).startsWith(dir));
+  const preservedExact = preservedPaths.some((file) => fold(file) === spec);
+  const foldedUpstream = foldedListing(upstreamFiles);
+  const targetFile = foldedUpstream.some((file) => file === spec);
+  const targetDir = foldedUpstream.some((file) => file.startsWith(dir));
   if (preservedChildren && targetFile && !targetDir) {
     return `the target ships ${spec} as a file but preserved local files sit under it as a directory`;
   }
@@ -3040,12 +3062,14 @@ export function preservedCheckoutCollision(path, preservedPaths, upstreamFiles) 
  */
 export function preservedSpecCollision(spec, preservedPaths) {
   const file = spec.endsWith('/') ? spec.slice(0, -1) : spec;
+  const foldedFile = foldedPath(file);
   for (const preserved of preservedPaths) {
-    if (preserved === file) continue;
-    if (preserved.startsWith(`${file}/`)) {
+    const foldedPreserved = foldedPath(preserved);
+    if (foldedPreserved === foldedFile) continue;
+    if (foldedPreserved.startsWith(`${foldedFile}/`)) {
       return `the target ships ${file} as a file but preserved local files sit under it as a directory`;
     }
-    if (file.startsWith(`${preserved}/`)) {
+    if (foldedFile.startsWith(`${foldedPreserved}/`)) {
       return `the target ships files under ${preserved} but a preserved local file stands in its place`;
     }
   }
@@ -3344,6 +3368,36 @@ export function restoreAfterFailedUpdate(paths, protectedPaths, { what, ...ctx }
 }
 
 /**
+ * Put a saved copy's bytes back at a worktree path without following a link.
+ *
+ * A forced checkout can replace a user's file with a symlink (upstream tracks
+ * some paths as mode 120000). copyFileSync() follows a symlink at its
+ * destination, so a plain copy would write the user's bytes into the link's
+ * referent, a different file. A symlink at the destination is removed first so
+ * the copy recreates a regular file at the path; a symlinked parent directory
+ * is refused, since the write would land outside the path's own directory.
+ * The source copy is never touched, so a failure leaves the .bak in place.
+ *
+ * @param {string} root - Repo root.
+ * @param {string} backup - Repo-relative source copy.
+ * @param {string} file - Repo-relative destination.
+ * @param {Function} copyFile - copyFileSync or a test seam.
+ */
+function restoreBytesWithoutFollowingLinks(root, backup, file, copyFile) {
+  const linked = symlinkedAncestor(file, root);
+  if (linked) throw new Error(`${linked} is a symlink; not writing through it`);
+  const destination = join(root, ...file.split('/'));
+  let isLink = false;
+  try {
+    isLink = lstatSync(destination).isSymbolicLink();
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  if (isLink) unlinkSync(destination);
+  copyFile(join(root, ...backup.split('/')), destination);
+}
+
+/**
  * Put an install's own edits to updater files back after a failed self-reexec.
  *
  * The self-bootstrap overwrites updater files this install had changed, after
@@ -3362,7 +3416,7 @@ export function restoreBootstrapBackups(backups, ctx = {}) {
   const failed = [];
   for (const { file, backup } of backups) {
     try {
-      copyFile(join(root, ...backup.split('/')), join(root, ...file.split('/')));
+      restoreBytesWithoutFollowingLinks(root, backup, file, copyFile);
       console.error(`Put back your local version of ${file} (the copy in ${backup} stays).`);
     } catch (err) {
       failed.push(file);
@@ -3392,6 +3446,16 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
       .map((entry) => entry.path),
   );
   const state = new Map();
+  // A path the user had deleted (staged or not) has no worktree file to back
+  // up and, when staged, no index entry to record. Remember that it was
+  // absent, so a checkout that recreated it can be undone as a deletion
+  // instead of being reset to HEAD's entry (which would resurrect the file).
+  for (const entry of statusEntries) {
+    if (entry.code[0] === 'D' || entry.code[1] === 'D') {
+      state.set(entry.path, { deleted: true, stagedDeletion: entry.code[0] === 'D' });
+      staged.delete(entry.path);
+    }
+  }
   if (staged.size === 0) return state;
   // ls-files -s records mode and blob for every index entry; -z keeps quoting
   // out of unusual names, the same reason the status parse uses it.
@@ -3403,6 +3467,36 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
     if (staged.has(path)) state.set(path, { mode, sha });
   }
   return state;
+}
+
+/**
+ * Re-take the pre-update snapshot at a write boundary: after the fetch and the
+ * other network waits, immediately before updater or system files are backed
+ * up and checked out. The snapshot apply() takes at its start predates those
+ * waits. A path the user edited or staged during them is not in it, so a
+ * failed update would reset that edit to HEAD (it is not "protected") and a
+ * restaged blob would come back as the older entry. Both the dirty-path set and
+ * the staged-entry map are rebuilt in place from current status, so every
+ * holder of them (protected set, restore exclusions, dirty-state restore)
+ * sees the same, current picture. The user-layer violation check still
+ * compares against this snapshot, so only changes made AFTER the boundary
+ * can be attributed to the update.
+ *
+ * @param {Set<string>} statusPaths - initialStatusPaths, rebuilt in place.
+ * @param {Map<string, object>} indexState - initialIndexState, rebuilt in place.
+ * @param {{statusEntries?: {code: string, path: string}[], gitRaw?: Function, root?: string}} [ctx] - Test seams.
+ * @returns {string[]} Paths dirty now that were not in the snapshot being replaced.
+ */
+export function refreshPreUpdateSnapshot(statusPaths, indexState, ctx = {}) {
+  // Read first: a failed status leaves the snapshot being replaced untouched.
+  const entries = ctx.statusEntries || gitStatusEntries(ctx.root || ROOT);
+  const fresh = capturePreUpdateIndex(entries, ctx);
+  const added = entries.map((entry) => entry.path).filter((file) => !statusPaths.has(file));
+  statusPaths.clear();
+  for (const entry of entries) statusPaths.add(entry.path);
+  indexState.clear();
+  for (const [file, value] of fresh) indexState.set(file, value);
+  return added;
 }
 
 /**
@@ -3447,7 +3541,7 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
     const backup = backupByFile.get(file);
     if (!backup) continue;
     try {
-      copyFile(join(root, ...backup.split('/')), join(root, ...file.split('/')));
+      restoreBytesWithoutFollowingLinks(root, backup, file, copyFile);
       console.error(`Put back your local version of ${file} (the copy in ${backup} stays).`);
     } catch (err) {
       unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
@@ -3456,8 +3550,15 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
   for (const file of writtenDirty) {
     const staged = state.initialIndexState.get(file);
     try {
-      if (staged) runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
-      else runGit('reset', '-q', 'HEAD', '--', file);
+      if (staged?.deleted) {
+        // The file was deleted before the update. Put the index back (a staged
+        // deletion drops the entry, an unstaged one returns to HEAD's) and
+        // remove the file the checkout recreated.
+        if (staged.stagedDeletion) runGit('--literal-pathspecs', 'rm', '--cached', '-q', '--ignore-unmatch', '--', file);
+        else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
+        rmSync(join(root, ...file.split('/')), { force: true });
+      } else if (staged) runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
+      else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
     } catch (err) {
       unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
     }
@@ -5419,6 +5520,8 @@ async function apply() {
             + 'Your files were NOT touched. Please report this — it is a manifest error.',
           );
         }
+        // Same boundary for the self-bootstrap checkout the parent runs first.
+        refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState);
         const bootstrapAtRisk = locallyModifiedSystemFiles(reexecFiles, targetCommit);
         if (bootstrapAtRisk.length > 0) {
           console.log('');
@@ -5548,6 +5651,9 @@ async function apply() {
     // about to vanish silently. Default is to KEEP the local version and say
     // so; `--force` overwrites. Either way a .bak of the local content is
     // written first, so the fix is recoverable even from the forced path.
+    // Write boundary (see refreshPreUpdateSnapshot): the start snapshot predates
+    // the fetch. Re-take it before any system file is backed up or written.
+    refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState);
     const preservedPaths = [];
     // file -> .bak for every successful backup, so a failed update can put a
     // FORCEd-overwritten local edit back (restoreWrittenDirtyState).
@@ -5892,15 +5998,27 @@ async function apply() {
       // not silently proceed — that would let a real violation slip
       // through. Revert what we already applied and abort.
       console.error(`Aborting: could not validate user-layer safety (${err.message}).`);
+      // Both repairs are attempted: a path the HEAD restore cannot put back
+      // must not stop a forced-overwritten dirty file getting its bytes and
+      // index entry back (restoreWrittenDirtyState reports its own failures).
+      const revertFailures = [];
       try {
         revertPaths(updated, initialStatusPaths, { exclude: restoreExclusions });
-        restoreWrittenDirtyState(updated, { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
       } catch (revertErr) {
+        revertFailures.push(revertErr.message);
+      }
+      try {
+        const unrestored = restoreWrittenDirtyState(updated, { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
+        if (unrestored.length > 0) revertFailures.push(`could not fully restore ${unrestored.join(', ')}`);
+      } catch (restoreErr) {
+        revertFailures.push(restoreErr.message);
+      }
+      if (revertFailures.length > 0) {
         // If the revert itself fails (likely whatever broke `git
         // status` also broke `git checkout --`), don't lose the
         // original validation error — chain it via `cause`.
         throw new Error(
-          `Validation failed (${err.message}) and revert also failed (${revertErr.message})`,
+          `Validation failed (${err.message}) and revert also failed (${revertFailures.join('; ')})`,
           { cause: err },
         );
       }
@@ -5917,14 +6035,23 @@ async function apply() {
       // user; leaving them as-is is the safe choice — the user decides
       // what to do with them.
       const violation = new Error('Update aborted: user files were touched.');
+      const revertFailures = [];
       try {
         revertPaths([...updated], initialStatusPaths, { exclude: restoreExclusions });
-        restoreWrittenDirtyState([...updated], { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
       } catch (revertErr) {
+        revertFailures.push(revertErr.message);
+      }
+      try {
+        const unrestored = restoreWrittenDirtyState([...updated], { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
+        if (unrestored.length > 0) revertFailures.push(`could not fully restore ${unrestored.join(', ')}`);
+      } catch (restoreErr) {
+        revertFailures.push(restoreErr.message);
+      }
+      if (revertFailures.length > 0) {
         // If the revert itself fails, don't lose the safety-violation
         // diagnostic — chain it via `cause` so the user sees both.
         throw new Error(
-          `Safety violation (${violation.message}) and revert also failed (${revertErr.message})`,
+          `Safety violation (${violation.message}) and revert also failed (${revertFailures.join('; ')})`,
           { cause: violation },
         );
       }
