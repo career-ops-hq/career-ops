@@ -197,9 +197,11 @@ export const UPDATE_APPLIED_INSTALL_FAILED_EXIT = 3;
 // directories. Keep this escape hatch small and reviewable: aliases, parents,
 // children, and case/Unicode variants are not overlaps.
 //
-// Rollback reads this list, and apply() does too through
-// assertSafeManifestPaths(): the exact overlaps stay allowed while any other
-// user-layer entry in a target manifest aborts the update (#3825).
+// Rollback reads this list, and apply() does too when refusing user-layer
+// entries: the exact overlaps stay allowed while any other user-layer entry
+// in a target manifest is refused on its own, out loud, and the rest of the
+// update completes (#3782). The re-exec import closure stays fatal - a
+// refused import cannot be skipped.
 export const MANIFEST_USER_PATH_OVERLAPS = Object.freeze([
   'writing-samples/README.md',
   'interview-prep/sessions/.gitkeep',
