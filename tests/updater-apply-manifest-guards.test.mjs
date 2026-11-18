@@ -218,24 +218,43 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
   );
 }
 
-// ── 6. apply() validates the target and merged manifests against user paths ──
+// ── 6. apply() refuses user-layer manifest entries without aborting (#3782) ──
+// A poisoned entry (cv.md, data/, .env in SYSTEM_PATHS) is a manifest error,
+// but aborting the whole update bricks every install's updates for one bad
+// entry: the established contract is per-entry refusal, out loud, before any
+// checkout, with the rest of the update completing.
 {
   const applyStart = updaterSource.indexOf('async function apply() {');
   const applyEnd = updaterSource.indexOf('\nfunction rollback(', applyStart);
   const applyBody = updaterSource.slice(applyStart, applyEnd);
 
-  const targetValidation = /assertSafeManifestPaths\(\s*remoteSystemPaths,\s*manifestUserPaths,/;
+  const fatalTargetValidation = /assertSafeManifestPaths\(\s*remoteSystemPaths,\s*manifestUserPaths,/;
   check(
-    targetValidation.test(applyBody),
-    'apply() validates the target SYSTEM_PATHS against effective user paths',
-    'apply() does not validate the target SYSTEM_PATHS against user paths',
+    !fatalTargetValidation.test(applyBody),
+    'apply() does not abort on a target SYSTEM_PATHS entry naming the user layer (#3782)',
+    'apply() still aborts on a user-layer target manifest entry instead of refusing it per entry',
   );
 
-  const mergedValidation = /assertSafeManifestPaths\(\s*validatedManifestPaths,\s*manifestUserPaths,\s*['"]Merged updater manifest['"]/;
+  const fatalMergedValidation = /assertSafeManifestPaths\(\s*validatedManifestPaths,\s*manifestUserPaths,\s*['"]Merged updater manifest['"]/;
   check(
-    mergedValidation.test(applyBody),
-    'apply() validates the merged updater manifest against effective user paths before checkout',
-    'apply() does not validate the merged manifest against user paths',
+    !fatalMergedValidation.test(applyBody),
+    'apply() does not abort on a merged-manifest entry naming the user layer (#3782)',
+    'apply() still aborts on a user-layer merged manifest entry instead of refusing it per entry',
+  );
+
+  const refusal = /rejectUserLayerPaths\(\s*mergePathLists\(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS\)/;
+  const refusalAt = applyBody.search(refusal);
+  check(
+    refusalAt !== -1,
+    'apply() refuses user-layer entries from the merged manifest before checkout (#3782)',
+    'apply() no longer refuses user-layer entries from the merged manifest',
+  );
+
+  const checkoutAt = applyBody.indexOf('checkoutSystemPathsBatched(updatePaths, preservedPaths, upstreamFiles, targetCommit');
+  check(
+    refusalAt !== -1 && checkoutAt > refusalAt,
+    'the batched checkout consumes only the refused-filtered updatePaths',
+    'the batched checkout does not clearly consume the refused-filtered updatePaths',
   );
 }
 
