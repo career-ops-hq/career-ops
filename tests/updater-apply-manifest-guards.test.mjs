@@ -16,6 +16,7 @@ import {
   planSystemCheckout,
   preservedCheckoutCollision,
   rejectUserLayerPaths,
+  preservedSpecCollision,
 } from '../update-system.mjs';
 import assert from 'node:assert/strict';
 import { pass } from './helpers.mjs';
@@ -121,10 +122,13 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
 {
   const testManifest = [
     '.env',
+    '.env/config',
+    '.env.example',
     'cv.md',
     'modes/update.md',
     'lib/update-manifest.mjs',
     'data/rogue-user-file.json',
+    'documents/readme.md',
   ];
 
   const { kept, refused } = rejectUserLayerPaths(testManifest, USER_PATHS, {
@@ -147,6 +151,86 @@ console.log('\n🧪 Testing updater apply target manifest guards (#3825)...');
     kept.includes('modes/update.md') && kept.includes('lib/update-manifest.mjs'),
     'rejectUserLayerPaths keeps non-user-layer system paths',
     `rejectUserLayerPaths dropped system paths: kept=${JSON.stringify(kept)}`,
+  );
+  check(
+    refused.includes('.env/config'),
+    'rejectUserLayerPaths refuses a child of the fixed user file .env (git would replace the file with a directory)',
+    `rejectUserLayerPaths failed to refuse .env/config: refused=${JSON.stringify(refused)}`,
+  );
+  check(
+    kept.includes('.env.example'),
+    'rejectUserLayerPaths keeps .env.example (a sibling, not a child of .env)',
+    `rejectUserLayerPaths dropped .env.example: kept=${JSON.stringify(kept)}`,
+  );
+  check(
+    kept.includes('documents/readme.md'),
+    'rejectUserLayerPaths still adjudicates a single file under a directory declaration',
+    `rejectUserLayerPaths refused documents/readme.md: refused=${JSON.stringify(refused)}`,
+  );
+}
+
+// ── 3c. overlapping declarations: every ancestor adjudicates, not the first
+//    match — a subtree claim listed earlier must not soften a fixed user file
+//    listed later, and the reverse order refuses the same way (#7250 review).
+{
+  const probes = {
+    tracked: () => true,
+    exists: () => false,
+    // data/ claims a subtree; data/secrets is a fixed file.
+    claimsSubtree: (p) => p === 'data/' || p === 'data',
+  };
+  const subtreeFirst = rejectUserLayerPaths(['data/secrets/config.yml'], ['data/', 'data/secrets'], probes);
+  check(
+    subtreeFirst.refused.includes('data/secrets/config.yml'),
+    'a child of a fixed user file is refused even when a subtree declaration matches first',
+    `subtree-first order kept the child: kept=${JSON.stringify(subtreeFirst.kept)}`,
+  );
+  const fileFirst = rejectUserLayerPaths(['data/secrets/config.yml'], ['data/secrets', 'data/'], probes);
+  check(
+    fileFirst.refused.includes('data/secrets/config.yml'),
+    'a child of a fixed user file is refused in either declaration order',
+    `file-first order kept the child: kept=${JSON.stringify(fileFirst.kept)}`,
+  );
+  const allSubtree = rejectUserLayerPaths(['data/notes/readme.md'], ['data/', 'data/notes/'], probes);
+  check(
+    allSubtree.kept.includes('data/notes/readme.md'),
+    'an unbroken chain of subtree claims still adjudicates a single file',
+    `subtree-only chain refused the file: refused=${JSON.stringify(allSubtree.refused)}`,
+  );
+}
+
+// ── 3b. preservedSpecCollision: the entry-level check at write depth ──
+{
+  check(
+    preservedSpecCollision('lib/nested', ['lib/nested/local.md']) !== null,
+    'preservedSpecCollision refuses a target file over a preserved local directory',
+    'preservedSpecCollision missed the file-over-directory shape',
+  );
+  check(
+    preservedSpecCollision('lib/blob/x.md', ['lib/blob']) !== null,
+    'preservedSpecCollision refuses a target directory over a preserved local file',
+    'preservedSpecCollision missed the directory-over-file shape',
+  );
+  check(
+    preservedSpecCollision('lib/a.mjs', ['lib/nested/local.md', 'lib/blob']) === null,
+    'preservedSpecCollision lets an ordinary sibling update',
+    'preservedSpecCollision refused an ordinary sibling',
+  );
+}
+
+// ── 3c. Update-owned file detection uses the expanded staging list ──
+{
+  const stagedCall = /stagedPathsOutside\(\s*\[\.\.\.expandedPathsToStage, \.\.\.materializedSkillEntrypoints\]/;
+  const unstagedCall = /unstagedPathsOutside\(\s*\[\.\.\.expandedPathsToStage, \.\.\.materializedSkillEntrypoints\]/;
+  check(
+    stagedCall.test(updaterSource),
+    'the staged-ownership check judges the expanded staging list, not the manifest spelling',
+    'stagedPathsOutside is not called with expandedPathsToStage',
+  );
+  check(
+    unstagedCall.test(updaterSource),
+    'the unstaged-ownership check judges the expanded staging list, not the manifest spelling',
+    'unstagedPathsOutside is not called with expandedPathsToStage',
   );
 }
 
