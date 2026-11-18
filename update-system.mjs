@@ -3423,21 +3423,47 @@ export function expandToShippedFiles(paths, ref = 'FETCH_HEAD', ctx = {}) {
   const seen = new Set();
   const files = [];
   const take = (p) => { if (p && !seen.has(p)) { seen.add(p); files.push(p); } };
+  // Deliberately uncaught, for the same reason as isTracked: `ls-tree --
+  // absent/` exits 0 with empty output, so a stale manifest entry needs no
+  // handling here. A throw is therefore a real failure — an unreadable ref,
+  // a timeout, a corrupt object store — and swallowing it would report "this
+  // directory ships nothing" and drop every file under it from staging.
+  //
+  // -z: raw, NUL-separated names. Without it git quotes anything non-ASCII
+  // per core.quotePath, and a quoted name is not a usable pathspec.
+  // --literal-pathspecs: a directory prefix still resolves, but no name is
+  // ever reinterpreted as a glob.
+  const expandDir = (dir) => {
+    const listed = runGit('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', dir);
+    for (const file of listed.split('\0')) take(file);
+  };
+
+  // A slashless entry can still name a directory in the target tree (#7250):
+  // passed through as a filename it reaches addPaths, whose rejectDirectories
+  // guard throws on it, and the update stops at staging. Probe every slashless
+  // entry in ONE ls-tree so ordinary file entries stay a single extra call for
+  // the whole manifest; only actual directories pay for a recursive listing.
+  const slashless = paths.filter((path) => !path.endsWith('/'));
+  const slashlessSet = new Set(slashless);
+  const slashlessDirs = new Set();
+  if (slashless.length > 0) {
+    const probed = runGit('--literal-pathspecs', 'ls-tree', '-z', ref, '--', ...slashless);
+    for (const record of probed.split('\0')) {
+      if (!record) continue;
+      const tab = record.indexOf('\t');
+      if (tab === -1) continue;
+      // "<mode> SP <type> SP <sha> TAB <name>"; a prefix pathspec could match
+      // a longer name, so only an exact hit on a probed entry counts.
+      if (record.slice(0, tab).split(' ')[1] === 'tree' && slashlessSet.has(record.slice(tab + 1))) {
+        slashlessDirs.add(record.slice(tab + 1));
+      }
+    }
+  }
 
   for (const path of paths) {
-    if (!path.endsWith('/')) { take(path); continue; }
-    // Deliberately uncaught, for the same reason as isTracked: `ls-tree --
-    // absent/` exits 0 with empty output, so a stale manifest entry needs no
-    // handling here. A throw is therefore a real failure — an unreadable ref,
-    // a timeout, a corrupt object store — and swallowing it would report "this
-    // directory ships nothing" and drop every file under it from staging.
-    //
-    // -z: raw, NUL-separated names. Without it git quotes anything non-ASCII
-    // per core.quotePath, and a quoted name is not a usable pathspec.
-    // --literal-pathspecs: a directory prefix still resolves, but no name is
-    // ever reinterpreted as a glob.
-    const listed = runGit('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', ref, '--', path);
-    for (const file of listed.split('\0')) take(file);
+    if (path.endsWith('/')) { expandDir(path); continue; }
+    if (slashlessDirs.has(path)) { expandDir(`${path}/`); continue; }
+    take(path);
   }
   return files;
 }
@@ -5149,22 +5175,15 @@ async function apply() {
     adoptTargetManifest(remoteSystemPaths);
     const manifestUserPaths = effectiveUserPaths();
     // A target manifest entry naming the user layer (cv.md, data/, .env) is a
-    // manifest error, not a path to skip: fail closed before the
-    // self-bootstrap checkout or re-exec, while the install is untouched.
-    // MANIFEST_USER_PATH_OVERLAPS keeps the byte-exact system scaffolds
-    // (.gitkeep keepers, dir READMEs) inside user directories allowed.
-    remoteSystemPaths = assertSafeManifestPaths(
-      remoteSystemPaths,
-      manifestUserPaths,
-      `Target SYSTEM_PATHS (${remoteManifestFile})`,
-    );
+    // manifest error, but refusing it must not abort the update (#3782): the
+    // merged-list refusal below drops the entry out loud before any checkout,
+    // so one bad entry never bricks every install's updates. The re-exec
+    // import closure below stays fatal - a refused import cannot be skipped
+    // without breaking the target updater. MANIFEST_USER_PATH_OVERLAPS keeps
+    // the byte-exact system scaffolds (.gitkeep keepers, dir READMEs) inside
+    // user directories allowed through the refusal's overlap rules.
     const validatedManifestPaths = assertCanonicalManifestPaths(
       mergePathLists(SYSTEM_PATHS, remoteSystemPaths, BOOTSTRAP_PATHS),
-      'Merged updater manifest',
-    );
-    assertSafeManifestPaths(
-      validatedManifestPaths,
-      manifestUserPaths,
       'Merged updater manifest',
     );
 
