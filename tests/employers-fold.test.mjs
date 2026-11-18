@@ -254,7 +254,8 @@ test('a numbered id already in contributions/ is an error that names a free numb
 }));
 
 test('ids without a number keep their order: compareContributionIds sorts them as plain text', () => {
-  const committed = readdirSync(join(ROOT, 'employers/contributions')).map((f) => f.replace(/\.json$/, ''));
+  // Only the committed ids that carry no number: a numbered one sorts by its number (.9 before .10), which is the second half of this test.
+  const committed = readdirSync(join(ROOT, 'employers/contributions')).map((f) => f.replace(/\.json$/, '')).filter((id) => !/\.\d+$/.test(id));
   const plain = [...committed, '2026-11-10-octocat', '2026-11-10-octocat-2', '2026-11-10-octo', '2026-11-10-octo-cat', '2026-11-09-zed', '2026-11-10-a1', '2026-11-10-a-1'];
   assert.deepEqual([...plain].sort(compareContributionIds), [...plain].sort());
   const numbered = ['2026-11-10-octocat.10', '2026-11-10-octocat-2', '2026-11-10-octocat.2', '2026-11-10-octocat', '2026-11-10-octocat.9'];
