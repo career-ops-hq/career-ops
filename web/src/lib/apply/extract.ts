@@ -76,7 +76,16 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       const tag = node.tagName.toLowerCase();
       const type = ((node as HTMLInputElement).type || "").toLowerCase();
       if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(type)) return false;
-      if ((node as HTMLElement).offsetParent === null && type !== "radio" && type !== "checkbox") return false;
+      if ((node as HTMLElement).offsetParent === null) {
+        // Styled radios/checkboxes often hide their own <input> and show a
+        // label instead, so a hidden one still counts while its label or
+        // wrapper renders. A control inside a hidden container (a Recruitee
+        // "Apply" tab panel) does not: keeping it would pass a few hidden
+        // radios off as the form and skip opening the real one.
+        if (type !== "radio" && type !== "checkbox") return false;
+        const shown = node.closest("label") ?? node.parentElement;
+        if (!shown || shown.getClientRects().length === 0) return false;
+      }
       if (node.closest('[class*="autofill" i]')) return false;
       return true;
     }
