@@ -138,6 +138,6 @@ A PID-based lock file (`batch-runner.pid`) prevents concurrent batch runs. If a 
 
 ## Prerequisites
 
-- Your CLI in PATH (see **Headless / Batch Mode** table in `AGENTS.md`)
+- Your CLI in PATH (see the headless command table in `modes/_headless.md`)
 - Node.js >= 22.13, Playwright chromium installed (`npm run doctor` to verify)
 - `batch-input.tsv` with at least one offer

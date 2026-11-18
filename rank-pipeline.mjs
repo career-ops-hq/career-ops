@@ -415,7 +415,7 @@ async function main(args) {
     : detectCli(active ? [active, ...CLI_CANDIDATES] : CLI_CANDIDATES);
   if (!cli) {
     console.error('No supported agent CLI found (tried: %s).', CLI_CANDIDATES.map(c => c.bin).join(', '));
-    console.error('Install one, or pass --cli <name>. See the Headless / Batch Mode table in AGENTS.md.');
+    console.error('Install one, or pass --cli <name>. See the headless command table in modes/_headless.md.');
     return 1;
   }
 
