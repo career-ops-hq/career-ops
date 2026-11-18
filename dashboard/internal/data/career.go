@@ -1080,30 +1080,52 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
 }
 
-// trackerSelector returns the set-status.mjs flag and value naming app's row.
-// Report numbers and tracker row numbers are two independent counters sharing
-// one number space (see set-status.mjs's header), so the flag has to state
-// which space the value belongs to.
+// trackerIdentity is one way to name a row to set-status.mjs: a selector flag
+// and its value. Report numbers and tracker row numbers are two independent
+// counters sharing one number space (see set-status.mjs's header), so the flag
+// is what states which space the value belongs to — report #32 and row #32 are
+// different applications.
+type trackerIdentity struct{ flag, value string }
+
+// trackerIdentities returns every identity app carries, the one to write with
+// first. A row can carry both: #42 linking report #7 answers to either
+// selector, and a pending repair filed under one has to be findable under the
+// other once a merge adds a report link to a row that had none.
 //
-// The report link comes first: it is the identity a report filename carries.
+// The report link is preferred: it is the identity a report filename carries.
 // A row added without an evaluation has no report link at all (`tracker` mode,
 // a backfilled recruiter inbound), and its # cell is then the only identity it
-// has — the one --row names. A row whose # cell is a backfill sentinel has
-// neither, because Number is then just its position in the table.
-func trackerSelector(app model.CareerApplication) (flag, value string, ok bool) {
+// has. A row whose # cell is a backfill sentinel carries neither, because
+// Number is then just its position in the table.
+//
+// `#0` is refused along with the sentinel: set-status.mjs accepts `--row 0` and
+// saves the status, but followup-seed.mjs rejects a non-positive application
+// number, so an Applied write would report a partial save that no retry can
+// repair. A refusal naming the row is the better failure.
+func trackerIdentities(app model.CareerApplication) []trackerIdentity {
+	var ids []trackerIdentity
 	if app.ReportNumber != "" {
-		return "--report-link", app.ReportNumber, true
+		ids = append(ids, trackerIdentity{"--report-link", app.ReportNumber})
 	}
-	if !app.TrackerNumberMissing {
-		return "--row", strconv.Itoa(app.Number), true
+	if !app.TrackerNumberMissing && app.Number > 0 {
+		ids = append(ids, trackerIdentity{"--row", strconv.Itoa(app.Number)})
 	}
-	return "", "", false
+	return ids
+}
+
+// trackerSelector returns the flag and value a status write should name app's
+// row with: the first of trackerIdentities.
+func trackerSelector(app model.CareerApplication) (flag, value string, ok bool) {
+	ids := trackerIdentities(app)
+	if len(ids) == 0 {
+		return "", "", false
+	}
+	return ids[0].flag, ids[0].value, true
 }
 
 // HasTrackerIdentity reports whether a status write can name app's row.
 func HasTrackerIdentity(app model.CareerApplication) bool {
-	_, _, ok := trackerSelector(app)
-	return ok
+	return len(trackerIdentities(app)) > 0
 }
 
 // SameTrackerRow reports whether one selector addresses both rows, so a caller
@@ -1127,11 +1149,11 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	if !isCanonicalStatusName(newStatus) {
 		return fmt.Errorf("unrecognized status: %q", newStatus)
 	}
-	flag, value, ok := trackerSelector(app)
-	if !ok {
-		return fmt.Errorf("application has no tracker identity: no report link, and its # cell is a backfill sentinel — number the row to change its status")
+	ids := trackerIdentities(app)
+	if len(ids) == 0 {
+		return fmt.Errorf("application has no tracker identity: no report link, and its # cell is not a positive number — number the row to change its status")
 	}
-	return runStatusWriter(careerOpsPath, flag, value, newStatus, notesAppend)
+	return runStatusWriter(careerOpsPath, ids, newStatus, notesAppend)
 }
 
 // IsCanonicalStatusName reports whether status is one of the states.yml

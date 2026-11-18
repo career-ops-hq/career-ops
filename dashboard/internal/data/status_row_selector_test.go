@@ -49,24 +49,59 @@ func TestDashboardStatusWritesRowWithoutReportLink(t *testing.T) {
 	}
 }
 
-// A backfill sentinel in the # column (#1799) leaves the row with no identity
-// at all: Number is then only its position in the table, and renumbering or
-// inserting a row above it would silently retarget the write.
+// Two # cells name no row. A backfill sentinel (#1799) leaves Number as only
+// the row's position in the table, so inserting a row above it would retarget
+// the write. A literal 0 is worse than useless: set-status.mjs takes `--row 0`
+// and saves the status, but followup-seed.mjs rejects a non-positive
+// application number, so an Applied write reports a partial save and no retry
+// can ever repair it. Both are refused before anything is written.
 func TestDashboardStatusRefusesRowWithoutIdentity(t *testing.T) {
-	t.Setenv("CAREER_OPS_TRACKER", "")
-	t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
-	before := statusTargetHeader + strings.Replace(noReportRow, "| 32 |", "| N/A |", 1)
-	root, tracker := writeTracker(t, before)
+	for _, cell := range []string{"N/A", "0"} {
+		t.Run(cell, func(t *testing.T) {
+			t.Setenv("CAREER_OPS_TRACKER", "")
+			t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
+			before := statusTargetHeader + strings.Replace(noReportRow, "| 32 |", "| "+cell+" |", 1)
+			root, tracker := writeTracker(t, before)
 
-	apps := mustParseApplications(t, root)
-	if len(apps) != 1 || !apps[0].TrackerNumberMissing {
-		t.Fatalf("premise: one row with a sentinel #, got %+v", apps)
+			apps := mustParseApplications(t, root)
+			if len(apps) != 1 {
+				t.Fatalf("premise: one row, got %+v", apps)
+			}
+			// The two reach trackerIdentities differently: the sentinel as
+			// TrackerNumberMissing, the 0 as a number the reader accepts.
+			if cell == "0" && apps[0].TrackerNumberMissing {
+				t.Fatalf("premise: a 0 cell parses as a number, got %+v", apps[0])
+			}
+			err := UpdateApplicationStatusAndNotes(root, apps[0], "Applied", "")
+			if err == nil || !strings.Contains(err.Error(), "no tracker identity") {
+				t.Fatalf("want a refusal naming the missing identity, got %v", err)
+			}
+			assertStatusTargetBytes(t, tracker, before)
+		})
 	}
-	err := UpdateApplicationStatusAndNotes(root, apps[0], "Discarded", "")
-	if err == nil || !strings.Contains(err.Error(), "no tracker identity") {
-		t.Fatalf("want a refusal naming the missing identity, got %v", err)
+}
+
+// A row can answer to both selectors. The order matters twice: the report link
+// is what the write names, and a pending repair filed under one identity has to
+// be findable under the other, since a merge can add a report link to the row a
+// failed write saved as `--row N`.
+func TestTrackerIdentitiesKeepsBothSelectors(t *testing.T) {
+	both := trackerIdentities(model.CareerApplication{Number: 42, ReportNumber: "7"})
+	if len(both) != 2 || both[0] != (trackerIdentity{"--report-link", "7"}) || both[1] != (trackerIdentity{"--row", "42"}) {
+		t.Fatalf("want the report link first and the tracker # second, got %+v", both)
 	}
-	assertStatusTargetBytes(t, tracker, before)
+	if only := trackerIdentities(model.CareerApplication{Number: 32}); len(only) != 1 || only[0] != (trackerIdentity{"--row", "32"}) {
+		t.Fatalf("a row with no report link carries one identity, got %+v", only)
+	}
+	for name, app := range map[string]model.CareerApplication{
+		"sentinel #": {Number: 1, TrackerNumberMissing: true},
+		"#0":         {Number: 0},
+		"negative #": {Number: -1},
+	} {
+		if ids := trackerIdentities(app); len(ids) != 0 {
+			t.Fatalf("%s must carry no identity, got %+v", name, ids)
+		}
+	}
 }
 
 // A tracker # duplicated across two rows (#1704) is the one case where the

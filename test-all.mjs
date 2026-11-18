@@ -6173,22 +6173,46 @@ try {
   const dashboardWriter = readFile('dashboard/internal/data/status_writer.go');
   const runWriterStart = dashboardWriter.indexOf('func runStatusWriter(');
   const runWriterBody = runWriterStart === -1 ? '' : dashboardWriter.slice(runWriterStart);
-  // The row selector moved out of the writer into career.go's trackerSelector,
-  // which names a row by its report link or, for a row with no report, by its
-  // tracker # — so check the flags there, not a literal in the writer. The
-  // selector must still be one of those two: a write that named a row any
-  // other way would be matching on something the tracker does not guarantee.
+  // The row selector moved out of the writer into career.go's
+  // trackerIdentities, which names a row by its report link or, for a row with
+  // no report, by its tracker # — so check the flags there, not a literal in
+  // the writer. The selector must still be one of those two: a write that named
+  // a row any other way would be matching on something the tracker does not
+  // guarantee.
+  //
+  // Read the argv slice, not the whole function: `includes('ids[0].flag')` over
+  // the body also matches the parameter list, so an argv that hardcoded a flag
+  // and ignored the one it was handed would still have passed. And every
+  // selector-returning line must RESOLVE — an unparseable one fails the guard
+  // instead of being skipped, because a skipped bad branch beside a good one
+  // reads as a pass (#7331 review).
   const dashboardSelector = readFile('dashboard/internal/data/career.go');
-  const selectorStart = dashboardSelector.indexOf('func trackerSelector(');
+  const selectorStart = dashboardSelector.indexOf('func trackerIdentities(');
+  // A function with nothing after it ends at EOF, not at index -1, which would
+  // silently drop its last character.
+  const selectorEnd = dashboardSelector.indexOf('\nfunc ', selectorStart + 1);
   const selectorBody = selectorStart === -1
     ? ''
-    : dashboardSelector.slice(selectorStart, dashboardSelector.indexOf('\nfunc ', selectorStart + 1));
-  const selectorFlags = [...selectorBody.matchAll(/return "(--[a-z-]+)"/g)].map((m) => m[1]);
+    : dashboardSelector.slice(selectorStart, selectorEnd === -1 ? undefined : selectorEnd);
+  // EVERY flag-shaped literal in the function, however it is written: a regex
+  // keyed to one return shape skips a branch spelled differently, and a skipped
+  // bad branch beside a good one reads as a pass.
+  const selectorFlags = [...selectorBody.replace(/^\s*\/\/.*$/gm, '').matchAll(/"(--[a-z-]+)"/g)]
+    .map((m) => m[1]);
+  const argsStart = runWriterBody.indexOf('args := []string{');
+  const argvLiteral = argsStart === -1
+    ? ''
+    : runWriterBody.slice(argsStart, runWriterBody.indexOf('}', argsStart) + 1);
   const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
     && runWriterBody.includes('exec.CommandContext')
-    && runWriterBody.includes('selectorFlag')
-    && selectorFlags.length > 0
+    && argvLiteral.includes('ids[0].flag')
+    && argvLiteral.includes('ids[0].value')
+    && !/"--(?:row|report|report-link)"/.test(argvLiteral)
     && selectorFlags.every((flag) => flag === '--report-link' || flag === '--row')
+    // Both must survive: losing --row is the bug #7331 fixed, and losing
+    // --report-link would renumber every existing row's writes.
+    && selectorFlags.includes('--report-link')
+    && selectorFlags.includes('--row')
     && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
   if (delegatesToCanonicalWriter) {
     pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
