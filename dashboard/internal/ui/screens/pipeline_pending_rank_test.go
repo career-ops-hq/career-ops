@@ -297,6 +297,9 @@ func TestInboxRankQuestionsFitEightyColumns(t *testing.T) {
 			if !strings.Contains(got, want) || !strings.Contains(want, "y: ") {
 				t.Errorf("%s %s: the 80-column footer %q does not hold the whole question %q", lang, name, got, want)
 			}
+			if width := ansi.StringWidth(got); width > 80 {
+				t.Errorf("%s %s: the footer is %d columns wide, want at most 80: %q", lang, name, width, got)
+			}
 		}
 	}
 }
