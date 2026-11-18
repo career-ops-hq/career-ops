@@ -19482,10 +19482,24 @@ try {
   }
 
   const agentsDoc = readFile('AGENTS.md');
-  if (agentsDoc.includes('`check-table-freshness.mjs`')) {
+  // Only the table under the Main Files heading counts: the name in prose,
+  // another table or a fenced example does not list the script there.
+  const agentsLines = agentsDoc.split(/\r?\n/);
+  const mainFilesHeading = agentsLines.indexOf('### Main Files');
+  const mainFilesRows = [];
+  for (const line of mainFilesHeading < 0 ? [] : agentsLines.slice(mainFilesHeading + 1)) {
+    if (line.startsWith('|')) mainFilesRows.push(line);
+    else if (mainFilesRows.length > 0 || line.trim() !== '') break;
+  }
+  if (mainFilesRows.some((row) => row.startsWith('| `check-table-freshness.mjs` |'))) {
     pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
   } else {
     fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+  }
+  if (mainFilesRows.some((row) => row.startsWith('| `add-entry.mjs` |'))) {
+    pass('AGENTS.md Main Files table lists add-entry.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing add-entry.mjs');
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold
