@@ -1080,6 +1080,42 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
 }
 
+// trackerSelector returns the set-status.mjs flag and value naming app's row.
+// Report numbers and tracker row numbers are two independent counters sharing
+// one number space (see set-status.mjs's header), so the flag has to state
+// which space the value belongs to.
+//
+// The report link comes first: it is the identity a report filename carries.
+// A row added without an evaluation has no report link at all (`tracker` mode,
+// a backfilled recruiter inbound), and its # cell is then the only identity it
+// has — the one --row names. A row whose # cell is a backfill sentinel has
+// neither, because Number is then just its position in the table.
+func trackerSelector(app model.CareerApplication) (flag, value string, ok bool) {
+	if app.ReportNumber != "" {
+		return "--report-link", app.ReportNumber, true
+	}
+	if !app.TrackerNumberMissing {
+		return "--row", strconv.Itoa(app.Number), true
+	}
+	return "", "", false
+}
+
+// HasTrackerIdentity reports whether a status write can name app's row.
+func HasTrackerIdentity(app model.CareerApplication) bool {
+	_, _, ok := trackerSelector(app)
+	return ok
+}
+
+// SameTrackerRow reports whether one selector addresses both rows, so a caller
+// can find a row again after re-reading the tracker. It compares the identity a
+// write would use, not the row's contents — a status write changes Status and
+// Notes. A row with no identity matches nothing, including itself.
+func SameTrackerRow(a, b model.CareerApplication) bool {
+	aFlag, aValue, aOK := trackerSelector(a)
+	bFlag, bValue, bOK := trackerSelector(b)
+	return aOK && bOK && aFlag == bFlag && aValue == bValue
+}
+
 // UpdateApplicationStatusAndNotes delegates to the canonical writer so status,
 // notes, the transition ledger and Applied follow-up seeding share one path.
 // Notes use the CLI's idempotent "; " separator; empty notes are unchanged.
@@ -1091,10 +1127,11 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	if !isCanonicalStatusName(newStatus) {
 		return fmt.Errorf("unrecognized status: %q", newStatus)
 	}
-	if app.ReportNumber == "" {
-		return fmt.Errorf("application has no report identity; use set-status.mjs --row to select a tracker row")
+	flag, value, ok := trackerSelector(app)
+	if !ok {
+		return fmt.Errorf("application has no tracker identity: no report link, and its # cell is a backfill sentinel — number the row to change its status")
 	}
-	return runStatusWriter(careerOpsPath, app.ReportNumber, newStatus, notesAppend)
+	return runStatusWriter(careerOpsPath, flag, value, newStatus, notesAppend)
 }
 
 // IsCanonicalStatusName reports whether status is one of the states.yml

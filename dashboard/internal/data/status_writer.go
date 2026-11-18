@@ -44,7 +44,9 @@ func CheckoutScriptPath(name string) (string, error) {
 	return "", fmt.Errorf("dashboard actions need %s in the career-ops checkout", name)
 }
 
-func runStatusWriter(dataRoot, report, status, note string) error {
+// runStatusWriter runs set-status.mjs against the row named by selectorFlag
+// (--report-link or --row) and selector; trackerSelector picks the pair.
+func runStatusWriter(dataRoot, selectorFlag, selector, status, note string) error {
 	script, err := CheckoutScriptPath("set-status.mjs")
 	if err != nil {
 		return err
@@ -60,8 +62,9 @@ func runStatusWriter(dataRoot, report, status, note string) error {
 	// --detach-jd-archive: a move into Interview may start a JD archive that can
 	// outlast the 30s budget below, and this runs inside Bubble Tea's Update, so
 	// waiting froze the TUI and then reported a saved status as timed out.
-	args := []string{script, "--report-link", report, status, "--detach-jd-archive", "--json"}
-	repairKey := tracker + "\x00" + report
+	args := []string{script, selectorFlag, selector, status, "--detach-jd-archive", "--json"}
+	// The flag is part of the key: report #32 and row #32 are different rows.
+	repairKey := tracker + "\x00" + selectorFlag + "\x00" + selector
 	if strings.EqualFold(status, "applied") {
 		// Only a retry after a partial Applied save may repair missing
 		// lifecycle observations even though the tracker is already Applied.

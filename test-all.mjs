@@ -6173,9 +6173,22 @@ try {
   const dashboardWriter = readFile('dashboard/internal/data/status_writer.go');
   const runWriterStart = dashboardWriter.indexOf('func runStatusWriter(');
   const runWriterBody = runWriterStart === -1 ? '' : dashboardWriter.slice(runWriterStart);
+  // The row selector moved out of the writer into career.go's trackerSelector,
+  // which names a row by its report link or, for a row with no report, by its
+  // tracker # — so check the flags there, not a literal in the writer. The
+  // selector must still be one of those two: a write that named a row any
+  // other way would be matching on something the tracker does not guarantee.
+  const dashboardSelector = readFile('dashboard/internal/data/career.go');
+  const selectorStart = dashboardSelector.indexOf('func trackerSelector(');
+  const selectorBody = selectorStart === -1
+    ? ''
+    : dashboardSelector.slice(selectorStart, dashboardSelector.indexOf('\nfunc ', selectorStart + 1));
+  const selectorFlags = [...selectorBody.matchAll(/return "(--[a-z-]+)"/g)].map((m) => m[1]);
   const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
     && runWriterBody.includes('exec.CommandContext')
-    && runWriterBody.includes('"--report-link"')
+    && runWriterBody.includes('selectorFlag')
+    && selectorFlags.length > 0
+    && selectorFlags.every((flag) => flag === '--report-link' || flag === '--row')
     && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
   if (delegatesToCanonicalWriter) {
     pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
