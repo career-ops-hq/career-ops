@@ -123,9 +123,9 @@ test('remove rejects a parent-relative probe id before touching the checkout', (
   assert.equal(readFileSync(cfgFile, 'utf8'), cfgSeed, 'config/plugins.yml must be untouched by an invalid id');
 });
 
-test('remove leaves a plugin in place when plugins.lock will not parse', () => {
+test('remove leaves a plugin in place when a legacy code-root plugins.lock will not parse', () => {
   const id = 'tornplug';
-  const dir = join(checkout, 'plugins.local', id);
+  const dir = join(dataRoot, 'plugins.local', id);
   mkdirSync(dir, { recursive: true });
   const sentinel = join(dir, 'index.mjs');
   writeFileSync(sentinel, 'export default {};\n');
@@ -137,6 +137,35 @@ test('remove leaves a plugin in place when plugins.lock will not parse', () => {
     hooks: ['ingest'],
   }));
   const lockFile = join(checkout, 'plugins.lock');
+  const torn = '{not-json';
+  writeFileSync(lockFile, torn);
+  const cfgDir = join(dataRoot, 'config');
+  mkdirSync(cfgDir, { recursive: true });
+  const cfgFile = join(cfgDir, 'plugins.yml');
+  const cfgSeed = `plugins:\n  ${id}:\n    enabled: true\n`;
+  writeFileSync(cfgFile, cfgSeed);
+  const r = run('remove', id);
+  assert.ok(exitedNonZero(r), describeSpawn(r, `exited ${r.status} — a torn lock must be refused before delete\n`));
+  assert.match(r.all, /not valid JSON/, `expected the torn-lock error, got:\n${r.all}`);
+  assert.equal(existsSync(sentinel), true, 'the plugin files must survive a torn lock');
+  assert.equal(readFileSync(lockFile, 'utf8'), torn, 'plugins.lock must stay torn rather than be rewritten');
+  assert.equal(readFileSync(cfgFile, 'utf8'), cfgSeed, 'config/plugins.yml must stay enabled');
+});
+
+test('remove leaves a plugin in place when the data-root plugins.lock will not parse', () => {
+  const id = 'tornplug2';
+  const dir = join(dataRoot, 'plugins.local', id);
+  mkdirSync(dir, { recursive: true });
+  const sentinel = join(dir, 'index.mjs');
+  writeFileSync(sentinel, 'export default {};\n');
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({
+    id,
+    apiVersion: 1,
+    description: 'fixture for a torn lock',
+    humanInTheLoop: true,
+    hooks: ['ingest'],
+  }));
+  const lockFile = join(dataRoot, 'plugins.lock');
   const torn = '{not-json';
   writeFileSync(lockFile, torn);
   const cfgDir = join(dataRoot, 'config');
