@@ -5,7 +5,7 @@
 ## Related issue
 
 <!-- Link the issue this PR addresses, if it has one. Format: Fixes #123 / Closes #123 -->
-<!-- Issue-first is asked for NEW FEATURES, new modes/commands, architecture changes, and any change to an [owner-reviewed path](https://github.com/career-ops-hq/career-ops/blob/main/CONTRIBUTING.md#owner-reviewed-paths), typos included: it saves you from building something we'd have to redirect. -->
+<!-- Issue-first is asked for NEW FEATURES, new modes/commands, architecture changes, and changes to an [owner-reviewed path](https://github.com/career-ops-hq/career-ops/blob/main/CONTRIBUTING.md#owner-reviewed-paths): it saves you from building something we'd have to redirect. -->
 <!-- No issue needed, send the PR straight in: bug fixes, new zero-auth scanner providers, docs, and translations, unless they change an owner-reviewed path. We don't want to slow these down. -->
 
 ## Type of change
