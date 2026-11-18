@@ -462,3 +462,44 @@ test("a control in a visibility:hidden panel is skipped, a styled box with a vis
     await close();
   }
 });
+
+for (const button of ['<button type="submit">Apply</button>', "<button>Apply</button>"]) {
+  test(`tryApplyTrigger does not click a form's submit button named Apply: ${button}`, async (t) => {
+    const html = `<!doctype html><body>
+      <p>About the role.</p>
+      <form onsubmit="event.preventDefault(); window.__submitted = true;">
+        <label for="name">Full name</label><input id="name" name="name">
+        ${button}
+      </form>
+    </body>`;
+    const fx = await fixturePage(t, html);
+    if (!fx) return;
+    const { page, close } = fx;
+    try {
+      await page.getByRole("button", { name: "Apply" }).waitFor({ state: "visible" });
+      const acted = await tryApplyTrigger(page);
+      assert.equal(acted, false);
+      assert.equal(await page.evaluate(() => window.__submitted === true), false, "the form was submitted");
+    } finally {
+      await close();
+    }
+  });
+}
+
+test("a hidden wrapper label does not name the visible field next to it", async (t) => {
+  const html = `<!doctype html><form>
+    <div class="form-group">
+      <label style="visibility:hidden">Website<input name="trap"></label>
+      <input name="full_name" placeholder="Full name">
+    </div>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => [f.type, f.label]), [["text", "Full name"]]);
+  } finally {
+    await close();
+  }
+});

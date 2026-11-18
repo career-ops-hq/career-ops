@@ -5,6 +5,8 @@ import { pickComboboxOption } from "./option-match.mjs";
 import { checkboxSelections } from "./checkbox-options.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 import { isApplicationHref } from "./apply-link.mjs";
+import { factsOf } from "./drive-action.mjs";
+import { isSubmitControl } from "./submit-guard.mjs";
 
 export type { ApplyIssue };
 
@@ -220,6 +222,11 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
     if ((await t.count().catch(() => 0)) && (await t.isVisible().catch(() => false))) {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
+      // The wording test misses a form's own <button type="submit">Apply</button>,
+      // and clicking that would file the form. Same guard as the drive loop;
+      // a control whose facts cannot be read is not clicked either.
+      const facts = await t.evaluate(factsOf, null).catch(() => null);
+      if (!facts || isSubmitControl(facts)) return false;
       const href = await t.getAttribute("href").catch(() => null);
       const blocked = await blockedTriggerHref(page, href);
       if (blocked) return { blocked };

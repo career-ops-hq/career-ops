@@ -116,6 +116,9 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
     // A display:none honeypot has no box. display:contents also has no box,
     // but its text stays on screen, so walk up until an ancestor has one.
     function isVisibleNode(node: Element): boolean {
+      // A visibility:hidden label keeps its layout box, so the walk below would
+      // accept it. Computed visibility already includes a hidden ancestor.
+      if (getComputedStyle(node).visibility === "hidden") return false;
       let current: HTMLElement | null = node as HTMLElement;
       while (current && current !== document.body) {
         if (current.offsetParent !== null) return true;
