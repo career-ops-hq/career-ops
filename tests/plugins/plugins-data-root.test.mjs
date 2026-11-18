@@ -646,6 +646,36 @@ test('remove puts the pin back when the folder cannot be deleted, so a retry can
   }
 });
 
+test('remove retries a partial delete that took manifest.json before failing', () => {
+  const { dataRoot, run, cleanup } = cliFixture('remove-partial');
+  try {
+    const { dir } = writePlugin(join(dataRoot, 'plugins.local'), 'partial-plug');
+    const tree = hashPluginTree(dir);
+    writeLockEntry(dataRoot, 'partial-plug', {
+      source: 'local', version: '1.0.0', integrity: tree.integrity, files: tree.files,
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+
+    // Node's recursive delete removes children one by one, so a failure can
+    // land after manifest.json is already gone. Stand that state up directly:
+    // the leftover folder has no manifest to resolve on the retry.
+    rmSync(join(dir, 'manifest.json'));
+    const failed = run(['remove', 'partial-plug'], { FAIL_FOLDER_DELETE: '1' });
+    assert.ok(exitedNonZero(failed), describeSpawn(failed, 'remove with a failing folder delete'));
+    assert.match(failed.stderr, /pin was put back/);
+    assert.equal(existsSync(dir), true, 'the leftover folder must survive');
+    assert.equal(existsSync(join(dir, 'manifest.json')), false, 'the manifest is gone, as in a partial delete');
+    assert.ok(readLock(dataRoot).plugins['partial-plug'], 'the pin must be put back');
+
+    const retried = run(['remove', 'partial-plug']);
+    assert.equal(retried.status, 0, describeSpawn(retried, 'remove retry without a manifest'));
+    assert.equal(existsSync(dir), false, 'the retry must finish the cleanup');
+    assert.equal(readLock(dataRoot).plugins['partial-plug'], undefined);
+  } finally {
+    cleanup();
+  }
+});
+
 test('remove disables the plugin when the folder cannot be deleted and no pin exists to restore', () => {
   const { dataRoot, run, cleanup } = cliFixture('remove-disable');
   try {
