@@ -557,6 +557,7 @@ function localPathsLeg() {
  */
 function userLayerRefusalLeg() {
   const USER_FILE = 'cv.md';
+  const ENV_FILE = '.env';
   const baseSha = git(ROOT, 'rev-parse', 'HEAD');
   const oldTag = newestAncestorTag(baseSha);
   if (!oldTag) { console.error('No release tag is an ancestor of HEAD — fetch tags first (CI: fetch-depth: 0)'); process.exit(1); }
@@ -580,7 +581,11 @@ function userLayerRefusalLeg() {
     git(mirror, 'worktree', 'add', wt, 'main');
     writeFileSync(join(wt, USER_FILE), '# UPSTREAM VERSION — must never land on top of the user\n');
     const manifestFile = injectManifestEntry(wt, USER_FILE);
-    git(wt, 'add', '-f', USER_FILE, manifestFile);
+    // Same poison for .env: newly protected by this change, so the leg pins
+    // its byte-identity through apply and rollback, not just cv.md's.
+    writeFileSync(join(wt, ENV_FILE), 'UPSTREAM_SECRET=must-never-land\n');
+    injectManifestEntry(wt, ENV_FILE);
+    git(wt, 'add', '-f', USER_FILE, ENV_FILE, manifestFile);
     git(wt, '-c', 'user.name=upgrade-tests', '-c', 'user.email=upgrade-tests@career-ops.test', 'commit', '-qm', 'poison: manifest names the user layer');
     const targetSha = git(wt, 'rev-parse', 'HEAD');
     git(mirror, 'worktree', 'remove', '--force', wt);
@@ -595,6 +600,10 @@ function userLayerRefusalLeg() {
     writeFileSync(join(install, USER_FILE), userContent);
     const before = sha256(join(install, USER_FILE));
     const intact = () => existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === before;
+    const envContent = 'API_KEY=user-own-secret\n';
+    writeFileSync(join(install, ENV_FILE), envContent);
+    const envBefore = sha256(join(install, ENV_FILE));
+    const envIntact = () => existsSync(join(install, ENV_FILE)) && sha256(join(install, ENV_FILE)) === envBefore;
 
     const applied = run(install, cfg, 'apply', '--confirm');
     ok(applied.exitCode === 0, `apply completes despite the user-layer manifest entry (exit ${applied.exitCode})`);
@@ -602,17 +611,23 @@ function userLayerRefusalLeg() {
       new RegExp(`Refused \\d+ manifest entry\\(ies\\) naming the user layer:[\\s\\S]*\\b${USER_FILE.replace('.', '\\.')}\\b`).test(applied.output),
       `apply refuses the entry out loud (${USER_FILE})`,
     );
+    ok(
+      applied.output.split('\n').some((line) => line.trim() === ENV_FILE),
+      `apply refuses the entry out loud (${ENV_FILE})`,
+    );
     ok(applied.output.includes('Update complete'), 'apply reports the update as complete');
     ok(
       git(install, 'rev-parse', 'HEAD:update-system.mjs') === git(mirror, 'rev-parse', `${targetSha}:update-system.mjs`),
       'the rest of the update landed (updater matches the target)',
     );
     ok(intact(), `user file is byte-identical after apply: ${USER_FILE}`);
+    ok(envIntact(), `user file is byte-identical after apply: ${ENV_FILE}`);
 
     const rolledBack = run(install, cfg, 'rollback');
     ok(rolledBack.exitCode === 0, `rollback of that update succeeds (exit ${rolledBack.exitCode})`);
     ok(rolledBack.output.includes('Rollback complete'), 'rollback reports completion');
     ok(intact(), `user file is byte-identical after rollback: ${USER_FILE}`);
+    ok(envIntact(), `user file is byte-identical after rollback: ${ENV_FILE}`);
     ok(
       git(install, 'status', '--porcelain', '--', USER_FILE).startsWith('??') || git(install, 'status', '--porcelain', '--', USER_FILE) === '',
       `rollback neither staged nor committed ${USER_FILE}`,
@@ -1242,10 +1257,15 @@ function fallbackCollisionRefusalLeg() {
 
     ok(exitCode !== 0, `apply aborts on the collision instead of completing (exit ${exitCode})`);
     ok(output.includes('Cannot check out collib'), 'apply reports the collision refusal honestly');
-    ok(output.includes('Update stopped while checking out collib'), 'apply names the path it stopped on (collib)');
+    // The batched preflight refuses before any checkout runs: no partial
+    // write, no restore churn, and no window in which a pre-update edit among
+    // the earlier entries could be reset to HEAD. The refusal message is the
+    // same one the per-path loop would have named.
+    ok(!output.includes('Update stopped while checking out'), 'the batched refusal aborts before anything is written');
+    ok(!/Restored \d+ system path/.test(output), 'no system-path restore ran, because nothing was written');
     ok(existsSync(join(install, 'collib')) && sha256(join(install, 'collib')) === collibBefore, 'the preserved local file is byte-identical: collib');
     ok(!existsSync(join(install, 'collib', 'a.md')), 'the shipped directory content never landed over the local file');
-    ok(!existsSync(join(install, 'zz-writable', 'new.md')), 'the writable entry checked out before the collision is restored');
+    ok(!existsSync(join(install, 'zz-writable', 'new.md')), 'the writable entry listed before the collision never landed');
     const staged = git(install, 'status', '--porcelain', '--', 'zz-writable', 'collib');
     ok(staged === '', 'no staged or dirty entries remain for the writable entry or the collision');
     ok(existsSync(join(install, USER_FILE)) && sha256(join(install, USER_FILE)) === cvBefore, `user layer is byte-identical: ${USER_FILE}`);
