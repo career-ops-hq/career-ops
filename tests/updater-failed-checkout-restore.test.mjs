@@ -1142,6 +1142,58 @@ for (const [label, content, withBak] of [['matching the target', 'a v2\n', false
   }
 }
 
+// ── 20j. a STAGED RENAME to a new path survives the restore: the checkout
+//    recreates the source, and a failure must leave it absent again (index
+//    and disk) with the destination's staged blob intact — not a resurrected
+//    source that degrades the rename to a copy. (A rename ONTO a tracked path
+//    is staged as D plus M, which the deletion and staged-edit legs cover.)
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    g('mv', 'sys/a.md', 'sys/local.md');
+    const renamedBlob = g('rev-parse', ':sys/local.md');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    g('checkout', target, '--', 'sys/a.md');
+    const unrestored = restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState }, { ...ctx });
+    const aGone = !existsSync(join(dir, 'sys/a.md')) && g('ls-files', '--', 'sys/a.md') === '';
+    const localOk = g('rev-parse', ':sys/local.md') === renamedBlob && read(dir, 'sys/local.md') === 'a v1\n';
+    if (unrestored.length === 0 && aGone && localOk) {
+      pass('a staged rename keeps the source absent and the destination\'s staged blob after a failed update');
+    } else {
+      fail(`rename restore wrong: unrestored=${JSON.stringify(unrestored)} aGone=${aGone} localOk=${localOk}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20k. a staged edit a previous update delivered (so no local-edit backup,
+//    the way locallyModifiedSystemFiles attributes it) still gets its BYTES
+//    back: the index entry alone would leave the checkout's content on disk
+//    over the staged blob.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v1.5\n');
+    g('add', 'sys/a.md');
+    const stagedBlob = g('rev-parse', ':sys/a.md');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    g('checkout', target, '--', 'sys/a.md');
+    const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx }));
+    if (unrestored.length === 0 && g('rev-parse', ':sys/a.md') === stagedBlob && read(dir, 'sys/a.md') === 'a v1.5\n') {
+      pass('a staged edit without a backup gets its staged bytes back on disk, not just in the index');
+    } else {
+      fail(`unbacked staged edit wrong: unrestored=${JSON.stringify(unrestored)} index=${g('rev-parse', ':sys/a.md')} want=${stagedBlob} worktree=${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // ── 21. preserved-collision checks fold case like manifest screening: on a
 //    case-insensitive filesystem lib/Local and lib/local are one location.
 {
