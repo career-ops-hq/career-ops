@@ -93,6 +93,9 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
   fieldsRef.current = fields;
   const answersRef = useRef<Record<string, string>>({});
   answersRef.current = answers;
+  // Ids the person changed after the draft. The server cannot tell a typed
+  // value from a planner guess unless this list says so.
+  const editedRef = useRef<Set<string>>(new Set());
   // Bumped every time a session is abandoned or replaced. Leaving the page is
   // reachable while a request or stream is still in flight, and none of them can
   // be recalled, so each one carries the generation it started in and drops its
@@ -181,6 +184,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setError("");
     setFields([]);
     setAnswers({});
+    editedRef.current = new Set();
     setMeta({});
     setSteps([]);
     setShots([]);
@@ -263,6 +267,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
         m[id] = { needsConfirmation: !!v?.needs_confirmation };
       }
       setAnswers(a);
+      editedRef.current = new Set();
       setMeta(m);
     };
     try {
@@ -335,7 +340,10 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
       fs.find((x) => x.id === idOrLabel) ||
       fs.find((x) => x.label.toLowerCase().includes(key)) ||
       fs.find((x) => key.includes(x.label.toLowerCase()) && x.label.length > 2);
-    if (f) setAnswers((prev) => ({ ...prev, [f.id]: value }));
+    if (f) {
+      editedRef.current.add(f.id);
+      setAnswers((prev) => ({ ...prev, [f.id]: value }));
+    }
   }, []);
 
   const fill = useCallback(async () => {
@@ -344,7 +352,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setStatus("filling");
     setSteps([]);
     try {
-      const r = await fetch("/api/apply/fill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, answers, fields, handoff: true, company: companyRef.current, application: nRef.current }) });
+      const r = await fetch("/api/apply/fill", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, answers, fields, edited: [...editedRef.current], handoff: true, company: companyRef.current, application: nRef.current }) });
       const d = await r.json();
       // Also stops the escalation below from starting an agent drive on a
       // session the user has already walked away from.
@@ -389,6 +397,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const fs = fieldsRef.current;
     const a = answersRef.current;
     const ans = fs.filter((f) => f.type !== "file").map((f) => ({ id: f.id, label: f.label || f.id, value: a[f.id] || "" }));
+    const editedLabels = fs.filter((f) => editedRef.current.has(f.id)).map((f) => f.label || f.id);
     setDriveSteps([]);
     setError("");
     setStatus("filling");
@@ -396,7 +405,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     const controller = new AbortController();
     fillAbort.current = controller;
     try {
-      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans, company: companyRef.current, application: nRef.current }), signal: controller.signal });
+      const r = await fetch("/api/apply/drive", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: sessionId.current, cliId: cliId(), goal: "full", answers: ans, editedLabels, company: companyRef.current, application: nRef.current }), signal: controller.signal });
       if (controller.signal.aborted || generation.current !== gen) return; // left mid-fill
       const result = await readFillResult(r, (step) => setDriveSteps((p) => [...p, step]), () => generation.current === gen, controller.signal);
       if (!result || controller.signal.aborted || generation.current !== gen) return; // left mid-fill
@@ -443,6 +452,7 @@ export function ApplyProvider({ children }: { children: React.ReactNode }) {
     setFrom("");
     setFields([]);
     setAnswers({});
+    editedRef.current = new Set();
     setMeta({});
     setSteps([]);
     setShots([]);
