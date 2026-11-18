@@ -18,10 +18,10 @@
  * preserved file's uncommitted edit; sections 12 and 13, a cleanup that fails.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync, lstatSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync, lstatSync, chmodSync, readlinkSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo, captureConsoleErrors, rmSync, ROOT } from './helpers.mjs';
-import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign, capturePreUpdateIndex, restoreWrittenDirtyState, locallyModifiedSystemFiles, parsePorcelainStatus, gitStatusEntries, refreshPreUpdateSnapshot, preservedCheckoutCollision, preservedSpecCollision } from '../update-system.mjs';
+import { gitIn, restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign, capturePreUpdateIndex, restoreWrittenDirtyState, locallyModifiedSystemFiles, parsePorcelainStatus, gitStatusEntries, refreshPreUpdateSnapshot, preservedCheckoutCollision, preservedSpecCollision } from '../update-system.mjs';
 
 function write(dir, rel, text) {
   mkdirSync(join(dir, rel, '..'), { recursive: true });
@@ -1181,13 +1181,186 @@ for (const [label, content, withBak] of [['matching the target', 'a v2\n', false
     const stagedBlob = g('rev-parse', ':sys/a.md');
     const startEntries = entriesOf(dir);
     const initialStatusPaths = stateOf(startEntries);
-    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g), root: dir });
     g('checkout', target, '--', 'sys/a.md');
     const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx }));
     if (unrestored.length === 0 && g('rev-parse', ':sys/a.md') === stagedBlob && read(dir, 'sys/a.md') === 'a v1.5\n') {
       pass('a staged edit without a backup gets its staged bytes back on disk, not just in the index');
     } else {
       fail(`unbacked staged edit wrong: unrestored=${JSON.stringify(unrestored)} index=${g('rev-parse', ':sys/a.md')} want=${stagedBlob} worktree=${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20l. the worktree can hold bytes that are NEITHER HEAD's nor the staged
+//    edit's — content the local-edit detector credits to upstream (the
+//    update's own content taken ahead of a release), so no .bak is written.
+//    A failed update must leave those bytes on disk, not overwrite them with
+//    the staged blob.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v1.5\n');
+    g('add', 'sys/a.md');
+    const stagedBlob = g('rev-parse', ':sys/a.md');
+    write(dir, 'sys/a.md', 'a v2\n');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g), root: dir });
+    g('checkout', target, '--', 'sys/a.md');
+    const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx }));
+    if (unrestored.length === 0 && g('rev-parse', ':sys/a.md') === stagedBlob && read(dir, 'sys/a.md') === 'a v2\n') {
+      pass('a staged edit whose worktree held the update\'s own content keeps that content, not the staged blob');
+    } else {
+      fail(`credited worktree content wrong: unrestored=${JSON.stringify(unrestored)} index=${g('rev-parse', ':sys/a.md')} want=${stagedBlob} worktree=${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20m. a staged edit whose worktree was then reverted to HEAD's content:
+//    the checkout overwrites that third content and the restore must put
+//    THOSE bytes back — neither the staged blob nor the checkout's version.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v1.5\n');
+    g('add', 'sys/a.md');
+    const stagedBlob = g('rev-parse', ':sys/a.md');
+    write(dir, 'sys/a.md', 'a v1\n');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g), root: dir });
+    g('checkout', target, '--', 'sys/a.md');
+    const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx }));
+    if (unrestored.length === 0 && g('rev-parse', ':sys/a.md') === stagedBlob && read(dir, 'sys/a.md') === 'a v1\n') {
+      pass('a staged edit whose worktree held a third content gets those exact bytes back');
+    } else {
+      fail(`third-content restore wrong: unrestored=${JSON.stringify(unrestored)} index=${g('rev-parse', ':sys/a.md')} want=${stagedBlob} worktree=${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20n-20q. the rest of the worktree states a staged edit can sit over:
+//    content no commit or blob names (must survive in the object store), an
+//    exec bit that differs from the staged mode, a symlink at the path, and a
+//    capture that could not read the disk (reported, never guessed).
+async function stagedOver(setupWorktree, mutateState) {
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v1.5\n');
+    g('add', 'sys/a.md');
+    const stagedBlob = g('rev-parse', ':sys/a.md');
+    setupWorktree(dir);
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g), root: dir });
+    if (mutateState) mutateState(initialIndexState.get('sys/a.md'));
+    g('checkout', target, '--', 'sys/a.md');
+    const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx }));
+    return { dir, g, unrestored, indexOk: g('rev-parse', ':sys/a.md') === stagedBlob };
+  } catch (err) {
+    rmSync(dir, { recursive: true, force: true });
+    throw err;
+  }
+}
+{
+  const r = await stagedOver((dir) => write(dir, 'sys/a.md', 'a v9 unique\n'));
+  try {
+    if (r.unrestored.length === 0 && r.indexOk && read(r.dir, 'sys/a.md') === 'a v9 unique\n') pass('worktree content no commit names survives a failed update');
+    else fail(`unique content wrong: ${JSON.stringify(r.unrestored)} ${JSON.stringify(read(r.dir, 'sys/a.md'))}`);
+  } finally { rmSync(r.dir, { recursive: true, force: true }); }
+}
+{
+  const r = await stagedOver((dir) => chmodSync(join(dir, 'sys/a.md'), 0o755));
+  try {
+    const exec = (lstatSync(join(r.dir, 'sys/a.md')).mode & 0o111) !== 0;
+    if (process.platform === 'win32' || (r.unrestored.length === 0 && r.indexOk && exec)) pass('a worktree exec bit that differs from the staged mode is kept');
+    else fail(`mode wrong: ${JSON.stringify(r.unrestored)} exec=${exec}`);
+  } finally { rmSync(r.dir, { recursive: true, force: true }); }
+}
+if (process.platform !== 'win32') {
+  const r = await stagedOver((dir) => {
+    write(dir, 'sys/real.md', 'a v2\n');
+    rmSync(join(dir, 'sys/a.md'), { force: true });
+    symlinkSync('real.md', join(dir, 'sys/a.md'));
+  });
+  try {
+    const isLink = lstatSync(join(r.dir, 'sys/a.md')).isSymbolicLink();
+    if (r.unrestored.length === 0 && r.indexOk && isLink && readlinkSync(join(r.dir, 'sys/a.md')) === 'real.md' && read(r.dir, 'sys/real.md') === 'a v2\n') pass('a symlink at the path is put back as a symlink, not a copy of its referent');
+    else fail(`symlink wrong: ${JSON.stringify(r.unrestored)} isLink=${isLink}`);
+  } finally { rmSync(r.dir, { recursive: true, force: true }); }
+}
+{
+  const r = await stagedOver(() => {}, (entry) => { entry.worktreeCaptureFailed = true; });
+  try {
+    if (r.unrestored.length === 1 && r.indexOk) pass('a worktree the capture could not read is reported, not overwritten with the staged blob');
+    else fail(`capture-failed wrong: ${JSON.stringify(r.unrestored)}`);
+  } finally { rmSync(r.dir, { recursive: true, force: true }); }
+}
+
+// ── 20r. the worktree bytes come back EXACTLY under line-ending conversion and
+//    custom filters: a git round trip (clean then smudge) would rewrite mixed
+//    endings or, for a lossy filter, change the content.
+for (const [label, config, attrs, bytes] of [
+  ['autocrlf=true with LF bytes', [['core.autocrlf', 'true']], null, 'a v2\n'],
+  ['autocrlf=true with mixed endings', [['core.autocrlf', 'true']], null, 'a x\r\nb y\n'],
+  ['autocrlf=input with CRLF bytes', [['core.autocrlf', 'input']], null, 'a v2\r\n'],
+  ['eol=crlf attribute with LF bytes', [], 'sys/* text eol=crlf\n', 'a v2\n'],
+  ['a lossy custom clean filter', [['filter.up.clean', 'tr a-z A-Z'], ['filter.up.smudge', 'cat']], 'sys/* filter=up\n', 'a v2 lower\n'],
+]) {
+  const r = await stagedOver((dir) => {
+    for (const [k, v] of config) gitIn(dir, 'config', k, v);
+    if (attrs) writeFileSync(join(dir, '.git', 'info', 'attributes'), attrs);
+    writeFileSync(join(dir, 'sys/a.md'), bytes);
+  });
+  try {
+    const got = readFileSync(join(r.dir, 'sys/a.md'), 'latin1');
+    if (r.unrestored.length === 0 && r.indexOk && got === bytes) pass(`exact bytes survive a failed update: ${label}`);
+    else fail(`filter round trip changed bytes (${label}): ${JSON.stringify(got)} want ${JSON.stringify(bytes)} unrestored=${JSON.stringify(r.unrestored)}`);
+  } finally { rmSync(r.dir, { recursive: true, force: true }); }
+}
+
+// ── 20s. the exact permission bits come back, so a private file is never
+//    widened by a rollback (and a read-only one stays read-only).
+if (process.platform !== 'win32') {
+  for (const perms of [0o600, 0o400, 0o640, 0o755, 0o700]) {
+    const r = await stagedOver((dir) => { writeFileSync(join(dir, 'sys/a.md'), 'a v2\n'); chmodSync(join(dir, 'sys/a.md'), perms); });
+    try {
+      const got = lstatSync(join(r.dir, 'sys/a.md')).mode & 0o7777;
+      if (r.unrestored.length === 0 && r.indexOk && got === perms && read(r.dir, 'sys/a.md') === 'a v2\n') pass(`permission bits ${perms.toString(8)} survive a failed update`);
+      else fail(`permissions changed: ${got.toString(8)} want ${perms.toString(8)} unrestored=${JSON.stringify(r.unrestored)}`);
+    } finally { rmSync(r.dir, { recursive: true, force: true }); }
+  }
+}
+
+// ── 20t. a write that fails part way must not cost the file at the path: the
+//    bytes go to a sibling first, so the checkout's version stays in place,
+//    no partial sibling is left, and the path is reported.
+for (const [label, ctxOverride] of [
+  ['the sibling write fails', { writeFile: (path) => { writeFileSync(path, 'par'); throw new Error('ENOSPC: no space left on device'); } }],
+  ['the rename fails', { rename: () => { throw new Error('EBUSY: resource busy or locked'); } }],
+]) {
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v1.5\n');
+    g('add', 'sys/a.md');
+    write(dir, 'sys/a.md', 'a v9 mine\n');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g), root: dir });
+    g('checkout', target, '--', 'sys/a.md');
+    const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx, ...ctxOverride }));
+    const leftovers = g('ls-files', '-o', '--exclude-standard', 'sys').split('\n').filter((f) => f.includes('.restore-'));
+    if (unrestored.length === 1 && existsSync(join(dir, 'sys/a.md')) && read(dir, 'sys/a.md') === 'a v2\n' && leftovers.length === 0) {
+      pass(`${label}: the file at the path stays, no partial sibling remains, and the path is reported`);
+    } else {
+      fail(`${label}: unrestored=${JSON.stringify(unrestored)} exists=${existsSync(join(dir, 'sys/a.md'))} leftovers=${JSON.stringify(leftovers)}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
