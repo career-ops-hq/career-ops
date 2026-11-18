@@ -343,9 +343,11 @@ function salaryRanges(meta) {
  *
  * Items sharing a job id (the per-office variant) merge into one posting.
  * A body that is empty, not a string, or not RSS, or a feed whose items all
- * lack a recognisable job link (a format change, not an empty board), throws —
- * so the board fails loud instead of reading 0 forever. An RSS channel with no
- * items is an honest empty board and returns []. A feed cut at the item
+ * lack a recognisable job link (a format change), or whose envelope is
+ * incomplete (no closing </channel> / </rss>, or an <item> never closed: a
+ * body cut off mid-transfer), throws — so the board fails loud instead of
+ * reading 0 forever. A complete RSS channel with no items is an honest empty
+ * board and returns []. An item with no title is skipped. A feed cut at the item
  * ceiling returns the postings read with `jobs.truncated` set.
  *
  * @param {unknown} xml - raw feed body
@@ -361,6 +363,17 @@ export function parseKulaFeed(xml, slug, companyName = '', opts = {}) {
   }
   if (!/<rss\b/i.test(xml) || !/<channel\b/i.test(xml)) {
     throw new Error(`kula: ${label}: feed is not RSS (body starts ${JSON.stringify(xml.trim().slice(0, 80))})`);
+  }
+  // A body cut off mid-transfer keeps its opening tags but loses the closing
+  // ones, and would otherwise match no item and read as an empty board. The
+  // envelope must be complete, and every <item> opened must be closed. CDATA
+  // is blanked first so a JD that mentions `<item>` cannot unbalance the
+  // count.
+  const outside = xml.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, '');
+  const opened = (outside.match(/<item\b/gi) || []).length;
+  const closed = (outside.match(/<\/item\s*>/gi) || []).length;
+  if (!/<\/channel\s*>/i.test(outside) || !/<\/rss\s*>\s*$/i.test(outside) || opened !== closed) {
+    throw new Error(`kula: ${label}: feed is incomplete or truncated (${opened} <item> opened, ${closed} closed; ends ${JSON.stringify(xml.trim().slice(-60))})`);
   }
   // The channel header runs up to the first <item>; its first <title> is the
   // tenant's display name (the <image> block repeats it further down).
@@ -389,13 +402,18 @@ export function parseKulaFeed(xml, slug, companyName = '', opts = {}) {
     const id = jobIdFromItem(meta, slug);
     if (!id) continue;
     linked++;
+    // An untitled item is malformed: it is dropped before it can create the
+    // per-id aggregate, so its description, offices and salary never reach a
+    // later valid item for the same job id.
+    const title = tagText(meta, 'title');
+    if (!title) continue;
 
     let agg = byId.get(id);
     if (!agg) {
       agg = { title: '', description: '', employmentType: '', workplaces: new Set(), locations: [], places: [], salaries: [] };
       byId.set(id, agg);
     }
-    if (!agg.title) agg.title = tagText(meta, 'title');
+    if (!agg.title) agg.title = title;
     const postedAt = toEpochMs(tagText(meta, 'pubDate'));
     if (postedAt !== undefined && (agg.postedAt === undefined || postedAt < agg.postedAt)) agg.postedAt = postedAt;
     if (!agg.description && desc) {
@@ -427,7 +445,6 @@ export function parseKulaFeed(xml, slug, companyName = '', opts = {}) {
 
   const jobs = [];
   for (const [id, agg] of byId) {
-    if (!agg.title) continue;
     /** @type {any} */
     const job = {
       title: agg.title,

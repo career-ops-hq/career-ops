@@ -455,6 +455,71 @@ try {
     }
   }
 
+  // --- a body cut off mid-transfer is a broken response, not an empty board
+  const whole201 = feed([item({ title: 'Cut Test', link: 'https://careers.kula.ai/acme/901' })]);
+  const truncatedBodies = [
+    ['opening tags only, cut inside an item', '<rss version="2.0"><channel><item><title>Engineer'],
+    ['cut after a complete item, before </channel>', whole201.slice(0, whole201.indexOf('</channel>'))],
+    ['cut between </channel> and </rss>', whole201.slice(0, whole201.indexOf('</rss>'))],
+    ['an <item> that is never closed', whole201.replace('</item>', '')],
+    ['cut inside a CDATA description', whole201.slice(0, whole201.indexOf('Build things') + 5)],
+  ];
+  for (const [label, body] of truncatedBodies) {
+    try {
+      const out = parseKulaFeed(body, 'acme', 'Acme');
+      fail(`parseKulaFeed must throw for a truncated body (${label}), returned ${JSON.stringify(out)}`);
+    } catch (err) {
+      if (/incomplete or truncated/.test(err.message)) pass(`parseKulaFeed throws on a truncated body: ${label}`);
+      else fail(`truncated body (${label}) error message: ${err.message}`);
+    }
+  }
+  // Markup-looking text inside a CDATA description must not unbalance the count.
+  const cdataItems = parseKulaFeed(feed([item({
+    title: 'Mentions Items',
+    link: 'https://careers.kula.ai/acme/902',
+    description: '<p>Use the &lt;item&gt; tag; literal <item> and </channel> text in the JD.</p>',
+  })]), 'acme', 'Acme');
+  if (cdataItems.length === 1 && cdataItems[0].title === 'Mentions Items') {
+    pass('parseKulaFeed ignores item / channel markup inside a CDATA description when checking the envelope');
+  } else {
+    fail(`CDATA markup feed → ${JSON.stringify(cdataItems)}`);
+  }
+  if (parseKulaFeed(feed([]) + '\n', 'acme', 'Acme').length === 0) pass('a complete channel with zero items, with a trailing newline, stays an empty board');
+  else fail('complete empty channel with trailing newline should return []');
+
+  // --- an untitled item never contributes to a later valid item with the same id
+  const untitledFirst = parseKulaFeed(feed([
+    item({
+      title: '',
+      link: 'https://careers.kula.ai/acme/910/apply',
+      pubDate: 'Mon, 01 Jan 2024 00:00:00 +0000',
+      description: '<p>Malformed row description.</p>',
+      extra: '<job:employmentType>CONTRACT</job:employmentType><job:workplace>REMOTE</job:workplace>'
+        + office({ name: 'Ghost Office', city: 'Nowhere', country: 'Atlantis' })
+        + salary({ min: '1000000', max: '2000000' }),
+    }),
+    item({
+      title: 'Real Role',
+      link: 'https://careers.kula.ai/acme/910/apply',
+      pubDate: 'Fri, 25 Sep 2026 15:19:35 +0000',
+      description: '<p>Real description.</p>',
+      extra: '<job:employmentType>FULL_TIME</job:employmentType><job:workplace>OFFICE</job:workplace>'
+        + office({ name: 'HQ', city: 'Springfield', country: 'United States' }),
+    }),
+  ]), 'acme', 'Acme');
+  const real = untitledFirst.find((j) => j.url.endsWith('/910'));
+  if (untitledFirst.length === 1 && real?.title === 'Real Role' && real.description === 'Real description.'
+      && real.location === 'Springfield, United States' && real.employmentType === 'full_time'
+      && real.workplaceType === 'onsite' && real.postedAt === Date.parse('Fri, 25 Sep 2026 15:19:35 +0000')
+      && real.salary === undefined) {
+    pass('an untitled item for the same job id leaks no description, offices, salary, date or types into the valid item');
+  } else {
+    fail(`untitled-then-valid merge → ${JSON.stringify(untitledFirst)}`);
+  }
+  const untitledOnly = parseKulaFeed(feed([item({ title: '', link: 'https://careers.kula.ai/acme/911' })]), 'acme', 'Acme');
+  if (untitledOnly.length === 0) pass('a feed whose only item is untitled yields no posting (and is not read as a format change)');
+  else fail(`untitled-only feed → ${JSON.stringify(untitledOnly)}`);
+
   // --- hard item cap (the feed is one unpaginated document)
   if (MAX_FEED_ITEMS === 20_000) pass('MAX_FEED_ITEMS is a fixed constant (20000), not taken from the source');
   else fail(`MAX_FEED_ITEMS = ${MAX_FEED_ITEMS}`);
