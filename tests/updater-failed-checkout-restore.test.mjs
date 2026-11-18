@@ -186,10 +186,12 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
     else fail('the self-reexec catch does not restore the files it checked out before rethrowing');
 
     // The child: the non-benign branch of the step-3 checkout loop.
-    // Both restores pass the preserved files, which the checkout excluded. The
-    // first list is everything already written: the loop's `updated`, plus any
+    // Both restores pass restoreExclusions: the preserved files, which the
+    // checkout excluded, plus every pre-update-dirty path, so an edit whose
+    // content already matched the target is never reset to HEAD. The first
+    // list is everything already written: the loop's `updated`, plus any
     // path a failed batched checkout had started before the loop took over.
-    const child = /if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]*?const written = mergePathLists\(updated, batchAttempted\)\.filter\(\(p\) => p !== path\);\n\s*restoreAfterFailedUpdate\(written, initialStatusPaths,[^\n]*exclude: preservedPaths \}\);\n\s*restoreAfterFailedUpdate\(\[path\], initialStatusPaths,[^\n]*exclude: preservedPaths \}\);\n\s*throw err;\s*\n\s*\}/;
+    const child = /if \(!checkoutErrorIsBenign\(err, \{ absentUpstream, preservedState \}\)\) \{[\s\S]*?const written = mergePathLists\(updated, batchAttempted\)\.filter\(\(p\) => p !== path\);\n\s*restoreAfterFailedUpdate\(written, initialStatusPaths,[^\n]*exclude: restoreExclusions \}\);\n\s*restoreAfterFailedUpdate\(\[path\], initialStatusPaths,[^\n]*exclude: restoreExclusions \}\);\n\s*throw err;\s*\n\s*\}/;
     if (child.test(body)) pass('a non-benign checkout error restores the paths already updated, preserved files excluded, then rethrows');
     else fail('the step-3 checkout loop rethrows without restoring what it had updated, or restores without excluding the preserved files');
 
@@ -419,6 +421,49 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
       pass('an unreadable additions list fails the restore after the other paths are back, and names `rollback`');
     } else {
       fail(`result ${result}, sys/a.md ${JSON.stringify(read(dir, 'sys/a.md'))}, messages ${JSON.stringify(errors)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 8. a pre-update edit that already matched the target survives the restore ──
+//    The preserve scan never flags such a file (it does not differ from
+//    upstream), so the checkout lists it and a later failure would reset it to
+//    HEAD — destroying an edit the checkout left byte-identical. apply()'s
+//    restore call now passes every pre-update-dirty path in `exclude`.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    // Given: the install edited sys/a.md to EXACTLY what the target ships
+    write(dir, 'sys/a.md', 'a v2\n');
+    // When: the update checked it out (a byte-identical write) and a later
+    // path failed, restoring with the pre-update-dirty exclusion
+    g('checkout', target, '--', 'sys/a.md');
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/a.md'], new Set(['sys/a.md']), { what: 'system path(s)', exclude: ['sys/a.md'], ...ctx }));
+    // Then: the edit is still there, not reset to HEAD
+    if (read(dir, 'sys/a.md') === 'a v2\n') {
+      pass('a pre-update edit matching the target survives the failed-update restore');
+    } else {
+      fail(`pre-update edit was reset to HEAD: ${JSON.stringify(read(dir, 'sys/a.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+{
+  // Control: without the exclusion the same restore resets the file to HEAD —
+  // the loss this change protects against.
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'a v2\n');
+    g('checkout', target, '--', 'sys/a.md');
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/a.md'], new Set(['sys/a.md']), { what: 'system path(s)', ...ctx }));
+    if (read(dir, 'sys/a.md') === 'a v1\n') {
+      pass('control: without the pre-update-dirty exclusion the restore resets to HEAD');
+    } else {
+      fail(`control unexpectedly kept the edit: ${JSON.stringify(read(dir, 'sys/a.md'))}`);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
