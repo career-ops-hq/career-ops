@@ -47,9 +47,12 @@
  * data/status-log.tsv. The tag is how these rows are told apart from real
  * rejections and found again if a reply arrives later. Re-running changes
  * nothing: closed rows are no longer Applied. When the status-log lines cannot
- * be written, the tracker is put back and the command fails: nothing is closed.
- * If the failed write left lines in the log that could not be removed, the
- * rows stay closed to match them, and the command still fails and says so.
+ * be written, the command fails and tries to put the tracker back, so nothing
+ * is closed when the log is unchanged and the restore works. If the restore
+ * fails, the rows stay closed with no ledger line. If the failed write may have
+ * left lines in the log (its size changed or could not be checked), the rows
+ * stay closed to match them. In both cases the error names the log, and its
+ * last lines need checking before the next run.
  *
  * Run: node close-stale.mjs                        (dry run, JSON to stdout)
  *      node close-stale.mjs --summary              (dry run, human-readable)

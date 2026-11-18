@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { openTrackerTransaction } from '../tracker-utils.mjs';
+import { openTrackerTransaction, trackerLockDirFor, canonicalizeTrackerPath } from '../tracker-utils.mjs';
 import { parseStatusLog } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
 import { daysBetween, isoMinusDays, noteTag, classifyRows } from '../close-stale.mjs';
@@ -45,7 +45,7 @@ function makeRoot(rows, extra = {}) {
 
 function run(root, args = [], env = {}) {
   const cleanEnv = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '', ...env };
-  const r = spawnSync(process.execPath, [SCRIPT, ...(args.includes('--today') ? [] : ['--today', TODAY]), ...args], { encoding: 'utf-8', env: cleanEnv });
+  const r = spawnSync(process.execPath, [SCRIPT, ...(args.includes('--today') ? [] : ['--today', TODAY]), ...args], { encoding: 'utf-8', env: cleanEnv, timeout: 30_000 });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch { /* summary mode or error */ }
   return { ...r, json };
@@ -240,10 +240,15 @@ syncBuiltinESMExports();
   return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, SCRIPT, '--today', TODAY, '--confirm'], {
     encoding: 'utf-8',
     env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '' },
+    timeout: 30_000,
   });
 }
 
-// A confirmed run takes the tracker lock, so it fails fast if a failed run left the lock behind.
+// The failed run must have released the tracker lock. A rerun alone cannot
+// show that: lib/dir-lock.mjs reclaims a lock whose owner process has exited,
+// so the lock directory itself is checked first. Then a confirmed run takes
+// the lock, with a short wait.
+const lockReleased = (tracker) => !existsSync(trackerLockDirFor(canonicalizeTrackerPath(tracker)));
 const confirmAfterwards = (root) => run(root, ['--confirm'], { CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '500' });
 
 test('a status-log append that fails puts the tracker back and fails the run', () => {
@@ -252,6 +257,7 @@ test('a status-log append that fails puts the tracker back and fails the run', (
     const before = readFileSync(tracker, 'utf-8');
     const r = refuseLedger(root);
     assert.ok(exitedNonZero(r), describeSpawn(r, 'a closure the ledger did not record must fail the run'));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
     assert.match(r.stderr, /Could not write the status log \(EACCES: permission denied\)\. The log is unchanged, so no row was closed\./);
     assert.equal(readFileSync(tracker, 'utf-8'), before, 'every row is still Applied');
     assert.equal(existsSync(log), false);
@@ -259,7 +265,7 @@ test('a status-log append that fails puts the tracker back and fails the run', (
     const dry = run(root);
     assert.equal(dry.status, 0, describeSpawn(dry));
     assert.deepEqual(closedNums(dry.json), [1, 2]);
-    // And the failed run released the lock: a confirmed run takes it and closes them.
+    // A confirmed run takes the lock and closes them.
     const confirmed = confirmAfterwards(root);
     assert.equal(confirmed.status, 0, describeSpawn(confirmed));
     assert.equal(confirmed.json.metadata.closed, 2);
@@ -275,6 +281,7 @@ test('a read-only status log fails the run with the log unchanged, and the rows 
     const before = readFileSync(tracker, 'utf-8');
     const r = refuseLedger(root, { refuseTruncate: true });
     assert.ok(exitedNonZero(r), describeSpawn(r));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
     assert.match(r.stderr, /could not be put back \(EACCES\)\)\. The log is unchanged, so no row was closed\./);
     assert.equal(readFileSync(tracker, 'utf-8'), before);
     assert.equal(readFileSync(log, 'utf-8'), prior);
@@ -292,6 +299,7 @@ test('lines the failed write left in the status log keep their rows closed, and 
   withRoot([row(1, OLD, 'Old Co', 'Applied'), row(2, D61, 'Edge Co', 'Applied')], {}, ({ tracker, log, root }) => {
     const r = refuseLedger(root, { writeFirst: true, refuseTruncate: true });
     assert.ok(exitedNonZero(r), describeSpawn(r));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
     assert.match(r.stderr, /2 row\(s\) stay closed, because .*status-log\.tsv may now hold part or all of their close-stale lines\. Check its last lines before running close-stale again\./);
     const after = readFileSync(tracker, 'utf-8');
     const tag = noteTag(TODAY, 60);
