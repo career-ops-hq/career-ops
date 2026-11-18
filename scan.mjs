@@ -531,15 +531,18 @@ function compileLocationKeyword(keyword) {
 //   - `allow: ["Washington"]`, written for the state, admitted every DC
 //     posting through the city name. In `allow` and `always_allow` the state
 //     name "Washington" no longer matches the city of Washington, DC, so
-//     "Seattle, Washington" passes and "Washington, DC" does not, while
-//     "Seattle, WA; Washington, DC" still passes on its Seattle part. `block`
+//     "Seattle, Washington" passes and "Washington, DC" (also written
+//     "Washington (DC)" or "Washington - DC") does not, while
+//     "Seattle, Washington; Washington, DC" still passes on its Seattle part.
+//     The abbreviation "WA" is not read as the state, before or after this
+//     change, so list "WA" separately to admit "Seattle, WA". `block`
 //     and `block_hard` keep matching both, so a block written as "Washington"
 //     never gets weaker. The built-in US-state expansion (#3633) is untouched:
 //     with "United States" in always_allow, DC still passes as a US place.
 const DC_TOKEN = String.raw`d\.?\s?c(?:\.|(?![\p{L}\p{M}\p{N}]))`;
 const DC_ENTRY_RE = /^d\.?\s?c\.?$/i;
 const DC_LOCATION_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${DC_TOKEN}`, 'u');
-const DC_CITY_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])washington\\s*,?\\s*(?:district of columbia|${DC_TOKEN})`, 'gu');
+const DC_CITY_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])washington\\s*[,(\\-\u2013\u2014]?\\s*(?:district of columbia|${DC_TOKEN})`, 'gu');
 const withoutDcCity = (lower) => lower.replace(DC_CITY_RE, 'district of columbia');
 
 function compileLocationKeywordList(value, { stateNameSkipsDc = false } = {}) {

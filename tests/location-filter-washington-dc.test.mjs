@@ -13,6 +13,9 @@ const DC_SPELLINGS = [
   'Washington DC',
   'Washington D.C. Metro Area',
   'Washington,DC',
+  'Washington (DC)',
+  'Washington - DC',
+  'Washington \u2013 D.C.',
 ];
 
 test('allow "Washington" (the state) no longer admits Washington, DC', () => {
@@ -32,6 +35,15 @@ test('a multi-place posting passes on its Washington State part', () => {
   const filter = buildLocationFilter({ allow: ['Washington'] });
   assert.equal(filter('Seattle, Washington; Washington, District of Columbia'), true);
   assert.equal(filter('Washington, DC · Olympia, Washington'), true);
+  assert.equal(filter('Seattle, Washington; Washington (DC)'), true);
+});
+
+test('"WA" is not read as the state, so "Seattle, WA" needs its own entry', () => {
+  const filter = buildLocationFilter({ allow: ['Washington'] });
+  assert.equal(filter('Seattle, WA'), false, 'unchanged from before #7293');
+  assert.equal(filter('Seattle, WA; Washington, DC'), false, 'no longer admitted through the DC city name');
+  const withWa = buildLocationFilter({ allow: ['Washington', 'WA'] });
+  assert.equal(withWa('Seattle, WA; Washington, DC'), true);
 });
 
 test('always_allow "Washington" does not rescue a blocked DC posting', () => {
