@@ -270,3 +270,29 @@ test("tryApplyTrigger reads the candidate links in one pass", async () => {
   assert.ok(acted && typeof acted === "object" && "followed" in acted);
   assert.deepEqual(gotos, [application]);
 });
+
+test("a hidden option with its own text does not stop visible options that share one label from using their values", async (t) => {
+  const html = `<!doctype html><form>
+    <fieldset><legend>Which benefits?</legend>
+      <input type="checkbox" name="perks" value="Health" aria-label="Which benefits?">
+      <input type="checkbox" name="perks" value="Dental" aria-label="Which benefits?">
+      <div hidden><label><input type="checkbox" name="perks" value="other">Other</label></div>
+    </fieldset>
+    <fieldset><legend>Based in the Netherlands?</legend>
+      <input type="radio" name="nl" value="Yes" aria-label="Based in the Netherlands?">
+      <input type="radio" name="nl" value="No" aria-label="Based in the Netherlands?">
+      <div hidden><label><input type="radio" name="nl" value="unsure">Not sure</label></div>
+    </fieldset>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => [f.type, f.options]), [["checkbox", ["Health", "Dental"]], ["radio", ["Yes", "No"]]]);
+    const tagged = await page.evaluate(() => [...document.querySelectorAll("[data-co-field]")].map((e) => e.getAttribute("data-co-option")));
+    assert.deepEqual(tagged, ["Health", "Dental", "Yes", "No"]);
+  } finally {
+    await close();
+  }
+});

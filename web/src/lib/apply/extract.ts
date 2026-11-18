@@ -238,13 +238,15 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         if (name) seenRadio.add(name);
         const allRadios = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
         const allLabels = allRadios.map((r) => normalize(labelFor(r)));
-        // The same text on every radio is the question or the input name, not a
-        // choice. Use each input's value so Yes and No stay distinct. Judged on
-        // the whole group: a hidden radio still shows the label is shared.
-        const shared = allLabels.length > 1 && allLabels.every((text) => text && text === allLabels[0]);
         // Only the options the person can see: a hidden choice gets no handle.
         const group = allRadios.filter(isEligibleControl);
         const fullLabels = group.map((r) => allLabels[allRadios.indexOf(r)]);
+        // The same text on every radio is the question or the input name, not a
+        // choice. Use each input's value so Yes and No stay distinct. Judged on
+        // the visible radios when there are several, so a hidden one with its
+        // own text does not hide a shared label; on the whole group otherwise.
+        const judged = fullLabels.length > 1 ? fullLabels : allLabels;
+        const shared = judged.length > 1 && judged.every((text) => text && text === judged[0]);
         const options = group.map((r, i) => {
           const value = clean((r as HTMLInputElement).value);
           const full = fullLabels[i];
@@ -283,12 +285,16 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           }
           seenCheckbox.add(boxName);
           const allLabels = allBoxes.map((box) => normalize(labelFor(box)));
-          // The same text on every box is the question or the input name, not a
-          // choice. Use each input's value so health and dental stay distinct.
-          const shared = allLabels.length > 1 && allLabels.every((text) => text && text === allLabels[0]);
           // Only the options the person can see: a hidden choice gets no handle.
           const boxes = allBoxes.filter(isEligibleControl);
           const fullLabels = boxes.map((box) => allLabels[allBoxes.indexOf(box)]);
+          // The same text on every box is the question or the input name, not a
+          // choice. Use each input's value so health and dental stay distinct.
+          // Judged on the visible boxes when there are several, so a hidden one
+          // with its own text does not hide a shared label; on the whole group
+          // otherwise.
+          const judged = fullLabels.length > 1 ? fullLabels : allLabels;
+          const shared = judged.length > 1 && judged.every((text) => text && text === judged[0]);
           const optionText = (box: Element, i: number) => {
             const value = clean((box as HTMLInputElement).value);
             const full = fullLabels[i] || "";
