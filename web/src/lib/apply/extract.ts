@@ -236,12 +236,15 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           continue;
         }
         if (name) seenRadio.add(name);
-        // Only the options the person can see: a hidden choice gets no handle.
-        const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`)).filter(isEligibleControl);
-        const fullLabels = group.map((r) => normalize(labelFor(r)));
+        const allRadios = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
+        const allLabels = allRadios.map((r) => normalize(labelFor(r)));
         // The same text on every radio is the question or the input name, not a
-        // choice. Use each input's value so Yes and No stay distinct.
-        const shared = fullLabels.length > 1 && fullLabels.every((text) => text && text === fullLabels[0]);
+        // choice. Use each input's value so Yes and No stay distinct. Judged on
+        // the whole group: a hidden radio still shows the label is shared.
+        const shared = allLabels.length > 1 && allLabels.every((text) => text && text === allLabels[0]);
+        // Only the options the person can see: a hidden choice gets no handle.
+        const group = allRadios.filter(isEligibleControl);
+        const fullLabels = group.map((r) => allLabels[allRadios.indexOf(r)]);
         const options = group.map((r, i) => {
           const value = clean((r as HTMLInputElement).value);
           const full = fullLabels[i];
@@ -268,19 +271,24 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
       if (itype === "checkbox") {
         const boxName = (el as HTMLInputElement).name;
-        const boxes = boxName
-          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`)).filter(isEligibleControl)
+        // Whether this is a group is decided on every same-name box, so a group
+        // with one option hidden keeps its question.
+        const allBoxes = boxName
+          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`))
           : [el];
-        if (boxes.length > 1) {
+        if (allBoxes.length > 1) {
           if (seenCheckbox.has(boxName)) {
             n--;
             continue;
           }
           seenCheckbox.add(boxName);
-          const fullLabels = boxes.map((box) => normalize(labelFor(box)));
+          const allLabels = allBoxes.map((box) => normalize(labelFor(box)));
           // The same text on every box is the question or the input name, not a
           // choice. Use each input's value so health and dental stay distinct.
-          const shared = fullLabels.length > 1 && fullLabels.every((text) => text && text === fullLabels[0]);
+          const shared = allLabels.length > 1 && allLabels.every((text) => text && text === allLabels[0]);
+          // Only the options the person can see: a hidden choice gets no handle.
+          const boxes = allBoxes.filter(isEligibleControl);
+          const fullLabels = boxes.map((box) => allLabels[allBoxes.indexOf(box)]);
           const optionText = (box: Element, i: number) => {
             const value = clean((box as HTMLInputElement).value);
             const full = fullLabels[i] || "";

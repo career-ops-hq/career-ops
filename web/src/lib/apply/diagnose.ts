@@ -187,12 +187,12 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
     //    A link that fails isApplicationHref (a "Powered by" logo pointing at
     //    the vendor's homepage) is skipped, and the next one is checked.
     const atsLinks = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]');
-    const linkCount = Math.min(await atsLinks.count().catch(() => 0), 20);
-    let href: string | null = null;
-    for (let i = 0; i < linkCount && !href; i++) {
-      const candidate = await atsLinks.nth(i).getAttribute("href").catch(() => null);
-      if (candidate && isApplicationHref(candidate)) href = candidate;
-    }
+    //    The hrefs are read in one pass, so a list that changes in between
+    //    cannot skip a link or wait out a locator timeout per index.
+    const hrefs = await atsLinks
+      .evaluateAll((links) => links.slice(0, 20).map((a) => a.getAttribute("href")))
+      .catch(() => [] as (string | null)[]);
+    const href = hrefs.find((h): h is string => !!h && isApplicationHref(h)) ?? null;
     if (href) {
       const blocked = await blockedTriggerHref(page, href);
       if (blocked) return { blocked };

@@ -212,3 +212,61 @@ test("isApplicationHref accepts an application URL and refuses a vendor homepage
   assert.equal(isApplicationHref("/apply"), false);
   assert.equal(isApplicationHref(null), false);
 });
+
+test("a checkbox group with a hidden option keeps its question and offers only the visible option", async (t) => {
+  const html = `<!doctype html><form>
+    <fieldset><legend>Which shifts suit you?</legend>
+      <label><input type="checkbox" name="shift" value="morning">Morning</label>
+      <div hidden><label><input type="checkbox" name="shift" value="night">Night</label></div>
+    </fieldset>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => [f.type, f.label, f.options]), [["checkbox", "Which shifts suit you?", ["Morning"]]]);
+  } finally {
+    await close();
+  }
+});
+
+test("radios that share one label keep using their values when one is hidden", async (t) => {
+  const html = `<!doctype html><form>
+    <fieldset><legend>Based in the Netherlands?</legend>
+      <input type="radio" name="nl" value="Yes" aria-label="Based in the Netherlands?">
+      <div hidden><input type="radio" name="nl" value="No" aria-label="Based in the Netherlands?"></div>
+    </fieldset>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => [f.type, f.options]), [["radio", ["Yes"]]]);
+  } finally {
+    await close();
+  }
+});
+
+test("tryApplyTrigger reads the candidate links in one pass", async () => {
+  const application = "https://acme.recruitee.com/o/android-developer/c/new";
+  const gotos = [];
+  const links = {
+    evaluateAll: async (fn) => fn([{ getAttribute: () => "https://recruitee.com/" }, { getAttribute: () => application }]),
+    // A list that changed between reads: per-index reads would miss the application link.
+    count: async () => 2,
+    nth: () => ({ getAttribute: async () => { throw new Error("element moved"); } }),
+    first: () => links,
+  };
+  const page = {
+    url: () => "https://careers.acme.test/jobs/1",
+    context: () => ({ pages: () => [] }),
+    goto: async (href) => { gotos.push(href); },
+    locator: () => links,
+    getByRole: () => ({ or: () => ({ first: () => ({ count: async () => 0 }) }) }),
+  };
+  const acted = await tryApplyTrigger(page);
+  assert.ok(acted && typeof acted === "object" && "followed" in acted);
+  assert.deepEqual(gotos, [application]);
+});
