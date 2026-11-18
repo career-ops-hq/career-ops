@@ -90,6 +90,7 @@ function pageForTrigger({ atsHref = null, applyHref = null } = {}) {
     page: {
       url: () => "https://careers.acme.test/jobs/1",
       context: () => ({ pages: () => [] }),
+      evaluate: async () => undefined,
       goto: async (href) => {
         gotos.push(href);
       },
