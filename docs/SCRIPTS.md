@@ -1040,14 +1040,14 @@ Possible JSON responses:
 | `status` | Meaning |
 |----------|---------|
 | `up-to-date` | Local version matches remote |
-| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`) |
+| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`). With `--channel main`, also reported when system files differ from `main`, when the comparison with `main` fails, or when main's commit cannot be resolved, and it carries `reason` |
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
 | `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 | `checkout-unreadable` | A git checkout whose commit git cannot read (git missing, no commit yet, or git refusing the directory, e.g. "detected dubious ownership"). Carries `detail`: the first line of the error. No version verdict, on either channel |
 
-`check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
+`check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift. Its `reason` is the first that applies: `system-files-changed` when system files differ from `main` or when fetching `main` or comparing the trees fails, `version-changed` when the remote version is newer, and `main-commit-unresolved` when the lookup of main's commit failed in a git checkout, since `check` then cannot tell whether the install matches `main`.
 
 The `local` field in the JSON output stays a bare semver string (e.g., `"1.32.0"`). A separate `local_sha` field is provided alongside it when the install is a git checkout — containing the short commit SHA (e.g., `"ae919b6f"`). For tarball installs without git metadata, `local_sha` will be omitted. This lets a bug report identify the exact tree under test, not just the release name (two installs pulled days apart can share a version string while running different code — see #3203).
 
@@ -1741,9 +1741,17 @@ fails or returns no usable JSON exits 1, `--dry-run` included.
 ```bash
 node rank-pipeline.mjs                  # rank up to 20 pending entries
 node rank-pipeline.mjs --limit 10
+node rank-pipeline.mjs --url <url>      # rank one pending row
 node rank-pipeline.mjs --cli codex      # override auto-detection
 node rank-pipeline.mjs --dry-run        # print annotations, write nothing
 ```
+
+`--url <url>` ranks only the first unranked row in the Pending section (from
+its heading to the next `##` heading, as `sync-batch-input.mjs` reads it; a
+file with no Pending heading is read whole) whose first cell is exactly that
+URL. When there is none, because the row was ranked or skipped,
+or its URL is not the first cell, the script exits 4 before it looks for a CLI,
+so nothing is called. The dashboard's Inbox runs it for its `a` key.
 
 Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
 `scan-ats-full.mjs` use, and the file is re-read inside the lock — so a

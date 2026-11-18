@@ -32,7 +32,7 @@ import { num } from './lib/api.mjs';
 import * as localBackend from './lib/index.mjs';
 import { readCache, writeCache } from './lib/cache.mjs';
 import { classifyTier } from './lib/tier.mjs';
-import { CONTROL_CHARS, displayClean } from './lib/clean.mjs';
+import { CONTROL_CHARS, cleanForDisplay } from './lib/clean.mjs';
 
 // Set once main() has chosen a backend. Null while unchosen and after a failed
 // choice, which is what lets the error handler report a source of null instead
@@ -116,7 +116,7 @@ async function writeCacheSafe(name, data, opts) {
   try {
     await writeCache(name, { ...data, schema: CACHE_SCHEMA }, opts);
   } catch (err) {
-    const msg = displayClean((err && err.message) ? err.message : err);
+    const msg = cleanForDisplay((err && err.message) ? err.message : err);
     process.stderr.write(`h1b-sponsor: cache write failed (${msg}); continuing without cache\n`);
   }
 }
@@ -145,7 +145,7 @@ function parseArgs(argv) {
 
 
 function formatSummary(result) {
-  const clean = displayClean;
+  const clean = cleanForDisplay;
   if (!result.found) return `unknown: ${clean(result.displayName) || 'unknown company'}`;
   const t = result.totals || {};
   const range = (t.first_year && t.last_year)
@@ -211,7 +211,7 @@ function emit(format, obj) {
 // may need to pick the exact one. Each listed name is checkable on its own: an
 // exact name resolves straight to that entity.
 function emitSearch(format, query, total, results) {
-  const clean = displayClean;
+  const clean = cleanForDisplay;
   if (format === 'json') {
     process.stdout.write(JSON.stringify({ query, total, shown: results.length, results }, null, 2) + '\n');
     return;
@@ -306,7 +306,7 @@ async function main() {
 main().catch(err => {
   // The message can embed up to 200 chars of API-controlled response body, and
   // the summary contract is one line: collapse all whitespace before printing.
-  const message = displayClean((err && err.message) ? err.message : err);
+  const message = cleanForDisplay((err && err.message) ? err.message : err);
   const argv = process.argv.slice(2);
   const format = argv.includes('--json') ? 'json' : 'summary';
   // Emit the full documented envelope even on error so consumers reading

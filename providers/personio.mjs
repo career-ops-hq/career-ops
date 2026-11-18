@@ -110,6 +110,20 @@ function resolveHost(entry) {
 }
 
 /**
+ * A posting's identity on its board: the tenant (the first label of its host, on either Personio domain) and the
+ * posting's numeric `id`, the same id its URL is built from. Every language version of one posting carries the same
+ * identity: they are one posting. No identity for an id that is not all digits.
+ * @param {string} host - validated tenant host, e.g. `acme.jobs.personio.de`
+ * @param {unknown} id
+ * @returns {{ ats_provider: 'personio', board_slug: string, posting_id: string } | undefined}
+ */
+export function personioListingIdentity(host, id) {
+  if (typeof host !== 'string' || !PERSONIO_HOST_RE.test(host)) return undefined;
+  if (typeof id !== 'string' || !/^\d+$/.test(id)) return undefined;
+  return { ats_provider: 'personio', board_slug: host.split('.')[0], posting_id: id };
+}
+
+/**
  * The language a Personio careers_url asks for (`?language=xx`), or null.
  * @param {import('./_types.js').PortalEntry} entry
  */
@@ -270,6 +284,7 @@ function listingPostingToJob(posting, companyName, host) {
   return {
     title: posting.name,
     url: `https://${host}/job/${posting.id}${languageQuery(language)}`,
+    listingIdentity: personioListingIdentity(host, posting.id),
     location: offices.join(', '),
     company: companyName,
     postedAt: toEpochMs(posting.createdAt),
@@ -458,6 +473,7 @@ export function parsePersonioXml(xml, companyName, host) {
     jobs.push({
       title,
       url: `https://${host}/job/${id}`,
+      listingIdentity: personioListingIdentity(host, id),
       location: offices.join(', '),
       company: companyName,
       postedAt: toEpochMs(tagText(scalar, 'createdAt')),
@@ -519,6 +535,7 @@ export function parsePersonioHtml(html, companyName, host) {
     jobs.push({
       title,
       url: `https://${host}/job/${id}`,
+      listingIdentity: personioListingIdentity(host, id),
       location,
       company: companyName,
     });

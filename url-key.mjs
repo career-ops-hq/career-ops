@@ -315,6 +315,38 @@ export function promoteKnownFragmentIdentity(url) {
 }
 
 /**
+ * Give one Microsoft requisition one URL shape. Microsoft's careers site
+ * (Eightfold) serves a posting at `/careers/job/{pid}` and at
+ * `/careers?pid={pid}&domain=microsoft.com`; the scanner writes the second and
+ * pasted or older rows carry the first. Keyed on the full URL the two spellings
+ * are two postings, so a role already in the tracker in one shape is added
+ * again from the feed in the other.
+ *
+ * The pid is the posting's own id, so everything else in the query (`hl`,
+ * `start`, `sort_by`, ...) is dropped. Only the `apply.careers.microsoft.com`
+ * host is read, and a `/careers` URL with no pid (a results page) is left
+ * alone. Mutates the URL used for the comparison key only. The hostname is
+ * folded here (a trailing dot, `apply.careers.microsoft.com.`), so a caller
+ * that keys on the parsed URL without folding it first, like scan.mjs's
+ * normalizeUrlForDedup, still gets the same key.
+ *
+ * @param {URL} url - A parsed posting URL.
+ */
+export function canonicalizeKnownPostingUrl(url) {
+  const host = foldHostname(url.hostname);
+  if (host !== 'apply.careers.microsoft.com') return;
+  const match = /^\/careers(?:\/job\/(\d+))?\/?$/i.exec(url.pathname);
+  if (!match) return;
+  const pid = match[1] ?? url.searchParams.get('pid');
+  if (!pid || !/^\d+$/.test(pid)) return;
+  url.hostname = host;
+  url.pathname = '/careers';
+  url.search = '';
+  url.searchParams.set('pid', pid);
+  url.searchParams.set('domain', 'microsoft.com');
+}
+
+/**
  * Google Careers' job id, or null when the URL is not a Google Careers posting.
  *
  * The id is the number after `/jobs/results/` on
@@ -367,6 +399,7 @@ export function normalizeUrl(raw) {
   u.protocol = 'https:';            // http vs https is the same posting
   u.hostname = foldHostname(u.hostname);
   promoteKnownFragmentIdentity(u);
+  canonicalizeKnownPostingUrl(u);
   u.hash = '';                      // unrecognized fragments do not identify it
 
   // Drop tracking params, keep functional ones, sort for order-independence.
@@ -696,6 +729,10 @@ export function canonicalJobKey(raw) {
   try { u = new URL(s); } catch { return ''; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
   u.hostname = foldHostname(u.hostname);
+  // A known posting shape is folded first, so its own id wins over a stray
+  // query id (a Microsoft `/careers/job/{pid}?gh_jid=…` link is the pid's
+  // posting, not a Greenhouse one).
+  canonicalizeKnownPostingUrl(u);
 
   const indeed = indeedJobId(u);
   if (indeed) return `indeed.com:${indeed}`;
