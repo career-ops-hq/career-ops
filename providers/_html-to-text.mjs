@@ -22,8 +22,14 @@ export const DESCRIPTION_CAP = 4000;
 // next `>` (a `&gt;150k` paragraphs later) was deleted, sponsorship sentence
 // included. `<script`, `</p`, `<!--` still match, so double-encoded active
 // markup stays inert.
-export const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^>"']|"[^"]*"|'[^']*')+>/gi;
-const HTML_MEDIA_RE = /<(script|style)\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
+//
+// The unquoted part of a tag body excludes `<` as well as `>` and quotes. An
+// unquoted `<` never occurs inside a real tag, and allowing it lets a text
+// with many openers and no closing `>` (`'<script '.repeat(10000)`) backtrack
+// quadratically: every opener rescans the whole rest of the input, which
+// takes seconds on a full JD body.
+export const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^<>"']|"[^"]*"|'[^']*')+>/gi;
+const HTML_MEDIA_RE = /<(script|style)\b(?:[^<>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
 
 /** @param {string} content */
 function stripMarkup(content) {
