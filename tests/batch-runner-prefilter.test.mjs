@@ -99,6 +99,7 @@ if (!bash || !detect || !act) {
         'jd_prefilter_decision=proceed; jd_prefilter_code=""; jd_prefilter_reason=""; jd_rescue_closed_note=""',
         `update_state_retrying() { printf 'STATE %s\\n' "$*" >> ${JSON.stringify(trace)}; }`,
         `release_report_num() { printf 'RELEASE %s\\n' "$1" >> ${JSON.stringify(trace)}; }`,
+        `log_discard() { printf 'DISCARD %s\\n' "$*" >> ${JSON.stringify(trace)}; }`,
         'one_offer() {',
         detect,
         act,
@@ -111,13 +112,13 @@ if (!bash || !detect || !act) {
     };
 
     const dead = run({ mode: 'skip-dead' });
-    if (!/CONTINUED/.test(dead.out) && /STATE 7 \S+ skipped T0 \S+ - - prefilter: expired \(code_skip-dead\)/.test(dead.trace) && /RELEASE 042/.test(dead.trace) && !dead.jdLeft) {
-      pass('skip-dead: recorded skipped (terminal), report number released, JD file removed, no worker');
+    if (!/CONTINUED/.test(dead.out) && /STATE 7 \S+ skipped T0 \S+ - - prefilter: expired \(code_skip-dead\)/.test(dead.trace) && /DISCARD 7 \S+ prefilter: expired \(code_skip-dead\)/.test(dead.trace) && /RELEASE 042/.test(dead.trace) && !dead.jdLeft) {
+      pass('skip-dead: recorded and audited as skipped (terminal), report number released, JD file removed, no worker');
     } else fail(`skip-dead handled wrong: ${JSON.stringify(dead)}`);
 
     const blocked = run({ mode: 'skip-blocked' });
-    if (!/CONTINUED/.test(blocked.out) && /skipped .* prefilter: blocked \(code_skip-blocked\) — needs-playwright:/.test(blocked.trace) && /RELEASE 042/.test(blocked.trace)) {
-      pass('skip-blocked: recorded skipped with a needs-playwright marker, number released, no worker');
+    if (!/CONTINUED/.test(blocked.out) && /skipped .* prefilter: blocked \(code_skip-blocked\) — needs-playwright:/.test(blocked.trace) && /DISCARD 7 \S+ prefilter: blocked \(code_skip-blocked\) — needs-playwright:/.test(blocked.trace) && /RELEASE 042/.test(blocked.trace)) {
+      pass('skip-blocked: recorded and audited as skipped with a needs-playwright marker, number released, no worker');
     } else fail(`skip-blocked handled wrong: ${JSON.stringify(blocked)}`);
 
     const later = run({ mode: 'retry-later' });

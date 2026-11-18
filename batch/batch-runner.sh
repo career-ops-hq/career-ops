@@ -1458,10 +1458,12 @@ process_offer() {
       skip-dead)
         echo "    🚫 Pre-filter: posting is gone ($jd_prefilter_code) — no worker spawned"
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$pf_now" "-" "-" "prefilter: expired ($jd_prefilter_code) — $jd_prefilter_reason" "$retries" || true
+        log_discard "$id" "$url" "prefilter: expired ($jd_prefilter_code) — $jd_prefilter_reason"
         ;;
       skip-blocked)
         echo "    🚫 Pre-filter: unreadable in batch ($jd_prefilter_code) — needs a browser, no worker spawned"
         update_state_retrying "$id" "$url" "skipped" "$started_at" "$pf_now" "-" "-" "prefilter: blocked ($jd_prefilter_code) — needs-playwright: $jd_prefilter_reason" "$retries" || true
+        log_discard "$id" "$url" "prefilter: blocked ($jd_prefilter_code) — needs-playwright: $jd_prefilter_reason"
         ;;
       retry-later)
         echo "    ⏳ Pre-filter: transient ($jd_prefilter_code) — deferred, no worker spawned"
