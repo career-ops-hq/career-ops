@@ -243,7 +243,7 @@ function toPlainText(html) {
       .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-      .replace(/<[^>]+>/g, ' '),
+      .replace(/<[^<>]+>/g, ' '),
   ).replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 

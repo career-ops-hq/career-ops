@@ -131,7 +131,7 @@ function assertMuseUrl(url) {
  */
 function cleanText(s) {
   return decodeEntities(
-    String(s).replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^>]*>/g, ' '),
+    String(s).replace(/<!--[\s\S]*?-->/g, ' ').replace(/<[^<>]*>/g, ' '),
   ).replace(/\s+/g, ' ').trim();
 }
 

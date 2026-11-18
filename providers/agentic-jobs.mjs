@@ -67,7 +67,7 @@ export { countryName };
 export function stripHtml(html) {
   if (typeof html !== 'string' || !html) return '';
   const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-  return decodeEntities(noMedia.replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(noMedia.replace(/<[^<>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 /**

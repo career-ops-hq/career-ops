@@ -130,7 +130,7 @@ export function parseHnComment(text, fallbackUrl = '') {
   const plain = decodeEntities(text
     .replace(/<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi, (_, href) => href)
     .replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*>/gi, '\n')
-    .replace(/<[^>]+>/g, ' '))
+    .replace(/<[^<>]+>/g, ' '))
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
 

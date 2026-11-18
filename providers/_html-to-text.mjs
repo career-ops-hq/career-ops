@@ -111,7 +111,7 @@ export function visibleText(fragment) {
   return decodeEntities(
     String(fragment ?? '')
       .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
+      .replace(/<[^<>]+>/g, ' '),
   )
     .replace(/\s+/g, ' ')
     .trim();
