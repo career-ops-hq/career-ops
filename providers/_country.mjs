@@ -262,6 +262,77 @@ export function isCountryKeyword(value) {
     || COUNTRY_ALIASES.some(country => country.name === name);
 }
 
+// A generic "Remote" allow token says nothing about where a role is. These
+// read free location text against the home countries a config names, so
+// "Remote (Hong Kong)" does not pass a US list. CLDR's long names ("Hong Kong
+// SAR China") miss the everyday spelling, so a few aliases and well-known
+// cities are listed. Cities that are also US place names (London, Paris,
+// Dublin) count only with no US marker in the same string.
+const PLACE_ALIASES = [
+  ['HK', 'hong kong'], ['MO', 'macau'], ['TW', 'taiwan'], ['CZ', 'czech republic'], ['TR', 'turkey'], ['CI', 'ivory coast'], ['AE', 'uae'], ['KR', 'korea'], ['RU', 'russia'], ['VN', 'vietnam'], ['PS', 'palestine'], ['MM', 'myanmar'], ['MM', 'burma'], ['GB', 'scotland'], ['GB', 'wales'],
+  ['CA', 'toronto'], ['CA', 'vancouver'], ['CA', 'montreal'], ['CA', 'ottawa'], ['CA', 'calgary'], ['IN', 'bangalore'], ['IN', 'bengaluru'], ['IN', 'hyderabad'], ['IN', 'mumbai'], ['IN', 'pune'], ['IN', 'delhi'], ['IN', 'gurgaon'], ['IN', 'gurugram'], ['IN', 'chennai'], ['IN', 'noida'], ['IN', 'kolkata'],
+  ['JP', 'tokyo'], ['AU', 'sydney'], ['AU', 'melbourne'], ['NL', 'amsterdam'], ['ES', 'madrid'], ['PL', 'warsaw'], ['PL', 'krakow'], ['PH', 'manila'], ['CN', 'shanghai'], ['CN', 'beijing'], ['CN', 'shenzhen'], ['KR', 'seoul'], ['IL', 'tel aviv'], ['MX', 'mexico city'], ['BR', 'sao paulo'], ['AR', 'buenos aires'],
+  ['AE', 'dubai'], ['CH', 'zurich'], ['DE', 'munich'], ['SE', 'stockholm'], ['PT', 'lisbon'], ['CZ', 'prague'], ['HU', 'budapest'], ['RO', 'bucharest'], ['MY', 'kuala lumpur'], ['ID', 'jakarta'], ['TH', 'bangkok'],
+];
+const AMBIGUOUS_CITIES = [['GB', 'london'], ['FR', 'paris'], ['IE', 'dublin'], ['DE', 'berlin'], ['GB', 'manchester'], ['GB', 'birmingham'], ['GB', 'cambridge'], ['AU', 'perth'], ['AU CA', 'victoria'], ['AT', 'vienna'], ['IT', 'rome'], ['RU', 'moscow'], ['PE', 'lima'], ['EG', 'cairo'], ['GR', 'athens']]
+  .map(([codes, name]) => ({ codes: codes.split(' '), match: word(name) }));
+const PLACES = [...COUNTRY_NAMES, ...COUNTRY_ALIASES].map(c => ({ codes: [c.code], match: c.match }))
+  .concat(PLACE_ALIASES.map(([code, name]) => ({ codes: [code], match: word(name) })));
+// These regions never include the US or Canada.
+const REGION_LABEL = /(?<![\p{L}\p{N}])(?:emea|apac|europe|latam)(?![\p{L}\p{N}])/u;
+const NORTH_AMERICA = new Set(['US', 'CA']);
+// A region in the config is wider than any home country list.
+const REGION_KEYWORD = /^(?:eu|european union|europe|emea|apac|asia|africa|latam|(?:north|south|latin) america|worldwide|global|international)$/;
+// "New Mexico", "New Jersey" and "Georgia" contain a country word.
+const US_STATE_NAMES_WITH_COUNTRY_WORD = /(?<![\p{L}\p{N}])(?:new mexico|new jersey|georgia)(?![\p{L}\p{N}])/gu;
+const GEORGIA = /(?<![\p{L}\p{N}])georgia(?![\p{L}\p{N}])/u;
+const US_MARKER = /(?<![\p{L}\p{N}])(?:united states(?: of america)?|usa|u\.s\.a?\.?|us)(?![\p{L}\p{N}])/u;
+
+/**
+ * Home countries named by a location keyword list: full country names and
+ * aliases, plus the US for a US state name. A bare two-letter entry is skipped
+ * because US configs use them for states ("IL" is Illinois, not Israel). Any
+ * region keyword returns an empty set, which turns the home check off.
+ * @param {unknown} keywords
+ * @param {Set<string>} usStateNames
+ * @returns {Set<string>}
+ */
+export function homeCountryCodes(keywords, usStateNames = new Set()) {
+  const values = list(keywords);
+  if (values.some(v => REGION_KEYWORD.test(v))) return new Set();
+  const codes = new Set(values.filter(v => !/^[a-z]{2}$/.test(v) && isCountryKeyword(v)).flatMap(v => [...countries(countryValue(v))]));
+  if (values.some(v => usStateNames.has(v))) codes.add('US');
+  return codes;
+}
+
+/**
+ * @param {unknown} location
+ * @param {Set<string>} home ISO codes from homeCountryCodes
+ * @param {boolean | ((segment: string) => boolean)} namesUsState whether the
+ *   caller found a US state name, or a test run on each `;` segment
+ * @returns {boolean} whether the text names a place and none of them is home.
+ */
+export function namesPlaceOutsideHome(location, home, namesUsState = false) {
+  if (!home.size) return false;
+  const text = fold(location);
+  if (!text) return false;
+  const named = [];
+  // A US marker in one `;` segment must not hide a city named in another.
+  for (const segment of text.split(';')) {
+    // "Georgia" is the country or the state: foreign to a German home, home to a US one.
+    if (GEORGIA.test(segment)) named.push(['GE', 'US']);
+    const part = segment.replace(US_STATE_NAMES_WITH_COUNTRY_WORD, ' ');
+    named.push(...PLACES.filter(p => p.match.test(part)).map(p => p.codes));
+    // "Bremen, DE" stays Germany for a German home; elsewhere ", DE" is Delaware.
+    const usStateCode = [...USPS_STATE_CODES].some(code => !home.has(isoCountryCode(code)) && new RegExp(`,\\s*${code}(?![\\p{L}\\p{N}])`, 'u').test(part));
+    const usState = typeof namesUsState === 'function' ? namesUsState(segment) : namesUsState;
+    if (usState || usStateCode || US_MARKER.test(part)) named.push(['US']);
+    else named.push(...AMBIGUOUS_CITIES.filter(p => p.match.test(part)).map(p => p.codes));
+  }
+  if (REGION_LABEL.test(text) && [...home].every(code => NORTH_AMERICA.has(code))) named.push([]);
+  return named.length > 0 && !named.some(codes => codes.some(code => home.has(code)));
+}
+
 const REMOTE = /\b(?:remote|work from (?:home|anywhere)|distributed)\b/;
 // Mirror scan.mjs's titleSignalsRemote marker: "Remote Sensing" describes a
 // discipline, not a work arrangement. The policy must not convert an office

@@ -636,6 +636,56 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
   }
 }
 
+// Every flag this file reads. An unrecognized one is a usage error: unknown
+// tokens used to fall through to a full run, so `--help` executed the whole
+// suite and a mistyped `--only` ran everything and could report green — which
+// reads as "the subset passed". Same rule as the KNOWN_FLAGS precedent
+// (#1633/#1635) and reply-watch.mjs: an unknown flag outranks --help, so
+// `--help --bogus` is still an error (#2745). `-h` is the only single-dash
+// flag, since the suite has no short flags for it to collide with.
+const FLAGS_WITH_VALUE = new Set(['--only', '--needs', '--jobs', '--inline-child']);
+const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, '--quick', '--help']);
+const USAGE = [
+  'Usage:',
+  '  node test-all.mjs                       Run all tests',
+  '  node test-all.mjs --quick               Skip the dashboard build',
+  '  node test-all.mjs --only <substring>    Run only the discovered tests/**/*.test.mjs whose path matches',
+  '  node test-all.mjs --needs <tool,...>    Run only the suites that declare one of these tools',
+  '  node test-all.mjs --jobs <N>            At most N discovered suites at a time',
+].join('\n');
+const ARGS = process.argv.slice(2);
+const UNKNOWN_FLAGS = [];
+let WANTS_HELP = false;
+for (let at = 0; at < ARGS.length; at++) {
+  const arg = ARGS[at];
+  if (arg.startsWith('--')) {
+    const eq = arg.indexOf('=');
+    const flag = eq === -1 ? arg : arg.slice(0, eq);
+    // An attached value belongs only to a flag that takes one: `--help=1` is a
+    // typo, not a help request, and must not fall through to a full run.
+    if (!KNOWN_FLAGS.has(flag) || (eq !== -1 && !FLAGS_WITH_VALUE.has(flag))) {
+      UNKNOWN_FLAGS.push(arg);
+      continue;
+    }
+    if (flag === '--help') { WANTS_HELP = true; continue; }
+    // A known flag owns its operand whatever it looks like, so `--jobs -1`
+    // stays the --jobs error it already was and `--only -h` never reads as
+    // help.
+    if (eq === -1 && FLAGS_WITH_VALUE.has(flag)) at++;
+    continue;
+  }
+  if (arg === '-h') { WANTS_HELP = true; continue; }
+  if (arg.startsWith('-')) UNKNOWN_FLAGS.push(arg);
+}
+if (UNKNOWN_FLAGS.length > 0) {
+  console.log(`  ❌ unknown flag ${UNKNOWN_FLAGS[0]} — run with --help to see the flags this suite takes`);
+  process.exit(1);
+}
+if (WANTS_HELP) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 // Set in the process a run with more than one job starts for the inline
 // sections: the file its counters go to. See startInlineSections().
 const INLINE_CHILD = hasFlag(process.argv, '--inline-child') ? (flagValue(process.argv, '--inline-child') ?? '') : null;

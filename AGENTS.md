@@ -97,7 +97,7 @@ AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluat
 
 ### CLI invocation
 
-Every supported CLI reaches the same router, `.agents/skills/career-ops/SKILL.md`; its "Invocation Notes" cover each one. In Codex (`CODEX.md` imports this file), run `codex` in the repo root; if `/career-ops` is unavailable, ask Codex to run the mode by name (`Run career-ops scan mode`), and use `codex exec "prompt"` for one-shot workers. Pi and Oh My Pi load this file as project context and expose the router as `/skill:career-ops`; `docs/SUPPORTED_CLIS.md` has their trust and headless flags.
+Every supported CLI reaches the same router, `.agents/skills/career-ops/SKILL.md`; its "Invocation Notes" cover each one. In Codex (`CODEX.md` imports this file), run `codex` in the repo root; if `/career-ops` is unavailable, ask Codex to run the mode by name (`Run career-ops scan mode`), and use `codex exec "prompt"` for one-shot workers. Pi and Oh My Pi load this file as project context and expose the router as `/skill:career-ops`; `docs/SUPPORTED_CLIS.md` has their trust and headless flags. Never give a Pi worker `-a`.
 
 ### Main Files
 

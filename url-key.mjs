@@ -315,6 +315,29 @@ export function promoteKnownFragmentIdentity(url) {
 }
 
 /**
+ * Google Careers' job id, or null when the URL is not a Google Careers posting.
+ *
+ * The id is the number after `/jobs/results/` on
+ * `www.google.com/about/careers/applications/`. A trailing `-{title-slug}` is
+ * cosmetic: the page is linked to with and without one, so both spellings read
+ * the same id. The id lives only in the URL path; the results card carries no
+ * other requisition field. scan.mjs reads it as the posting's requisition for
+ * company+role dedup (requisitionIdsForDedup).
+ *
+ * @param {unknown} raw - A posting URL.
+ * @returns {string|null}
+ */
+export function googleCareersJobId(raw) {
+  if (typeof raw !== 'string') return null;
+  let u;
+  try { u = new URL(raw.trim()); } catch { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  const host = foldHostname(u.hostname);
+  if (host !== 'www.google.com' && host !== 'google.com') return null;
+  return /^\/about\/careers\/applications\/jobs\/results\/(\d+)(?:-[^/]*)?\/?$/i.exec(u.pathname)?.[1] ?? null;
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
