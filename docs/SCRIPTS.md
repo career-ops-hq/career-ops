@@ -1746,10 +1746,14 @@ node rank-pipeline.mjs --cli codex      # override auto-detection
 node rank-pipeline.mjs --dry-run        # print annotations, write nothing
 ```
 
-`--url <url>` ranks only the unranked pending row whose first cell is exactly
-that URL. When there is none, because the row was ranked or skipped, or its URL
-is not the first cell, nothing is called and the script exits 4. The
-dashboard's Inbox runs it for its `a` key.
+Only the Pending section is read when `pipeline.md` has one (from its heading
+to the next `##` heading, as `sync-batch-input.mjs` reads it); a file with no
+Pending heading is read whole.
+
+`--url <url>` ranks only the first unranked Pending row whose first cell is
+exactly that URL. When there is none, because the row was ranked or skipped,
+or its URL is not the first cell, the script exits 4 before it looks for a CLI,
+so nothing is called. The dashboard's Inbox runs it for its `a` key.
 
 Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
 `scan-ats-full.mjs` use, and the file is re-read inside the lock — so a

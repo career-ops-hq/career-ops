@@ -51,15 +51,17 @@ first after `- [ ] ` is left alone and the footer says why.
 
 `a` ranks the selected row and `A` ranks the unranked rows, up to 20 per run.
 Ranking calls your agent CLI and spends tokens, so neither key starts on its
-own: the footer asks whether to rank, naming the row or the number of rows and
-saying it uses your CLI and tokens. `y` starts it and any other key cancels.
-The dashboard then runs `rank-pipeline.mjs --url <url>` or
-`rank-pipeline.mjs --limit <n>`, which asks the model for one answer (with
-tools off where the CLI has a switch for it; see `docs/SCRIPTS.md`) and writes
-each `rank:` cell into `data/pipeline.md` under the pipeline
-lock. The summary line shows the run until it ends; then the Inbox is read
-again and the footer says how many rows were ranked. `e`, `x`, `u`, `a` and
-`A` do nothing on the tracker tabs.
+own: the footer asks whether to rank the selected row, or how many rows, and
+says it uses your CLI and tokens. Only `y` starts it; any other key, `Y`
+included, cancels. The dashboard then runs `rank-pipeline.mjs --url <url>` or
+`rank-pipeline.mjs --limit <n>`. The script reads only the Pending section,
+ranks rows in batches of up to 10, one model call per batch (so twenty rows
+take two calls), with tools off where the CLI has a switch for it (see
+`docs/SCRIPTS.md`), and writes each `rank:` cell into `data/pipeline.md` under
+the pipeline lock. The summary line shows the run until it ends; then the
+Inbox is read again, and the footer gives the new rank, or for `A` how many
+rows are still not ranked. `e`, `x`, `u`, `a` and `A` do nothing on the
+tracker tabs.
 
 Otherwise the tab changes no file, and no key on it evaluates a row:
 navigation, tabs, `/`, `s`, `r`, `o` (http(s) rows only), `e`, `x`, `u`, `a`,

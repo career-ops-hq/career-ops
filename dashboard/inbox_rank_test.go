@@ -204,7 +204,7 @@ func TestInboxCapitalARanksTheUnrankedRows(t *testing.T) {
 	m, _ = sendKey(t, m, "left")
 
 	next, _ := m.Update(keyMsg("A"))
-	if view := ansi.Strip(next.(appModel).pipeline.View()); !strings.Contains(view, "Rank 2 unranked rows with your agent CLI? It uses your CLI and tokens.") {
+	if view := ansi.Strip(next.(appModel).pipeline.View()); !strings.Contains(view, "Rank 2 row(s) with your agent CLI? Uses tokens. y: yes, other key: no") {
 		t.Fatalf("A does not ask about the two unranked rows:\n%s", view)
 	}
 	m = pressRank(t, m, "A")
@@ -213,7 +213,7 @@ func TestInboxCapitalARanksTheUnrankedRows(t *testing.T) {
 		t.Fatalf("node args = %q, want the script and --limit=2", got.Args)
 	}
 	view := ansi.Strip(m.pipeline.View())
-	if !strings.Contains(view, "Ranked 2 row(s); 0 still not ranked") || !strings.Contains(view, "3 pending · 0 not ranked") {
+	if !strings.Contains(view, "Rank run finished; 0 row(s) still not ranked") || !strings.Contains(view, "3 pending · 0 not ranked") {
 		t.Errorf("the footer or summary does not report the run:\n%s", view)
 	}
 }

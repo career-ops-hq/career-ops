@@ -53,9 +53,8 @@ func TestInboxAAsksBeforeRankingTheSelectedRow(t *testing.T) {
 	if cmds[0] != nil {
 		t.Fatal("a started a rank before the y")
 	}
-	prompt := footer(asked)
-	if !strings.Contains(prompt, unrankedURL) || !strings.Contains(prompt, "tokens") {
-		t.Fatalf("footer = %q, want the question naming the row and the tokens", prompt)
+	if prompt := footer(asked); !strings.Contains(prompt, i18n.Current.InboxRankAskRow) || !strings.Contains(prompt, "tokens") {
+		t.Fatalf("footer = %q, want the question with the tokens", prompt)
 	}
 
 	started, cmds := press(asked, "y")
@@ -75,7 +74,7 @@ func TestInboxAAsksBeforeRankingTheSelectedRow(t *testing.T) {
 }
 
 func TestInboxRankQuestionCancelsOnAnyOtherKey(t *testing.T) {
-	for _, key := range []string{"n", "esc", "enter", "q", "j", "a", "x"} {
+	for _, key := range []string{"Y", "n", "esc", "enter", "q", "j", "a", "x"} {
 		m := onInbox(t, newInboxModel(t, inboxRows()))
 		m, _ = press(m, "G")
 		m, _ = press(m, "a")
@@ -123,7 +122,7 @@ func TestInboxCapitalAAsksForTheUnrankedRowsUpToTheLimit(t *testing.T) {
 	}{
 		{inboxRows(), 1, fmt.Sprintf(i18n.Current.InboxRankAskAll, 1), 1},
 		{unrankedRows(pendingRankLimit), pendingRankLimit, fmt.Sprintf(i18n.Current.InboxRankAskAll, pendingRankLimit), pendingRankLimit},
-		{unrankedRows(25), pendingRankLimit, fmt.Sprintf(i18n.Current.InboxRankAskSome, pendingRankLimit, 25), pendingRankLimit},
+		{unrankedRows(25), pendingRankLimit, fmt.Sprintf(i18n.Current.InboxRankAskSome, pendingRankLimit), pendingRankLimit},
 	}
 	for _, c := range cases {
 		m := onInbox(t, newInboxModel(t, c.rows))
@@ -200,7 +199,7 @@ func TestInboxRankOutcomesInEveryLanguage(t *testing.T) {
 			t.Errorf("%s failure flash = %q, running %v", lang, m.flash, m.pendingRanking != nil)
 		}
 
-		// Every row: 20 of 25 came back ranked.
+		// Every row: 20 of 25 came back ranked, so 5 are left.
 		m = start("A", "y")
 		after := unrankedRows(25)
 		for i := range 20 {
@@ -208,8 +207,17 @@ func TestInboxRankOutcomesInEveryLanguage(t *testing.T) {
 		}
 		m.SetPendingRows(after)
 		m, _ = m.Update(PipelineRankDoneMsg{})
-		if m.flash != fmt.Sprintf(i18n.Current.InboxRankedAll, 20, 5) {
+		if m.flash != fmt.Sprintf(i18n.Current.InboxRankedAll, 5) {
 			t.Errorf("%s all-rows flash = %q", lang, m.flash)
+		}
+
+		// The reload after the run failed: the rows are the old ones, so
+		// the outcome says the Inbox could not be read, not "no score".
+		m = start("a", "y")
+		m.pendingErr = "permission denied"
+		m, _ = m.Update(PipelineRankDoneMsg{URL: url})
+		if m.flash != fmt.Sprintf(i18n.Current.InboxRankReadFailed, "permission denied") {
+			t.Errorf("%s read-failed flash = %q", lang, m.flash)
 		}
 	}
 }
@@ -261,6 +269,34 @@ func TestInboxFooterAndKeyListOfferAAndCapitalA(t *testing.T) {
 	for _, key := range []string{"a", "A"} {
 		if helpOffersKey(footer(tracker), key) {
 			t.Errorf("tracker footer offers %s:\n%s", key, footer(tracker))
+		}
+	}
+}
+
+// The footer keeps the start and the end of a line that is too wide and cuts
+// the middle, which would drop the controls. Every question fits 80 columns
+// whole, in every language, at the largest count `A` can ask about.
+func TestInboxRankQuestionsFitEightyColumns(t *testing.T) {
+	defer i18n.SetLang("en")
+	for _, lang := range []string{"en", "tr", "es"} {
+		i18n.SetLang(lang)
+		for name, rows := range map[string][]data.PendingRow{
+			"a":           unrankedRows(1),
+			"A, all":      unrankedRows(pendingRankLimit),
+			"A, the next": unrankedRows(999),
+		} {
+			m := onInbox(t, newInboxModel(t, rows))
+			key := "A"
+			if name == "a" {
+				key = "a"
+			}
+			m, _ = press(m, key)
+			want := m.rankPrompt()
+			m.width = 80
+			got := ansi.Strip(m.renderHelp())
+			if !strings.Contains(got, want) || !strings.Contains(want, "y") {
+				t.Errorf("%s %s: the 80-column footer %q does not hold the whole question %q", lang, name, got, want)
+			}
 		}
 	}
 }

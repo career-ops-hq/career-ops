@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT } from './helpers.mjs';
 import { envWithPathFirst, writeFakeCli } from './helpers/fake-cli.mjs';
-import { RANK_EXIT, selectByUrl } from '../rank-pipeline.mjs';
+import { RANK_EXIT, pendingSection, selectByUrl } from '../rank-pipeline.mjs';
 
 const ROWS = [
   '# Pipeline',
@@ -27,10 +27,12 @@ function setup(t, pipeline = ROWS) {
   mkdirSync(join(root, 'data'));
   mkdirSync(join(root, 'bin'));
   if (pipeline !== null) writeFileSync(join(root, 'data', 'pipeline.md'), pipeline);
-  // The fake CLI saves each prompt it is given and scores every row it lists.
+  // The fake CLI logs every launch, version probes included, saves each
+  // ranking prompt it is given, and scores every row the prompt lists.
   writeFakeCli(join(root, 'bin'), 'claude', [
-    "if (process.argv[2] === '--version') return; // CommonJS: a top-level return ends the script",
     "const fs = require('node:fs');",
+    'fs.appendFileSync(process.env.RANK_CALLS, process.argv.slice(2, 3).join(" ") + "\\n");',
+    "if (process.argv[2] === '--version') return; // CommonJS: a top-level return ends the script",
     'const prompt = process.argv[3] ?? "";',
     'fs.appendFileSync(process.env.RANK_PROMPTS, prompt + "\\n=====\\n");',
     'const ids = [...prompt.matchAll(/^(\\d+)\\. company:/gm)].map(m => Number(m[1]));',
@@ -43,6 +45,7 @@ function setup(t, pipeline = ROWS) {
     CAREER_OPS_CLI: 'claude',
     CAREER_OPS_RANK_CLI: '',
     RANK_PROMPTS: join(root, 'prompts.txt'),
+    RANK_CALLS: join(root, 'calls.txt'),
   });
   const run = (...args) => spawnSync(process.execPath, [join(ROOT, 'rank-pipeline.mjs'), ...args], {
     env, cwd: root, encoding: 'utf8', timeout: 30_000,
@@ -59,6 +62,58 @@ test('selectByUrl matches the URL exactly, never a prefix', () => {
   const entries = [{ url: 'https://example.test/1' }, { url: 'https://example.test/12' }];
   assert.deepEqual(selectByUrl(entries, 'https://example.test/1'), [entries[0]]);
   assert.deepEqual(selectByUrl(entries, 'https://example.test/9'), []);
+});
+
+test('selectByUrl takes only the first of two rows with the same URL', () => {
+  const entries = [{ url: 'https://example.test/1', index: 3 }, { url: 'https://example.test/1', index: 7 }];
+  assert.deepEqual(selectByUrl(entries, 'https://example.test/1'), [entries[0]]);
+});
+
+test('pendingSection is the first Pending section, or the whole file without one', () => {
+  const lines = ['- [ ] a', '## Pending', '- [ ] b', '##\tProcessed', '- [ ] c'];
+  assert.deepEqual(pendingSection(lines), { start: 2, end: 3 });
+  assert.deepEqual(pendingSection(['- [ ] a', '- [ ] b']), { start: 0, end: 2 });
+  assert.deepEqual(pendingSection(['## Offen', '- [ ] a']), { start: 1, end: 2 });
+});
+
+test('--url ranks only the first of two rows with the same URL', t => {
+  const twice = ROWS.replace('- [ ] https://example.test/12 | Beta | Designer', '- [ ] https://example.test/1 | Acme | Engineer (again)');
+  const { run, pipeline, env } = setup(t, twice);
+  const result = run('--url=https://example.test/1');
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const lines = readFileSync(pipeline, 'utf8').split('\n');
+  assert.match(lines[3], /Engineer \| rank: 4\.2\/5/);
+  assert.equal(lines[4], '- [ ] https://example.test/1 | Acme | Engineer (again)');
+  assert.equal((readFileSync(env.RANK_PROMPTS, 'utf8').match(/url: https:\/\/example\.test\/1$/gm) ?? []).length, 1);
+});
+
+test('only rows in the Pending section are ranked, with or without --url', t => {
+  const outside = [
+    '- [ ] https://example.test/above | Above | Row',
+    '## Pending',
+    '- [ ] https://example.test/1 | Acme | Engineer',
+    '## Notes',
+    '- [ ] https://example.test/note | Note | Row',
+    '',
+  ].join('\n');
+  const { run, pipeline, env } = setup(t, outside);
+  const miss = run('--url=https://example.test/note');
+  assert.equal(miss.status, RANK_EXIT.NOT_PENDING, miss.stdout + miss.stderr);
+  assert.equal(existsSync(env.RANK_CALLS), false, 'a row outside Pending called the CLI');
+  const all = run('--limit=1');
+  assert.equal(all.status, 0, all.stdout + all.stderr);
+  const lines = readFileSync(pipeline, 'utf8').split('\n');
+  assert.deepEqual(lines.map(line => line.includes('| rank: ')), [false, false, true, false, false, false]);
+});
+
+test('--url on a missing row exits 4 even when no CLI is installed', t => {
+  const { root, pipeline } = setup(t);
+  const result = spawnSync(process.execPath, [join(ROOT, 'rank-pipeline.mjs'), '--url=https://example.test/3'], {
+    env: { CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: root, PATH: mkdtempSync(join(tmpdir(), 'rank-no-cli-')), CAREER_OPS_RANK_CLI: '' },
+    cwd: root, encoding: 'utf8', timeout: 30_000,
+  });
+  assert.equal(result.status, RANK_EXIT.NOT_PENDING, result.stdout + result.stderr);
+  assert.equal(readFileSync(pipeline, 'utf8'), ROWS);
 });
 
 test('--url ranks only that row and sends only that row to the CLI', t => {
@@ -91,7 +146,8 @@ for (const [label, url, pipeline] of [
     const { run, pipeline: path, env } = setup(t, pipeline);
     const result = run(`--url=${url}`);
     assert.equal(result.status, RANK_EXIT.NOT_PENDING, result.stdout + result.stderr);
-    assert.equal(existsSync(env.RANK_PROMPTS), false, 'the CLI was not called');
+    assert.equal(existsSync(env.RANK_CALLS), false, 'the CLI was launched, if only for a version probe');
+    assert.equal(existsSync(env.RANK_PROMPTS), false, 'the CLI was given a ranking prompt');
     if (pipeline !== null) assert.equal(readFileSync(path, 'utf8'), pipeline);
   });
 }
@@ -105,7 +161,7 @@ for (const [label, arg, message] of [
     const result = run(arg);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stderr, message);
-    assert.equal(existsSync(env.RANK_PROMPTS), false);
+    assert.equal(existsSync(env.RANK_CALLS), false);
     assert.equal(readFileSync(pipeline, 'utf8'), ROWS);
   });
 }

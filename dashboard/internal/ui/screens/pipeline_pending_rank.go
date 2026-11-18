@@ -3,8 +3,9 @@ package screens
 // `a` on the Inbox tab ranks the selected row, and `A` ranks every unranked
 // row up to the ranker's usual limit (#5269). Ranking calls the agent CLI and
 // spends tokens, so neither key starts anything on its own: the footer says
-// how many rows it will rank and that it uses the CLI and tokens, and only `y`
-// starts it. Any other key cancels.
+// how many rows it will rank and that it uses the CLI and tokens, and only a
+// lowercase `y` starts it. Any other key, `Y` included, cancels. The question
+// fits an 80-column footer in every language, so its controls are never cut.
 //
 // The screen only asks: main.go runs the checkout's rank-pipeline.mjs, with
 // --url for one row or --limit for the count it named, and the script writes
@@ -35,7 +36,8 @@ type pendingRankRequest struct {
 	URL string
 	// Count is the number of rows the prompt names.
 	Count int
-	// Unranked is how many Inbox rows had no rank when `A` was pressed.
+	// Unranked is how many Inbox rows had no rank when `A` was pressed; more
+	// than Count means the question offers the next Count of them.
 	Unranked int
 }
 
@@ -98,7 +100,7 @@ func (m PipelineModel) askRankAll() (PipelineModel, tea.Cmd) {
 func (m PipelineModel) handleRankConfirm(msg tea.KeyMsg) (PipelineModel, tea.Cmd) {
 	req := m.pendingRankAsk
 	m.pendingRankAsk = nil
-	if msg.String() != "y" && msg.String() != "Y" {
+	if msg.String() != "y" {
 		m.flash = i18n.Current.InboxRankCancelled
 		return m, nil
 	}
@@ -116,23 +118,29 @@ func (m PipelineModel) rankPrompt() string {
 	if m.pendingRankAsk == nil {
 		return ""
 	}
+	// The selected row stays highlighted and its preview shows the URL, so
+	// the question leaves the URL out and keeps its controls in view.
 	if m.pendingRankAsk.URL != "" {
-		return fmt.Sprintf(i18n.Current.InboxRankAskRow, m.pendingRankAsk.URL)
+		return i18n.Current.InboxRankAskRow
 	}
 	if m.pendingRankAsk.Unranked > m.pendingRankAsk.Count {
-		return fmt.Sprintf(i18n.Current.InboxRankAskSome, m.pendingRankAsk.Count, m.pendingRankAsk.Unranked)
+		return fmt.Sprintf(i18n.Current.InboxRankAskSome, m.pendingRankAsk.Count)
 	}
 	return fmt.Sprintf(i18n.Current.InboxRankAskAll, m.pendingRankAsk.Count)
 }
 
 // onRankDone runs after main.go has reloaded the Inbox, so the rows it reads
-// are the ones the run left.
+// are the ones the run left. When that read failed, the rows are the ones
+// shown before the run, so nothing is inferred from them. The bulk outcome
+// names only the rows still unranked: rows skipped or scanned in while the
+// run took its minutes would make a before-and-after count wrong.
 func (m PipelineModel) onRankDone(msg PipelineRankDoneMsg) PipelineModel {
-	req := m.pendingRanking
 	m.pendingRanking = nil
 	switch {
 	case msg.Err != "":
 		m.flash = fmt.Sprintf(i18n.Current.InboxRankFailed, msg.Err)
+	case m.pendingErr != "":
+		m.flash = fmt.Sprintf(i18n.Current.InboxRankReadFailed, m.pendingErr)
 	case msg.NotPending:
 		m.flash = fmt.Sprintf(i18n.Current.InboxRankNotPending, msg.URL)
 	case msg.URL != "":
@@ -142,12 +150,7 @@ func (m PipelineModel) onRankDone(msg PipelineRankDoneMsg) PipelineModel {
 			m.flash = fmt.Sprintf(i18n.Current.InboxRankNoScore, msg.URL)
 		}
 	default:
-		before := 0
-		if req != nil {
-			before = req.Unranked
-		}
-		left := countUnranked(m.pending)
-		m.flash = fmt.Sprintf(i18n.Current.InboxRankedAll, max(before-left, 0), left)
+		m.flash = fmt.Sprintf(i18n.Current.InboxRankedAll, countUnranked(m.pending))
 	}
 	return m
 }

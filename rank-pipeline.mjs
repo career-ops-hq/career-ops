@@ -44,6 +44,7 @@ import { getCareerOpsRoot } from './path-resolver.mjs';
 import { readRememberedCli } from './lib/agent-cli.mjs';
 import { resolveCliLaunch } from './lib/agent-launch.mjs';
 import { SCORE_MAX, SCORE_MIN } from './lib/score-action.mjs';
+import { sectionKind } from './lib/pipeline-sections.mjs';
 
 const CAREER_OPS = dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = getCareerOpsRoot();
@@ -112,8 +113,8 @@ const USAGE = `
   node rank-pipeline.mjs [--limit N] [--url <url>] [--cli <name>] [--model <name>] [--dry-run]
 
     --limit N     max entries to rank this run (default ${DEFAULT_LIMIT}, ceiling ${LIMIT_CEILING})
-    --url <url>   rank only the unranked pending row whose URL cell is exactly <url>
-                  (exit 4 when there is none)
+    --url <url>   rank only the first unranked Pending row whose URL cell is exactly
+                  <url> (exit 4 when there is none)
     --cli <name>  force a CLI instead of $CAREER_OPS_CLI or auto-detection
     --model <n>   passed through to the CLI when it accepts one
     --dry-run     print the annotations, write nothing
@@ -188,7 +189,9 @@ export function heuristicSegment(entry, targets) {
 export function parsePendingEntries(text) {
   const out = [];
   const lines = String(text ?? '').split('\n');
+  const { start, end } = pendingSection(lines);
   lines.forEach((raw, index) => {
+    if (index < start || index >= end) return;
     if (!raw.startsWith('- [ ] ')) return;
     if (raw.includes(RANK_LABEL)) return;
     const cells = raw.slice(6).split('|').map(c => c.trim());
@@ -265,9 +268,26 @@ export function applyAnnotations(text, pending, originalText = text) {
   return { text: out, written };
 }
 
-/** The rows --url asks for. Exact match, so one posting never widens to another. */
+/**
+ * Line range of the first Pending section: from its heading to the next `##`
+ * heading, the rows sync-batch-input.mjs queues and the dashboard Inbox lists.
+ * A file with no Pending heading is one plain list, so every line counts.
+ */
+export function pendingSection(lines) {
+  const heading = lines.findIndex(line => sectionKind(line) === 'pending');
+  if (heading < 0) return { start: 0, end: lines.length };
+  const next = lines.findIndex((line, i) => i > heading && /^##\s/.test(line));
+  return { start: heading + 1, end: next < 0 ? lines.length : next };
+}
+
+/**
+ * The row --url asks for: the first unranked entry whose URL cell is exactly
+ * `url`, so one posting never widens to another. A URL listed twice is one row
+ * in the dashboard Inbox, which shows the first, so only the first is ranked.
+ */
 export function selectByUrl(entries, url) {
-  return entries.filter(e => e.url === url);
+  const hit = entries.find(e => e.url === url);
+  return hit ? [hit] : [];
 }
 
 /** Respects --limit and the ceiling the flag cannot raise. Deterministic: file order. */
@@ -433,6 +453,20 @@ async function main(args) {
     return 0;
   }
 
+  // With --url, find the row before looking for a CLI: a miss calls nothing,
+  // not even a version probe, and exits NOT_PENDING whatever is installed.
+  const targetUrl = flagValue(args, '--url')?.trim();
+  let original = '';
+  let pending = [];
+  if (targetUrl !== undefined) {
+    original = readFileSync(PIPELINE_PATH, 'utf-8');
+    pending = selectByUrl(parsePendingEntries(original), targetUrl);
+    if (!pending.length) {
+      console.error(`No unranked pending row has this URL as its first cell: ${targetUrl}`);
+      return RANK_EXIT.NOT_PENDING;
+    }
+  }
+
   const remembered = readRememberedCli(DATA_ROOT);
   const active = CLI_CANDIDATES.find(c => c.bin === remembered || c.id === remembered);
   const cli = forced
@@ -444,16 +478,13 @@ async function main(args) {
     return 1;
   }
 
-  const original = readFileSync(PIPELINE_PATH, 'utf-8');
-  const targetUrl = flagValue(args, '--url')?.trim();
-  const pending = targetUrl === undefined ? parsePendingEntries(original) : selectByUrl(parsePendingEntries(original), targetUrl);
-  if (!pending.length) {
-    if (targetUrl !== undefined) {
-      console.error(`No unranked pending row has this URL as its first cell: ${targetUrl}`);
-      return RANK_EXIT.NOT_PENDING;
+  if (targetUrl === undefined) {
+    original = readFileSync(PIPELINE_PATH, 'utf-8');
+    pending = parsePendingEntries(original);
+    if (!pending.length) {
+      console.log('No unranked pending entries. Nothing to do.');
+      return 0;
     }
-    console.log('No unranked pending entries. Nothing to do.');
-    return 0;
   }
   const selected = selectBatch(pending, limit);
   const cvExcerpt = existsSync(CV_PATH) ? readFileSync(CV_PATH, 'utf-8').slice(0, 2000) : '';
@@ -671,6 +702,16 @@ function selfTest() {
     (tripleDupOut.text.match(/rank: 4\.5\/5/g) ?? []).length === 1);
   check('the two unselected duplicates remain pending',
     parsePendingEntries(tripleDupOut.text).length === 2);
+
+  const sectioned = parsePendingEntries([
+    '- [ ] https://s.test/above | Above | Row',
+    '## Pending',
+    '- [ ] https://s.test/in | In | Row',
+    '## Notes',
+    '- [ ] https://s.test/note | Note | Row',
+  ].join('\n'));
+  check('only the Pending section is read when the file has one',
+    sectioned.map(e => e.url).join() === 'https://s.test/in' && sectioned[0].index === 2);
 
   console.log(`\n  rank-pipeline self-test: ${pass} passed, ${fail} failed\n`);
   return fail === 0 ? 0 : 1;
