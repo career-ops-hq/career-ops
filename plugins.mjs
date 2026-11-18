@@ -795,6 +795,14 @@ async function cmdAdd(args) {
     console.log("⚠️  Not in the career-ops registry — you are installing this author's code with your privileges.");
   }
 
+  // A torn lock throws from writeLockEntry after the clone. Checking it first
+  // keeps a refused install from leaving a half-installed plugin directory.
+  try {
+    readLockForUpdate(DATA_ROOT, ROOT);
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exit(1);
+  }
   console.log(`Cloning ${url} @ ${String(useSha).slice(0, 10)} …`);
   let installed;
   try { installed = installFromRepo(DATA_ROOT, { url, sha: useSha }); }
