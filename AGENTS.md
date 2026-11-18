@@ -662,7 +662,7 @@ If they say yes: run `node hired-share.mjs --report N --anonymity <their choice>
 
 ### TSV Format for Tracker Additions
 
-One TSV file per evaluation at `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`, where `merge-tracker.mjs` and `verify-pipeline.mjs` look for it (with a data-root override, a TSV written in the checkout is never merged): a **header row of column labels**, then exactly one data row.
+One TSV file per evaluation at `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`, where `merge-tracker.mjs` and `verify-pipeline.mjs` look for it (with a data-root override, a TSV written in the checkout is never merged): a **header row of column labels**, then exactly one data row. Separate the fields with a tab character: `\t` in this example stands for that tab, so do not type a backslash and a `t`.
 
 ```
 num\tdate\tcompany\trole\tstatus\tscore\tpdf\treport\tnotes\turl
