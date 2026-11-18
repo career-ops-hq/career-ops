@@ -6144,4 +6144,316 @@ function rollback() {
         userPaths,
         warnRejected('target-manifest'),
       );
-      targe
+      targetFiles = manifestTreeFiles(safeTargetPaths, targetRef, userPaths, {
+        onRejected: concreteWarnings,
+      });
+      targetPairAvailable = true;
+    } catch (err) {
+      console.error(`Rollback warning: paired target is missing or unavailable (${err.message}).`);
+      console.error('Target-only system files may remain as leftovers; mutable FETCH_HEAD was not consulted.');
+    }
+
+    // Restoration remains limited to safe manifest coverage, but deciding
+    // whether a target path is genuinely new requires the complete backup
+    // tree. A pre-existing tracked file can be absent from both the current
+    // and backup manifests after manifest drift; treating that omission as
+    // proof that the target introduced it would delete backup-owned bytes.
+    // Read the raw NUL-delimited tree before mutating the worktree and use it
+    // only as membership evidence, never as scope authority. Prefix membership
+    // is conservative across file/directory transitions: if either tree has a
+    // leaf where the other has descendants, that path was not wholly new.
+    const backupTreeFiles = targetPairAvailable
+      ? gitRaw('--literal-pathspecs', 'ls-tree', '-r', '--name-only', '-z', latest, '--')
+        .split('\0')
+        .filter(Boolean)
+      : [];
+    const backupTreeFileSet = new Set(backupTreeFiles);
+    const backupTreeFileKeySet = new Set();
+    const backupTreeDirectoryKeySet = new Set();
+    for (const file of backupTreeFiles) {
+      const segments = manifestPathSegments(file);
+      backupTreeFileKeySet.add(segments.join('/'));
+      for (let length = 1; length < segments.length; length++) {
+        backupTreeDirectoryKeySet.add(segments.slice(0, length).join('/'));
+      }
+    }
+    const backupTreeConflict = (file) => {
+      if (backupTreeFileSet.has(file)) return 'exact path';
+      const segments = manifestPathSegments(file);
+      const key = segments.join('/');
+      if (backupTreeFileKeySet.has(key)) return 'filesystem-equivalent backup path';
+      if (backupTreeDirectoryKeySet.has(key)) return 'backup directory at this path';
+      for (let length = segments.length - 1; length > 0; length--) {
+        const ancestor = segments.slice(0, length).join('/');
+        if (backupTreeFileKeySet.has(ancestor)) return `backup file at ancestor ${ancestor}`;
+      }
+      return '';
+    };
+
+    // apply() also overwrites a file the target manifest claims when it was
+    // already in the backup tree, even if neither restore manifest lists it.
+    // Restore those through the same guards, or they keep the update's bytes.
+    const backupFileSet = new Set(backupFiles);
+    const restoreFiles = [
+      ...backupFiles,
+      ...targetFiles.filter((file) => backupTreeFileSet.has(file) && !backupFileSet.has(file)),
+    ];
+
+    const restored = [];
+    for (const file of restoreFiles) {
+      try {
+        const symlink = symlinkedAncestor(file);
+        if (symlink) {
+          console.error(`Rollback warning: ${file} has symlinked parent ${symlink}; leaving it untouched.`);
+          continue;
+        }
+        const nonDirectory = nonDirectoryAncestor(file);
+        if (nonDirectory) {
+          console.error(`Rollback warning: ${file} has non-directory parent ${nonDirectory}; leaving it untouched.`);
+          continue;
+        }
+        if (existsSync(join(ROOT, file)) && lstatSync(join(ROOT, file)).isDirectory()) {
+          console.error(`Rollback warning: ${file} is now a directory; leaving it and its children untouched.`);
+          continue;
+        }
+        git('--literal-pathspecs', 'checkout', latest, '--', file);
+        restored.push(file);
+      } catch (err) {
+        throw new Error(`could not restore ${file}: ${err.message}`);
+      }
+    }
+
+    const removalCandidates = [];
+    if (targetPairAvailable) {
+      for (const file of targetFiles) {
+        const conflict = backupTreeConflict(file);
+        if (!conflict) {
+          removalCandidates.push(file);
+        } else if (conflict !== 'exact path') {
+          console.error(`Rollback warning: ${file} conflicts with the backup tree (${conflict}); leaving it untouched.`);
+        }
+      }
+    }
+    // Tree membership says the target ships the path, not that this update
+    // wrote it. The update's checkout stages what it writes, so an untracked
+    // file there may be the user's own, kept by apply or never reached by it.
+    // Rollback cannot tell, and removing it could lose bytes no backup holds.
+    const trackedFileSet = removalCandidates.length > 0
+      ? new Set(gitRaw('ls-files', '-z').split('\0').filter(Boolean))
+      : new Set();
+    const removed = [];
+    for (const file of removalCandidates) {
+      const absolute = join(ROOT, file);
+      try {
+        const symlink = symlinkedAncestor(file);
+        if (symlink) {
+          console.error(`Rollback warning: ${file} has symlinked parent ${symlink}; leaving it untouched.`);
+          continue;
+        }
+        // Same guard as the restore loop. With a regular file where a parent
+        // directory used to be, there is nothing to remove at this path, and
+        // recording it as removed would misreport what rollback did.
+        const nonDirectory = nonDirectoryAncestor(file);
+        if (nonDirectory) {
+          console.error(`Rollback warning: ${file} has non-directory parent ${nonDirectory}; leaving it untouched.`);
+          continue;
+        }
+        if (existsSync(absolute) && lstatSync(absolute).isDirectory()) {
+          console.error(`Rollback warning: ${file} became a directory; leaving it and its children untouched.`);
+          continue;
+        }
+        if (!trackedFileSet.has(file)) {
+          if (existsSync(absolute)) {
+            console.error(`Rollback warning: ${file} is not tracked, so rollback cannot tell whether this update wrote it; leaving it untouched.`);
+          }
+          continue;
+        }
+        git('--literal-pathspecs', 'rm', '-f', '--ignore-unmatch', '--', file);
+        try { unlinkSync(absolute); } catch (err) {
+          if (existsSync(absolute)) throw err;
+        }
+        removed.push(file);
+      } catch (err) {
+        throw new Error(`could not remove target-only file ${file}: ${err.message}`);
+      }
+    }
+
+    // Restore and stage only concrete backup files. `git rm` already staged
+    // target-only deletions; no directory pathspec is ever passed to add/commit.
+    if (restored.length > 0) addPaths(restored);
+    const concreteRollbackPaths = mergePathLists(restored, removed);
+    // Commit from the index, not from the path list. The concrete list runs to
+    // well over a thousand files, which exceeds the Windows command-line limit
+    // as one argv. Only what is staged can be committed, so name just those
+    // paths, and only when something unrelated is staged alongside them.
+    const rollbackPathSet = new Set(concreteRollbackPaths);
+    const stagedRollbackPaths = gitRaw('diff', '--cached', '--name-only', '-z')
+      .split('\0')
+      .filter((path) => path !== '' && rollbackPathSet.has(path));
+    // A second rollback has nothing staged, and so nothing to commit.
+    if (stagedRollbackPaths.length > 0) {
+      const message = `chore: rollback system files from ${latest}`;
+      const scoped = stagedPathsOutside(concreteRollbackPaths).length > 0;
+      try {
+        if (!scoped) {
+          git('commit', '-m', message);
+        } else {
+          commitPathspecs(message, stagedRollbackPaths, { literal: true });
+        }
+      } catch (err) {
+        // Something unrelated is staged on the scoped path, so a bare
+        // `git commit` would sweep it in. Name the file commitPathspecs left.
+        let recovery = 'Fix the cause and commit the staged files.';
+        if (scoped) {
+          try {
+            recovery = `Fix the cause, then run: git --literal-pathspecs commit -m "${message}" `
+              + `"--pathspec-from-file=${err.pathspecFile ?? writePathspecFile(stagedRollbackPaths)}" --pathspec-file-nul`;
+          } catch {
+            recovery = 'Fix the cause and commit only the rollback files; other staged work would go in with them.';
+          }
+        }
+        throw new Error(
+          `the files were restored and staged, but the rollback commit failed (${err.message}). `
+          + recovery,
+        );
+      }
+    }
+
+    // The restored tree no longer contains the withheld update snapshot.
+    clearStagedUpdate();
+
+    // package.json is back at the backup's version, but node_modules still
+    // holds what the update installed, and package-lock.json is not tracked,
+    // so the backup did not carry one to restore.
+    const dependencies = refreshDependencies();
+
+    const summary = `Restored ${restored.length} file(s) from ${latest}, removed ${removed.length} target-only file(s).`;
+    if (dependencies.ok) {
+      console.log(`Rollback complete. ${summary}`);
+    } else {
+      console.error(`Rollback incomplete. ${summary}`);
+      console.error(`npm install failed: ${dependencies.reason}`);
+      console.error('node_modules still holds the dependencies of the version you rolled back from.');
+      console.error('Run `npm install` so it matches the restored package.json.');
+      process.exitCode = 1;
+    }
+    console.log('Your data (CV, profile, tracker, reports) was not affected.');
+  } catch (err) {
+    console.error('Rollback failed:', err.message);
+    process.exit(1);
+  }
+}
+
+// ── DISMISS ─────────────────────────────────────────────────────
+
+/**
+ * Record a "no" to one release. The version comes from `--version X.Y.Z`
+ * (AGENTS.md passes the `remote` that check() just offered, so no network is
+ * needed); without it, from the same release lookup check() makes. If that
+ * fails too, only the moment is recorded, and dismissalCovers() falls back
+ * to publish dates: a release published afterwards asks again.
+ *
+ * @param {string[]} [argv]
+ * @param {{curlGet?: typeof curlGet, root?: string, now?: () => Date}} [ctx] - test seams.
+ */
+export async function dismiss(argv = process.argv, ctx = {}) {
+  const raw = argvFlagValue(argv, '--version');
+  let version = raw !== undefined ? String(raw || '').trim().replace(/^v/i, '') : '';
+  if (raw !== undefined && !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`--version '${raw ?? ''}' is not a release version (X.Y.Z). Nothing was dismissed.`);
+  }
+  if (!version) {
+    const latest = await latestRelease(ctx.curlGet || curlGet);
+    if (latest.status === 'ok') version = latest.version;
+  }
+  const at = (ctx.now ? ctx.now() : new Date()).toISOString();
+  writeFileSync(join(ctx.root || ROOT, DISMISS_FILE), JSON.stringify(version ? { version, at } : { at }) + '\n');
+  console.log(version
+    ? `Update to v${version} dismissed. You will be asked again when a newer release is out; run "node update-system.mjs check --force" or say "check for updates" to see it anyway.`
+    : 'Update dismissed. You will be asked again when a newer release is out; run "node update-system.mjs check --force" or say "check for updates" to see it anyway.');
+}
+
+// ── MAIN ────────────────────────────────────────────────────────
+
+// Only run the CLI when executed directly, so importing this module
+// (e.g. from test-all.mjs to exercise SEMVER_RE) does not trigger a
+// live update check.
+//
+// This is the ONE place that inlines lib/is-main-module.mjs instead of importing
+// it (#3170). #1706 requires this file to be SELF-LOADING: a pre-#1245 client's
+// apply() checks out only update-system.mjs and re-execs it, so any static
+// relative import crashes the old→new jump with ERR_MODULE_NOT_FOUND. The
+// semantics must still match the helper exactly — realpath BOTH sides, because
+// `import.meta.url` is realpath-resolved by Node while argv[1] keeps whatever
+// spelling the caller typed, and a mismatch makes the updater a silent no-op
+// that exits 0. tests/main-guard-convention.test.mjs exempts this file BY NAME
+// from its no-hand-rolled-guard source scan (the #1706 constraint is why), and
+// pins the semantics behaviourally instead: it invokes this file through a
+// symlink and requires the CLI tail to answer. Keep that in mind when editing —
+// the scan will not catch a regression here; only that behaviour test will.
+//
+// `.native` matches lib/is-main-module.mjs's canonicalize(): it expands Windows
+// 8.3 short names and reports on-disk casing, which the JS realpath leaves
+// alone. Both sides go through the SAME function, which is the property that
+// actually matters — a divergence here would make this copy answer differently
+// from the helper on exactly the platforms the helper was hardened for.
+const canonicalizePath = realpathSync.native ?? realpathSync;
+
+// Imported at the point of use, like every other local module here (see the
+// NOTE at the top): an older path-resolver.mjs without the export reads as
+// "not a plugin install".
+async function managedByPlugin() {
+  try {
+    const { isPluginInstallCopy } = await import('./path-resolver.mjs');
+    return typeof isPluginInstallCopy === 'function' && isPluginInstallCopy(ROOT);
+  } catch {
+    return false;
+  }
+}
+
+const entryPath = process.argv[1] ? resolve(process.argv[1]) : '';
+const selfPath = fileURLToPath(import.meta.url);
+let isCli = Boolean(process.argv[1]) && entryPath === selfPath;
+if (process.argv[1] && !isCli) {
+  try { isCli = canonicalizePath(entryPath) === canonicalizePath(selfPath); } catch { isCli = false; }
+}
+
+if (isCli) {
+  const cmd = process.argv[2] || 'check';
+
+  try {
+    // A Claude Code plugin install is a copy Claude Code owns and replaces on
+    // every plugin update, with no .git of its own, so this updater has
+    // nothing to act on there. `managed-by-plugin` joins the statuses agents
+    // stay silent on (AGENTS.md → Update Check).
+    if (cmd !== 'status' && await managedByPlugin()) {
+      if (cmd === 'check') {
+        console.log(JSON.stringify({ status: 'managed-by-plugin', local: localVersion() }));
+        process.exit(0);
+      }
+      console.error('career-ops is installed here as a Claude Code plugin, which Claude Code updates: run /plugin, open the Installed tab and update career-ops. Nothing was changed.');
+      process.exit(1);
+    }
+
+    // From a linked worktree the update belongs on main, not this branch.
+    const redirected = redirectToMainCheckout(cmd);
+    if (redirected !== null) process.exit(redirected);
+
+    switch (cmd) {
+      case 'check': await check(); break;
+      case 'status': console.log(`career-ops v${formatLocalVersion()}`); break;
+      case 'apply': await apply(); break;
+      case 'rollback': rollback(); break;
+      case 'dismiss': await dismiss(); break;
+      default:
+        console.log('Usage: node update-system.mjs [check [--force] [--channel main]|status|apply --confirm [--force] [--channel main] [--commit-on-branch]|rollback|dismiss [--version X.Y.Z]]');
+        process.exit(1);
+    }
+  } catch (err) {
+    // Subcommands now `throw` on aborts so their outer `finally` blocks
+    // run (e.g. apply() must release `.update-lock`). Print a clean
+    // message here instead of letting Node spit out a stack trace.
+    console.error(err.message || err);
+    process.exit(1);
+  }
+}
