@@ -19482,7 +19482,7 @@ try {
   }
 
   const agentsDoc = readFile('AGENTS.md');
-  if (agentsDoc.includes('`check-table-freshness.mjs`')) {
+  if (/^\| `check-table-freshness\.mjs` \|/m.test(agentsDoc)) {
     pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
   } else {
     fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
