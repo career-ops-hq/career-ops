@@ -42,7 +42,11 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 //     search.jobs.barclays is the same family in a card layout: the title sits
 //     in <strong> inside the anchor and the location is a SIBLING
 //     <div class="job-location"> after </a>, so the parser also looks between
-//     one anchor and the next. The location element is a span, p or div
+//     one anchor and the next. The title is the heading, else an element whose class
+//     holds `jobtitle` / `job-title` (`<span class="jobtitle">` on www.ccep.jobs). The
+//     modern markup on careers.loreal.com carries `<h3 class="…__job-title">` and
+//     `<span class="… job-location">` inside the link, read the same way.
+//     The location element is a span, p or div
 //     depending on the tenant; its class is `job-location`, or a bare
 //     `location` on careers.arm.com.
 //
@@ -212,6 +216,21 @@ export function readFragmentTotals(html) {
 const LEGACY_LOCATION_RE = /class="(?:[^"]*\bjob-location\b[^"]*|(?:[^"]*\s)?location(?:\s[^"]*)?)"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i;
 
 /**
+ * The title element inside a result anchor: a heading, else an element whose
+ * class holds `job-title` or `jobtitle` (`<span class="jobtitle">` on
+ * www.ccep.jobs, `<h3 class="search-results-list__job-title">` on
+ * careers.loreal.com). Null when the anchor has neither, so the caller can fall
+ * back to the anchor's own text.
+ * @param {string} inner
+ * @returns {string|null}
+ */
+function titleElementText(inner) {
+  const head = inner.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
+  const el = head ? null : inner.match(/<(\w+)\b[^>]*class="[^"]*job-?title[^"]*"[^>]*>([\s\S]*?)<\/\1>/i);
+  return clean(head ? head[1] : (el ? el[2] : '')) || null;
+}
+
+/**
  * Parse the LEGACY markup: the anchor IS the row, with no list-item class to
  * split on. Anchored on <a> carrying both data-job-id and a /job/ href, so the
  * sibling `js-save-job-btn` <button> (which repeats data-job-id) can't produce
@@ -240,8 +259,7 @@ export function parseLegacyResults(html, origin) {
     // Title lives in the heading. Falling back to the anchor's full text would
     // swallow the req-number and location spans (UHG renders both inside the
     // anchor), so strip element content first and only then accept bare text.
-    const headM = inner.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
-    const title = clean(headM ? headM[1] : inner.replace(/<span[\s\S]*?<\/span>/gi, ' '));
+    const title = titleElementText(inner) ?? clean(inner.replace(/<span[\s\S]*?<\/span>/gi, ' '));
     if (!title) continue;
 
     let url;
@@ -305,7 +323,9 @@ export function parseModernResults(html, origin) {
     const hrefIds = [...href.matchAll(/\/(\d+)(?=[/?#]|$)/g)];
     const id = dataIdM ? dataIdM[1] : (hrefIds.length ? hrefIds[hrefIds.length - 1][1] : href);
     if (seen.has(id)) continue;
-    const title = clean(link[2]);
+    // A title element inside the link keeps the location span beside it
+    // (careers.loreal.com) out of the title.
+    const title = titleElementText(link[2]) ?? clean(link[2]);
     if (!title) continue;
     let url;
     try {
@@ -313,7 +333,10 @@ export function parseModernResults(html, origin) {
     } catch {
       continue;
     }
-    const locM = block.match(/__job-info--location[\s\S]*?<span>([\s\S]*?)<\/span>/);
+    // `__job-info--location` is the classic markup; careers.loreal.com puts the
+    // location in `<span class="… job-location">` instead.
+    const locM = block.match(/__job-info--location[\s\S]*?<span>([\s\S]*?)<\/span>/)
+      || block.match(LEGACY_LOCATION_RE);
     seen.add(id);
     out.push({ id, title, url, location: locM ? clean(locM[1]) : '' });
   }

@@ -285,6 +285,43 @@ try {
   if (parseModernResults(LEGACY_BARCLAYS, 'https://x').length === 0) pass('radancy.parseModernResults() does not claim the Barclays card layout');
   else fail('radancy.parseModernResults() wrongly matched Barclays markup');
 
+  // ExampleCo list rows whose title is a class-named <span> inside the anchor
+  // (not a heading) and whose location is a <span class="job-location">: the
+  // old parser removed every span from the anchor, so it found no title.
+  const LEGACY_SPAN_TITLE = `
+<ul>
+<li class="list__item"><div><button type="button" class="js-save-job-btn" data-job-id="501">Save</button></div>
+<a class="list__item--content" href="/en/job/madrid/analyst-finance/1299/501" data-job-id="501">
+<span class="jobtitle">Analyst, Finance &amp; Planning</span><br/><br/><span class="job-location"> Madrid, Spain </span><span class="button-circle"></span></a></li>
+<li class="list__item"><a class="list__item--content" href="/en/job/multiple/buyer/1299/502" data-job-id="502">
+<span class="jobtitle">Buyer</span><span class="job-location"> Multiple locations </span></a></li>
+</ul>`;
+  const spanRows = parseResults(LEGACY_SPAN_TITLE, 'https://careers.acme.example');
+  if (spanRows.length === 2 && spanRows[0].title === 'Analyst, Finance & Planning' && spanRows[1].title === 'Buyer') pass('radancy.parseResults() reads a <span class="jobtitle"> title inside the anchor');
+  else fail(`radancy.parseResults() span-title rows = ${JSON.stringify(spanRows)}`);
+  if (spanRows[0]?.location === 'Madrid, Spain' && spanRows[1]?.location === 'Multiple locations') pass('radancy.parseResults() keeps the location the board prints, even a generic one');
+  else fail(`radancy.parseResults() span-title locations = ${JSON.stringify(spanRows.map(r => r.location))}`);
+
+  // ExampleCo modern rows: title in <h3 class="…__job-title"> and location in
+  // <span class="… job-location"> INSIDE the link. The location must neither be
+  // glued onto the title nor left empty.
+  const MODERN_JOB_LOCATION = `
+<ul>
+<li class="search-results-list__item ">
+<a class="search-results-list__job-link" href="/en/job/lyon/data-manager/3456/601" data-job-id="601">
+<h3 class="search-results-list__job-title">Data Manager</h3>
+<span class="search-results-list__job-info job-location">Lyon, Auvergne-Rh&ocirc;ne-Alpes, France</span></a>
+<button type="button" class="search-results-list__save-job-btn js-save-job-btn" data-job-id="601"><span class="sr-only">Save</span></button></li>
+<li class="search-results-list__item ">
+<a class="search-results-list__job-link" href="/en/job/turin/buyer/3456/602" data-job-id="602">
+<h3 class="search-results-list__job-title">Buyer</h3></a></li>
+</ul>`;
+  const mjRows = parseResults(MODERN_JOB_LOCATION, 'https://careers.acme.example');
+  if (mjRows.length === 2 && mjRows[0].title === 'Data Manager' && mjRows[1].title === 'Buyer') pass('radancy.parseResults() keeps the location span out of a modern title');
+  else fail(`radancy.parseResults() modern job-location titles = ${JSON.stringify(mjRows.map(r => r.title))}`);
+  if (mjRows[0]?.location === 'Lyon, Auvergne-Rhône-Alpes, France' && mjRows[1]?.location === '') pass('radancy.parseResults() reads a modern row’s <span class="job-location"> and leaves a location-less row empty');
+  else fail(`radancy.parseResults() modern job-location locations = ${JSON.stringify(mjRows.map(r => r.location))}`);
+
   // A <p class="job-location"> and a row with no location at all: the sibling
   // fallback must read the former and must not invent a location for the latter
   // (nor borrow the next row's).
