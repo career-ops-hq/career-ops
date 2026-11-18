@@ -17,51 +17,28 @@ location_filter:
 
 ### Poland-first, EU-remote example
 
-For a Poland-based search that accepts Warsaw/Poland office roles and remote
-roles explicitly open to EU-based applicants, use a narrower policy:
+For a Poland-based search that accepts office roles in selected Polish cities
+and remote roles the candidate can work from Poland, use a narrower policy:
 
 ```yaml
 location_filter:
-  allow: [Warsaw, Poland, Remote, EU, European Union]
+  allow: [Warsaw, Warszawa, Kraków, Wrocław, Gdańsk, Poznań, Łódź, Poland, Remote, EU, European Union]
   workplace_policy:
-    onsite_locations: [Warsaw]
+    onsite_locations: [Warsaw, Warszawa, Kraków, Wrocław, Gdańsk, Poznań, Łódź]
     onsite_countries: [Poland]
-    remote_countries:
-      - Poland
-      - Austria
-      - Belgium
-      - Bulgaria
-      - Croatia
-      - Cyprus
-      - Czech Republic
-      - Denmark
-      - Estonia
-      - Finland
-      - France
-      - Germany
-      - Greece
-      - Hungary
-      - Ireland
-      - Italy
-      - Latvia
-      - Lithuania
-      - Luxembourg
-      - Malta
-      - Netherlands
-      - Portugal
-      - Romania
-      - Slovakia
-      - Slovenia
-      - Spain
-      - Sweden
+    remote_countries: [Poland]
     remote_regions: [European Union, EU]
 ```
 
-This keeps office/hybrid roles in Warsaw and permits remote roles whose
-description or structured eligibility identifies an EU country or the EU.
-For relocation to other EU offices, add those destinations to both `allow` and
-`onsite_countries`. If you want all of Europe rather than the EU, add the
-appropriate countries or region explicitly; the scopes are not interchangeable.
+This keeps office/hybrid roles in the listed Polish cities and permits remote
+roles whose description or structured eligibility identifies Poland or a
+generic EU region. `remote_countries: [Poland]` does not allow a remote role
+restricted to another country, such as Germany.
+
+For relocation to another EU office, add each destination city to both `allow`
+and `onsite_locations`, and its country to `onsite_countries`. If you want all
+of Europe rather than the EU, add the appropriate countries or region
+explicitly; the scopes are not interchangeable.
 
 Europe, the EU and the EEA are different scopes. Add EU/EEA region labels only
 when they cover your allowed remote country; these labels do not establish work

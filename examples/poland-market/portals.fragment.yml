@@ -1,38 +1,11 @@
-# Warsaw/Poland office plus remote roles explicitly open to EU applicants.
+# Polish-city office roles plus remote roles the candidate can work from Poland.
 # Merge into user-owned portals.yml; keep your candidate-specific filters.
 location_filter:
-  allow: [Warsaw, Poland, Remote, EU, European Union]
+  allow: [Warsaw, Warszawa, Kraków, Wrocław, Gdańsk, Poznań, Łódź, Poland, Remote, EU, European Union]
   workplace_policy:
-    onsite_locations: [Warsaw]
+    onsite_locations: [Warsaw, Warszawa, Kraków, Wrocław, Gdańsk, Poznań, Łódź]
     onsite_countries: [Poland]
-    remote_countries:
-      - Austria
-      - Belgium
-      - Bulgaria
-      - Croatia
-      - Cyprus
-      - Czech Republic
-      - Denmark
-      - Estonia
-      - Finland
-      - France
-      - Germany
-      - Greece
-      - Hungary
-      - Ireland
-      - Italy
-      - Latvia
-      - Lithuania
-      - Luxembourg
-      - Malta
-      - Netherlands
-      - Poland
-      - Portugal
-      - Romania
-      - Slovakia
-      - Slovenia
-      - Spain
-      - Sweden
+    remote_countries: [Poland]
     remote_regions: [European Union, EU]
 
 job_boards:

@@ -33,12 +33,16 @@ board's bot challenge to create an integration.
 
 ## Poland-first location
 
-For Warsaw office roles and remote roles explicitly eligible for EU applicants,
-use the [Poland-first, EU-remote location policy](WORKPLACE_GEOGRAPHY.md#poland-first-eu-remote-example).
-The copyable example is city-specific: add each desired city to both `allow`
-and `onsite_locations`, and add its country to `onsite_countries` for office or
-hybrid work. This also lets EU-based users add their own local office locations.
-A remote-region label is not proof of work authorization.
+For office roles in selected Polish cities and remote roles the candidate can
+work from Poland, use the
+[Poland-first location policy](WORKPLACE_GEOGRAPHY.md#poland-first-eu-remote-example).
+The copyable example lists Polish cities in both `allow` and `onsite_locations`,
+with Poland in `onsite_countries` and `remote_countries`. EU region labels can
+match a generic EU-eligible remote posting when Poland is not named, but a role
+restricted to another country is not allowed. To add an EU office for
+relocation, add each destination city to `allow` and `onsite_locations`, and
+its country to `onsite_countries`. A remote-region label is not proof of work
+authorization.
 
 ## Compensation details
 
