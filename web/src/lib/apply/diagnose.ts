@@ -4,6 +4,7 @@ import type { ApplyIssue } from "./issue";
 import { pickComboboxOption } from "./option-match.mjs";
 import { checkboxSelections } from "./checkbox-options.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
+import { isApplicationHref } from "./apply-link.mjs";
 
 export type { ApplyIssue };
 
@@ -186,7 +187,7 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
     const atsLink = page.locator('a[href*="ashbyhq"], a[href*="greenhouse"], a[href*="lever.co"], a[href*="smartrecruiters"], a[href*="workable"], a[href*="recruitee"], a[href*="bamboohr"], a[href*="jobvite"], a[href*="teamtailor"], a[href*="myworkdayjobs"], a[href*="myworkdaysite"], a[href*="icims.com"], a[href*="ultipro.com"], a[href*="ultipro.ca"], a[href*="/apply"], a[href*="/application"]').first();
     if (await atsLink.count().catch(() => 0)) {
       const href = await atsLink.getAttribute("href").catch(() => null);
-      if (href && /^https?:\/\//i.test(href) && !/submit/i.test(href)) {
+      if (href && isApplicationHref(href)) {
         const blocked = await blockedTriggerHref(page, href);
         if (blocked) return { blocked };
         const before = urlSnapshot(page);

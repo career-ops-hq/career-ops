@@ -1,0 +1,134 @@
+// Recruitee posting pages ship the whole application form inside a hidden
+// "Apply" tab panel. extractForm used to keep the hidden radio and checkbox
+// inputs (it exempts them from the visibility check because styled controls
+// hide their real input) and drop every hidden text field. Three hidden fields
+// then passed as "the form", the Apply tab was never opened, and the fill
+// could not reach them. When the field list is empty instead, tryApplyTrigger
+// must not leave for the "Powered by Recruitee" logo link (a vendor homepage).
+//
+// Uses real headless Google Chrome with every network request aborted; skips
+// where Chrome cannot start, except on CI.
+// Run (from web/): node --experimental-strip-types --test tests/lib/apply-hidden-tab-form.test.mjs
+
+import assert from "node:assert/strict";
+import { after, before, test } from "node:test";
+import { chromium } from "playwright-core";
+import "../helpers/web-ts-alias-loader.mjs";
+
+const { extractForm } = await import("../../src/lib/apply/extract.ts");
+const { tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
+
+// Fictional employer; the markup mirrors Recruitee's tabs: a tab panel with
+// the `hidden` attribute holds the form until the Apply control is clicked.
+const RECRUITEE_LIKE = `<!doctype html><html><head><title>Acme - Android Developer</title></head><body>
+  <div role="tablist">
+    <button role="tab" aria-selected="true">Job description</button>
+    <button role="tab" aria-selected="false" aria-controls="panel-apply">Apply</button>
+  </div>
+  <div role="tabpanel"><p>About the role.</p><button type="button" id="cta">Apply</button></div>
+  <div role="tabpanel" id="panel-apply" hidden>
+    <form>
+      <label for="name">Full name *</label><input id="name" name="candidate.name" required>
+      <label for="email">Email address *</label><input id="email" type="email" name="candidate.email" required>
+      <label for="cv">CV or resume *</label><input id="cv" type="file" name="candidate.cv" required>
+      <fieldset><legend>Are you based in the Netherlands?</legend>
+        <label><input type="radio" name="q1" value="yes" required>Yes</label>
+        <label><input type="radio" name="q1" value="no">No</label>
+      </fieldset>
+      <label for="why">Why this role?</label><textarea id="why" name="q2" required></textarea>
+      <label><input type="checkbox" name="consent" required>I consent to the processing of my data</label>
+    </form>
+  </div>
+  <footer><a href="https://recruitee.com/"><img alt=""></a></footer>
+  <script>
+    document.getElementById("cta").addEventListener("click", () => {
+      document.getElementById("panel-apply").hidden = false;
+    });
+  </script>
+</body></html>`;
+
+// Web CI (ubuntu-latest) ships Google Chrome, so a launch failure there is a
+// real failure. Elsewhere a machine without Chrome skips these tests.
+let browser;
+let launchError;
+before(async () => {
+  try {
+    browser = await chromium.launch({ channel: "chrome", headless: true });
+  } catch (e) {
+    launchError = e;
+  }
+});
+after(async () => {
+  await browser?.close();
+});
+
+async function fixturePage(t, html) {
+  if (!browser) {
+    if (process.env.CI) throw launchError;
+    t.skip("Google Chrome is not available");
+    return null;
+  }
+  const context = await browser.newContext();
+  const page = await context.newPage();
+  const requested = [];
+  await page.route("**/*", (route) => {
+    requested.push(route.request().url());
+    return route.abort();
+  });
+  await page.setContent(html);
+  return { page, requested, close: () => context.close() };
+}
+
+test("a form inside a hidden tab panel yields no fields, not just its radios and checkboxes", async (t) => {
+  const fx = await fixturePage(t, RECRUITEE_LIKE);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields, []);
+  } finally {
+    await close();
+  }
+});
+
+test("a styled checkbox whose own input is display:none is still extracted", async (t) => {
+  const html = `<!doctype html><form>
+    <label for="email">Email</label><input id="email" type="email">
+    <label class="box"><input type="checkbox" name="agree" style="display:none"><span>Keep me informed</span></label>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => f.type), ["email", "checkbox"]);
+  } finally {
+    await close();
+  }
+});
+
+test("tryApplyTrigger clicks Apply instead of following a vendor homepage link", async (t) => {
+  const fx = await fixturePage(t, RECRUITEE_LIKE);
+  if (!fx) return;
+  const { page, requested, close } = fx;
+  try {
+    const acted = await tryApplyTrigger(page);
+    assert.ok(acted && typeof acted === "object" && "followed" in acted, "the Apply control should have been used");
+    assert.deepEqual(requested.filter((u) => u.includes("recruitee.com")), []);
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => f.type), ["text", "email", "file", "radio", "textarea", "checkbox"]);
+  } finally {
+    await close();
+  }
+});
+
+test("isApplicationHref accepts an application URL and refuses a vendor homepage", async () => {
+  const { isApplicationHref } = await import("../../src/lib/apply/apply-link.mjs");
+  assert.equal(isApplicationHref("https://recruitee.com/"), false);
+  assert.equal(isApplicationHref("https://www.greenhouse.io"), false);
+  assert.equal(isApplicationHref("https://boards.greenhouse.io/acme/jobs/123"), true);
+  assert.equal(isApplicationHref("https://acme.recruitee.com/o/android-developer/c/new"), true);
+  assert.equal(isApplicationHref("https://jobs.ashbyhq.com/acme/123/application/submit"), false);
+  assert.equal(isApplicationHref("/apply"), false);
+  assert.equal(isApplicationHref(null), false);
+});
