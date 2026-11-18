@@ -148,6 +148,24 @@ try {
   if (probe.calls === 1 && probed.result.length === 30 && probed.lines.length === 0) pass('ctx.maxPages: 1 makes exactly one list request and warns nothing');
   else fail(`probe made ${probe.calls} calls, ${probed.result.length} jobs, stderr ${JSON.stringify(probed.lines)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so nothing warns and nothing is marked (#7180).
+  const probeAtCap = fullBoard({ maxPages: 1 });
+  const probedAtCap = await captureStderr(() => ibm.fetch({ name: 'IBM', max_pages: 1 }, probeAtCap.ctx));
+  if (probeAtCap.calls === 1 && probedAtCap.result.length === 30 && probedAtCap.lines.length === 0 && probedAtCap.result.truncated === undefined) {
+    pass('a probe on a max_pages: 1 entry warns nothing and leaves the board unmarked');
+  } else {
+    fail(`probe at max_pages: 1 made ${probeAtCap.calls} calls, truncated=${JSON.stringify(probedAtCap.result.truncated)}, stderr ${JSON.stringify(probedAtCap.lines)}`);
+  }
+  // The same entry in a real scan is still cut by its own cap.
+  const scanAtCap = fullBoard();
+  const scannedAtCap = await captureStderr(() => ibm.fetch({ name: 'IBM', max_pages: 1 }, scanAtCap.ctx));
+  if (scannedAtCap.result.truncated?.reason === 'page-cap' && scannedAtCap.lines.some((l) => /raise max_pages/.test(l))) {
+    pass('a real scan of a max_pages: 1 entry still warns and marks page-cap');
+  } else {
+    fail(`scan at max_pages: 1: truncated=${JSON.stringify(scannedAtCap.result.truncated)}, stderr ${JSON.stringify(scannedAtCap.lines)}`);
+  }
+
   // The entry's own cap on a full board: stops there and says to raise it.
   const capped = fullBoard();
   const cappedRun = await captureStderr(() => ibm.fetch({ name: 'IBM', max_pages: 3 }, capped.ctx));
