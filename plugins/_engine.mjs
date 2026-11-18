@@ -219,7 +219,7 @@ export function warnConfigLeftInCodeRoot(root, dataRoot) {
     } catch {}
     if (hasPlugins) {
       const targetLocal = path.join(dataRoot, 'plugins.local');
-      console.warn(`⚠️  plugins.local is in the code folder, not the data folder, so plugins do not read it: move ${legacyLocal} to ${targetLocal}`);
+      console.warn(`⚠️  plugins.local is in the code folder, not the data folder, so plugins do not read it: move each plugin folder inside ${legacyLocal} into ${targetLocal} (if ${targetLocal} already exists, move the folders themselves, not the whole plugins.local folder, and do not overwrite a plugin of the same name)`);
     }
   }
 }
@@ -706,6 +706,8 @@ export function pluginSource(manifest, root) {
   return 'local';
 }
 
+const legacyLockWarned = new Set();
+
 /**
  * Integrity gate run on an ENABLED plugin before importing it (the rug-pull
  * defense). Returns { load }. Re-pins the lock on the benign cases (silent).
@@ -721,6 +723,12 @@ export function lockGate(manifest, root, dataRoot = root, io = {}) {
   // falls back to it, so the drift check runs against the same pins as when
   // no migration existed.
   try { migrateLegacyLock(dataRoot, root, io); } catch { /* best-effort write; the fallback read still applies */ }
+  // The migration did not land and the gate is about to read the legacy lock
+  // out of the replaceable code folder. Say so once, so the user keeps a copy.
+  if (path.resolve(root) !== path.resolve(dataRoot) && !existsSync(path.join(dataRoot, 'plugins.lock')) && existsSync(path.join(root, 'plugins.lock')) && !legacyLockWarned.has(root)) {
+    legacyLockWarned.add(root);
+    console.warn(`⚠️  plugins.lock could not be copied to ${dataRoot}, so the pins are still read from ${root}. Keep a copy of ${path.join(root, 'plugins.lock')} before updating the code folder.`);
+  }
   let lock;
   try {
     lock = readLockForUpdate(dataRoot, root);
