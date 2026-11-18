@@ -736,8 +736,22 @@ function cmdRemove(args) {
   // path segment and passes; the lookup below turns it into the manifest id.
   if (!ID_RE.test(token)) { console.error(`✗ Invalid plugin id ${JSON.stringify(token)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
   const resolved = resolvePluginArg(token);
-  if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
-  const id = resolved.manifest.id;
+  // A partial folder delete can take manifest.json before failing on another
+  // child. The leftover then has no manifest to resolve, so a remove retry
+  // exited "Unknown plugin" while the folder stayed, and add refused the
+  // existing destination. The token already passed ID_RE, so it is one name
+  // segment: a surviving directory at plugins.local/<token> is a validated
+  // data-root local-plugin leftover that remove may finish cleaning up.
+  let id = resolved.manifest?.id;
+  if (!id) {
+    const leftover = path.join(DATA_ROOT, 'plugins.local', token);
+    if (existsSync(leftover) && statSync(leftover).isDirectory()) {
+      id = token;
+    } else {
+      console.error(resolved.message);
+      process.exit(1);
+    }
+  }
   if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
   // The lock entry goes before the folder. With the folder deleted first, a
   // torn lock or a failed lock save left a pin for a plugin whose manifest was
