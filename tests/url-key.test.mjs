@@ -288,6 +288,19 @@ ok('Jobicy: the leading number of /jobs/{id}-{slug} is the posting id', () => {
   assert.equal(aggregatorPostingId('https://jobicy.com/jobs/senior-ai-engineer'), null);
   assert.equal(aggregatorPostingId('https://jobicy.com/jobs/161691'), null);
 });
+ok('Wellfound: the leading number of /jobs/{id}-{slug} is the posting id', () => {
+  // providers/wellfound.mjs builds every job URL this way from the listing id.
+  assert.deepEqual(aggregatorPostingId('https://wellfound.com/jobs/4881145-qa-engineer'),
+    { domain: 'wellfound.com', id: '4881145' });
+  // Another slug on the same id is the same posting; another id is another one.
+  assert.deepEqual(aggregatorPostingId('https://www.wellfound.com/jobs/4881145-senior-qa-engineer/'),
+    { domain: 'wellfound.com', id: '4881145' });
+  assert.notEqual(aggregatorPostingId('https://wellfound.com/jobs/4881146-qa-engineer').id, '4881145');
+  // A bare id answers 404, and the company-path form only redirects: UNKNOWN.
+  assert.equal(aggregatorPostingId('https://wellfound.com/jobs/4881145'), null);
+  assert.equal(aggregatorPostingId('https://wellfound.com/company/acme/jobs/4881145-qa-engineer'), null);
+  assert.equal(aggregatorPostingId('https://wellfound.com/company/acme/jobs'), null);
+});
 ok('the updater ships himalayas-posting.mjs, which url-key.mjs now imports', () => {
   // url-key.mjs is a system file: an upgraded install whose updater had no entry
   // for the resolver would check out a url-key.mjs that cannot load.
