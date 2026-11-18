@@ -299,6 +299,40 @@ test('lockGate keeps the plugin unloaded through legacy-lock migration when the 
   }
 });
 
+test('migrateLegacyLock refuses a legacy lock whose plugins map is an array', () => {
+  const codeRoot = makeSandbox('co-test-code-arr-');
+  const dataRoot = makeSandbox('co-test-data-arr-');
+  try {
+    const arr = JSON.stringify({ lockfileVersion: 1, plugins: [] });
+    writeFileSync(join(codeRoot, 'plugins.lock'), arr);
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot), false);
+    assert.equal(existsSync(join(dataRoot, 'plugins.lock')), false, 'an invalid plugins map must not be published');
+    assert.equal(readFileSync(join(codeRoot, 'plugins.lock'), 'utf8'), arr);
+    writeFileSync(join(codeRoot, 'plugins.lock'), '[]');
+    assert.equal(migrateLegacyLock(dataRoot, codeRoot), false);
+  } finally {
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('the legacy lock is not used when the data-root lock cannot be checked', { skip: process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0) }, () => {
+  const codeRoot = makeSandbox('co-test-code-eacces-');
+  const parent = makeSandbox('co-test-data-eacces-');
+  const dataRoot = join(parent, 'data');
+  try {
+    mkdirSync(dataRoot);
+    writeFileSync(join(codeRoot, 'plugins.lock'), JSON.stringify({ lockfileVersion: 1, plugins: { legacy: { version: '1.0.0' } } }));
+    chmodSync(dataRoot, 0o000);
+    assert.deepEqual(readLock(dataRoot, codeRoot).plugins, {}, 'readLock must not fall back to the legacy lock');
+    assert.throws(() => writeLockEntry(dataRoot, 'x', {}, codeRoot), /could not be checked/);
+  } finally {
+    chmodSync(dataRoot, 0o755);
+    rmSync(codeRoot, { recursive: true, force: true });
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test('lockGate migrates a valid legacy lock and still loads', () => {
   const codeRoot = makeSandbox('co-test-code-ok-legacy-');
   const dataRoot = makeSandbox('co-test-data-ok-legacy-');
