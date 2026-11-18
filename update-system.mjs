@@ -3264,7 +3264,9 @@ export function revertPaths(paths, protectedPaths = new Set(), ctx = {}) {
     if (kept.includes(pathspec)) continue;
     if (kept.length === 0 || headHasFilesBesides(pathspec, kept, runGit)) {
       try {
-        runGit('checkout', 'HEAD', '--', p, ...kept.map((file) => `${EXCLUDE_PATHSPEC_PREFIX}${file}`));
+        // literal: a kept file is a real filename, and one like `docs/[x].md`
+        // read as a glob would exclude the wrong files and reset this one.
+        runGit('checkout', 'HEAD', '--', p, ...kept.map((file) => `${LITERAL_EXCLUDE_PATHSPEC_PREFIX}${file}`));
       } catch (err) {
         // Only remove if the path genuinely doesn't exist in HEAD.
         let existsInHead = true;
@@ -3446,14 +3448,21 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
       .map((entry) => entry.path),
   );
   const state = new Map();
-  // A path the user had deleted (staged or not) has no worktree file to back
-  // up and, when staged, no index entry to record. Remember that it was
-  // absent, so a checkout that recreated it can be undone as a deletion
+  // The index and the worktree are recorded apart, because a deletion can be
+  // in either one alone:
+  // - `D ` + `?? path`: the entry was removed from the index and a new file
+  //   put on disk. The index has no entry; the file stays (deleted: false).
+  // - `MD` / `AD`: an edit was staged, then the file deleted. The staged blob
+  //   is recorded below; the file is absent (deleted: true).
+  // - ` D`: an unstaged deletion. The index is HEAD's; the file is absent.
+  // A checkout that recreated an absent file is then undone as a deletion
   // instead of being reset to HEAD's entry (which would resurrect the file).
+  const untracked = new Set(statusEntries.filter((entry) => entry.code === '??').map((entry) => entry.path));
   for (const entry of statusEntries) {
-    if (entry.code[0] === 'D' || entry.code[1] === 'D') {
-      state.set(entry.path, { deleted: true, stagedDeletion: entry.code[0] === 'D' });
-      staged.delete(entry.path);
+    const stagedDeletion = entry.code[0] === 'D';
+    if (stagedDeletion || entry.code[1] === 'D') {
+      state.set(entry.path, { deleted: !untracked.has(entry.path), stagedDeletion });
+      if (stagedDeletion) staged.delete(entry.path);
     }
   }
   if (staged.size === 0) return state;
@@ -3464,7 +3473,7 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
     const tab = record.indexOf('\t');
     const [mode, sha] = record.slice(0, tab).split(' ');
     const path = record.slice(tab + 1);
-    if (staged.has(path)) state.set(path, { mode, sha });
+    if (staged.has(path)) state.set(path, { ...state.get(path), mode, sha });
   }
   return state;
 }
@@ -3550,15 +3559,21 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
   for (const file of writtenDirty) {
     const staged = state.initialIndexState.get(file);
     try {
-      if (staged?.deleted) {
-        // The file was deleted before the update. Put the index back (a staged
-        // deletion drops the entry, an unstaged one returns to HEAD's) and
-        // remove the file the checkout recreated.
-        if (staged.stagedDeletion) runGit('--literal-pathspecs', 'rm', '--cached', '-q', '--ignore-unmatch', '--', file);
-        else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
-        rmSync(join(root, ...file.split('/')), { force: true });
-      } else if (staged) runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
+      // The file the checkout recreated is removed below, and a symlinked
+      // parent would point that delete outside the worktree: refuse it here,
+      // before the index changes, as restoreBytesWithoutFollowingLinks does.
+      const linked = staged?.deleted ? symlinkedAncestor(file, root) : null;
+      if (linked) throw new Error(`${linked} is a symlink; the recreated file was left in place`);
+      // The index first, independently of what is on disk: a staged deletion
+      // had no entry (update-index removes it whatever the file holds, where
+      // `git rm --cached` refuses content that differs from HEAD and the
+      // index), a staged edit had its recorded blob, anything else HEAD's.
+      if (staged?.stagedDeletion) runGit('update-index', '--force-remove', '--', file);
+      else if (staged?.sha) runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
       else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
+      // Then the worktree: a file absent before the update is removed again.
+      // An untracked replacement (deleted: false) was put back from its .bak.
+      if (staged?.deleted) rmSync(join(root, ...file.split('/')), { force: true });
     } catch (err) {
       unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
     }
@@ -3961,6 +3976,7 @@ function rejectDirectories(paths, root) {
 // place that has to recognise such an entry again — the index-commit guard —
 // reads the prefix from here rather than re-spelling it.
 const EXCLUDE_PATHSPEC_PREFIX = ':(exclude)';
+const LITERAL_EXCLUDE_PATHSPEC_PREFIX = ':(exclude,literal)';
 
 /**
  * The concrete FILE list to stage and scope-commit for an update.
@@ -5646,6 +5662,44 @@ async function apply() {
       console.log('');
     }
 
+    // Read the active template defaults BEFORE checkout. A configured variant
+    // can be present upstream under the same filename; in that case the
+    // generic locallyModifiedSystemFiles() baseline check may no longer flag
+    // it, but checkout would still overwrite the user's local content.
+    // This runs before the snapshot below, not after it: these are the last
+    // waits before checkout, and a file staged during them must be in the
+    // snapshot and the backups that a failed update restores from.
+    let dataRoot = ROOT;
+    let profilePaths = [];
+    try {
+      const { getCareerOpsRoot, getProfilePath } = await import('./path-resolver.mjs');
+      dataRoot = getCareerOpsRoot();
+      // The override's profile and the data root's own: the templates directory
+      // is the data root's, so a variant either one selects must survive.
+      profilePaths = [getProfilePath(), getProfilePath(dataRoot)];
+    } catch {
+      // Very old targets may not have path-resolver.mjs yet; ROOT is the
+      // historical data root and remains the safe compatibility fallback.
+    }
+    let configuredVariantRemoteFiles = [];
+    try {
+      configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', targetCommit, '--', 'templates')
+        .split('\n').map((file) => file.trim()).filter(Boolean);
+    } catch {
+      // If the upstream tree cannot be read, the checkout below reports the
+      // real failure; do not infer a preservation decision from an empty tree.
+    }
+    const configuredSnapshot = await snapshotConfiguredTemplateVariantsAcrossProfiles({
+      dataRoot,
+      profilePaths,
+      remoteFiles: configuredVariantRemoteFiles,
+      readRemoteContent: (file) => gitShowRaw(`${targetCommit}:${file}`),
+    });
+    const { configuredVariants } = configuredSnapshot;
+    for (const warning of configuredSnapshot.warnings) console.log(`Warning: ${warning}`);
+    const configuredReferencePaths = configuredSnapshot.localFiles;
+    const configuredAtRisk = configuredSnapshot.preservedPaths;
+
     // 3b. Local edits to system files (#2337). The checkout is a raw overwrite,
     // so anything this install fixed locally and upstream has not adopted is
     // about to vanish silently. Default is to KEEP the local version and say
@@ -5682,40 +5736,6 @@ async function apply() {
       }
       console.log('');
     }
-    // Read the active template defaults BEFORE checkout. A configured variant
-    // can be present upstream under the same filename; in that case the
-    // generic locallyModifiedSystemFiles() baseline check may no longer flag
-    // it, but checkout would still overwrite the user's local content.
-    let dataRoot = ROOT;
-    let profilePaths = [];
-    try {
-      const { getCareerOpsRoot, getProfilePath } = await import('./path-resolver.mjs');
-      dataRoot = getCareerOpsRoot();
-      // The override's profile and the data root's own: the templates directory
-      // is the data root's, so a variant either one selects must survive.
-      profilePaths = [getProfilePath(), getProfilePath(dataRoot)];
-    } catch {
-      // Very old targets may not have path-resolver.mjs yet; ROOT is the
-      // historical data root and remains the safe compatibility fallback.
-    }
-    let configuredVariantRemoteFiles = [];
-    try {
-      configuredVariantRemoteFiles = git('ls-tree', '-r', '--name-only', targetCommit, '--', 'templates')
-        .split('\n').map((file) => file.trim()).filter(Boolean);
-    } catch {
-      // If the upstream tree cannot be read, the checkout below reports the
-      // real failure; do not infer a preservation decision from an empty tree.
-    }
-    const configuredSnapshot = await snapshotConfiguredTemplateVariantsAcrossProfiles({
-      dataRoot,
-      profilePaths,
-      remoteFiles: configuredVariantRemoteFiles,
-      readRemoteContent: (file) => gitShowRaw(`${targetCommit}:${file}`),
-    });
-    const { configuredVariants } = configuredSnapshot;
-    for (const warning of configuredSnapshot.warnings) console.log(`Warning: ${warning}`);
-    const configuredReferencePaths = configuredSnapshot.localFiles;
-    const configuredAtRisk = configuredSnapshot.preservedPaths;
     if (configuredAtRisk.length > 0) {
       preservedPaths.push(...configuredAtRisk.filter((file) => !preservedPaths.includes(file)));
       console.log(`Keeping configured template variant(s) with local content: ${configuredAtRisk.join(', ')}`);

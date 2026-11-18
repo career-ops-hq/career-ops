@@ -771,7 +771,18 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
 }
 
 // gitStatusEntries reads untrimmed: g() trims, which would eat a leading space of the first ` M` entry.
-const entriesOf = (dir) => gitStatusEntries(dir);
+// It inherits process.env, though, where g() does not: an inherited
+// GIT_INDEX_FILE would read status from another index than the blobs g()
+// compares. Clear it for this read only; other suites rely on process.env.
+const entriesOf = (dir) => {
+  const inherited = process.env.GIT_INDEX_FILE;
+  delete process.env.GIT_INDEX_FILE;
+  try {
+    return gitStatusEntries(dir);
+  } finally {
+    if (inherited !== undefined) process.env.GIT_INDEX_FILE = inherited;
+  }
+};
 const rawOf = (g) => (...a) => g(...a);
 const stateOf = (statusEntries) => new Set(statusEntries.map((entry) => entry.path));
 
@@ -980,6 +991,154 @@ const stateOf = (statusEntries) => new Set(statusEntries.map((entry) => entry.pa
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20d. bootstrap shape with an UNSTAGED updater edit: the parent's catch
+//    order leaves no target blob staged over it. The index is HEAD's again,
+//    and the edit is back on disk, still unstaged.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'unstaged updater edit\n');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    const headBlob = g('rev-parse', 'HEAD:sys/a.md');
+    const bootstrapBackups = backupSystemFiles(locallyModifiedSystemFiles(['sys/a.md'], target, ctx), ctx).filter((r) => !r.error);
+    g('checkout', target, '--', 'sys/a.md');
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/a.md'], initialStatusPaths, { what: 'updater file(s) loaded to run the new version', exclude: [...initialStatusPaths], ...ctx }));
+    const putBackFailed = restoreBootstrapBackups(bootstrapBackups, ctx);
+    const unrestored = restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState }, { ...ctx });
+    if (bootstrapBackups.length === 1 && putBackFailed.length === 0 && unrestored.length === 0 &&
+        read(dir, 'sys/a.md') === 'unstaged updater edit\n' && g('rev-parse', ':sys/a.md') === headBlob) {
+      pass('an unstaged updater edit comes back on disk with HEAD\'s index entry after a failed bootstrap');
+    } else {
+      fail(`unstaged bootstrap restore wrong: backups=${bootstrapBackups.length} a=${JSON.stringify(read(dir, 'sys/a.md'))} index=${g('rev-parse', ':sys/a.md')} want=${headBlob} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20e. an edit staged and then deleted from disk (`MD`) gets its staged
+//    blob back, and the file the checkout recreated is removed again.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'staged edit\n');
+    g('add', 'sys/a.md');
+    const stagedBlob = g('rev-parse', ':sys/a.md');
+    rmSync(join(dir, 'sys/a.md'));
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    g('checkout', target, '--', 'sys/a.md');
+    const unrestored = restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState }, { ...ctx });
+    if (unrestored.length === 0 && !existsSync(join(dir, 'sys/a.md')) && g('rev-parse', ':sys/a.md') === stagedBlob) {
+      pass('a staged edit deleted from disk keeps its staged blob and stays deleted');
+    } else {
+      fail(`MD restore wrong: exists=${existsSync(join(dir, 'sys/a.md'))} index=${g('rev-parse', ':sys/a.md')} want=${stagedBlob} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20f. a staged deletion with an UNTRACKED replacement on disk (`D ` plus
+//    `??`): the index entry stays removed and the replacement stays, whether
+//    it matches the target (no .bak, the checkout wrote the same bytes) or
+//    differs from HEAD and the target (where `git rm --cached` refuses).
+for (const [label, content, withBak] of [['matching the target', 'a v2\n', false], ['of its own', 'my new file\n', true]]) {
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    g('rm', '-q', '--cached', 'sys/a.md');
+    write(dir, 'sys/a.md', content);
+    if (withBak) write(dir, 'sys/a.md.bak', content);
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    g('checkout', target, '--', 'sys/a.md');
+    const backupByFile = new Map(withBak ? [['sys/a.md', 'sys/a.md.bak']] : []);
+    const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile, preservedSet: new Set() }, { ...ctx }));
+    const inIndex = g('ls-files', '--', 'sys/a.md') !== '';
+    const kept = existsSync(join(dir, 'sys/a.md')) ? read(dir, 'sys/a.md') : null;
+    if (unrestored.length === 0 && !inIndex && kept === content) {
+      pass(`a staged deletion keeps its untracked replacement ${label}`);
+    } else {
+      fail(`staged deletion + replacement ${label} wrong: inIndex=${inIndex} content=${JSON.stringify(kept)} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20g. the staged-deletion restore refuses a SYMLINKED PARENT: removing the
+//    recreated file through it would delete the link's referent.
+{
+  const { dir, g, ctx } = makeRepo();
+  try {
+    let canLink = true;
+    try { symlinkSync('sys/dir', join(dir, 'probe-dir-link'), 'dir'); } catch { canLink = false; }
+    rmSync(join(dir, 'probe-dir-link'), { force: true });
+    if (!canLink) {
+      pass('staged-deletion symlinked-parent check skipped: this filesystem cannot create symlinks');
+    } else {
+      g('rm', '-q', 'sys/dir/old.md');
+      const startEntries = entriesOf(dir);
+      const initialStatusPaths = stateOf(startEntries);
+      const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+      // A failed checkout left a link where the directory was.
+      rmSync(join(dir, 'sys/dir'), { recursive: true, force: true });
+      write(dir, 'elsewhere/old.md', 'outside original\n');
+      symlinkSync(join(dir, 'elsewhere'), join(dir, 'sys/dir'), 'dir');
+      const { result: unrestored } = await captureConsoleErrors(() => restoreWrittenDirtyState(['sys/'], { initialStatusPaths, initialIndexState }, { ...ctx }));
+      if (unrestored.length === 1 && read(dir, 'elsewhere/old.md') === 'outside original\n') {
+        pass('a staged deletion under a symlinked parent is refused and the referent is untouched');
+      } else {
+        fail(`staged deletion through a symlinked parent: unrestored=${JSON.stringify(unrestored)} referent=${existsSync(join(dir, 'elsewhere/old.md'))}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20h. the HEAD restore excludes a kept file LITERALLY: `sys/[x].md` read
+//    as a glob would exclude `sys/x.md` instead and reset the kept edit.
+{
+  const { dir, g, ctx } = makeRepo();
+  try {
+    write(dir, 'sys/[x].md', 'bracket v1\n');
+    write(dir, 'sys/x.md', 'x v1\n');
+    g('add', '-A');
+    g('commit', '-qm', 'bracket names');
+    write(dir, 'sys/[x].md', 'my kept edit\n');
+    const initialStatusPaths = stateOf(entriesOf(dir));
+    write(dir, 'sys/x.md', 'written by the update\n');
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/'], initialStatusPaths, { what: 'system file(s)', exclude: ['sys/[x].md'], ...ctx }));
+    if (read(dir, 'sys/[x].md') === 'my kept edit\n' && read(dir, 'sys/x.md') === 'x v1\n') {
+      pass('the HEAD restore keeps a bracketed kept file and still restores its glob look-alike');
+    } else {
+      fail(`literal exclusion wrong: kept=${JSON.stringify(read(dir, 'sys/[x].md'))} lookalike=${JSON.stringify(read(dir, 'sys/x.md'))}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20i. the main path re-takes its snapshot after its last waits: the
+//    template-variant loading is awaited first, so a file staged during it is
+//    in the snapshot and the backups that a failed update restores from.
+{
+  const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const templates = source.indexOf('await snapshotConfiguredTemplateVariantsAcrossProfiles(');
+  const refresh = source.indexOf('refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState);', templates);
+  const backups = source.indexOf('const atRisk = locallyModifiedSystemFiles(updatePaths, targetCommit);');
+  if (templates !== -1 && refresh > templates && backups > refresh) {
+    pass('the snapshot and the system-file backups come after the template-variant waits');
+  } else {
+    fail(`write boundary out of order: templates=${templates} refresh=${refresh} backups=${backups}`);
   }
 }
 
