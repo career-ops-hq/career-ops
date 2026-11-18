@@ -329,6 +329,22 @@ try {
     fail('dover.detect() lost the <Company>/careers/<client-id> form');
   }
 
+  // Overlap: a company literally named "jobs" publishes /jobs/careers/<uuid>. That is the
+  // <Company>/careers/<uuid> form, not the /jobs/<slug> form with slug "careers".
+  const overlap = resolveBoard({ careers_url: `https://app.dover.com/jobs/careers/${BOARD}` });
+  if (overlap?.board === BOARD && overlap?.slug === null && overlap?.company === 'jobs'
+      && dover.detect({ name: 'Jobs Co', careers_url: `https://app.dover.com/jobs/careers/${BOARD}` })?.url === API0) {
+    pass('dover.detect() reads /jobs/careers/<uuid> as company "jobs" with a board uuid, not slug "careers"');
+  } else {
+    fail(`dover /jobs/careers/<uuid> overlap = ${JSON.stringify(overlap)}`);
+  }
+  // A real slug named "careers" (no uuid after it) is still the slug form.
+  if (resolveBoard({ careers_url: 'https://app.dover.com/jobs/careers' })?.slug === 'careers') {
+    pass('resolveBoard still reads /jobs/careers (no uuid) as slug "careers"');
+  } else {
+    fail('resolveBoard should read /jobs/careers as slug "careers"');
+  }
+
   // fetch(): slug lookup first, then the board's list pages; company segment from the lookup name.
   const slugCalls = [];
   const slugFetched = await dover.fetch({ name: 'Acme Inc', careers_url: SLUG_URL }, {

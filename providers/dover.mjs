@@ -80,17 +80,22 @@ export function resolveBoard(entry) {
   }
   if (parsed.protocol !== 'https:' || parsed.hostname !== HOST) return null;
   const [company, marker, board] = parsed.pathname.split('/').filter(Boolean);
+  // The <Company>/careers/<uuid> route is checked first: a company literally
+  // named "jobs" gives /jobs/careers/<uuid>, which must not be read as the
+  // /jobs/<slug> form with slug "careers" (that would discard the board id).
+  if (company && marker === 'careers' && board && UUID_RE.test(board)) {
+    let decoded;
+    try {
+      decoded = decodeURIComponent(company);
+    } catch {
+      decoded = company;
+    }
+    return { company: decoded, board: board.toLowerCase(), slug: null };
+  }
   if (company === 'jobs' && marker && SLUG_RE.test(marker)) {
     return { company: marker, board: null, slug: marker };
   }
-  if (!company || marker !== 'careers' || !board || !UUID_RE.test(board)) return null;
-  let decoded;
-  try {
-    decoded = decodeURIComponent(company);
-  } catch {
-    decoded = company;
-  }
-  return { company: decoded, board: board.toLowerCase(), slug: null };
+  return null;
 }
 
 /** @param {string} slug */
