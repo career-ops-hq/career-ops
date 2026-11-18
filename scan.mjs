@@ -546,10 +546,11 @@ const DC_CITY_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])washington\\s*[,(\\-\u20
 const withoutDcCity = (lower) => lower.replace(DC_CITY_RE, 'district of columbia');
 // A Workday URL hint puts the city first ("Washington", "Washington-United-States").
 // When the display location names Washington, DC, a hint that starts with a
-// bare "Washington" is that city, not the state. "Seattle-Washington" keeps
-// naming the state, and with no DC in the display the hint is read as before.
+// bare "Washington" is that city, not the state. "Seattle-Washington" and
+// "Washington-State" keep naming the state, and with no DC in the display the
+// hint is read as before. The hint arrives with its dashes turned into spaces.
 const DC_CITY_TEST_RE = new RegExp(DC_CITY_RE.source, 'u');
-const LEADING_WASHINGTON_RE = /^washington(?![\p{L}\p{M}\p{N}])/u;
+const LEADING_WASHINGTON_RE = /^washington(?![\p{L}\p{M}\p{N}])(?!\s+state(?![\p{L}\p{M}\p{N}]))/u;
 const hintWithoutDcCity = (hint, display) => (typeof display === 'string' && DC_CITY_TEST_RE.test(display)
   ? hint.replace(LEADING_WASHINGTON_RE, 'district of columbia')
   : hint);

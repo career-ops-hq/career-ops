@@ -113,7 +113,11 @@ test('a bare "Washington" URL hint does not admit a Washington, DC posting', () 
   assert.equal(always('Seattle, Washington', bareUrl), true, 'no DC in the display: the hint names the state');
   assert.equal(always('Seattle, WA', waUrl), true, 'Seattle-Washington keeps matching');
   assert.equal(always('Washington, DC', waUrl), true, 'an explicit Washington State hint still wins');
+  const stateUrl = 'https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Washington-State/Engineer_R-5';
+  assert.equal(always('Washington, DC', stateUrl), true, 'Washington-State names the state');
   const allow = buildLocationFilter({ allow: ['Washington'] });
   assert.equal(allow('Washington, DC', bareUrl), false, 'allow vs bare hint');
   assert.equal(allow('2 Locations', bareUrl), true, 'no DC in the display: unchanged');
+  assert.equal(allow('Washington, DC', stateUrl), true, 'allow vs Washington-State hint');
+  assert.equal(allow('Washington, DC', 'https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Washington-Statehouse/Engineer_R-6'), false, 'only the whole word "state"');
 });
