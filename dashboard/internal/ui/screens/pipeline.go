@@ -457,7 +457,9 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	selectedReportPath := ""
 	selectedCompany := ""
 	selectedRole := ""
+	selectedApp := model.CareerApplication{}
 	if app, ok := m.CurrentApp(); ok {
+		selectedApp = app
 		selectedReportPath = app.ReportPath
 		selectedCompany = app.Company
 		selectedRole = app.Role
@@ -510,16 +512,35 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 		return reloaded
 	}
 
+	// Identity first, in its own pass. Company and role do not identify a row:
+	// two report-less rows for the same company and role (a leveled variant and
+	// its bare title) both match, and a status change can reorder them, so the
+	// cursor could land on the sibling. That matters beyond navigation — a retry
+	// after a partial save writes to whatever the cursor is on.
 	for i, app := range reloaded.filtered {
-		if selectedReportPath != "" && app.ReportPath == selectedReportPath {
+		if selectedReportPath != "" {
+			if app.ReportPath == selectedReportPath {
+				reloaded.cursor = i
+				reloaded.adjustScroll()
+				return reloaded
+			}
+			continue
+		}
+		if data.HasTrackerIdentity(selectedApp) && data.SameTrackerRow(app, selectedApp) {
 			reloaded.cursor = i
 			reloaded.adjustScroll()
 			return reloaded
 		}
-		if selectedReportPath == "" && app.Company == selectedCompany && app.Role == selectedRole {
-			reloaded.cursor = i
-			reloaded.adjustScroll()
-			return reloaded
+	}
+	// Then company and role, which is all a row with neither a report link nor a
+	// usable # has — and still better than an index into a re-sorted table.
+	if selectedReportPath == "" {
+		for i, app := range reloaded.filtered {
+			if app.Company == selectedCompany && app.Role == selectedRole {
+				reloaded.cursor = i
+				reloaded.adjustScroll()
+				return reloaded
+			}
 		}
 	}
 

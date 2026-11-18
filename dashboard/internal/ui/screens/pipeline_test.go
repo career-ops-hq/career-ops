@@ -914,3 +914,74 @@ func TestSpeculativeHasItsOwnStatusColour(t *testing.T) {
 		}
 	}
 }
+
+// Company and role do not identify a tracker row. Two report-less rows for one
+// company and role — a leveled variant and its bare title — both match the
+// restore, so a status change that reorders them could leave the cursor on the
+// sibling. A retry after a partial save writes to whatever the cursor is on, so
+// the restore has to prefer the row's own identity (#7331 review).
+func TestWithReloadedDataRestoresTheSameRowAmongSiblings(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Applied"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.sortMode = sortStatus
+	pm.applyFilterAndSort()
+
+	idx := -1
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			idx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatal("premise: #32 is visible")
+	}
+	pm.cursor = idx
+	if app, _ := pm.CurrentApp(); app.Number != 32 {
+		t.Fatalf("premise: the cursor is on #32, got #%d", app.Number)
+	}
+
+	// #32 moves to Discarded, which sorts it behind its Applied sibling.
+	refreshed := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Discarded"},
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Applied"},
+	}
+	reloaded := pm.WithReloadedData(refreshed, model.PipelineMetrics{Total: len(refreshed)})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 {
+		t.Fatalf("the cursor moved to #%d; a retry would write to the wrong row", app.Number)
+	}
+}
+
+// A row with no identity at all still falls back to company and role, which is
+// better than an index into a re-sorted table.
+func TestWithReloadedDataFallsBackToCompanyAndRole(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 1, TrackerNumberMissing: true, Company: "Acme", Role: "AI", Status: "Evaluated"},
+		{Number: 2, TrackerNumberMissing: true, Company: "Globex", Role: "Platform", Status: "Evaluated"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Globex" {
+			pm.cursor = i
+		}
+	}
+
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 1, TrackerNumberMissing: true, Company: "Zzz Co", Role: "Ops", Status: "Evaluated"},
+		{Number: 2, TrackerNumberMissing: true, Company: "Acme", Role: "AI", Status: "Evaluated"},
+		{Number: 3, TrackerNumberMissing: true, Company: "Globex", Role: "Platform", Status: "Evaluated"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok || app.Company != "Globex" {
+		t.Fatalf("want the Globex row selected, got %+v (ok=%v)", app, ok)
+	}
+}
