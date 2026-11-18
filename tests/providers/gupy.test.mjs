@@ -307,6 +307,8 @@ try {
   } else {
     fail(`fetch() pagination = ${JSON.stringify({ offsets, limits, jobs: paged.length })}`);
   }
+  if (paged.truncated === undefined) pass('fetch() leaves a sweep that reached a short page unmarked');
+  else fail(`short-page sweep was marked: ${JSON.stringify(paged.truncated)}`);
 
   // REGRESSION (2026-08-13): pagination.total reports the PAGE SIZE, not the
   // result-set size — the live API answers total=100 at every offset of a
@@ -359,6 +361,28 @@ try {
   }
   if (probeWarnings.length === 0) pass('fetch() stays quiet when ctx.maxPages truncates — a probe is not a misconfiguration');
   else fail(`probe emitted warnings: ${JSON.stringify(probeWarnings)}`);
+  if (probed.truncated === undefined) pass('fetch() leaves a probe cut by ctx.maxPages unmarked');
+  else fail(`probe was marked: ${JSON.stringify(probed.truncated)}`);
+
+  // An entry whose own max_pages is 1 ends the walk on the same page the probe
+  // budget does, but that ceiling belongs to the entry: the probe is still a
+  // probe and must stay quiet and unmarked (#7180).
+  const entryCapWarnings = [];
+  let entryCapped;
+  const beforeEntryCap = console.error;
+  try {
+    console.error = (...args) => entryCapWarnings.push(args.join(' '));
+    entryCapped = await provider.fetch({ gupy: { keywords: ['A'] }, max_pages: 1 }, {
+      maxPages: 1,
+      sleep: noSleep, fetchJson: async () => ({ data: Array.from({ length: 100 }, (_, i) => mk(i)), pagination: { total: 100 } }),
+    });
+  } finally {
+    console.error = beforeEntryCap;
+  }
+  if (entryCapWarnings.length === 0) pass('fetch() stays quiet when the entry max_pages and a probe end on the same page (#7180)');
+  else fail(`entry-capped probe emitted warnings: ${JSON.stringify(entryCapWarnings)}`);
+  if (entryCapped.truncated === undefined) pass('fetch() leaves an entry-capped probe unmarked (#7180)');
+  else fail(`entry-capped probe was marked: ${JSON.stringify(entryCapped.truncated)}`);
 
   // max_pages caps the sweep and warns.
   const capCalls = [];
@@ -384,6 +408,9 @@ try {
   } else {
     fail(`truncation warning missing; captured = ${JSON.stringify(capWarnings)}`);
   }
+  // Each warned stop is also marked, so scan.mjs logs the board partial, not reachable.
+  if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === 200) pass('fetch() marks the board partial when max_pages truncates a sweep');
+  else fail(`max_pages cut: truncated = ${JSON.stringify(capped.truncated)}`);
 
   // The API answers offset 10,000 and beyond with a 400, so no max_pages takes
   // a sweep past 100 pages, and at that ceiling the warning must not tell the
@@ -415,6 +442,8 @@ try {
   } else {
     fail(`ceiling warning = ${JSON.stringify(deepWarnings)}`);
   }
+  if (deep.truncated?.reason === 'page-cap' && deep.truncated.fetched === 10_000) pass('fetch() marks the board partial when the API ceiling truncates a sweep');
+  else fail(`API ceiling cut: truncated = ${JSON.stringify(deep.truncated)}`);
 
   // Optional filters ride along comma-joined under the names the API reads,
   // workplaceType and type, as portal.gupy.io sends them. It ignores the plural
@@ -509,6 +538,8 @@ try {
   } else {
     fail(`sweep isolation = ${JSON.stringify({ jobs: isolated.length, calls: isoCalls, warnings: isoWarnings })}`);
   }
+  if (isolated.truncated?.reason === 'fetch-error' && isolated.truncated.fetched === 2) pass('fetch() marks the board partial when one keyword sweep fails');
+  else fail(`failed sweep: truncated = ${JSON.stringify(isolated.truncated)}`);
 
   // A failure mid-sweep keeps the pages already in hand (newest-first, so a
   // partial sweep is the freshest N pages) and moves on.
@@ -534,6 +565,8 @@ try {
   } else {
     fail(`mid-sweep partial = ${JSON.stringify({ jobs: partial.length, calls: partialCalls })}`);
   }
+  if (partial.truncated?.reason === 'fetch-error' && partial.truncated.fetched === 100) pass('fetch() marks the board partial when a sweep dies mid-pagination');
+  else fail(`mid-sweep failure: truncated = ${JSON.stringify(partial.truncated)}`);
 
   // Every sweep dead = outage, moved endpoint or changed payload. Must rethrow
   // the ORIGINAL error object: verify-portals' classifyFetchError reads

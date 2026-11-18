@@ -199,11 +199,11 @@ function parseMoney(raw) {
   const text = String(raw ?? "");
   const currency = /€|\bEUR\b/i.test(text) ? "EUR" : /£|\bGBP\b/i.test(text) ? "GBP" : /\$|\bUSD\b/i.test(text) ? "USD" : null;
   const amounts = [];
-  const pattern = /(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(\s*[kK])?/g;
+  const pattern = /(?:(\d{1,3}(?:[,. \u00a0\u202f]\d{3}(?!\d))+)|(\d+(?:\.\d+)?))(\s*[kK])?/g;
   for (const match of text.matchAll(pattern)) {
-    let amount = Number(match[1].replace(/,/g, ""));
+    let amount = Number(match[1] ? match[1].replace(/[,. \u00a0\u202f]/g, "") : match[2]);
     if (!Number.isFinite(amount)) continue;
-    if (match[2]) amount *= 1000;
+    if (match[3]) amount *= 1000;
     if (amount >= 1000) amounts.push(amount);
   }
   if (!amounts.length) return null;
@@ -247,6 +247,13 @@ function titleClause(title, roles) {
   return { points: best.points, text: `Title matches '${best.phrase}'` };
 }
 
+function mentionsPlace(text, place) {
+  const token = String(place).trim();
+  if (token.length < 3) return false;
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
 function locationClauses(location, targets) {
   const text = String(location ?? "");
   const clauses = [];
@@ -258,12 +265,10 @@ function locationClauses(location, targets) {
   const places = [...(targets.places || [])].filter((place) => typeof place === "string");
   places.sort((a, b) => b.length - a.length);
   for (const place of places) {
-    if (place.trim().length < 3) continue;
-    if (text.toLowerCase().includes(place.trim().toLowerCase())) {
-      clauses.push(`Location matches '${place.trim()}'`);
-      points += 1;
-      break;
-    }
+    if (!mentionsPlace(text, place)) continue;
+    clauses.push(`Location matches '${place.trim()}'`);
+    points += 1;
+    break;
   }
   return { clauses, points };
 }

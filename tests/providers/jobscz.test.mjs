@@ -126,8 +126,9 @@ try {
         { title: 'SW Technical Leader – Java', url: 'https://www.jobs.cz/rpd/2001471915/', company: 'JISR Institute, a.s.', location: 'Pardubice – Drozdice', postedAt: posted },
         { title: 'Java & Python Developer', url: 'https://www.jobs.cz/rpd/2/', company: 'JISR Institute, a.s.', location: 'Pardubice – Drozdice', postedAt: posted },
       ],
+      cardCount: 2,
     };
-    if (isDeepStrictEqual(got, want)) pass('parseJobsCzPage maps total, title, url, company, location and postedAt');
+    if (isDeepStrictEqual(got, want)) pass('parseJobsCzPage maps total, title, url, company, location and postedAt, and counts the cards the source sent');
     else fail(`parseJobsCzPage returned ${JSON.stringify(got)}`);
 
     if (got.jobs[1]?.title === 'Java & Python Developer') pass('parseJobsCzPage decodes entities in the title');
@@ -197,16 +198,32 @@ try {
 
   {
     const { calls, ctx } = stub(fullPage(400));
-    const text = await captureStderr(() => jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['x'] }, max_pages: 2 }, ctx));
+    let capped = [];
+    const text = await captureStderr(async () => { capped = await jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['x'] }, max_pages: 2 }, ctx); });
     if (calls.length === 2 && text.includes('truncated at max_pages=2')) pass('jobscz.fetch() stops at max_pages and warns that the search was truncated');
     else fail(`max_pages=2: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (capped.truncated?.reason === 'page-cap' && capped.truncated.fetched === capped.length && capped.length > 0) pass('jobscz.fetch() marks the board page-cap when max_pages truncates a keyword');
+    else fail(`max_pages=2 cut: ${capped.length} jobs, truncated = ${JSON.stringify(capped.truncated)}`);
+    // A short last page ends the board even when the total read on page 1
+    // promised more: no warning, no mark.
+    const shrunk = stub((url) => (pageOf(url) === '1'
+      ? page(Array.from({ length: 30 }, (_, i) => card({ id: `1${String(i).padStart(3, '0')}` })), 400)
+      : page([card({ id: '2000' })], 31)));
+    let shrunkJobs = [];
+    const shrunkText = await captureStderr(async () => { shrunkJobs = await jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['x'] }, max_pages: 2 }, shrunk.ctx); });
+    if (shrunk.calls.length === 2 && shrunkJobs.length === 31 && shrunkJobs.truncated === undefined && !shrunkText.includes('truncated at max_pages')) pass('jobscz.fetch() treats a short last page as the end of the board, whatever page 1 reported');
+    else fail(`short last page: ${shrunkJobs.length} jobs, truncated = ${JSON.stringify(shrunkJobs.truncated)}, stderr ${JSON.stringify(shrunkText)}`);
   }
 
   {
     const { calls, ctx } = stub(fullPage(400), { maxPages: 1 });
-    const text = await captureStderr(() => jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['x'] } }, ctx));
+    let probed = [];
+    const text = await captureStderr(async () => { probed = await jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['x'] } }, ctx); });
     if (calls.length === 1 && text === '') pass('jobscz.fetch() honors ctx.maxPages:1 with exactly one request and no warning');
     else fail(`ctx.maxPages=1: ${calls.length} request(s), stderr ${JSON.stringify(text)}`);
+    if (probed.truncated === undefined) pass('jobscz.fetch() leaves the one-page probe unmarked');
+    else fail(`ctx.maxPages=1 probe was marked: ${JSON.stringify(probed.truncated)}`);
 
     const err = new Error('probe budget');
     let caught = null;
@@ -230,6 +247,9 @@ try {
     });
     if (fetched.length === 30 && text.includes('jobscz')) pass('jobscz.fetch() keeps page-1 jobs and warns when page 2 fails');
     else fail(`page-2 failure: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
+    // The board was only partly read, so scan.mjs must log it partial, not reachable.
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 30) pass('jobscz.fetch() marks the board partial when a later page fails');
+    else fail(`page-2 failure truncated = ${JSON.stringify(fetched.truncated)}`);
   }
 
   {
@@ -243,6 +263,8 @@ try {
     });
     if (fetched.length === 1 && text.includes('page 1 failed')) pass('jobscz.fetch() keeps the other keywords and warns when one keyword fails on page 1');
     else fail(`one keyword failing: ${fetched.length} jobs, stderr ${JSON.stringify(text)}`);
+    if (fetched.truncated?.reason === 'fetch-error' && fetched.truncated.fetched === 1) pass('jobscz.fetch() marks the board partial when one keyword fails and another answers');
+    else fail(`one keyword failing truncated = ${JSON.stringify(fetched.truncated)}`);
   }
 
   {
@@ -259,6 +281,8 @@ try {
     const fetched = await jobscz.fetch({ provider: 'jobscz', name: 'Acme', jobscz: { keywords: ['a', 'b'] } }, stub(() => page([card()], 1)).ctx);
     if (fetched.length === 1) pass('jobscz.fetch() dedups an offer returned for two keywords');
     else fail(`jobscz.fetch() returned ${fetched.length} rows for one shared offer`);
+    if (fetched.truncated === undefined) pass('jobscz.fetch() leaves a board unmarked when every keyword answers');
+    else fail(`fully read board was marked: ${JSON.stringify(fetched.truncated)}`);
   }
 
   {

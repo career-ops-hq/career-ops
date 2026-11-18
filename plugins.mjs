@@ -17,7 +17,8 @@
  */
 
 import path from 'path';
-import { existsSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'fs';
+import { randomUUID } from 'node:crypto';
+import { chmodSync, existsSync, lstatSync, readFileSync, readlinkSync, realpathSync, writeFileSync, rmSync, mkdirSync, renameSync, statSync } from 'fs';
 import { fileURLToPath } from 'url';
 import * as yaml from 'js-yaml';
 import { hasYamlContent, loadYaml } from './lib/yaml-document.mjs';
@@ -29,7 +30,7 @@ import {
   warnConfigLeftInCodeRoot, ID_RE,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
-import { readLock, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
+import { readLock, readLockForUpdate, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
 import { installFromRepo, scaffoldNew, parseRepoArg } from './plugin-install.mjs';
 import { appendToPipeline, appendToScanHistory, PORTALS_PATH } from './scan.mjs';
 import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs';
@@ -466,12 +467,157 @@ function readPluginConfigListError(root) {
 // the user's other plugins or non-secret settings).
 export function setPluginEnabled(root, id, on, settings) {
   const file = path.join(root, 'config', 'plugins.yml');
-  const cfg = parsePluginConfig(existsSync(file) ? readFileSync(file, 'utf8') : null, file);
+  // existsSync is false for ELOOP and EACCES as well as a missing file.
+  // Read the path and keep every error except ENOENT, so a long symlink
+  // chain is not replaced with an empty configuration.
+  let raw = null;
+  try {
+    raw = readFileSync(file, 'utf8');
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  const cfg = parsePluginConfig(raw, file);
   if (!cfg.plugins || typeof cfg.plugins !== 'object') cfg.plugins = {};
   const prev = (cfg.plugins[id] && typeof cfg.plugins[id] === 'object') ? cfg.plugins[id] : {};
   cfg.plugins[id] = { ...prev, ...(settings || {}), enabled: on };
   mkdirSync(path.join(root, 'config'), { recursive: true });
-  writeFileSync(file, '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg), 'utf8');
+  const text = '# career-ops plugin activation — see config/plugins.example.yml\n' + yaml.dump(cfg);
+  // Node's default mode is 0o666, and the mode passed to writeFileSync is
+  // still narrowed by the umask. chmod restores the exact bits, so a 0640
+  // config stays 0640 after the rename.
+  const dest = resolvedConfigFile(file);
+  let mode;
+  try {
+    mode = statSync(dest).mode & 0o777;
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  const tmp = path.join(path.dirname(dest), `.plugins.yml.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(tmp, text, mode == null ? 'utf8' : { encoding: 'utf8', mode });
+    if (mode != null) chmodSync(tmp, mode);
+    renameSync(tmp, dest);
+  } catch (err) {
+    try { rmSync(tmp, { force: true }); } catch {}
+    throw err;
+  }
+}
+
+/**
+ * The file rename publishes onto. A symlink stays a symlink: follow the whole
+ * chain and rename onto the last file, even when that file is not there yet.
+ * Directory links are resolved before "..", including ".." inside the link
+ * target, so the save hits the same file the reader loads. A cycle stops
+ * the walk so an intermediate link is not replaced.
+ *
+ * @param {string} file
+ * @returns {string}
+ */
+function resolvedConfigFile(file) {
+  const seen = new Set();
+  let current = path.resolve(file);
+  for (;;) {
+    if (seen.has(current)) return current;
+    seen.add(current);
+    let link;
+    try {
+      if (!lstatSync(current).isSymbolicLink()) return current;
+      link = readlinkSync(current);
+    } catch (err) {
+      if (err?.code === 'ENOENT') return current;
+      throw err;
+    }
+    current = resolveLinkTarget(path.dirname(current), link);
+  }
+}
+
+/**
+ * Walk one symlink target in filesystem order. ".." is applied after a
+ * directory link, and a missing final file stays a missing final file.
+ * A missing or non-directory step fails the save instead of picking another file.
+ *
+ * @param {string} parentDir
+ * @param {string} link
+ * @param {Set<string>} expanding
+ * @param {boolean} [intermediate] true when this link is a step, not the final file
+ * @returns {string}
+ */
+function resolveLinkTarget(parentDir, link, expanding = new Set(), intermediate = false) {
+  let base = parentDir;
+  try {
+    base = realpathSync(parentDir);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+  }
+  const root = path.parse(path.isAbsolute(link) ? link : base).root;
+  let current = path.isAbsolute(link) ? root : base;
+  const body = path.isAbsolute(link) ? link.slice(root.length) : link;
+  // On POSIX a backslash is a filename character. Windows accepts both separators.
+  const separators = path.sep === '\\' ? /[/\\]/ : /\//;
+  // Keep ".". Dropping it turns "regular/." into "regular" and the save
+  // overwrites that file. A dot after a non-directory fails below.
+  const segments = body.split(separators).filter((seg) => seg !== '');
+  // "regular/" is a directory lookup. Splitting drops the empty tail, so
+  // remember the separator and do not treat a file as the final name.
+  const directoryRequired = body.endsWith('/') || (path.sep === '\\' && body.endsWith('\\'));
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (seg === '..') {
+      current = path.dirname(current);
+      continue;
+    }
+    const next = path.join(current, seg);
+    const last = i === segments.length - 1;
+    let st;
+    try {
+      st = lstatSync(next);
+    } catch (err) {
+      if (err?.code !== 'ENOENT') throw err;
+      // A missing final file is created. A missing step in the middle is ENOENT,
+      // the same as the reader, so "missing/../target.yml" does not pick another file.
+      if (!last || directoryRequired) throw Object.assign(new Error(`missing path component: ${next}`), { code: 'ENOENT' });
+      return next;
+    }
+    if (!last && st.isSymbolicLink()) {
+      if (expanding.has(next)) throw Object.assign(new Error(`symlink cycle: ${next}`), { code: 'ELOOP' });
+      expanding.add(next);
+      try {
+        current = resolveLinkTarget(path.dirname(next), readlinkSync(next), expanding, true);
+        try {
+          current = realpathSync(current);
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err;
+          throw Object.assign(new Error(`dangling link: ${current}`), { code: 'ENOENT' });
+        }
+      } finally {
+        expanding.delete(next);
+      }
+      if (!lstatSync(current).isDirectory()) {
+        throw Object.assign(new Error(`not a directory: ${current}`), { code: 'ENOTDIR' });
+      }
+      continue;
+    }
+    if (!last && !st.isDirectory()) {
+      throw Object.assign(new Error(`not a directory: ${next}`), { code: 'ENOTDIR' });
+    }
+    current = next;
+  }
+  if (!directoryRequired) return current;
+  let st;
+  try {
+    st = lstatSync(current);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') throw err;
+    throw Object.assign(new Error(`missing path component: ${current}`), { code: 'ENOENT' });
+  }
+  const probe = st.isSymbolicLink() ? realpathSync(current) : current;
+  if (!lstatSync(probe).isDirectory()) {
+    throw Object.assign(new Error(`not a directory: ${current}`), { code: 'ENOTDIR' });
+  }
+  // alias -> "nested/" is a directory the rest of the path still walks.
+  // plugins.yml -> "nested/" is the destination, and that stays EISDIR.
+  if (intermediate) return current;
+  throw Object.assign(new Error(`directory: ${current}`), { code: 'EISDIR' });
 }
 
 const setEnabled = (id, on, settings) => setPluginEnabled(DATA_ROOT, id, on, settings);
@@ -593,6 +739,15 @@ function cmdRemove(args) {
   if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
   const id = resolved.manifest.id;
   if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
+  // A torn lock throws from removeLockEntry. Checking it after the directory
+  // is gone skips the disable step and reports failure for a plugin that is
+  // already deleted.
+  try {
+    readLockForUpdate(ROOT);
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exit(1);
+  }
   const dir = path.join(ROOT, 'plugins.local', id);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   removeLockEntry(ROOT, id);

@@ -79,15 +79,17 @@ function bodyText(body) {
   return null;
 }
 
-function isCredentialHeader(name) {
-  return name === 'authorization' || name === 'cookie' || name === 'proxy-authorization'
-    || name.includes('api-key') || name.includes('apikey');
-}
-
-function credentialMaterial(headers) {
+// Every request header is part of the key, not only the credentials. A header
+// can choose the board: adp-myjobs.mjs reads all tenants from one list URL and
+// names the tenant in `orgoid`, so a key without it answered each later ADP
+// board in a scan with the first board's postings. Which header a host reads
+// that way cannot be listed ahead of time, and a wrong split only costs one
+// more request. Headers lowercases the names, so capitalization does not split
+// an entry.
+function headerMaterial(headers) {
   const parts = [];
   for (const [name, value] of new Headers(headers || {}).entries()) {
-    if (isCredentialHeader(name)) parts.push(`${name}=${value}`);
+    parts.push(`${name}=${value}`);
   }
   parts.sort();
   return parts.join('\n');
@@ -97,7 +99,7 @@ function cacheKey(method, url, opts, body) {
   // The cap is part of the request. A smaller maxBytes must not be answered
   // with a body saved under a larger one.
   const maxBytes = opts.maxBytes == null ? '' : String(opts.maxBytes);
-  return createHash('sha256').update(`${method}\n${url}\n${credentialMaterial(opts.headers)}\n${maxBytes}\n${body}`).digest('hex');
+  return createHash('sha256').update(`${method}\n${url}\n${headerMaterial(opts.headers)}\n${maxBytes}\n${body}`).digest('hex');
 }
 
 function isFresh(entry, store) {

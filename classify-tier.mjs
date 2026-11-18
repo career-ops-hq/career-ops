@@ -51,8 +51,8 @@ export function classifyTier(title) {
     { pattern: /\bdirector\b/i, tier: 'senior', weight: 4 },
     { pattern: /\bprincipal\b/i, tier: 'senior', weight: 4 },
     { pattern: /\bstaff\b/i, tier: 'senior', weight: 4 },
-    { pattern: /\blead\b/i, tier: 'senior', weight: 4 },
-    { pattern: /\bsenior\b/i, tier: 'senior', weight: 4 },
+    { pattern: /\blead\b(?![\s-]+(?:generation\b|gen\b(?![\s-]*ai\b)))/i, tier: 'senior', weight: 4 },
+    { pattern: /\bsenior\b(?![\s-]+living\b)/i, tier: 'senior', weight: 4 },
     { pattern: /\bsr\b/i, tier: 'senior', weight: 4 },
     { pattern: /\bsr\./i, tier: 'senior', weight: 4 },
     { pattern: /\bhead\s+of\b/i, tier: 'senior', weight: 4 },
@@ -148,7 +148,7 @@ export function classifyTier(title) {
   const programBridge = /\b(?:intern(?:ship)?|trainee|co-op|graduate|junior|entry(?:-level)?)\s+(?:program|scheme|talent|cohort)\b/i;
   if (programBridge.test(cleanTitle)) {
     const afterBridge = cleanTitle.replace(programBridge, ' ').trim();
-    if (/\b(chief|vp|vice\s+president|director|principal|staff|lead|senior|sr\.?|head\s+of|partner)\b/i.test(afterBridge)) {
+    if (/\b(chief|vp|vice\s+president|director|principal|staff|lead(?![\s-]+(?:generation\b|gen\b(?![\s-]*ai\b)))|senior(?![\s-]+living\b)|sr\.?|head\s+of|partner)\b/i.test(afterBridge)) {
       return 'senior';
     }
   }

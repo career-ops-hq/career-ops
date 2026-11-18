@@ -20,6 +20,7 @@
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { parseDate } from '../lib/parse-date.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const API_URL = 'https://www-api.ibm.com/search/api/v2';
 const PAGE_SIZE = 30;
@@ -175,11 +176,17 @@ export default {
       if (!lastPageFull) break;
     }
     // Only a full page at the entry's own cap is a truncation. A short last
-    // page ended the board on its own, and the probe's cap is not the entry's.
-    if (stopReason === 'complete' && lastPageFull && page === maxPages) stopReason = 'cap';
+    // page ended the board on its own, and a probe never reports a cap: with
+    // max_pages: 1 on the entry, the probe's one page is also the entry's last,
+    // so the page count alone cannot tell the two apart (#7180).
+    if (stopReason === 'complete' && lastPageFull && page === maxPages && ctxCap === Infinity) stopReason = 'cap';
     if (stopReason === 'cap') {
       console.error(`⚠️  ibm: ${entry.name} truncated at max_pages=${maxPages} (${out.length} jobs) — raise max_pages on this entry for more`);
     }
+    // The stop reason that drives the warnings marks the result too, so scan.mjs
+    // logs a partly read board `partial` instead of `reachable`
+    // (lib/board-truncation.mjs). 'cap' is named page-cap, as in themuse.mjs.
+    if (stopReason !== 'complete') markTruncated(out, stopReason === 'cap' ? 'page-cap' : stopReason, { fetched: out.length });
 
     return out;
   },

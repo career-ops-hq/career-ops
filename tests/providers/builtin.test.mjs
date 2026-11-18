@@ -201,6 +201,24 @@ try {
     fail(`throw handling: ${JSON.stringify(survived.map((j) => j.title))}`);
   }
 
+  // ── fetch: a probe sees the rejection instead of an empty board ─────
+  // verify-portals identifies a live-but-capped board by the budget cutoff's
+  // identity, and a broken one by the error itself (#7175's rule, and
+  // providers/vdab.mjs's probing branch). Swallowing it into [] turns either
+  // into "this board has no postings".
+  const probeErrCtx = mockCtx({ [p1]: new Error('probe budget spent') });
+  let probeThrew = null;
+  try {
+    await bi.fetch({ name: 'B', queries: ['a'], max_pages: 5 }, { ...probeErrCtx.ctx, maxPages: 1 });
+  } catch (err) {
+    probeThrew = err;
+  }
+  if (probeThrew?.message === 'probe budget spent') {
+    pass('builtin.fetch() propagates a page rejection while probing, so the probe can name the board');
+  } else {
+    fail(`probe rejection: ${probeThrew ? JSON.stringify(probeThrew.message) : 'swallowed into a result'}`);
+  }
+
   // ── resolveHost / market hosts ──────────────────────────────────────
   const { resolveHost, parseCards, parseSalary, parsePostedAt, composeLocation } = mod;
 

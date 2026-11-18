@@ -131,6 +131,9 @@ try {
     else fail(`schoolspring.fetch() ceiling: ${calls.length} calls, ${out.length} jobs`);
     if (warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() warns "raise max_pages" when its ceiling truncated the board');
     else fail(`schoolspring.fetch() ceiling warning missing: ${JSON.stringify(warnings)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (out.truncated?.reason === 'page-cap' && out.truncated.fetched === 2000) pass('schoolspring.fetch() marks the board page-cap when its ceiling truncated it');
+    else fail(`schoolspring.fetch() ceiling cut: truncated = ${JSON.stringify(out.truncated)}`);
 
     // an API that ignores `page` and repeats the same full page: no duplicates, stops early, no max_pages blame
     calls = [];
@@ -143,6 +146,8 @@ try {
     else fail(`schoolspring.fetch() repeated page made ${calls.length} calls (expected 2)`);
     if (!warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() does not blame max_pages when the API just repeated itself');
     else fail('schoolspring.fetch() misfired the max_pages warning on a repeating API');
+    if (out.truncated === undefined) pass('schoolspring.fetch() leaves a board that stopped on a repeated page unmarked');
+    else fail(`schoolspring.fetch() repeating page was marked: ${JSON.stringify(out.truncated)}`);
 
     // overlapping pages: only the new postings from page 2 are added
     calls = [];
@@ -169,6 +174,28 @@ try {
     else fail(`schoolspring.fetch() ctx.maxPages:1 made ${calls.length} calls`);
     if (!warnings.some((w) => /raise max_pages/.test(w))) pass('schoolspring.fetch() does not blame max_pages for a ctx.maxPages probe cap');
     else fail('schoolspring.fetch() warned about max_pages during a probe');
+    if (out.truncated === undefined) pass('schoolspring.fetch() leaves the ctx.maxPages probe unmarked');
+    else fail(`schoolspring.fetch() probe was marked: ${JSON.stringify(out.truncated)}`);
+
+    // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+    // It is still a probe, so nothing warns and nothing is marked (#7180).
+    calls = [];
+    warnings.length = 0;
+    const probedAtCap = await schoolspring.fetch({ ...entry, max_pages: 1 }, { ...ctx, maxPages: 1 });
+    if (calls.length === 1 && !warnings.some((w) => /raise max_pages/.test(w)) && probedAtCap.truncated === undefined) {
+      pass('schoolspring.fetch() warns nothing and marks nothing for a probe on a max_pages: 1 entry');
+    } else {
+      fail(`schoolspring.fetch() probe at max_pages: 1 made ${calls.length} calls, truncated=${JSON.stringify(probedAtCap.truncated)}, warnings ${JSON.stringify(warnings)}`);
+    }
+    // The same entry in a real scan is still cut by its own ceiling.
+    calls = [];
+    warnings.length = 0;
+    const scannedAtCap = await schoolspring.fetch({ ...entry, max_pages: 1 }, ctx);
+    if (calls.length === 1 && warnings.some((w) => /raise max_pages/.test(w)) && scannedAtCap.truncated?.reason === 'page-cap') {
+      pass('schoolspring.fetch() still warns and marks page-cap for a real scan of a max_pages: 1 entry');
+    } else {
+      fail(`schoolspring.fetch() scan at max_pages: 1 made ${calls.length} calls, truncated=${JSON.stringify(scannedAtCap.truncated)}, warnings ${JSON.stringify(warnings)}`);
+    }
 
     // a ctx.fetch* rejection propagates UNWRAPPED (verify-portals matches the sentinel by identity)
     class ProbeSentinel extends Error {}

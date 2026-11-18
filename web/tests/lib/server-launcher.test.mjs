@@ -21,6 +21,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import os, { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -360,7 +361,11 @@ test("starting the dashboard starts the PDF painter from the repo root and does 
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
     }
-    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    // On Windows the directory can stay busy for a moment after the painter
+    // is gone. fs.promises.rm retries that; rmSync throws on the first try
+    // although it is given maxRetries, which failed this test and left the
+    // whole copy behind in the temp folder.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 

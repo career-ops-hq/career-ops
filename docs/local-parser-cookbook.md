@@ -25,11 +25,14 @@ Most local parsers are company-specific: the script already knows the source URL
 
 ## Where the script lives
 
-`providers/local-parser.mjs` only runs a script that resolves **inside the repository root** — a whitelisted interpreter (`node`, `python3`, …) must take an in-repo script as its first argument, and a path that escapes the root is rejected. This is a deliberate boundary: `portals.yml` is not fully trusted on a shared or template config, so the parser command cannot point at an arbitrary binary or a file outside the checkout.
+`providers/local-parser.mjs` only runs a script that resolves **inside the repository root** or **inside the data root's `local/` folder**. A whitelisted interpreter (`node`, `python3`, …) must take that script as its first argument, and any other path is rejected, including one that reaches outside through a symlink. This is a deliberate boundary: `portals.yml` is not fully trusted on a shared or template config, so the parser command cannot point at an arbitrary binary, or at a saved JD or report elsewhere in the data root.
 
-Because the script has to sit in the tree, put a parser you do not intend to contribute under a path that Git ignores, so it is never staged:
+A relative path resolves against the repository root first, then against the data root. The scanner passes the parser the absolute path it checked. An in-repo parser runs with the repository root as its working directory; a parser from the data root's `local/` runs in the data root.
 
-- `local/` is gitignored by default. `local/acme-jobs.mjs` is the simplest home for a one-off, company-specific parser.
+Put a parser you do not intend to contribute in `local/`:
+
+- In a git checkout, `local/` is gitignored by default, so `local/acme-jobs.mjs` is never staged. When the data root is the checkout (no `CAREER_OPS_ROOT`), it is the same folder.
+- In a Claude Code plugin install, Claude Code replaces the code root on every plugin update and deletes anything you put there. Keep the parser in `local/` under your data root (`~/career-ops-data/local/acme-jobs.mjs` by default) and point `portals.yml` at `local/acme-jobs.mjs`.
 - `portals.yml` is already a user-layer file (gitignored), so the `parser:` block that points at the script stays private too.
 
 Use `scripts/parsers/` only for a parser you plan to open a PR for. `career-ops` does not bundle company-specific parser scripts, so in practice that is rare.

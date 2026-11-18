@@ -85,7 +85,9 @@
  *   {tracker#}\t{date}\t{from}\t{to}\t{source}\t
  * Source is `set-status` unless --source names the caller delegating here.
  * Date defaults to today; pass --on YYYY-MM-DD when the transition actually
- * happened earlier ("they replied Tuesday"). The append is observation-only:
+ * happened earlier ("they replied Tuesday"). Rewriting a dated Applied cell
+ * keeps that cell's day on the log when the notes have no Applied date.
+ * The append is observation-only:
  * if it fails, a warning goes to stderr and the exit code is unchanged — the
  * tracker remains the source of truth for state. Read by funnel-velocity.mjs.
  *
@@ -119,7 +121,7 @@ import { extractTrackerReportNumbers, parseMarkdownLinks, soleMarkdownLink, reso
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { localToday } from './lib/local-today.mjs';
 import {
-  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate,
+  resolveTrackerPath, writeFileAtomic, loadCanonicalStates, resolveCanonicalState, stripStatusDecoration, statusTextAfterDate, statusDateInCell,
   prependNote, hasNoteEntry, normalizeCompany, cell, CLI_EXIT, makeCliFailWith, makeCliFailUsage, acquireTrackerLockForCli,
   appendLedgerRows, companiesMatchIgnoringCorporateForm,
 } from './tracker-utils.mjs';
@@ -706,6 +708,50 @@ const statusKey = value => resolveCanonicalState(value, states) ?? String(value 
 // --undo. dedup-tracker.mjs logs its promotions the same way.
 const ledgerState = value => resolveCanonicalState(stripStatusDecoration(value), states) ?? '-';
 
+// The status log records text this command moved into Notes. A later
+// --repair-followup reads it back and leaves that entry out of the pin date.
+const MOVED_STATUS_NOTE = 'moved-status:';
+
+function dropLeadingNote(notes, entry) {
+  const kept = String(notes ?? '').trim();
+  const target = String(entry ?? '').trim();
+  if (!kept || !target) return kept;
+  if (kept === target) return '';
+  const prefix = `${target}; `;
+  return kept.startsWith(prefix) ? kept.slice(prefix.length) : kept;
+}
+
+async function notesForRepair(num, notes) {
+  const kept = String(notes ?? '').trim();
+  if (!kept) return kept;
+  let content = '';
+  try {
+    content = readFileSync(statusLogPath(APPS_FILE), 'utf-8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') return kept;
+  }
+  const { observations } = parseStatusLog(content, states);
+  let recorded = '';
+  let sawRewrite = false;
+  for (const obs of observations) {
+    if (obs.num !== num || obs.to !== 'Applied') continue;
+    if (obs.from === 'Applied') sawRewrite = true;
+    if (String(obs.note || '').startsWith(MOVED_STATUS_NOTE)) {
+      recorded = obs.note.slice(MOVED_STATUS_NOTE.length).trim();
+    }
+  }
+  if (recorded) return dropLeadingNote(kept, recorded);
+  // A row written before that record still has the copied status first.
+  // Drop it only when another Applied date remains, so a lone copied line
+  // still supplies the cell day.
+  if (!sawRewrite) return kept;
+  const first = kept.split('; ')[0];
+  if (!statusTextAfterDate(first) || resolveCanonicalState(stripStatusDecoration(first), states) !== 'Applied') return kept;
+  const rest = dropLeadingNote(kept, first);
+  const { parseAppliedDate } = await import('./followup-cadence.mjs');
+  return parseAppliedDate(rest) ? rest : kept;
+}
+
 // The change --undo takes back is the one a retraction line would pop: the
 // last surviving entry of this row's ledger replay. Read under the lock, so no
 // writer can append between this read and the retraction below.
@@ -778,6 +824,11 @@ const releaseActivityClaim = flags.dryRun ? () => {} : claimStatusActivity(targe
 
 let statusChanged = false;
 let noteChanged = false;
+let cellAppliedDate = '';
+// Status text this run moved into Notes, and the Notes the pin may read.
+// The pin skips that moved entry. --replace-note is already applied.
+let movedStatus = '';
+let authoredNotes = '';
 let statusLogged = false;
 let statusLogRepaired = false;
 let statusLogRepair = null;
@@ -811,7 +862,10 @@ try {
   if (statusChanged && colmap.notes != null && statusTextAfterDate(oldStatus)) {
     const kept = (parts[colmap.notes] ?? '').trim();
     const moved = oldStatus.trim();
-    if (!hasNoteEntry(kept, moved)) replaceCellValue(colmap.notes, prependNote(kept, moved));
+    if (!hasNoteEntry(kept, moved)) {
+      replaceCellValue(colmap.notes, prependNote(kept, moved));
+      movedStatus = moved;
+    }
   }
 
   if (note) {
@@ -850,6 +904,19 @@ try {
     }
   }
 
+  authoredNotes = dropLeadingNote(colmap.notes == null ? '' : parts[colmap.notes], movedStatus);
+
+  // A date already on an Applied cell is the day it was sent.
+  // --on stays the only explicit date.
+  if (newStatus === 'Applied' && !flags.on) {
+    const alreadyApplied = resolveCanonicalState(stripStatusDecoration(oldStatus), states) === 'Applied';
+    if (alreadyApplied) {
+      const { isValidCalendarDate } = await import('./followup-seed.mjs');
+      const found = statusDateInCell(oldStatus);
+      if (isValidCalendarDate(found)) cellAppliedDate = found;
+    }
+  }
+
   if ((statusChanged || noteChanged) && !flags.dryRun) {
     if (separator === '\t') {
       const closing = rawLine.trimEnd().endsWith('|');
@@ -868,15 +935,13 @@ try {
   }
 
   // ── status-log append (transition ledger, read by funnel-velocity.mjs) ──
-  // Observation trail only: the tracker stays the source of truth for STATE,
-  // the ledger records WHEN transitions happened. A failed append is a warning,
-  // never a failure — the status write above already succeeded. Sibling of the
-  // tracker file so CAREER_OPS_TRACKER redirects (tests, custom layouts) keep
-  // the ledger next to the tracker it describes. Inside the lock window, so
-  // concurrent writers can't interleave lines.
+  // The ledger records WHEN a transition happened. A status that is not in the
+  // ledger cannot be undone, so a failed append puts the old line back and the
+  // command fails. Sibling of the tracker file so CAREER_OPS_TRACKER redirects
+  // (tests, custom layouts) keep the ledger next to the tracker it describes.
+  // Inside the lock window, so concurrent writers can't interleave lines.
   // An undo retracts the entry it selected even when that entry left the
   // status as it was (Applied → Applied), or the next undo would pick it again.
-  // The retraction is the undo, so a failed append puts the old status back.
   if (undone && !flags.dryRun) {
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
@@ -905,20 +970,42 @@ try {
     // (#2932, mirroring #2765). status-log.tsv is what funnel-velocity reads for
     // time-between-stages, so a future-dated transition skews the interval it
     // measures rather than just looking odd in the file.
+    // Notes the user wrote, or --note, that already say "Applied YYYY-MM-DD"
+    // own the cadence. The log then records this edit. Text moved out of the
+    // old status cell is not one of those notes. With no Applied date in
+    // what remains, the log keeps the day that was on the cell.
+    let ledgerDate = flags.on ?? localToday();
+    if (!flags.on && cellAppliedDate) {
+      const { parseAppliedDate } = await import('./followup-cadence.mjs');
+      if (!parseAppliedDate(authoredNotes)) ledgerDate = cellAppliedDate;
+    }
+    const movedNote = movedStatus && !/[\t\r\n]/.test(movedStatus) ? `${MOVED_STATUS_NOTE}${movedStatus}` : '';
     statusLogged = appendStatusTransition(APPS_FILE, {
       num: target.num,
-      date: flags.on ?? localToday(),
+      date: ledgerDate,
       from: ledgerState(oldStatus),
       to: newStatus,
       source: flags.source ?? 'set-status',
+      note: movedNote,
     });
+    if (!statusLogged) {
+      let restored = false;
+      lines[target.lineIdx] = rawLine;
+      try {
+        writeFileAtomic(APPS_FILE, lines.join('\n'));
+        restored = true;
+        statusChanged = false;
+      } catch { /* reported below */ }
+      failWith(EXIT_USAGE, 'status-not-logged', restored
+        ? `Could not write the status log for #${target.num}, so it stays ${oldStatus}`
+        : `Could not write the status log for #${target.num}, and could not put it back to ${oldStatus}; it now reads ${newStatus}`);
+    }
   }
-  // A dashboard call that received the partial-success error above can retry
-  // the same Applied action. The tracker is already Applied, so there is no
-  // normal transition to log; append one correction observation only when the
-  // effective timeline does not already end at Applied. This is append-only
-  // and idempotent, and the correction source is folded by funnel-velocity.mjs
-  // onto the repaired stage.
+  // --repair-status-log is for a tracker that is already Applied while the
+  // ledger does not end at Applied. A failed append above puts the row back,
+  // so the retry is an ordinary transition and does not reach this branch.
+  // The correction is append-only and idempotent, and funnel-velocity.mjs
+  // folds that source onto the repaired stage.
   if (flags.repairStatusLog && !statusChanged && newStatus === 'Applied' && !flags.dryRun) {
     const logPath = statusLogPath(APPS_FILE);
     const timeline = [];
@@ -1002,20 +1089,21 @@ const changed = statusChanged || noteChanged;
 // AFTER the tracker lock is released, deliberately: the seeder re-reads the
 // row this run just wrote (lib/status-hooks.mjs has the rest of the why).
 //
-// A seeding failure NEVER fails the status change. The write has already
-// committed and the caller's exit code is about that write — same policy as
-// the status-log append above.
+// A seeding failure NEVER fails a status that already landed in the tracker
+// and the ledger. The caller's exit code is about that write.
 let followupSeeded = null;
 if (!undone && (statusChanged || flags.repairFollowup) && newStatus === 'Applied') {
+  if (flags.repairFollowup && !statusChanged) authoredNotes = await notesForRepair(target.num, authoredNotes);
   followupSeeded = await seedFollowupOnApplied(target.num, {
     trackerPath: APPS_FILE,
-    // --on is the day the user says the application was sent. Without it,
-    // a fresh transition passes today as the status-change date, which
-    // resolveAppliedDate ranks below an "Applied YYYY-MM-DD" in the notes and
-    // above the evaluation-date column. A repair retry passes neither,
-    // because the apply happened on an earlier run.
-    date: flags.on,
-    statusChangeDate: statusChanged ? localToday() : undefined,
+    // --on is the only explicit date. An Applied date in the notes the user
+    // wrote, or in --note, still outranks the cell. Text moved out of the old
+    // status cell is left out above, including on a repair. The cell day is
+    // the status-change date. A fresh transition passes today. A repair passes
+    // neither.
+    date: flags.on || undefined,
+    authoredNotes,
+    statusChangeDate: cellAppliedDate || (statusChanged ? localToday() : undefined),
     dryRun: flags.dryRun,
     quiet: flags.json,
   });

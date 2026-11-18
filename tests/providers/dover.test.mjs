@@ -3,7 +3,9 @@
 // Dover's careers page reads a same-origin, DRF-paginated
 // `app.dover.com/api/v1/careers-page/<board-uuid>/jobs?limit=&offset=` envelope
 // (`{ count, next, previous, results }`) — see the header comment in
-// providers/dover.mjs for the full shape.
+// providers/dover.mjs for the full shape. A careers page published as
+// app.dover.com/jobs/<slug> resolves to its board uuid through
+// app.dover.com/api/v1/careers-page-slug/<slug> first.
 import { pass, fail, ROOT, captureConsoleErrors } from '../helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -13,6 +15,10 @@ console.log('\nProvider — dover');
 const BOARD = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 const CAREERS = `https://app.dover.com/Acme/careers/${BOARD}`;
 const API0 = `https://app.dover.com/api/v1/careers-page/${BOARD}/jobs?limit=300&offset=0`;
+// The /jobs/<slug> form: the slug resolves to the board uuid through a lookup endpoint.
+const SLUG_URL = 'https://app.dover.com/jobs/acme';
+const SLUG_LOOKUP = 'https://app.dover.com/api/v1/careers-page-slug/acme';
+const lookupBody = { id: BOARD, slug: 'acme', name: 'Acme Corp' };
 
 /** One posting in Dover's list shape. */
 const row = (id, title, extra = {}) => ({
@@ -231,6 +237,15 @@ try {
   if (probeCalls === 1 && probeOpts?.redirect === 'error') pass('dover.fetch() honors ctx.maxPages: 1 (one request, redirect:"error")');
   else fail(`dover.fetch() probe made ${probeCalls} calls, opts ${JSON.stringify(probeOpts)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so nothing warns and nothing is marked (#7180).
+  const { result: probedAtCap, errors: probeAtCapErrors } = await captureConsoleErrors(() => dover.fetch({ ...big, max_pages: 1 }, { maxPages: 1, fetchJson: async () => full(0, 300) }));
+  if (!probeAtCapErrors.some((e) => /raise max_pages/.test(e)) && probedAtCap.truncated === undefined) pass('dover.fetch() warns nothing and marks nothing for a probe on a max_pages: 1 entry');
+  else fail(`dover.fetch() probe at max_pages: 1: truncated=${JSON.stringify(probedAtCap.truncated)}, errors ${JSON.stringify(probeAtCapErrors)}`);
+  const { result: scannedAtCap, errors: scanAtCapErrors } = await captureConsoleErrors(() => dover.fetch({ ...big, max_pages: 1 }, { sleep: async () => {}, fetchJson: async () => full(0, 300) }));
+  if (scanAtCapErrors.some((e) => /raise max_pages/.test(e)) && scannedAtCap.truncated?.reason === 'page-cap') pass('dover.fetch() still warns and marks page-cap for a real scan of a max_pages: 1 entry');
+  else fail(`dover.fetch() scan at max_pages: 1: truncated=${JSON.stringify(scannedAtCap.truncated)}, errors ${JSON.stringify(scanAtCapErrors)}`);
+
   // A plain Error has no status, so isRetryableError() treats it as retryable.
   // The probe must still make exactly one call and rethrow that same error
   // (providers/magneto.mjs's health-probe check).
@@ -276,6 +291,200 @@ try {
   } else {
     fail(`dover.fetch() later failure: ${later.length} jobs, ${JSON.stringify(laterErrors)}`);
   }
+
+  // ── /jobs/<slug> careers-page form ──────────────────────────────────────
+  // detect(): synchronous, request-free; returns the slug lookup URL.
+  if (dover.detect({ name: 'Acme', careers_url: SLUG_URL })?.url === SLUG_LOOKUP
+      && dover.detect({ name: 'Acme', careers_url: `${SLUG_URL}/` })?.url === SLUG_LOOKUP
+      && dover.detect({ name: 'Acme', careers_url: `${SLUG_URL}?utm_source=x` })?.url === SLUG_LOOKUP) {
+    pass('dover.detect() claims app.dover.com/jobs/<slug> (trailing slash and query ignored)');
+  } else {
+    fail(`dover.detect() slug form = ${JSON.stringify(dover.detect({ name: 'Acme', careers_url: SLUG_URL }))}`);
+  }
+
+  const slugJunk = [
+    'https://app.dover.com/jobs',                       // no slug
+    'https://app.dover.com/jobs/',                      // no slug
+    'http://app.dover.com/jobs/acme',                   // non-https
+    'https://example.com/jobs/acme',                    // other host
+    'https://evil.example/app.dover.com/jobs/acme',     // path spoof
+    'https://app.dover.com/jobs/ac%2Fme',               // percent-escaped slash
+    'https://app.dover.com/jobs/ac.me',                 // dot
+    'https://app.dover.com/jobs/-acme',                 // non-alphanumeric edge
+    `https://app.dover.com/jobs/${'a'.repeat(101)}`,    // over-long
+  ];
+  let slugJunkOk = true;
+  for (const u of slugJunk) {
+    try {
+      if (dover.detect({ name: 'X', careers_url: u }) !== null) { slugJunkOk = false; fail(`dover.detect() should be null for ${u}`); }
+    } catch (err) {
+      slugJunkOk = false;
+      fail(`dover.detect() threw for ${u}: ${err.message}`);
+    }
+  }
+  if (slugJunkOk) pass('dover.detect() returns null (no throw) for malformed /jobs/<slug> URLs');
+
+  const slugBoard = resolveBoard({ careers_url: SLUG_URL });
+  if (slugBoard?.slug === 'acme' && slugBoard?.board === null) pass('resolveBoard returns { slug, board: null } for the /jobs/<slug> form');
+  else fail(`resolveBoard slug form = ${JSON.stringify(slugBoard)}`);
+
+  // The older <Company>/careers/<client-id> route carries a client id that is not
+  // a v4 uuid (version nibble 6); it keeps resolving like any other board id.
+  const CLIENT_ID = '0a1b2c3d-4e5f-6a6b-8c7d-9e0f1a2b3c4d';
+  if (dover.detect({ name: 'Acme', careers_url: `https://app.dover.com/Acme/careers/${CLIENT_ID}` })?.url
+      === `https://app.dover.com/api/v1/careers-page/${CLIENT_ID}/jobs?limit=300&offset=0`) {
+    pass('dover.detect() still resolves the <Company>/careers/<client-id> form (non-v4 client id)');
+  } else {
+    fail('dover.detect() lost the <Company>/careers/<client-id> form');
+  }
+
+  // Overlap: a company literally named "jobs" publishes /jobs/careers/<uuid>. That is the
+  // <Company>/careers/<uuid> form, not the /jobs/<slug> form with slug "careers".
+  const overlap = resolveBoard({ careers_url: `https://app.dover.com/jobs/careers/${BOARD}` });
+  if (overlap?.board === BOARD && overlap?.slug === null && overlap?.company === 'jobs'
+      && dover.detect({ name: 'Jobs Co', careers_url: `https://app.dover.com/jobs/careers/${BOARD}` })?.url === API0) {
+    pass('dover.detect() reads /jobs/careers/<uuid> as company "jobs" with a board uuid, not slug "careers"');
+  } else {
+    fail(`dover /jobs/careers/<uuid> overlap = ${JSON.stringify(overlap)}`);
+  }
+  // A real slug named "careers" (no uuid after it) is still the slug form.
+  if (resolveBoard({ careers_url: 'https://app.dover.com/jobs/careers' })?.slug === 'careers') {
+    pass('resolveBoard still reads /jobs/careers (no uuid) as slug "careers"');
+  } else {
+    fail('resolveBoard should read /jobs/careers as slug "careers"');
+  }
+
+  // fetch(): slug lookup first, then the board's list pages; company segment from the lookup name.
+  const slugCalls = [];
+  const slugFetched = await dover.fetch({ name: 'Acme Inc', careers_url: SLUG_URL }, {
+    fetchJson: async (url, o) => {
+      slugCalls.push({ url, o });
+      return url === SLUG_LOOKUP ? lookupBody : sample;
+    },
+  });
+  if (slugCalls.length === 2 && slugCalls[0].url === SLUG_LOOKUP && slugCalls[1].url === API0) {
+    pass('dover.fetch() resolves /jobs/<slug> through the slug lookup, then reads the board list');
+  } else {
+    fail(`dover.fetch() slug calls: ${JSON.stringify(slugCalls.map((c) => c.url))}`);
+  }
+  if (slugCalls.every((c) => c.o?.redirect === 'error')) pass('dover.fetch() passes redirect:"error" on the slug lookup too (SSRF guard)');
+  else fail(`dover.fetch() slug opts = ${JSON.stringify(slugCalls.map((c) => c.o))}`);
+  if (slugFetched.length === 3 && slugFetched[0].company === 'Acme Inc'
+      && slugFetched[0].url === 'https://app.dover.com/apply/Acme%20Corp/id-1') {
+    pass('dover.fetch() on a slug entry: company from entry name, apply URL segment from the lookup name');
+  } else {
+    fail(`dover.fetch() slug row 0 = ${JSON.stringify(slugFetched[0])}`);
+  }
+
+  // Without an entry name, the lookup name is the company; without either, the slug.
+  const unnamed = await dover.fetch({ careers_url: SLUG_URL }, {
+    fetchJson: async (url) => (url === SLUG_LOOKUP ? lookupBody : sample),
+  });
+  const noName = await dover.fetch({ careers_url: SLUG_URL }, {
+    fetchJson: async (url) => (url === SLUG_LOOKUP ? { id: BOARD } : sample),
+  });
+  if (unnamed[0]?.company === 'Acme Corp' && noName[0]?.company === 'acme'
+      && noName[0]?.url === 'https://app.dover.com/apply/acme/id-1') {
+    pass('dover.fetch() falls back from entry name to lookup name to slug');
+  } else {
+    fail(`dover.fetch() name fallbacks: ${JSON.stringify([unnamed[0], noName[0]])}`);
+  }
+
+  // An unknown slug is a 404 from the lookup: it throws and never reads as an empty board.
+  let unknownThrew = false;
+  let unknownListCalled = false;
+  try {
+    await dover.fetch({ name: 'Acme', careers_url: 'https://app.dover.com/jobs/no-such-company' }, {
+      sleep: async () => {},
+      fetchJson: async (url) => {
+        if (url.includes('/careers-page-slug/')) throw Object.assign(new Error('HTTP 404'), { status: 404 });
+        unknownListCalled = true;
+        return { results: [] };
+      },
+    });
+  } catch (e) {
+    unknownThrew = /404/.test(e.message);
+  }
+  if (unknownThrew && !unknownListCalled) pass('dover.fetch() surfaces an unknown slug (404) as an error, not an empty board');
+  else fail(`dover.fetch() unknown slug: threw=${unknownThrew}, list requested=${unknownListCalled}`);
+
+  // A lookup body without a board uuid throws (defensive parsing); nothing is listed.
+  let badBodies = true;
+  for (const bad of [{}, { id: 'not-a-uuid' }, { id: 42 }, null, [], 'x']) {
+    let threw = false;
+    let listed = false;
+    try {
+      await dover.fetch({ name: 'Acme', careers_url: SLUG_URL }, {
+        sleep: async () => {},
+        fetchJson: async (url) => { if (url === SLUG_LOOKUP) return bad; listed = true; return sample; },
+      });
+    } catch (e) {
+      threw = /unexpected slug lookup response/.test(e.message);
+    }
+    if (!threw || listed) { badBodies = false; fail(`dover.fetch() should throw on slug lookup body ${JSON.stringify(bad)} (threw=${threw}, listed=${listed})`); }
+  }
+  if (badBodies) pass('dover.fetch() throws on a slug lookup response that carries no board uuid');
+
+  // Paging works on the resolved board id.
+  const slugUrls = [];
+  const slugPaged = await dover.fetch({ name: 'BigCo', careers_url: SLUG_URL }, {
+    sleep: async () => {},
+    fetchJson: async (url) => {
+      if (url === SLUG_LOOKUP) return lookupBody;
+      slugUrls.push(url);
+      return slugUrls.length === 1 ? full(0, 300) : full(1, 20, null);
+    },
+  });
+  if (slugUrls.length === 2 && slugUrls[0] === API0 && slugUrls[1].endsWith(`${BOARD}/jobs?limit=300&offset=300`) && slugPaged.length === 320) {
+    pass('dover.fetch() pages a /jobs/<slug> board by offset using the resolved board uuid');
+  } else {
+    fail(`dover.fetch() slug pagination: ${JSON.stringify(slugUrls)}, ${slugPaged.length} jobs`);
+  }
+
+  // The page cap still marks a capped slug board with jobs.truncated.
+  let slugHugeCalls = 0;
+  const { result: slugHuge } = await captureConsoleErrors(() => dover.fetch({ name: 'BigCo', careers_url: SLUG_URL, max_pages: 2 }, {
+    sleep: async () => {},
+    fetchJson: async (url) => { if (url === SLUG_LOOKUP) return lookupBody; slugHugeCalls++; return full(slugHugeCalls, 300); },
+  }));
+  if (slugHugeCalls === 2 && slugHuge.truncated?.reason === 'page-cap') pass('dover.fetch() keeps the page-cap truncated signal on a slug board');
+  else fail(`dover.fetch() slug cap: ${slugHugeCalls} list calls, ${JSON.stringify(slugHuge.truncated)}`);
+
+  // Probe on a slug board: one lookup + one list page, no retries, failure rethrown unwrapped.
+  let slugProbeCalls = 0;
+  const slugProbed = await dover.fetch({ name: 'BigCo', careers_url: SLUG_URL }, {
+    maxPages: 1,
+    fetchJson: async (url) => { slugProbeCalls++; return url === SLUG_LOOKUP ? lookupBody : full(0, 300); },
+  });
+  if (slugProbeCalls === 2 && !slugProbed.truncated) pass('dover.fetch() probe on a slug board makes one lookup and one list request, unflagged');
+  else fail(`dover.fetch() slug probe: ${slugProbeCalls} calls, truncated=${JSON.stringify(slugProbed.truncated)}`);
+
+  const lookupErr = new Error('budget');
+  let lookupCalls = 0;
+  let lookupUnwrapped = false;
+  try {
+    await dover.fetch({ name: 'BigCo', careers_url: SLUG_URL }, {
+      maxPages: 1,
+      sleep: async () => {},
+      fetchJson: async () => { lookupCalls++; throw lookupErr; },
+    });
+  } catch (e) {
+    lookupUnwrapped = e === lookupErr;
+  }
+  if (lookupUnwrapped && lookupCalls === 1) pass('dover.fetch() probe propagates a failed slug lookup unwrapped after exactly one call');
+  else fail(`dover.fetch() slug lookup probe failure: unwrapped=${lookupUnwrapped}, calls=${lookupCalls}`);
+
+  // A non-probe lookup retries a status-less failure (RETRY_POLICY), like the list requests.
+  let retryCalls = 0;
+  const retried = await dover.fetch({ name: 'Acme', careers_url: SLUG_URL }, {
+    sleep: async () => {},
+    fetchJson: async (url) => {
+      if (url === SLUG_LOOKUP) { retryCalls++; if (retryCalls === 1) throw new Error('socket hang up'); return lookupBody; }
+      return sample;
+    },
+  });
+  if (retryCalls === 2 && retried.length === 3) pass('dover.fetch() retries a transient slug lookup failure during a normal scan');
+  else fail(`dover.fetch() lookup retry: ${retryCalls} lookups, ${retried.length} jobs`);
 } catch (e) {
   fail(`dover provider tests crashed: ${e.stack || e.message}`);
 }

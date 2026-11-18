@@ -564,6 +564,8 @@ try {
   } else {
     fail(`consider.fetch() walk: ${JSON.stringify({ rows: fullWalk.jobs?.length, metas: fullWalk.metas, warnings: fullWalk.warnings })}`);
   }
+  if (fullWalk.jobs?.truncated === undefined) pass('consider.fetch() leaves a board read to its end unmarked');
+  else fail(`consider.fetch() full walk was marked: ${JSON.stringify(fullWalk.jobs?.truncated)}`);
   if (JSON.stringify(fullWalk.delays) === JSON.stringify([250, 250])) pass('consider.fetch() waits 250 ms between pages and not before the first one');
   else fail(`consider.fetch() page delays: ${JSON.stringify(fullWalk.delays)}`);
 
@@ -582,10 +584,15 @@ try {
   } else {
     fail(`consider.fetch() max_pages: ${JSON.stringify({ requests: capped.metas.length, warnings: capped.warnings })}`);
   }
+  // Each warned stop is also marked, so scan.mjs logs the board partial, not reachable.
+  if (capped.jobs?.truncated?.reason === 'page-cap' && capped.jobs.truncated.fetched === 4) pass('consider.fetch() marks the board page-cap when max_pages ends the walk with a cursor left');
+  else fail(`consider.fetch() max_pages cut: truncated = ${JSON.stringify(capped.jobs?.truncated)}`);
 
   const endsAtCap = await walkRun({ max_pages: 2 }, { pages: 2, total: 4 });
   if (endsAtCap.metas.length === 2 && endsAtCap.warnings.length === 0) pass('consider.fetch() does not warn when the board ends exactly at max_pages');
   else fail(`consider.fetch() board ending at max_pages: ${JSON.stringify(endsAtCap.warnings)}`);
+  if (endsAtCap.jobs?.truncated === undefined) pass('consider.fetch() leaves a board that ends exactly at max_pages unmarked');
+  else fail(`consider.fetch() board ending at max_pages was marked: ${JSON.stringify(endsAtCap.jobs?.truncated)}`);
 
   const hardCap = await walkRun({ max_pages: 5000 }, { pages: 200, total: 400 });
   if (hardCap.metas.length === 100 && hardCap.warnings.length === 1
@@ -604,6 +611,8 @@ try {
   } else {
     fail(`consider.fetch() later page failure: ${JSON.stringify({ rows: laterFailure.jobs?.length, requests: laterFailure.metas.length, warnings: laterFailure.warnings })}`);
   }
+  if (laterFailure.jobs?.truncated?.reason === 'fetch-error' && laterFailure.jobs.truncated.fetched === 2) pass('consider.fetch() marks the board partial when a later page fails after its retries');
+  else fail(`consider.fetch() later page failure: truncated = ${JSON.stringify(laterFailure.jobs?.truncated)}`);
 
   const notObject = await walkRun({}, { shape: failing('plain string rejection') });
   if (notObject.warnings[0]?.includes('truncated at page 2 of 10 after an unknown number of attempts (2 jobs): plain string rejection')) {

@@ -8,6 +8,7 @@ import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
 import { interpretFormWithAgent } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
+import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
 import { cvUploadFile } from "./upload-name.mjs";
 import { resolveCli } from "../clis";
@@ -157,11 +158,12 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
     if (hit.type) f.type = hit.type as ApplyField["type"];
     if (hit.options.length) f.options = hit.options;
     if (hit.required) f.required = true;
-    if (hit.type === "select") f.combobox = true;
+    // Do not mark a native select or a yes/no as a menu. A combobox keeps the
+    // flag the reader already set. Typing into a menu is only for that flag.
   }
 }
 
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string };
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string> };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -505,6 +507,8 @@ export async function fillSession(
   fieldsMeta: ApplyField[],
   cvPath?: string,
   cvUploadName?: string,
+  /** Answers to compare at read-back. Defaults to the map this call typed. */
+  readbackAnswers?: Record<string, string>,
 ): Promise<{ steps: FillStep[]; navigated: boolean; issues: ApplyIssue[] }> {
   const s = SESSIONS.get(id);
   if (!s) throw new Error("apply session not found (it may have expired)");
@@ -600,6 +604,31 @@ export async function fillSession(
         await loc.selectOption({ label: value }).catch(async () => {
           await loc.selectOption(value);
         });
+      } else if (meta.type === "checkbox" && meta.options?.length) {
+        const wanted = checkboxSelections(value, meta.options);
+        const consent = (label: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(label);
+        const boxes = s.frame.locator(`[data-co-field="${cssAttr(fid)}"]`);
+        const count = await boxes.count();
+        let checked = 0;
+        let missed = 0;
+        for (let i = 0; i < count; i++) {
+          const box = boxes.nth(i);
+          const opt = (await box.getAttribute("data-co-option")) || "";
+          // A consent option keeps its own words, or the mark set when a shared
+          // consent label was replaced by the control's value. The group title
+          // does not make the whole group consent. Leave the box untouched.
+          if (consent(opt) || (await box.getAttribute("data-co-consent")) === "1") continue;
+          const want = checkboxOptionWanted(wanted, opt);
+          const did = await confirmCheckbox(
+            (state, opts) => box.setChecked(state, opts),
+            (opts) => box.isChecked(opts),
+            want,
+          );
+          if (!did) missed += 1;
+          else if (want) checked += 1;
+        }
+        const actionable = wanted.filter((opt) => !consent(opt));
+        gaveUp = missed > 0 || checked !== actionable.length || actionable.length !== wanted.length;
       } else if (meta.type === "checkbox") {
         const want = ["true", "1", "yes", "on", "checked"].includes(value.toLowerCase());
         let done = false;
@@ -640,7 +669,17 @@ export async function fillSession(
       } else {
         const liveType = ((await loc.getAttribute("type").catch(() => "")) || "").toLowerCase();
         if (liveType === "password") continue;
-        await loc.fill(value);
+        const current = (await loc.inputValue().catch(() => "")).trim();
+        // Remember only values this session wrote, without surrounding spaces.
+        // The live value is trimmed too, so a padded answer still matches on
+        // the next run and a dashboard correction can replace it. A different
+        // value already on the form was typed there, so a later run leaves it.
+        const answer = value.trim();
+        const remembered = s.written?.get(fid);
+        if (answer && (!current || current === remembered)) {
+          if (current !== answer) await loc.fill(answer);
+          (s.written ??= new Map()).set(fid, answer);
+        }
       }
       ok = !gaveUp;
     } catch {
@@ -657,7 +696,9 @@ export async function fillSession(
   })();
   // Read the real form back: did every answer actually land? any validation
   // error? — so we warn the user about silent divergence before the handoff.
-  const issues = await verifyFill(s.frame, fieldsMeta, answers).catch(() => [] as ApplyIssue[]);
+  const issues = await verifyFill(s.frame, fieldsMeta, readbackAnswers ?? answers).catch(() => [
+    { level: "warn" as const, code: "fill-unverified", message: "Couldn't read the form back, so it is not counted as pre-filled." },
+  ] as ApplyIssue[]);
   return { steps, navigated: endPath !== startPath, issues };
 }
 

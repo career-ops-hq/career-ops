@@ -6,6 +6,7 @@
  */
 import fs from 'node:fs/promises';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { stripMarkup } from './lib/jd-parse.mjs';
 
 const MAX_BODY = 1024 * 1024;
 const TIMEOUT_MS = 15_000;
@@ -58,8 +59,8 @@ export function classifyHimalayasPosting(originalUrl, status, body, metadata = {
       || !Array.isArray(job.locationRestrictions) || !Array.isArray(job.timezoneRestrictions)
       || !epoch(job.pubDate) || !epoch(job.expiryDate)) return unknown('partial_job');
   if (CHALLENGE.test(job.description) || /^(?:just a moment|access denied|sign in|log in|forbidden)\b/i.test(job.title)) return unknown('challenge_or_login_wall');
-  const plain = job.description.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]*>|&(?:#\w+|\w+);/g, ' ').replace(/\s+/g, ' ').trim();
+  const plain = stripMarkup(job.description, { unclosedPayloadIsText: true })
+    .replace(/&(?:#\w+|\w+);/g, ' ').replace(/\s+/g, ' ').trim();
   if (plain.length < 500) return unknown('insufficient_description');
   // An inconsistent expiry is uncertainty; only the documented 410 closes it.
   if (job.expiryDate <= Date.parse(observed) / 1000) return unknown('inconsistent_expiry');

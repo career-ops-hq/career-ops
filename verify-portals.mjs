@@ -504,7 +504,7 @@ export function unminedHints(cfg) {
  * Classify a fetch/probe failure for scan summaries and slug diagnostics.
  *
  * @param {Error|{status?: number, name?: string, message?: string}|null|undefined} err
- * @returns {'slug_gone'|'auth'|'network'|'server'|'unknown'}
+ * @returns {'slug_gone'|'auth'|'network'|'server'|'rate_limit'|'unknown'}
  */
 export function classifyFetchError(err) {
   if (!err) return 'unknown';
@@ -516,9 +516,11 @@ export function classifyFetchError(err) {
   const status = err.status;
   if (status === 404 || status === 410) return 'slug_gone';
   if (status === 401 || status === 403) return 'auth';
+  if (status === 429) return 'rate_limit';
   if (typeof status === 'number' && status >= 500) return 'server';
   if (/HTTP 404|HTTP 410/.test(msg)) return 'slug_gone';
   if (/HTTP 401|HTTP 403/.test(msg)) return 'auth';
+  if (/HTTP 429\b/.test(msg)) return 'rate_limit';
   if (/HTTP 5\d\d/.test(msg)) return 'server';
   return 'unknown';
 }
@@ -1040,6 +1042,7 @@ const ERROR_KIND_LABEL = {
   auth: 'auth blocked',
   network: 'network error',
   server: 'server error',
+  rate_limit: 'rate limited',
   unknown: 'unresolved',
 };
 

@@ -5,24 +5,36 @@ import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { careerOpsRoot, findReportFile, isRegularContainedFile, pdfPathStatusForReport, rootScript } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
-import { dataFolderMissingMessage } from "@/lib/core/data-root.mjs";
+import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { atomicWrite } from "@/lib/core/safe-write";
+import { resolvePdfIndexPath } from "@/lib/core/pdf-index";
 import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { markTrackerReady, spawnGeneratePdf, undeliveredRenderError } from "@/lib/pdf-render.mjs";
 import { escapeHtml, htmlText, parseBlocks, renderBlocks, type BlockTree } from "./html-blocks.mjs";
 import { parseBaseCv } from "./base-cv.mjs";
 import { unsupportedClaims } from "./rewrite.mjs";
+import { withPdfExport } from "./put-order.mjs";
+import { restoreFullPdfIndex } from "./restore-pdf.mjs";
 import { buildStudioDoc, emptyEdits, parseEdits, resolveStudio, type StudioDoc, type StudioEdits } from "./studio.mjs";
 
 const EDITED_SUFFIX = "-edited";
 
 export function missingDataFolderMessage(): string | null {
-  const root = careerOpsRoot();
+  let root: string;
+  try {
+    root = careerOpsRoot();
+  } catch (err) {
+    const unsafe = unsafeDataRootMessage(err);
+    if (!unsafe) throw err;
+    return unsafe;
+  }
   return fs.existsSync(root) ? null : dataFolderMissingMessage(root);
 }
 
+export type PdfExportFailure = { ok: false; error: string };
+
 export type StudioLoad =
-  | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean }
+  | { ok: true; reportNum: string; company: string; file: string; tree: BlockTree; doc: StudioDoc; edits: StudioEdits; stale: boolean; hasBase: boolean; pdfExport: PdfExportFailure | null }
   | { ok: false; reason: "no-report" | "no-tailored-cv" | "unreadable-layout" };
 
 type KeywordMatch = { extractKeywords: (report: string) => string[]; keywordCount: (keyword: string, text: string) => number };
@@ -143,13 +155,73 @@ export async function loadStudio(n: string): Promise<StudioLoad> {
     if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
   const { edits, stale } = parseEdits(raw, sourceHash) ?? { edits: emptyEdits(sourceHash), stale: false };
-  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null };
+  const pdfExport = stale ? null : readPdfExport(raw);
+  return { ok: true, reportNum: id.reportNum, company: companyOf(reportText, id.slug), file: path.relative(path.join(careerOpsRoot(), "output"), file).split(path.sep).join("/"), tree, doc, edits, stale, hasBase: base.entries.length > 0 || base.summary !== null, pdfExport };
 }
 
-export function saveEdits(reportNum: string, edits: StudioEdits) {
+function readPdfExport(raw: unknown): PdfExportFailure | null {
+  const flag = raw && typeof raw === "object" ? (raw as { pdfExport?: { ok?: unknown; error?: unknown } }).pdfExport : null;
+  if (flag && flag.ok === false && typeof flag.error === "string" && flag.error.length > 0) return { ok: false, error: flag.error };
+  return null;
+}
+
+export function saveEdits(reportNum: string, edits: StudioEdits, pdfExport?: PdfExportFailure | null) {
   const file = editsPath(reportNum);
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  atomicWrite(file, JSON.stringify(edits, null, 2) + "\n");
+  let stored: PdfExportFailure | null = null;
+  if (pdfExport === undefined) {
+    try {
+      stored = readPdfExport(JSON.parse(fs.readFileSync(file, "utf8")));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    }
+  }
+  atomicWrite(file, JSON.stringify(withPdfExport(edits, stored, pdfExport), null, 2) + "\n");
+}
+
+/** Write the PDF result onto the draft already on disk. A save that landed during the render keeps its edits. */
+export function recordPdfExport(reportNum: string, pdfExport: PdfExportFailure | null) {
+  const file = editsPath(reportNum);
+  let raw: unknown;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return;
+  }
+  if (!raw || typeof raw !== "object") return;
+  atomicWrite(file, JSON.stringify(withPdfExport(raw, null, pdfExport), null, 2) + "\n");
+}
+
+type IndexLock = {
+  withPipelineLock?: (
+    target: string,
+    fn: () => { restored: boolean; reason?: "missing" },
+    options?: { timeoutMs?: number; retryMs?: number },
+  ) => Promise<{ restored: boolean; reason?: "missing" }>;
+};
+
+/** Point Apply back at the full PDF after Reset, when that file is still on disk. */
+export async function restoreIndexedFullPdf(reportNum: string): Promise<{ restored: boolean; reason?: "missing" }> {
+  const indexPath = await resolvePdfIndexPath();
+  if (!indexPath || !fs.existsSync(indexPath)) return { restored: false };
+  // generate-pdf.mjs holds this same lock while it rewrites the index.
+  const lockFile = path.join(resolveCodeRoot(process.cwd(), process.env), "pipeline-lock.mjs");
+  const mod = (await import(/* webpackIgnore: true */ pathToFileURL(lockFile).href)) as IndexLock;
+  if (typeof mod.withPipelineLock !== "function") throw new Error("pipeline-lock.mjs has no withPipelineLock");
+  const timeoutMs = Number(process.env.CAREER_OPS_WEB_LOCK_TIMEOUT_MS) || 5_000;
+  return mod.withPipelineLock(indexPath, () => {
+    const text = fs.readFileSync(indexPath, "utf8");
+    const root = careerOpsRoot();
+    const outputDir = path.resolve(root, "output");
+    const result = restoreFullPdfIndex(text, reportNum, (rel) => {
+      const abs = path.resolve(root, rel);
+      return abs.startsWith(`${outputDir}${path.sep}`) && isRegularContainedFile(abs, outputDir);
+    });
+    if (!result.restored) return { restored: false, reason: result.reason };
+    atomicWrite(indexPath, result.text.endsWith("\n") ? result.text : `${result.text}\n`);
+    return { restored: true };
+  }, { timeoutMs, retryMs: 50 });
 }
 
 export async function keywordsInText(n: string, text: string): Promise<string[] | null> {

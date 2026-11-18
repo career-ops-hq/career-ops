@@ -44,13 +44,18 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BOARD_ATS,
+  DNS_LABEL_ATS,
+  OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
   REGIONS,
   SLUG_RE,
+  SUBDOMAIN_ATS,
+  SUBDOMAIN_RESERVED_LABELS,
   WORKDAY_HOSTS,
   WORKDAY_INSTANCE_RE,
   WORKDAY_SEGMENT_RE,
   buildBoardUrl,
+  regionsOf,
 } from '../lib/ats-board-url.mjs';
 import { isMainModule } from '../lib/is-main-module.mjs';
 import {
@@ -88,12 +93,13 @@ export const MANIFEST_KEYS = Object.freeze([
 ]);
 export const RETIRED_REASONS = Object.freeze(['gone', 'owner_request', 'moved', 'duplicate', 'policy']);
 
-// Where a row's pointer came from. A closed list: three fixed values and two
+// Where a row's pointer came from. A closed list: three fixed values and three
 // parameterised forms.
 export const FIXED_SOURCES = Object.freeze(['community', 'ats-directory', 'vc-portfolio']);
 export const SOURCE_PATTERNS = Object.freeze({
   'employer-list': /^employer-list:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/,
   'prior-mit': /^prior-mit:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{7,40}$/,
+  'web-index': /^web-index:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?@\d{4}-\d{2}-\d{2}$/,
 });
 
 export const LICENSE_ID = 'CC-BY-4.0';
@@ -103,7 +109,9 @@ export const ALSO_PERMITS = Object.freeze(['ODbL-1.0', 'CC0-1.0']);
 // reserved in the format so rows written later do not need a migration.
 export const TAG_VOCABULARY = Object.freeze([]);
 
-export const MANIFEST_ID_RE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/;
+// <YYYY-MM-DD>-<slug>, and for a later contribution of the same day a number
+// after a dot, 2 to 99 with no leading zero: <YYYY-MM-DD>-<slug>.<n>.
+export const MANIFEST_ID_RE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)(?:\.([2-9]|[1-9]\d))?$/;
 export const GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -124,9 +132,11 @@ const TOP_LEVEL = Object.freeze(['README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md
 const OPTIONAL_TOP_LEVEL = Object.freeze(['inbox']);
 const TOP_LEVEL_DIRS = new Set(['contributions', 'boards', 'inbox']);
 
-// ATS whose board id is a subdomain label: their providers only match
-// lowercase hosts, so the id is lowercase letters, digits and hyphens.
-const SUBDOMAIN_ATS = new Set(['recruitee', 'breezy', 'bamboohr', 'pinpoint']);
+// ATS whose board id is a subdomain label (SUBDOMAIN_ATS): their providers
+// only match lowercase hosts, so the id is lowercase letters, digits and
+// hyphens. For DNS_LABEL_ATS it is also at most 63 characters and not one of
+// the vendor's own subdomains (SUBDOMAIN_RESERVED_LABELS).
+const SUBDOMAIN_LABEL_MAX = 63;
 
 // Values that turn up where a board id should be but never name a board:
 // URL path words (Greenhouse's /embed/, Workday's /wday/cxs/) and placeholders.
@@ -175,6 +185,23 @@ export function boardProblem(ats, board) {
 }
 
 /**
+ * Why `region` is not a region of `ats`, or null when it is.
+ * @param {string} ats
+ * @param {unknown} region
+ * @param {string} what  "rows" or "boards", for the message
+ * @returns {string|null}
+ */
+function regionProblem(ats, region, what) {
+  const regions = regionsOf(ats);
+  if (regions.length === 0) {
+    return `region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} ${what}, and on ${Object.keys(OPTIONAL_REGION_BOARD_URL_BUILDERS).join(' and ')} ${what} off the default host`;
+  }
+  if (typeof region === 'string' && regions.includes(region)) return null;
+  const optional = Object.hasOwn(OPTIONAL_REGION_BOARD_URL_BUILDERS, ats) ? '; leave it out for a board on the default host' : '';
+  return `region ${show(region)} is not one of: ${regions.join(', ')}${optional}`;
+}
+
+/**
  * @param {string} ats
  * @param {string} slug
  * @param {string} label
@@ -182,14 +209,16 @@ export function boardProblem(ats, board) {
 function slugProblem(ats, slug, label) {
   if (!SLUG_RE.test(slug)) return `${label} ${show(slug)} has characters outside [A-Za-z0-9._-]`;
   if (slug.length < SLUG_MIN) return `${label} ${show(slug)} is too short to be a board id`;
-  if (slug.length > SEGMENT_MAX) return `${label} is ${slug.length} characters long; the limit is ${SEGMENT_MAX}`;
+  if (slug.length > SEGMENT_MAX && !DNS_LABEL_ATS.includes(ats)) return `${label} is ${slug.length} characters long; the limit is ${SEGMENT_MAX}`;
   if (!/^[A-Za-z0-9]/.test(slug) || !/[A-Za-z0-9]$/.test(slug)) return `${label} ${show(slug)} must start and end with a letter or digit`;
   if (slug.includes('..')) return `${label} ${show(slug)} contains ".."`;
   if (/^[0-9]+$/.test(slug)) return `${label} ${show(slug)} is numeric-only; ${ats} boards are named by a slug, not a number`;
   if (PLACEHOLDER_BOARDS.has(slug.toLowerCase())) return `${label} ${show(slug)} is a placeholder or a URL path word, not a board id`;
-  if (SUBDOMAIN_ATS.has(ats)) {
+  if (SUBDOMAIN_ATS.includes(ats)) {
     if (slug !== slug.toLowerCase()) return `${ats} ${label}s are lowercase (the id is a subdomain): use ${show(slug.toLowerCase())}`;
+    if (DNS_LABEL_ATS.includes(ats) && slug.length > SUBDOMAIN_LABEL_MAX) return `${ats} ${label}s are one subdomain label, at most ${SUBDOMAIN_LABEL_MAX} characters; this one has ${slug.length}`;
     if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(slug)) return `${ats} ${label}s are one subdomain label: lowercase letters, digits and hyphens`;
+    if (Object.hasOwn(SUBDOMAIN_RESERVED_LABELS, ats) && SUBDOMAIN_RESERVED_LABELS[ats].includes(slug)) return `${label} ${show(slug)} is one of ${ats}'s own subdomains, not a board`;
   }
   if (ats === 'rippling' && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(slug)) return `rippling ${label}s are letters, digits and hyphens`;
   if (ats === 'workable' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `workable ${label}s are letters, digits, "_" and "-"`;
@@ -251,8 +280,11 @@ export function websiteProblem(website) {
 export function sourceProblem(source) {
   if (typeof source !== 'string') return 'source must be a string';
   if (FIXED_SOURCES.includes(source)) return null;
+  if (SOURCE_PATTERNS['web-index'].test(source)) {
+    return isIsoDate(source.slice(source.lastIndexOf('@') + 1)) ? null : `source ${show(source)} does not end in a real calendar date (YYYY-MM-DD)`;
+  }
   if (Object.values(SOURCE_PATTERNS).some((re) => re.test(source))) return null;
-  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>`;
+  return `source ${show(source)} is not one of: ${FIXED_SOURCES.join(', ')}, employer-list:<org>, prior-mit:<owner>/<repo>@<commit>, web-index:<name>@<YYYY-MM-DD>`;
 }
 
 /** @param {unknown} value */
@@ -347,6 +379,23 @@ contribution does not edit this file: maintainers regenerate it on main with
 `;
 
 /**
+ * The order of two contribution ids: by the id without its number, then by
+ * the number (none comes first), so <id>.2 sorts right after <id> and <id>.10
+ * after <id>.9. Two ids without a number compare as plain text.
+ * @param {string} a
+ * @param {string} b
+ */
+export function compareContributionIds(a, b) {
+  const split = (/** @type {string} */ id) => {
+    const m = /^(.*)\.(\d+)$/.exec(id);
+    return m ? [m[1], Number(m[2])] : [id, 1];
+  };
+  const [ab, an] = split(a);
+  const [bb, bn] = split(b);
+  return ab < bb ? -1 : ab > bb ? 1 : an - bn;
+}
+
+/**
  * Render CHANGELOG.md from manifests: one line per contribution, oldest first,
  * crediting it with its own attribution.
  * @param {Array<any>} manifests
@@ -354,7 +403,7 @@ contribution does not edit this file: maintainers regenerate it on main with
 export function renderChangelog(manifests) {
   const usable = manifests
     .filter((m) => m && typeof m === 'object' && typeof m.id === 'string' && typeof m.date === 'string')
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : compareContributionIds(a.id, b.id)));
   const lines = usable.map((m) => {
     const rows = Number.isInteger(m.rows) ? `${m.rows} board${m.rows === 1 ? '' : 's'}` : 'boards';
     return `- ${m.date} \`${m.id}\` (${rows}, source \`${m.source}\`): ${m.attribution}`;
@@ -422,7 +471,7 @@ function readRegistry(rootDir, report) {
       if (f === '.DS_Store') continue;
       const rel = `${REGISTRY_DIR}/contributions/${f}`;
       const id = f.endsWith('.json') ? f.slice(0, -5) : '';
-      if (!MANIFEST_ID_RE.test(id)) { err(rel, 0, 'manifests are named <YYYY-MM-DD>-<slug>.json (lowercase slug)'); continue; }
+      if (!MANIFEST_ID_RE.test(id)) { err(rel, 0, 'manifests are named <YYYY-MM-DD>-<slug>.json (lowercase slug), or <YYYY-MM-DD>-<slug>.<n>.json with n from 2 to 99'); continue; }
       if (!lstatOrNull(join(cdir, f))?.isFile()) { err(rel, 0, 'must be a regular file'); continue; }
       const text = readFileSync(join(cdir, f), 'utf8');
       let data = null;
@@ -526,8 +575,9 @@ export function readInbox(rootDir, report) {
 
 /**
  * Problems with one inbox line: {"ats","board","name"} and, optionally,
- * "website", plus "region" (greenhouse, lever) or "workday_host" (workday) when
- * the board is not on the default host. Empty when the line is valid.
+ * "website", plus "region" (greenhouse, lever, personio, zoho-recruit) or
+ * "workday_host" (workday) when the board is not on the default host. Empty
+ * when the line is valid.
  * @param {any} line
  * @param {Set<string>} [aggregatorDomains]
  * @returns {string[]}
@@ -541,8 +591,8 @@ export function inboxLineProblems(line, aggregatorDomains = loadAggregatorDomain
   const atsOk = typeof line.ats === 'string' && BOARD_ATS.includes(line.ats);
   if (hasOwn(line, 'ats') && !atsOk) out.push(`ats ${show(line.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
   if (atsOk && hasOwn(line, 'region')) {
-    if (!hasOwn(REGIONAL_BOARD_URL_BUILDERS, line.ats)) out.push(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} boards`);
-    else if (!REGIONS.includes(line.region)) out.push(`region ${show(line.region)} is not one of: ${REGIONS.join(', ')}`);
+    const p = regionProblem(line.ats, line.region, 'boards');
+    if (p) out.push(p);
   }
   if (atsOk && hasOwn(line, 'workday_host')) {
     if (line.ats !== 'workday') out.push('workday_host is only used on workday boards');
@@ -583,14 +633,16 @@ const KNOWN_LINES_SHOWN = 20;
 /**
  * Validate the inbox against the registry it sits in. Errors: a bad name, a
  * bad line, a file over the limit, a board listed twice in the inbox, a
- * manifest that does not fit its boards files. Warning: boards already in
- * boards/ (one warning per file, however many lines), which the fold skips.
+ * manifest that does not fit its boards files, a numbered contribution id
+ * that contributions/ already has. Warning: boards already in boards/ (one
+ * warning per file, however many lines), which the fold skips.
  * @param {Inbox} inbox
  * @param {RowRecord[]} storeRows
+ * @param {Map<string, ManifestRecord>} storeManifests  contributions/, by id
  * @param {{err: (file: string, line: number, message: string) => void, warn: (file: string, line: number, message: string) => void, aggregatorDomains: Set<string>, latestDate: string}} ctx
  * @returns {number} how many inbox lines are already in the registry
  */
-function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate }) {
+function checkInbox(inbox, storeRows, storeManifests, { err, warn, aggregatorDomains, latestDate }) {
   /** @type {Map<string, RowRecord>} */
   const store = new Map();
   for (const r of storeRows) {
@@ -634,6 +686,22 @@ function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate
     if (typeof c === 'string' && GITHUB_LOGIN_RE.test(c) && c.toLowerCase() !== s.parsed.login) {
       err(s.file, 0, `contributor ${show(c)} is not the login in the file name (${s.parsed.login})`);
     }
+  }
+
+  // A contribution without a number whose id is taken is folded in as
+  // <id>-2, <id>-3, …; a numbered one keeps its id, so a taken one is an error.
+  /** @type {Map<string, string>} id → its first file */
+  const firstFile = new Map();
+  for (const x of [...inbox.files, ...inbox.sheets.values()].sort((a, b) => (a.file < b.file ? -1 : 1))) {
+    if (!firstFile.has(x.parsed.id)) firstFile.set(x.parsed.id, x.file);
+  }
+  for (const [id, file] of firstFile) {
+    if (!id.includes('.') || !storeManifests.has(id)) continue;
+    const base = id.slice(0, id.lastIndexOf('.'));
+    let n = 2;
+    while (n <= 99 && (storeManifests.has(`${base}.${n}`) || firstFile.has(`${base}.${n}`))) n++;
+    const next = n <= 99 ? `; the next free one is ${base}.${n}` : '';
+    err(file, 0, `contribution ${id} is already in the registry (contributions/${id}.json): give this one another number${next}`);
   }
   return knownTotal;
 }
@@ -760,11 +828,11 @@ export function validateRegistry({
     if (hasOwn(row, 'ats') && !atsOk) e(`ats ${show(row.ats)} is not one of: ${BOARD_ATS.join(', ')}`);
     else if (atsOk && row.ats !== rec.dirAts) e(`ats ${show(row.ats)} is filed under boards/${rec.dirAts}/; a row lives under boards/<its ats>/`);
 
-    if (atsOk && hasOwn(REGIONAL_BOARD_URL_BUILDERS, row.ats)) {
-      if (!hasOwn(row, 'region')) e(`region is required on ${row.ats} rows: ${REGIONS.join(' or ')}`);
-      else if (!REGIONS.includes(row.region)) e(`region ${show(row.region)} is not one of: ${REGIONS.join(', ')}`);
+    if (atsOk && hasOwn(REGIONAL_BOARD_URL_BUILDERS, row.ats) && !hasOwn(row, 'region')) {
+      e(`region is required on ${row.ats} rows: ${REGIONS.join(' or ')}`);
     } else if (atsOk && hasOwn(row, 'region')) {
-      e(`region is only used on ${Object.keys(REGIONAL_BOARD_URL_BUILDERS).join(' and ')} rows`);
+      const p = regionProblem(row.ats, row.region, 'rows');
+      if (p) e(p);
     }
 
     if (row.ats === 'workday') {
@@ -849,7 +917,7 @@ export function validateRegistry({
     let manifest = null;
     if (hasOwn(row, 'contribution')) {
       const id = row.contribution;
-      if (typeof id !== 'string' || !MANIFEST_ID_RE.test(id)) e(`contribution ${show(id)} is not a manifest id (<YYYY-MM-DD>-<slug>)`);
+      if (typeof id !== 'string' || !MANIFEST_ID_RE.test(id)) e(`contribution ${show(id)} is not a manifest id (<YYYY-MM-DD>-<slug> or <YYYY-MM-DD>-<slug>.<n>)`);
       else if (!head.manifests.has(id)) e(`contribution ${show(id)} has no manifest at contributions/${id}.json`);
       else manifest = validManifests.get(id) || null;
     }
@@ -899,7 +967,7 @@ export function validateRegistry({
   }
 
   const inbox = readInbox(root, err);
-  const inboxKnown = checkInbox(inbox, head.rows, { err, warn, aggregatorDomains, latestDate });
+  const inboxKnown = checkInbox(inbox, head.rows, head.manifests, { err, warn, aggregatorDomains, latestDate });
 
   // CHANGELOG.md is not compared with the manifests: a contribution does not
   // touch it, and maintainers regenerate it on main (--write-changelog).
