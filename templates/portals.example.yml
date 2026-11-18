@@ -1407,6 +1407,9 @@ search_queries:
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
+#   successfactors-classic  career<N>.successfactors.(eu|com)/career?company=<ID>  (SAP's own hosted
+#                   job board, no RMK tiles or CSB API; the same host family as above, told apart by
+#                   the /career?company= path, which successfactors leaves to this provider)
 #   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
 #                   (Oracle Recruiting Cloud / Fusion CX — JPMorgan, Oracle, BNY, Amex, Honeywell; siteNumber
 #                   auto-derived from the URL, override with provider: oraclecloud + siteNumber: / optional locationId:.
@@ -1909,6 +1912,17 @@ search_queries:
 #   careers_url: https://www.exampleco.com/careers   # public/branded careers page
 #   provider: successfactors
 #   api: https://jobs.exampleco.com                  # RMK board origin
+#   enabled: true
+#
+# - name: Example SuccessFactors Classic Co
+#   # SAP SuccessFactors "classic" career site, hosted by SAP itself at
+#   # career<N>.successfactors.(eu|com)/career?company=<ID> (not an RMK board:
+#   # it has no /tile-search-results/). Auto-detected from that URL. Reads the
+#   # whole board, 50 postings per call, through the DWR calls the public search
+#   # page makes. The list carries no place, so location is empty: filter these
+#   # rows by title, not by location_filter.
+#   careers_url: https://career5.successfactors.eu/career?company=EXAMPLECO
+#   max_pages: 20          # optional cap on search calls of 50 (default 20, max 100)
 #   enabled: true
 #
 # - name: Example UKG Pro Co
@@ -3373,6 +3387,11 @@ tracked_companies:
     careers_url: https://job-boards.greenhouse.io/amplemarket
     api: https://boards-api.greenhouse.io/v1/boards/amplemarket/jobs
     notes: "Lisbon PT / Remote. AI-native sales platform."
+    enabled: true
+
+  - name: Naturgy
+    careers_url: https://career5.successfactors.eu/career?company=C0000880172P
+    notes: "Madrid/Barcelona and Latin America. Energy utility. SAP-hosted classic SuccessFactors board (27 postings on 2026-11-18, Spanish and Brazilian); no place in the list, so filter by title."
     enabled: true
 
   # -- Italy (Zucchetti InRecruiting career pages) --
