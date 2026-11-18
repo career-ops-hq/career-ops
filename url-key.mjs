@@ -315,6 +315,33 @@ export function promoteKnownFragmentIdentity(url) {
 }
 
 /**
+ * Give one Microsoft requisition one URL shape. Microsoft's careers site
+ * (Eightfold) serves a posting at `/careers/job/{pid}` and at
+ * `/careers?pid={pid}&domain=microsoft.com`; the scanner writes the second and
+ * pasted or older rows carry the first. Keyed on the full URL the two spellings
+ * are two postings, so a role already in the tracker in one shape is added
+ * again from the feed in the other.
+ *
+ * The pid is the posting's own id, so everything else in the query (`hl`,
+ * `start`, `sort_by`, ...) is dropped. Only the `apply.careers.microsoft.com`
+ * host is read, and a `/careers` URL with no pid (a results page) is left
+ * alone. Mutates the URL used for the comparison key only.
+ *
+ * @param {URL} url - Hostname already folded.
+ */
+export function canonicalizeKnownPostingUrl(url) {
+  if (url.hostname !== 'apply.careers.microsoft.com') return;
+  const match = /^\/careers(?:\/job\/(\d+))?\/?$/i.exec(url.pathname);
+  if (!match) return;
+  const pid = match[1] ?? url.searchParams.get('pid');
+  if (!pid || !/^\d+$/.test(pid)) return;
+  url.pathname = '/careers';
+  url.search = '';
+  url.searchParams.set('pid', pid);
+  url.searchParams.set('domain', 'microsoft.com');
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string) from a tracker row / TSV.
@@ -344,6 +371,7 @@ export function normalizeUrl(raw) {
   u.protocol = 'https:';            // http vs https is the same posting
   u.hostname = foldHostname(u.hostname);
   promoteKnownFragmentIdentity(u);
+  canonicalizeKnownPostingUrl(u);
   u.hash = '';                      // unrecognized fragments do not identify it
 
   // Drop tracking params, keep functional ones, sort for order-independence.

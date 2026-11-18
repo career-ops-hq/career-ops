@@ -392,3 +392,25 @@ ok('two known, different languages are distinct; the same language (any region) 
   assert.equal(postingUrlRelation('https://acme.recruitee.com/o/a?lang=en-GB', 'https://acme.recruitee.com/o/a?lang=en'), 'same');
   assert.equal(postingUrlRelation('http://acme.recruitee.com/o/a/?utm_source=x', 'https://acme.recruitee.com/o/a'), 'same');
 });
+
+ok('one Microsoft requisition keys the same whether the job path or the Eightfold pid form wrote it', () => {
+  const job = 'https://apply.careers.microsoft.com/careers/job/1970000000000001';
+  const pid = 'https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com&hl=en&start=20';
+  assert.equal(normalizeUrl(job), normalizeUrl(pid));
+  assert.equal(normalizeUrl(job), 'https://apply.careers.microsoft.com/careers?domain=microsoft.com&pid=1970000000000001');
+  assert.equal(postingUrlRelation(job, pid), 'same');
+});
+ok('two Microsoft requisitions stay distinct, and a results page with no pid is left alone', () => {
+  const a = 'https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com';
+  const b = 'https://apply.careers.microsoft.com/careers/job/1970000000000002';
+  assert.notEqual(normalizeUrl(a), normalizeUrl(b));
+  assert.equal(postingUrlRelation(a, b), 'distinct');
+  assert.notEqual(
+    normalizeUrl('https://apply.careers.microsoft.com/careers?start=0&sort_by=timestamp'),
+    normalizeUrl('https://apply.careers.microsoft.com/careers?start=10&sort_by=timestamp'));
+});
+ok('the Microsoft fold is limited to the Microsoft host', () => {
+  assert.notEqual(
+    normalizeUrl('https://careers.example.com/careers/job/42'),
+    normalizeUrl('https://careers.example.com/careers?pid=42&domain=example.com'));
+});
