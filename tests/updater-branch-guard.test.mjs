@@ -192,7 +192,7 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
   const { dir, g } = repo();
   const paths = ['a.mjs', "it's.mjs"];
   const pathspecForm = updateCommitCommand('1.31.0', false, paths, { git: g, root: dir });
-  const hint = pathspecForm.match(/"--pathspec-from-file=([^"]+)" --pathspec-file-nul$/);
+  const hint = pathspecForm.match(/^git --literal-pathspecs commit -m "[^"]+" "--pathspec-from-file=([^"]+)" --pathspec-file-nul$/);
   if (indexForm === 'git commit -m "chore: auto-update system files to v1.31.0"' &&
       hint && readFileSync(resolve(dir, hint[1]), 'utf8') === "a.mjs\0it's.mjs\0") {
     pass('suggested commit command matches the form the updater would have used');
@@ -202,8 +202,8 @@ console.log('\n🧪 Testing updater branch guard (#3846)...');
   const fallback = updateCommitCommand('1.31.0', false, paths, {
     git: () => { throw new Error('git directory is not writable'); },
   });
-  if (fallback.includes("-- 'a.mjs' 'it'\\''s.mjs'")) {
-    pass('an unwritable pathspec file retains the quoted inline recovery fallback');
+  if (fallback.startsWith('git --literal-pathspecs commit') && fallback.includes("-- 'a.mjs' 'it'\\''s.mjs'")) {
+    pass('an unwritable pathspec file retains the quoted inline recovery fallback, with literal pathspecs');
   } else {
     fail(`commit fallback wrong: ${fallback}`);
   }
