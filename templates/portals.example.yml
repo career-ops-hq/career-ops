@@ -1393,6 +1393,7 @@ search_queries:
 #   workday         <tenant>.wd<N>.myworkdayjobs.com[/<locale>]/<board>
 #   avature         <tenant>.avature.net  (branded host → provider: avature + api: the /careers/SearchJobs URL)
 #   amazon          amazon.jobs           (global board; provider: amazon + an amazon: filter block, see below)
+#   goldman         higher.gs.com         (Goldman Sachs careers; optional goldman: { experiences: [...] }, see below)
 #   successfactors  *.successfactors.(eu|com) / *.jobs2web.com  (SAP SF Recruiting Marketing / RMK boards;
 #                   branded hosts like jobs.<company>.com need provider: successfactors + api: <board origin>)
 #   oraclecloud     <tenant>.fa[.<region>][.ocs].oraclecloud[1-99].com/hcmUI/CandidateExperience/.../sites/<siteNumber>/jobs
@@ -1995,6 +1996,13 @@ search_queries:
 # - name: Example SchoolSpring District
 #   careers_url: https://exampledistrict.schoolspring.com/   # any <district>.schoolspring.com host
 #   max_pages: 20          # optional page cap (100 postings/page, default 20, max 100)
+#   enabled: true
+#
+# - name: Goldman Sachs                   # one company: Goldman's own careers search
+#   careers_url: https://higher.gs.com/results   # auto-detected (higher.gs.com)
+#   goldman:
+#     experiences: [PROFESSIONAL, EARLY_CAREER, CAMPUS]   # optional; the default reads all three public ones
+#   max_pages: 20          # optional page cap (100 roles/page, default 20, max 100)
 #   enabled: true
 #
 # -- Job boards / aggregators  (→ job_boards:; set provider: explicitly unless the host auto-detects) --
