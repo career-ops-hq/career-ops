@@ -116,6 +116,14 @@ function pipelinePathsUseDataRoot(_testContext) {
   ]) {
     assert.ok(pipeline.includes(path), `modes/pipeline.md does not root ${path} under DATA_ROOT`);
   }
+  assert.ok(
+    pipeline.includes('`CAREER_OPS_PROFILE` when set; otherwise `{DATA_ROOT}/config/profile.yml`'),
+    'modes/pipeline.md does not honor the profile path override',
+  );
+  assert.ok(
+    read('modes/_shared.md').includes('`CAREER_OPS_PROFILE` when set; otherwise `{DATA_ROOT}/config/profile.yml`'),
+    'modes/_shared.md does not honor the profile path override',
+  );
   assert.ok(pipeline.includes('Use the exact path printed'));
 }
 

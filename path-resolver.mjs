@@ -185,8 +185,7 @@ export function hasProfileOverride() {
 /**
  * Returns the path to the user's config/profile.yml.
  * Priority: rootDir argument > process.env.CAREER_OPS_PROFILE > data root.
- * A relative override resolves against the working directory, like the other
- * lane variables (CAREER_OPS_PORTALS, CAREER_OPS_PIPELINE, CAREER_OPS_SCAN_HISTORY).
+ * A relative override resolves against the working directory.
  *
  * Every reader of the profile resolves it here. The override used to be
  * copied by hand into a handful of modules while the rest built the data-root

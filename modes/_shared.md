@@ -18,7 +18,7 @@ See "Untrusted External Content" in `AGENTS.md` / `CLAUDE.md` / `CODEX.md` for t
 |------|------|------|
 | cv.md | `{DATA_ROOT}/cv.md` | ALWAYS |
 | article-digest.md | `{DATA_ROOT}/article-digest.md` (if exists) | ALWAYS (detailed proof points) |
-| profile.yml | `{DATA_ROOT}/config/profile.yml` | ALWAYS (candidate identity and targets) |
+| profile.yml | `CAREER_OPS_PROFILE` when set; otherwise `{DATA_ROOT}/config/profile.yml` | ALWAYS (candidate identity and targets) |
 | _profile.md | `{DATA_ROOT}/modes/_profile.md` | ALWAYS (user archetypes, narrative, negotiation) |
 | writing-samples/ | `{DATA_ROOT}/writing-samples/` | When generating candidate-facing text — check `_profile.md` for cached `## Writing Style` first; only scan files if absent |
 | voice-dna.md | `{DATA_ROOT}/voice-dna.md` (if exists) | When generating candidate-facing text. Anti-AI-slop guardrail + voice. See Voice DNA precedence below. |

@@ -39,7 +39,7 @@ This complements — does not replace — the per-URL liveness gate in `auto-pip
 
 ## Pre-screen gate (standard / premium tiers only)
 
-Read `spend_tier` from `{DATA_ROOT}/config/profile.yml` (see `modes/_shared.md` -- Spend Tier section; defaults to `standard` if absent).
+Read `spend_tier` from the resolved profile: `CAREER_OPS_PROFILE` when set; otherwise `{DATA_ROOT}/config/profile.yml` (see `modes/_shared.md` -- Spend Tier section; defaults to `standard` if absent).
 
 - **`standard` or `premium` tier:** Before running the full A-F evaluation on a pending URL that survived the liveness sweep, run a cheap pre-screen pass using the tier's economy-equivalent model (see the mapping table in `modes/_shared.md`) against the candidate's North Star archetypes (`{DATA_ROOT}/modes/_profile.md`). If the JD is an obvious mismatch, skip the full evaluation: mark it `- [x] #-- | {url} | skipped (pre-screen mismatch: {reason})` in "Processed" and continue to the next URL.
 - **`economy` tier:** No gate. The tier is already the cheapest available. Every surviving pending URL goes straight to the full evaluation.
