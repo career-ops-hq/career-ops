@@ -31,9 +31,37 @@ export const DESCRIPTION_CAP = 4000;
 export const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^<>"']|"[^"]*"|'[^']*')+>/gi;
 const HTML_MEDIA_RE = /<(script|style)\b(?:[^<>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
 
+/**
+ * Remove complete HTML comments (`<!-- ... -->`) in one linear pass.
+ *
+ * A comment body may hold an unquoted `<` (`<!-- salary < 100000 -->`), which
+ * the tag body class above rejects, so comments are removed here first and
+ * never reach HTML_TAG_RE. indexOf, not a lazy regex: `<!--[\s\S]*?-->` is
+ * quadratic again on text with many `<!--` and no `-->`. An unterminated
+ * `<!--` is left in place for the tag matcher and the final opener cleanup.
+ *
+ * Exported for browser-extract.mjs, which strips with HTML_TAG_RE too.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function stripHtmlComments(text) {
+  let out = '';
+  let from = 0;
+  for (;;) {
+    const start = text.indexOf('<!--', from);
+    if (start < 0) break;
+    const end = text.indexOf('-->', start + 4);
+    if (end < 0) break;
+    out += `${text.slice(from, start)} `;
+    from = end + 3;
+  }
+  return from === 0 ? text : out + text.slice(from);
+}
+
 /** @param {string} content */
 function stripMarkup(content) {
-  return content.replace(HTML_MEDIA_RE, ' ').replace(HTML_TAG_RE, ' ');
+  return stripHtmlComments(content).replace(HTML_MEDIA_RE, ' ').replace(HTML_TAG_RE, ' ');
 }
 
 /**
