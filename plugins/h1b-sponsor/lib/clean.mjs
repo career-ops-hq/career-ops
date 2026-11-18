@@ -13,5 +13,4 @@ export function cleanForDisplay(s) {
   return String(s || '').replace(/\s+/g, ' ').replace(CONTROL_CHARS, '').trim();
 }
 
-export const cleanDisplay = cleanForDisplay;
 export const displayClean = cleanForDisplay;
