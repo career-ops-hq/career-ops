@@ -19,7 +19,7 @@ New to all this? That's the point. Claim a good-first-issue by commenting `/assi
 
 **For a new feature, a new mode or command, or an architecture change, please open an issue first.** It saves you from investing time in something we'd have to redirect, and lets us align on direction before you write code.
 
-**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want. The one exception is a change to an [owner-reviewed path](#owner-reviewed-paths): open an issue first there, even for a bug fix or a docs change. A typo fix needs no issue.
+**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want. The one exception is a change to an [owner-reviewed path](#owner-reviewed-paths): open an issue first there, even for a bug fix or a docs change. A typo fix there needs no issue.
 
 A large *feature* PR that skipped this step may be asked to start with an issue if it doesn't fit the architecture or roadmap — that's a scope conversation, never a judgment on your work.
 
@@ -46,7 +46,7 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 
 What that means depends on who makes the change:
 
-- **A contributor**, working by hand or with a coding agent they are directing: open an issue first and link it from the PR, then expect a closer review. These paths are not off limits; several plugin-engine fixes landed this way.
+- **A contributor**, working by hand or with a coding agent they are directing: open an issue first and link it from the PR, then expect a closer review. A typo fix needs no issue and goes straight to a PR. These paths are not off limits; several plugin-engine fixes landed this way.
 - **An unattended coding agent**, a session no person is watching (the Copilot cloud agent, for one): leave these paths alone. Stop and explain in the report why the task needs them, so a person can open the issue.
 
 The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/contributing-owner-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
