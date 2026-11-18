@@ -303,6 +303,27 @@ try {
   if (probeOpts?.redirect === 'error') pass('rippling.fetch() probe request still passes redirect:"error"');
   else fail(`rippling.fetch() probe request redirect = ${JSON.stringify(probeOpts?.redirect)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so nothing warns and the board is not tagged (#7180).
+  const { result: probedAtCap, errors: probeAtCapErrors } = await captureConsoleErrors(() => rippling.fetch({ ...bigEntry, max_pages: 1 }, {
+    maxPages: 1,
+    fetchJson: async () => pageOf(0, 1000),
+  }));
+  if (!probeAtCapErrors.some((e) => /raise max_pages/.test(e)) && probedAtCap.ripplingTruncated === undefined) {
+    pass('rippling.fetch() warns nothing and tags nothing for a probe on a max_pages: 1 entry');
+  } else {
+    fail(`rippling.fetch() probe at max_pages: 1: ripplingTruncated=${probedAtCap.ripplingTruncated}, errors ${JSON.stringify(probeAtCapErrors)}`);
+  }
+  const { result: scannedAtCap, errors: scanAtCapErrors } = await captureConsoleErrors(() => rippling.fetch({ ...bigEntry, max_pages: 1 }, {
+    sleep: async () => {},
+    fetchJson: async () => pageOf(0, 1000),
+  }));
+  if (scanAtCapErrors.some((e) => /raise max_pages/.test(e)) && scannedAtCap.ripplingTruncated === true) {
+    pass('rippling.fetch() still warns and tags a real scan of a max_pages: 1 entry');
+  } else {
+    fail(`rippling.fetch() scan at max_pages: 1: ripplingTruncated=${scannedAtCap.ripplingTruncated}, errors ${JSON.stringify(scanAtCapErrors)}`);
+  }
+
   // A ctx.fetch* rejection while ctx.maxPages is set (a probe) propagates
   // UNWRAPPED — verify-portals identifies ProbePageBudgetReached by instanceof,
   // so it must not be caught/swallowed/rewrapped here.

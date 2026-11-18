@@ -231,6 +231,15 @@ try {
   if (probeCalls === 1 && probeOpts?.redirect === 'error') pass('dover.fetch() honors ctx.maxPages: 1 (one request, redirect:"error")');
   else fail(`dover.fetch() probe made ${probeCalls} calls, opts ${JSON.stringify(probeOpts)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so nothing warns and nothing is marked (#7180).
+  const { result: probedAtCap, errors: probeAtCapErrors } = await captureConsoleErrors(() => dover.fetch({ ...big, max_pages: 1 }, { maxPages: 1, fetchJson: async () => full(0, 300) }));
+  if (!probeAtCapErrors.some((e) => /raise max_pages/.test(e)) && probedAtCap.truncated === undefined) pass('dover.fetch() warns nothing and marks nothing for a probe on a max_pages: 1 entry');
+  else fail(`dover.fetch() probe at max_pages: 1: truncated=${JSON.stringify(probedAtCap.truncated)}, errors ${JSON.stringify(probeAtCapErrors)}`);
+  const { result: scannedAtCap, errors: scanAtCapErrors } = await captureConsoleErrors(() => dover.fetch({ ...big, max_pages: 1 }, { sleep: async () => {}, fetchJson: async () => full(0, 300) }));
+  if (scanAtCapErrors.some((e) => /raise max_pages/.test(e)) && scannedAtCap.truncated?.reason === 'page-cap') pass('dover.fetch() still warns and marks page-cap for a real scan of a max_pages: 1 entry');
+  else fail(`dover.fetch() scan at max_pages: 1: truncated=${JSON.stringify(scannedAtCap.truncated)}, errors ${JSON.stringify(scanAtCapErrors)}`);
+
   // A plain Error has no status, so isRetryableError() treats it as retryable.
   // The probe must still make exactly one call and rethrow that same error
   // (providers/magneto.mjs's health-probe check).

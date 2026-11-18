@@ -211,7 +211,10 @@ export default {
       if (rawCount < PAGE_SIZE || !hasNext) break;
     }
 
-    if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages) {
+    // Never during a probe: on a max_pages: 1 entry the probe's one page is also
+    // the entry's last, so pagesToFetch === maxPages alone cannot tell them
+    // apart (#7180).
+    if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages && !probing) {
       stopReason = STOP_REASON.CAP;
       console.error(`⚠️  dover: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
     }
