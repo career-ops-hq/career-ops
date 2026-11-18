@@ -1230,6 +1230,82 @@ try {
     }
   }
 
+  // 48-52. Antigravity (agy). Its servers live in one user-level file,
+  //        ~/.gemini/config/mcp_config.json, as `{ mcpServers: { name: { command,
+  //        args, disabled } } }` (the shape `agy mcp add` writes). Doctor used to
+  //        skip the check for it ("doctor doesn't scan MCP configs for ...").
+  {
+    const agy = (label, config, check) => {
+      const home = mkdtempSync(join(tmpdir(), 'co-mcp-agy-home-'));
+      const dir = mkdtempSync(join(tmpdir(), 'co-mcp-agy-'));
+      try {
+        if (config !== null) {
+          const cfgDir = join(home, '.gemini', 'config');
+          mkdirSync(cfgDir, { recursive: true });
+          writeFileSync(join(cfgDir, 'mcp_config.json'), typeof config === 'string' ? config : JSON.stringify(config));
+        }
+        const state = runDoctor(dir, ['--cli', 'antigravity'], { HOME: home, USERPROFILE: home });
+        if (!expectWarn(state, label)) return;
+        check(state);
+      } finally {
+        rmSync(home, { recursive: true, force: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+    const pwArgs = { command: 'npx', args: ['@playwright/mcp@latest', '--browser', 'msedge'], disabled: false };
+    const noticeFor = (state) => state.warnings.some((w) => PLAYWRIGHT_RE.test(w) && /active cli: antigravity/i.test(w));
+
+    agy('#48', { mcpServers: { playwright: pwArgs } }, (state) => {
+      if (state.playwright_mcp?.antigravity === true && !noticeFor(state)
+          && !state.warnings.some((w) => /doesn't scan MCP configs/i.test(w))) {
+        pass('antigravity: an enabled Playwright server in ~/.gemini/config/mcp_config.json is detected');
+      } else {
+        fail(`#48 unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+
+    agy('#49', null, (state) => {
+      if (state.playwright_mcp?.antigravity === false && noticeFor(state)
+          && state.warnings.some((w) => /agy mcp add playwright/.test(w))) {
+        pass('antigravity: no config file → warns and names the agy mcp add command');
+      } else {
+        fail(`#49 unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+
+    agy('#50b', { mcpServers: { playwright: { ...pwArgs, enabled: false } } }, (state) => {
+      if (state.playwright_mcp?.antigravity === true && !noticeFor(state)) {
+        pass('antigravity: only its own disabled flag counts, an unrelated enabled:false does not hide a server');
+      } else {
+        fail(`#50b unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+
+    agy('#50', { mcpServers: { playwright: { ...pwArgs, disabled: true } } }, (state) => {
+      if (state.playwright_mcp?.antigravity === false && noticeFor(state)) {
+        pass('antigravity: a server switched off with disabled:true does not count');
+      } else {
+        fail(`#50 unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+
+    agy('#51', { mcpServers: { files: { command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '/work'] } } }, (state) => {
+      if (state.playwright_mcp?.antigravity === false && noticeFor(state)) {
+        pass('antigravity: other servers but no Playwright → warns');
+      } else {
+        fail(`#51 unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+
+    agy('#52', '{ not json', (state) => {
+      if (state.playwright_mcp?.antigravity === false && noticeFor(state)) {
+        pass('antigravity: an unreadable config reads as not configured, never a crash');
+      } else {
+        fail(`#52 unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+  }
+
 } catch (e) {
   fail(`opencode-mcp-detection tests crashed: ${e.message}`);
 } finally {

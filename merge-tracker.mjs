@@ -2275,7 +2275,7 @@ export async function mergeTracker(options = {}) {
       }
 
       if (duplicate) {
-        // An unscoreable re-eval (N/A/—/-) carries no score to write through. Its
+        // An unscoreable re-evaluation (N/A/—/-) carries no score to write through. Its
         // score parses to 0, so the downgrade path below would read it as a genuine
         // zero and overwrite a real score with the sentinel — unrecoverably, since
         // the tracker is gitignored and no .bak is written (#2803). A failed fetch is

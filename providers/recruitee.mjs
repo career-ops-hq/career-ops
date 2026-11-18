@@ -60,6 +60,26 @@ function entryLanguage(entry) {
   return LANGUAGE_RE.test(language) ? language : null;
 }
 
+/**
+ * The posting's ATS-native identity: the tenant label of the board's host
+ * (`<slug>.recruitee.com`, already checked by RECRUITEE_HOST_RE) and the offer's
+ * integer `id` from the payload, never parsed out of a URL, rendered in its one
+ * decimal form as join.mjs does. Every language version of one offer carries the
+ * same identity: they are one posting. A non-integer, unsafe or non-positive id,
+ * or a slug that is missing, padded or carries control characters, gives no
+ * identity, so that row falls back to URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'recruitee', board_slug: string, posting_id: string} | undefined}
+ */
+export function recruiteeListingIdentity(slug, id) {
+  if (typeof slug !== 'string' || slug === '' || slug !== slug.trim() || /[\u0000-\u001f\u007f]/u.test(slug)) return undefined;
+  if (typeof id !== 'number' || !Number.isSafeInteger(id) || id <= 0) return undefined;
+  return { ats_provider: 'recruitee', board_slug: slug, posting_id: String(id) };
+}
+
 /** @type {Provider} */
 export default {
   id: 'recruitee',
@@ -78,6 +98,7 @@ export default {
       allLanguages: ctx?.dedupIncludeLanguage === true,
       preferredLanguageRank: typeof ctx?.preferredLanguageRank === 'function' ? ctx.preferredLanguageRank : null,
       entryLanguage: entryLanguage(entry),
+      boardSlug: new URL(apiUrl).hostname.split('.')[0],
     });
   },
 };
@@ -440,10 +461,11 @@ function parseSalary(salary) {
  *
  * @param {any} json
  * @param {string} companyName
- * @param {{allLanguages?: boolean, preferredLanguageRank?: ((language: string) => number)|null, entryLanguage?: string|null}} [options]
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, salary?: {min: number, max: number, currency: string}, language?: string}>}
+ * @param {{allLanguages?: boolean, preferredLanguageRank?: ((language: string) => number)|null, entryLanguage?: string|null, boardSlug?: string|null}} [options]
+ *   `boardSlug` is the tenant label the board was fetched at; without it no row carries a `listingIdentity`.
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, salary?: {min: number, max: number, currency: string}, language?: string, listingIdentity?: {ats_provider: 'recruitee', board_slug: string, posting_id: string}}>}
  */
-export function parseRecruiteeResponse(json, companyName, { allLanguages = false, preferredLanguageRank = null, entryLanguage = null } = {}) {
+export function parseRecruiteeResponse(json, companyName, { allLanguages = false, preferredLanguageRank = null, entryLanguage = null, boardSlug = null } = {}) {
   const offers = json && typeof json === 'object' && Array.isArray(json.offers) ? json.offers : null;
   if (!offers) {
     const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : typeof json;
@@ -484,6 +506,7 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
     const location = assembleLocation(j);
     const postedAt = toEpochMs(j.published_at);
     const salary = parseSalary(j.salary);
+    const listingIdentity = recruiteeListingIdentity(boardSlug, j.id);
 
     for (const version of languageVersions(j, allLanguages, preferredLanguageRank, entryLanguage)) {
       out.push({
@@ -495,6 +518,7 @@ export function parseRecruiteeResponse(json, companyName, { allLanguages = false
         ...(postedAt !== undefined ? { postedAt } : {}),
         ...(salary ? { salary } : {}),
         ...(version.language ? { language: version.language } : {}),
+        ...(listingIdentity ? { listingIdentity } : {}),
       });
     }
   }

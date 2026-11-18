@@ -162,6 +162,27 @@ try {
   if (liveShape.truncated?.reason === 'page-cap' && liveShape.truncated.fetched === 100) pass('fetch() marks the board page-cap when max_pages truncates the feed');
   else fail(`live-shape cut: truncated = ${JSON.stringify(liveShape.truncated)}`);
 
+  // The health probe (ctx.maxPages: 1) reads one page of a long feed, and is
+  // never warned about or marked as a max_pages cut, including on a max_pages: 1
+  // entry, where the probe's page is also the entry's last (#7180).
+  for (const probeEntry of [{}, { max_pages: 1 }]) {
+    const probeCalls = [];
+    const probeWarnings = [];
+    let probed;
+    try {
+      console.error = (...args) => probeWarnings.push(args.join(' '));
+      probed = await provider.fetch(probeEntry, {
+        maxPages: 1,
+        fetchJson: async (url) => { probeCalls.push(url); return { jobs: Array.from({ length: 50 }, (_, i) => mk(i)), total: 16830, page_size: 50, total_pages: 337 }; },
+      });
+    } finally {
+      console.error = liveRealConsoleError;
+    }
+    const label = JSON.stringify(probeEntry);
+    if (probeCalls.length === 1 && probed.length === 50 && probeWarnings.length === 0 && probed.truncated === undefined) pass(`fetch() reads one page under a ctx.maxPages: 1 probe and reports no cut (entry ${label})`);
+    else fail(`probe on entry ${label} = ${JSON.stringify({ calls: probeCalls.length, jobs: probed?.length, warnings: probeWarnings, truncated: probed?.truncated })}`);
+  }
+
   // #2547: total_pages outranks the short-page break. On a board that rotates
   // while a sweep runs, a page can legitimately come back 49/50 because a
   // listing was deleted between requests — that is not the last page, and the

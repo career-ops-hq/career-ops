@@ -167,6 +167,46 @@ try {
   } else {
     fail(`cap Infinity: length=${uncapped.length}`);
   }
+
+  // Linear-time guard: text with many `<` openers and no closing `>` must not
+  // backtrack quadratically (10k openers took ~7 s before the tag body class
+  // excluded `<`). The bound is generous; the linear form takes a few ms.
+  for (const [label, input] of [
+    ['<script openers', '<script '.repeat(10000)],
+    ['<a openers', '<a '.repeat(20000)],
+    ['<p class="x" openers', '<p class="x" '.repeat(5000)],
+  ]) {
+    const started = performance.now();
+    const out = htmlToText(input);
+    const ms = performance.now() - started;
+    if (ms < 500) pass(`htmlToText() stays linear on unclosed ${label} (${Math.round(ms)} ms)`);
+    else fail(`htmlToText() took ${Math.round(ms)} ms on unclosed ${label}, expected < 500`);
+    if (!out.includes('<')) pass(`htmlToText() leaves no '<' from unclosed ${label}`);
+    else fail(`unclosed ${label} left a '<' in the output`);
+  }
+
+  // The tighter tag body must not change how well-formed markup converts.
+  const wellFormed = htmlToText(
+    `<p class="lead" title='a > b'>Hi <!-- note --> there</p><script type="text/javascript">if (a < b && c > d) {}</script><style>p > a { color: red }</style><br/>Done`
+  );
+  if (wellFormed === 'Hi there Done') pass('htmlToText() still strips quoted-attribute tags, comments, script and style blocks');
+  else fail(`well-formed markup = ${JSON.stringify(wellFormed)}`);
+
+  // A comment body may hold an unquoted `<`; the whole comment still goes.
+  const commentWithLt = htmlToText('<!-- salary < 100000 -->Body <p>a</p><!-- <b>x</b> -->end');
+  if (commentWithLt === 'Body a end') pass('htmlToText() strips comments that contain `<` or tags');
+  else fail(`comment with '<' = ${JSON.stringify(commentWithLt)}`);
+  const unclosedComments = '<!-- '.repeat(20000);
+  const commentStarted = performance.now();
+  htmlToText(unclosedComments);
+  const commentMs = performance.now() - commentStarted;
+  if (commentMs < 500) pass(`htmlToText() stays linear on unterminated comment openers (${Math.round(commentMs)} ms)`);
+  else fail(`htmlToText() took ${Math.round(commentMs)} ms on unterminated comment openers, expected < 500`);
+
+  // Text after an unclosed opener survives; the earlier real tag is still stripped.
+  const afterUnclosed = htmlToText('<b>ok</b> <i never closed, then plain text');
+  if (afterUnclosed === 'ok i never closed, then plain text') pass('htmlToText() keeps text after an unclosed tag opener');
+  else fail(`unclosed opener = ${JSON.stringify(afterUnclosed)}`);
 } catch (e) {
   fail(`_html-to-text tests crashed: ${e.message}`);
 }
