@@ -3,7 +3,7 @@
 {"ats":"lever","region":"us","board":"abovelending","careers_url":"https://jobs.lever.co/abovelending","name":"Above Lending","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"abtaba","careers_url":"https://jobs.lever.co/abtaba","name":"Above and Beyond Therapy","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer","added":"2026-11-18"}
 {"ats":"lever","region":"eu","board":"abzena","careers_url":"https://jobs.eu.lever.co/abzena","name":"Abzena Inc.","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
-{"ats":"lever","region":"us","board":"Academy","careers_url":"https://jobs.lever.co/Academy","name":"Academy","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
+{"ats":"lever","region":"us","board":"Academy","careers_url":"https://jobs.lever.co/Academy","name":"Academy","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17","retired":true,"retired_reason":"policy"}
 {"ats":"lever","region":"us","board":"acceldata","careers_url":"https://jobs.lever.co/acceldata","name":"Acceldata","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"accesssoftek","careers_url":"https://jobs.lever.co/accesssoftek","name":"Access Softek","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
 {"ats":"lever","region":"us","board":"achievers","careers_url":"https://jobs.lever.co/achievers","name":"Achievers","source":"web-index:wayback@2026-11-12","contribution":"2026-11-14-santifer","added":"2026-11-14"}
@@ -43,7 +43,7 @@
 {"ats":"lever","region":"us","board":"aicrete","careers_url":"https://jobs.lever.co/aicrete","name":"AICrete","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.9","added":"2026-11-18"}
 {"ats":"lever","region":"us","board":"aifi","careers_url":"https://jobs.lever.co/aifi","name":"AiFi","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
 {"ats":"lever","region":"us","board":"aigen","careers_url":"https://jobs.lever.co/aigen","name":"Aigen","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
-{"ats":"lever","region":"us","board":"aipconnect","careers_url":"https://jobs.lever.co/aipconnect","name":"AIP Connect","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
+{"ats":"lever","region":"us","board":"aipconnect","careers_url":"https://jobs.lever.co/aipconnect","name":"AIP Connect","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17","retired":true,"retired_reason":"policy"}
 {"ats":"lever","region":"us","board":"air-tek","careers_url":"https://jobs.lever.co/air-tek","name":"Air-tek","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
 {"ats":"lever","region":"us","board":"airalo","careers_url":"https://jobs.lever.co/airalo","name":"Airalo","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"airdna","careers_url":"https://jobs.lever.co/airdna","name":"AirDNA","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
@@ -125,7 +125,7 @@
 {"ats":"lever","region":"us","board":"arcadia","careers_url":"https://jobs.lever.co/arcadia","name":"Arcadia","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"arcteryx.com","careers_url":"https://jobs.lever.co/arcteryx.com","name":"Arc'teryx","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"argonaut","careers_url":"https://jobs.lever.co/argonaut","name":"ARGONAUT","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
-{"ats":"lever","region":"us","board":"arootah","careers_url":"https://jobs.lever.co/arootah","name":"Arootah","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
+{"ats":"lever","region":"us","board":"arootah","careers_url":"https://jobs.lever.co/arootah","name":"Arootah","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17","retired":true,"retired_reason":"policy"}
 {"ats":"lever","region":"us","board":"arraylabs.io","careers_url":"https://jobs.lever.co/arraylabs.io","name":"Array Labs","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"arrivelogistics","careers_url":"https://jobs.lever.co/arrivelogistics","name":"Arrive Logistics","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"arsenalbio","careers_url":"https://jobs.lever.co/arsenalbio","name":"Arsenal Biosciences","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}

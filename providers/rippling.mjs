@@ -104,6 +104,25 @@ function resolveMaxPages(entry) {
 }
 
 /**
+ * The posting's ATS-native identity: the configured board slug and the
+ * posting's own `id` from the payload, never parsed out of a URL. Rippling
+ * ids are opaque strings (UUIDs on live boards), kept exactly as the payload
+ * typed them; identity ids are never coerced (docs/listing-fingerprint.md), so
+ * a non-string id gets none. Returns undefined for an empty, padded or
+ * control-character slug or id, so that row falls back to URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'rippling', board_slug: string, posting_id: string} | undefined}
+ */
+export function ripplingListingIdentity(slug, id) {
+  const clean = (v) => typeof v === 'string' && v !== '' && v === v.trim() && !/[\u0000-\u001f\u007f]/u.test(v);
+  if (!clean(slug) || !clean(id)) return undefined;
+  return { ats_provider: 'rippling', board_slug: /** @type {string} */ (slug), posting_id: /** @type {string} */ (id) };
+}
+
+/**
  * Parse one page of the Rippling v2 board API response. Exported for unit
  * tests.
  *
@@ -118,12 +137,15 @@ function resolveMaxPages(entry) {
  *               company field, same as recruitee).
  *   - location: every `locations[].name`, joined with ` · ` (a posting can
  *               list more than one place); "" when the array is empty/absent.
+ *   - listingIdentity: `rippling` / `slug` / the posting's string `id`, when
+ *               the caller passes the board slug (see ripplingListingIdentity).
  *
  * @param {any} json
  * @param {string} companyName
- * @returns {{jobs: Array<{title: string, url: string, company: string, location: string}>, rawCount: number}}
+ * @param {string} [slug]  the board slug the page was fetched at
+ * @returns {{jobs: Array<{title: string, url: string, company: string, location: string, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>, rawCount: number}}
  */
-export function parseRipplingPage(json, companyName) {
+export function parseRipplingPage(json, companyName, slug) {
   if (!json || typeof json !== 'object' || !Array.isArray(json.items)) {
     const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : typeof json;
     throw new Error(`rippling: unexpected response — expected items[], got: [${got}]`);
@@ -155,7 +177,8 @@ export function parseRipplingPage(json, companyName) {
         .filter(Boolean)
         .join(' · ');
 
-      return { title, url, location, company: companyName };
+      const listingIdentity = ripplingListingIdentity(slug, j?.id);
+      return { title, url, location, company: companyName, ...(listingIdentity ? { listingIdentity } : {}) };
     })
     .filter(Boolean);
   return { jobs, rawCount };
@@ -207,7 +230,7 @@ export default {
         break;
       }
 
-      const { jobs: pageJobs, rawCount } = parseRipplingPage(json, entry.name);
+      const { jobs: pageJobs, rawCount } = parseRipplingPage(json, entry.name, slug);
       jobs.push(...pageJobs);
 
       // Natural end: the source's own raw row count for this page (before

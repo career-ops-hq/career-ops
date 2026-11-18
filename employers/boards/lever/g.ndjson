@@ -49,7 +49,7 @@
 {"ats":"lever","region":"us","board":"goodamerican","careers_url":"https://jobs.lever.co/goodamerican","name":"Good American","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"goodleap","careers_url":"https://jobs.lever.co/goodleap","name":"GoodLeap","source":"web-index:wayback@2026-11-12","contribution":"2026-11-16-santifer","added":"2026-11-16"}
 {"ats":"lever","region":"us","board":"gopuff","careers_url":"https://jobs.lever.co/gopuff","name":"Gopuff","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
-{"ats":"lever","region":"us","board":"gorh","careers_url":"https://jobs.lever.co/gorh","name":"Go RH","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
+{"ats":"lever","region":"us","board":"gorh","careers_url":"https://jobs.lever.co/gorh","name":"Go RH","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17","retired":true,"retired_reason":"policy"}
 {"ats":"lever","region":"us","board":"gostudion","careers_url":"https://jobs.lever.co/gostudion","name":"Studion","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
 {"ats":"lever","region":"us","board":"goswift","careers_url":"https://jobs.lever.co/goswift","name":"Swiftly","source":"web-index:wayback@2026-11-12","contribution":"2026-11-18-santifer.3","added":"2026-11-18"}
 {"ats":"lever","region":"us","board":"GoToGroup","careers_url":"https://jobs.lever.co/GoToGroup","name":"GoTo Group","source":"web-index:wayback@2026-11-12","contribution":"2026-11-17-santifer","added":"2026-11-17"}
