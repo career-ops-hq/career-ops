@@ -66,6 +66,26 @@ test('scrub processes guard.textValues longest first using sorted copy without m
   assert.deepEqual([...mockGuard.textValues], originalOrder);
 });
 
+test('scrub never matches a configured value inside a token, new or existing', () => {
+  const mockGuard = { textValues: new Set(['Jane Smith', 'value']) };
+
+  // A new token must not be scrubbed again by a shorter value that it contains.
+  const map = {};
+  const scrubbed = scrub('Contact: Jane Smith', mockGuard, map);
+  assert.equal(scrubbed, 'Contact: PRIVACY_VALUE_1');
+  assert.deepEqual(map, { PRIVACY_VALUE_1: 'Jane Smith' });
+  assert.equal(rehydrate(scrubbed, map), 'Contact: Jane Smith');
+
+  // A file scrubbed before keeps its tokens intact on a second scrub.
+  const rescrubbed = scrub('PRIVACY_VALUE_1 wrote it; Jane Smith signed it.', mockGuard, map);
+  assert.equal(rescrubbed, 'PRIVACY_VALUE_1 wrote it; PRIVACY_VALUE_1 signed it.');
+  assert.deepEqual(map, { PRIVACY_VALUE_1: 'Jane Smith' });
+
+  // Legacy tokens from the map are kept too.
+  const legacyMap = { __NAME__: 'Jane Smith' };
+  assert.equal(scrub('__NAME__ (Jane Smith)', { textValues: new Set(['Jane Smith', '__NAME']) }, legacyMap), '__NAME__ (__NAME__)');
+});
+
 test('scrub handles numeric-only guard without throwing', () => {
   const mockGuard = {
     textValues: new Set(),

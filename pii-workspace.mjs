@@ -102,19 +102,45 @@ function scrub(text, guard, map) {
   }
   let index = maxIndex;
 
+  // Every match is found in the original text, never in text an earlier value
+  // already replaced, so a configured value cannot match inside a token
+  // ("value" inside PRIVACY_VALUE_1). Spans taken by existing tokens and by
+  // longer values are skipped; replacements are spliced in at the end.
+  const taken = [];
+  const overlaps = (start, end) => taken.some((s) => start < s.end && s.start < end);
+
+  const legacyTokens = Object.keys(map)
+    .filter((k) => isTokenKey(k) && !/^PRIVACY_VALUE_\d+$/.test(k))
+    .sort((a, b) => b.length - a.length);
+  const tokenRe = new RegExp([...legacyTokens.map(escapeRe), 'PRIVACY_VALUE_\\d+'].join('|'), 'g');
+  for (const m of text.matchAll(tokenRe)) {
+    taken.push({ start: m.index, end: m.index + m[0].length, token: null });
+  }
+
   const sortedValues = [...guard.textValues].sort((a, b) => b.length - a.length);
   for (const value of sortedValues) {
     if (value.length < 5) continue;
-    const re = new RegExp(escapeRe(value), 'gi');
-    out = out.replace(re, (matched) => {
+    for (const m of text.matchAll(new RegExp(escapeRe(value), 'gi'))) {
+      const start = m.index;
+      const end = start + m[0].length;
+      if (overlaps(start, end)) continue;
+      const matched = m[0];
       // Reuse an existing token only when the spelling and casing match exactly.
       const existing = Object.entries(map).find(([k, v]) => isTokenKey(k) && v === matched);
-      if (existing) return existing[0];
-      // Use an identifier valid as an unquoted YAML scalar (no braces).
-      const token = `PRIVACY_VALUE_${++index}`;
-      map[token] = matched;
-      return token;
-    });
+      let token;
+      if (existing) {
+        token = existing[0];
+      } else {
+        // Use an identifier valid as an unquoted YAML scalar (no braces).
+        token = `PRIVACY_VALUE_${++index}`;
+        map[token] = matched;
+      }
+      taken.push({ start, end, token });
+    }
+  }
+
+  for (const span of taken.filter((s) => s.token).sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, span.start) + span.token + out.slice(span.end);
   }
   return out;
 }
