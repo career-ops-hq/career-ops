@@ -348,7 +348,7 @@ export function computePortalStats(portalsYmlContent, scanStats, producingCompan
     for (const r of healthRecords) {
       // Mirrors scan.mjs computeConsecutiveFailures: reached statuses reset
       // (a `partial` board answered, it was only cut short), every other
-      // status (slug_gone/network/auth/server/unknown) counts.
+      // status (slug_gone/network/auth/server/rate_limit/unknown) counts.
       if (r.status === 'reachable' || r.status === 'empty' || r.status === 'partial') {
         streaks.set(r.company, 0);
       } else {
