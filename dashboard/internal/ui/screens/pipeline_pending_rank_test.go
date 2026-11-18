@@ -294,7 +294,7 @@ func TestInboxRankQuestionsFitEightyColumns(t *testing.T) {
 			want := m.rankPrompt()
 			m.width = 80
 			got := ansi.Strip(m.renderHelp())
-			if !strings.Contains(got, want) || !strings.Contains(want, "y") {
+			if !strings.Contains(got, want) || !strings.Contains(want, "y: ") {
 				t.Errorf("%s %s: the 80-column footer %q does not hold the whole question %q", lang, name, got, want)
 			}
 		}

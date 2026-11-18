@@ -87,7 +87,7 @@ test('--url ranks only the first of two rows with the same URL', t => {
   assert.equal((readFileSync(env.RANK_PROMPTS, 'utf8').match(/url: https:\/\/example\.test\/1$/gm) ?? []).length, 1);
 });
 
-test('only rows in the Pending section are ranked, with or without --url', t => {
+test('--url finds rows only in the Pending section; a run without it reads every row', t => {
   const outside = [
     '- [ ] https://example.test/above | Above | Row',
     '## Pending',
@@ -100,16 +100,29 @@ test('only rows in the Pending section are ranked, with or without --url', t => 
   const miss = run('--url=https://example.test/note');
   assert.equal(miss.status, RANK_EXIT.NOT_PENDING, miss.stdout + miss.stderr);
   assert.equal(existsSync(env.RANK_CALLS), false, 'a row outside Pending called the CLI');
-  const all = run('--limit=1');
+  const all = run();
   assert.equal(all.status, 0, all.stdout + all.stderr);
   const lines = readFileSync(pipeline, 'utf8').split('\n');
-  assert.deepEqual(lines.map(line => line.includes('| rank: ')), [false, false, true, false, false, false]);
+  assert.deepEqual(lines.map(line => line.includes('| rank: ')), [true, false, true, false, true, false],
+    'without --url the run is unchanged: every unchecked row is ranked, as the web inbox lists them');
+});
+
+test('--url on a missing row exits 4 even when Hermes is asked for', t => {
+  const { run, pipeline } = setup(t);
+  const result = run('--url=https://example.test/9', '--cli=hermes');
+  assert.equal(result.status, RANK_EXIT.NOT_PENDING, result.stdout + result.stderr);
+  assert.equal(readFileSync(pipeline, 'utf8'), ROWS);
+  const hit = run('--url=https://example.test/1', '--cli=hermes');
+  assert.equal(hit.status, 1, hit.stdout + hit.stderr);
+  assert.match(hit.stderr, /Hermes is not supported/);
 });
 
 test('--url on a missing row exits 4 even when no CLI is installed', t => {
   const { root, pipeline } = setup(t);
+  const emptyPath = join(root, 'empty-bin');
+  mkdirSync(emptyPath);
   const result = spawnSync(process.execPath, [join(ROOT, 'rank-pipeline.mjs'), '--url=https://example.test/3'], {
-    env: { CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: root, PATH: mkdtempSync(join(tmpdir(), 'rank-no-cli-')), CAREER_OPS_RANK_CLI: '' },
+    env: { CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: root, PATH: emptyPath, CAREER_OPS_RANK_CLI: '' },
     cwd: root, encoding: 'utf8', timeout: 30_000,
   });
   assert.equal(result.status, RANK_EXIT.NOT_PENDING, result.stdout + result.stderr);

@@ -54,8 +54,8 @@ Ranking calls your agent CLI and spends tokens, so neither key starts on its
 own: the footer asks whether to rank the selected row, or how many rows, and
 says it uses your CLI and tokens. Only `y` starts it; any other key, `Y`
 included, cancels. The dashboard then runs `rank-pipeline.mjs --url <url>` or
-`rank-pipeline.mjs --limit <n>`. The script reads only the Pending section,
-ranks rows in batches of up to 10, one model call per batch (so twenty rows
+`rank-pipeline.mjs --limit <n>`. With `--url` the script looks for the row
+only in the Pending section. It ranks rows in batches of up to 10, one model call per batch (so twenty rows
 take two calls), with tools off where the CLI has a switch for it (see
 `docs/SCRIPTS.md`), and writes each `rank:` cell into `data/pipeline.md` under
 the pipeline lock. The summary line shows the run until it ends; then the

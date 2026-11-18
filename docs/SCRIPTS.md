@@ -1746,12 +1746,10 @@ node rank-pipeline.mjs --cli codex      # override auto-detection
 node rank-pipeline.mjs --dry-run        # print annotations, write nothing
 ```
 
-Only the Pending section is read when `pipeline.md` has one (from its heading
-to the next `##` heading, as `sync-batch-input.mjs` reads it); a file with no
-Pending heading is read whole.
-
-`--url <url>` ranks only the first unranked Pending row whose first cell is
-exactly that URL. When there is none, because the row was ranked or skipped,
+`--url <url>` ranks only the first unranked row in the Pending section (from
+its heading to the next `##` heading, as `sync-batch-input.mjs` reads it; a
+file with no Pending heading is read whole) whose first cell is exactly that
+URL. When there is none, because the row was ranked or skipped,
 or its URL is not the first cell, the script exits 4 before it looks for a CLI,
 so nothing is called. The dashboard's Inbox runs it for its `a` key.
 

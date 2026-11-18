@@ -113,8 +113,8 @@ const USAGE = `
   node rank-pipeline.mjs [--limit N] [--url <url>] [--cli <name>] [--model <name>] [--dry-run]
 
     --limit N     max entries to rank this run (default ${DEFAULT_LIMIT}, ceiling ${LIMIT_CEILING})
-    --url <url>   rank only the first unranked Pending row whose URL cell is exactly
-                  <url> (exit 4 when there is none)
+    --url <url>   rank only the first unranked row in the Pending section whose URL
+                  cell is exactly <url> (exit 4 when there is none)
     --cli <name>  force a CLI instead of $CAREER_OPS_CLI or auto-detection
     --model <n>   passed through to the CLI when it accepts one
     --dry-run     print the annotations, write nothing
@@ -189,9 +189,7 @@ export function heuristicSegment(entry, targets) {
 export function parsePendingEntries(text) {
   const out = [];
   const lines = String(text ?? '').split('\n');
-  const { start, end } = pendingSection(lines);
   lines.forEach((raw, index) => {
-    if (index < start || index >= end) return;
     if (!raw.startsWith('- [ ] ')) return;
     if (raw.includes(RANK_LABEL)) return;
     const cells = raw.slice(6).split('|').map(c => c.trim());
@@ -272,6 +270,8 @@ export function applyAnnotations(text, pending, originalText = text) {
  * Line range of the first Pending section: from its heading to the next `##`
  * heading, the rows sync-batch-input.mjs queues and the dashboard Inbox lists.
  * A file with no Pending heading is one plain list, so every line counts.
+ * Only --url reads through it: a run without --url ranks every unchecked row,
+ * which is what the web inbox lists.
  */
 export function pendingSection(lines) {
   const heading = lines.findIndex(line => sectionKind(line) === 'pending');
@@ -439,10 +439,14 @@ async function main(args) {
   const model = flagValue(args, '--model');
   const forced = flagValue(args, '--cli') ?? process.env.CAREER_OPS_RANK_CLI;
 
-  if (forced === 'hermes') {
+  const targetUrl = flagValue(args, '--url')?.trim();
+  const rejectHermes = () => {
     console.error('Hermes is not supported for batch ranking.');
     return 1;
-  }
+  };
+  // With --url the row is looked up first, so a miss says so whatever CLI
+  // was asked for; Hermes is refused once there is a row to rank.
+  if (forced === 'hermes' && targetUrl === undefined) return rejectHermes();
 
   if (!existsSync(PIPELINE_PATH)) {
     if (hasFlag(args, '--url')) {
@@ -453,18 +457,21 @@ async function main(args) {
     return 0;
   }
 
-  // With --url, find the row before looking for a CLI: a miss calls nothing,
-  // not even a version probe, and exits NOT_PENDING whatever is installed.
-  const targetUrl = flagValue(args, '--url')?.trim();
+  // With --url, find the row in the Pending section before looking for a
+  // CLI: a miss calls nothing, not even a version probe, and exits
+  // NOT_PENDING whatever is installed.
   let original = '';
   let pending = [];
   if (targetUrl !== undefined) {
     original = readFileSync(PIPELINE_PATH, 'utf-8');
-    pending = selectByUrl(parsePendingEntries(original), targetUrl);
+    const { start, end } = pendingSection(original.split('\n'));
+    const inPending = parsePendingEntries(original).filter(e => e.index >= start && e.index < end);
+    pending = selectByUrl(inPending, targetUrl);
     if (!pending.length) {
       console.error(`No unranked pending row has this URL as its first cell: ${targetUrl}`);
       return RANK_EXIT.NOT_PENDING;
     }
+    if (forced === 'hermes') return rejectHermes();
   }
 
   const remembered = readRememberedCli(DATA_ROOT);
@@ -703,15 +710,18 @@ function selfTest() {
   check('the two unselected duplicates remain pending',
     parsePendingEntries(tripleDupOut.text).length === 2);
 
-  const sectioned = parsePendingEntries([
+  const sectionLines = [
     '- [ ] https://s.test/above | Above | Row',
     '## Pending',
     '- [ ] https://s.test/in | In | Row',
     '## Notes',
     '- [ ] https://s.test/note | Note | Row',
-  ].join('\n'));
-  check('only the Pending section is read when the file has one',
-    sectioned.map(e => e.url).join() === 'https://s.test/in' && sectioned[0].index === 2);
+  ];
+  const section = pendingSection(sectionLines);
+  check('pendingSection is the first Pending section, up to the next ## heading',
+    section.start === 2 && section.end === 3);
+  check('a run without --url still reads every unchecked row',
+    parsePendingEntries(sectionLines.join('\n')).length === 3);
 
   console.log(`\n  rank-pipeline self-test: ${pass} passed, ${fail} failed\n`);
   return fail === 0 ? 0 : 1;
