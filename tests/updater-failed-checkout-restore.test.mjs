@@ -18,10 +18,10 @@
  * preserved file's uncommitted edit; sections 12 and 13, a cleanup that fails.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync, lstatSync } from 'fs';
 import { join } from 'path';
 import { pass, fail, makeUpdaterRepo, captureConsoleErrors, rmSync, ROOT } from './helpers.mjs';
-import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign, capturePreUpdateIndex, restoreWrittenDirtyState, locallyModifiedSystemFiles, parsePorcelainStatus } from '../update-system.mjs';
+import { restoreAfterFailedUpdate, restoreBootstrapBackups, backupSystemFiles, checkoutErrorIsBenign, capturePreUpdateIndex, restoreWrittenDirtyState, locallyModifiedSystemFiles, parsePorcelainStatus, gitStatusEntries, refreshPreUpdateSnapshot, preservedCheckoutCollision, preservedSpecCollision } from '../update-system.mjs';
 
 function write(dir, rel, text) {
   mkdirSync(join(dir, rel, '..'), { recursive: true });
@@ -768,4 +768,253 @@ console.log('\n🧪 Testing that a failed update restores what it had checked ou
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+// gitStatusEntries reads untrimmed: g() trims, which would eat a leading space of the first ` M` entry.
+const entriesOf = (dir) => gitStatusEntries(dir);
+const rawOf = (g) => (...a) => g(...a);
+const stateOf = (statusEntries) => new Set(statusEntries.map((entry) => entry.path));
+
+// ── 17. the .bak copy-back never writes THROUGH a symlink the checkout left at
+//    the path: upstream tracks some paths as symlinks, a forced checkout puts
+//    one where the user's file was, and a plain copy would overwrite the
+//    link's referent (#7250 review 5955888085). Real filesystem, both restore
+//    sites. Skipped where the OS cannot create symlinks.
+{
+  const { dir, g, ctx } = makeRepo();
+  try {
+    let canLink = true;
+    try { symlinkSync('b.md', join(dir, 'probe-link')); } catch { canLink = false; }
+    rmSync(join(dir, 'probe-link'), { force: true });
+    if (!canLink) {
+      pass('symlink restore check skipped: this filesystem cannot create symlinks');
+    } else {
+      for (const site of ['dirty-state', 'bootstrap']) {
+        write(dir, 'sys/a.md', `my edit ${site}\n`);
+        write(dir, 'sys/a.md.bak', `my edit ${site}\n`);
+        write(dir, 'sys/b.md', 'b referent\n');
+        // The checkout replaced the user's file with a link to another file.
+        rmSync(join(dir, 'sys/a.md'), { force: true });
+        symlinkSync('b.md', join(dir, 'sys/a.md'));
+        const initialStatusPaths = new Set(['sys/a.md']);
+        const initialIndexState = new Map();
+        let failed;
+        if (site === 'dirty-state') {
+          failed = restoreWrittenDirtyState(['sys/'], { initialStatusPaths, initialIndexState, backupByFile: new Map([['sys/a.md', 'sys/a.md.bak']]), preservedSet: new Set() }, { ...ctx });
+        } else {
+          failed = restoreBootstrapBackups([{ file: 'sys/a.md', backup: 'sys/a.md.bak' }], ctx);
+        }
+        const stillLink = lstatSync(join(dir, 'sys/a.md')).isSymbolicLink();
+        if (!stillLink && read(dir, 'sys/a.md') === `my edit ${site}\n` && read(dir, 'sys/b.md') === 'b referent\n') {
+          pass(`${site} restore replaces a symlink with the user's bytes and leaves its referent alone`);
+        } else {
+          fail(`${site} restore followed the link: link=${stillLink} a=${JSON.stringify(read(dir, 'sys/a.md'))} referent=${JSON.stringify(read(dir, 'sys/b.md'))} failed=${JSON.stringify(failed)}`);
+        }
+        rmSync(join(dir, 'sys/a.md'), { force: true });
+        write(dir, 'sys/a.md', 'a v1\n');
+        write(dir, 'sys/b.md', 'b v1\n');
+        rmSync(join(dir, 'sys/a.md.bak'), { force: true });
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 18. the dirty-state index reset is LITERAL: a bracketed name is not a
+//    glob, so resetting sys/[x].md must not unstage its sibling sys/x.md.
+{
+  const { dir, g, ctx } = makeRepo();
+  try {
+    write(dir, 'sys/[x].md', 'bracket v1\n');
+    write(dir, 'sys/x.md', 'x v1\n');
+    g('add', '-A');
+    g('commit', '-qm', 'bracket files');
+    write(dir, 'sys/x.md', 'x staged edit\n');
+    g('add', 'sys/x.md');
+    write(dir, 'sys/[x].md', 'bracket edit\n');
+    const statusEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(statusEntries);
+    const initialIndexState = capturePreUpdateIndex(statusEntries, { gitRaw: rawOf(g) });
+    // The checkout stages its blob over the bracketed file only.
+    write(dir, 'sys/[x].md', 'bracket v2\n');
+    g('--literal-pathspecs', 'add', 'sys/[x].md');
+    // sys/x.md is not named by the update: the restore must leave it staged.
+    const unrestored = restoreWrittenDirtyState(['sys/[x].md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx });
+    const lines = g('status', '--porcelain', '--untracked-files=all');
+    if (unrestored.length === 0 && /^M  sys\/x\.md$/m.test(lines) && !/^M  sys\/\[x\]\.md$/m.test(lines)) {
+      pass('the dirty-state reset treats a bracketed name literally and leaves a pattern-matching sibling staged');
+    } else {
+      fail(`literal reset wrong: status=${JSON.stringify(lines)} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 19. a path the user had DELETED stays deleted: a staged deletion returns
+//    to staged-deleted (no entry, no file), an unstaged one to unstaged-deleted.
+{
+  for (const mode of ['staged', 'unstaged']) {
+    const { dir, g, ctx, target } = makeRepo();
+    try {
+      if (mode === 'staged') g('rm', '-q', 'sys/a.md'); else rmSync(join(dir, 'sys/a.md'));
+      const before = JSON.stringify(entriesOf(dir));
+      const statusEntries = entriesOf(dir);
+      const initialStatusPaths = stateOf(statusEntries);
+      const initialIndexState = capturePreUpdateIndex(statusEntries, { gitRaw: rawOf(g) });
+      // A later path fails after the checkout recreated and staged sys/a.md.
+      g('checkout', target, '--', 'sys/a.md');
+      const unrestored = restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map(), preservedSet: new Set() }, { ...ctx });
+      const after = JSON.stringify(entriesOf(dir));
+      if (unrestored.length === 0 && after === before && !existsSync(join(dir, 'sys/a.md'))) {
+        pass(`a ${mode} deletion is a deletion again after the restore (status "${after}")`);
+      } else {
+        fail(`${mode} deletion restore wrong: before=${JSON.stringify(before)} after=${JSON.stringify(after)} exists=${existsSync(join(dir, 'sys/a.md'))} unrestored=${JSON.stringify(unrestored)}`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+}
+
+// ── 20. the snapshot is re-taken at the write boundary, as a whole. A blob
+//    staged during the network wait is the one the failed update puts back,
+//    and a path first edited during the wait is PROTECTED: with the start
+//    snapshot alone the HEAD restore would reset the user's new edit.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    write(dir, 'sys/a.md', 'edit A\n');
+    g('add', 'sys/a.md');
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    // During the fetch: a different blob is staged, and a second file is edited.
+    write(dir, 'sys/a.md', 'edit B\n');
+    g('add', 'sys/a.md');
+    const shaB = g('rev-parse', ':sys/a.md');
+    write(dir, 'sys/b.md', 'late edit to b\n');
+    const staleProtected = new Set(initialStatusPaths);
+    const added = refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState, { statusEntries: entriesOf(dir), gitRaw: rawOf(g) });
+    // The checkout writes both files (b.md is not at-risk-preserved here: it
+    // matches the --force shape, so it has a .bak), then the update fails.
+    write(dir, 'sys/a.md.bak', 'edit B\n');
+    write(dir, 'sys/b.md.bak', 'late edit to b\n');
+    g('checkout', target, '--', 'sys/a.md', 'sys/b.md');
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/a.md', 'sys/b.md'], initialStatusPaths, { what: 'system path(s)', exclude: [...initialStatusPaths], ...ctx }));
+    const unrestored = restoreWrittenDirtyState(['sys/a.md', 'sys/b.md'], { initialStatusPaths, initialIndexState, backupByFile: new Map([['sys/a.md', 'sys/a.md.bak'], ['sys/b.md', 'sys/b.md.bak']]), preservedSet: new Set() }, { ...ctx });
+    if (added.length === 1 && added[0] === 'sys/b.md' && !staleProtected.has('sys/b.md') &&
+        unrestored.length === 0 && g('rev-parse', ':sys/a.md') === shaB &&
+        read(dir, 'sys/a.md') === 'edit B\n' && read(dir, 'sys/b.md') === 'late edit to b\n') {
+      pass('the write-boundary snapshot returns a restaged blob and protects a path edited during the wait');
+    } else {
+      fail(`boundary refresh wrong: added=${JSON.stringify(added)} index=${g('rev-parse', ':sys/a.md')} want=${shaB} b=${JSON.stringify(read(dir, 'sys/b.md'))} unrestored=${JSON.stringify(unrestored)}`);
+    }
+    // Negative control: the START snapshot would not have protected b.md, so the
+    // HEAD restore resets the late edit (this is what the refresh prevents).
+    if (staleProtected.has('sys/b.md')) fail('control wrong: the start snapshot already named sys/b.md');
+    else pass('control: sys/b.md is outside the start snapshot, so only the refresh protects it');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20b. bootstrap shape with a late staged edit: an updater file the user
+//    staged DURING the wait is backed up, overwritten by the bootstrap
+//    checkout, and the parent's catch order (HEAD restore with the snapshot
+//    excluded, bootstrap backups, dirty-state restore) returns its bytes AND
+//    its staged blob.
+{
+  const { dir, g, ctx, target } = makeRepo();
+  try {
+    const startEntries = entriesOf(dir);
+    const initialStatusPaths = stateOf(startEntries);
+    const initialIndexState = capturePreUpdateIndex(startEntries, { gitRaw: rawOf(g) });
+    write(dir, 'sys/a.md', 'late staged updater edit\n');
+    g('add', 'sys/a.md');
+    const shaLate = g('rev-parse', ':sys/a.md');
+    refreshPreUpdateSnapshot(initialStatusPaths, initialIndexState, { statusEntries: entriesOf(dir), gitRaw: rawOf(g) });
+    const atRisk = locallyModifiedSystemFiles(['sys/a.md'], target, ctx);
+    const bootstrapBackups = backupSystemFiles(atRisk, ctx).filter((r) => !r.error);
+    g('checkout', target, '--', 'sys/a.md');
+    await captureConsoleErrors(() => restoreAfterFailedUpdate(['sys/a.md'], initialStatusPaths, { what: 'updater file(s) loaded to run the new version', exclude: [...initialStatusPaths], ...ctx }));
+    const putBackFailed = restoreBootstrapBackups(bootstrapBackups, ctx);
+    const unrestored = restoreWrittenDirtyState(['sys/a.md'], { initialStatusPaths, initialIndexState }, { ...ctx });
+    if (atRisk.includes('sys/a.md') && putBackFailed.length === 0 && unrestored.length === 0 &&
+        read(dir, 'sys/a.md') === 'late staged updater edit\n' && g('rev-parse', ':sys/a.md') === shaLate) {
+      pass('a late staged updater edit comes back with its bytes and its staged blob after a failed bootstrap');
+    } else {
+      fail(`late bootstrap restore wrong: atRisk=${JSON.stringify(atRisk)} a=${JSON.stringify(read(dir, 'sys/a.md'))} index=${g('rev-parse', ':sys/a.md')} want=${shaLate} putBack=${JSON.stringify(putBackFailed)} unrestored=${JSON.stringify(unrestored)}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 20c. a SYMLINKED PARENT directory is refused: nothing is written through
+//    it, the .bak stays, and the failure is reported (both restore sites).
+{
+  const { dir, g, ctx } = makeRepo();
+  try {
+    let canLink = true;
+    try { symlinkSync('sys/dir', join(dir, 'probe-dir-link')); } catch { canLink = false; }
+    rmSync(join(dir, 'probe-dir-link'), { force: true });
+    if (!canLink) {
+      pass('symlinked-parent check skipped: this filesystem cannot create symlinks');
+    } else {
+      write(dir, 'elsewhere/f.md', 'outside original\n');
+      write(dir, 'sys/f.md.bak', 'user bytes\n');
+      symlinkSync(join(dir, 'elsewhere'), join(dir, 'sys/linked'), 'dir');
+      write(dir, 'sys/linked.bak.md', 'unused\n');
+      // The file to restore sits under the link; its .bak is beside it.
+      write(dir, 'elsewhere/f.md.bak', 'user bytes\n');
+      const dirtyFailed = restoreWrittenDirtyState(['sys/'], { initialStatusPaths: new Set(['sys/linked/f.md']), initialIndexState: new Map(), backupByFile: new Map([['sys/linked/f.md', 'sys/linked/f.md.bak']]), preservedSet: new Set() }, { ...ctx });
+      const bootFailed = restoreBootstrapBackups([{ file: 'sys/linked/f.md', backup: 'sys/linked/f.md.bak' }], ctx);
+      if (read(dir, 'elsewhere/f.md') === 'outside original\n' && existsSync(join(dir, 'elsewhere/f.md.bak')) &&
+          dirtyFailed.length === 1 && bootFailed.length === 1) {
+        pass('a symlinked parent is refused at both restore sites: the referent is untouched and the failure is reported');
+      } else {
+        fail(`symlinked parent not refused: referent=${JSON.stringify(read(dir, 'elsewhere/f.md'))} dirty=${JSON.stringify(dirtyFailed)} boot=${JSON.stringify(bootFailed)}`);
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// ── 21. preserved-collision checks fold case like manifest screening: on a
+//    case-insensitive filesystem lib/Local and lib/local are one location.
+{
+  const a = preservedSpecCollision('lib/local/x.md', ['lib/Local']);
+  const b = preservedSpecCollision('lib/Local', ['lib/local/x.md']);
+  const c = preservedCheckoutCollision('lib/nested', ['lib/Nested/local.md'], ['lib/nested']);
+  const d = preservedCheckoutCollision('lib/nested', ['lib/Nested'], ['lib/nested/x.md']);
+  const ok = preservedSpecCollision('lib/other.md', ['lib/Local']);
+  if (a && b && c && d && ok === null) {
+    pass('collision checks match case-variant paths and still pass unrelated siblings');
+  } else {
+    fail(`case-folded collisions wrong: ${JSON.stringify({ a, b, c, d, ok })}`);
+  }
+}
+
+// ── 22. both validation handlers attempt BOTH repairs. apply() is not
+//    exported, so this asserts against its source (a source check, not an
+//    end-to-end run): each handler wraps revertPaths() in its own try and calls
+//    restoreWrittenDirtyState() outside it, so a HEAD restore that throws
+//    cannot skip the dirty-state restore.
+{
+  const src = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const shapes = ['revertPaths(updated, initialStatusPaths', 'revertPaths([...updated], initialStatusPaths'];
+  let ok = true;
+  for (const shape of shapes) {
+    const at = src.indexOf(`try {\n        ${shape}`);
+    if (at < 0) { ok = false; continue; }
+    const block = src.slice(at, at + 700);
+    const closeRevert = block.indexOf('} catch (revertErr)');
+    const restore = block.indexOf('restoreWrittenDirtyState(');
+    if (closeRevert < 0 || restore < closeRevert) ok = false;
+  }
+  if (ok) pass('both validation handlers call restoreWrittenDirtyState() after, not inside, the revertPaths() try');
+  else fail('a validation handler still lets a revertPaths() throw skip restoreWrittenDirtyState()');
 }
