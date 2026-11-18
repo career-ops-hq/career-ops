@@ -545,6 +545,15 @@ fs.renameSync = function(from, to) {
   }
   return rename.call(this, from, to);
 };
+// Same idea for the folder delete in remove: chmod cannot make a Windows
+// folder undeletable, so FAIL_FOLDER_DELETE fails rmSync on plugins.local.
+const rm = fs.rmSync;
+fs.rmSync = function(target, ...rest) {
+  if (process.env.FAIL_FOLDER_DELETE && String(target).includes('plugins.local')) {
+    throw Object.assign(new Error('EACCES: permission denied (injected)'), { code: 'EACCES' });
+  }
+  return rm.call(this, target, ...rest);
+};
 const execFile = cp.execFileSync;
 cp.execFileSync = function(file, args = [], ...rest) {
   if (file !== 'git' || !process.env.FAKE_CLONE_SRC) return execFile.call(this, file, args, ...rest);
@@ -604,6 +613,58 @@ test('remove keeps the folder and its pin when the lock save fails, so a second 
     assert.equal(retried.status, 0, describeSpawn(retried, 'remove retry'));
     assert.equal(existsSync(dir), false);
     assert.equal(readLock(dataRoot).plugins['retry-plug'], undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test('remove puts the pin back when the folder cannot be deleted, so a retry can finish', () => {
+  const { dataRoot, run, cleanup } = cliFixture('remove-restore');
+  try {
+    const { dir } = writePlugin(join(dataRoot, 'plugins.local'), 'stuck-plug');
+    const tree = hashPluginTree(dir);
+    writeLockEntry(dataRoot, 'stuck-plug', {
+      source: 'local', version: '1.0.0', integrity: tree.integrity, files: tree.files,
+      consent: { allowedHosts: ['api.example.com'], requiredEnv: [], acceptedAt: '2026-01-01T00:00:00.000Z' },
+    });
+
+    const failed = run(['remove', 'stuck-plug'], { FAIL_FOLDER_DELETE: '1' });
+    assert.ok(exitedNonZero(failed), describeSpawn(failed, 'remove with a failing folder delete'));
+    assert.match(failed.stderr, /EACCES/);
+    assert.match(failed.stderr, /pin was put back/);
+    assert.equal(existsSync(join(dir, 'manifest.json')), true, 'the folder must survive');
+    const restored = readLock(dataRoot).plugins['stuck-plug'];
+    assert.equal(restored?.integrity, tree.integrity, 'the pin must be put back, or the leftover files load unpinned');
+    assert.equal(restored?.version, '1.0.0');
+
+    const retried = run(['remove', 'stuck-plug']);
+    assert.equal(retried.status, 0, describeSpawn(retried, 'remove retry'));
+    assert.equal(existsSync(dir), false);
+    assert.equal(readLock(dataRoot).plugins['stuck-plug'], undefined);
+  } finally {
+    cleanup();
+  }
+});
+
+test('remove disables the plugin when the folder cannot be deleted and no pin exists to restore', () => {
+  const { dataRoot, run, cleanup } = cliFixture('remove-disable');
+  try {
+    const { dir } = writePlugin(join(dataRoot, 'plugins.local'), 'unpinned-plug');
+    const enabled = run(['enable', 'unpinned-plug', '--confirm']);
+    assert.equal(enabled.status, 0, describeSpawn(enabled, 'enable'));
+    // Enabled but unpinned: the state a torn or legacy lock can leave behind.
+    removeLockEntry(dataRoot, 'unpinned-plug');
+
+    const failed = run(['remove', 'unpinned-plug'], { FAIL_FOLDER_DELETE: '1' });
+    assert.ok(exitedNonZero(failed), describeSpawn(failed, 'remove with a failing folder delete and no pin'));
+    assert.match(failed.stderr, /was disabled/);
+    assert.equal(existsSync(join(dir, 'manifest.json')), true, 'the folder must survive');
+    const config = readFileSync(join(dataRoot, 'config', 'plugins.yml'), 'utf8');
+    assert.match(config, /enabled: false/, 'an unpinned plugin whose files survived must not stay enabled');
+
+    const retried = run(['remove', 'unpinned-plug']);
+    assert.equal(retried.status, 0, describeSpawn(retried, 'remove retry'));
+    assert.equal(existsSync(dir), false);
   } finally {
     cleanup();
   }
