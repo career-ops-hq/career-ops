@@ -1375,6 +1375,7 @@ search_queries:
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   kula            careers.kula.ai/<slug>              (Kula career site, any path under it; reads the tenant RSS feed /<slug>/feed)
 #   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (or darwinbox.com; the company id is required; a bare tenant host is not claimed)
 #   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
 #   careerpuck      app.careerpuck.com/job-board/<permalink>   (CareerPuck board, any path under it; the list is read from api.careerpuck.com)
@@ -1530,6 +1531,10 @@ search_queries:
 #
 # - name: Example Keka Co
 #   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example Kula Co
+#   careers_url: https://careers.kula.ai/exampleco        # any careers.kula.ai/<slug> page
 #   enabled: true
 #
 # - name: Example Darwinbox Co
@@ -3415,6 +3420,11 @@ tracked_companies:
     careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/a432d829-f701-4cf3-9108-56ef703b2ac5
     notes: "CI/CD and software delivery platform."
     enabled: true
+
+  - name: Kula
+    careers_url: https://careers.kula.ai/hire
+    notes: "Recruiting software. The vendor's own careers site, read through its public RSS feed."
+    enabled: false
 
   # -- Dev Tools / AI Infra (DevRel, SA, FDE focus) --
 

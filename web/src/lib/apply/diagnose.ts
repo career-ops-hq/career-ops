@@ -392,6 +392,9 @@ export async function verifyFill(frame: Frame, fields: ApplyField[], answers: Re
             const matches = !!(intended && intended.trim() && chosen && (norm(actual) === norm(intended) || norm(chosen.value) === norm(intended)));
             if (intended && intended.trim()) {
               if (!matches) mismatches.push(f.label);
+            } else if (chosen) {
+              // A selected radio with no intended answer was not one we listed.
+              mismatches.push(f.label);
             } else if (f.required && !chosen) requiredEmpty.push(f.label);
             continue;
           }
