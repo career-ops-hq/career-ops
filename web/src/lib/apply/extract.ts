@@ -183,6 +183,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
     const fields: Array<Record<string, unknown>> = [];
     const seenRadio = new Set<string>();
+    const seenCheckbox = new Set<string>();
     const els = Array.from(document.querySelectorAll("input, textarea, select"));
     let n = 0;
 
@@ -248,6 +249,51 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         const radioLabel = clean(radioRaw) || name;
         fields.push({ id: fid, type: "radio", label: radioLabel, required: requiredFor(clean(radioRaw) ? radioRaw : (name || "")), options });
         continue;
+      }
+
+      if (itype === "checkbox") {
+        const boxName = (el as HTMLInputElement).name;
+        const boxes = boxName
+          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`))
+          : [el];
+        if (boxes.length > 1) {
+          if (seenCheckbox.has(boxName)) {
+            n--;
+            continue;
+          }
+          seenCheckbox.add(boxName);
+          const fullLabels = boxes.map((box) => normalize(labelFor(box)));
+          // The same text on every box is the question or the input name, not a
+          // choice. Use each input's value so health and dental stay distinct.
+          const shared = fullLabels.length > 1 && fullLabels.every((text) => text && text === fullLabels[0]);
+          const optionText = (box: Element, i: number) => {
+            const value = clean((box as HTMLInputElement).value);
+            const full = fullLabels[i] || "";
+            const text = clean(full);
+            const rawName = (box as HTMLInputElement).name || "";
+            if (!full || full === rawName || (shared && value)) return value || text;
+            return text || value;
+          };
+          const options = boxes.map((box, i) => optionText(box, i)).filter(Boolean);
+          // Same words the fill step treats as consent. Kept here because this
+          // callback runs in the page and cannot import the Node helper.
+          const consentLabel = (text: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(text);
+          boxes.forEach((box, i) => {
+            box.setAttribute("data-co-field", fid);
+            const shown = optionText(box, i) || String(i);
+            box.setAttribute("data-co-option", shown);
+            // A shared consent sentence is stored as the control value above.
+            // Mark the box from the original words so fill leaves it alone.
+            if (consentLabel(fullLabels[i] || "") || consentLabel(shown)) box.setAttribute("data-co-consent", "1");
+          });
+          const matchTexts = shared
+            ? options
+            : fullLabels.map((full, i) => full || normalize((boxes[i] as HTMLInputElement).value)).filter(Boolean);
+          const boxRaw = groupLabel(el, matchTexts.length ? matchTexts : options);
+          const boxLabel = clean(boxRaw) || boxName;
+          fields.push({ id: fid, type: "checkbox", label: boxLabel, required: requiredFor(clean(boxRaw) ? boxRaw : (boxName || "")), options });
+          continue;
+        }
       }
 
       el.setAttribute("data-co-field", fid);

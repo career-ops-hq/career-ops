@@ -229,6 +229,16 @@
 # structured location only. Reverse scans do not consume those field gates;
 # unlike the shared location filter, that alternative does not use URL hints.
 #
+# A generic allow entry ("Remote", "Remote work", "Work from home", "Anywhere",
+# "Distributed") says nothing about where the role is. When always_allow or
+# allow also names a country ("United States", "Germany") or a US state name,
+# that entry no longer admits a location that names only other places: with
+# the example below, "Remote (Hong Kong)" and "Remote - Toronto" are rejected,
+# and a Remote title cannot rescue them either. "Remote" alone and "Remote -
+# Austin, TX" still pass. A bare two-letter code does not count as a country
+# here, because US lists use them for states. A list with no country, or with a
+# region ("Europe", "EMEA", "Worldwide"), matches as before.
+#
 # Example below targets US-based remote + a couple of US metros, blocking
 # common foreign hubs. Customize to your geography. Keywords match whole words
 # and take no `word:`/`stem:` prefix. A Chinese or Japanese keyword matches
@@ -1361,9 +1371,11 @@ search_queries:
 #   bamboohr        <tenant>.bamboohr.com               (or api: field)
 #   breezy          <tenant>.breezy.hr                  (or api: field)
 #   taleez          <tenant>.taleez.com                 (or api: field)
+#   inhire          <tenant>.inhire.app                 (or api: field; Brazilian ATS, one list request per tenant)
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   kula            careers.kula.ai/<slug>              (Kula career site, any path under it; reads the tenant RSS feed /<slug>/feed)
 #   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (or darwinbox.com; the company id is required; a bare tenant host is not claimed)
 #   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
 #   careerpuck      app.careerpuck.com/job-board/<permalink>   (CareerPuck board, any path under it; the list is read from api.careerpuck.com)
@@ -1508,6 +1520,10 @@ search_queries:
 #   # Branded careers domain: api: https://feed.homerun.co/exampleco (the feed the careers page links)
 #   enabled: true
 #
+# - name: Example InHire Co
+#   careers_url: https://exampleco.inhire.app             # any <tenant>.inhire.app host
+#   enabled: true
+#
 # - name: Example InRecruiting Co
 #   careers_url: https://exampleco.intervieweb.it/it/career   # any <tenant>.intervieweb.it host
 #   max_pages: 40          # optional page cap (15 jobs/page, default 40, max 200)
@@ -1515,6 +1531,10 @@ search_queries:
 #
 # - name: Example Keka Co
 #   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example Kula Co
+#   careers_url: https://careers.kula.ai/exampleco        # any careers.kula.ai/<slug> page
 #   enabled: true
 #
 # - name: Example Darwinbox Co
@@ -3400,6 +3420,11 @@ tracked_companies:
     careers_url: https://recruiting.paylocity.com/Recruiting/Jobs/All/a432d829-f701-4cf3-9108-56ef703b2ac5
     notes: "CI/CD and software delivery platform."
     enabled: true
+
+  - name: Kula
+    careers_url: https://careers.kula.ai/hire
+    notes: "Recruiting software. The vendor's own careers site, read through its public RSS feed."
+    enabled: false
 
   # -- Dev Tools / AI Infra (DevRel, SA, FDE focus) --
 

@@ -54,6 +54,26 @@ test('generic filler may differ, distinctive tokens may not', () => {
   assert.equal(tier('New York Times', 'The New York Times'), 'strong');
 });
 
+test('a dotted legal form is the same filler as the plain one (#7171)', () => {
+  // The split on punctuation leaves single letters, which were distinctive, so
+  // the dotted spelling demoted an exact employer to a weak (hidden) match.
+  assert.equal(tier('Acme', 'Acme L.L.C.'), 'strong');
+  assert.equal(tier('Telefonica', 'Telefonica S.A.'), 'strong');
+  assert.equal(tier('Siemens', 'Siemens A.G.'), 'strong');
+  assert.equal(tier('Booking.com', 'Booking.com B.V.'), 'strong');
+  assert.equal(tier('Novo Nordisk', 'Novo Nordisk A/S'), 'strong');
+  assert.equal(tier('Robert Bosch', 'Robert Bosch G.m.b.H.'), 'strong');
+  assert.equal(tier('Fictional Foods', 'Fictional Foods S.p.A.'), 'strong');
+  assert.deepEqual(companyTokens('Acme L.L.C.').distinctive, ['acme']);
+  // The key is unchanged: it was already separator-free.
+  assert.equal(companyTokens('Acme L.L.C.').key, 'acmellc');
+});
+
+test('a run of initials that spells no legal form stays as it was', () => {
+  assert.deepEqual(companyTokens('A.P. Moller - Maersk').distinctive, ['p', 'moller', 'maersk']);
+  assert.equal(tier('Acme X Y', 'Acme'), 'weak');
+});
+
 test('nesting is not identity', () => {
   assert.equal(tier('Epic Systems', 'Epic Games'), 'weak');
   assert.equal(tier('Optimal Blue', 'Blue Cloud Ventures'), 'weak');

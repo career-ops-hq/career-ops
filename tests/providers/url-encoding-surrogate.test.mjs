@@ -75,6 +75,20 @@ try {
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
   );
 
+  // inhire.parseInhireResponse — for…of over jobsPage[]; jobId feeds the posting URL.
+  const { parseInhireResponse } = await load('inhire.mjs');
+  check(
+    'inhire.parseInhireResponse',
+    () => parseInhireResponse(
+      { jobsPage: [
+        { jobId: `${LONE}bad`, displayName: 'Bad Id', status: 'published' },
+        { jobId: 'ok-5', displayName: 'Good Id', status: 'published' },
+      ] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.inhire.app/vagas/ok-5/good-id',
+  );
+
   // taleez.parseTaleezResponse — for…of over the site's jobs[]; slug feeds the posting URL.
   const { parseTaleezResponse } = await load('taleez.mjs');
   check(
@@ -480,6 +494,7 @@ try {
     'feishu-jobs.mjs',
     'garena.mjs',
     'hibob.mjs',
+    'inhire.mjs',
     'jibeapply.mjs',
     'kalibrr.mjs',
     'keka.mjs',

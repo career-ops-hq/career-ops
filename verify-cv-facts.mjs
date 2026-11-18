@@ -1501,7 +1501,7 @@ function spellZhDates(value) {
 }
 
 function dateEndpoints(value) {
-  const clean = spellZhDates(normalizeFact(stripMarkup(value))).replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
+  const clean = spellZhDates(normalizeFact(stripMarkup(value))).replace(/\s*--\s*/g, ' - ').replace(/\b((?:19|20)\d{2})-(\d{2})\b/g, '$2/$1');
   const parts = clean.split(/\s*[-–—]+\s*|\s+to\s+/);
   if (parts.length > 2) return null;
   const dates = parts.map(part => {
@@ -3380,11 +3380,14 @@ function sourceContainsFact(sourceText, value) {
 
 function sourceSpellsFact(sourceText, value) {
   if (value.length > MAX_SOURCE_LOOKUP_LENGTH) return false;
-  const escaped = value
+  const isDate = dateEndpoints(value) !== null;
+  const normVal = isDate ? value.replace(/\s*--\s*/g, ' - ') : value;
+  const normSrc = isDate ? sourceText.replace(/\s*--\s*/g, ' - ') : sourceText;
+  const escaped = normVal
     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     .replace(/\s+/g, '\\s+')
     .replace(/-/g, `[-${FOLDED_DASH}]`);
-  return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(sourceText);
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}+#/-])${escaped}(?=$|[^\\p{L}\\p{N}+#/-])`, 'iu').test(normSrc);
 }
 
 /**

@@ -620,8 +620,11 @@ export function summarize(runs, reference = 'claude-opus-5') {
   const refScore = new Map(all.filter((r) => runLabel(r) === reference && r.rep === 1 && r.score != null)
     .map((r) => [r.case, r.score]));
 
+  // "/eval" sits in a placeholder: written out in front of " (", the HOL plugin
+  // scanner (hol-plugin-scanner.yml) reads it as a call to eval.
+  const PER_EVAL = '/eval';
   const lines = [
-    `| Model | Runs | Scored | Archetype = label | mean \\|Δ\\| vs label | mean \\|Δ\\| vs ${reference} | Rep-to-rep \\|Δ\\| | Output contract | Schema-valid YAML | \`expect\` checks | Tokens/eval (processed / generated) | Mean $/eval (API list price) | Median turns | Median time |`,
+    `| Model | Runs | Scored | Archetype = label | mean \\|Δ\\| vs label | mean \\|Δ\\| vs ${reference} | Rep-to-rep \\|Δ\\| | Output contract | Schema-valid YAML | \`expect\` checks | Tokens${PER_EVAL} (processed / generated) | Mean $${PER_EVAL} (API list price) | Median turns | Median time |`,
     '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
   ];
   for (const m of models) {

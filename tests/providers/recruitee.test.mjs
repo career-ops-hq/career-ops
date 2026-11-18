@@ -924,6 +924,65 @@ try {
     fail(`url-fallback: got ${urlFallbackOffers.length} offer(s) = ${JSON.stringify(urlFallbackOffers)}`);
   }
 
+  // listingIdentity (#6908): the tenant label of the board's host and the
+  // offer's integer id from the payload, never parsed out of a URL.
+  {
+    const { recruiteeListingIdentity } = recruiteeModule;
+    const identityRows = await recruitee.fetch(
+      { name: 'Acme', careers_url: 'https://acme.recruitee.com' },
+      { fetchJson: async () => ({ offers: [
+        { id: 2796207, title: 'Senior PM', careers_url: 'https://careers.acme.example/o/senior-pm' },
+        { id: 0, title: 'Zero Id', careers_url: 'https://careers.acme.example/o/zero' },
+        { id: '2796208', title: 'Text Id', careers_url: 'https://careers.acme.example/o/text' },
+      ] }) },
+    );
+    const identity = identityRows[0]?.listingIdentity;
+    if (identity && identity.ats_provider === 'recruitee' && identity.board_slug === 'acme' && identity.posting_id === '2796207') {
+      pass('recruitee.fetch() returns the recruitee/<host label>/<offer id> listingIdentity, whatever domain the offer URL is on');
+    } else {
+      fail(`recruitee listingIdentity = ${JSON.stringify(identity)}`);
+    }
+    if (identityRows.length === 3 && !('listingIdentity' in identityRows[1]) && !('listingIdentity' in identityRows[2])) {
+      pass('a non-positive or non-integer recruitee offer id leaves listingIdentity off and keeps the row');
+    } else {
+      fail(`rows without identity = ${JSON.stringify(identityRows.slice(1))}`);
+    }
+
+    if (recruiteeListingIdentity('acme', 7)?.posting_id === '7'
+        && recruiteeListingIdentity('acme', '7') === undefined
+        && recruiteeListingIdentity('acme', 7.5) === undefined
+        && recruiteeListingIdentity('acme', -7) === undefined
+        && recruiteeListingIdentity('acme', Number.MAX_SAFE_INTEGER + 1) === undefined
+        && recruiteeListingIdentity('acme', null) === undefined
+        && recruiteeListingIdentity('', 7) === undefined
+        && recruiteeListingIdentity(' acme', 7) === undefined
+        && recruiteeListingIdentity('ac\nme', 7) === undefined
+        && recruiteeListingIdentity(null, 7) === undefined) {
+      pass('recruiteeListingIdentity takes only a positive safe integer id and a clean slug');
+    } else {
+      fail('recruiteeListingIdentity accepted an id or a slug it must refuse');
+    }
+
+    const noSlug = parseRecruiteeResponse({ offers: [{ id: 2796207, title: 'Senior PM', careers_url: 'https://acme.recruitee.com/o/senior-pm' }] }, 'Acme');
+    if (noSlug.length === 1 && !('listingIdentity' in noSlug[0])) pass('parseRecruiteeResponse without a board slug gives no listingIdentity');
+    else fail(`no-slug rows = ${JSON.stringify(noSlug)}`);
+
+    const versions = parseRecruiteeResponse({ offers: [{
+      id: 42,
+      title: 'QA Engineer (m/w/d)',
+      careers_url: 'https://acme.recruitee.com/o/qa',
+      translations: { en: { title: 'QA Engineer (m/f/d)' }, de: { title: 'QA Engineer (m/w/d)' } },
+    }] }, 'Acme', { allLanguages: true, boardSlug: 'acme' });
+    if (versions.length === 2
+        && versions[0].listingIdentity?.posting_id === '42'
+        && JSON.stringify(versions[0].listingIdentity) === JSON.stringify(versions[1].listingIdentity)
+        && versions[0].url !== versions[1].url) {
+      pass('every language version of one recruitee offer carries the same listingIdentity');
+    } else {
+      fail(`language versions = ${JSON.stringify(versions.map(v => [v.url, v.listingIdentity]))}`);
+    }
+  }
+
 } catch (e) {
   fail(`recruitee provider tests crashed: ${e.message}`);
 }

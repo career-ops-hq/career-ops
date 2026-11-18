@@ -1096,6 +1096,16 @@ export function statusTextAfterDate(input) {
   return withoutBoldOrLeadingDate(input).match(STATUS_DATE_RE)?.[1].trim() ?? '';
 }
 
+/** Not checked as a real calendar day. That is the caller's job. */
+export function statusDateInCell(input) {
+  const raw = String(input ?? '').replace(/\*\*/g, '').trim();
+  const leading = raw.match(LEADING_STATUS_DATE_RE);
+  if (leading) return leading[0].slice(0, 10);
+  const matched = withoutBoldOrLeadingDate(input).match(STATUS_DATE_RE);
+  const date = matched?.[0].match(/\d{4}-\d{2}-\d{2}/);
+  return date ? date[0] : '';
+}
+
 /**
  * A Notes cell with `entry` put first, as its own entry. set-status.mjs reads
  * Notes as "; "-separated entries (--note, --replace-note), so text a writer
