@@ -1475,6 +1475,11 @@ search_queries:
 # claim. Set `provider: rexx` + `careers_url` pointed at the portal's job list
 # page (e.g. https://jobs.exampleco.com/stellenangebote.html).
 #
+# Bizneo HR is explicit-only too: its career sites run on the employer's own
+# domain (empleo.<company>.com, jobs.<company>.com), so there is no vendor host
+# to claim. Set `provider: bizneo` + `careers_url` pointed at the site (only the
+# host is used; the provider reads its `/jobs` list).
+#
 # Eploy is also explicit-only: standard tenants use unrelated branded domains,
 # so a URL cannot be distinguished safely from a non-Eploy careers site. Set
 # `provider: eploy`; the provider reads the public `/live-jobs.xml` on that
@@ -1513,6 +1518,12 @@ search_queries:
 #
 # - name: Example BambooHR Co
 #   careers_url: https://exampleco.bamboohr.com/careers   # any *.bamboohr.com host
+#   enabled: true
+#
+# - name: Example Bizneo Co
+#   careers_url: https://empleo.exampleco.com/jobs        # Bizneo HR career site on the employer's own domain
+#   provider: bizneo       # required — branded domains cannot auto-detect
+#   max_pages: 30          # optional page cap (default 30, max 100)
 #   enabled: true
 #
 # - name: Example Homerun Co
@@ -3373,6 +3384,14 @@ tracked_companies:
     careers_url: https://job-boards.greenhouse.io/amplemarket
     api: https://boards-api.greenhouse.io/v1/boards/amplemarket/jobs
     notes: "Lisbon PT / Remote. AI-native sales platform."
+    enabled: true
+
+  # -- Spain (Bizneo HR career pages) --
+
+  - name: Bit2Me
+    careers_url: https://empleo.bit2me.com/jobs
+    provider: bizneo
+    notes: "Madrid / Remote. Crypto exchange. Bizneo HR career site on its own domain (3 postings on 2026-11-18)."
     enabled: true
 
   # -- Italy (Zucchetti InRecruiting career pages) --
