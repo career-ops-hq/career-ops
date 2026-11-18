@@ -26,6 +26,7 @@
 
 import { readFileSync } from 'node:fs';
 import { classifyLiveness, isUnreadableVerdict } from '../liveness-core.mjs';
+import { sameDocument, visibleTextForLiveness } from '../lib/jd-page-fetch.mjs';
 
 // Strong expiry signals only. The soft and listing heuristics depend on an
 // apply-control check that this curl-only path cannot run.
@@ -36,7 +37,15 @@ const DEAD_CODES = new Set(['http_gone', 'expired_url', 'expired_body', 'deadlin
  * @returns {{decision: 'proceed'|'skip-dead'|'skip-blocked'|'retry-later', code: string, reason: string}}
  */
 export function decide({ status = 0, requestedUrl = '', finalUrl = '', bodyText = '' } = {}) {
-  const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText });
+  // Curl received no HTTP response (DNS, TLS, connect or transfer failure).
+  // Its last attempted redirect URL is not page evidence, so let the runner's
+  // existing transport/thin-JD handling decide whether to retry or WebFetch.
+  if (status === 0) return { decision: 'proceed', code: 'transport_unconfirmed', reason: 'no HTTP response' };
+  // A page fetched for another posting cannot lend its closure banner to the
+  // requested URL. Keep the final URL: classifyLiveness can still recognise an
+  // explicit expired redirect, but body-derived closure is ignored.
+  const trustedBody = finalUrl && !sameDocument(requestedUrl, finalUrl) ? '' : bodyText;
+  const verdict = classifyLiveness({ status, requestedUrl, finalUrl, bodyText: trustedBody });
   const { result, code, reason } = verdict;
   let decision;
   if (result === 'expired') {
@@ -69,7 +78,7 @@ function main() {
   const status = Number.parseInt(statusRaw, 10) || 0;
   let bodyText = '';
   try {
-    bodyText = readFileSync(bodyFile, 'utf-8');
+    bodyText = visibleTextForLiveness(readFileSync(bodyFile, 'utf-8'));
   } catch {
     bodyText = '';
   }

@@ -1270,6 +1270,7 @@ process_offer() {
   local prefetch_min_words=80
   local jd_prefetch_words=0
   local jd_rescue_closed_note=""
+  local jd_rescue_ats_accepted=0
   local jd_raw_file=""
   local curl_status=0
   local jd_http_code=0 jd_final_url=""
@@ -1372,12 +1373,12 @@ process_offer() {
       # miscompare. Strip everything that is not a digit and default to 0.
       jd_prefetch_words="${jd_prefetch_words//[^0-9]/}"
       jd_prefetch_words="${jd_prefetch_words:-0}"
-      # The pre-filter must see the visible page text curl returned. jd-rescue
-      # can replace $jd_file with a structured JD from stale embedded data,
-      # which must not hide an explicit "posting closed" notice on the page.
+      # The pre-filter reads the original page before jd-rescue can replace the
+      # JD. prefilter-url.mjs applies the shared visibility rules itself, so a
+      # hidden expiry template cannot masquerade as a visible closure banner.
       if [[ "${PREFILTER:-true}" == "true" && -f "${BATCH_DIR:-}/prefilter-url.mjs" ]]; then
         jd_prefilter_visible_file="${jd_file}.visible"
-        cp "$jd_file" "$jd_prefilter_visible_file" 2>/dev/null || true
+        cp "$jd_raw_file" "$jd_prefilter_visible_file" 2>/dev/null || true
       fi
       # Zero-token JD rescue: read the JD out of the structured data the board
       # already shipped in the bytes above. It only replaces the text when the page
@@ -1402,6 +1403,7 @@ process_offer() {
           if [[ "$_rs_words" -ge "$prefetch_min_words" ]]; then
             echo "    ℹ️  JD rescue: recovered ${_rs_words} words via ${_rs_method} (visible text had ${jd_prefetch_words})"
             jd_prefetch_words="$_rs_words"
+            [[ "$_rs_method" == ats-api:* ]] && jd_rescue_ats_accepted=1
           fi
         fi
       fi
@@ -1429,16 +1431,28 @@ process_offer() {
   # A blocked or transient HTML response can still have a readable JD in the
   # ATS's public API. Rescue it before recording the pre-filter outcome; dead
   # postings remain terminal and never make this extra request.
-  if [[ "$jd_prefilter_decision" == "skip-blocked" || "$jd_prefilter_decision" == "retry-later" ]]; then
+  if [[ ( "$jd_prefilter_decision" == "skip-blocked" || "$jd_prefilter_decision" == "retry-later" ) && "$jd_rescue_ats_accepted" == "1" ]]; then
+    # jd-rescue got this description from the requested URL's ATS API, not the
+    # redirected page, so it is safe to keep and needs no second API request.
+    jd_prefilter_decision=proceed
+  elif [[ "$jd_prefilter_decision" == "skip-blocked" || "$jd_prefilter_decision" == "retry-later" ]]; then
     : > "$jd_file"
-    local jd_prefilter_api_tmp jd_prefilter_api_words=0
+    local jd_prefilter_api_tmp jd_prefilter_api_words=0 jd_prefilter_api_rc=0
     if [[ -f "$PROJECT_DIR/fetch-jd.mjs" ]]; then
       jd_prefilter_api_tmp="$(mktemp "${TMPDIR:-/tmp}/batch-jd-prefilter-api.XXXXXX")"
-      if node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_prefilter_api_tmp" 2>/dev/null; then
+      node "$PROJECT_DIR/fetch-jd.mjs" "$url" > "$jd_prefilter_api_tmp" 2>/dev/null || jd_prefilter_api_rc=$?
+      if [[ "$jd_prefilter_api_rc" -eq 3 ]]; then
+        # fetch-jd has authoritative ATS closure evidence. Preserve it for the
+        # shared closed-posting path below instead of consuming a retry here.
+        jd_rescue_closed_note="posting closed (fetch-jd): $(head -c 160 "$jd_prefilter_api_tmp" | tr -c '[:print:]' ' ' | sed 's/^CLOSED_POSTING //; s/  */ /g')"
+        jd_prefilter_decision=proceed
+      elif [[ "$jd_prefilter_api_rc" -eq 0 ]]; then
         jd_prefilter_api_words=$(wc -w < "$jd_prefilter_api_tmp" 2>/dev/null) || jd_prefilter_api_words=0
         jd_prefilter_api_words="${jd_prefilter_api_words//[^0-9]/}"
         jd_prefilter_api_words="${jd_prefilter_api_words:-0}"
-        if [[ "$jd_prefilter_api_words" -ge "$prefetch_min_words" ]]; then
+        if grep -q 'Job description truncated here: the posting is longer than' "$jd_prefilter_api_tmp" 2>/dev/null; then
+          echo "    ℹ️  JD prefilter rescue: fetch-jd.mjs returned a truncated JD — not used as the full posting"
+        elif [[ "$jd_prefilter_api_words" -ge "$prefetch_min_words" ]]; then
           cat "$jd_prefilter_api_tmp" > "$jd_file"
           jd_prefilter_decision=proceed
           echo "    ℹ️  JD prefilter rescue: ${jd_prefilter_api_words} words from the ATS API (fetch-jd.mjs)"
@@ -1446,6 +1460,13 @@ process_offer() {
       fi
       rm -f "$jd_prefilter_api_tmp"
     fi
+  fi
+
+  # A blocked static fetch may be readable in Chromium. The user explicitly
+  # selected that recovery path, so defer its terminal batch decision until the
+  # existing browser-extract stage has had a chance to recover the JD.
+  if [[ "$jd_prefilter_decision" == "skip-blocked" && "$THIN_ACTION" == "browser-extract" ]]; then
+    jd_prefilter_decision=proceed
   fi
 
   # Act on the pre-filter verdict. "skipped" is terminal (a 404 is still a 404

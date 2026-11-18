@@ -28,7 +28,9 @@ eq('HTTP 429 is retried later', d({ status: 429 }), 'retry-later');
 eq('HTTP 503 is retried later', d({ status: 503 }), 'retry-later');
 eq('HTTP 500 is retried later', d({ status: 500 }), 'retry-later');
 eq('no HTTP response at all (status 0) proceeds', d({ status: 0 }), 'proceed');
+eq('a transport failure after a redirect hop still proceeds', d({ status: 0, finalUrl: 'https://boards.greenhouse.io/acme/jobs' }), 'proceed');
 eq('a redirect from a posting to a board listing is unreadable, not dead', d({ status: 200, finalUrl: 'https://careers.acme.example/positions/', bodyText: long }), 'skip-blocked');
+eq('a closure banner on another posting cannot expire the requested offer', d({ status: 200, finalUrl: 'https://boards.greenhouse.io/acme/jobs/7654321', bodyText: `This job is no longer available. ${long}` }), 'skip-blocked');
 
 const r = decide({ status: 404, requestedUrl: posting });
 eq('the code and reason are passed through', `${r.code}|${r.reason}`, 'http_gone|HTTP 404');
@@ -38,14 +40,17 @@ const dir = mkdtempSync(join(tmpdir(), 'prefilter-'));
 try {
   const body = join(dir, 'body.txt');
   writeFileSync(body, `This job is no longer available. ${long}`);
+  const hiddenExpiry = join(dir, 'hidden-expiry.html');
+  writeFileSync(hiddenExpiry, `<section class="job-expire-view"><h2>This job is no longer available.</h2></section><main>${long}</main>`);
   const cli = (...args) => spawnSync(NODE, ['batch/prefilter-url.mjs', ...args], { cwd: ROOT, encoding: 'utf-8' });
   const gone = cli('200', posting, posting, body);
   eq('CLI prints decision<TAB>code<TAB>reason', gone.stdout.split('\t')[0], 'skip-dead');
+  eq('CLI ignores a closure phrase inside a hidden expiry template', cli('200', posting, posting, hiddenExpiry).stdout.split('\t')[0], 'proceed');
   eq('CLI output is one line', gone.stdout.trim().split('\n').length, 1);
   eq('CLI: a missing body file fails open', cli('200', posting, posting, join(dir, 'nope.txt')).stdout.split('\t')[0], 'proceed');
   eq('CLI: --help prints usage and does not run the filter', /^Usage:/.test(cli('--help').stdout), true);
   eq('CLI: no arguments at all fail open', cli().stdout.split('\t')[0], 'proceed');
-  eq('CLI: a non-numeric status is treated as no response', cli('abc', posting, posting, body).stdout.split('\t')[0], 'skip-dead');
+  eq('CLI: a non-numeric status is treated as no response', cli('abc', posting, posting, body).stdout.split('\t')[0], 'proceed');
 } finally {
   try { rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
 }
