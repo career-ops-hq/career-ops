@@ -1160,7 +1160,7 @@ if (!undone && statusChanged && newStatus === 'Interview' && !flags.dryRun) {
 // Same never-fails-the-status-change policy as the hooks above.
 let cooldownRecorded = null;
 if (!undone && newStatus === 'Rejected' && flags.cooldownDays !== null) {
-  cooldownRecorded = recordCooldownOnRejected(target, {
+  cooldownRecorded = await recordCooldownOnRejected(target, {
     days: Number(flags.cooldownDays),
     scope: flags.cooldownScope || 'role',
     date: flags.on || localToday(),

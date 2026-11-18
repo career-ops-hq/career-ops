@@ -34,3 +34,12 @@ test("an external status change closes the cooldown prompt too", () => {
   const effect = src.slice(src.indexOf("if (!saving.current)"), src.indexOf("}, [current]"));
   assert.match(effect, /setPendingRejected\(false\)/);
 });
+
+test("a cooldown outcome outlives the editor: kept past the clear, sent to the page when unmounted", () => {
+  const commit = src.slice(src.indexOf("async function commitChange"), src.indexOf("async function onChange"));
+  assert.match(commit, /onCooldown: \(outcome\) => \{ cooldownOutcome = cooldownMessage\(outcome\); \}/);
+  const clearAt = commit.indexOf('onHeldSave?.({ type: "clear" });\n      const note');
+  const noticeAt = commit.indexOf('onHeldSave?.({ type: "notice", text: note.text })');
+  assert.ok(clearAt !== -1 && noticeAt > clearAt, "the notice is sent after the clear, so the clear cannot wipe it");
+  assert.match(src, /heldSave\?\.phase === "notice"/);
+});

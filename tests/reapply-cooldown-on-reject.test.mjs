@@ -2,7 +2,7 @@ import { pass, fail, NODE, ROOT } from './helpers.mjs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, chmodSync, statSync, existsSync } from 'fs';
 import { tmpdir } from 'os';
 import * as yaml from 'js-yaml';
 
@@ -11,7 +11,7 @@ console.log('\nre-apply cooldown recorded on Rejected (set-status --cooldown-day
 const check = (ok, label, detail = '') => (ok ? pass(label) : fail(`${label}${detail ? ` — ${detail}` : ''}`));
 const mod = (file) => import(pathToFileURL(join(ROOT, file)).href);
 
-const { upsertReapplyWindow, mergeWindow, windowUntil } = await mod('lib/reapply-windows.mjs');
+const { upsertReapplyWindow, mergeWindow, windowUntil, recordCooldown, cooldownLockDir } = await mod('lib/reapply-windows.mjs');
 const { buildCooldownFilter, loadReApplyWindows } = await mod('scan.mjs');
 const { findActiveCooldown } = await mod('precheck-duplicate.mjs');
 
@@ -80,6 +80,16 @@ check(upsertReapplyWindow('- a\n- b\n', 'X', { from: '2026-01-01', days: 5 }) ==
   check(again.applied_to.length === 2, 'roles are de-duplicated case-insensitively');
 }
 
+{
+  // A company-wide window that ended 2026-01-31; a role-scoped rejection on 2026-11-10.
+  const expired = { cooldown_from: '2025-08-04', same_role_days: 180, applied_to: ['SWE'], cross_role_bucket: 'all_EM_roles', scope: 'company', note: 'mine' };
+  const merged = mergeWindow(expired, { from: '2026-11-10', days: 90, role: 'PM', scope: 'role' });
+  check(merged.scope === undefined && merged.cross_role_bucket === undefined, 'an expired window does not pass on its company-wide scope or bucket');
+  check(merged.applied_to.join() === 'PM', 'an expired window does not pass on its roles');
+  check(merged.note === 'mine', 'unrelated keys of the expired window are kept');
+  check(merged.cooldown_from === '2026-11-10' && merged.same_role_days === 90, 'the new window starts fresh');
+}
+
 // ── scan: cooldown_from and scope: company ───────────────────────
 
 {
@@ -136,6 +146,29 @@ try {
   check(wide.changed === false && wide.cooldownRecorded?.scope === 'company',
     'an already-Rejected row can still record (and widen) its window');
 
+  if (process.platform !== 'win32') {
+    chmodSync(profilePath, 0o600);
+    run('--row', '1', 'Rejected', '--cooldown-days', '400', '--json');
+    check((statSync(profilePath).mode & 0o777) === 0o600, 'the replaced profile keeps its 0600 mode', (statSync(profilePath).mode & 0o777).toString(8));
+  }
+  check(!existsSync(cooldownLockDir(profilePath)), 'the cooldown lock is released after the write');
+
+  const moved = run('--row', '1', 'Interview', '--json');
+  const guarded = run('--row', '1', 'Rejected', '--expect-status', 'Rejected', '--cooldown-days', '30', '--json');
+  check(moved.status === 0 && guarded.status !== 0, '--expect-status Rejected refuses a row that moved on', `exit ${guarded.status}`);
+  run('--row', '1', 'Rejected', '--json');
+  const stillRejected = run('--row', '1', 'Rejected', '--expect-status', 'Rejected', '--cooldown-days', '30', '--json');
+  check(stillRejected.status === 0, '--expect-status Rejected accepts a row that is still Rejected');
+
+  // Two cooldown writers at once: both windows land.
+  writeFileSync(profilePath, PROFILE_TEXT);
+  const both = await Promise.all([
+    recordCooldown({ profilePath, company: 'Alpha Co', role: 'A', from: '2026-11-10', days: 30 }),
+    recordCooldown({ profilePath, company: 'Beta Co', role: 'B', from: '2026-11-10', days: 60 }),
+  ]);
+  const concurrent = yaml.load(readFileSync(profilePath, 'utf8')).re_apply_windows;
+  check(both.every((r) => r.recorded) && concurrent['Alpha Co'] && concurrent['Beta Co'], 'concurrent cooldown writers both land');
+
   const zero = JSON.parse(run('--row', '2', 'Rejected', '--cooldown-days', '0', '--json').stdout);
   check(zero.newStatus === 'Rejected' && zero.cooldownRecorded?.reason === 'no-cooldown', '--cooldown-days 0 saves the status and records nothing');
 
@@ -167,6 +200,12 @@ try {
   check(other?.coversThisRole === false, 'precheck notes a window that covers other roles only');
   const expired = await findActiveCooldown({ company: 'Initech', title: 'Software Engineer' }, { profilePath, today: '2027-05-09' });
   check(expired === null, 'precheck is silent once the window ends');
+
+  // Two keys match one company: a PM-only window and a longer company-wide one.
+  writeFileSync(profilePath, 're_apply_windows:\n  Acme:\n    cooldown_from: "2026-11-01"\n    same_role_days: 30\n    applied_to: ["PM"]\n  Acme Inc:\n    cooldown_from: "2026-11-10"\n    same_role_days: 180\n    scope: "company"\n');
+  const pair = await findActiveCooldown({ company: 'Acme Inc', title: 'Software Engineer' }, { profilePath, today: '2026-11-20' });
+  check(pair?.coversThisRole === true && pair.company === 'Acme Inc' && pair.until === '2027-05-09' && pair.scope === 'company',
+    'precheck reports the covering window, with that window\'s own dates', JSON.stringify(pair));
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

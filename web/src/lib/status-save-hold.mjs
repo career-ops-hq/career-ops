@@ -3,8 +3,12 @@
 // and any failure here until that row is mounted again.
 
 /**
- * @typedef {{ phase: "pending", status: string, n: string } | { phase: "failed", error: string, n: string }} HeldStatusSave
- * @typedef {{ type: "start", key: string, status: string, n: string } | { type: "fail", key: string, error: string, n: string } | { type: "clear", key: string }} HeldStatusSaveEvent
+ * A "notice" is a save that landed with something to report, such as a
+ * re-apply cooldown that could not be recorded. It is not a failure: the
+ * status was saved, and nothing waits on it.
+ *
+ * @typedef {{ phase: "pending", status: string, n: string } | { phase: "failed", error: string, n: string } | { phase: "notice", text: string, n: string }} HeldStatusSave
+ * @typedef {{ type: "start", key: string, status: string, n: string } | { type: "fail", key: string, error: string, n: string } | { type: "notice", key: string, text: string, n: string } | { type: "clear", key: string }} HeldStatusSaveEvent
  */
 
 /** @param {ReadonlyMap<string, HeldStatusSave>} holds @param {HeldStatusSaveEvent} event */
@@ -20,6 +24,13 @@ export function reduceHeldSave(holds, event) {
     if (prev?.phase === "pending" && prev.status === event.status && prev.n === event.n) return holds;
     const next = new Map(holds);
     next.set(event.key, { phase: "pending", status: event.status, n: event.n });
+    return next;
+  }
+  if (event.type === "notice") {
+    const prev = holds.get(event.key);
+    if (prev?.phase === "notice" && prev.text === event.text && prev.n === event.n) return holds;
+    const next = new Map(holds);
+    next.set(event.key, { phase: "notice", text: event.text, n: event.n });
     return next;
   }
   if (event.type === "fail") {
@@ -79,4 +90,18 @@ export function offscreenStatusFailures(holds, mountedKeys) {
     }
   }
   return failures;
+}
+
+/** Notices for rows that are not currently mounted. The mounted row shows its own.
+ * @param {ReadonlyMap<string, HeldStatusSave>} holds
+ * @param {Iterable<string>} mountedKeys
+ * @returns {{ key: string, n: string, text: string }[]}
+ */
+export function offscreenStatusNotices(holds, mountedKeys) {
+  const visible = new Set(mountedKeys);
+  const notices = [];
+  for (const [key, hold] of holds) {
+    if (hold.phase === "notice" && !visible.has(key)) notices.push({ key, n: hold.n, text: hold.text });
+  }
+  return notices;
 }

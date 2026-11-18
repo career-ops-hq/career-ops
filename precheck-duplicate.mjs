@@ -246,19 +246,25 @@ export async function findActiveCooldown({ company = '', title = '' }, { profile
   if (!company.trim()) return null;
   const { loadReApplyWindows, buildCooldownFilter, companyMatch } = await import('./scan.mjs');
   const windows = loadReApplyWindows(profilePath);
-  const covers = buildCooldownFilter(windows, today)({ company, title }).skip === true;
+  // Coverage is judged per window, so the verdict and the dates and roles
+  // reported beside it always describe the same window. Two keys can match one
+  // company ("Acme" and "Acme Inc"); a window that covers this title wins over
+  // one that only covers other roles, and among equals the longer one.
+  let best = null;
   for (const [key, win] of Object.entries(windows)) {
     const until = windowUntil(win);
     if (!until || today >= until || !companyMatch(company, key)) continue;
-    return {
+    const found = {
       company: key,
       until,
       scope: win.scope === 'company' ? 'company' : 'role',
       appliedTo: Array.isArray(win.applied_to) ? win.applied_to : [],
-      coversThisRole: covers,
+      coversThisRole: buildCooldownFilter({ [key]: win }, today)({ company, title }).skip === true,
     };
+    if (!best || (found.coversThisRole && !best.coversThisRole)
+      || (found.coversThisRole === best.coversThisRole && found.until > best.until)) best = found;
   }
-  return null;
+  return best;
 }
 
 function formatCooldown(c) {

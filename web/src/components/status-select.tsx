@@ -20,8 +20,10 @@ type StatusSelectProps = {
   // Set when this row unmounted during an earlier save. Pending keeps the
   // chosen status on screen. Failed is the error the unmounted editor could
   // not show.
-  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string };
-  onHeldSave?: (event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "clear" }) => void;
+  // Notice is a save that landed with something to report (a cooldown that
+  // was not recorded) while this row was unmounted.
+  heldSave?: { phase: "pending"; status: string } | { phase: "failed"; error: string } | { phase: "notice"; text: string };
+  onHeldSave?: (event: { type: "start"; status: string } | { type: "fail"; error: string } | { type: "notice"; text: string } | { type: "clear" }) => void;
 };
 
 export function StatusSelect(props: StatusSelectProps) {
@@ -73,6 +75,7 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
 
   const heldPending = heldSave?.phase === "pending" ? heldSave.status : "";
   const heldError = heldSave?.phase === "failed" ? heldSave.error : "";
+  const heldNotice = heldSave?.phase === "notice" ? heldSave.text : "";
   const savingNow = busy || heldPending !== "";
   const errorShown = error || heldError;
 
@@ -111,8 +114,11 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
     // editor still has the chosen status and can show a later failure.
     onHeldSave?.({ type: "start", status: next });
     try {
+      // The cooldown outcome is kept here and reported after the save settles:
+      // the row may have unmounted by then, and the clear below must not wipe it.
+      let cooldownOutcome: ReturnType<typeof cooldownMessage> = null;
       const confirmed = await saveStatus(n, prev, next, fetch, cooldown
-        ? { ...cooldown, onCooldown: (outcome) => { if (mounted.current) setCooldownNote(cooldownMessage(outcome)); } }
+        ? { ...cooldown, onCooldown: (outcome) => { cooldownOutcome = cooldownMessage(outcome); } }
         : null);
       if (!confirmed) {
         onHeldSave?.({ type: "clear" });
@@ -127,7 +133,14 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
       if (onSaved) onSaved(confirmed, restoreFocus);
       else router.refresh();
       onHeldSave?.({ type: "clear" });
-      if (!mounted.current) return;
+      const note = cooldownOutcome as ReturnType<typeof cooldownMessage>;
+      if (!mounted.current) {
+        // A failed cooldown on a row that scrolled away goes to the page,
+        // which shows it above the table until the row is mounted again.
+        if (note && !note.ok) onHeldSave?.({ type: "notice", text: note.text });
+        return;
+      }
+      setCooldownNote(note);
       setStatus(confirmed);
       setEditing(false);
       setSaved(true);
@@ -322,9 +335,9 @@ function StatusEditor({ n, current, inline = false, applicationLabel, onSaved, h
           </button>
         </span>
       )}
-      {cooldownNote && (
-        <span role="status" className={cn("basis-full whitespace-normal text-xs", cooldownNote.ok ? "text-faint" : "text-red-700 dark:text-red-400")}>
-          {cooldownNote.text}
+      {(cooldownNote || heldNotice) && (
+        <span role="status" className={cn("basis-full whitespace-normal text-xs", cooldownNote?.ok ? "text-faint" : "text-red-700 dark:text-red-400")}>
+          {cooldownNote ? cooldownNote.text : heldNotice}
         </span>
       )}
       {!inline && savingNow && <span role="status" className="text-xs text-faint">saving…</span>}

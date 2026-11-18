@@ -98,5 +98,7 @@ the configured Data Root, and proposals for another tracker are rejected.
 
 After a `Rejected` update is accepted, ask whether that company has a re-apply
 cooldown, and with an answer record it on the now-Rejected row:
-`node set-status.mjs --row <#> Rejected --cooldown-days N [--cooldown-scope company] [--on YYYY-MM-DD]`
+`node set-status.mjs --row <#> Rejected --expect-status Rejected --cooldown-days N [--cooldown-scope company] [--on YYYY-MM-DD]`
 (the status is unchanged; only the window in `config/profile.yml` is written).
+`--expect-status Rejected` makes the command refuse a row that moved to another
+status while the question was open, instead of writing Rejected back over it.
