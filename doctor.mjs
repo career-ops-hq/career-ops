@@ -637,7 +637,7 @@ function hasPlaywrightInAntigravity(configs) {
     if (!servers || typeof servers !== 'object') return false;
     return Object.values(servers).some((def) => def
       && def.disabled !== true && def.disabled !== 'true'
-      && isPlaywrightServer(def));
+      && isPlaywrightServer(def, { allowDisabled: true }));
   });
 }
 

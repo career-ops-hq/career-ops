@@ -1273,6 +1273,14 @@ try {
       }
     });
 
+    agy('#50b', { mcpServers: { playwright: { ...pwArgs, enabled: false } } }, (state) => {
+      if (state.playwright_mcp?.antigravity === true && !noticeFor(state)) {
+        pass('antigravity: only its own disabled flag counts, an unrelated enabled:false does not hide a server');
+      } else {
+        fail(`#50b unexpected state: ${JSON.stringify(state)}`);
+      }
+    });
+
     agy('#50', { mcpServers: { playwright: { ...pwArgs, disabled: true } } }, (state) => {
       if (state.playwright_mcp?.antigravity === false && noticeFor(state)) {
         pass('antigravity: a server switched off with disabled:true does not count');
