@@ -140,6 +140,46 @@ function makeRepo(fileCount) {
 }
 
 {
+  // A collision can sit BELOW a clean manifest entry: the target ships
+  // `lib/nested` as a FILE while preserved local content forms a directory
+  // there (lib/nested/local.md). The entry-level check compares shapes at
+  // `lib/` and passes; the write the planner selects would make git delete
+  // the preserved directory. Refuse the entry before any git run (#7250
+  // review), in the same preflight shape as the entry-level collisions.
+  const calls = [];
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched(['lib/'], ['lib/nested/local.md'], ['lib/nested', 'lib/a.mjs'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out lib/'),
+    'a target file below the entry over a preserved local directory is refused', String(threw));
+  check(!calls.some((a) => a.includes('checkout')), 'no checkout run happens for the deep-colliding entry');
+}
+
+{
+  // The inverse below the entry: the target ships files UNDER `lib/blob`
+  // while a preserved local FILE stands at lib/blob. Writing them would make
+  // git replace the preserved file with a directory.
+  const calls = [];
+  let threw = null;
+  try {
+    checkoutSystemPathsBatched(['lib/'], ['lib/blob'], ['lib/blob/x.md', 'lib/a.mjs'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  } catch (err) { threw = err; }
+  check(threw !== null && String(threw.message).includes('Cannot check out lib/'),
+    'target files below the entry over a preserved local file are refused', String(threw));
+  check(!calls.some((a) => a.includes('checkout')), 'no checkout run happens for the inverse deep collision');
+}
+
+{
+  // Ordinary siblings still update: preserved local content shares no prefix
+  // with the shipped files, so nothing is refused and every file is written.
+  const calls = [];
+  checkoutSystemPathsBatched(['lib/'], ['lib/nested/local.md'], ['lib/a.mjs', 'lib/b.mjs'], 'a'.repeat(40), { git: (...a) => { calls.push(a); return ''; } });
+  check(calls.some((a) => a.includes('checkout') && a.includes('lib/a.mjs') && a.includes('lib/b.mjs')),
+    'ordinary siblings update beside preserved local content', JSON.stringify(calls));
+}
+
+{
   // The inverse collision on a real repo: a preserved local FILE stands where
   // the target ships a DIRECTORY. The refusal must come before git - the
   // checkout would replace the file's worktree content without asking.
