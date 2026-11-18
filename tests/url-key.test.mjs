@@ -26,7 +26,7 @@ import { readFileSync } from 'node:fs';
 const inheritedDomainsPath = process.env.CAREER_OPS_AGGREGATOR_DOMAINS;
 process.env.CAREER_OPS_AGGREGATOR_DOMAINS =
   fileURLToPath(new URL('../data-static/aggregator-domains.txt', import.meta.url));
-const { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingLanguageKey, postingUrlRelation } =
+const { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingLanguageKey, postingUrlRelation, canonicalJobKey } =
   await import('../url-key.mjs?shipped-aggregator-list');
 // Put the environment back: the suites after this one share the process.
 if (inheritedDomainsPath === undefined) delete process.env.CAREER_OPS_AGGREGATOR_DOMAINS;
@@ -408,6 +408,14 @@ ok('two Microsoft requisitions stay distinct, and a results page with no pid is 
   assert.notEqual(
     normalizeUrl('https://apply.careers.microsoft.com/careers?start=0&sort_by=timestamp'),
     normalizeUrl('https://apply.careers.microsoft.com/careers?start=10&sort_by=timestamp'));
+});
+ok('a Microsoft posting keeps its pid key when the link also carries a gh_jid', () => {
+  const tagged = 'https://apply.careers.microsoft.com/careers/job/1970000000000001?gh_jid=42';
+  const clean = 'https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com';
+  assert.equal(canonicalJobKey(tagged), canonicalJobKey(clean));
+  assert.notEqual(canonicalJobKey(tagged), 'greenhouse:42');
+  // gh_jid still keys a non-Microsoft employer page.
+  assert.equal(canonicalJobKey('https://careers.example.com/jobs?gh_jid=42'), 'greenhouse:42');
 });
 ok('the Microsoft fold is limited to the Microsoft host', () => {
   assert.notEqual(

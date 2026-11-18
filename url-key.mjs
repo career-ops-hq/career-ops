@@ -729,6 +729,10 @@ export function canonicalJobKey(raw) {
   try { u = new URL(s); } catch { return ''; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
   u.hostname = foldHostname(u.hostname);
+  // A known posting shape is folded first, so its own id wins over a stray
+  // query id (a Microsoft `/careers/job/{pid}?gh_jid=…` link is the pid's
+  // posting, not a Greenhouse one).
+  canonicalizeKnownPostingUrl(u);
 
   const indeed = indeedJobId(u);
   if (indeed) return `indeed.com:${indeed}`;

@@ -213,6 +213,9 @@ try {
   if (normalizeUrlForDedup(dotted) === normalizeUrlForDedup(pid) && seenJobKey(dotted) === seenJobKey(pid)) {
     pass('a trailing-dot Microsoft host gets the same scan dedup key');
   } else fail(`trailing-dot Microsoft host keys differ: ${JSON.stringify({ a: normalizeUrlForDedup(dotted), b: normalizeUrlForDedup(pid) })}`);
+  const tagged = 'https://apply.careers.microsoft.com/careers/job/1970000000000001?gh_jid=42';
+  if (seenJobKey(tagged) === seenJobKey(pid)) pass('a Microsoft link carrying a gh_jid keeps the pid scan key');
+  else fail(`gh_jid Microsoft link keys differ: ${JSON.stringify({ a: seenJobKey(tagged), b: seenJobKey(pid) })}`);
   if (seenJobKey(pid) !== seenJobKey(other) && normalizeUrlForDedup(pid) !== normalizeUrlForDedup(other)) {
     pass('a different Microsoft pid is a different posting');
   } else fail('two Microsoft pids collapsed onto one key');
