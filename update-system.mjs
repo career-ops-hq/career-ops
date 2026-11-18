@@ -841,7 +841,6 @@ export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
   // the raw spelling — tracked/exists/claimsSubtree describe the real tree.
   const foldKey = (path) => manifestPathSegments(path).join('/');
   const declared = userPaths.map(foldKey);
-  const declaredDirs = userPaths.filter((path) => path.endsWith('/')).map(foldKey);
 
   const kept = [];
   const refused = [];
@@ -860,7 +859,27 @@ export function rejectUserLayerPaths(manifestPaths, userPaths, probes = {}) {
       refused.push(path);
       continue;
     }
-    if (declaredDirs.some((dir) => isUnder(key, dir))) {
+    // A child of a declaration, matched against EVERY ancestor declaration,
+    // slashed or not — never just the first match. A fixed user file (.env,
+    // cv.md) has no children — a target spelling one would make git replace
+    // the file with a directory at checkout — so the child is refused
+    // outright. An overlapping subtree claim listed EARLIER (data/ before
+    // data/secrets) must not soften that refusal; only an unbroken chain of
+    // subtree claims adjudicates the child below. The segment boundary in
+    // isUnder() keeps a sibling like .env.example eligible. A declaration
+    // claims a subtree by the trailing-slash spelling, or a directory on disk
+    // or upstream.
+    const ancestors = declared
+      .map((userPath, i) => (isUnder(key, userPath) ? userPaths[i] : null))
+      .filter(Boolean);
+    if (ancestors.length > 0) {
+      const allSubtree = ancestors.every(
+        (declaration) => declaration.endsWith('/') || claimsSubtree(declaration),
+      );
+      if (!allSubtree) {
+        refused.push(path);
+        continue;
+      }
       // A subtree claim inside user territory is open-ended — upstream decides its
       // contents in this release and every later one — so it cannot be adjudicated
       // once and is refused outright.
@@ -3005,6 +3024,35 @@ export function preservedCheckoutCollision(path, preservedPaths, upstreamFiles) 
 }
 
 /**
+ * Whether ONE concrete checkout spec cannot be written safely because the
+ * preserved local layout disagrees about its shape — the entry-level
+ * preservedCheckoutCollision() check applied at the depth the checkout
+ * actually writes. A manifest entry can be clean at the top while a target
+ * file sits where preserved local files form a directory (`lib/nested` shipped
+ * as a file, `lib/nested/local.md` preserved), or a target directory sits on a
+ * preserved local file's place. Git resolves either by deleting the preserved
+ * side, so both planners refuse the entry before any git run. Ordinary
+ * siblings share neither prefix and still update.
+ *
+ * @param {string} spec - Concrete target file the checkout would write.
+ * @param {string[]} preservedPaths - Files the update keeps out of the checkout.
+ * @returns {string | null}
+ */
+export function preservedSpecCollision(spec, preservedPaths) {
+  const file = spec.endsWith('/') ? spec.slice(0, -1) : spec;
+  for (const preserved of preservedPaths) {
+    if (preserved === file) continue;
+    if (preserved.startsWith(`${file}/`)) {
+      return `the target ships ${file} as a file but preserved local files sit under it as a directory`;
+    }
+    if (file.startsWith(`${preserved}/`)) {
+      return `the target ships files under ${preserved} but a preserved local file stands in its place`;
+    }
+  }
+  return null;
+}
+
+/**
  * The pathspecs apply()'s per-path fallback checkout names for one manifest
  * entry, by the same rule checkoutSystemPathsBatched() plans the batched run:
  * a directory entry with preserved files under it, spelled `dir/` or `dir`,
@@ -3110,6 +3158,13 @@ export function checkoutSystemPathsBatched(updatePaths, preservedPaths, upstream
     const dir = path.endsWith('/') ? path : `${path}/`;
     const hasPreserved = preservedPaths.some((file) => file.startsWith(dir));
     const specs = hasPreserved ? upstreamFiles.filter((file) => file.startsWith(dir) && !preservedSet.has(file)) : [path];
+    // The entry-level collision check above looks at the entry itself; a
+    // collision can also sit BELOW it, between a concrete target file and the
+    // preserved local layout. Refuse here too, still before the first write.
+    for (const spec of specs) {
+      const specCollision = preservedSpecCollision(spec, preservedPaths);
+      if (specCollision) throw new Error(`Cannot check out ${path}: ${specCollision}`);
+    }
     for (const spec of specs) entryOf.set(spec, path);
   }
   // Literal: with no `:(exclude)` magic left, a file name from the target tree
@@ -3315,6 +3370,103 @@ export function restoreBootstrapBackups(backups, ctx = {}) {
     }
   }
   return failed;
+}
+
+/**
+ * The pre-update index entry (mode + blob) for every path that was STAGED
+ * before apply() ran, read from the porcelain snapshot already taken at the
+ * start. Unstaged and untracked paths need no record: restoring them means
+ * returning the index to HEAD's entry, which `git reset -q HEAD -- <path>`
+ * does without any saved state.
+ *
+ * @param {{code: string, path: string}[]} statusEntries - parsePorcelainStatus() output.
+ * @param {{gitRaw?: Function, root?: string}} [ctx] - Test seams.
+ * @returns {Map<string, {mode: string, sha: string}>}
+ */
+export function capturePreUpdateIndex(statusEntries, ctx = {}) {
+  const root = ctx.root || ROOT;
+  const runRaw = ctx.gitRaw || ((...args) => gitRawIn(root, ...args));
+  const staged = new Set(
+    statusEntries
+      .filter((entry) => entry.code[0] !== ' ' && entry.code[0] !== '?' && entry.code[0] !== '!')
+      .map((entry) => entry.path),
+  );
+  const state = new Map();
+  if (staged.size === 0) return state;
+  // ls-files -s records mode and blob for every index entry; -z keeps quoting
+  // out of unusual names, the same reason the status parse uses it.
+  for (const record of runRaw('ls-files', '-s', '-z').split('\0')) {
+    if (!record) continue;
+    const tab = record.indexOf('\t');
+    const [mode, sha] = record.slice(0, tab).split(' ');
+    const path = record.slice(tab + 1);
+    if (staged.has(path)) state.set(path, { mode, sha });
+  }
+  return state;
+}
+
+/**
+ * Return every pre-update-dirty path a failed update's checkouts wrote to its
+ * exact pre-update state, where revertPaths() deliberately leaves them alone
+ * (resetting them to HEAD would destroy an edit the checkout left
+ * byte-identical, and a preserved file was never written at all). For each
+ * written dirty file:
+ * - the worktree gets the local edit back from its .bak when the checkout
+ *   overwrote different bytes (the --force shape backupSystemFiles() covers);
+ *   an equal-content edit needs no copy, since the checkout wrote the same
+ *   bytes it found;
+ * - the index gets its pre-update entry back: the recorded mode+blob for an
+ *   edit staged before apply, HEAD's entry for an unstaged one (or no entry,
+ *   when HEAD does not track the path), so `git status` after the restore
+ *   shows exactly what the user had rather than the blob the checkout staged.
+ * Failures are reported, not thrown: every other path still gets its restore,
+ * matching revertPaths()'s record-and-continue contract.
+ *
+ * @param {string[]} entries - Manifest entries the update's checkouts wrote.
+ * @param {{initialStatusPaths: Set<string>, initialIndexState: Map<string, {mode: string, sha: string}>, backupByFile?: Map<string, string>, preservedSet?: Set<string>}} state
+ * @param {{git?: Function, root?: string, copyFile?: Function}} [ctx] - Test seams.
+ * @returns {string[]} Files whose pre-update state could not be fully restored.
+ */
+export function restoreWrittenDirtyState(entries, state, ctx = {}) {
+  const root = ctx.root || ROOT;
+  const copyFile = ctx.copyFile || copyFileSync;
+  const runGit = ctx.git || gitQuiet;
+  const backupByFile = state.backupByFile || new Map();
+  const preservedSet = state.preservedSet || new Set();
+  // A forced-overwritten IGNORED file is at-risk and backed up like any
+  // untracked one (#5088), but `git status --untracked-files=all` does not
+  // report ignored paths, so initialStatusPaths never names it: only its .bak
+  // records that the update wrote over pre-update local content. Include the
+  // backed-up files, or the restore drops the staged blob the checkout wrote
+  // without putting the user's bytes back.
+  const dirtyCandidates = new Set([...state.initialStatusPaths, ...backupByFile.keys()]);
+  const writtenDirty = [...dirtyCandidates].filter((file) =>
+    !preservedSet.has(file) && entries.some((entry) => pathMatchesManifest(file, entry)));
+  const unrestored = [];
+  for (const file of writtenDirty) {
+    const backup = backupByFile.get(file);
+    if (!backup) continue;
+    try {
+      copyFile(join(root, ...backup.split('/')), join(root, ...file.split('/')));
+      console.error(`Put back your local version of ${file} (the copy in ${backup} stays).`);
+    } catch (err) {
+      unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
+    }
+  }
+  for (const file of writtenDirty) {
+    const staged = state.initialIndexState.get(file);
+    try {
+      if (staged) runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
+      else runGit('reset', '-q', 'HEAD', '--', file);
+    } catch (err) {
+      unrestored.push(`${file} (${String(err.message).split('\n')[0]})`);
+    }
+  }
+  if (unrestored.length > 0) {
+    console.error(`Could not fully restore the pre-update state of: ${unrestored.join(', ')}`);
+    console.error('Run `node update-system.mjs rollback` to return to the version before this update.');
+  }
+  return unrestored;
 }
 
 /**
@@ -4846,6 +4998,11 @@ export function shellQuoteArg(value) {
 export function updateCommitCommand(version, usedIndexCommit, expandedPathsToStage, ctx = {}) {
   const message = `chore: auto-update system files to v${version}`;
   if (usedIndexCommit) return `git commit -m "${message}"`;
+  // --literal-pathspecs is a GLOBAL git option (commitPathspecs passes it the
+  // same way): ahead of the subcommand, so an expanded filename holding
+  // brackets can never glob-match a different tracked file. Behind `commit`
+  // the flag does not exist and the command fails outright.
+  const literal = 'git --literal-pathspecs commit';
   // Reuse the scoped commit's file on failure. Withheld commits need their own
   // file, written by the same helper: large updates exceed Windows argv limits.
   let pathspecArgs;
@@ -4856,7 +5013,7 @@ export function updateCommitCommand(version, usedIndexCommit, expandedPathsToSta
     // Match main's recovery fallback if the git directory is not writable.
     pathspecArgs = `-- ${expandedPathsToStage.map(p => `'${p.replace(/'/g, "'\\''")}'`).join(' ')}`;
   }
-  return `git commit -m "${message}" ${pathspecArgs}`;
+  return `${literal} -m "${message}" ${pathspecArgs}`;
 }
 
 /**
@@ -5005,7 +5162,13 @@ async function apply() {
   const commitOnBranch = commitOnBranchOptIn();
   const updateConfirmed = process.argv.includes('--confirm') ||
     (isReexec && (process.env.CAREER_OPS_UPDATE_CONFIRM === '1' || legacyReexec));
-  const initialStatusPaths = new Set(gitStatusEntries().map(entry => entry.path));
+  const initialStatusEntries = gitStatusEntries();
+  const initialStatusPaths = new Set(initialStatusEntries.map(entry => entry.path));
+  // The pre-update index entry for every staged path, so a failed update can
+  // put the index back exactly: a staged edit stays staged, an unstaged one
+  // returns to HEAD's entry, and neither inherits the blob a checkout staged
+  // over it.
+  const initialIndexState = capturePreUpdateIndex(initialStatusEntries);
   // Backups created by this apply run are expected updater output, not user
   // files the checkout modified. Record only successful copies so an unrelated
   // pre-existing .bak can never receive this exemption.
@@ -5175,9 +5338,12 @@ async function apply() {
     // git. Validate their canonical form before even the self-bootstrap
     // checkout, and fail closed when the target updater or its manifest is
     // missing/corrupt. Once effectiveUserPaths() is available below, the same
-    // lists are validated against it too: an entry that names the user layer
-    // aborts the whole update before anything is checked out (#3825), rather
-    // than being refused entry by entry at 3a after the self-bootstrap.
+    // lists are validated against it too, and the outcomes differ by kind:
+    // a malformed (non-canonical) entry aborts before the self-bootstrap, a
+    // user-layer entry in the target updater's re-exec import closure is fatal
+    // because a refused import cannot be skipped, and an ordinary user-layer
+    // manifest entry is refused per entry, out loud, before any system
+    // checkout, with the rest of the update completing (#3782).
     try {
       git('show', `${targetCommit}:update-system.mjs`);
     } catch (err) {
@@ -5325,6 +5491,10 @@ async function apply() {
         // edit the checkout changed — resetting it to HEAD would lose it.
         restoreAfterFailedUpdate(checkedOutForReexec, initialStatusPaths, { what: 'updater file(s) loaded to run the new version', exclude: [...initialStatusPaths] });
         restoreBootstrapBackups(bootstrapBackups);
+        // restoreBootstrapBackups() returns the worktree bytes; the index can
+        // still hold the blob the bootstrap checkout staged over a pre-update
+        // edit. Put the pre-update index entries back too.
+        restoreWrittenDirtyState(checkedOutForReexec, { initialStatusPaths, initialIndexState });
         if (timedOut) {
           // A killed child may have stopped between two checkouts without
           // restoring anything of its own.
@@ -5379,6 +5549,9 @@ async function apply() {
     // so; `--force` overwrites. Either way a .bak of the local content is
     // written first, so the fix is recoverable even from the forced path.
     const preservedPaths = [];
+    // file -> .bak for every successful backup, so a failed update can put a
+    // FORCEd-overwritten local edit back (restoreWrittenDirtyState).
+    const backupByFile = new Map();
     const atRisk = locallyModifiedSystemFiles(updatePaths, targetCommit);
     if (atRisk.length > 0) {
       console.log('');
@@ -5390,6 +5563,7 @@ async function apply() {
           console.log(`  ${result.file}  (could not write ${result.backup}: ${result.error})`);
         } else {
           generatedBackupPaths.add(result.backup);
+          backupByFile.set(result.file, result.backup);
           console.log(`  ${result.file}  (local copy saved: ${result.backup})`);
         }
       }
@@ -5517,6 +5691,13 @@ async function apply() {
         // checkout, and abort the update (#3825).
         const fallbackSpecs = fallbackCheckoutSpecs(path, preservedPaths, upstreamFiles);
         if (fallbackSpecs.length === 0) continue;
+        // The entry-level check above looks at the entry itself; refuse a
+        // collision sitting below it before any git run here too, matching
+        // checkoutSystemPathsBatched().
+        for (const spec of fallbackSpecs) {
+          const specCollision = preservedSpecCollision(spec, preservedPaths);
+          if (specCollision) throw new Error(`Cannot check out ${path}: ${specCollision}`);
+        }
         // stderr is piped rather than inherited here. A path absent upstream is
         // an EXPECTED skip (a stale manifest entry such as `.gemini/commands/`),
         // but execFileSync inherits stderr by default, so git printed
@@ -5556,6 +5737,10 @@ async function apply() {
           // not differ from upstream), yet resetting it to HEAD would destroy
           restoreAfterFailedUpdate(written, initialStatusPaths, { what: 'system path(s) it had already updated', exclude: restoreExclusions });
           restoreAfterFailedUpdate([path], initialStatusPaths, { what: `path it stopped on (${path})`, exclude: restoreExclusions });
+          // The exclusion above spares pre-update-dirty paths from the HEAD
+          // reset; their exact pre-update state (worktree bytes and index
+          // entry) is restored separately here.
+          restoreWrittenDirtyState(mergePathLists(written, [path]), { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
           throw err;
         }
         skippedPaths.push(path);
@@ -5709,6 +5894,7 @@ async function apply() {
       console.error(`Aborting: could not validate user-layer safety (${err.message}).`);
       try {
         revertPaths(updated, initialStatusPaths, { exclude: restoreExclusions });
+        restoreWrittenDirtyState(updated, { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
       } catch (revertErr) {
         // If the revert itself fails (likely whatever broke `git
         // status` also broke `git checkout --`), don't lose the
@@ -5733,6 +5919,7 @@ async function apply() {
       const violation = new Error('Update aborted: user files were touched.');
       try {
         revertPaths([...updated], initialStatusPaths, { exclude: restoreExclusions });
+        restoreWrittenDirtyState([...updated], { initialStatusPaths, initialIndexState, backupByFile, preservedSet });
       } catch (revertErr) {
         // If the revert itself fails, don't lose the safety-violation
         // diagnostic — chain it via `cause` so the user sees both.
@@ -5834,15 +6021,16 @@ async function apply() {
       // staged. Content is committed identically either way; only the mode bits
       // ride on the index-based path.
       //
-      // `pathsToStage` is a git PATHSPEC list, not a path list: the preserved
-      // entries in it are `:(exclude)<path>`, which match no staged path at all.
-      // Handing them to the guard as owned paths would leave a preserved file
-      // claimed by its enclosing owned directory (`providers/` covering
-      // `providers/acme.mjs`) — so strip the exclusions out and pass the
-      // preserved list separately, where preservation outranks ownership.
-      const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      // Ownership is judged on the EXPANDED list, not the manifest spelling:
+      // staging expands a slashless directory entry to its concrete shipped
+      // files, and git's name-only output reports those files — the original
+      // spelling (`lib`) would match none of them, marking the update's own
+      // staged files as unrelated work in the notice below and needlessly
+      // blocking the index commit. The expanded list never carries a preserved
+      // file (expansion excludes them), and the preserved argument still wins
+      // for anything preserved that did get staged.
       const unrelated = stagedPathsOutside(
-        [...ownedPaths, ...materializedSkillEntrypoints],
+        [...expandedPathsToStage, ...materializedSkillEntrypoints],
         preservedPaths,
       );
       usedIndexCommit = unrelated.length === 0;
@@ -5862,7 +6050,7 @@ async function apply() {
           commitCommand: updateCommitCommand(remote, usedIndexCommit, expandedPathsToStage),
           unrelatedStaged: unrelated,
           unrelatedUnstaged: unstagedPathsOutside(
-            [...ownedPaths, ...materializedSkillEntrypoints], preservedPaths,
+            [...expandedPathsToStage, ...materializedSkillEntrypoints], preservedPaths,
           ),
         }));
       } else if (branchDecision.commit && usedIndexCommit) {
