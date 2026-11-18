@@ -46,7 +46,7 @@
  */
 
 import { execFile, execFileSync, execSync, spawnSync } from 'child_process';
-import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync, writeSync } from 'fs';
+import { copyFileSync, readFileSync, writeFileSync, existsSync, unlinkSync, rmSync, lstatSync, statSync, mkdtempSync, realpathSync, writeSync, readlinkSync, symlinkSync, chmodSync, renameSync } from 'fs';
 import { join, dirname, basename, resolve, posix as pathPosix } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes, timingSafeEqual } from 'crypto';
@@ -3479,7 +3479,44 @@ export function capturePreUpdateIndex(statusEntries, ctx = {}) {
     const tab = record.indexOf('\t');
     const [mode, sha] = record.slice(0, tab).split(' ');
     const path = record.slice(tab + 1);
-    if (staged.has(path)) state.set(path, { ...state.get(path), mode, sha });
+    if (!staged.has(path)) continue;
+    const entry = { ...state.get(path), mode, sha };
+    // The worktree state is a third fact, independent of HEAD and the staged
+    // blob: one edit can be staged while the disk holds other content — bytes
+    // the local-edit detector credits to upstream (taken ahead of a release,
+    // or a reverted edit), so no .bak protects them. Record what the disk
+    // held so a failed update restores exactly that state:
+    // - a symlink is recorded by its TARGET and recreated, never followed:
+    //   hashing it would read the referent, and writing the staged blob would
+    //   materialize a regular file over the link;
+    // - a regular file's RAW bytes and exec bit, read straight from disk: a
+    //   git blob round trip would run the clean and smudge filters
+    //   (autocrlf, eol attributes, custom filters), which are not byte-exact;
+    //   the path instead of guessing the disk held the staged blob.
+    const diskPath = join(root, ...path.split('/'));
+    let stat = null;
+    try {
+      stat = lstatSync(diskPath);
+    } catch (err) {
+      // ENOENT is the staged-then-deleted shape: nothing on disk to record,
+      // and the restore removes what the checkout recreated.
+      if (err?.code !== 'ENOENT') entry.worktreeCaptureFailed = true;
+    }
+    if (stat?.isSymbolicLink()) {
+      try {
+        entry.worktreeSymlink = readlinkSync(diskPath);
+      } catch {
+        entry.worktreeCaptureFailed = true;
+      }
+    } else if (stat) {
+      entry.worktreePerms = stat.mode & 0o7777;
+      try {
+        entry.worktreeBytes = readFileSync(diskPath);
+      } catch {
+        entry.worktreeCaptureFailed = true;
+      }
+    }
+    state.set(path, entry);
   }
   return state;
 }
@@ -3578,18 +3615,65 @@ export function restoreWrittenDirtyState(entries, state, ctx = {}) {
       if (staged?.stagedDeletion) runGit('update-index', '--force-remove', '--', file);
       else if (staged?.sha) {
         runGit('update-index', '--cacheinfo', `${staged.mode},${staged.sha},${file}`);
-        // The worktree can still hold the checkout's bytes: the .bak put back
-        // above covers an at-risk edit, but an edit attributed to a previous
-        // update gets no backup (locallyModifiedSystemFiles credits the
-        // update, not the install), so nothing else returns its bytes. The
-        // staged blob is in the object store; restore --worktree writes the
-        // index entry back over the checkout's. Skipped when the bytes
-        // already match (an equal-content edit), and refused through a
-        // symlinked parent for restoreBytesWithoutFollowingLinks()'s reason.
-        if (!backup && runGit('hash-object', '--', file) !== staged.sha) {
+        // The worktree goes back to its own recorded pre-update bytes, not
+        // assumed to be the staged blob: the .bak put back above covers an
+        // at-risk edit, but an edit the local-edit detector credits to a
+        // previous update gets no backup, and its on-disk bytes can be the
+        // staged edit, the update's own content taken ahead of a release, or
+        // a reverted edit. The recorded raw bytes (or symlink target) are
+        // written back directly, never through git's clean and smudge
+        // filters, which are not byte-exact. Skipped when the disk already
+        // matches, and refused through a symlinked parent for
+        // restoreBytesWithoutFollowingLinks()'s reason.
+        if (!backup) {
           const linkedParent = symlinkedAncestor(file, root);
-          if (linkedParent) throw new Error(`${linkedParent} is a symlink; the staged blob was not put back`);
-          runGit('--literal-pathspecs', 'restore', '--worktree', '--', file);
+          if (linkedParent) throw new Error(`${linkedParent} is a symlink; the pre-update worktree state was not put back`);
+          if (staged.worktreeCaptureFailed) throw new Error('the pre-update worktree state could not be recorded, so the checkout\'s bytes were left as they are');
+          const diskPath = join(root, ...file.split('/'));
+          if (staged.worktreeSymlink !== undefined) {
+            // The path was itself a symlink: put the link back, never its referent's bytes.
+            let current = null;
+            try {
+              current = lstatSync(diskPath).isSymbolicLink() ? readlinkSync(diskPath) : null;
+            } catch { /* absent: recreate below */ }
+            if (current !== staged.worktreeSymlink) {
+              rmSync(diskPath, { force: true });
+              symlinkSync(staged.worktreeSymlink, diskPath);
+            }
+          } else if (staged.worktreeBytes) {
+            // Raw bytes back, written directly: `git restore` would pass them
+            // through the smudge filter. A symlink the checkout left at the
+            // path is unlinked first so the write cannot follow it.
+            let current = null;
+            let currentPerms = null;
+            let isLink = false;
+            try {
+              const st = lstatSync(diskPath);
+              isLink = st.isSymbolicLink();
+              currentPerms = st.mode & 0o7777;
+              if (!isLink) current = readFileSync(diskPath);
+            } catch { /* absent: written below */ }
+            const wantedPerms = staged.worktreePerms ?? 0o644;
+            if (!(current && current.equals(staged.worktreeBytes) && currentPerms === wantedPerms)) {
+              // Replace rather than overwrite, and only after a complete write:
+              // the checkout's file may be more readable than the user's was,
+              // so the bytes go into a new sibling created with the recorded
+              // permissions, then renamed over the path. A failed write leaves
+              // the existing file in place (rename also replaces a symlink
+              // itself without following it).
+              const tmpPath = `${diskPath}.restore-${randomBytes(6).toString('hex')}`;
+              try {
+                (ctx.writeFile || writeFileSync)(tmpPath, staged.worktreeBytes, { mode: wantedPerms, flag: 'wx' });
+                chmodSync(tmpPath, wantedPerms);
+                (ctx.rename || renameSync)(tmpPath, diskPath);
+              } catch (err) {
+                rmSync(tmpPath, { force: true });
+                throw err;
+              }
+            }
+          }
+          // No record and no capture failure: the path was absent before the
+          // update (a staged edit then deleted); it is removed again below.
         }
       } else runGit('--literal-pathspecs', 'reset', '-q', 'HEAD', '--', file);
       // Then the worktree: a file absent before the update is removed again.
