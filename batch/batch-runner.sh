@@ -1371,6 +1371,13 @@ process_offer() {
       # miscompare. Strip everything that is not a digit and default to 0.
       jd_prefetch_words="${jd_prefetch_words//[^0-9]/}"
       jd_prefetch_words="${jd_prefetch_words:-0}"
+      # The pre-filter must see the visible page text curl returned. jd-rescue
+      # can replace $jd_file with a structured JD from stale embedded data,
+      # which must not hide an explicit "posting closed" notice on the page.
+      if [[ "${PREFILTER:-true}" == "true" && -f "${BATCH_DIR:-}/prefilter-url.mjs" ]]; then
+        jd_prefilter_visible_file="${jd_file}.visible"
+        cp "$jd_file" "$jd_prefilter_visible_file" 2>/dev/null || true
+      fi
       # Zero-token JD rescue: read the JD out of the structured data the board
       # already shipped in the bytes above. It only replaces the text when the page
       # is thin or the rescued JD is longer, and it fails open (any failure leaves
@@ -1405,9 +1412,10 @@ process_offer() {
       # after this block (tests/batch-runner-jd-prefetch.test.mjs runs the block
       # standalone, where `return` is illegal). Any failure to classify proceeds.
       if [[ "${PREFILTER:-true}" == "true" && -f "${BATCH_DIR:-}/prefilter-url.mjs" ]]; then
-        _pf_line=$(node "$BATCH_DIR/prefilter-url.mjs" "$jd_http_code" "$url" "$jd_final_url" "$jd_file" 2>/dev/null) || _pf_line=""
+        _pf_line=$(node "$BATCH_DIR/prefilter-url.mjs" "$jd_http_code" "$url" "$jd_final_url" "$jd_prefilter_visible_file" 2>/dev/null) || _pf_line=""
         IFS=$'\t' read -r jd_prefilter_decision jd_prefilter_code jd_prefilter_reason <<< "$_pf_line"
         jd_prefilter_decision="${jd_prefilter_decision:-proceed}"
+        rm -f "$jd_prefilter_visible_file"
       fi
       if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
         : > "$jd_file"

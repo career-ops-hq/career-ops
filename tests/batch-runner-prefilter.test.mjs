@@ -14,7 +14,9 @@ const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/
 
 console.log('\nbatch-runner.sh — zero-token dead-URL pre-filter');
 
-const detect = SRC.match(/      if \[\[ "\$\{PREFILTER:-true\}" == "true" && -f[\s\S]*?\n      fi\n/)?.[0] ?? null;
+const prefilterBlocks = [...SRC.matchAll(/      if \[\[ "\$\{PREFILTER:-true\}" == "true" && -f[\s\S]*?\n      fi\n/g)]
+  .map((match) => match[0]);
+const detect = prefilterBlocks.find((block) => block.includes('_pf_line=')) ?? null;
 const act = SRC.match(/  if \[\[ "\$jd_prefilter_decision" != "proceed" \]\]; then[\s\S]*?\n  fi\n(?=\n  # ATS API fallback)/)?.[0] ?? null;
 if (detect && act) pass('batch-runner.sh has the pre-filter detection and action blocks');
 else fail('the pre-filter blocks are missing from batch-runner.sh');
@@ -31,6 +33,8 @@ if (rescueBlock.includes('fetch-jd.mjs') && rescueBlock.includes('prefetch_min_w
 // ── contract ───────────────────────────────────────────────────────────────
 const writeOutAt = SRC.indexOf("--write-out '%{http_code}\\t%{url_effective}'");
 const stripAt = SRC.indexOf('jd_prefetch_words=$(node -e');
+const visibleSnapshotAt = SRC.indexOf('jd_prefilter_visible_file=');
+const jdRescueAt = SRC.indexOf('if [[ -f "$BATCH_DIR/jd-rescue.mjs"');
 const detectAt = SRC.indexOf('prefilter-url.mjs" "$jd_http_code"');
 const thinAt = SRC.indexOf('thin content (${jd_prefetch_words} words) — worker will WebFetch');
 const actAt = SRC.indexOf('if [[ "$jd_prefilter_decision" != "proceed" ]]');
@@ -40,8 +44,17 @@ if (writeOutAt !== -1 && writeOutAt < stripAt && stripAt < detectAt && detectAt 
 } else {
   fail('pre-filter ordering is wrong: the verdict must be taken before the thin-content truncation and the skip before any further fetch');
 }
-if (/prefilter-url\.mjs" "\$jd_http_code" "\$url" "\$jd_final_url" "\$jd_file"/.test(SRC)) pass('the URL reaches prefilter-url.mjs as a quoted argument');
-else fail('prefilter-url.mjs must be called with quoted arguments');
+if (
+  stripAt < visibleSnapshotAt
+  && visibleSnapshotAt < jdRescueAt
+  && jdRescueAt < detectAt
+  && SRC.includes('cp "$jd_file" "$jd_prefilter_visible_file"')
+  && /prefilter-url\.mjs" "\$jd_http_code" "\$url" "\$jd_final_url" "\$jd_prefilter_visible_file"/.test(SRC)
+) {
+  pass('prefilter reads the stripped visible-page snapshot, not a JD-rescue replacement');
+} else {
+  fail('prefilter must snapshot stripped visible page text before jd-rescue and pass that snapshot to prefilter-url.mjs');
+}
 if (/--no-prefilter\) PREFILTER=false/.test(SRC) && /--no-prefilter\s+Disable/.test(SRC)) pass('--no-prefilter opts out and is documented in usage');
 else fail('--no-prefilter is missing from the parser or the usage text');
 
@@ -73,6 +86,7 @@ if (!bash || !detect || !act) {
         '#!/usr/bin/env bash',
         'set -euo pipefail',
         `jd_file=${JSON.stringify(jd)}`,
+        'jd_prefilter_visible_file="${jd_file}.visible"; cp "$jd_file" "$jd_prefilter_visible_file"',
         `BATCH_DIR=${JSON.stringify(withStub ? batchDir : join(work, 'none'))}`,
         `PREFILTER=${prefilter}`,
         'url="https://jobs.example.com/acme/1"; id=7; started_at=T0; retries=0; report_num=042; MAX_RETRIES=3',
