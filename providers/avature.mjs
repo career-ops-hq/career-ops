@@ -11,6 +11,10 @@ import { sleep } from './_http.mjs';
 //   GET {origin}/careers/SearchJobs?jobOffset=N
 //
 // returns a server-rendered page of <article class="article--result"> blocks.
+// Some tenants have no SearchJobs at all and list postings on per-country pages
+// (e.g. /en_US/careers/JobOpeningsSpain, rows are <div class="article
+// article--result">): such a URL is honoured as the list path, the same way a
+// facet-filtered SearchJobs URL is (the user's choice of view).
 // Avature hard-caps the page at 6 results (a jobRecordsPerPage override is
 // ignored), and paginates via jobOffset in steps of 6 — so this is request-
 // heavy for large boards; max_pages (default 50 → ~300 postings) bounds it and
@@ -66,9 +70,13 @@ function resolveConfig(entry) {
     return null;
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-  // Honour an explicit SearchJobs path (branded tenants may prefix a locale,
-  // e.g. /en_US/searchjobs/SearchJobs); otherwise default to the classic path.
-  const searchPath = /\/SearchJobs\b/i.test(u.pathname) ? u.pathname.replace(/\/+$/, '') : '/careers/SearchJobs';
+  // Honour an explicit list path: a SearchJobs path (branded tenants may prefix
+  // a locale, e.g. /en_US/searchjobs/SearchJobs) or a per-country opening page
+  // (/careers/JobOpeningsSpain, the only listing some tenants have). Anything
+  // else defaults to the classic path.
+  const searchPath = /\/(?:SearchJobs\b|JobOpenings[^/]*\/?$)/i.test(u.pathname)
+    ? u.pathname.replace(/\/+$/, '')
+    : '/careers/SearchJobs';
   // Carry over any facet/filter query params the entry pinned (e.g. Avature's
   // wizard-generated field-value facets, ?42386=[812132]&... for a country
   // filter) so a pre-narrowed board (fewer pages to walk) stays narrowed on
@@ -102,7 +110,7 @@ function parsePosted(block) {
 /** @param {string} block */
 function parseLocation(block) {
   const m =
-    block.match(/list-item-location[^>]*>([\s\S]*?)<\/span>/i) ||
+    block.match(/(?:list-item-location|subtitle--location)[^>]*>([\s\S]*?)<\/span>/i) ||
     block.match(/class="[^"]*\blocation\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div|li)>/i) ||
     block.match(/glyphicon-map-marker[\s\S]{0,80}?>([^<]{2,60})</i) ||
     block.match(/icon-address[^>]*><\/span>([^<]{2,80})</i);
@@ -134,7 +142,22 @@ export function assertParsedSomething(html, url) {
 // appends a position index (`article--result 1`). Accept any suffix.
 // careers.avature.net renders `article--jobs` cards instead (seen 2026-09-28).
 // Deloitte USI drops the leading `article` class: `<article class="article--result ">`.
-const ARTICLE_PATTERN = /<article class="(?:article )?article--(?:result|jobs)\b[^"]*"[\s\S]*?<\/article>/;
+// Enel's opening pages use `<div class="article article--result">` rows with no
+// closing `</article>`, so a div row runs to the next row (or the end of the page).
+const CARD_START = /<(article|div) class="(?:article )?article--(?:result|jobs)\b[^"]*"/g;
+
+/** @param {string} htmlText @returns {string[]} */
+function splitCards(htmlText) {
+  const text = String(htmlText ?? '');
+  const starts = [...text.matchAll(CARD_START)];
+  return starts.map((m, i) => {
+    const end = i + 1 < starts.length ? starts[i + 1].index : text.length;
+    const block = text.slice(m.index, end);
+    if (m[1] !== 'article') return block;
+    const close = block.indexOf('</article>');
+    return close === -1 ? block : block.slice(0, close + '</article>'.length);
+  });
+}
 
 /**
  * Number of result cards on a page, before `parseArticles` drops any (no
@@ -143,16 +166,13 @@ const ARTICLE_PATTERN = /<article class="(?:article )?article--(?:result|jobs)\b
  * @param {string} htmlText
  */
 export function countArticles(htmlText) {
-  return (String(htmlText ?? '').match(new RegExp(ARTICLE_PATTERN, 'g')) || []).length;
+  return splitCards(htmlText).length;
 }
 
 /** @param {string} htmlText @param {string} origin */
 export function parseArticles(htmlText, origin) {
   const out = [];
-  const re = new RegExp(ARTICLE_PATTERN, 'g');
-  let a;
-  while ((a = re.exec(htmlText)) !== null) {
-    const block = a[0];
+  for (const block of splitCards(htmlText)) {
     // JobDetail path may or may not sit under /careers/ (branded tenants vary),
     // so anchor on JobDetail itself rather than a fixed prefix. Prefer the
     // `class="link"` title anchor (most tenants); fall back to any JobDetail
@@ -184,7 +204,7 @@ export function parseArticles(htmlText, origin) {
       // so new URL keeps it as it is: only http(s) is a job link.
       if (!/^https?:\/\//i.test(url)) continue;
     }
-    const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
+    const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\/(\d+)(?:[/?#]|$)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
     out.push({
       id: idM ? idM[1] : url,
       title,

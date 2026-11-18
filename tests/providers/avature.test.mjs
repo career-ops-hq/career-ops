@@ -437,6 +437,42 @@ try {
     else if (badArts.length === 1 && badArts[0].title === 'Overflow &#99999999; & Hex &#xFFFFFFFF; Surrogate &#xD800;') pass('avature.parseArticles() tolerates out-of-range / surrogate entities, degrading them to literal text while still decoding &amp; (no RangeError crash)');
     else fail(`avature.parseArticles() out-of-range entity wrong: ${JSON.stringify(badArts)}`);
   }
+
+  // A per-country opening page (the only listing some branded tenants have,
+  // modelled on a real board whose /careers/SearchJobs is a 404): the user's
+  // list path is honoured on every request, rows are <div class="article
+  // article--result"> with no closing </article>, and the location comes from
+  // the row's own subtitle (no per-posting detail fetch).
+  const mkDivRow = (id, title) => `
+    <div class="article article--result">
+      <div class="article__header"><div class="article__header__text">
+        <div class="article__header__text__ref">Job ID ${id}</div>
+        <h3 class="article__header__text__title"><a href="https://jobs.acme.example.com/en_US/careers/JobDetail/${id}?team=Ops">${title}</a></h3>
+        <div class="article__header__text__subtitle"><span class="article__header__text__subtitle--location">Spain</span>
+          <span class="article__header__text__subtitle--separator">|</span>
+          <span class="article__header__text__subtitle--team">Ops</span></div>
+      </div></div>
+      <a href="https://jobs.acme.example.com/en_US/careers/JobDetail/${id}?team=Ops">View more</a>
+    </div>`;
+  const divPage = (ids) => ids.map((i) => mkDivRow(i, `Role ${i}`)).join('') + '<div class="footer"><a href="https://jobs.acme.example.com/en_US/careers/JobDetail/999">Footer</a></div>';
+  const divArts = parseArticles(divPage([11, 12]), 'https://jobs.acme.example.com');
+  if (divArts.length === 2 && divArts[0].id === '11' && divArts[0].location === 'Spain' && divArts[1].title === 'Role 12') pass('avature.parseArticles() reads <div class="article article--result"> rows and their subtitle location');
+  else fail(`avature.parseArticles() div rows wrong: ${JSON.stringify(divArts)}`);
+  const countryUrl = 'https://jobs.acme.example.com/en_US/careers/JobOpeningsSpain';
+  const countryCtx = {
+    calls: [],
+    sleep: async () => {},
+    fetchText: async function (url, opts) {
+      this.calls.push({ url, redirect: opts && opts.redirect });
+      const n = Number(new URL(url).searchParams.get('jobOffset')) / 6;
+      return n === 0 ? divPage([1, 2, 3, 4, 5, 6]) : divPage([7, 8]);
+    },
+  };
+  const countryJobs = await avature.fetch({ name: 'X', careers_url: countryUrl, provider: 'avature' }, countryCtx);
+  if (countryJobs.length === 8 && countryJobs.every((j) => j.location === 'Spain')) pass('avature.fetch() walks a JobOpenings<Country> list page (8 jobs, row location kept)');
+  else fail(`avature.fetch() JobOpenings page wrong: ${JSON.stringify(countryJobs.map((j) => j.title))}`);
+  if (countryCtx.calls.every((c) => c.url.startsWith(countryUrl + '?jobOffset=') && c.redirect === 'error')) pass('avature.fetch() requests the given JobOpenings path with redirect:error (no rewrite to /careers/SearchJobs)');
+  else fail(`avature.fetch() JobOpenings requests wrong: ${JSON.stringify(countryCtx.calls)}`);
 } catch (e) {
   fail(`avature provider tests crashed: ${e.message}`);
 }
