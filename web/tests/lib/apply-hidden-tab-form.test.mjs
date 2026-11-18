@@ -7,12 +7,13 @@
 // must not leave for the "Powered by Recruitee" logo link (a vendor homepage).
 //
 // Uses real headless Google Chrome with every network request aborted; skips
-// where Chrome cannot start, except on CI.
+// where Chrome cannot start, unless the run requires a browser.
 // Run (from web/): node --experimental-strip-types --test tests/lib/apply-hidden-tab-form.test.mjs
 
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { chromium } from "playwright-core";
+import { toolRequired } from "../../../tests/required-tools.mjs";
 import "../helpers/web-ts-alias-loader.mjs";
 
 const { extractForm } = await import("../../src/lib/apply/extract.ts");
@@ -47,8 +48,8 @@ const RECRUITEE_LIKE = `<!doctype html><html><head><title>Acme - Android Develop
   </script>
 </body></html>`;
 
-// Web CI (ubuntu-latest) ships Google Chrome, so a launch failure there is a
-// real failure. Elsewhere a machine without Chrome skips these tests.
+// A launch failure skips these tests, except in a run that requires the
+// browser (tests/required-tools.mjs), where it fails.
 let browser;
 let launchError;
 before(async () => {
@@ -64,8 +65,8 @@ after(async () => {
 
 async function fixturePage(t, html) {
   if (!browser) {
-    if (process.env.CI) throw launchError;
-    t.skip("Google Chrome is not available");
+    if (toolRequired("browser")) throw launchError;
+    t.skip(`system Chrome did not launch (${launchError instanceof Error ? launchError.message : String(launchError)})`);
     return null;
   }
   const context = await browser.newContext();
@@ -112,9 +113,16 @@ test("tryApplyTrigger clicks Apply instead of following a vendor homepage link",
   if (!fx) return;
   const { page, requested, close } = fx;
   try {
+    // The page must be painted before the trigger runs: its click gives up
+    // after 3 s, which a cold browser on a slow runner can use up.
+    await page.locator("#cta").waitFor({ state: "visible" });
     const acted = await tryApplyTrigger(page);
     assert.ok(acted && typeof acted === "object" && "followed" in acted, "the Apply control should have been used");
     assert.deepEqual(requested.filter(isRecruiteeHost), []);
+    await page
+      .locator("#panel-apply")
+      .waitFor({ state: "visible", timeout: 10_000 })
+      .catch(() => assert.fail("the Apply click did not open the form panel"));
     const form = await extractForm(page);
     assert.deepEqual(form.fields.map((f) => f.type), ["text", "email", "file", "radio", "textarea", "checkbox"]);
   } finally {
