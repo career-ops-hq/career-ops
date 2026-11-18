@@ -14,7 +14,7 @@ const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/
 
 console.log('\nbatch-runner.sh — zero-token dead-URL pre-filter');
 
-const prefilterBlocks = [...SRC.matchAll(/      if \[\[ "\$\{PREFILTER:-true\}" == "true" && -f[\s\S]*?\n      fi\n/g)]
+const prefilterBlocks = [...SRC.matchAll(/      if \[\[ (?:-z "\$jd_rescue_closed_note" && )?"\$\{PREFILTER:-true\}" == "true" && -f[\s\S]*?\n      fi\n/g)]
   .map((match) => match[0]);
 const detect = prefilterBlocks.find((block) => block.includes('_pf_line=')) ?? null;
 const act = SRC.match(/  if \[\[ "\$jd_prefilter_decision" != "proceed" \]\]; then[\s\S]*?\n  fi\n(?=\n  # ATS API fallback)/)?.[0] ?? null;
@@ -33,7 +33,7 @@ if (rescueBlock.includes('fetch-jd.mjs') && rescueBlock.includes('prefetch_min_w
 // ── contract ───────────────────────────────────────────────────────────────
 const writeOutAt = SRC.indexOf("--write-out '%{http_code}\\t%{url_effective}'");
 const stripAt = SRC.indexOf('jd_prefetch_words=$(node -e');
-const visibleSnapshotAt = SRC.indexOf('jd_prefilter_visible_file=');
+const visibleSnapshotAt = SRC.indexOf('jd_prefilter_visible_file="${jd_file}.visible"');
 const jdRescueAt = SRC.indexOf('if [[ -f "$BATCH_DIR/jd-rescue.mjs"');
 const detectAt = SRC.indexOf('prefilter-url.mjs" "$jd_http_code"');
 const thinAt = SRC.indexOf('thin content (${jd_prefetch_words} words) — worker will WebFetch');
@@ -54,6 +54,11 @@ if (
   pass('prefilter reads the stripped visible-page snapshot, not a JD-rescue replacement');
 } else {
   fail('prefilter must snapshot stripped visible page text before jd-rescue and pass that snapshot to prefilter-url.mjs');
+}
+if (/if \[\[ -z "\$jd_rescue_closed_note" && "\$\{PREFILTER:-true\}" == "true" && -f/.test(SRC)) {
+  pass('a closed jd-rescue result bypasses prefilter so it has one terminal outcome');
+} else {
+  fail('a closed jd-rescue result must bypass prefilter and use the runner\'s closed-posting path');
 }
 if (/--no-prefilter\) PREFILTER=false/.test(SRC) && /--no-prefilter\s+Disable/.test(SRC)) pass('--no-prefilter opts out and is documented in usage');
 else fail('--no-prefilter is missing from the parser or the usage text');
@@ -91,7 +96,7 @@ if (!bash || !detect || !act) {
         `PREFILTER=${prefilter}`,
         'url="https://jobs.example.com/acme/1"; id=7; started_at=T0; retries=0; report_num=042; MAX_RETRIES=3',
         'jd_http_code=404; jd_final_url="$url"',
-        'jd_prefilter_decision=proceed; jd_prefilter_code=""; jd_prefilter_reason=""',
+        'jd_prefilter_decision=proceed; jd_prefilter_code=""; jd_prefilter_reason=""; jd_rescue_closed_note=""',
         `update_state_retrying() { printf 'STATE %s\\n' "$*" >> ${JSON.stringify(trace)}; }`,
         `release_report_num() { printf 'RELEASE %s\\n' "$1" >> ${JSON.stringify(trace)}; }`,
         'one_offer() {',

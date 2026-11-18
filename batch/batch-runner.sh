@@ -1274,6 +1274,7 @@ process_offer() {
   local curl_status=0
   local jd_http_code=0 jd_final_url=""
   local jd_prefilter_decision="proceed" jd_prefilter_code="" jd_prefilter_reason=""
+  local jd_prefilter_visible_file=""
   if command -v curl >/dev/null 2>&1; then
     # Reject loopback, link-local, private-network and cloud-metadata
     # destinations before curl connects, on every redirect hop.
@@ -1411,12 +1412,12 @@ process_offer() {
       # evidence that the posting is gone. Only flagged here; the skip happens
       # after this block (tests/batch-runner-jd-prefetch.test.mjs runs the block
       # standalone, where `return` is illegal). Any failure to classify proceeds.
-      if [[ "${PREFILTER:-true}" == "true" && -f "${BATCH_DIR:-}/prefilter-url.mjs" ]]; then
+      if [[ -z "$jd_rescue_closed_note" && "${PREFILTER:-true}" == "true" && -f "${BATCH_DIR:-}/prefilter-url.mjs" ]]; then
         _pf_line=$(node "$BATCH_DIR/prefilter-url.mjs" "$jd_http_code" "$url" "$jd_final_url" "$jd_prefilter_visible_file" 2>/dev/null) || _pf_line=""
         IFS=$'\t' read -r jd_prefilter_decision jd_prefilter_code jd_prefilter_reason <<< "$_pf_line"
         jd_prefilter_decision="${jd_prefilter_decision:-proceed}"
-        rm -f "$jd_prefilter_visible_file"
       fi
+      rm -f "$jd_prefilter_visible_file"
       if [[ "$jd_prefetch_words" -lt "$prefetch_min_words" ]]; then
         : > "$jd_file"
         echo "    ℹ️  JD prefetch: thin content (${jd_prefetch_words} words) — worker will WebFetch"
