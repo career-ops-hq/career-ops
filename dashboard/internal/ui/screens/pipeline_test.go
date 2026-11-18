@@ -1152,3 +1152,52 @@ func TestWithReloadedDataDoesNotFallBackToASiblingOfAnIdentifiedRow(t *testing.T
 		t.Fatalf("want the retained index (#40), got #%d", app.Number)
 	}
 }
+
+// Two rows alike in #, company AND role are indistinguishable to every signal
+// the dashboard has. If the selected one leaves the tab, narrowing must not
+// hand the cursor to the visible twin — a status write there targets the twin's
+// report.
+func TestWithReloadedDataWillNotNarrowOntoAHiddenRowsIdenticalTwin(t *testing.T) {
+	interviewTab := 0
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterInterview {
+			interviewTab = i
+		}
+	}
+	// Both #32 rows carry the same company and role; Gamma keeps the retained
+	// index pointing somewhere other than the twin.
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview", Notes: "the selected one"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.activeTab = interviewTab
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Notes == "the selected one" {
+			pm.cursor = i
+		}
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: the selected twin sits at index 1, got %d", pm.cursor)
+	}
+
+	// The selected twin leaves the Interview tab.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Rejected", Notes: "the selected one"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number == 32 {
+		t.Fatal("the cursor landed on the hidden row's identical twin; a write there hits the twin")
+	}
+	if app.Company != "Gamma" {
+		t.Fatalf("want the retained index (Gamma), got %q", app.Company)
+	}
+}

@@ -526,45 +526,41 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 			}
 		}
 	} else if data.HasTrackerIdentity(selectedApp) {
-		// Ambiguity is counted over the WHOLE reloaded tracker, not the visible
-		// rows: a tab filter can hide a row's twin and make a duplicate # look
-		// like a unique match, which is how the cursor could land on the twin
-		// (#7331 review).
+		// Candidates are resolved over the WHOLE reloaded tracker, never over the
+		// visible rows. A tab filter can hide a row's twin, which makes an
+		// ambiguous selector look unique, and it can hide the selected row
+		// itself, which leaves a twin as the only visible candidate. Both end
+		// with the cursor on a different opening (#7331 review).
 		sharing := 0
 		for _, app := range reloaded.apps {
 			if data.SameTrackerRow(app, selectedApp) {
 				sharing++
 			}
 		}
-		matches := []int{}
-		for i, app := range reloaded.filtered {
-			if data.SameTrackerRow(app, selectedApp) {
-				matches = append(matches, i)
+		// Several rows answer to the selector, so the tracker holds a duplicate #
+		// (#1704). Company and role narrow it, still tracker-wide, and only a
+		// single survivor is restorable — two rows alike in #, company and role
+		// are indistinguishable here, so the cursor keeps its index instead.
+		narrowing := sharing > 1
+		restorable := sharing == 1
+		if narrowing {
+			narrowed := 0
+			for _, app := range reloaded.apps {
+				if data.SameTrackerRow(app, selectedApp) && app.Company == selectedCompany && app.Role == selectedRole {
+					narrowed++
+				}
 			}
+			restorable = narrowed == 1
 		}
-		if sharing == 1 && len(matches) == 1 {
-			reloaded.cursor = matches[0]
-			reloaded.adjustScroll()
-			return reloaded
-		}
-		// Several rows answer to the selector, so the tracker holds a duplicate
-		// # (#1704). Company and role then decide among exactly those rows, and
-		// only when one of them matches — never across the whole table, which
-		// is how the cursor used to reach an unrelated row carrying the same #.
-		if sharing > 1 {
-			narrowed := -1
-			for _, i := range matches {
-				if reloaded.filtered[i].Company != selectedCompany || reloaded.filtered[i].Role != selectedRole {
+		if restorable {
+			for i, app := range reloaded.filtered {
+				if !data.SameTrackerRow(app, selectedApp) {
 					continue
 				}
-				if narrowed >= 0 {
-					narrowed = -1
-					break
+				if narrowing && (app.Company != selectedCompany || app.Role != selectedRole) {
+					continue
 				}
-				narrowed = i
-			}
-			if narrowed >= 0 {
-				reloaded.cursor = narrowed
+				reloaded.cursor = i
 				reloaded.adjustScroll()
 				return reloaded
 			}

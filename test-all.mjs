@@ -6233,10 +6233,17 @@ try {
   // report linked as #7 on tracker row #32 sends `--row 7`, which the CLI
   // accepts as a tracker selector (#7331 review). So pair each flag with the
   // field it must carry.
-  const selectorPairs = { '--report-link': 'ReportNumber', '--row': 'Number' };
+  // Matched as a whole field reference, not a substring: `app.ReportNumber`
+  // CONTAINS `Number`, so a substring test would accept
+  // `trackerIdentity{"--row", app.ReportNumber}` — a one-sided swap, which is
+  // the half of the swap the two-sided check would miss (#7331 review).
+  const selectorPairs = {
+    '--report-link': /\bapp\.ReportNumber\b/,
+    '--row': /\bapp\.Number\b/,
+  };
   const mispaired = selectorIdentities
     .filter(({ flag, value }) => flag !== null
-      && (value === null || !value.includes(selectorPairs[flag] ?? '\u0000')))
+      && (value === null || !(selectorPairs[flag] ?? /(?!)/).test(value)))
     .map(({ flag }) => flag);
   const argsStart = runWriterBody.indexOf('args := []string{');
   const argvLiteral = argsStart === -1
@@ -6278,13 +6285,26 @@ try {
     ['concatenated', '"--" + "report", strconv.Itoa(app.Number)', null],
     ['parenthesized', '("--report"), strconv.Itoa(app.Number)', null],
   ];
+  // Pairing is checked on the same principle: each shape below sends a flag the
+  // repo does not accept while leaving an acceptable literal in the text.
+  const pairedValues = [
+    ['the row value', '--row', 'strconv.Itoa(app.Number)', true],
+    ['the report value', '--report-link', 'app.ReportNumber', true],
+    ['the report field under --row', '--row', 'app.ReportNumber', false],
+    ['the row field under --report-link', '--report-link', 'strconv.Itoa(app.Number)', false],
+    ['a value that names neither field', '--row', 'app.Company', false],
+  ];
+  const pairingMisreads = pairedValues
+    .filter(([, flag, value, want]) => (selectorPairs[flag] ?? /(?!)/).test(value) !== want)
+    .map(([name]) => name);
   const flagFieldMisreads = resolvableFlagFields
     .filter(([, construction, want]) => identityFlagField(construction) !== want)
     .map(([name]) => name);
-  if (flagFieldMisreads.length === 0) {
-    pass('dashboard selector guard resolves every tracker-identity flag or fails closed');
+  const guardSelfCheck = [...flagFieldMisreads, ...pairingMisreads];
+  if (guardSelfCheck.length === 0) {
+    pass('dashboard selector guard resolves every tracker-identity flag and value, or fails closed');
   } else {
-    fail(`dashboard selector guard misreads a tracker-identity flag: ${flagFieldMisreads.join(', ')}`);
+    fail(`dashboard selector guard misreads a tracker identity: ${guardSelfCheck.join(', ')}`);
   }
 
 } catch (e) {
