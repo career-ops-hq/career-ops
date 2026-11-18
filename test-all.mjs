@@ -6249,10 +6249,23 @@ try {
   const argvLiteral = argsStart === -1
     ? ''
     : runWriterBody.slice(argsStart, runWriterBody.indexOf('}', argsStart) + 1);
+  // Presence of each token is not enough: the two checks below are independent,
+  // so `{script, ids[0].value, ids[0].flag, status, ...}` passes both while
+  // sending the status as the selector value (#7331 review). The flag must be
+  // the element immediately before its value — an argv the guard cannot split
+  // into elements resolves to none and fails closed.
+  const selectorArgvAdjacent = (literal) => {
+    const open = literal.indexOf('{');
+    if (open === -1 || !literal.endsWith('}')) return false;
+    const elements = literal.slice(open + 1, -1).split(',').map((f) => f.trim());
+    const flagAt = elements.indexOf('ids[0].flag');
+    return flagAt !== -1 && elements[flagAt + 1] === 'ids[0].value';
+  };
   const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
     && runWriterBody.includes('exec.CommandContext')
     && argvLiteral.includes('ids[0].flag')
     && argvLiteral.includes('ids[0].value')
+    && selectorArgvAdjacent(argvLiteral)
     && !/"--(?:row|report|report-link)"/.test(argvLiteral)
     && selectorFlags.every((flag) => flag === '--report-link' || flag === '--row')
     // Every identity the selector builds must name its flag with a literal the
@@ -6297,10 +6310,22 @@ try {
   const pairingMisreads = pairedValues
     .filter(([, flag, value, want]) => (selectorPairs[flag] ?? /(?!)/).test(value) !== want)
     .map(([name]) => name);
+  // Arrangement is checked on the same principle: each shape below contains
+  // both selector tokens, so the presence checks accept every one of them.
+  const argvArrangements = [
+    ['the flag before its value', 'args := []string{script, ids[0].flag, ids[0].value, status, "--json"}', true],
+    ['the flag and its value swapped', 'args := []string{script, ids[0].value, ids[0].flag, status, "--json"}', false],
+    ['the status between the two', 'args := []string{script, ids[0].flag, status, ids[0].value, "--json"}', false],
+    ['the value as the last element', 'args := []string{script, ids[0].flag, status, "--json", ids[0].value}', false],
+    ['an unsplittable argv', 'args := []string{script, ids[0].flag, ids[0].value', false],
+  ];
+  const argvMisreads = argvArrangements
+    .filter(([, literal, want]) => selectorArgvAdjacent(literal) !== want)
+    .map(([name]) => name);
   const flagFieldMisreads = resolvableFlagFields
     .filter(([, construction, want]) => identityFlagField(construction) !== want)
     .map(([name]) => name);
-  const guardSelfCheck = [...flagFieldMisreads, ...pairingMisreads];
+  const guardSelfCheck = [...flagFieldMisreads, ...pairingMisreads, ...argvMisreads];
   if (guardSelfCheck.length === 0) {
     pass('dashboard selector guard resolves every tracker-identity flag and value, or fails closed');
   } else {
