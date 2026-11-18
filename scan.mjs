@@ -544,6 +544,15 @@ const DC_ENTRY_RE = /^d\.?\s?c\.?$/i;
 const DC_LOCATION_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${DC_TOKEN}`, 'u');
 const DC_CITY_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])washington\\s*[,(\\-\u2013\u2014]?\\s*(?:district of columbia|${DC_TOKEN})`, 'gu');
 const withoutDcCity = (lower) => lower.replace(DC_CITY_RE, 'district of columbia');
+// A Workday URL hint puts the city first ("Washington", "Washington-United-States").
+// When the display location names Washington, DC, a hint that starts with a
+// bare "Washington" is that city, not the state. "Seattle-Washington" keeps
+// naming the state, and with no DC in the display the hint is read as before.
+const DC_CITY_TEST_RE = new RegExp(DC_CITY_RE.source, 'u');
+const LEADING_WASHINGTON_RE = /^washington(?![\p{L}\p{M}\p{N}])/u;
+const hintWithoutDcCity = (hint, display) => (typeof display === 'string' && DC_CITY_TEST_RE.test(display)
+  ? hint.replace(LEADING_WASHINGTON_RE, 'district of columbia')
+  : hint);
 
 function compileLocationKeywordList(value, { stateNameSkipsDc = false } = {}) {
   // An entry written as two uppercase letters ("IN", "DE") is an ISO country
@@ -562,7 +571,8 @@ function compileLocationKeywordList(value, { stateNameSkipsDc = false } = {}) {
       if (DC_ENTRY_RE.test(trimmed)) return (lower) => DC_LOCATION_RE.test(lower);
       if (stateNameSkipsDc && trimmed.toLowerCase() === 'washington') {
         const state = compileLocationKeyword('washington');
-        return (lower) => state(withoutDcCity(lower));
+        // `display` is passed only when `lower` is the URL hint.
+        return (lower, _original, display) => state(withoutDcCity(hintWithoutDcCity(lower, display)));
       }
       if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
       const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
@@ -827,7 +837,7 @@ export function buildLocationFilter(locationFilter) {
     // against a provider that never returns a location would otherwise let
     // every out-of-region posting through (#3276).
     if (lower === '' && hint === '') return !strict;
-    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint));
+    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint, undefined, lower));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
     // word-boundary matching (#2087) does not catch it and always_allow's

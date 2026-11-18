@@ -100,3 +100,20 @@ test('the Workday URL hint is read the same way', () => {
   assert.equal(filter('2 Locations', dcUrl), false);
   assert.equal(filter('2 Locations', waUrl), true);
 });
+
+test('a bare "Washington" URL hint does not admit a Washington, DC posting', () => {
+  const bareUrl = 'https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Washington/Engineer_R-3';
+  const countryUrl = 'https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Washington-United-States/Engineer_R-4';
+  const waUrl = 'https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Seattle-Washington/Engineer_R-2';
+  const always = buildLocationFilter({ always_allow: ['Washington'], block: ['District of Columbia', 'DC'] });
+  for (const loc of DC_SPELLINGS) {
+    assert.equal(always(loc, bareUrl), false, `always_allow vs ${loc} + bare hint`);
+    assert.equal(always(loc, countryUrl), false, `always_allow vs ${loc} + Washington-United-States hint`);
+  }
+  assert.equal(always('Seattle, Washington', bareUrl), true, 'no DC in the display: the hint names the state');
+  assert.equal(always('Seattle, WA', waUrl), true, 'Seattle-Washington keeps matching');
+  assert.equal(always('Washington, DC', waUrl), true, 'an explicit Washington State hint still wins');
+  const allow = buildLocationFilter({ allow: ['Washington'] });
+  assert.equal(allow('Washington, DC', bareUrl), false, 'allow vs bare hint');
+  assert.equal(allow('2 Locations', bareUrl), true, 'no DC in the display: unchanged');
+});
