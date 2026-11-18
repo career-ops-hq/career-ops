@@ -253,6 +253,14 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 		if len(fields) < width {
 			continue
 		}
+		// Read the # cell before sanitizing. SanitizeTerminalText deletes control
+		// characters, so a cell of `3<US>2` would sanitize to `32` and the write
+		// would land on whichever row genuinely holds 32. Sanitization still
+		// applies to every cell that gets displayed.
+		rawNumber := ""
+		if idx, ok := cols["num"]; ok && idx >= 0 && idx < len(fields) {
+			rawNumber = fields[idx]
+		}
 		for i, field := range fields {
 			fields[i] = SanitizeTerminalText(field)
 		}
@@ -266,7 +274,6 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 
 		num++
 		trackerNumber := num
-		rawNumber := at("num")
 		missingNumber := rawNumber == "" || strings.IndexFunc(rawNumber, func(r rune) bool { return r < '0' || r > '9' }) >= 0
 		if parsedNumber, err := strconv.Atoi(rawNumber); err == nil && !missingNumber {
 			trackerNumber = parsedNumber

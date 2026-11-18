@@ -176,3 +176,49 @@ func TestSameTrackerRowFollowsARowThatGainsAReportLink(t *testing.T) {
 		t.Fatalf("want --report-link 7, got %s %s (ok=%v)", flag, value, ok)
 	}
 }
+
+// SanitizeTerminalText deletes control characters, so a # cell read after it
+// ran can disagree with set-status.mjs about which row a number names: `3<US>2`
+// sanitizes to `32`, and the write lands on whichever row genuinely holds 32 —
+// unique there, so the duplicate-# guard never fires. The reader decides from
+// the raw cell instead; parseInt (tracker-parse.mjs) stops at the same first
+// non-digit.
+func TestTrackerNumberIsReadFromTheRawCell(t *testing.T) {
+	for name, cell := range map[string]string{
+		"unit separator": "3\u001f2",
+		"NUL":            "32\u0000",
+		"DEL":            "3\u007f2",
+		"ANSI reset":     "\u001b[0m32",
+		"space":          "3 2",
+		"trailing x":     "32x",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("CAREER_OPS_TRACKER", "")
+			t.Setenv("CAREER_OPS_TRACKER_LOCK", "")
+			before := statusTargetHeader + strings.Replace(noReportRow, "| 32 |", "| "+cell+" |", 1)
+			root, tracker := writeTracker(t, before)
+
+			apps := mustParseApplications(t, root)
+			if len(apps) != 1 {
+				t.Fatalf("premise: one row, got %+v", apps)
+			}
+			if !apps[0].TrackerNumberMissing {
+				t.Fatalf("a # cell of %q names no row, got Number=%d missing=false", cell, apps[0].Number)
+			}
+			// No identity means the write is refused, not retargeted.
+			err := UpdateApplicationStatusAndNotes(root, apps[0], "Applied", "")
+			if err == nil || !strings.Contains(err.Error(), "no tracker identity") {
+				t.Fatalf("want a refusal naming the missing identity, got %v", err)
+			}
+			assertStatusTargetBytes(t, tracker, before)
+		})
+	}
+
+	// A plain cell still parses, so the fix refuses no ordinary row.
+	t.Setenv("CAREER_OPS_TRACKER", "")
+	root, _ := writeTracker(t, statusTargetHeader+noReportRow)
+	apps := mustParseApplications(t, root)
+	if len(apps) != 1 || apps[0].TrackerNumberMissing || apps[0].Number != 32 {
+		t.Fatalf("a plain # cell must parse as 32, got %+v", apps)
+	}
+}
