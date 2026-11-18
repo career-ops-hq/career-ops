@@ -133,14 +133,56 @@ export function releaseUpdateLock(root) {
   }
 }
 
+/**
+ * How recent `.update-lock` has to be to count as a live parent.
+ *
+ * Generous on purpose: an apply that installs a dependency set can run for
+ * minutes, and the point is to exclude a lock left behind by a crashed update
+ * hours or days ago, not to time a healthy one.
+ */
+const LEGACY_REEXEC_MAX_LOCK_AGE_MS = 30 * 60_000;
+/** Clock skew tolerated on a lock stamped slightly in the future. */
+const LEGACY_REEXEC_FUTURE_SKEW_MS = 60_000;
+
+/**
+ * Does this `.update-lock` content belong to an update that could still be
+ * running? The file holds the ISO timestamp the claimer wrote.
+ *
+ * Unreadable content answers no: a lock this function cannot date is not
+ * evidence of a live parent, and the caller falls back to asking for
+ * confirmation.
+ *
+ * @param {string} lockText
+ * @param {number} [now]
+ * @returns {boolean}
+ */
+export function legacyLockLooksLive(lockText, now = Date.now()) {
+  const started = Date.parse(String(lockText ?? '').trim());
+  if (!Number.isFinite(started)) return false;
+  const age = now - started;
+  return age >= -LEGACY_REEXEC_FUTURE_SKEW_MS && age <= LEGACY_REEXEC_MAX_LOCK_AGE_MS;
+}
+
 function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
   }
   // A matching backup branch is durable state, not proof that a parent updater
-  // is currently running. Legacy children have no authenticated marker, so
-  // the parent's active update lock is the remaining proof of a real reexec.
-  if (!existsSync(join(ROOT, '.update-lock'))) {
+  // is currently running. Legacy children have no authenticated marker, so the
+  // parent's update lock is the remaining proof — and the lock has to look live.
+  //
+  // Merely existing is not enough: the lock survives a crash (one exit path even
+  // leaks it, see the note in apply()), so a stale file plus any old backup
+  // branch armed this path, after which CAREER_OPS_UPDATE_REEXEC=1 alone skipped
+  // --confirm, created no backup branch, and trusted the _TARGET_REF/_SHA in the
+  // environment without the identity check.
+  let lockText;
+  try {
+    lockText = readFileSync(join(ROOT, '.update-lock'), 'utf8');
+  } catch {
+    return false;
+  }
+  if (!legacyLockLooksLive(lockText)) {
     return false;
   }
   const backupBranch = process.env.CAREER_OPS_UPDATE_BACKUP_BRANCH || '';
