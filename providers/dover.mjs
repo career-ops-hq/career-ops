@@ -2,10 +2,16 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // Dover provider — single-company ATS adapter (→ tracked_companies:).
-// Auto-detects a Dover-hosted careers page,
-// `https://app.dover.com/<Company>/careers/<board-uuid>`, and reads the
-// public zero-auth list endpoint the page itself calls:
+// Auto-detects a Dover-hosted careers page in either public URL form,
+//   https://app.dover.com/<Company>/careers/<board-uuid>
+//   https://app.dover.com/jobs/<slug>
+// and reads the public zero-auth list endpoint the page itself calls:
 //   GET https://app.dover.com/api/v1/careers-page/<board-uuid>/jobs?limit=300&offset=<n>
+// The `/jobs/<slug>` form carries no board id, so fetch() first resolves the
+// slug with one extra request,
+//   GET https://app.dover.com/api/v1/careers-page-slug/<slug>   → { id, slug, name, ... }
+// (`id` is the board uuid; an unknown slug is a 404, which surfaces as an error
+// rather than an empty board). detect() stays synchronous and request-free.
 // Response: Django REST Framework pagination, `{ count, next, previous, results }`,
 // each result `{ id, title, locations: [{ location_type, location_option:
 // { display_name, location_type, city, state, country }, name, is_primary }],
@@ -15,6 +21,9 @@
 // The posting URL is the apply page Dover's own careers page links to,
 // `https://app.dover.com/apply/<Company>/<job-id>`, with <Company> taken from
 // the careers_url path so the URL matches the link a user copies off the page.
+// A `/jobs/<slug>` URL has no company segment, so it uses the company `name`
+// the slug lookup returns (the apply page loads by job id alone; the segment is
+// cosmetic), falling back to the slug.
 //
 // Location: Dover tags a worldwide-remote role with a REGION option whose
 // display_name is "International" and whose country is "US". Read naively
@@ -28,6 +37,10 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 const HOST = 'app.dover.com';
 const API_BASE = `https://${HOST}/api/v1/careers-page`;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Observed slugs look like `acme` or `acme-0ef01d90`: alphanumeric edges with
+// hyphens/underscores inside, never a dot, slash or percent-escape. Checked
+// before the slug is interpolated into an API path.
+const SLUG_RE = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,98}[A-Za-z0-9])?$/;
 
 // The page size Dover's own careers page requests.
 const PAGE_SIZE = 300;
@@ -47,10 +60,14 @@ const STOP_REASON = {
 };
 
 /**
- * Resolve `{ company, board }` from a careers_url like
- * `https://app.dover.com/Acme/careers/<uuid>`. Returns null for any other host,
- * a non-https URL, or a path without a `<company>/careers/<uuid>` prefix.
+ * Resolve the board a careers_url names. Two forms:
+ *   - `https://app.dover.com/<Company>/careers/<board-uuid>` →
+ *     `{ company, board, slug: null }`
+ *   - `https://app.dover.com/jobs/<slug>` → `{ company: <slug>, board: null, slug }`;
+ *     the board uuid is resolved from the slug at fetch time.
+ * Returns null for any other host, a non-https URL, or any other path.
  * @param {import('./_types.js').PortalEntry} entry
+ * @returns {{ company: string, board: string, slug: null } | { company: string, board: null, slug: string } | null}
  */
 export function resolveBoard(entry) {
   const raw = typeof entry?.careers_url === 'string' ? entry.careers_url : '';
@@ -63,6 +80,9 @@ export function resolveBoard(entry) {
   }
   if (parsed.protocol !== 'https:' || parsed.hostname !== HOST) return null;
   const [company, marker, board] = parsed.pathname.split('/').filter(Boolean);
+  if (company === 'jobs' && marker && SLUG_RE.test(marker)) {
+    return { company: marker, board: null, slug: marker };
+  }
   if (!company || marker !== 'careers' || !board || !UUID_RE.test(board)) return null;
   let decoded;
   try {
@@ -70,7 +90,13 @@ export function resolveBoard(entry) {
   } catch {
     decoded = company;
   }
-  return { company: decoded, board: board.toLowerCase() };
+  return { company: decoded, board: board.toLowerCase(), slug: null };
+}
+
+/** @param {string} slug */
+function slugUrlFor(slug) {
+  // slug is config-derived and already restricted to SLUG_RE.
+  return `https://${HOST}/api/v1/careers-page-slug/${encodeURIComponent(slug)}`;
 }
 
 /** @param {string} board @param {number} page */
@@ -160,7 +186,8 @@ export default {
 
   detect(entry) {
     const board = resolveBoard(entry);
-    return board ? { url: apiUrlFor(board.board, 0) } : null;
+    if (!board) return null;
+    return { url: board.slug ? slugUrlFor(board.slug) : apiUrlFor(board.board, 0) };
   },
 
   /**
@@ -170,15 +197,38 @@ export default {
   async fetch(entry, ctx) {
     const board = resolveBoard(entry);
     if (!board) throw new Error(`dover: cannot derive API URL for ${entry.name}`);
-    // Config-derived segment: encoded once, outside the row loop.
-    const companySegment = encodeURIComponent(board.company);
-    const companyName = entry.name || board.company;
 
     const maxPages = resolveMaxPages(entry);
     const ctxMaxPages = Number(ctx?.maxPages);
     const ctxCap = ctxMaxPages > 0 ? ctxMaxPages : Infinity;
     const pagesToFetch = Math.min(maxPages, ctxCap);
     const probing = ctxCap !== Infinity;
+
+    // A /jobs/<slug> URL names the board by slug; resolve it to the board uuid
+    // and the company name first. Any failure here (404 for an unknown slug, a
+    // body without a board uuid) throws: a board that cannot be resolved is
+    // broken, not empty. A probe gets no retries, as for the list requests.
+    let boardId = board.board;
+    let company = board.company;
+    if (board.slug) {
+      const lookup = await fetchJsonWithRetry(
+        ctx,
+        slugUrlFor(board.slug),
+        { redirect: 'error' },
+        probing ? { retries: 0 } : RETRY_POLICY,
+      );
+      const id = lookup && typeof lookup === 'object' && typeof lookup.id === 'string' ? lookup.id.trim() : '';
+      if (!UUID_RE.test(id)) {
+        const got = lookup && typeof lookup === 'object' ? Object.keys(lookup).join(', ') : typeof lookup;
+        throw new Error(`dover: unexpected slug lookup response for "${board.slug}" — expected an id (uuid), got: [${got}]`);
+      }
+      boardId = id.toLowerCase();
+      const name = typeof lookup.name === 'string' ? lookup.name.trim() : '';
+      if (name) company = name;
+    }
+    // Config-derived segment: encoded once, outside the row loop.
+    const companySegment = encodeURIComponent(company);
+    const companyName = entry.name || company;
 
     const jobs = [];
     let stopReason = STOP_REASON.COMPLETE;
@@ -192,7 +242,7 @@ export default {
         // gets no retries. A normal scan keeps RETRY_POLICY (two retries).
         json = await fetchJsonWithRetry(
           ctx,
-          apiUrlFor(board.board, page),
+          apiUrlFor(boardId, page),
           { redirect: 'error' },
           probing ? { retries: 0 } : RETRY_POLICY,
         );
