@@ -37,7 +37,9 @@ import { createAdmissionGate, formatSkipCounts } from './lib/admission-gate.mjs'
 import { localToday } from './lib/local-today.mjs';
 import { canonicalJobKey } from './url-key.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
-import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
+import {
+  getCareerOpsRoot, resolvePipelinePath, resolveTrackerPath,
+} from './path-resolver.mjs';
 import { resolveColumns, parseTrackerRow, isHeaderRow, isSeparatorRow } from './tracker-parse.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -49,8 +51,9 @@ const APPLICATIONS_PATH = resolveTrackerPath(DATA_ROOT);
 // lane is honored by the de-dup read, the export snapshot, the write and the
 // log line alike (#6353). Passed to appendToPipeline() explicitly rather than
 // left to its default, so all four always agree on one file.
-const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data', 'pipeline.md');
-const PIPELINE_LABEL = process.env.CAREER_OPS_PIPELINE ? PIPELINE_PATH : 'data/pipeline.md';
+const PIPELINE_OVERRIDE = process.env.CAREER_OPS_PIPELINE?.trim();
+const PIPELINE_PATH = resolvePipelinePath(PIPELINE_OVERRIDE, DATA_ROOT);
+const PIPELINE_LABEL = PIPELINE_OVERRIDE ? PIPELINE_PATH : 'data/pipeline.md';
 
 // A misbehaving plugin's stray rejection should be attributed and not silently
 // crash the host (the engine's per-hook try/catch handles the common case; this

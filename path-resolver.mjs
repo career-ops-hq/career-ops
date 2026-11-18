@@ -1,4 +1,4 @@
-import { resolve, dirname, join, basename, parse, sep, relative, isAbsolute } from 'path';
+import { resolve, dirname, join, basename, parse, sep, relative, isAbsolute, win32 } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, realpathSync } from 'fs';
 import { homedir } from 'os';
@@ -156,6 +156,22 @@ export function getCareerOpsRoot() {
 }
 
 /**
+ * Resolves the pipeline inbox override against the selected data root.
+ * Absolute POSIX and Windows paths are preserved; a blank override uses the
+ * default inbox under the data root.
+ *
+ * @param {string | undefined} lane Pipeline path override.
+ * @param {string} [dataRoot=getCareerOpsRoot()] Root for relative overrides.
+ * @returns {string} Absolute path to the pipeline inbox.
+ */
+export function resolvePipelinePath(lane, dataRoot = getCareerOpsRoot()) {
+  const file = lane?.trim();
+  if (!file) return join(dataRoot, 'data', 'pipeline.md');
+  if (isAbsolute(file) || win32.isAbsolute(file)) return file;
+  return resolve(dataRoot, file);
+}
+
+/**
  * True when CAREER_OPS_PROFILE names a profile. Callers that must tell "an
  * override is set" from "none" use this instead of comparing paths: an override
  * may name the data-root profile itself.
@@ -169,8 +185,7 @@ export function hasProfileOverride() {
 /**
  * Returns the path to the user's config/profile.yml.
  * Priority: rootDir argument > process.env.CAREER_OPS_PROFILE > data root.
- * A relative override resolves against the working directory, like the other
- * lane variables (CAREER_OPS_PORTALS, CAREER_OPS_PIPELINE, CAREER_OPS_SCAN_HISTORY).
+ * A relative override resolves against the working directory.
  *
  * Every reader of the profile resolves it here. The override used to be
  * copied by hand into a handful of modules while the rest built the data-root

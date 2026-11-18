@@ -10,9 +10,10 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipelineRunHint } from '../scan.mjs';
+import { resolvePipelinePath } from '../path-resolver.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const mode = readFileSync(join(ROOT, 'modes', 'pipeline.md'), 'utf-8');
@@ -25,10 +26,43 @@ function section(text, start, end) {
   return text.slice(from, to);
 }
 
-test('the scan hint names the lane inbox when CAREER_OPS_PIPELINE is set', () => {
-  const hint = pipelineRunHint('data/pipeline.bridge.md');
-  assert.match(hint, /\/career-ops pipeline data\/pipeline\.bridge\.md /);
-});
+/**
+ * Verifies the scan hint names the data-root-resolved lane inbox.
+ * @returns {void}
+ */
+function scanHintNamesResolvedLaneInbox() {
+  const hint = pipelineRunHint('data/pipeline.bridge.md', ROOT);
+  assert.ok(hint.includes(`/career-ops pipeline "${resolve(ROOT, 'data/pipeline.bridge.md')}" `));
+}
+
+test('the scan hint names the lane inbox when CAREER_OPS_PIPELINE is set', scanHintNamesResolvedLaneInbox);
+
+/**
+ * Verifies the scan hint preserves an absolute lane inbox path.
+ * @returns {void}
+ */
+function scanHintPreservesAbsoluteLaneInboxPath() {
+  const absolute = resolve(ROOT, 'data', 'bridge inbox.md');
+  assert.ok(pipelineRunHint(absolute).includes(`/career-ops pipeline "${absolute}" `));
+}
+
+test('the scan hint preserves an absolute lane inbox path', scanHintPreservesAbsoluteLaneInboxPath);
+
+/**
+ * Verifies shared resolution for default, relative, and absolute inbox paths.
+ * @returns {void}
+ */
+function sharedPipelinePathResolverPreservesPathSemantics() {
+  const dataRoot = resolve(ROOT, 'data-root');
+  const absolute = resolve(dataRoot, 'lane inbox.md');
+  assert.equal(resolvePipelinePath(undefined, dataRoot), resolve(dataRoot, 'data', 'pipeline.md'));
+  assert.equal(resolvePipelinePath('data/pipeline.bridge.md', dataRoot), resolve(dataRoot, 'data/pipeline.bridge.md'));
+  assert.equal(resolvePipelinePath(absolute, dataRoot), absolute);
+  assert.equal(resolvePipelinePath('   ', dataRoot), resolve(dataRoot, 'data', 'pipeline.md'));
+  assert.equal(resolvePipelinePath('C:\\career-ops\\pipeline.md', dataRoot), 'C:\\career-ops\\pipeline.md');
+}
+
+test('the shared pipeline path resolver preserves path semantics', sharedPipelinePathResolverPreservesPathSemantics);
 
 test('the scan hint is unchanged without a lane', () => {
   // '' and not undefined: undefined takes the default, process.env.CAREER_OPS_PIPELINE,
@@ -37,7 +71,12 @@ test('the scan hint is unchanged without a lane', () => {
   assert.equal(pipelineRunHint('   '), '→ Run /career-ops pipeline to evaluate new offers.');
 });
 
-test('the pipeline mode takes a named file first, then the path scan.mjs writes to', () => {
+/**
+ * Verifies that a named inbox takes precedence over the Data Root default.
+ * @param {object} _testContext Node.js test context.
+ * @returns {void}
+ */
+function pipelineModeKeepsTheDataRootDefault(_testContext) {
   const which = section(mode, '## Which inbox', '## Liveness sweep');
   const named = which.indexOf('names in the request');
   const scanner = which.indexOf('import { PIPELINE_PATH } from "./scan.mjs"');
@@ -46,8 +85,10 @@ test('the pipeline mode takes a named file first, then the path scan.mjs writes 
   // `./scan.mjs` resolves against the working directory, which is not the
   // checkout when a plugin session starts elsewhere.
   assert.match(which, /Run it from `PROJECT_ROOT`/);
-  assert.match(which, /Do not fall back to `data\/pipeline\.md`/);
-});
+  assert.match(which, /Do not fall back to `\{DATA_ROOT\}\/data\/pipeline\.md`/);
+}
+
+test('the pipeline mode takes a named file first, then the path scan.mjs writes to', pipelineModeKeepsTheDataRootDefault);
 
 // scan.mjs loads the data root's .env before it reads CAREER_OPS_PIPELINE, so a
 // lane set only there must still reach the mode (a shell-only read misses it).
@@ -65,13 +106,20 @@ test('the command the mode runs resolves a lane set only in the data root .env',
     delete env.CAREER_OPS_PIPELINE;
     delete env.CAREER_OPS_ROOT;
     const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: ROOT, env, encoding: 'utf-8' });
-    assert.equal(out.trim(), 'data/pipeline.bridge.md');
+    assert.equal(out.trim(), resolve(dataRoot, 'data/pipeline.bridge.md'));
   } finally {
     rmSync(dataRoot, { recursive: true, force: true });
   }
 });
 
-test('the pipeline mode searches the resolved inbox, not a hardcoded file', () => {
+/**
+ * Verifies that the pipeline search uses its resolved inbox variable.
+ * @param {object} _testContext Node.js test context.
+ * @returns {void}
+ */
+function pipelineModeSearchesTheResolvedInbox(_testContext) {
   const workflow = section(mode, '## Workflow', '## Format of pipeline.md');
-  assert.match(workflow, /searching `\{INBOX\}`/);
-});
+  assert.match(workflow, /searching the resolved `\{INBOX\}`/);
+}
+
+test('the pipeline mode searches the resolved inbox, not a hardcoded file', pipelineModeSearchesTheResolvedInbox);

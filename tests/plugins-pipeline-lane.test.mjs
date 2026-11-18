@@ -73,3 +73,31 @@ test('without CAREER_OPS_PIPELINE, the data-root pipeline is used', (t) => {
   assert.deepEqual(got.snapshotUrls, ['https://example.com/main/1']);
   assert.deepEqual(got.admittedUrls, ['https://example.com/lane/1', 'https://example.com/new/1']);
 });
+
+/**
+ * Verifies that plugins resolves a relative lane override under the data root.
+ * @param {object} t Node.js test context.
+ * @returns {void}
+ */
+function pluginsResolveRelativePipelineOverrideUnderDataRoot(t) {
+  const { dir } = fixture();
+  t.after(cleanupPluginFixture.bind(null, dir));
+  const got = probe({ ...BASE_ENV, CAREER_OPS_ROOT: dir, CAREER_OPS_PIPELINE: 'data/pipeline-other.md' });
+  assert.equal(got.pipelinePath, join(dir, 'data', 'pipeline-other.md'));
+  assert.deepEqual(got.snapshotUrls, ['https://example.com/lane/1', 'https://example.com/lane/2']);
+  assert.deepEqual(got.admittedUrls, ['https://example.com/main/1', 'https://example.com/new/1']);
+}
+
+/**
+ * Removes a temporary plugin-path fixture after its test completes.
+ * @param {string} dir Fixture directory.
+ * @returns {void}
+ */
+function cleanupPluginFixture(dir) {
+  rmSync(dir, { recursive: true, force: true });
+}
+
+test(
+  'plugins resolve a relative CAREER_OPS_PIPELINE under the data root',
+  pluginsResolveRelativePipelineOverrideUnderDataRoot,
+);

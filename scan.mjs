@@ -85,7 +85,9 @@ import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
 import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, googleCareersJobId } from './url-key.mjs';
-import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
+import {
+  getCareerOpsRoot, getProfilePath, hasProfileOverride, resolvePipelinePath,
+} from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
@@ -138,16 +140,24 @@ const PROFILE_PATH = hasProfileOverride() ? getProfilePath() : getProfilePath(DA
 // create data/pipeline.md in the cwd, then append the actual results to the
 // anchored one (#3510). One resolution, imported, cannot drift.
 export const SCAN_HISTORY_PATH = process.env.CAREER_OPS_SCAN_HISTORY || path.join(DATA_ROOT, 'data/scan-history.tsv');
-export const PIPELINE_PATH = process.env.CAREER_OPS_PIPELINE || path.join(DATA_ROOT, 'data/pipeline.md');
+
+export const PIPELINE_PATH = resolvePipelinePath(process.env.CAREER_OPS_PIPELINE, DATA_ROOT);
 
 // The closing hint names the lane's inbox when CAREER_OPS_PIPELINE is set.
 // `/career-ops pipeline` alone reads data/pipeline.md unless the agent's own
 // environment carries the same variable, so a lane run that only says "run
 // pipeline" sends the user to the other lane's inbox (#6379).
-export function pipelineRunHint(lane = process.env.CAREER_OPS_PIPELINE) {
+/**
+ * Builds the suggested pipeline command from the resolved inbox path.
+ *
+ * @param {string | undefined} lane Optional pipeline path override.
+ * @param {string} dataRoot Root for user data and relative pipeline paths.
+ * @returns {string} Suggested command or the default command hint.
+ */
+export function pipelineRunHint(lane = process.env.CAREER_OPS_PIPELINE, dataRoot = DATA_ROOT) {
   const file = lane?.trim();
   return file
-    ? `→ Run /career-ops pipeline ${file} to evaluate new offers (this lane's inbox, not data/pipeline.md).`
+    ? `→ Run /career-ops pipeline "${resolvePipelinePath(file, dataRoot)}" to evaluate new offers (this lane's inbox, not data/pipeline.md).`
     : '→ Run /career-ops pipeline to evaluate new offers.';
 }
 
