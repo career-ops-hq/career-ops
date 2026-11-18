@@ -209,6 +209,10 @@ try {
   if (normalizeUrlForDedup(job) === normalizeUrlForDedup(pid) && seenJobKey(job) === seenJobKey(pid)) {
     pass('the job-path and pid shapes share one scan dedup key');
   } else fail(`Microsoft keys differ: ${JSON.stringify({ a: seenJobKey(job), b: seenJobKey(pid) })}`);
+  const dotted = 'https://apply.careers.microsoft.com./careers/job/1970000000000001';
+  if (normalizeUrlForDedup(dotted) === normalizeUrlForDedup(pid) && seenJobKey(dotted) === seenJobKey(pid)) {
+    pass('a trailing-dot Microsoft host gets the same scan dedup key');
+  } else fail(`trailing-dot Microsoft host keys differ: ${JSON.stringify({ a: normalizeUrlForDedup(dotted), b: normalizeUrlForDedup(pid) })}`);
   if (seenJobKey(pid) !== seenJobKey(other) && normalizeUrlForDedup(pid) !== normalizeUrlForDedup(other)) {
     pass('a different Microsoft pid is a different posting');
   } else fail('two Microsoft pids collapsed onto one key');

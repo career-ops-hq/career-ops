@@ -325,16 +325,21 @@ export function promoteKnownFragmentIdentity(url) {
  * The pid is the posting's own id, so everything else in the query (`hl`,
  * `start`, `sort_by`, ...) is dropped. Only the `apply.careers.microsoft.com`
  * host is read, and a `/careers` URL with no pid (a results page) is left
- * alone. Mutates the URL used for the comparison key only.
+ * alone. Mutates the URL used for the comparison key only. The hostname is
+ * folded here (a trailing dot, `apply.careers.microsoft.com.`), so a caller
+ * that keys on the parsed URL without folding it first, like scan.mjs's
+ * normalizeUrlForDedup, still gets the same key.
  *
- * @param {URL} url - Hostname already folded.
+ * @param {URL} url - A parsed posting URL.
  */
 export function canonicalizeKnownPostingUrl(url) {
-  if (url.hostname !== 'apply.careers.microsoft.com') return;
+  const host = foldHostname(url.hostname);
+  if (host !== 'apply.careers.microsoft.com') return;
   const match = /^\/careers(?:\/job\/(\d+))?\/?$/i.exec(url.pathname);
   if (!match) return;
   const pid = match[1] ?? url.searchParams.get('pid');
   if (!pid || !/^\d+$/.test(pid)) return;
+  url.hostname = host;
   url.pathname = '/careers';
   url.search = '';
   url.searchParams.set('pid', pid);
