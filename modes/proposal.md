@@ -9,7 +9,7 @@ It is NOT:
 
 **Never submit.** Never click Apply, Send or Submit. Never paste a draft into a live form. This mode writes one markdown file and does nothing else. The candidate reviews the draft, fills in the rate and sends it personally.
 
-**Unattended runs** Follow `modes/_shared.md` → **Unattended runs**: do not start a draft with no usable source or output directory, and never ask. With no report number, range or pasted JD, end on one line: `needs_confirmation: proposal_input no report or JD supplied - rerun with a report number, range, or pasted JD`. When a source was supplied but no output directory can be resolved, end instead on `needs_confirmation: proposals_output_dir no output directory configured - rerun after setting proposals.output_dir in config/profile.yml or a house rule in modes/_custom.md`. Never invent a path.
+**Unattended runs** Follow `modes/_shared.md` → **Unattended runs**: do not start a draft with no usable source or output directory, and never ask. With no report number, range or pasted JD, end on one line: `needs_confirmation: proposal_input no report or JD supplied - rerun with a report number, range, or pasted JD`. When a report was supplied but neither its archived JD nor a matching `jds/` capture exists, end on `needs_confirmation: proposal_input report {NNN} has no archived JD or matching jds/ capture - rerun with a usable JD, matching capture, or pasted JD`. When a source was supplied but no output directory can be resolved, end instead on `needs_confirmation: proposals_output_dir no output directory configured - rerun after setting proposals.output_dir in config/profile.yml or a house rule in modes/_custom.md`. Never invent a path.
 
 ---
 
