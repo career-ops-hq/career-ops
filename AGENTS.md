@@ -61,9 +61,9 @@ Auto-memory at `~/.claude/projects/.../memory/` is for **behavioural steering on
 
 ### Where rules live
 
-Rules belong in files the harness reads automatically — `CLAUDE.md`, `CODEX.md`, `AGENTS.md`, `modes/*.md`, `MEMORY.md` — or in a `modes/` file that AGENTS.md, the router or a mode tells the agent to read at the step that needs it (for example `modes/_onboarding.md` when `doctor.mjs` reports `onboardingNeeded`). Do not create sidecar documentation that nothing tells the agent to load. Reinforcement-without-enforcement decays.
+Rules belong in files the harness reads automatically — `CLAUDE.md`, `CODEX.md`, `AGENTS.md`, `modes/*.md`, `MEMORY.md` — or in a `modes/` file that AGENTS.md, the router or a mode tells the agent to read at the step that needs it. Do not create sidecar documentation that nothing tells the agent to load. Reinforcement-without-enforcement decays.
 
-AGENTS.md is loaded whole into every session, so it holds the rules every session needs and stays under 40,000 characters (`tests/agents-md-size.test.mjs`). Reference material one workflow needs goes in a `modes/` file with a pointer here.
+AGENTS.md loads into every session, so it stays under 40,000 characters (`tests/agents-md-size.test.mjs`). Reference one workflow needs goes in a `modes/` file with a pointer here.
 
 ## Untrusted External Content (CRITICAL)
 
@@ -93,7 +93,7 @@ If yes → `node update-system.mjs apply --confirm`. If no → `node update-syst
 
 ## What is career-ops
 
-AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (Claude Code, Cursor, Codex, OpenCode, Pi, Oh My Pi, Qwen, Copilot, Kimi, Antigravity CLI, Grok Build CLI). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
+AI-powered, CLI-agnostic job search automation: pipeline tracking, offer evaluation, CV generation, portal scanning, batch processing. Runs on any AI coding CLI following the [open agent skill standard](https://agentskills.io) (`docs/SUPPORTED_CLIS.md` lists them). Legacy Gemini API evaluation remains via `gemini-eval.mjs`.
 
 ### CLI invocation
 
@@ -295,9 +295,9 @@ This is a confirmation step, not a replacement for `check-liveness.mjs` — run 
 
 ## CI/CD, Community and Governance
 
-- **GitHub Actions** run the full `test-all.mjs` suite and a risk-based auto-labeler on every PR; `main` requires status checks and takes no direct pushes.
-- **Contributing:** a new feature, mode or command, or architecture change starts with an issue → discussion → PR with linked issue. Bug fixes, zero-auth scanner providers, docs and translations go straight to a PR. Every PR: CI passes → maintainer review → merge.
-- **Governance:** `GOVERNANCE.md` (BDFL with a contributor ladder), `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), `SUPPORT.md` (help questions go to Discord or Discussions, not issues). Discord: https://discord.gg/8pRpHETxa4
+- **GitHub Actions** run `test-all.mjs` on every PR; `main` takes no direct pushes.
+- **Contributing:** changing the repo itself (code, tests, docs) rather than running career-ops? Before the first edit, read these `CONTRIBUTING.md` sections: "Before Submitting a PR" (issue-first rules, owner-reviewed paths), "Guidelines", and "Development" (test layout, what to run before a PR). In short, a new feature, mode or command, or architecture change starts with an issue → discussion → PR with linked issue. Bug fixes, zero-auth scanner providers, docs and translations go straight to a PR, unless they change an owner-reviewed path; a typo fix goes straight to a PR on any path. Every PR: CI passes → maintainer review → merge.
+- **Governance:** `GOVERNANCE.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md` (private vulnerability reporting), `SUPPORT.md` (help questions go to Discord or Discussions, not issues). Discord: https://discord.gg/8pRpHETxa4
 
 ## Community asks (one at a time, once each)
 
@@ -323,7 +323,7 @@ When the user records a `hired` or `accepted` outcome, celebrate first, then off
 
 ### TSV Format for Tracker Additions
 
-A new tracker row is one TSV file per evaluation at `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`: a header row of column labels, then exactly one data row, merged by `node merge-tracker.mjs`. Read `modes/_tracker-tsv.md` before writing one: it gives the header and fields, the score sentinels, the optional `via`, `location` and `url` fields, and how the merge finds duplicates.
+A new tracker row is one TSV file per evaluation at `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`: a header row of column labels, then exactly one data row, merged by `node merge-tracker.mjs`. Read `modes/_tracker-tsv.md` before writing one: it has the fields, the score sentinels and the dedup rules.
 
 ### Pipeline Integrity
 

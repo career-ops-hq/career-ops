@@ -223,7 +223,7 @@ ok('URL match → status never downgrades (monotonic funnel)', () => {
     assert.equal(rows.length, 1);
     assert.ok(rows[0].includes('Interview'), 'status stays Interview, not downgraded to Evaluated');
     assert.ok(rows[0].includes('4.3/5'), 'score advances via LWW');
-    assert.ok(rows[0].includes('✅'), 'PDF ✅ is not lost to a ❌ re-eval (monotonic)');
+    assert.ok(rows[0].includes('✅'), 'PDF ✅ is not lost to a ❌ re-evaluation (monotonic)');
   } finally { cleanup(env); }
 });
 
@@ -271,7 +271,7 @@ ok('--backfill-urls fills empty url from the linked report, idempotently', () =>
 });
 
 // NOTE: an earlier revision of this PR also guarded against an unscoreable
-// re-eval (N/A → parseScore 0) overwriting a real score on a URL match. That
+// re-evaluation (N/A → parseScore 0) overwriting a real score on a URL match. That
 // guard is gone, deliberately: the hazard is neither URL-specific nor this
 // PR's. On pristine main an N/A re-eval already overwrites a real score through
 // the report-number tier — #2411 made re-evals write through in both

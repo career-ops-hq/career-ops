@@ -14,6 +14,8 @@ Two things this log deliberately is not: a ranking, and a promise. Rule 4 says i
 
 Until 2026-11-18 the rule said that the shared listings layer "does not copy the text of the posting". It now says what the layer does with that text: it does not serve or republish it, and it keeps a private working copy, used only to derive the fields of the card. The copy lets a field be derived again when the method improves, without asking the employer's site a second time. It is not served, it is not part of anything that can be downloaded, and it is deleted when an employer asks not to be read.
 
+Later the same day the rule was made more exact on four points. How long: the copy is kept while the posting is published and for 90 days after. What for: the fields of the card and other closed facts about the posting, such as its level, its work mode or its salary. With whom: to derive them, the text may be sent, without email addresses, phone numbers or links, to an outside AI model provider that processes it for the project under a data processing agreement and does not train on it. And what stays after a removal: when an employer asks not to be read, the copy of its postings is deleted, and the facts already derived from them are kept, with the employer's name, to study the job market.
+
 ---
 
 ## Rules 4 and 6 changed (2026-11-12)
