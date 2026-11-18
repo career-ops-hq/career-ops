@@ -109,9 +109,11 @@ export const CLI_CANDIDATES = [
 const USAGE = `
   rank-pipeline.mjs — opt-in LLM relevance re-ranker (annotates, never filters)
 
-  node rank-pipeline.mjs [--limit N] [--cli <name>] [--model <name>] [--dry-run]
+  node rank-pipeline.mjs [--limit N] [--url <url>] [--cli <name>] [--model <name>] [--dry-run]
 
     --limit N     max entries to rank this run (default ${DEFAULT_LIMIT}, ceiling ${LIMIT_CEILING})
+    --url <url>   rank only the unranked pending row whose URL cell is exactly <url>
+                  (exit 4 when there is none)
     --cli <name>  force a CLI instead of $CAREER_OPS_CLI or auto-detection
     --model <n>   passed through to the CLI when it accepts one
     --dry-run     print the annotations, write nothing
@@ -121,6 +123,7 @@ const USAGE = `
 `;
 const KNOWN_FLAGS = [
   '--limit',
+  '--url',
   '--cli',
   '--model',
   '--dry-run',
@@ -128,7 +131,16 @@ const KNOWN_FLAGS = [
   '--help',
   '-h',
 ];
-const VALUE_FLAGS = ['--limit', '--cli', '--model'];
+const VALUE_FLAGS = ['--limit', '--url', '--cli', '--model'];
+
+/**
+ * Exit statuses besides 0 (done, or nothing to rank) and 1 (error). With
+ * --url, NOT_PENDING means no unranked `- [ ] ` row has that URL as its first
+ * cell: it was ranked or skipped meanwhile, or its URL is not the first cell.
+ * The dashboard's Inbox switches on it (dashboard/inbox_exit_codes_test.go).
+ */
+export const RANK_EXIT = Object.freeze({ NOT_PENDING: 4 });
+
 /**
  * Clamp to SCORE_MIN..SCORE_MAX (lib/score-action.mjs) at one decimal, and
  * sanitize the reason so a model-generated string can never break the row's
@@ -251,6 +263,11 @@ export function applyAnnotations(text, pending, originalText = text) {
     })
     .join('\n');
   return { text: out, written };
+}
+
+/** The rows --url asks for. Exact match, so one posting never widens to another. */
+export function selectByUrl(entries, url) {
+  return entries.filter(e => e.url === url);
 }
 
 /** Respects --limit and the ceiling the flag cannot raise. Deterministic: file order. */
@@ -395,6 +412,10 @@ async function main(args) {
     console.error('--limit must be a positive integer.');
     return 1;
   }
+  if (hasFlag(args, '--url') && !flagValue(args, '--url')?.trim()) {
+    console.error('--url needs the posting URL of a pending row.');
+    return 1;
+  }
   const model = flagValue(args, '--model');
   const forced = flagValue(args, '--cli') ?? process.env.CAREER_OPS_RANK_CLI;
 
@@ -404,6 +425,10 @@ async function main(args) {
   }
 
   if (!existsSync(PIPELINE_PATH)) {
+    if (hasFlag(args, '--url')) {
+      console.error('No data/pipeline.md yet, so no row has this URL.');
+      return RANK_EXIT.NOT_PENDING;
+    }
     console.log('No data/pipeline.md yet — run a scan first. Nothing to rank.');
     return 0;
   }
@@ -420,8 +445,13 @@ async function main(args) {
   }
 
   const original = readFileSync(PIPELINE_PATH, 'utf-8');
-  const pending = parsePendingEntries(original);
+  const targetUrl = flagValue(args, '--url')?.trim();
+  const pending = targetUrl === undefined ? parsePendingEntries(original) : selectByUrl(parsePendingEntries(original), targetUrl);
   if (!pending.length) {
+    if (targetUrl !== undefined) {
+      console.error(`No unranked pending row has this URL as its first cell: ${targetUrl}`);
+      return RANK_EXIT.NOT_PENDING;
+    }
     console.log('No unranked pending entries. Nothing to do.');
     return 0;
   }

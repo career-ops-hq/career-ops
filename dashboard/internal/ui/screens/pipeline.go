@@ -387,6 +387,11 @@ type PipelineModel struct {
 	// pendingLastSkip is the URL of the last row `x` skipped in this session,
 	// which `u` puts back (pipeline_pending_skip.go). "" when there is none.
 	pendingLastSkip string
+	// pendingRankAsk is the rank the footer is asking about (`a` or `A`),
+	// waiting for `y`; pendingRanking is the rank that runs. Both are nil
+	// otherwise (pipeline_pending_rank.go).
+	pendingRankAsk *pendingRankRequest
+	pendingRanking *pendingRankRequest
 }
 
 // IsTextInputActive returns true if the search or any other text input is currently focused
@@ -476,6 +481,8 @@ func (m PipelineModel) WithReloadedData(apps []model.CareerApplication, metrics 
 	reloaded.pendingSort = m.pendingSort
 	reloaded.pendingErr = m.pendingErr
 	reloaded.pendingLastSkip = m.pendingLastSkip
+	reloaded.pendingRankAsk = m.pendingRankAsk
+	reloaded.pendingRanking = m.pendingRanking
 	reloaded.viewMode = m.viewMode
 	// Preserve search state across refresh — otherwise pressing `r` silently drops a
 	// committed query and the user loses their place mid-investigation.
@@ -551,6 +558,9 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		m.flash = ""
+		if m.pendingRankAsk != nil {
+			return m.handleRankConfirm(msg)
+		}
 		if m.hiredStep > 0 {
 			return m.handleHiredFlow(msg)
 		}
@@ -607,6 +617,8 @@ func (m PipelineModel) Update(msg tea.Msg) (PipelineModel, tea.Cmd) {
 		return m.onQueueEvalDone(msg), nil
 	case PipelineSkipDoneMsg:
 		return m.onSkipDone(msg), nil
+	case PipelineRankDoneMsg:
+		return m.onRankDone(msg), nil
 	case pipelineStartDiscardPickerMsg:
 		// The status change that starts this flow came from a tracker tab; if
 		// the user has since moved to the Inbox, which has no tracker rows, go
@@ -2614,6 +2626,14 @@ func (m PipelineModel) renderHelp() string {
 	budget := m.width - 2
 	if budget < 1 {
 		budget = 1
+	}
+
+	if prompt := m.rankPrompt(); prompt != "" {
+		promptStyle := lipgloss.NewStyle().
+			Foreground(m.theme.Peach).
+			Background(m.theme.Surface).
+			Padding(0, 1)
+		return oneLine(m.width, promptStyle, fitPlain(budget, sanitizeFlash(prompt)))
 	}
 
 	if m.flash != "" {

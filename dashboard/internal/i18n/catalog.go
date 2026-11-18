@@ -134,6 +134,8 @@ type Catalog struct {
 	HelpQueue      string
 	HelpSkip       string
 	HelpUndoSkip   string
+	HelpRankRow    string
+	HelpRankAll    string
 	HelpOpenPDF    string
 	HelpCopyPDF    string
 	HelpRegenPDF   string
@@ -224,6 +226,23 @@ type Catalog struct {
 	InboxUndoUnchanged  string
 	InboxUndoGone       string
 	InboxUndoFailed     string
+
+	// Inbox `a` and `A`: rank the selected row, or the unranked rows, through
+	// rank-pipeline.mjs after a `y` (#5269)
+	InboxRankAskRow     string
+	InboxRankAskAll     string
+	InboxRankAskSome    string
+	InboxRankCancelled  string
+	InboxRanking        string
+	InboxRankRunning    string
+	InboxRankBusy       string
+	InboxRankAlready    string
+	InboxRankNone       string
+	InboxRankFailed     string
+	InboxRankNotPending string
+	InboxRankedRow      string
+	InboxRankNoScore    string
+	InboxRankedAll      string
 }
 
 // SortModeLabel returns the localized display label for a sort mode ("score", "date", etc.).
@@ -488,6 +507,8 @@ var En = Catalog{
 	HelpQueue:      " queue  ",
 	HelpSkip:       " skip  ",
 	HelpUndoSkip:   " undo skip  ",
+	HelpRankRow:    " rank  ",
+	HelpRankAll:    " rank all  ",
 	HelpOpenPDF:    " open PDF  ",
 	HelpCopyPDF:    " copy PDF path  ",
 	HelpRegenPDF:   " regen PDF  ",
@@ -575,6 +596,21 @@ var En = Catalog{
 	InboxUndoUnchanged:  "Not skipped any more, nothing to undo: %s",
 	InboxUndoGone:       "Not put back: the row is no longer in the Pending section of data/pipeline.md: %s",
 	InboxUndoFailed:     "Could not undo the skip; u tries again: %s",
+
+	InboxRankAskRow:     "Rank this row with your agent CLI? It uses your CLI and tokens. y starts, any other key cancels: %s",
+	InboxRankAskAll:     "Rank %d unranked rows with your agent CLI? It uses your CLI and tokens. y starts, any other key cancels",
+	InboxRankAskSome:    "Rank the first %d of %d unranked rows with your agent CLI? It uses your CLI and tokens. y starts, any other key cancels",
+	InboxRankCancelled:  "Cancelled, nothing ranked",
+	InboxRanking:        "Ranking %d row(s) with your agent CLI ...",
+	InboxRankRunning:    "ranking %d ...",
+	InboxRankBusy:       "A rank is already running; wait for it to finish",
+	InboxRankAlready:    "Already ranked, nothing to do: %s",
+	InboxRankNone:       "Every row is ranked, nothing to do",
+	InboxRankFailed:     "Could not rank: %s",
+	InboxRankNotPending: "Not ranked: the URL must come first after \"- [ ] \" in data/pipeline.md, with no rank yet: %s",
+	InboxRankedRow:      "Ranked %.1f/5: %s",
+	InboxRankNoScore:    "No score came back; a tries again: %s",
+	InboxRankedAll:      "Ranked %d row(s); %d still not ranked",
 }
 
 // Tr is the static Turkish translation catalog.
@@ -703,6 +739,8 @@ var Tr = Catalog{
 	HelpQueue:      " sıraya al  ",
 	HelpSkip:       " atla  ",
 	HelpUndoSkip:   " atlamayı geri al  ",
+	HelpRankRow:    " sırala  ",
+	HelpRankAll:    " tümünü sırala  ",
 	HelpOpenPDF:    " PDF'i aç  ",
 	HelpCopyPDF:    " PDF yolunu kopyala  ",
 	HelpRegenPDF:   " PDF üret  ",
@@ -790,6 +828,21 @@ var Tr = Catalog{
 	InboxUndoUnchanged:  "Artık atlanmış değil, geri alınacak bir şey yok: %s",
 	InboxUndoGone:       "Geri getirilmedi: satır artık data/pipeline.md dosyasının Pending bölümünde değil: %s",
 	InboxUndoFailed:     "Atlama geri alınamadı; u ile yeniden deneyin: %s",
+
+	InboxRankAskRow:     "Bu satır ajan CLI'nizle sıralansın mı? CLI'nizi ve token'larınızı kullanır. y başlatır, başka bir tuş iptal eder: %s",
+	InboxRankAskAll:     "Sıralanmamış %d satır ajan CLI'nizle sıralansın mı? CLI'nizi ve token'larınızı kullanır. y başlatır, başka bir tuş iptal eder",
+	InboxRankAskSome:    "Sıralanmamış %[2]d satırın ilk %[1]d tanesi ajan CLI'nizle sıralansın mı? CLI'nizi ve token'larınızı kullanır. y başlatır, başka bir tuş iptal eder",
+	InboxRankCancelled:  "İptal edildi, hiçbir satır sıralanmadı",
+	InboxRanking:        "%d satır ajan CLI'nizle sıralanıyor ...",
+	InboxRankRunning:    "%d sıralanıyor ...",
+	InboxRankBusy:       "Bir sıralama zaten sürüyor; bitmesini bekleyin",
+	InboxRankAlready:    "Zaten sıralanmış, yapılacak bir şey yok: %s",
+	InboxRankNone:       "Tüm satırlar sıralanmış, yapılacak bir şey yok",
+	InboxRankFailed:     "Sıralanamadı: %s",
+	InboxRankNotPending: "Sıralanmadı: URL, data/pipeline.md içinde \"- [ ] \" ifadesinden hemen sonra gelmeli ve henüz sırası olmamalı: %s",
+	InboxRankedRow:      "Sıralandı %.1f/5: %s",
+	InboxRankNoScore:    "Puan dönmedi; a ile yeniden deneyin: %s",
+	InboxRankedAll:      "%d satır sıralandı; %d satır hâlâ sıralanmadı",
 }
 
 // Es is the static Spanish translation catalog.
@@ -918,6 +971,8 @@ var Es = Catalog{
 	HelpQueue:      " encolar  ",
 	HelpSkip:       " omitir  ",
 	HelpUndoSkip:   " deshacer omisión  ",
+	HelpRankRow:    " rango  ",
+	HelpRankAll:    " rango a todas  ",
 	HelpOpenPDF:    " abrir PDF  ",
 	HelpCopyPDF:    " copiar ruta del PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
@@ -1005,6 +1060,21 @@ var Es = Catalog{
 	InboxUndoUnchanged:  "Ya no está omitida; nada que deshacer: %s",
 	InboxUndoGone:       "No se devolvió: la fila ya no está en la sección Pending de data/pipeline.md: %s",
 	InboxUndoFailed:     "No se pudo deshacer la omisión; u lo intenta de nuevo: %s",
+
+	InboxRankAskRow:     "¿Asignar rango a esta fila con tu CLI de agente? Usa tu CLI y tus tokens. y empieza, cualquier otra tecla cancela: %s",
+	InboxRankAskAll:     "¿Asignar rango a %d filas sin rango con tu CLI de agente? Usa tu CLI y tus tokens. y empieza, cualquier otra tecla cancela",
+	InboxRankAskSome:    "¿Asignar rango a las primeras %d de %d filas sin rango con tu CLI de agente? Usa tu CLI y tus tokens. y empieza, cualquier otra tecla cancela",
+	InboxRankCancelled:  "Cancelado, ninguna fila recibió rango",
+	InboxRanking:        "Asignando rango a %d fila(s) con tu CLI de agente ...",
+	InboxRankRunning:    "asignando rango a %d ...",
+	InboxRankBusy:       "Ya hay una asignación de rango en curso; espera a que termine",
+	InboxRankAlready:    "Ya tiene rango, nada que hacer: %s",
+	InboxRankNone:       "Todas las filas tienen rango, nada que hacer",
+	InboxRankFailed:     "No se pudo asignar rango: %s",
+	InboxRankNotPending: "Sin rango: la URL debe ir justo después de \"- [ ] \" en data/pipeline.md y sin rango previo: %s",
+	InboxRankedRow:      "Rango %.1f/5: %s",
+	InboxRankNoScore:    "No llegó ninguna puntuación; a lo intenta de nuevo: %s",
+	InboxRankedAll:      "%d fila(s) con rango nuevo; %d siguen sin rango",
 }
 
 // Current points to the active language catalog. Defaults to English (&En).
