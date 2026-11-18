@@ -8,9 +8,10 @@ export function matchEvaluatedPosting(evaluated, offer, norm) {
       if (!normalizeUrl(row?.url)) continue;
       if (postingUrlRelation(row.url, offer.url) === "same") return row;
     }
-    return null;
   }
 
+  // A tracker row with no URL cannot be compared by posting, so it falls back
+  // to an exact company and title match.
   const company = norm(offer?.company);
   const title = norm(offer?.title ?? "");
   if (!title) return null;

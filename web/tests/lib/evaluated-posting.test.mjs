@@ -50,6 +50,16 @@ test("a nearby title is not evaluated when the offer has its own URL", () => {
   assert.equal(matchEvaluatedPosting(rows, offer, norm), null);
 });
 
+test("a tracker row with no URL matches an offer with a URL by exact company and title", () => {
+  const rows = [{ n: "5", company: "Acme", role: "Operations analyst", url: "" }];
+  const offer = {
+    company: "Acme",
+    title: "Operations analyst",
+    url: "https://jobs.example/acme/posting-c",
+  };
+  assert.equal(matchEvaluatedPosting(rows, offer, norm)?.n, "5");
+});
+
 test("a scored URL does not match an offer that has no URL", () => {
   const offer = { company: "Acme", title: "Operations analyst", url: "" };
   assert.equal(matchEvaluatedPosting(scored, offer, norm), null);
