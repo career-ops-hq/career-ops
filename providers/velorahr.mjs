@@ -110,9 +110,11 @@ function offerId(id) {
  *   payload `id`, which must be a positive integer (so it needs no escaping,
  *   as the slug, restricted by SITE_SEGMENT_RE, does not either); a row without one, or
  *   without a title, is dropped.
- * - title: `clean_title`, falling back to `title` (which carries the tenant's
- *   internal requisition code in brackets).
- * - listingIdentity: `velorahr` / site id / payload `id`.
+ * - title: `clean_title`, or `title` when `clean_title` is blank (`title` carries
+ *   the tenant's internal requisition code in brackets).
+ * - listingIdentity: `velorahr` / site id / payload `id`, omitted when the raw
+ *   `id` is a string with surrounding whitespace (identity ids are never trimmed;
+ *   the row keeps its URL and falls back to URL dedup).
  *
  * @param {any} json
  * @param {{companyName: string, origin: string, slug: string, siteId: string}} site
@@ -128,8 +130,11 @@ export function parseVeloraHrPage(json, site) {
   const jobs = [];
   for (const o of rows) {
     if (!o || typeof o !== 'object') continue;
-    const title = String(o.clean_title || o.title || '').trim();
+    // Each candidate is trimmed on its own, so a blank `clean_title` does not
+    // shadow a usable `title`; non-string values count as absent.
+    const title = [o.clean_title, o.title].map(t => (typeof t === 'string' ? t.trim() : '')).find(Boolean) || '';
     const id = offerId(o.id);
+    const padded = typeof o.id === 'string' && o.id !== o.id.trim();
     if (!title || !id) continue;
 
     const country = typeof o.country === 'string' && o.country.trim() ? o.country.trim() : undefined;
@@ -151,7 +156,7 @@ export function parseVeloraHrPage(json, site) {
       ...(workplaceType ? { workplaceType } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
       ...(description ? { description } : {}),
-      listingIdentity: { ats_provider: 'velorahr', board_slug: site.siteId, posting_id: id },
+      ...(padded ? {} : { listingIdentity: { ats_provider: 'velorahr', board_slug: site.siteId, posting_id: id } }),
     });
   }
   return { jobs, rawCount: rows.length };
@@ -182,6 +187,8 @@ export default {
     let offset = 0;
     let total = null;
     let hitCap = false;
+    let rawTotal = 0; // rows the source returned, before normalisation
+    let shortRead = false;
     for (let page = 0; ; page++) {
       if (page >= pagesToFetch) {
         hitCap = true; // reached only when the last page fetched did not end the walk
@@ -201,16 +208,22 @@ export default {
         throw new Error(`velorahr: ${entry.name} returned a body that is not JSON`);
       }
       const { jobs: pageJobs, rawCount } = parseVeloraHrPage(json, parseSite);
-      const reported = Number(res.headers?.get?.('content-range')?.split('/')[1]);
-      if (Number.isFinite(reported)) total = reported;
+      // The total is this page's own: a page without a usable header must not
+      // keep driving the stop from an earlier page's number.
+      const reportedMatch = /\/(\d+)\s*$/.exec(res.headers?.get?.('content-range') ?? '');
+      total = reportedMatch ? Number(reportedMatch[1]) : null;
       for (const job of pageJobs) {
         if (seen.has(job.url)) continue;
         seen.add(job.url);
         jobs.push(job);
       }
       offset += rawCount;
+      rawTotal += rawCount;
       // The walk ends on the source's own page shape: an empty page, or the
       // reported total reached (a short page when none was reported).
+      // An empty page while the reported total is not reached is an incomplete
+      // read, not the end of the board.
+      if (rawCount === 0 && total !== null && offset < total) shortRead = true;
       const done = rawCount === 0 || (total !== null ? offset >= total : rawCount < PAGE_SIZE);
       if (done) break;
     }
@@ -220,9 +233,16 @@ export default {
       markTruncated(jobs, 'page-cap', total !== null ? { fetched: jobs.length, total } : { fetched: jobs.length });
     }
 
+    if (shortRead) {
+      console.error(`⚠️  velorahr: ${entry.name} returned an empty page at offset ${offset} of ${total} reported offers — the list is incomplete`);
+      markTruncated(jobs, 'short-page', { fetched: jobs.length, total: /** @type {number} */ (total) });
+    }
+
     // Total 0 is also the answer for an unknown site id: only the careers page
     // (404 when the id is wrong) tells a real empty board from a typo.
-    if (!jobs.length) {
+    // Decided on the rows the source returned: rows that all failed to parse
+    // are not an empty answer.
+    if (rawTotal === 0) {
       await fetchTextWithRetry(ctx, `${site.origin}/${site.slug}`, { redirect: 'error' });
     }
     return jobs;

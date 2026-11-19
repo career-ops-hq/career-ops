@@ -90,6 +90,59 @@ try {
   }
   const rangeStart = (u) => Number(/^\[(\d+),/.exec(u.searchParams.get('range') || '')?.[1]);
 
+  // --- fetch(): blank clean_title must not shadow a usable title --------
+  {
+    const rows = [
+      offer(201, { clean_title: '   ', title: ' [REQ-1] Spaced title ' }),
+      offer(202, { clean_title: { toString: null }, title: 'Object clean title' }),
+      offer(203, { clean_title: '   ', title: '   ' }),
+    ];
+    const jobs = await velorahr.fetch(entry, makeCtx({ list: () => page(rows, rows.length) }));
+    if (jobs.length === 2 && jobs[0].title === '[REQ-1] Spaced title' && jobs[1].title === 'Object clean title') {
+      pass('velorahr.fetch() trims each title candidate before choosing the fallback');
+    } else {
+      fail(`velorahr.fetch() blank clean_title cases: ${JSON.stringify(jobs.map(j => j.title))}`);
+    }
+  }
+
+  // --- fetch(): padded ids, stale totals, short pages, raw-count probe ---
+  {
+    const jobs = await velorahr.fetch(entry, makeCtx({ list: () => page([offer(' 301 '), offer(302), offer('303')]) }));
+    const byUrl = Object.fromEntries(jobs.map(j => [j.url.split('/').pop(), j]));
+    if (jobs.length === 3 && !('listingIdentity' in byUrl['301']) && byUrl['302'].listingIdentity?.posting_id === '302' && byUrl['303'].listingIdentity?.posting_id === '303') {
+      pass('velorahr.fetch() omits listingIdentity for a padded id and keeps the row and its URL');
+    } else {
+      fail(`velorahr padded id: ${JSON.stringify(jobs.map(j => [j.url, j.listingIdentity]))}`);
+    }
+
+    // A later page without Content-Range must not reuse page 1's total (150 < the real 230).
+    const all = Array.from({ length: 230 }, (_, i) => offer(1000 + i));
+    const noHeader = makeCtx({ list: (u) => {
+      const s = rangeStart(u);
+      const rows = all.slice(s, s + 100);
+      return s === 0 ? page(rows, 150) : json({ data: rows, success: true });
+    } });
+    const walked = await velorahr.fetch(entry, noHeader);
+    if (walked.length === 230) pass('velorahr.fetch() drops a stale total when a page has no Content-Range');
+    else fail(`velorahr stale total: ${walked.length} jobs after ${noHeader.calls.list.length} requests`);
+
+    // An empty page while the total is unreached: partial, with its own reason and warning.
+    const shortCtx = makeCtx({ list: (u) => (rangeStart(u) === 0 ? page(all.slice(0, 100), 230) : page([], 230)) });
+    const { result: shortJobs, errors: shortErrors } = await captureConsoleErrors(() => velorahr.fetch(entry, shortCtx));
+    if (shortJobs.length === 100 && shortJobs.truncated?.reason === 'short-page' && shortJobs.truncated.total === 230
+        && shortErrors.length === 1 && !/raise max_pages/.test(String(shortErrors[0]))) {
+      pass('velorahr.fetch() marks an empty page short of the reported total as a partial read, without the max_pages message');
+    } else {
+      fail(`velorahr short page: ${shortJobs.length} jobs, ${JSON.stringify(shortJobs.truncated)}, ${JSON.stringify(shortErrors)}`);
+    }
+
+    // Rows that all fail to parse are not an empty board: no careers-page check.
+    const bad = makeCtx({ list: () => page([offer(null), { id: 5 }]), text: () => { throw httpError(500); } });
+    const badJobs = await velorahr.fetch(entry, bad);
+    if (badJobs.length === 0 && bad.calls.text.length === 0) pass('velorahr.fetch() checks the careers page only when the source returned no rows');
+    else fail(`velorahr raw-count probe: ${badJobs.length} jobs, ${bad.calls.text.length} page checks`);
+  }
+
   // --- fetch(): normalisation -------------------------------------------
   {
     const rows = [
@@ -311,13 +364,24 @@ try {
       fail(`velorahr probe: ${probe.calls.list.length} requests, ${probeErrors.length} warnings`);
     }
 
-    // A rejection while probing propagates as the same object, unwrapped.
+    // A rejection the shared retry policy treats as final (here a timeout) propagates as the
+    // same object, unwrapped, after exactly one request and no retry sleep, on the list request
+    // and on the empty-board careers-page check alike.
     class ProbeBudget extends Error {}
-    const budget = new ProbeBudget('budget');
+    const budget = Object.assign(new ProbeBudget('budget'), { timedOut: true });
+    const listCtx = makeCtx({ maxPages: 1, list: () => { throw budget; } });
     let thrown;
-    try { await velorahr.fetch(entry, makeCtx({ maxPages: 1, list: () => { throw budget; } })); } catch (e) { thrown = e; }
-    if (thrown === budget) pass('velorahr.fetch() propagates a ctx.fetch* rejection unwrapped while probing');
-    else fail(`velorahr probe rejection was rewrapped: ${thrown?.message}`);
+    try { await velorahr.fetch(entry, listCtx); } catch (e) { thrown = e; }
+    const textCtx = makeCtx({ maxPages: 1, list: () => page([], 0), text: () => { throw budget; } });
+    let thrownText;
+    try { await velorahr.fetch(entry, textCtx); } catch (e) { thrownText = e; }
+    if (thrown === budget && thrownText === budget
+        && listCtx.calls.list.length === 1 && textCtx.calls.list.length === 1 && textCtx.calls.text.length === 1
+        && listCtx.calls.sleeps === 0 && textCtx.calls.sleeps === 0) {
+      pass('velorahr.fetch() propagates a ctx.fetch* rejection unwrapped while probing, with one request and no retry');
+    } else {
+      fail(`velorahr probe rejection: ${thrown?.message}, ${thrownText?.message}, ${listCtx.calls.list.length}/${textCtx.calls.text.length} requests, ${listCtx.calls.sleeps + textCtx.calls.sleeps} sleeps`);
+    }
 
     // Failure on page 2 that retry cannot clear fails the board (no silent partial list) and
     // never prints the "raise max_pages" warning.
