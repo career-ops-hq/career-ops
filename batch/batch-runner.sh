@@ -1292,7 +1292,7 @@ process_offer() {
     local redirect_count=0
     local redirect_headers
     local redirect_location
-    local curl_meta
+    local jd_meta_file
     while :; do
       if ! _egress_pin=$(node "$PROJECT_DIR/lib/egress-pin.mjs" "$current_url" 2>/dev/null); then
         echo "    ℹ️  JD prefetch: blocked — private/loopback destination ($current_url)"
@@ -1304,8 +1304,9 @@ process_offer() {
         # prefetch block is extracted and run in isolation by
         # tests/batch-runner-jd-prefetch.test.mjs, where $jd_tmp_dir is not set).
         redirect_headers="$(mktemp "${TMPDIR:-/tmp}/batch-jd-headers.XXXXXX")"
+        jd_meta_file="$(mktemp "${TMPDIR:-/tmp}/batch-jd-meta.XXXXXX")"
         curl_status=0
-        curl_meta="$(curl --silent --show-error --location --max-redirs 0 \
+        curl --silent --show-error --location --max-redirs 0 \
           --max-time 20 --connect-timeout 5 \
           --fail --compressed \
           --proto '=http,https' --proto-redir 'https,http' --max-filesize 5000000 \
@@ -1315,8 +1316,9 @@ process_offer() {
           --write-out '%{http_code}\t%{url_effective}' \
           --output "$jd_file" \
           ${_egress_pin:+--resolve "$_egress_pin"} \
-          -- "$current_url" 2>/dev/null)" || curl_status=$?
-        IFS=$'\t' read -r jd_http_code jd_final_url <<< "$curl_meta" 2>/dev/null || true
+          -- "$current_url" > "$jd_meta_file" 2>/dev/null || curl_status=$?
+        IFS=$'\t' read -r jd_http_code jd_final_url < "$jd_meta_file" 2>/dev/null || true
+        rm -f "$jd_meta_file"
         jd_http_code="${jd_http_code//[^0-9]/}"
         jd_http_code="${jd_http_code:-0}"
         redirect_location=""
