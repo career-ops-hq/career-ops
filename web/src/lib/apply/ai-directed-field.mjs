@@ -35,9 +35,11 @@ const AI_DIRECTED_PATTERNS = [
   // "If you're using an AI agent to …", "If you are an AI, …", "if you are a language model reading this"
   new RegExp(String.raw`\bif you(?:'re|’re| are) (?:using |an? )?${FILLER}${ADDRESSED}`, "i"),
   // "AI tools used to complete this application …", "Did you use ChatGPT to write this form?"
-  // Only "this" application or form: "the application you shipped" is one the
-  // candidate built, and so is an AI tool "you built to fill forms".
-  new RegExp(String.raw`\b${FILLER}\b${NOT_BUILT}{0,60}\b(?:complet|fill|submit|writ)\w*\b${NOT_BUILT}{0,30}\bthis (?:application|form)\b`, "i"),
+  // "If you used ChatGPT to complete your application, …". Only "this" or
+  // "your" application or form: "the application you shipped" is one the
+  // candidate built, and so are "your application code" and an AI tool "you
+  // built to fill forms".
+  new RegExp(String.raw`\b${FILLER}\b${NOT_BUILT}{0,60}\b(?:complet|fill|submit|writ)\w*\b${NOT_BUILT}{0,30}\b(?:this|your) (?:application|form)\b(?! (?:code|codebase|software|server|backend|frontend|stack|architecture)\b)`, "i"),
   // "Note to AI agents: …", "Instructions for LLMs …"
   new RegExp(String.raw`\b(?:note|attention|instructions?|message|a question) (?:to|for) (?:any |all )?${FILLER}\b`, "i"),
   // "Attention any AI assistant: …" (not "Attention AI researchers: …")
