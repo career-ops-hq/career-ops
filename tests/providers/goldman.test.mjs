@@ -237,6 +237,71 @@ try {
   });
   if (enc.length === 1 && enc[0].url === 'https://higher.gs.com/roles/a%20b%2F1') pass('goldman role URLs go through safeEncodeURIComponent (bad id dropped, clean id escaped)');
   else fail(`encoding: ${JSON.stringify(enc)}`);
+
+  // A full page whose rows are all malformed is a distinct page, not a repeat:
+  // the walk goes on and reads the valid page after it.
+  const badCalls = [];
+  const badPage = Array.from({ length: 100 }, (_, i) => ({ roleId: `b${i}`, jobTitle: '', externalSource: { sourceId: String(500000 + i) } }));
+  const afterBad = await provider.fetch({ name: 'Acme', careers_url: SITE }, {
+    transport: 'http',
+    sleep: async () => {},
+    fetchJson: async (url, opts) => {
+      badCalls.push(opts);
+      const page = JSON.parse(opts.body).variables.searchQueryInput.page.pageNumber;
+      if (page === 0) return { data: { roleSearch: { totalCount: 105, items: badPage } } };
+      if (page === 1) return { data: { roleSearch: { totalCount: 105, items: [item('600001', 'After the bad page')] } } };
+      return { data: { roleSearch: { totalCount: 105, items: [] } } };
+    },
+  });
+  if (badCalls.length === 2 && afterBad.length === 1 && afterBad[0].title === 'After the bad page') {
+    pass('goldman.fetch() pages past a full page of malformed rows and reads the next page');
+  } else {
+    fail(`malformed page: ${badCalls.length} calls, rows ${JSON.stringify(afterBad.map((r) => r.title))}`);
+  }
+
+  // The same malformed page served for every pageNumber is a repeat and ends the walk.
+  const repeatCalls = [];
+  await provider.fetch({ name: 'Acme', careers_url: SITE }, {
+    transport: 'http',
+    sleep: async () => {},
+    fetchJson: async (url, opts) => { repeatCalls.push(opts); return { data: { roleSearch: { totalCount: 900, items: badPage } } }; },
+  });
+  if (repeatCalls.length === 2) pass('goldman.fetch() ends the walk when the same raw page comes back');
+  else fail(`repeated malformed page: ${repeatCalls.length} calls`);
+
+  // Ids that cannot form a role URL, padded ids, and separate locations.
+  const odd = await provider.fetch({ name: 'Acme', careers_url: SITE }, {
+    transport: 'http',
+    sleep: async () => {},
+    fetchJson: async () => ({ data: { roleSearch: { totalCount: 5, items: [
+      item('..', 'Dot dot'),
+      item('.', 'Dot'),
+      item(' 187400 ', 'Padded'),
+      item('187401', 'Two places', [
+        { primary: true, city: 'New York', state: 'New York', country: 'United States' },
+        { primary: false, city: 'London', country: 'United Kingdom' },
+        { primary: false, city: 'London', country: 'United Kingdom' },
+      ]),
+      item('187402', 'No place', []),
+    ] } } }),
+  });
+  const byTitle = Object.fromEntries(odd.map((r) => [r.title, r]));
+  if (!byTitle['Dot dot'] && !byTitle.Dot) pass('goldman.fetch() skips ids "." and ".." that cannot form a role URL');
+  else fail(`dot ids kept: ${JSON.stringify(odd.map((r) => r.url))}`);
+  const padded = byTitle.Padded;
+  if (padded && !('listingIdentity' in padded) && padded.externalId === ' 187400 ') {
+    pass('goldman.fetch() keeps a padded-id row for URL dedup but omits its listingIdentity');
+  } else {
+    fail(`padded id row = ${JSON.stringify(padded)}`);
+  }
+  const two = byTitle['Two places'];
+  if (two && JSON.stringify(two.locations) === JSON.stringify(['New York, New York, United States', 'London, United Kingdom'])
+      && two.location === 'New York, New York, United States; London, United Kingdom'
+      && byTitle['No place'] && !('locations' in byTitle['No place'])) {
+    pass('goldman.fetch() returns separate, deduplicated locations and omits the key when there are none');
+  } else {
+    fail(`locations = ${JSON.stringify(two)} / ${JSON.stringify(byTitle['No place'])}`);
+  }
 } catch (e) {
   fail(`goldman provider tests crashed: ${e.stack || e.message}`);
 }

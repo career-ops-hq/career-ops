@@ -83,8 +83,23 @@ function formatLocation(loc) {
 }
 
 /**
- * Map one roleSearch item to a Job, or null when it lacks a title or a usable
- * posting id. Exported for tests.
+ * The posting id as a listingIdentity part, or null when it is unusable there:
+ * missing, empty, padded or carrying a control character. Never trimmed, so a
+ * padded id falls back to URL dedup instead of becoming a different key.
+ * @param {unknown} raw
+ * @returns {string|null}
+ */
+function identityId(raw) {
+  if (typeof raw === 'number') return Number.isSafeInteger(raw) && raw >= 0 ? String(raw) : null;
+  if (typeof raw !== 'string' || raw === '' || raw !== raw.trim()) return null;
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f-\u009f]/.test(raw)) return null;
+  return raw;
+}
+
+/**
+ * Map one roleSearch item to a Job, or null when it lacks a title or an id
+ * that forms a role URL. Exported for tests.
  * @param {any} it
  * @param {string} company
  * @returns {Job|null}
@@ -96,17 +111,23 @@ export function toJob(it, company) {
   const id = typeof rawId === 'string' || typeof rawId === 'number' ? String(rawId) : '';
   if (!title || !id) return null;
   const encoded = safeEncodeURIComponent(id);
-  if (encoded === null) return null;
+  // `.` and `..` survive encoding unchanged and resolve /roles/.. to the
+  // careers home page, not a posting.
+  if (encoded === null || encoded === '.' || encoded === '..') return null;
   const locs = Array.isArray(it.locations) ? it.locations.filter((l) => l && typeof l === 'object') : [];
   const ordered = [...locs.filter((l) => l.primary), ...locs.filter((l) => !l.primary)];
-  const location = [...new Set(ordered.map(formatLocation).filter(Boolean))].join('; ');
+  const locations = [...new Set(ordered.map(formatLocation).filter(Boolean))];
+  const postingId = identityId(rawId);
   return {
     title,
     url: `${ROLE_BASE}${encoded}`,
     company,
-    location,
+    location: locations.join('; '),
+    ...(locations.length > 0 ? { locations } : {}),
     externalId: id,
-    listingIdentity: { ats_provider: 'goldman', board_slug: SITE_HOST, posting_id: id },
+    ...(postingId === null ? {} : {
+      listingIdentity: { ats_provider: 'goldman', board_slug: SITE_HOST, posting_id: postingId },
+    }),
   };
 }
 
@@ -161,6 +182,10 @@ export default {
     const out = new Map();
     let total = null;
     let ended = false; // set only by a natural end of the board
+    /** @type {Set<string>} */
+    const seenPages = new Set();
+    /** @type {Set<string>} */
+    const seenRawIds = new Set();
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
       const body = JSON.stringify({
@@ -184,17 +209,24 @@ export default {
       }, RETRY_POLICY);
       const rs = roleSearchOf(res);
       if (total === null && Number.isInteger(rs.totalCount)) total = rs.totalCount;
-      let fresh = 0;
       for (const it of rs.items) {
         const job = toJob(it, entry.name);
-        if (!job || out.has(job.url)) continue;
-        out.set(job.url, job);
-        fresh++;
+        if (job && !out.has(job.url)) out.set(job.url, job);
       }
       // Only the board itself ends the walk: an empty page, a short page, or a
-      // page with nothing new (the API ignoring pageNumber). totalCount is
-      // never proof the walk is complete.
-      if (rs.items.length === 0 || rs.items.length < PAGE_SIZE || fresh === 0) { ended = true; break; }
+      // repeated page (the API ignoring pageNumber). totalCount is never proof
+      // the walk is complete. A repeat is judged on the raw page, not on what
+      // survived toJob(): a full page of malformed rows is still a distinct
+      // page, and the next one can hold valid roles.
+      if (rs.items.length === 0 || rs.items.length < PAGE_SIZE) { ended = true; break; }
+      const pageSig = JSON.stringify(rs.items);
+      const rawIds = rs.items.map((it) => it?.externalSource?.sourceId)
+        .filter((v) => typeof v === 'string' || typeof v === 'number').map(String);
+      const repeated = seenPages.has(pageSig)
+        || (rawIds.length > 0 && rawIds.every((v) => seenRawIds.has(v)));
+      if (repeated) { ended = true; break; }
+      seenPages.add(pageSig);
+      for (const v of rawIds) seenRawIds.add(v);
     }
     const jobs = [...out.values()];
     if (!ended && !probing) {
