@@ -25,13 +25,21 @@ const FILLER = String.raw`(?:an? )?(?:ai|a\.i\.|artificial intelligence|llms?|la
 // "an AI researcher" and "AI tools in your daily work" do not.
 const ADDRESSED = String.raw`(?=\s*(?:[,.:;!?)]|$|(?:to|reading|filling|completing|or|and|please|that|who)\b))`;
 
+// One character of a gap that does not start a word for something the
+// candidate made: "the AI tool you built to fill forms" is their own work.
+const NOT_BUILT = String.raw`(?:(?!\b(?:built|build|shipped|ship|developed|develop|created|create|designed|design|made)\b)[^.?!])`;
+
 const AI_DIRECTED_PATTERNS = [
   // "If you're using an AI agent to …", "If you are an AI, …", "if you are a language model reading this"
   new RegExp(String.raw`\bif you(?:'re|’re| are) (?:using |an? )?${FILLER}${ADDRESSED}`, "i"),
   // "AI tools used to complete this application …", "Did you use ChatGPT to write this form?"
-  new RegExp(String.raw`\b${FILLER}\b[^.?!]{0,60}\b(?:complet|fill|submit|writ)\w*\b[^.?!]{0,30}\b(?:this|the) (?:application|form)\b`, "i"),
-  // "Note to AI agents: …", "Instructions for LLMs …", "Attention any AI assistant"
+  // Only "this" application or form: "the application you shipped" is one the
+  // candidate built, and so is an AI tool "you built to fill forms".
+  new RegExp(String.raw`\b${FILLER}\b${NOT_BUILT}{0,60}\b(?:complet|fill|submit|writ)\w*\b${NOT_BUILT}{0,30}\bthis (?:application|form)\b`, "i"),
+  // "Note to AI agents: …", "Instructions for LLMs …"
   new RegExp(String.raw`\b(?:note|attention|instructions?|message|a question) (?:to|for) (?:any |all )?${FILLER}\b`, "i"),
+  // "Attention any AI assistant: …" (not "Attention AI researchers: …")
+  new RegExp(String.raw`\battention,? (?:any |all )?${FILLER}${ADDRESSED}`, "i"),
   // "AI agents: include the word …", "Dear LLM, …" opening the label. A bare
   // "AI," is not enough: "AI, ML experience" is a skills question.
   /^\s*(?:dear |hey |hi )?(?:(?:ai|a\.i\.|gpt|chatgpt|claude|gemini|copilot) (?:agents?|assistants?|models?|bots?)|llms?|language models?|chatgpt|claude)\s*[:,]/i,
