@@ -41,6 +41,7 @@ import { resolveTrackerPath, resolveWorkspaceRoot, resolvePdfIndexPath, trackerL
 import { normalizeUrl, isAggregatorUrl, aggregatorPostingId, postingUrlRelation } from './url-key.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { machineSummarySection } from './lib/machine-summary-section.mjs';
 import { syncTrackerPdfFlags } from './sync-pdf-flags.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -583,10 +584,14 @@ export async function mergeTracker(options = {}) {
     if (!reportPath) return '';
     const fence = machineSummarySection(readFileSync(reportPath, 'utf-8'))
       .match(/^##\s*Machine Summary\s*\n+```(?:yaml|yml)?\s*\n([\s\S]*?)\n```/i);
-    const m = fence && fence[1].match(/^posting_location:[ \t]*(.*)$/m);
-    if (!m) return '';
-    const value = m[1].trim().replace(/^(["'])(.*)\1$/, '$2').trim();
-    return value === 'null' || value === '~' ? '' : value;
+    if (!fence) return '';
+    try {
+      const location = loadYaml(fence[1])?.posting_location;
+      return typeof location === 'string' ? location.trim() : '';
+    } catch {
+      // A malformed optional summary should not prevent the tracker merge.
+      return '';
+    }
   }
 
   // A row's posting URL for the URL guards: its URL cell, else the URL its
@@ -686,6 +691,9 @@ export async function mergeTracker(options = {}) {
     const isRepeat = incoming !== '' && prev.split(/\.\s+/).map(clause)
       .some(c => c === incomingClause || c.endsWith(`: ${incomingClause}`));
     const tail = incoming && !isRepeat ? `${marker}: ${incoming}` : marker;
+    // The dashboard reads a Location label through the next semicolon.
+    // Preserve the entire place name, including punctuation such as "D.C.".
+    if (/\blocation:[^;]*$/i.test(prevRaw)) return `${prevRaw}; ${tail}`;
     return prev ? `${prev}. ${tail}` : tail;
   }
 

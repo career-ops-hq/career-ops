@@ -143,3 +143,28 @@ ok('a Machine Summary inside the archived JD is not read', () => {
     assert.match(rows(env)[0], /\| Solutions Engineer \| Austin, TX \|/);
   });
 });
+
+for (const [yaml, expected] of [
+  ["'St. John''s, NL' # office", "St. John's, NL"],
+  [String.raw`"Montr\u00e9al, QC"`, 'Montréal, QC'],
+  ['null # remote', '—'],
+  ['[Austin, Dallas]', '—'],
+  ['"unterminated', '—'],
+]) {
+  ok(`reads YAML posting_location ${yaml} into one location cell`, () => {
+    withFixture(LOCATION_HEADER, null, (env) => {
+      merge(env, { postingLocation: yaml });
+      assert.strictEqual(rows(env)[0].split('|')[5].trim(), expected);
+    });
+  });
+}
+
+ok('re-evaluation terminates an existing location in Notes before its marker', () => {
+  const existing = '| 10 | 2026-10-01 | Acme | Solutions Engineer | 3.5/5 | Applied | ❌ | [10](../reports/010-acme-2026-10-01.md) | first look; Location: Washington, D.C. |';
+  withFixture(DEFAULT_HEADER, existing, (env) => {
+    merge(env, { postingLocation: '"Austin, TX"' });
+    const all = rows(env);
+    assert.strictEqual(all.length, 1);
+    assert.match(all[0], /first look; Location: Washington, D\.C\.; Re-eval 2026-10-02 \(3\.5→4\): Strong fit/);
+  });
+});
