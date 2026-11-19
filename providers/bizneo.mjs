@@ -29,11 +29,18 @@
 //
 // Pagination is `/jobs?page=N`. The boards checked on 2026-11-18 hold 1 to 3
 // postings, so the page size is not known; a page past the end answers 200
-// with no cards, which is where the walk stops (as does a page that adds
-// nothing new, in case a board ignores `page`). Page 1 must look like a
-// Bizneo career site (`career-site` body class) and, when it carries cards,
-// at least one must parse; otherwise the markup changed and this throws
-// instead of reading as an empty board.
+// with no cards, which is where the walk stops (as does a page that serves
+// the same postings as the one before it, in case a board ignores `page`).
+// The stop is decided from what the page returned, never from how many of its
+// postings are new. Page 1 must look like a Bizneo career site (`career-site`
+// body class). On every page, cards of which none parse, or `/jobs/<slug>`
+// links with no card at all, mean the markup changed and this throws instead
+// of reading as an empty board.
+//
+// `careers_url` must be a public named https host (no credentials, port, IP
+// address or local name; checked on the hostname only, before any request).
+// Private resolved addresses are blocked by the shared DNS guard, which
+// `CAREER_OPS_NO_DNS_CACHE=1` disables.
 
 import { BROWSER_LIKE_USER_AGENT, fetchTextWithRetry, sleep } from './_http.mjs';
 import { visibleText } from './_html-to-text.mjs';
@@ -42,6 +49,9 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 const DEFAULT_MAX_PAGES = 30;
 const MAX_PAGES_CAP = 100;
 const INTER_PAGE_DELAY_MS = 250;
+
+/** Any link to a single posting page (`/jobs/<slug>`), a card or not. */
+const POSTING_LINK_RE = /\bhref="(?:https?:\/\/[^\/"]+)?\/jobs\/[^\/"?#][^"]*"/i;
 
 /** An opening `<a>` whose class list contains `job-card`, and everything up to its `</a>`. */
 const CARD_RE = /<a\b([^>]*\bclass="[^"]*\bjob-card\b[^"]*"[^>]*)>([\s\S]*?)<\/a>/gi;
@@ -59,8 +69,12 @@ const WORK_MODELS = /** @type {const} */ ([
 ]);
 
 /**
- * Hostname of a careers URL, validated; the origin is rebuilt from it so a
- * port, userinfo or path in the entry never reaches the request.
+ * Hostname of a careers URL, validated before any request: a public named
+ * https host, with no credentials, port, bare IP (any spelling), IPv6 literal
+ * or localhost/.internal-style name. The origin is rebuilt from the hostname,
+ * so a path in the entry never reaches the request. The check does not
+ * resolve DNS: private resolved addresses are blocked by the shared DNS guard,
+ * which `CAREER_OPS_NO_DNS_CACHE=1` disables.
  * @param {string | undefined} raw
  */
 function boardHost(raw) {
@@ -71,6 +85,15 @@ function boardHost(raw) {
     throw new Error(`bizneo: invalid careers_url: ${raw}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`bizneo: careers_url must use HTTPS: ${raw}`);
+  const h = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (
+    parsed.username || parsed.password || parsed.port ||
+    !h.includes('.') || h.startsWith('[') ||
+    /^\d+(?:\.\d+){0,3}$/.test(h) || /^0x[0-9a-f]+$/i.test(h) ||
+    /(^|\.)(localhost|local|internal|localdomain|home\.arpa|lan)$/.test(h)
+  ) {
+    throw new Error(`bizneo: careers_url must be a public named https host (no credentials, port, IP address or local name): ${raw}`);
+  }
   return parsed.hostname;
 }
 
@@ -101,10 +124,12 @@ export function parseListingPage(html, host, company) {
     const href = HREF_RE.exec(m[1]);
     const titleHtml = TITLE_RE.exec(m[2]);
     if (!href || !titleHtml) continue;
+    const hrefText = visibleText(href[1]);
+    if (!hrefText) continue; // a blank href would resolve to the board's own page
     const title = visibleText(titleHtml[1]);
     let url;
     try {
-      const u = new URL(visibleText(href[1]), `https://${host}/`);
+      const u = new URL(hrefText, `https://${host}/`);
       if (u.protocol !== 'https:' || u.hostname !== host) continue;
       u.hash = '';
       url = u.href;
@@ -158,6 +183,7 @@ export default {
     const jobs = [];
     const seen = new Set();
     let capped = false;
+    let lastUrls = '';
 
     for (let page = 1; page <= maxPages; page++) {
       if (page > 1) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -167,25 +193,31 @@ export default {
         redirect: 'error',
       });
 
-      const { jobs: parsed, cards } = parseListingPage(html, host, company);
-      if (page === 1) {
-        if (!CAREER_SITE_RE.test(html)) {
-          throw new Error(`bizneo: ${url} does not look like a Bizneo career site (no career-site page)`);
-        }
-        if (cards > 0 && parsed.length === 0) {
-          throw new Error(`bizneo: ${url} has job cards but none could be parsed — the listing markup changed`);
-        }
+      if (page === 1 && !CAREER_SITE_RE.test(html)) {
+        throw new Error(`bizneo: ${url} does not look like a Bizneo career site (no career-site page)`);
       }
-      if (cards === 0) break;
+      const { jobs: parsed, cards } = parseListingPage(html, host, company);
+      // Every page is checked: a markup change can start on a later one.
+      if (cards > 0 && parsed.length === 0) {
+        throw new Error(`bizneo: ${url} has job cards but none could be parsed — the listing markup changed`);
+      }
+      if (cards === 0) {
+        if (POSTING_LINK_RE.test(html)) {
+          throw new Error(`bizneo: ${url} links to postings but has no job cards — the listing markup changed`);
+        }
+        break; // a page past the end
+      }
 
-      const before = seen.size;
       for (const job of parsed) {
         if (seen.has(job.url)) continue;
         seen.add(job.url);
         jobs.push(job);
       }
-      if (seen.size === before) break;
-      // Still finding new postings on the last page the entry allows: the ceiling cut the walk.
+      // A board that ignores `page` serves the same list again: that page is the end.
+      const urls = parsed.map((j) => j.url).join('\n');
+      if (urls === lastUrls) break;
+      lastUrls = urls;
+      // The page still had postings and the entry's own ceiling stops the walk here.
       if (page === maxPages && entryMax <= ctxMax) capped = true;
     }
 

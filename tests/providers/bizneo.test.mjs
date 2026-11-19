@@ -61,11 +61,12 @@ check(bizneo.detect === undefined, 'no detect(): custom domains are reached with
     card('ok', 'Good', ['Madrid']),
     '<a class="job-card" href="https://empleo.acme.example.com/jobs/no-title"><div class="details"><span>Madrid</span></div></a>',
     '<a class="job-card"><div class="title">No link</div></a>',
+    '<a class="job-card" href=""><div class="title">Blank link</div></a>',
     card('elsewhere', 'Other host', ['Madrid'], 'evil.example.com'),
     '<a class="job-card" href="http://empleo.acme.example.com/jobs/plain"><div class="title">Plain http</div></a>',
   ]);
   const { jobs, cards } = parseListingPage(html, 'empleo.acme.example.com', 'Acme');
-  check(cards === 5 && jobs.length === 1 && jobs[0].title === 'Good', 'rows without title/link, off-host or non-https links are dropped');
+  check(cards === 6 && jobs.length === 1 && jobs[0].title === 'Good', 'rows without title/link, blank link, off-host or non-https links are dropped');
 }
 
 // ── fetch ──
@@ -98,7 +99,13 @@ const U = 'https://empleo.acme.example.com/jobs';
   const log = [];
   const same = new Map([[U, PAGE1], [`${U}?page=2`, PAGE1]]);
   const jobs = await bizneo.fetch(entry, makeCtx(same, log));
-  check(jobs.length === 4 && log.length === 2, 'a page with nothing new ends the walk');
+  check(jobs.length === 4 && log.length === 2, 'a page that repeats the previous one ends the walk');
+
+  // A page made only of postings already seen is not the end: the stop comes from the page, not from dedup.
+  const dupOnly = page([card('legal-compliance-operations-intern', 'Dup', ['Madrid'])]);
+  const log2 = [];
+  const jobs2 = await bizneo.fetch(entry, makeCtx(new Map([[U, PAGE1], [`${U}?page=2`, dupOnly], [`${U}?page=3`, page([card('third', 'Third page job', ['Sevilla'])])], [`${U}?page=4`, EMPTY]]), log2));
+  check(log2.length === 4 && jobs2.some((j) => j.title === 'Third page job'), 'a page whose postings were all seen does not stop the walk');
 }
 
 {
@@ -106,12 +113,17 @@ const U = 'https://empleo.acme.example.com/jobs';
   const log = [];
   const endless = { fetchText: async (url) => { log.push(url); const n = Number(new URL(url).searchParams.get('page') || 1); return page([card(`job-${n}`, `Job ${n}`, ['Madrid'])]); }, sleep: async () => {} };
   const warn = console.warn; const warned = []; console.warn = (m) => warned.push(String(m));
-  const jobs = await bizneo.fetch({ ...entry, max_pages: 3 }, endless);
-  check(log.length === 3 && jobs.length === 3, 'entry max_pages stops the walk');
+  let jobs, huge;
+  try {
+    jobs = await bizneo.fetch({ ...entry, max_pages: 3 }, endless);
+    var logAfterFirst = log.length;
+    log.length = 0;
+    huge = await bizneo.fetch({ ...entry, max_pages: 100000 }, endless);
+  } finally {
+    console.warn = warn;
+  }
+  check(logAfterFirst === 3 && jobs.length === 3, 'entry max_pages stops the walk');
   check(jobs.truncated?.reason === 'page-cap' && warned.some((m) => /raise max_pages/.test(m)), 'the cap is reported as truncated and warned');
-  log.length = 0;
-  const huge = await bizneo.fetch({ ...entry, max_pages: 100000 }, endless);
-  console.warn = warn;
   check(log.length === 100 && huge.length === 100, 'max_pages is clamped to the hard ceiling (100)');
   log.length = 0;
   const probe = await bizneo.fetch(entry, { ...endless, maxPages: 1 });
@@ -125,7 +137,7 @@ const U = 'https://empleo.acme.example.com/jobs';
   try {
     await bizneo.fetch(entry, { fetchText: async (url) => { if (url.includes('page=2')) throw boom; return PAGE1; }, sleep: async () => {} });
   } catch (e) { err = e; }
-  check(err && /503/.test(err.message), 'a failing later page fails loud');
+  check(err === boom, 'a failing later page fails loud, unwrapped');
 }
 
 // ── guards ──
@@ -136,9 +148,24 @@ const U = 'https://empleo.acme.example.com/jobs';
     try { await bizneo.fetch({ ...entry, careers_url }, { fetchText: async (u) => { calls.push(u); return PAGE1; }, sleep: async () => {} }); } catch (e) { err = e; }
     check(err && calls.length === 0, `${label} careers_url throws before any request`);
   }
+  for (const [label, careers_url] of [
+    ['credentials', 'https://user:pw@empleo.acme.example.com/jobs'],
+    ['port', 'https://empleo.acme.example.com:8443/jobs'],
+    ['bare IPv4', 'https://169.254.169.254/jobs'],
+    ['decimal IPv4', 'https://2130706433/jobs'],
+    ['IPv6 literal', 'https://[::1]/jobs'],
+    ['localhost', 'https://localhost/jobs'],
+    ['internal name', 'https://jobs.corp.internal/jobs'],
+    ['single label', 'https://intranet/jobs'],
+  ]) {
+    const calls = [];
+    let err;
+    try { await bizneo.fetch({ ...entry, careers_url }, { fetchText: async (u) => { calls.push(u); return PAGE1; }, sleep: async () => {} }); } catch (e) { err = e; }
+    check(err && /public named https host/.test(err.message) && calls.length === 0, `${label} careers_url is refused before any request`);
+  }
   const log = [];
-  await bizneo.fetch({ ...entry, careers_url: 'https://user:pw@empleo.acme.example.com:8443/other/path?x=1' }, makeCtx(new Map([[U, EMPTY]]), log));
-  check(log[0].url === U, 'origin is rebuilt from the hostname only (port, userinfo, path discarded)');
+  await bizneo.fetch({ ...entry, careers_url: 'https://empleo.acme.example.com/other/path?x=1' }, makeCtx(new Map([[U, EMPTY]]), log));
+  check(log[0].url === U, 'origin is rebuilt from the hostname only (path discarded)');
 }
 
 // ── empty vs broken ──
@@ -150,6 +177,20 @@ const U = 'https://empleo.acme.example.com/jobs';
   let err;
   try { await bizneo.fetch(entry, makeCtx(new Map([[U, broken]]))); } catch (e) { err = e; }
   check(err && /markup changed/.test(err.message), 'cards present but none parsed throws');
+
+  // The same break on a later page fails too, not only on the first.
+  err = undefined;
+  try { await bizneo.fetch(entry, makeCtx(new Map([[U, PAGE1], [`${U}?page=2`, broken]]))); } catch (e) { err = e; }
+  check(err && /markup changed/.test(err.message) && /page=2/.test(err.message), 'cards present but none parsed on a later page throws');
+
+  // Posting links with no card at all: markup changed, not an empty board.
+  const noCards = '<html><body class="career-site"><ul><li><a href="/jobs/some-role">Some role</a></li></ul></body></html>';
+  err = undefined;
+  try { await bizneo.fetch(entry, makeCtx(new Map([[U, noCards]]))); } catch (e) { err = e; }
+  check(err && /no job cards/.test(err.message), 'posting links with no cards throws');
+  err = undefined;
+  try { await bizneo.fetch(entry, makeCtx(new Map([[U, PAGE1], [`${U}?page=2`, noCards]]))); } catch (e) { err = e; }
+  check(err && /no job cards/.test(err.message), 'posting links with no cards on a later page throws');
 
   err = undefined;
   try { await bizneo.fetch(entry, makeCtx(new Map([[U, '<html><body><h1>Maintenance</h1></body></html>']]))); } catch (e) { err = e; }
