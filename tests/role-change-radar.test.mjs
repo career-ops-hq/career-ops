@@ -27,6 +27,13 @@ test('singular and plural skill headings classify otherwise unrecognized passage
     assert.equal(result.changes[0].after.text, 'Rust.');
   }
 });
+test('unrecognized markdown heading clears inherited section', () => {
+  const result = compareDescriptions('## Skills\n- Python\n## Benefits\n- Free lunch.', '## Skills\n- Python\n## Benefits\n- Free breakfast.');
+  assert.equal(result.changes.length, 1);
+  assert.deepEqual(result.changes[0].categories, ['Other text changes']);
+  assert.equal(result.changes[0].before.text, '- Free lunch.');
+  assert.equal(result.changes[0].after.text, '- Free breakfast.');
+});
 test('split UTF-8 pipe chunks preserve multilingual text and its saved hash', async t => {
   const { root, application } = fixture(t, false);
   const text = `${original}\n${'€ ₹ 日本語 हिन्दी 🧑🏽‍💻 '.repeat(1000)}`;
