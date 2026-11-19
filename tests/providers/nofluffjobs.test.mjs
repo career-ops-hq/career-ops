@@ -94,6 +94,25 @@ try {
     fail('bare remote label should remain unconfirmed without country evidence');
   }
 
+  const multiPlace = parseNoFluffJobsResponse({
+    postings: [{
+      title: 'Backend Engineer',
+      name: 'ExampleCo',
+      url: 'backend-engineer-multiple-locations',
+      location: {
+        places: [
+          { city: 'Warsaw' },
+          { city: 'Berlin', country: { name: 'Germany' } },
+        ],
+      },
+    }],
+  })[0];
+  if (multiPlace.location === 'Warsaw; Berlin, Germany' && polandPolicy(multiPlace.location, multiPlace.title).eligible) {
+    pass('multiple places keep country evidence scoped to its city');
+  } else {
+    fail(`multiple places should retain distinct city-country groups: ${JSON.stringify(multiPlace)}`);
+  }
+
   let capturedUrl = '';
   let capturedOpts = null;
   const fetched = await nfj.fetch(
