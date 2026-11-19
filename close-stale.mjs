@@ -499,7 +499,7 @@ if (isMainModule(import.meta.url)) {
           } catch { /* reported below */ }
           throw new Error(restored
             ? `Could not write the status log (${err.message}). The log is unchanged, so no row was closed.`
-            : `Could not write the status log (${err.message}), and could not put the tracker back: ${closed} row(s) now read ${targetStatus} with no status-log line.`);
+            : `Could not write the status log (${err.message}), and could not put the tracker back: ${closed} row(s) now read ${targetStatus} with no line in ${logPath}.`);
         }
       }
       report = buildReport({ classified, today, days, targetStatus, confirm, closed, warnings, trackerPath });

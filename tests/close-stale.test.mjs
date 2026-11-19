@@ -215,13 +215,15 @@ test('--confirm writes status, note tag and one status-log line per row; only th
 // process. Reads of the ledger still work.
 //   writeFirst      the append writes its bytes, then fails (a failed close)
 //   refuseTruncate  the truncate that would undo the append fails too
-function refuseLedger(root, { writeFirst = false, refuseTruncate = false } = {}) {
+function refuseLedger(root, { writeFirst = false, refuseTruncate = false, refuseRestore = false } = {}) {
   const preload = join(root, 'refuse-ledger.mjs');
   writeFileSync(preload, `import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 const realAppend = fs.appendFileSync;
 const realTruncate = fs.truncateSync;
+const realRename = fs.renameSync;
 const isLedger = (path) => String(path).endsWith('status-log.tsv');
+let trackerWrites = 0;
 const fail = (code, message) => Object.assign(new Error(code + ': ' + message), { code });
 fs.appendFileSync = function appendFileSync(path, data, options) {
   if (!isLedger(path)) return realAppend.call(this, path, data, options);
@@ -234,6 +236,12 @@ fs.appendFileSync = function appendFileSync(path, data, options) {
 fs.truncateSync = function truncateSync(path, len) {
   if (${refuseTruncate} && isLedger(path)) throw fail('EACCES', 'permission denied');
   return realTruncate.call(this, path, len);
+};
+// The tracker is replaced by a rename over it: the first is the closure, the
+// second the restore.
+fs.renameSync = function renameSync(from, to) {
+  if (${refuseRestore} && String(to).endsWith('applications.md') && ++trackerWrites === 2) throw fail('EIO', 'i/o error, rename');
+  return realRename.call(this, from, to);
 };
 syncBuiltinESMExports();
 `);
@@ -310,6 +318,20 @@ test('lines the failed write left in the status log keep their rows closed, and 
     const confirmed = confirmAfterwards(root);
     assert.equal(confirmed.status, 0, describeSpawn(confirmed));
     assert.equal(confirmed.json.metadata.closed, 0);
+  });
+});
+
+test('a tracker that cannot be put back leaves its rows closed, and the error names the status log', () => {
+  withRoot([row(1, OLD, 'Old Co', 'Applied'), row(2, D61, 'Edge Co', 'Applied')], {}, ({ tracker, log, root }) => {
+    const r = refuseLedger(root, { refuseRestore: true });
+    assert.ok(exitedNonZero(r), describeSpawn(r));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
+    assert.match(r.stderr, /Could not write the status log \(EACCES: permission denied\), and could not put the tracker back: 2 row\(s\) now read Discarded with no line in .*status-log\.tsv\./);
+    const after = readFileSync(tracker, 'utf-8');
+    const tag = noteTag(TODAY, 60);
+    assert.equal(lineFor(after, 1), row(1, OLD, 'Old Co', 'Discarded', tag));
+    assert.equal(lineFor(after, 2), row(2, D61, 'Edge Co', 'Discarded', tag));
+    assert.equal(existsSync(log), false);
   });
 });
 
