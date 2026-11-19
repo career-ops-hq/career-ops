@@ -125,6 +125,10 @@ export const factsOf = (el, ref) => {
     return flat(copy.textContent);
   };
   const shown = (node) => {
+    // Same rule as extractForm's isVisibleNode: a visibility:hidden label keeps
+    // its layout box, and naming a field after it would make the two paths
+    // disagree on the field, so its listed answer would be refused.
+    if (typeof getComputedStyle === "function" && getComputedStyle(node).visibility === "hidden") return false;
     let current = node;
     const body = typeof document !== "undefined" ? document.body : null;
     while (current && current !== body) {

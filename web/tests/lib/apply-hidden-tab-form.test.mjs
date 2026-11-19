@@ -18,6 +18,7 @@ import "../helpers/web-ts-alias-loader.mjs";
 
 const { extractForm } = await import("../../src/lib/apply/extract.ts");
 const { tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
+const { factsOf } = await import("../../src/lib/apply/drive-action.mjs");
 
 // Fictional employer; the markup mirrors Recruitee's tabs: a tab panel with
 // the `hidden` attribute holds the form until the Apply control is clicked.
@@ -499,6 +500,26 @@ test("a hidden wrapper label does not name the visible field next to it", async 
   try {
     const form = await extractForm(page);
     assert.deepEqual(form.fields.map((f) => [f.type, f.label]), [["text", "Full name"]]);
+  } finally {
+    await close();
+  }
+});
+
+test("the fill step names a field the same way extraction does when its group label is hidden", async (t) => {
+  const html = `<!doctype html><form>
+    <div class="form-group">
+      <label style="visibility:hidden">Website</label>
+      <input name="full_name" placeholder="Full name">
+    </div>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => f.label), ["Full name"]);
+    const facts = await page.locator('input[name="full_name"]').evaluate(factsOf, null);
+    assert.equal(facts.identity, "Full name");
   } finally {
     await close();
   }
