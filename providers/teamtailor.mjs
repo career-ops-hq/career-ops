@@ -22,6 +22,12 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // short page to reveal it. `offset` keeps every request at the size the feed
 // serves by default, so a short page is a trustworthy end-of-feed signal.
 //
+// A walk is also bounded by its own wall-clock budget (WALK_BUDGET_MS). The
+// sweep in scan-ats-full.mjs gives one board 5 minutes and, when that fires,
+// discards everything the board had read (the provider only sees an abort at
+// that same instant, too late to hand pages back). So the walk stops itself
+// before then and returns the pages already read, marked partial.
+//
 // Auto-detects `https://<slug>.teamtailor.com/...` careers URLs. Many tenants
 // front the same feed on a branded domain (e.g. careers.acme.com also serves
 // /jobs.rss), so an entry with an explicit `provider: teamtailor` may point its
@@ -83,6 +89,9 @@ const PAGE_SIZE = 100;           // items `/jobs.rss` serves per request
 const DEFAULT_MAX_PAGES = 20;    // 20 * 100 = 2,000 postings, when the entry sets no max_pages
 const MAX_PAGES_CAP = 100;       // hard ceiling even for a user override (10,000 postings)
 const INTER_PAGE_DELAY_MS = 250;
+// Under the 5-minute per-board watchdog of scan-ats-full.mjs (COMPANY_TIMEOUT_MS),
+// leaving room for the page in flight and for processJobs.
+const WALK_BUDGET_MS = 4 * 60_000;
 
 /** @param {import('./_types.js').PortalEntry} entry */
 function resolveMaxPages(entry) {
@@ -122,15 +131,24 @@ export default {
 
     const jobs = [];
     const seen = new Set();
+    const seenItems = new Set(); // raw item identities, before any row is dropped
+    const startedAt = Date.now();
     // Why the walk stopped: 'complete' (short or empty page), 'cap' (page
-    // budget ran out on a full page), 'offset-ignored' (a full page that added
-    // nothing new: the server did not honour `?offset=`, so the rest of the
-    // board is out of reach) or 'fetch-error'. Drives both the warning and the
+    // budget ran out on a full page), 'offset-ignored' (a full page made only
+    // of postings already read: the server did not honour `?offset=`, so the
+    // rest of the board is out of reach), 'time-budget' (the walk's own
+    // wall-clock budget ran out) or 'fetch-error'. Drives both the warning and the
     // truncation marker.
     let stopReason = 'complete';
     let page = 0;
     for (; page < pagesToFetch; page++) {
-      if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+      if (page > 0) {
+        if (Date.now() - startedAt >= WALK_BUDGET_MS) {
+          stopReason = 'time-budget';
+          break;
+        }
+        await sleep(INTER_PAGE_DELAY_MS, ctx);
+      }
       const pageUrl = page === 0 ? feedUrl : `${feedUrl}?offset=${page * PAGE_SIZE}`;
       let text;
       try {
@@ -146,28 +164,37 @@ export default {
       }
       // Raw item count, before malformed rows are dropped: a short page is the
       // feed's own end, whatever the parser kept.
-      const rawCount = typeof text === 'string' ? (text.match(/<item[\s>]/gi) || []).length : 0;
-      let fresh = 0;
+      const items = rawItems(text);
       for (const job of parseTeamtailorFeed(text, company)) {
         // The feed can shift while it is walked: skip a posting seen on an earlier page.
         if (seen.has(job.url)) continue;
         seen.add(job.url);
         jobs.push(job);
-        fresh++;
       }
-      if (rawCount < PAGE_SIZE) break;
-      if (fresh === 0) {
+      if (items.length < PAGE_SIZE) break;
+      // A full page made only of items already read means the server ignored
+      // `?offset=`. Judged on the raw items, so a page whose rows the parser
+      // drops (no link, no title) is not mistaken for a repeat.
+      const repeated = items.every((item) => seenItems.has(item));
+      for (const item of items) seenItems.add(item);
+      if (repeated) {
         stopReason = 'offset-ignored';
         break;
       }
     }
     // Budget ran out on a full page that still added postings. A probe cap
-    // (ctx.maxPages below the entry's own ceiling) is not a truncation.
-    if (page === pagesToFetch && maxPages <= ctxCap) stopReason = 'cap';
+    // (ctx.maxPages, at or below the entry's own ceiling) is not a truncation.
+    if (page === pagesToFetch && maxPages < ctxCap) stopReason = 'cap';
 
     if (stopReason === 'cap') {
-      console.error(`⚠️  teamtailor: ${company} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
+      const advice = maxPages < MAX_PAGES_CAP
+        ? 'raise max_pages on this entry for more'
+        : `the hard ceiling of ${MAX_PAGES_CAP} pages was reached`;
+      console.error(`⚠️  teamtailor: ${company} truncated at max_pages=${maxPages} (${jobs.length} jobs) — ${advice}`);
       markTruncated(jobs, 'page-cap', { fetched: jobs.length });
+    } else if (stopReason === 'time-budget') {
+      console.error(`⚠️  teamtailor: ${company} stopped at page ${page} of ${maxPages} after ${Math.round(WALK_BUDGET_MS / 60_000)} minutes (${jobs.length} jobs read, the rest of the board was not reached)`);
+      markTruncated(jobs, 'time-budget', { fetched: jobs.length });
     } else if (stopReason === 'fetch-error') {
       markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     } else if (stopReason === 'offset-ignored') {
@@ -177,6 +204,18 @@ export default {
     return jobs;
   },
 };
+
+// The raw items of a feed page, one identity string each: the link text, or the
+// whole block when the item has none. Counted before the parser drops anything,
+// so an empty or malformed `<item/>` still counts toward a full page.
+function rawItems(xml) {
+  if (typeof xml !== 'string') return [];
+  const out = [];
+  for (const m of xml.matchAll(/<item\b[^>]*?(?:\/>|>[\s\S]*?<\/item>)/gi)) {
+    out.push(tagText(m[0], 'link') || m[0]);
+  }
+  return out;
+}
 
 // Resolve a tag's inner text: unwrap a CDATA section, else decode entities.
 function extractText(inner) {

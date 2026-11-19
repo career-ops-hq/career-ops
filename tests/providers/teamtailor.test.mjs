@@ -266,6 +266,64 @@ try {
   }
 
   {
+    // The hard ceiling is not something the operator can raise: the warning says so.
+    const { warnings } = await quietly(() => teamtailor.fetch({ ...acme, max_pages: 100 }, mkCtx(async (url) => feedOf(offsetOf(url), 100))));
+    if (warnings.length === 1 && !/raise max_pages/.test(warnings[0]) && /hard ceiling/.test(warnings[0])) pass('teamtailor.fetch() does not advise raising max_pages at the hard cap');
+    else fail(`hard-cap warnings: ${JSON.stringify(warnings)}`);
+  }
+
+  {
+    // A probe cap equal to the entry's max_pages is the probe's budget, not a truncation.
+    const log = [];
+    const { out, warnings } = await quietly(() => teamtailor.fetch({ ...acme, max_pages: 1 }, mkCtx(serve(TOTAL, log), { maxPages: 1 })));
+    if (log.length === 1 && !out.truncated && warnings.length === 0) pass('teamtailor.fetch() gives the probe budget precedence when it ties with max_pages');
+    else fail(`tie: ${log.length} requests, truncated=${JSON.stringify(out.truncated)}, warnings=${warnings.length}`);
+  }
+
+  {
+    // The sweep discards a board that outlives its 5-minute watchdog, so the walk stops
+    // on its own clock first and returns the pages already read, marked partial.
+    const realNow = Date.now;
+    let clock = 0;
+    Date.now = () => clock;
+    try {
+      let requests = 0;
+      const { out, warnings } = await quietly(() => teamtailor.fetch({ ...acme, max_pages: 50 }, mkCtx(async (url) => {
+        requests++;
+        clock += 100_000; // a slow board: 100 s per page
+        return feedOf(offsetOf(url), 100);
+      })));
+      if (out.length === 300 && requests === 3 && out.truncated?.reason === 'time-budget' && out.truncated?.fetched === 300) {
+        pass('teamtailor.fetch() keeps the pages read and marks time-budget when its walk budget runs out');
+      } else fail(`time budget: ${out.length} jobs, ${requests} requests, truncated=${JSON.stringify(out.truncated)}`);
+      if (warnings.length === 1 && !/raise max_pages/.test(warnings[0])) pass('teamtailor.fetch() time-budget stop does not claim the ceiling truncated the board');
+      else fail(`time-budget warnings: ${JSON.stringify(warnings)}`);
+    } finally {
+      Date.now = realNow;
+    }
+  }
+
+  {
+    // An empty <item/> still counts toward a full page: 99 usable items plus one empty one
+    // is a full page, so the next offset is requested.
+    const log = [];
+    const pages = [feedOf(0, 99).replace('</channel>', '<item/></channel>'), feedOf(100, 5)];
+    const out = await teamtailor.fetch(acme, mkCtx(async (url) => { log.push(url); return pages[log.length - 1]; }));
+    if (log.length === 2 && out.length === 104 && !out.truncated) pass('teamtailor.fetch() counts an empty <item/> toward a full page');
+    else fail(`empty item: ${log.length} requests, ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}`);
+  }
+
+  {
+    // A full page whose rows the parser drops (no link) is not a repeat: the walk goes on.
+    const linkless = '<?xml version="1.0"?><rss><channel>' + Array.from({ length: 100 }, (_, i) => `<item><title>No link ${i}</title></item>`).join('') + '</channel></rss>';
+    const pages = [feedOf(0, 100), linkless, feedOf(200, 7)];
+    let n = 0;
+    const { out } = await quietly(() => teamtailor.fetch(acme, mkCtx(async () => pages[n++])));
+    if (out.length === 107 && n === 3 && !out.truncated) pass('teamtailor.fetch() does not report offset-ignored for a page of unusable rows');
+    else fail(`unusable page: ${out.length} jobs, ${n} requests, truncated=${JSON.stringify(out.truncated)}`);
+  }
+
+  {
     // The feed shifts while it is walked: a posting repeated on the next page is kept once.
     const pages = [feedOf(0, 100), feedOf(99, 51)]; // item 99 appears on both pages
     let n = 0;
