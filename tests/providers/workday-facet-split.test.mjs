@@ -733,14 +733,36 @@ try {
     ] },
     { facetParameter: 'jobFamily', values: [{ id: 'a', count: 1500 }, { id: 'b', count: 1200 }] },
   ];
+  const scopedSlices = [];
+  const scopedResponder = coverageResponder(LOCATION_SCOPED, ['locationCountry=us']);
   const { result: scopedJobs, errors: scopedErrors } = await captureConsoleErrors(() => workday.fetch(
     ENTRY,
-    mkCtx(coverageResponder(LOCATION_SCOPED, ['locationCountry=us']), {
+    mkCtx(async (url, opts) => {
+      scopedSlices.push(sliceKey(JSON.parse(opts.body).appliedFacets));
+      return scopedResponder(url, opts);
+    }, {
       includeUndated: true,
       locationHints: { always_allow: ['United States'] },
     }),
   ));
   const scopedLine = scopedErrors.find((e) => String(e).includes('offset-clamped at'));
+  // Prove the slice ran before reading the line: without these, a fetch that
+  // never split (no clamp detected, no US request, no line) would also pass.
+  if (scopedSlices.includes('locationCountry=us')) {
+    pass('workday.fetch() requests the location-scoped slice (locationCountry=us)');
+  } else {
+    fail(`location-scoped split never requested locationCountry=us; requested ${JSON.stringify([...new Set(scopedSlices)])}`);
+  }
+  if (scopedJobs.some((j) => String(j.title).startsWith('locationCountry=us job'))) {
+    pass('workday.fetch() returns the postings read from the location-scoped slice');
+  } else {
+    fail('location-scoped split returned none of the slice\'s postings');
+  }
+  if (scopedLine) {
+    pass('workday.fetch() prints the offset-clamped recovery line for the location-scoped split');
+  } else {
+    fail(`location-scoped split printed no "offset-clamped at" line; errors: ${JSON.stringify(scopedErrors)}`);
+  }
   if (scopedJobs.workdayTruncated === undefined && !String(scopedLine ?? '').includes('(still incomplete)')) {
     pass('workday.fetch() does not call a location-scoped split incomplete for postings outside the configured locations');
   } else {
