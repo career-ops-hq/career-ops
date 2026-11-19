@@ -84,7 +84,7 @@ import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHis
 import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, googleCareersJobId } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, canonicalizeKnownPostingUrl, googleCareersJobId } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
@@ -523,7 +523,39 @@ function compileLocationKeyword(keyword) {
   return (lower) => re.test(lower);
 }
 
-function compileLocationKeywordList(value) {
+// Washington, DC is written "DC", "D.C." and "District of Columbia", and its
+// city part is the name of a US state. Two consequences (#7293):
+//   - `block: ["DC"]` missed "Washington, D.C.": the entry "DC" was matched as
+//     an ISO code, so "D.C." never matched it. An entry spelled DC or D.C. (any
+//     case) now matches either spelling, in every tier.
+//   - `allow: ["Washington"]`, written for the state, admitted every DC
+//     posting through the city name. In `allow` and `always_allow` the state
+//     name "Washington" no longer matches the city of Washington, DC, so
+//     "Seattle, Washington" passes and "Washington, DC" (also written
+//     "Washington (DC)" or "Washington - DC") does not, while
+//     "Seattle, Washington; Washington, DC" still passes on its Seattle part.
+//     The abbreviation "WA" is not read as the state, before or after this
+//     change, so list "WA" separately to admit "Seattle, WA". `block`
+//     and `block_hard` keep matching both, so a block written as "Washington"
+//     never gets weaker. The built-in US-state expansion (#3633) is untouched:
+//     with "United States" in always_allow, DC still passes as a US place.
+const DC_TOKEN = String.raw`d\.?\s?c(?:\.|(?![\p{L}\p{M}\p{N}]))`;
+const DC_ENTRY_RE = /^d\.?\s?c\.?$/i;
+const DC_LOCATION_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${DC_TOKEN}`, 'u');
+const DC_CITY_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])washington\\s*[,(\\-\u2013\u2014]?\\s*(?:district of columbia|${DC_TOKEN})`, 'gu');
+const withoutDcCity = (lower) => lower.replace(DC_CITY_RE, 'district of columbia');
+// A Workday URL hint puts the city first ("Washington", "Washington-United-States").
+// When the display location names Washington, DC, a hint that starts with a
+// bare "Washington" is that city, not the state. "Seattle-Washington" and
+// "Washington-State" keep naming the state, and with no DC in the display the
+// hint is read as before. The hint arrives with its dashes turned into spaces.
+const DC_CITY_TEST_RE = new RegExp(DC_CITY_RE.source, 'u');
+const LEADING_WASHINGTON_RE = /^washington(?![\p{L}\p{M}\p{N}])(?!\s+state(?![\p{L}\p{M}\p{N}]))/u;
+const hintWithoutDcCity = (hint, display) => (typeof display === 'string' && DC_CITY_TEST_RE.test(display)
+  ? hint.replace(LEADING_WASHINGTON_RE, 'district of columbia')
+  : hint);
+
+function compileLocationKeywordList(value, { stateNameSkipsDc = false } = {}) {
   // An entry written as two uppercase letters ("IN", "DE") is an ISO country
   // code. Lowercased like every other keyword it would match the plain word
   // "in" in "Anywhere in the World" (#6605), so it is matched against the
@@ -537,6 +569,12 @@ function compileLocationKeywordList(value) {
     .filter(k => typeof k === 'string' && k.trim())
     .map((entry) => {
       const trimmed = foldLocationWhitespace(entry).trim();
+      if (DC_ENTRY_RE.test(trimmed)) return (lower) => DC_LOCATION_RE.test(lower);
+      if (stateNameSkipsDc && trimmed.toLowerCase() === 'washington') {
+        const state = compileLocationKeyword('washington');
+        // `display` is passed only when `lower` is the URL hint.
+        return (lower, _original, display) => state(withoutDcCity(hintWithoutDcCity(lower, display)));
+      }
       if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
       const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
       return (lower, original) => typeof original === 'string' && re.test(original);
@@ -754,7 +792,7 @@ export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
   const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow).map(foldLocationWhitespace);
-  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
+  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow, { stateNameSkipsDc: true });
   // US-targeted configs list the country in always_allow and foreign cities
   // in block. "Dublin, OH" does not contain "United States", so without this
   // expansion block: [Dublin] rejects a real US job. Opt-in on the country
@@ -764,7 +802,7 @@ export function buildLocationFilter(locationFilter) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
   const allowKeywords = normalizeKeywordList(locationFilter.allow).map(foldLocationWhitespace);
-  const allow = compileLocationKeywordList(locationFilter.allow);
+  const allow = compileLocationKeywordList(locationFilter.allow, { stateNameSkipsDc: true });
   // Do not widen city-only or mixed city/country targeting. Reuse the shared
   // country vocabulary rather than introducing a second country-name list.
   const countryOnlyAllow = allowKeywords.length > 0
@@ -800,7 +838,7 @@ export function buildLocationFilter(locationFilter) {
     // against a provider that never returns a location would otherwise let
     // every out-of-region posting through (#3276).
     if (lower === '' && hint === '') return !strict;
-    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint));
+    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint, undefined, lower));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
     // word-boundary matching (#2087) does not catch it and always_allow's
@@ -2153,6 +2191,7 @@ export function normalizeUrlForDedup(url) {
     }
   }
   promoteKnownFragmentIdentity(parsed);
+  canonicalizeKnownPostingUrl(parsed);
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
@@ -4515,7 +4554,7 @@ export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) =
 
 export async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}, {
   checkApi = checkLivenessViaApi,
-  loadPlaywright = () => import('playwright'),
+  loadPlaywright = () => import('./lib/hardened-chromium.mjs'),
   // Consulted before each headed retry (#5776); see robots-check.mjs.
   robotsGate = robotsAllows,
 } = {}) {
@@ -5498,6 +5537,7 @@ async function main() {
         }
         if (!workplaceFilter(job.workplaceType)) {
           totalFilteredWorkplace++;
+          st.other++;
           continue;
         }
         if (!employmentTypeFilter(job.employmentType)) {

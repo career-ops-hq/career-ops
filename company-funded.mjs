@@ -14,6 +14,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
 import { decodeEntities } from './providers/_html-entities.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
 import { safeEncodeURIComponent } from './providers/_safe-url.mjs';
 import { BROWSER_LIKE_USER_AGENT } from './user-agent.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -202,21 +203,6 @@ function trustedForSource(raw, source) {
   return domains.some((domain) => matchesDomain(url.hostname, domain));
 }
 
-function isPrivateIpv4(parts) {
-  const [a, b] = parts;
-  return (
-    a === 0 ||
-    a === 10 ||
-    a === 127 ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 198 && (b === 18 || b === 19)) ||
-    a >= 224
-  );
-}
-
 function parseIpv4Part(part) {
   if (/^0x[0-9a-f]+$/i.test(part)) return Number.parseInt(part.slice(2), 16);
   if (/^0[0-7]+$/.test(part)) return Number.parseInt(part, 8);
@@ -241,37 +227,19 @@ function parseIpv4Hostname(host) {
   return nums;
 }
 
-function parseIpv4MappedIpv6(host) {
-  const normalized = String(host || '').toLowerCase();
-  const dotted = normalized.match(/^(?:0:0:0:0:0:ffff:|::ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (dotted) return parseIpv4Hostname(dotted[1]);
-  const hex = normalized.match(/^(?:0:0:0:0:0:ffff:|::ffff:)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (!hex) return null;
-  const high = Number.parseInt(hex[1], 16);
-  const low = Number.parseInt(hex[2], 16);
-  if (high > 0xffff || low > 0xffff) return null;
-  return [(high >>> 8) & 255, high & 255, (low >>> 8) & 255, low & 255];
-}
-
-function isPrivateOrInternalHostname(hostname) {
+// An IP literal is judged by the providers' address list
+// (providers/_ip-guard.mjs isBlockedAddress), so this fetcher refuses what every
+// other one refuses. It kept its own list until it fell behind: [::] and the
+// IPv4-compatible spellings (::7f00:1) passed. Exported for tests.
+export function isPrivateOrInternalHostname(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
   if (!host) return true;
   if (host === 'localhost' || host.endsWith('.localhost')) return true;
 
   const ipv4 = parseIpv4Hostname(host);
-  if (ipv4) return isPrivateIpv4(ipv4);
-
-  const version = isIP(host);
-  if (version !== 6) return false;
-  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
-
-  const mappedIpv4 = parseIpv4MappedIpv6(host);
-  if (mappedIpv4) return isPrivateIpv4(mappedIpv4);
-
-  const firstHextet = host.split(':')[0];
-  if (/^f[cd][0-9a-f]{0,2}$/i.test(firstHextet)) return true;
-  const first = Number.parseInt(firstHextet, 16);
-  return Number.isFinite(first) && first >= 0xfe80 && first <= 0xfebf;
+  if (ipv4) return isBlockedAddress(ipv4.join('.'));
+  if (isIP(host) === 6) return isBlockedAddress(new URL(`http://[${host}]/`).hostname.slice(1, -1));
+  return false;
 }
 
 function untrustedSourceMeta(url, finalUrl, message, status = 0, contentType = '') {

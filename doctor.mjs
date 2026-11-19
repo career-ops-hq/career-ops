@@ -62,7 +62,7 @@ try {
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
 let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
-let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
+let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv, checkRemotePageBrowser;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -72,6 +72,7 @@ try {
     { resolveExtractorMode },
     { auditUserTemplates },
     { browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv },
+    { checkRemotePageBrowser },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
@@ -80,6 +81,7 @@ try {
     import('./browser-extract.mjs'),
     import('./cv-templates.mjs'),
     import('./lib/browser-launch.mjs'),
+    import('./lib/remote-page-browser-check.mjs'),
   ]);
 } catch (err) {
   let missing = [];
@@ -492,7 +494,13 @@ function playwrightDepsFix() {
   return `Run: ${sudo}npx playwright install-deps chromium`;
 }
 
+// Set by the suites that spawn doctor many times to test other checks: each
+// browser launch costs seconds, and two per run add up to timeouts under load.
+const SKIP_BROWSER_ENV = 'CAREER_OPS_DOCTOR_SKIP_BROWSER';
+const skipBrowserLaunch = () => Boolean(process.env[SKIP_BROWSER_ENV]);
+
 async function checkPlaywright(browserProcessEnv) {
+  if (skipBrowserLaunch()) return { pass: true, label: `Playwright chromium: skipped (${SKIP_BROWSER_ENV} is set)` };
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -515,13 +523,14 @@ async function checkPlaywright(browserProcessEnv) {
   // tests the exact binary the runtime uses and catches stub-installs (directory
   // present but no binary — just ABOUT + LICENSE files).
   let browser;
-  // The configured browser, so the check tests what the rest of the repo will
-  // actually launch rather than always probing the bundled Chromium.
+  // The browser PDF rendering launches: the configured one or the bundled
+  // Chromium. checkRemotePageBrowser covers the launch third-party pages get,
+  // which can succeed on the system Chrome with this one missing.
   const override = resolveBrowserExecutable({ projectRoot, processEnv: browserProcessEnv });
   try {
     browser = await chromium.launch(browserLaunchOptions(
       { headless: true },
-      { projectRoot, processEnv: browserProcessEnv },
+      { projectRoot, processEnv: browserProcessEnv, localContentOnly: true },
     ));
     return {
       pass: true,
@@ -1660,6 +1669,8 @@ async function main() {
   const pluginInstall = checkPluginInstall(projectRoot);
   const userLayerWritable = !pluginInstall || pluginInstall.pass;
 
+  const playwrightCheck = await checkPlaywright(browserProcessEnv);
+
   const checks = [
     checkNodeVersion(),
     // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
@@ -1671,7 +1682,10 @@ async function main() {
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
-    await checkPlaywright(browserProcessEnv),
+    playwrightCheck,
+    ...(skipBrowserLaunch()
+      ? []
+      : await checkRemotePageBrowser({ probe: { projectRoot, processEnv: browserProcessEnv }, bundledCheckPassed: playwrightCheck.pass === true })),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),

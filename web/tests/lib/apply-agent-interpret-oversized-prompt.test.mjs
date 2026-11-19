@@ -1,8 +1,8 @@
 // A form-interpreter prompt too long for the command line reaches the CLI through a file.
 //
 // The apply agentic fallback (lib/apply/agent-interpret.ts) lists every
-// interactive control of the live form in its prompt, one line each with up
-// to 220 characters of context and twelve options, and passes the prompt as
+// interactive control of the live form in its prompt, one JSON entry each with
+// up to 220 characters of context and twelve options, and passes the prompt as
 // one argv element. Nothing caps the number of controls, so a long
 // application form takes the launch past the Windows command line (32,767
 // UTF-16 units) and the spawn fails with an opaque `spawn ENAMETOOLONG`. The
@@ -94,14 +94,19 @@ test("a form too long for the command line reaches the CLI through a file, remov
   assert.ok(launch, "the interpreter reached the spawn boundary");
   assert.ok(launch.args.join(" ").length < 8000, `argv still carries the controls: ${launch.args.join(" ").length} chars`);
   assert.equal(launch.files.length, 1, "the prompt went to one file under the data root");
-  assert.match(launch.files[0], /\[0\] tag=select type=select required name="question_0"/);
-  assert.match(launch.files[0], /\[299\] tag=select .*QUESTION-299/);
+  assert.match(launch.files[0], /"n":0,"tag":"select","type":"select","required":true,"name":"question_0"/);
+  assert.match(launch.files[0], /"n":299,"tag":"select".*QUESTION-299/);
   assert.deepEqual(spillDirs(root), [], "the file is removed when the CLI closes");
 });
 
-test("the spilled prompt is removed when the spawn throws, which still rejects", async t => {
+test("the spilled prompt is removed when the spawn throws, which comes back as a refusal", async t => {
   const root = useRoot(t, "throw");
-  await assert.rejects(interpretFormWithAgent(frameWith(controls(300)), "claude", "Fixture application"), /Fixture spawn failure/);
+  // runPlanner resolves a spawn throw as `refused` rather than rejecting, so
+  // the caller can show the reason instead of a .catch() swallowing it.
+  const result = await interpretFormWithAgent(frameWith(controls(300)), "claude", "Fixture application");
+  assert.equal(result.spawned, false);
+  assert.deepEqual(result.fields, []);
+  assert.match(result.refused ?? "", /Fixture spawn failure/);
   assert.equal(globalThis.__interpretLaunch.files.length, 1);
   assert.deepEqual(spillDirs(root), []);
 });
@@ -113,6 +118,6 @@ test("a form that fits is passed in argv as before, and nothing is written", asy
   const launch = globalThis.__interpretLaunch;
   assert.deepEqual(launch.files, []);
   assert.equal(launch.args[0], "-p");
-  assert.match(launch.args[1], /\[4\] tag=select .*QUESTION-4/);
+  assert.match(launch.args[1], /"n":4,"tag":"select".*QUESTION-4/);
   assert.deepEqual(spillDirs(root), []);
 });

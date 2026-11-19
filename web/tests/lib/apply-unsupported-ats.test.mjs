@@ -93,7 +93,7 @@ function pageForTrigger({ atsHref = null, applyHref = null } = {}) {
       goto: async (href) => {
         gotos.push(href);
       },
-      locator: () => ({ first: () => atsLink }),
+      locator: () => ({ first: () => atsLink, evaluateAll: async () => (atsHref ? [atsHref] : []) }),
       getByRole: () => ({ or: () => ({ first: () => apply }) }),
     },
   };
@@ -367,7 +367,7 @@ function careerPage(careerUrl, blockedHref, closed, options = {}) {
         click: async () => {},
         first() { return this; },
       };
-      return { first: () => node };
+      return { first: () => node, evaluateAll: async () => (hit ? [blockedHref] : []) };
     },
     getByRole(_role, roleOptions) {
       const wantsApply = Boolean(options.applyClick) && /apply/i.test(String(roleOptions?.name ?? ""));
