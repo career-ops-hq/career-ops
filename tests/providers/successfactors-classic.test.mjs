@@ -214,6 +214,8 @@ try {
   {
     const ctx = makeCtx({ replies: { search: paged(120) } });
     const out = await sfc.fetch(entry, ctx);
+    if (ctx.calls.every((c) => c.opts.redirect === 'error')) pass('every request of a multi-page walk carries redirect: "error"');
+    else fail('a later-page request lost redirect: "error"');
     if (out.length === 120 && ctx.searchCalls.n === 3 && !out.truncated) pass('fetch() walks 50 postings per call until the short last page (120 postings = 3 searches, not truncated)');
     else fail(`120-posting walk: ${out.length} jobs, ${ctx.searchCalls.n} searches`);
   }
@@ -276,6 +278,52 @@ try {
     try { await sfc.fetch(entry, rejecting); } catch (e) { caught = e; }
     if (caught === sentinel) pass('a ctx.fetch* rejection while ctx.maxPages is set propagates unwrapped');
     else fail(`probe rejection: ${caught?.message}`);
+  }
+
+  {
+    // A title that holds the DWR handler names is data, not a DWR exception.
+    const ctx = makeCtx({ replies: { search: () => searchReply([posting(1, 'Engineer: _remoteHandleException')]) } });
+    const out = await sfc.fetch(entry, ctx);
+    if (out.length === 1 && out[0].title === 'Engineer: _remoteHandleException') pass('a posting title naming a DWR handler is not mistaken for a DWR exception');
+    else fail(`handler name in a title: ${JSON.stringify(out)}`);
+  }
+  {
+    // Postings but no detail URL prefix: a broken page, not an empty or short one.
+    const noPrefix = (n) => searchReply(many((n - 1) * 50, n === 1 ? 50 : 1), 51).split('s1.detailURLPrefix=').join('s1.unused=');
+    let msg = '';
+    try { await sfc.fetch(entry, makeCtx({ replies: { search: () => noPrefix(1) } })); } catch (e) { msg = e.message; }
+    if (/detailURLPrefix/.test(msg)) pass('postings without a detail URL prefix on page 1 are an error');
+    else fail(`no prefix, page 1: ${msg}`);
+    const withLater = (n) => (n === 1 ? paged(51)(1) : noPrefix(2));
+    const { result: out, errors } = await captureConsoleErrors(() => sfc.fetch(entry, makeCtx({ replies: { search: withLater } })));
+    if (out.length === 50 && out.truncated?.reason === 'fetch-error' && errors.length === 1) pass('postings without a detail URL prefix on a later page keep the earlier pages, marked fetch-error');
+    else fail(`no prefix, page 2: ${out.length} jobs, truncated=${JSON.stringify(out.truncated)}, warns=${JSON.stringify(errors)}`);
+  }
+  {
+    // Probe: a search that keeps failing is that HTTP error, not a spent budget. Retries would
+    // consume the probe's request budget and the sentinel would read as a live board.
+    const ctx = makeCtx({ replies: { search: () => { const e = new Error('HTTP 503'); e.status = 503; throw e; } } });
+    ctx.maxPages = 1;
+    let status = 0;
+    try { await sfc.fetch(entry, ctx); } catch (e) { status = e.status; }
+    if (status === 503 && ctx.searchCalls.n === 1) pass('a failing search during a probe is not retried and surfaces its HTTP error');
+    else fail(`probe 503: status=${status}, searches=${ctx.searchCalls.n}`);
+  }
+  {
+    // A repeated page ends the walk as partial even when it reaches the reported total.
+    const ctx = makeCtx({ replies: { search: () => searchReply(many(0, 50), 100) } });
+    const { result: out, errors } = await captureConsoleErrors(() => sfc.fetch(entry, ctx));
+    if (out.length === 50 && ctx.searchCalls.n === 2 && out.truncated?.reason === 'page-ignored' && out.truncated.total === 100 && errors.length === 1) pass('a repeated page that reaches the reported total is still marked page-ignored');
+    else fail(`repeat at total: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}`);
+  }
+  {
+    // A full page whose rows all fail normalization does not end the walk (the board omits its total).
+    const noTotal = (r) => r.split(';').filter((x) => !x.includes('postingCount')).join(';');
+    const untitled = Array.from({ length: 50 }, (_, i) => ({ id: 900 + i, title: '' }));
+    const ctx = makeCtx({ replies: { search: (n) => noTotal(n === 1 ? searchReply(untitled) : searchReply(many(0, 3))) } });
+    const out = await sfc.fetch(entry, ctx);
+    if (out.length === 3 && ctx.searchCalls.n === 2 && !out.truncated) pass('a full page of unusable rows does not end the walk: the next page is read');
+    else fail(`unusable page: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}`);
   }
 
   // parseSearchReply on its own: pagination count is the source's, not the filtered one.

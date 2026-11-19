@@ -5,6 +5,7 @@ import { decodeEntities } from './_html-entities.mjs';
 import { fetchResponseWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
 import { coerceId } from './_ids.mjs';
+import { randomBytes, randomInt } from 'node:crypto';
 import { markTruncated } from '../lib/board-truncation.mjs';
 import { cookieHeaderFrom } from './csod.mjs';
 
@@ -146,11 +147,12 @@ function unescapeJs(s) {
  * @param {string} text @returns {any[]}
  */
 export function parseDwr(text) {
-  if (/_remoteHandleException/.test(text)) {
+  // Statements start a line: a posting title holding the same words sits inside a string literal.
+  if (/^dwr\.engine\._remoteHandleException\(/m.test(text)) {
     const message = /"message":"([^"]*)"/.exec(text)?.[1] || 'unknown';
     throw new Error(`successfactors-classic: DWR error: ${message}`);
   }
-  if (!/_remoteHandleCallback/.test(text)) {
+  if (!/^dwr\.engine\._remoteHandleCallback\(/m.test(text)) {
     throw new Error('successfactors-classic: reply is not a DWR reply (session or CSRF key rejected, or a login page)');
   }
   /** @type {Map<string, any>} */
@@ -219,7 +221,8 @@ function postingUrl(origin, prefix, posting) {
  * @param {{origin: string, company: string}} cfg
  * @param {string} companyName
  * @param {string} lang the page's language, for the date format
- * @returns {{jobs: any[], rawCount: number, total: number | null}}
+ * @returns {{jobs: any[], rawCount: number, total: number | null, keys: string[]}} `keys` identifies each
+ *   row the source returned (id and title), before any is dropped, for repeated-page detection
  */
 export function parseSearchReply(objects, cfg, companyName, lang) {
   const results = objects.find((o) => o && !Array.isArray(o) && Array.isArray(o.postings));
@@ -229,10 +232,16 @@ export function parseSearchReply(objects, cfg, companyName, lang) {
   const total = Number.isInteger(results.postingCount) ? results.postingCount : null;
   const prefix = typeof results.detailURLPrefix === 'string' ? results.detailURLPrefix : '';
   const rows = results.postings.filter((p) => p && typeof p === 'object');
+  // Postings with no prefix to build their links from would all be dropped below and the page
+  // would read as an empty or short one: that is a broken reply, not an empty board.
+  if (rows.length > 0 && !/^\/career\?/.test(prefix)) {
+    throw new Error('successfactors-classic: postings present but no usable detailURLPrefix in the search reply (protocol changed?)');
+  }
   const toMs = dateParser(rows.map((p) => (typeof p.postingDate === 'string' ? p.postingDate : '')).filter(Boolean), lang);
   const jobs = [];
   for (const p of rows) {
-    const title = decodeEntities(String(p.title ?? '')).replace(/\s+/g, ' ').trim();
+    if (typeof p.title !== 'string') continue;
+    const title = decodeEntities(p.title).replace(/\s+/g, ' ').trim();
     const url = postingUrl(cfg.origin, prefix, p);
     if (!title || !url) continue;
     const postedAt = typeof p.postingDate === 'string' ? toMs(p.postingDate) : undefined;
@@ -245,7 +254,8 @@ export function parseSearchReply(objects, cfg, companyName, lang) {
       listingIdentity: { ats_provider: 'successfactors-classic', board_slug: cfg.company, posting_id: String(coerceId(p.id)) },
     });
   }
-  return { jobs, rawCount: results.postings.length, total };
+  const keys = rows.map((p) => `${typeof p.id === 'string' || typeof p.id === 'number' ? p.id : ''}|${typeof p.title === 'string' ? p.title : ''}`);
+  return { jobs, rawCount: results.postings.length, total, keys };
 }
 
 /** @param {import('./_types.js').PortalEntry} entry */
@@ -272,7 +282,12 @@ export default {
 
     // Bootstrap: cookies + CSRF key + view id. One anonymous GET, outside max_pages.
     const searchUrl = `${cfg.origin}${cfg.searchPage}`;
-    const boot = await fetchResponseWithRetry(ctx, searchUrl, { redirect: 'error', headers: { accept: 'text/html' } });
+    // A health probe (ctx.maxPages) spends a small request budget: no retries there, so a failing
+    // board surfaces its own HTTP error instead of exhausting the budget and reading as live.
+    const ctxMaxPages = Number(ctx?.maxPages);
+    const probing = ctxMaxPages > 0;
+    const retryPolicy = probing ? { retries: 0 } : {};
+    const boot = await fetchResponseWithRetry(ctx, searchUrl, { redirect: 'error', headers: { accept: 'text/html' } }, retryPolicy);
     const html = await boot.text();
     const cookie = cookieHeaderFrom(typeof boot.headers?.getSetCookie === 'function' ? boot.headers.getSetCookie() : []);
     const key = /ajaxSecKey="([^"]+)"/.exec(html)?.[1];
@@ -285,8 +300,8 @@ export default {
     let batch = 0;
     /** @param {string} method @param {string} page @param {unknown[]} params */
     const dwr = async (method, page, params) => {
-      const scriptSessionId = Array.from({ length: 32 }, () => '0123456789ABCDEF'[Math.floor(Math.random() * 16)]).join('')
-        + String(Math.floor(Math.random() * 1000));
+      // 32 hex digits and a 0-999 counter, from the system CSPRNG.
+      const scriptSessionId = randomBytes(16).toString('hex').toUpperCase() + String(randomInt(1000));
       const body = [
         'callCount=1', `page=${page}`, 'httpSessionId=', `scriptSessionId=${scriptSessionId}`,
         `c0-scriptName=${CONTROLLER}`, 'c0-methodName=' + method, 'c0-id=0',
@@ -308,7 +323,7 @@ export default {
           ...(cookie ? { cookie } : {}),
         },
         body,
-      });
+      }, retryPolicy);
       return parseDwr(text);
     };
 
@@ -339,13 +354,12 @@ export default {
 
     const summaryPage = `/career?company=${encodeURIComponent(cfg.company)}&career%5fns=job%5flisting%5fsummary&navBarLevel=JOB%5fSEARCH&_s.crb=${encodeURIComponent(key)}`;
     const maxPages = resolveMaxPages(entry);
-    const ctxMaxPages = Number(ctx?.maxPages);
-    const pagesToFetch = Math.min(maxPages, ctxMaxPages > 0 ? ctxMaxPages : Infinity);
-    const probing = ctxMaxPages > 0;
+    const pagesToFetch = Math.min(maxPages, probing ? ctxMaxPages : Infinity);
 
     /** @type {any[]} */
     const jobs = [];
     const seen = new Set();
+    const seenKeys = new Set(); // raw rows of earlier pages, as the source returned them
     let total = null;
     let stopReason = 'complete';
     for (let page = 1; page <= pagesToFetch; page++) {
@@ -370,25 +384,27 @@ export default {
         break;
       }
       total = parsed.total ?? total;
-      let fresh = 0;
       for (const job of parsed.jobs) {
         if (seen.has(job.listingIdentity.posting_id)) continue;
         seen.add(job.listingIdentity.posting_id);
-        fresh++;
         jobs.push(job);
       }
-      // Rows the source returned, before malformed ones were dropped: a short
-      // page, or the counted total, is the board's own end.
-      if (parsed.rawCount < PAGE_SIZE || (total !== null && page * PAGE_SIZE >= total)) break;
-      // A later full page of nothing new means the server ignored the page
-      // number: the rest of the board is out of reach, so the read is partial.
-      if (fresh === 0) {
-        if (page > 1) {
-          console.error(`⚠️  successfactors-classic: ${entry.name} ignored the page number (page ${page} repeated earlier postings), keeping ${jobs.length} postings`);
-          stopReason = 'page-ignored';
-        }
+      // A later page made only of rows an earlier page already returned means the
+      // server ignored the page number: the rest of the board is out of reach, so
+      // the read is partial. Judged on the rows as the source sent them, before any
+      // is dropped, and before the counted total is consulted: a repeated page can
+      // also reach that total.
+      const repeated = page > 1 && parsed.keys.length > 0 && parsed.keys.every((k) => seenKeys.has(k));
+      if (repeated) {
+        console.error(`⚠️  successfactors-classic: ${entry.name} ignored the page number (page ${page} repeated earlier postings), keeping ${jobs.length} postings`);
+        stopReason = 'page-ignored';
         break;
       }
+      for (const k of parsed.keys) seenKeys.add(k);
+      // Rows the source returned, before malformed ones were dropped: a short
+      // page, or the counted total, is the board's own end. A full page whose
+      // rows all failed normalization is not: the next page may hold valid ones.
+      if (parsed.rawCount < PAGE_SIZE || (total !== null && page * PAGE_SIZE >= total)) break;
       if (page === pagesToFetch && !probing) stopReason = 'cap';
     }
     if (total !== null && total > 0 && jobs.length === 0) {
