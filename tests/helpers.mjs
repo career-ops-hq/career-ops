@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join, dirname, resolve, sep, delimiter } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -214,7 +214,18 @@ export function isolatedBatchStatePath(additionsDir) {
 // option still wins, and a removal that keeps failing still throws. Same
 // wrapper test-all.mjs applies to its own call sites (#3066), shared so the
 // suites under tests/ cannot drift from it.
-export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+export const rmSync = (target, opts = {}) => {
+  // A junction (or directory symlink) reports itself as a directory, so
+  // _rmSync treats it as a real directory and throws ERR_FS_EISDIR instead of
+  // dropping the link. Match Node's own rmSync semantics: a symbolic link is
+  // removed as the link itself, never recursed into — even with recursive.
+  const targetStat = lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat?.isSymbolicLink()) {
+    unlinkSync(target);
+    return;
+  }
+  return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+};
 
 /**
  * The per-script budget run() applies when a caller does not override it.
