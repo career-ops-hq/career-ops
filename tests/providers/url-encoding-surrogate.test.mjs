@@ -52,6 +52,17 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // goldman.toJob — role URL built from externalSource.sourceId.
+  const { toJob: goldmanToJob } = await load('goldman.mjs');
+  check(
+    'goldman.toJob',
+    () => [
+      goldmanToJob({ jobTitle: 'Bad', externalSource: { sourceId: `${LONE}bad` } }, 'Acme'),
+      goldmanToJob({ jobTitle: 'Good', externalSource: { sourceId: 'g-1' } }, 'Acme'),
+    ],
+    ([bad, good]) => bad === null && good !== null && good.url.endsWith('/roles/g-1'),
+  );
+
   // deel.parseDeelBoard — .map() over the board's jobPostings array.
   const { parseDeelBoard } = await load('deel.mjs');
   const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;

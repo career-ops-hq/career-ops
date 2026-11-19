@@ -208,6 +208,7 @@ export function ApplyView() {
                   field={f}
                   value={a.answers[f.id] ?? ""}
                   needs={!!a.meta[f.id]?.needsConfirmation}
+                  reason={a.meta[f.id]?.reason}
                   index={i}
                   drafting={prefilling}
                   cvAttached={a.cvAttached}
@@ -587,6 +588,7 @@ function FieldRow({
   field: f,
   value,
   needs,
+  reason,
   index,
   drafting,
   cvAttached,
@@ -595,6 +597,8 @@ function FieldRow({
   field: ApplyField;
   value: string;
   needs: boolean;
+  /** Why the field was left for the user, e.g. an AI-directed question (#7193). */
+  reason?: string;
   index: number;
   drafting: boolean;
   cvAttached: boolean;
@@ -602,12 +606,14 @@ function FieldRow({
 }) {
   const controlId = useId();
   const confirmationId = `${controlId}-confirmation`;
+  const reasonId = `${controlId}-reason`;
+  const describedBy = [needs ? confirmationId : null, reason ? reasonId : null].filter(Boolean).join(" ");
   // Announce the employer's requirement without imposing native validation on
   // this draft editor; the user still reviews/submits the real form separately.
   const controlProps = {
     id: controlId,
     "aria-required": f.required || undefined,
-    "aria-describedby": needs ? confirmationId : undefined,
+    "aria-describedby": describedBy || undefined,
   };
   const labelText = f.label || "Untitled field";
 
@@ -643,6 +649,7 @@ function FieldRow({
         {f.required && <Asterisk aria-hidden="true" className="size-3 text-brand-text" />}
         {needs && <span id={confirmationId} className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:text-amber-400">you confirm</span>}
       </div>
+      {reason && <p id={reasonId} className="mb-1.5 text-xs text-amber-800 dark:text-amber-400">{reason}</p>}
       {writing ? (
         <div className={cn("co-skel", f.type === "textarea" ? "h-[68px]" : "h-9")} />
       ) : f.type === "textarea" ? (

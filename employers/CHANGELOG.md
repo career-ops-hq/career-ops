@@ -26,3 +26,9 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-19 `2026-11-19-santifer.5` (428 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
 - 2026-11-19 `2026-11-19-santifer.6` (273 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
 - 2026-11-19 `2026-11-19-santifer.7` (181 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer.8` (54 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-19 `2026-11-19-santifer.9` (17 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-19 `2026-11-19-santifer.10` (782 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-19 `2026-11-19-santifer.11` (369 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-19 `2026-11-19-santifer.12` (731 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-19 `2026-11-19-santifer.13` (536 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
