@@ -1,0 +1,5 @@
+# Fork-owned product files, intentionally tracked for consistent CI checks.
+# The upstream updater and coverage validator support this declaration format.
+PROJECT_HANDOFF.md
+hosted/
+package-lock.json

@@ -1,6 +1,6 @@
 # Hosted product: shared agent handoff
 
-Last updated: 2026-11-19. Status: architecture agreed; implementation not started.
+Last updated: 2026-11-19. Status: shared documentation published; evaluation adapter implemented and locally verified; full hosted product not yet built.
 
 ## Start here, regardless of AI tool
 
@@ -16,6 +16,7 @@ Create a hosted web application for multiple users using career-ops as its backe
 - Reviewed engine commit: `3c15976d1c434403b73c5b6ca641101b85a30c65`.
 - Connected account: FranckAkim. Upstream access is read-only; publish product work to a user-owned fork, not an upstream pull request unless asked.
 - Working branch: `product/hosted-foundation` (create if absent).
+- Product fork: https://github.com/FranckAkim/career-ops/tree/product/hosted-foundation
 - Root package 1.40.0; existing web package 0.18.0 at the reviewed commit.
 - Full architecture: `docs/hosted/backend-design.md`.
 
@@ -37,9 +38,9 @@ Create a hosted web application for multiple users using career-ops as its backe
 Prove a complete isolated backend workflow before UI redesign: confirmed fixture profile -> pasted posting -> evaluation -> canonical tracker merge -> tailored CV -> validated PDF. Exercise two independent tenants. Keep source changes small and preserve upstream CLI behavior.
 
 Suggested order:
-- [ ] Publish this handoff, detailed design and `hosted/AGENTS.md` on the user's fork; verify remote contents.
-- [ ] Implement an allowlisted engine adapter with explicit per-child environments, safe paths, bounded output, timeouts and cancellation.
-- [ ] Establish deterministic offline contract tests with synthetic candidate data. Clearly distinguish mocked tests from live execution.
+- [x] Publish this handoff, detailed design and `hosted/AGENTS.md` on the user's fork; verify remote contents.
+- [x] Implement the initial allowlisted evaluation/merge adapter with explicit per-child environments, safe paths, bounded output, timeouts and cancellation. Other operations remain unfinished.
+- [x] Establish deterministic tests using synthetic profiles and a local mock model server. These run real upstream evaluator/merger processes; no external model is called.
 - [ ] Install pinned dependencies and run a real engine fixture flow where credentials/runtime permit. No paid model calls without a configured authorized project credential/budget.
 - [ ] Verify tracker/report relationships, fact/structure validation and PDF output.
 - [ ] Add durable orchestration, workspace snapshots and tenant isolation before exposing an API publicly.
@@ -67,7 +68,13 @@ After each meaningful implementation chunk, update the Progress section below wi
 
 - 2026-11-19: Source review completed at the pinned upstream commit. Existing web app, standalone model entrypoints, canonical storage and local-only assumptions inspected.
 - 2026-11-19: Multi-user hosted direction explicitly confirmed by user; implementation and publishing shared documentation authorized.
-- 2026-11-19: Handoff and detailed design prepared locally. Writable fork found at https://github.com/FranckAkim/career-ops; publishing documentation on product/hosted-foundation. No dependencies installed, live model calls made, tests run or deployment created yet.
+- 2026-11-19: Documentation published before implementation in commit `4f5356b`; verified PROJECT_HANDOFF.md through the GitHub connector. The existing fork is writable; no browser sign-in was needed.
+- 2026-11-19: Implemented `hosted/engine.mjs` and `hosted/process.mjs` for pasted-text evaluation plus canonical merge. Uses upstream summary/tracker parsers, fixed script arguments, explicit environments, bounded output, cancellation and an exclusive local mutation lock. Input/profile/model/engine-revision fingerprints support successful job replay. Incomplete jobs require recovery; no automatic model retry.
+- 2026-11-19: Added `hosted/tests/engine.test.mjs`, package scripts, README and a dedicated Linux/Windows GitHub Actions workflow. Added root AGENTS.md entry so coding agents discover this file automatically. Committed a root dependency lockfile for reproducible adapter CI; `config/local-paths.txt` intentionally tracks fork-owned files using the upstream-supported declaration mechanism.
+- Local validation: `npm --prefix hosted test` — 6 tests passed, including real evaluator/merge across two synthetic tenants, idempotency, malformed output, required tracker, input/config rejection, workspace contention, timeout/cancellation/output cap and sanitized failures. `node tests/evaluator-score-cell.test.mjs` — 27 score cases plus single-source check passed. `node --test tests/openai-eval-stream-usage.test.mjs` — 7 passed. `node validate-system-paths-coverage.mjs`, changed-module syntax checks and staged diff whitespace checks passed.
+- Environment note: loopback model-server tests require network-enabled execution in this desktop sandbox. No external provider calls, real candidate data, paid services or deployments were used.
+- Current limitations: evaluation only, based on pasted text; no live liveness/research, tailoring/PDF adapter, public API, authentication, durable queue, production leases/snapshots or container isolation. Passing process tests does not establish tenant security in production. The supervisor must supply the correct immutable engine commit. Failed runs may leave partial private workspace changes; do not publish them.
+- Next concrete action: implement tailoring and strict fact/structure/PDF gates against synthetic fixtures, then the durable isolated worker supervisor. Configure a project model credential and budget before real provider quality/cost testing. Check the branch's hosted-engine Actions results before relying on cross-platform CI.
 
 ## Next-agent resume procedure
 

@@ -1,0 +1,7 @@
+{
+  "name": "@hosted-career/engine-adapter",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test tests/*.test.mjs" },
+  "engines": { "node": ">=24.15.0" }
+}

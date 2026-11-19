@@ -1,5 +1,13 @@
 # career-ops: open-source AI job search agent
 
+## Hosted product development
+
+When working on the hosted multi-user application in this fork, read
+`PROJECT_HANDOFF.md` and `docs/hosted/backend-design.md` before editing. Keep
+the handoff's progress, validation evidence and next steps current for other AI
+agents. This section concerns software development; job-search runs still follow
+the data and workflow rules below.
+
 ## Origin
 
 Built and used by [santifer](https://santifer.io) for his own job search: 740 listings evaluated, 68 applied, 12 interviews, 1 offer, a Head of Applied AI role. The archetypes, scoring, and negotiation scripts reflect that search; his portfolio is also open source: [cv-santiago](https://github.com/santifer/cv-santiago).
