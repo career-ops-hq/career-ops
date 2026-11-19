@@ -35,7 +35,9 @@ The server binds IPv4 loopback, so reach it as `localhost` or `127.0.0.1`;
 ## What works today
 
 - **Pipeline** — your tracker as a sortable, filterable table; status changes
-  write back through the core's own scripts.
+  write back through the core's own scripts. Evaluate jobs from any status,
+  including Skip, and complete a partial evaluation with a fresh full assessment.
+  Results attach to the same job; status, notes and earlier reports are preserved.
 - **Explore** — the free reverse-ATS scan with an honest partial-dataset
   indicator, plus AI-assisted discovery (bring your own CLI/keys, including Grok Build CLI).
 - **Scheduled scans** — save local zero-token or full-dataset scans and run due

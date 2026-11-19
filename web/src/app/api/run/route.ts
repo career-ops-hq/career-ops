@@ -9,8 +9,10 @@ import { cliSubstitutionNotice, cliUnavailableError, resolveCliOrFallback } from
 import { localISODate } from "@/lib/followups";
 import { accumulateTokens, createAgentTextJoiner, isFatalGenericStderr, killMsForKind, noOutputError, timeoutMessage } from "@/lib/run-cli-support.mjs";
 import { spawnHeadlessCli } from "@/lib/spawn-cli.mjs";
-import { careerOpsRoot, readMemory, findReportFile, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
+import { careerOpsRoot, readMemory, findReportFile, findApplication, readInbox, readScanDates, readLanguageConfig } from "@/lib/career-ops";
 import { resolveCodeRoot } from "@/lib/core/code-root.mjs";
+import { postingHref } from "@/lib/posting-url.mjs";
+import { normalizeUrl } from "@/lib/core/url-key.mjs";
 import { dataFolderMissingMessage, unsafeDataRootMessage } from "@/lib/core/data-root.mjs";
 import { resolvePdfPaths, type PdfPaths } from "@/lib/pdf-paths.mjs";
 import { renderAndMarkPdf, writeCvHtml, pdfRunOutcome } from "@/lib/pdf-render.mjs";
@@ -41,7 +43,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 800; // a real oferta evaluation / pdf-mode CV tailoring + render is heavy and multi-step
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; ats?: unknown }>(req);
+  const body = await readJsonObject<{ kind?: string; input?: string; cliId?: string; brief?: unknown; evaluationSections?: unknown; targetApplication?: unknown; ats?: unknown }>(req);
   if (!body) return new Response(JSON.stringify({ error: "bad json" }), { status: 400 });
   const { kind = "evaluate", input, cliId: requestedCliId, brief } = body;
   const evaluation = kind === "evaluate" ? parseEvaluationOptions(body.evaluationSections) : undefined;
@@ -65,6 +67,19 @@ export async function POST(req: Request) {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+  let evaluationTarget: { num: string; expectedCompany: string; expectedRole: string; expectedReport: string } | undefined;
+  if (body.targetApplication !== undefined) {
+    if (kind !== "evaluate" || typeof body.targetApplication !== "string" || !/^[1-9]\d*$/.test(body.targetApplication)) {
+      return Response.json({ error: "Choose a valid application to evaluate." }, { status: 400 });
+    }
+    const app = findApplication(body.targetApplication);
+    if (!app) return Response.json({ error: "Application no longer exists. Refresh before retrying." }, { status: 404 });
+    const savedUrl = postingHref(app.url) || postingHref(app.applyLink);
+    if (!postingHref(input) || (savedUrl && normalizeUrl(savedUrl) !== normalizeUrl(input))) {
+      return Response.json({ error: "Use this application's saved posting URL. Refresh if it changed." }, { status: 409 });
+    }
+    evaluationTarget = { num: String(Number(app.n)), expectedCompany: app.company, expectedRole: app.role, expectedReport: app.report };
   }
   const resolved = resolveCliOrFallback(requestedCliId);
   if (!resolved) {
@@ -552,13 +567,14 @@ export async function POST(req: Request) {
             today,
             postedAt,
             evaluationSections: evaluation?.ok ? evaluation.sections : undefined,
+            targetApplication: evaluationTarget,
           });
           if (!result.ok) {
             send({ type: "error", msg: result.error.slice(0, 1500) });
             return;
           }
           sendWarnings(result.warnings);
-          const reportN = Number(result.num);
+          const reportN = Number(result.applicationN ?? result.num);
           if (Number.isFinite(reportN)) {
             send({ type: "done", tokens: lastTokens, costUsd: lastCostUsd, reportN });
           } else {

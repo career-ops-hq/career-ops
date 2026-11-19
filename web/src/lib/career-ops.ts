@@ -14,6 +14,7 @@ import { parseStatusLog } from "@/lib/pipeline-sankey.mjs";
 // Pipeline rows are parsed in a plain .mjs for the same reason as
 // tracker-table.mjs: so `node --test` can exercise the real parser.
 import { parseInbox, splitLines } from "@/lib/pipeline-table.mjs";
+import { evaluationState } from "@/lib/evaluation-state.mjs";
 import { reconcileInbox } from "@/lib/inbox-pending.mjs";
 // One definition of the `{n}-RESERVED.md` convention, shared with
 // run-cli-support.mjs — see report-files.mjs for why it lives there.
@@ -227,6 +228,7 @@ export type Application = {
   url: string;
   /** Calendar day the posting closes, from scan history. Absent when that file has no day for this URL. */
   closesAt?: string;
+  evaluation?: { kind: "none" | "partial" | "full" | "missing" | "unreadable"; sections: string[] };
 };
 
 /**
@@ -248,7 +250,7 @@ export function readApplications(): Application[] {
     path.resolve(codeRoot, "tracker-aliases.json"),
   ])];
   const rows = cachedFileValue(file, "applications", (md) =>
-    parseApplications(md, root, codeRoot) as Application[],
+    parseApplications(md, root, codeRoot) as unknown as Application[],
     aliasFiles,
   );
   // A new array of new row objects each call. The cache keeps the parsed rows;
@@ -479,13 +481,27 @@ export function pipelineSummary(): PipelineSummary {
   const root = careerOpsRoot();
   const scanDates = readScanDates();
   const applications = readApplications();
+  const readReport = requestReportReader();
+  const withEvaluation = applications.map(app => {
+    let evaluation;
+    try {
+      const report = readReport(app);
+      evaluation = report ? evaluationState(report.content)
+        : { kind: firstMarkdownLinkTarget(app.report) ? "missing" : "none", sections: [] };
+    } catch {
+      // One unreadable report must not take down the tracker or its back link.
+      // Keep the error distinct from a missing file; the detail page offers retry.
+      evaluation = { kind: "unreadable", sections: [] };
+    }
+    return { ...app, evaluation: evaluation as NonNullable<Application["evaluation"]> };
+  });
   return {
     root,
     rootExists: fs.existsSync(root),
     // join the freshness date (first_seen) onto each raw posting — the inbox's
     // triage view orders/faceted-filters on it entirely client-side.
     inbox: readInbox(applications).map((j) => ({ ...j, postedAt: j.postedAt ?? scanDates.get(j.url) })),
-    applications,
+    applications: withEvaluation,
   };
 }
 
