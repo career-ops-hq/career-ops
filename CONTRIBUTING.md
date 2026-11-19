@@ -37,7 +37,7 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 
 - Repo docs and governance: `README*.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `ARCHITECTURE.md`, `.github/CODEOWNERS`
 - Coding-agent configuration: `.github/copilot-instructions.md`, `.github/agents/`
-- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`
+- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`, `modes/_community-asks.md`, `modes/_files.md`, `modes/_headless.md`, `modes/_markets.md`, `modes/_onboarding.md`, `modes/_tracker-tsv.md`
 - Scoring and the data contract: `modes/_shared.md`, `DATA_CONTRACT.md`
 - The self-updater: `update-system.mjs`, `lib/update-manifest.mjs`, `updater-migration-tests.mjs`
 - Plugin governance: `plugins-registry/`, `validate-plugin-registry.mjs`, `plugin-install.mjs`, `plugin-audit.mjs`, `plugins/_engine.mjs`, `plugins/_lock.mjs`, `plugins/_net.mjs`, `plugins/_registry.mjs`, `.github/workflows/`, `docs/PLUGIN_REVIEW.md`
