@@ -42,6 +42,8 @@ const REFUSALS = [
   'Applicants must have work authorization that does not require sponsorship from the company now or in the future.',
   'Work authorization that does not require company sponsorship now or in the future.',
   'You must hold work authorisation that doesn’t require sponsorship.',
+  'Applicants must not require visa sponsorship now or in the future.',
+  'Candidates must not now or in the future require sponsorship for employment.',
   'Applicants must be legally authorized to work in the United States without requiring visa sponsorship now or in the future.',
   'Applicants must be authorized to work without the need for visa sponsorship by the start date.',
   'Must be legally eligible to work in Canada without requiring company sponsorship.',
