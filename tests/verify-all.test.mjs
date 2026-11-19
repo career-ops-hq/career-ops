@@ -27,12 +27,14 @@ function workspace(files) {
   return dir;
 }
 
-function run(dir, args, cwd = dir) {
-  return spawnSync(process.execPath, [SCRIPT, ...args], {
-    cwd,
-    encoding: 'utf8',
-    env: { ...process.env, CAREER_OPS_ROOT: dir },
-  });
+function run(dir, args, cwd = dir, extraEnv = {}) {
+  // Pin the link-guard configuration so the result does not depend on the
+  // machine running the test (an ambient proxy or DNS-cache opt-out).
+  const env = { ...process.env, CAREER_OPS_ROOT: dir, ...extraEnv };
+  for (const k of ['CAREER_OPS_NO_DNS_CACHE', 'NODE_USE_ENV_PROXY', 'CAREER_OPS_TRUST_PROXY_EGRESS']) {
+    if (!(k in extraEnv)) delete env[k];
+  }
+  return spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8', env });
 }
 
 test('extractUrls keeps scheme links and bare profile hosts, skips emails and file names', () => {
@@ -100,6 +102,20 @@ test('--links reports a malformed link as a failure instead of throwing', () => 
     const r = run(dir, ['bad.md', '--links']);
     assert.equal(r.status, 1, r.stdout + r.stderr);
     assert.match(r.stdout, /\[fail\] http:\/\/\[::1: not a valid URL/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--links still fails a malformed link when the address guard skips the network checks', () => {
+  const dir = workspace({ 'cv.md': CV, 'bad.md': '- Ran the weekly release train for the payments app\n\nhttp://[::1\n' });
+  try {
+    for (const extra of [{ CAREER_OPS_NO_DNS_CACHE: '1' }, { NODE_USE_ENV_PROXY: '1' }]) {
+      const r = run(dir, ['bad.md', '--links'], dir, extra);
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stdout, /\[fail\] http:\/\/\[::1: not a valid URL/);
+      assert.match(r.stdout, /links not checked/);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

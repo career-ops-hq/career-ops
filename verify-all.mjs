@@ -170,29 +170,34 @@ async function guardedStatus(url, guard) {
 }
 
 async function checkLinks(urls) {
+  // Malformed links need no network, so they fail even when the checks below
+  // are skipped.
+  let dead = 0;
+  const valid = [];
+  for (const u of urls) {
+    try { new URL(u); valid.push(u); } catch {
+      dead++;
+      console.log(`  [fail] ${u}: not a valid URL`);
+    }
+  }
+  const skipped = (why) => {
+    console.log(`  [info] links not checked: ${why}`);
+    console.log(dead ? `Links: ${dead} dead of ${urls.length} (the rest not checked)` : `Links: none checked`);
+    return dead === 0;
+  };
   // The connect-time guard lives in the patched dns.lookup, so the patch has
   // to be in place, and a fetch through an untrusted HTTP proxy would hide the
   // destination from it: fail closed in both cases, as jd-page-fetch does.
   const { dnsLookupPatched } = await import('./providers/_dns-cache.mjs');
   const { providerFetchContext } = await import('./providers/_ip-guard.mjs');
   const { validateUrlSecurity } = await import('./liveness-browser.mjs');
-  if (!dnsLookupPatched()) {
-    console.log('  [info] links not checked: the connect-time address guard is off (CAREER_OPS_NO_DNS_CACHE)');
-    return true;
-  }
+  if (!dnsLookupPatched()) return skipped('the connect-time address guard is off (CAREER_OPS_NO_DNS_CACHE)');
   if (/^(1|true)$/i.test(process.env.NODE_USE_ENV_PROXY ?? '') && process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') {
-    console.log('  [info] links not checked: NODE_USE_ENV_PROXY is set without CAREER_OPS_TRUST_PROXY_EGRESS=1');
-    return true;
+    return skipped('NODE_USE_ENV_PROXY is set without CAREER_OPS_TRUST_PROXY_EGRESS=1');
   }
   const guard = { validateUrlSecurity, providerFetchContext };
-  let dead = 0;
-  for (const u of urls) {
-    let hostname;
-    try { hostname = new URL(u).hostname; } catch {
-      dead++;
-      console.log(`  [fail] ${u}: not a valid URL`);
-      continue;
-    }
+  for (const u of valid) {
+    const hostname = new URL(u).hostname;
     const result = await guardedStatus(u, guard);
     if (result.blocked) { console.log(`  [info] not checked (${result.blocked}): ${u}`); continue; }
     const { status } = result;
