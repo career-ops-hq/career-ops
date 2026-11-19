@@ -310,11 +310,12 @@ try {
     else fail(`probe 503: status=${status}, searches=${ctx.searchCalls.n}`);
   }
   {
-    // A repeated page ends the walk as partial even when it reaches the reported total.
+    // A repeated page before the rows read reach the reported total: the server ignored the
+    // page number, so the walk ends as partial.
     const ctx = makeCtx({ replies: { search: () => searchReply(many(0, 50), 100) } });
     const { result: out, errors } = await captureConsoleErrors(() => sfc.fetch(entry, ctx));
-    if (out.length === 50 && ctx.searchCalls.n === 2 && out.truncated?.reason === 'page-ignored' && out.truncated.total === 100 && errors.length === 1) pass('a repeated page that reaches the reported total is still marked page-ignored');
-    else fail(`repeat at total: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}`);
+    if (out.length === 50 && ctx.searchCalls.n === 2 && out.truncated?.reason === 'page-ignored' && out.truncated.total === 100 && errors.length === 1) pass('a repeated page short of the reported total is marked page-ignored');
+    else fail(`repeat short of total: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}`);
   }
   {
     // The reported total is not the end of the walk: a stale count on a full first page

@@ -406,7 +406,8 @@ export default {
       // multiple of PAGE_SIZE ends this way: complete when the counted total says every row was
       // already read. Otherwise the server ignored the page number, the rest of the board is out
       // of reach and the read is partial. Judged on the rows as the source sent them, before
-      // any is dropped.
+      // any is dropped. This stop and the cap below are the only ones that read the count, and
+      // only for the label: a stale count can mislabel the stop, never cut a walk short.
       const repeated = page > 1 && parsed.keys.length > 0 && parsed.keys.every((k) => seenKeys.has(k));
       if (repeated) {
         if (total !== null && seenKeys.size >= total) break;
