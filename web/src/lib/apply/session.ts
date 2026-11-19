@@ -245,7 +245,7 @@ type UnsupportedApplySession = { unsupported: { vendor: string; label: string; p
 export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<OpenedApplySession | UnsupportedApplySession> {
   // Workday, iCIMS, and UKG have no in-app fill. Refuse before Chrome starts.
   const blockedAts = await unsupportedInAppAts(url);
-  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts.label) };
+  if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts) };
   // Refuse before launching any navigation, so an obviously-internal target
   // never reaches Playwright at all.
   await assertSafeApplyUrl(url);
@@ -288,7 +288,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (landedAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts.label, true) };
+    return { unsupported: landedAts, message: unsupportedAtsMessage(landedAts, true) };
   }
   await snap(); // first paint
   const sBlock = statusBlock(resp?.status(), resp ? resp.headers() : {});
@@ -307,7 +307,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (settledAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts.label, true) };
+    return { unsupported: settledAts, message: unsupportedAtsMessage(settledAts, true) };
   }
   await snap(); // settled
 
@@ -334,7 +334,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       const hit = await unsupportedInAppAts(trigger.blocked);
       await context.close().catch(() => {});
       if (SESSIONS.size === 0) scheduleIdleClose();
-      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit.label, true) };
+      if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit, true) };
     } else if (trigger && typeof trigger === "object" && "followed" in trigger) {
       await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 6_000 }).catch(() => null))).catch(() => {});
       await page.waitForTimeout(800);
@@ -345,7 +345,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       if (lateAts) {
         await context.close().catch(() => {});
         if (SESSIONS.size === 0) scheduleIdleClose();
-        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts.label, true) };
+        return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts, true) };
       }
       ({ frame, form } = await pickFormFrame(page));
       if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
