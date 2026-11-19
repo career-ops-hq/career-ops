@@ -18,14 +18,19 @@
  */
 
 // Who the text is speaking to.
-const FILLER = String.raw`(?:an? )?(?:ai|a\.i\.|artificial intelligence|llms?|large language models?|language models?|chatgpt|gpt|claude|gemini|copilot|bots?|automated tools?)(?: (?:agents?|assistants?|tools?|models?|systems?))?`;
+const FILLER = String.raw`(?:an? )?(?:ai|a\.i\.|artificial intelligence|llms?|large language models?|language models?|chatgpt|gpt|claude|gemini|copilot|bots?|robots?|automated (?:tools?|systems?|programs?|scripts?|agents?))(?: (?:agents?|assistants?|tools?|models?|systems?))?`;
+
+// What ends an addressee: punctuation, the end of the label, or a word that
+// goes on speaking to it ("an AI agent to complete …", "a model reading this").
+const ENDS_ADDRESSEE = String.raw`\s*(?:[,.:;!?)]|$|(?:to|reading|filling|completing|please|that|who)\b)`;
 
 // What may follow the addressee for it to be the subject being spoken to, not
 // a noun modifier: "an AI, write …" or "an AI agent to complete …" qualify,
 // "an AI researcher" and "AI tools in your daily work" do not. "and"/"or" only
-// when another addressee follows: "a human or a bot" qualifies, "AI and ML
-// engineers" is a human role.
-const ADDRESSED = String.raw`(?=\s*(?:[,.:;!?)]|$|(?:to|reading|filling|completing|please|that|who)\b|(?:or|and) (?:an? )?(?:human|person|agents?|assistants?|${FILLER})\b))`;
+// when another addressee follows and ends the phrase too: "a human or a
+// robot?" qualifies, while "AI and ML engineers" and "an AI or robot
+// engineer" are human roles.
+const ADDRESSED = String.raw`(?=${ENDS_ADDRESSEE}|\s*(?:or|and) (?:an? )?(?:human|person|agents?|assistants?|${FILLER})(?=${ENDS_ADDRESSEE}))`;
 
 // One character of a gap that does not start a word for something the
 // candidate made: "the AI tool you built to fill forms" is their own work.
