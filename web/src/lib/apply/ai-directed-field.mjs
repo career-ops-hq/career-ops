@@ -22,8 +22,10 @@ const FILLER = String.raw`(?:an? )?(?:ai|a\.i\.|artificial intelligence|llms?|la
 
 // What may follow the addressee for it to be the subject being spoken to, not
 // a noun modifier: "an AI, write …" or "an AI agent to complete …" qualify,
-// "an AI researcher" and "AI tools in your daily work" do not.
-const ADDRESSED = String.raw`(?=\s*(?:[,.:;!?)]|$|(?:to|reading|filling|completing|or|and|please|that|who)\b))`;
+// "an AI researcher" and "AI tools in your daily work" do not. "and"/"or" only
+// when another addressee follows: "a human or a bot" qualifies, "AI and ML
+// engineers" is a human role.
+const ADDRESSED = String.raw`(?=\s*(?:[,.:;!?)]|$|(?:to|reading|filling|completing|please|that|who)\b|(?:or|and) (?:an? )?(?:human|person|agents?|assistants?|${FILLER})\b))`;
 
 // One character of a gap that does not start a word for something the
 // candidate made: "the AI tool you built to fill forms" is their own work.
