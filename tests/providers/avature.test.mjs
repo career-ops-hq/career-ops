@@ -9,7 +9,7 @@ console.log('\nProvider — avature (career-site SearchJobs parser)');
 try {
   const avatureModule = await import(pathToFileURL(join(ROOT, 'providers/avature.mjs')).href);
   const avature = avatureModule.default;
-  const { parseArticles, assertParsedSomething } = avatureModule;
+  const { parseArticles, countArticles, assertParsedSomething } = avatureModule;
 
   if (avature.id === 'avature') pass('avature.id is "avature"');
   else fail(`avature.id is ${JSON.stringify(avature.id)}`);
@@ -458,6 +458,18 @@ try {
   const divArts = parseArticles(divPage([11, 12]), 'https://jobs.acme.example.com');
   if (divArts.length === 2 && divArts[0].id === '11' && divArts[0].location === 'Spain' && divArts[1].title === 'Role 12') pass('avature.parseArticles() reads <div class="article article--result"> rows and their subtitle location');
   else fail(`avature.parseArticles() div rows wrong: ${JSON.stringify(divArts)}`);
+  {
+    // The last row has no link of its own: the footer's JobDetail link must not become its posting.
+    const linkless = mkDivRow(21, 'Role 21') + '<div class="article article--result"><div class="article__header"><h3>No link</h3></div></div>'
+      + '<div class="footer"><a href="https://jobs.acme.example.com/en_US/careers/JobDetail/999">Footer</a></div>';
+    const arts = parseArticles(linkless, 'https://jobs.acme.example.com');
+    if (arts.length === 1 && arts[0].id === '21' && !arts.some((a) => a.title === 'Footer') && countArticles(linkless) === 2) pass('avature div card ends at its own </div>: a linkless last card does not pick up the footer link, and the raw card count is unchanged');
+    else fail(`avature linkless div card wrong: ${JSON.stringify(arts)} cards=${countArticles(linkless)}`);
+    const open = '<div class="article article--result"><div class="article__header"><h3 class="article__header__text__title"><a href="https://jobs.acme.example.com/en_US/careers/JobDetail/31">Role 31</a></h3>';
+    const unclosed = parseArticles(open, 'https://jobs.acme.example.com');
+    if (unclosed.length === 1 && unclosed[0].id === '31') pass('avature div card with no matching close keeps the old boundary');
+    else fail(`avature unclosed div card wrong: ${JSON.stringify(unclosed)}`);
+  }
   const countryUrl = 'https://jobs.acme.example.com/en_US/careers/JobOpeningsSpain';
   const countryCtx = {
     calls: [],

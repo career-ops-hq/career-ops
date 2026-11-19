@@ -165,8 +165,27 @@ export function assertParsedSomething(html, url) {
 // careers.avature.net renders `article--jobs` cards instead (seen 2026-09-28).
 // Deloitte USI drops the leading `article` class: `<article class="article--result ">`.
 // Enel's opening pages use `<div class="article article--result">` rows with no
-// closing `</article>`, so a div row runs to the next row (or the end of the page).
+// closing `</article>`, so a div row ends at its own matching `</div>` (nested
+// divs counted) and never past the next row: the last row does not take in the
+// page footer. A row whose markup never closes keeps the old boundary, the next
+// row or the end of the page.
 const CARD_START = /<(article|div) class="(?:article )?article--(?:result|jobs)\b[^"]*"/g;
+
+/**
+ * Index just past the `</div>` that closes a div card whose opening tag ends at `from`,
+ * counting nested `<div` / `</div>` tags; null when the markup never closes it.
+ * @param {string} text @param {number} from @returns {number | null}
+ */
+function divCardEnd(text, from) {
+  const tag = /<div(?![A-Za-z0-9_-])|<[/]div[^>]*>/gi;
+  tag.lastIndex = from;
+  let depth = 1;
+  for (let m = tag.exec(text); m; m = tag.exec(text)) {
+    depth += m[0][1] === '/' ? -1 : 1;
+    if (depth === 0) return m.index + m[0].length;
+  }
+  return null;
+}
 
 /** @param {string} htmlText @returns {string[]} */
 function splitCards(htmlText) {
@@ -174,8 +193,8 @@ function splitCards(htmlText) {
   const starts = [...text.matchAll(CARD_START)];
   return starts.map((m, i) => {
     const end = i + 1 < starts.length ? starts[i + 1].index : text.length;
+    if (m[1] !== 'article') return text.slice(m.index, Math.min(end, divCardEnd(text, m.index + m[0].length) ?? end));
     const block = text.slice(m.index, end);
-    if (m[1] !== 'article') return block;
     const close = block.indexOf('</article>');
     return close === -1 ? block : block.slice(0, close + '</article>'.length);
   });
