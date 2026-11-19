@@ -2060,13 +2060,15 @@ try {
   // guard calls the ESM namespace bindings of `dns/promises`, which no mock can
   // reach, so the previous `mock.method(dnsModule.default, …)` stub never
   // applied. The test passed anyway — the real resolver found nothing for
-  // `ssrf-blocked-host.local` and the guard blocked on the empty address list,
+  // `ssrf-blocked-host.example` and the guard blocked on the empty address list,
   // so the loopback-rejection branch under test was never executed, and each
   // run spent ~12s waiting for mDNS/LLMNR to time out. The injected resolver
   // hands back a loopback address, which is the case that matters, and keeps
-  // the whole section off the network.
+  // the whole section off the network. The name is not a `.local` one: those
+  // are refused by name before any lookup (isPrivateUseName), which would skip
+  // the DNS layer this case exists to exercise.
   const restoreHostResolver = setHostResolver(async (hostname) => {
-    if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    if (hostname === 'ssrf-blocked-host.example') return ['127.0.0.1'];
     // A shut-down analytics vendor: the name still appears in the page, but it
     // resolves to nothing at all. Distinct from the loopback case above, which
     // resolves fine and is blocked for being private.
@@ -2086,7 +2088,7 @@ try {
         if (routeCallback) {
           let aborted = false;
           const mockRoute = {
-            request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+            request: () => ({ url: () => 'http://ssrf-blocked-host.example/sensitive-internal' }),
             abort: async () => {
               aborted = true;
             },
@@ -2333,10 +2335,10 @@ try {
   //    that resolves into loopback. Without the DNS layer this hop is allowed,
   //    which is the whole reason validateUrlSecurity is reused here.
   const restoreArchiveResolver = setHostResolver(async (hostname) => (
-    hostname === 'ssrf-blocked-host.local' ? ['127.0.0.1'] : ['93.184.216.34']
+    hostname === 'ssrf-blocked-host.example' ? ['127.0.0.1'] : ['93.184.216.34']
   ));
   try {
-    const dnsHop = await runGuard('http://ssrf-blocked-host.local/sensitive-internal');
+    const dnsHop = await runGuard('http://ssrf-blocked-host.example/sensitive-internal');
     if (dnsHop.verdict?.action === 'abort' && dnsHop.verdict.code === 'blockedbyclient') {
       pass('archive-posting egress guard blocks a hostname that resolves to loopback');
     } else {

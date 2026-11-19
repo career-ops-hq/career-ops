@@ -19,23 +19,39 @@ import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mj
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
-function applyScopeFile(): string {
+/** A core script (`apply-scope`, `lib/egress-proxy`) by its root-relative name. */
+function rootScriptFile(name: string): string {
   const explicit = (process.env.CAREER_OPS_CODE_ROOT || "").trim();
-  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), name);
   // resolveCodeRoot assumes cwd is <checkout>/web. node --test from the
-  // checkout walks up to the parent and misses apply-scope.mjs.
+  // checkout walks up to the parent and misses the script.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope"),
-    resolveRootScript(path.resolve(process.cwd()), "apply-scope"),
-    resolveRootScript(path.resolve(here, "../../../.."), "apply-scope"),
+    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), name),
+    resolveRootScript(path.resolve(process.cwd()), name),
+    resolveRootScript(path.resolve(here, "../../../.."), name),
   ];
   return candidates.find((file) => existsSync(file)) || candidates[0];
 }
 
 async function applyLaunch(): Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }> {
-  const file = applyScopeFile();
+  const file = rootScriptFile("apply-scope");
   return import(/* webpackIgnore: true */ pathToFileURL(file).href) as Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }>;
+}
+
+type EgressLaunch = ApplyLaunch & { proxy?: { server: string; bypass?: string } };
+
+/** The launch options with the core egress filter (lib/egress-proxy.mjs) as the
+ *  browser's proxy. installApplyEgressGuard's route() sees only the first URL of
+ *  a redirected request, so a page that redirected into private space was
+ *  loaded (GHSA-wwfx); the filter sees every connection, redirect hops included,
+ *  and checks the address it dials. */
+async function withEgressFilter(options: ApplyLaunch): Promise<EgressLaunch> {
+  const file = rootScriptFile("lib/egress-proxy");
+  const { egressLaunchOptions } = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as {
+    egressLaunchOptions: (o: ApplyLaunch) => Promise<EgressLaunch>;
+  };
+  return egressLaunchOptions(options);
 }
 
 /** The frame with the most interactive controls — where the agentic interpreter
@@ -181,12 +197,12 @@ async function headedBrowser(): Promise<Browser> {
   const { HEADED_APPLY_LAUNCH, BUNDLED_HEADED_LAUNCH } = await applyLaunch();
   let nb: Browser;
   try {
-    nb = await chromium.launch(HEADED_APPLY_LAUNCH);
+    nb = await chromium.launch(await withEgressFilter(HEADED_APPLY_LAUNCH));
   } catch {
     // No system Google Chrome → fall back to Playwright's bundled Chromium if
     // present; otherwise a clear, actionable error.
     try {
-      nb = await chromium.launch(BUNDLED_HEADED_LAUNCH);
+      nb = await chromium.launch(await withEgressFilter(BUNDLED_HEADED_LAUNCH));
     } catch {
       throw new Error("The apply feature needs Google Chrome. Install Chrome (or run: npx playwright install chromium) and try again.");
     }

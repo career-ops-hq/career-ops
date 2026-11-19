@@ -4554,7 +4554,7 @@ export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) =
 
 export async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}, {
   checkApi = checkLivenessViaApi,
-  loadPlaywright = () => import('playwright'),
+  loadPlaywright = () => import('./lib/hardened-chromium.mjs'),
   // Consulted before each headed retry (#5776); see robots-check.mjs.
   robotsGate = robotsAllows,
 } = {}) {
