@@ -363,6 +363,15 @@ test('hooks:install sets core.hooksPath, and refuses to replace another value wi
   const fresh = install();
   assert.equal(fresh.status, 0, describeSpawn(fresh, 'install with no hooksPath set'));
   assert.equal(hooksPath(), '.githooks');
+
+  // A worktree-scoped value outranks the clone's, so --force writes the clone
+  // config and the old value still wins. The install must say so, not succeed.
+  assert.equal(git('config', 'extensions.worktreeConfig', 'true').status, 0);
+  assert.equal(git('config', '--worktree', 'core.hooksPath', '.husky').status, 0);
+  const shadowed = install('--force');
+  assert.ok(exitedNonZero(shadowed), describeSpawn(shadowed, 'install reported success under a worktree override'));
+  assert.match(shadowed.stderr, /git config --worktree core\.hooksPath \.githooks/);
+  assert.equal(hooksPath(), '.husky');
 });
 
 test('a clean commit passes and reports what it skipped', (t) => {
