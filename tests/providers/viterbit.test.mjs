@@ -55,7 +55,7 @@ try {
   const NOW = Date.UTC(2026, 10, 18, 15, 30);
   const day = (d) => Date.UTC(2026, 10, 18 - d);
   const ageCases = [
-    ['hace 19 horas', day(0)], ['hoy', day(0)], ['ayer', day(1)], ['hace 3 días', day(3)],
+    ['hace 19 horas', day(1)], ['hace 2 horas', day(0)], ['hoy', day(0)], ['ayer', day(1)], ['hace 3 días', day(3)],
     ['hace 2 semanas', day(14)], ['hace 1 mes', day(30)], ['2 days ago', day(2)], ['hace un rato', undefined], ['', undefined],
   ];
   const ageBad = ageCases.filter(([t, want]) => parsePostedAt(t, NOW) !== want);
@@ -74,8 +74,8 @@ try {
     card({ href: 'https://other.example/foreign-FFFF/', title: 'Foreign Host', place: 'Madrid' }),
     card({ href: '/no-title-GGGG/', title: '' }),
   ]);
-  const jobs = parseViterbitBoard(html, ORIGIN, 'Acme');
-  // postedAt depends on the run date, so only its presence is compared here.
+  const jobs = parseViterbitBoard(html, ORIGIN, 'Acme', NOW);
+  // postedAt is checked against the fixed clock below, so only its presence is compared here.
   const norm = (js) => js.map(({ postedAt, ...r }) => ({ ...r, hasDate: postedAt !== undefined }));
   const want = [
     { title: 'Ops & Strategy Lead', url: `${ORIGIN}/ops-lead-AAAA11112222/`, company: 'Acme', location: 'Madrid', workplaceType: 'hybrid', locations: ['Madrid'], hasDate: true },
@@ -94,7 +94,7 @@ try {
   } else {
     fail(`parseViterbitBoard kept a card it should drop: ${JSON.stringify(jobs.map((j) => j.title))}`);
   }
-  if (jobs[0].postedAt === Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() - 3)) {
+  if (jobs[0].postedAt === day(3)) {
     pass('postedAt is the UTC midnight of the day the card\'s age implies');
   } else {
     fail(`postedAt = ${jobs[0].postedAt}`);
@@ -111,6 +111,32 @@ try {
   } catch (e) { threw = e; }
   if (threw && /job cards but none could be parsed/.test(threw.message)) pass('cards present but none readable throw (the markup changed), not an empty board');
   else fail(`changed markup did not throw descriptively: ${threw?.message ?? 'no throw'}`);
+
+  // The "no offers" block is on populated pages too: a changed title class must not read as an empty board.
+  threw = undefined;
+  try {
+    parseViterbitBoard(page([card({ href: '/ops-lead-AAAA11112222/', title: 'Ops Lead', place: 'Madrid' })]).replaceAll('vb-job-title', 'renamed-title').replaceAll('vb-label-custom', 'renamed-btn'), ORIGIN, 'Acme');
+  } catch (e) { threw = e; }
+  if (threw && /still carries job card markup/.test(threw.message)) pass('the "no offers" block does not hide cards whose title class changed: it throws');
+  else fail(`renamed title class did not throw descriptively: ${threw?.message ?? 'no throw'}`);
+
+  // A genuinely empty board, as the real page renders it: the list container, an inline CSS rule
+  // naming the title class, and the "no offers" block that itself holds a vb-jobs-tab. Must stay [].
+  const realEmpty = `<!DOCTYPE html><html><head><style>.vb-job-title:hover{color:#000}</style></head><body>
+<div id="list-jobs-container--jobs-mps-" data-pagination="10"><div class="vb-jobs-tab col-lg-9"></div></div>
+<div class="text-left vb-jobs mt-0 pt-0" id="empty-jobs"> <div class="tab-pane fadeIn vb-jobs-tab"> <div class="kt-widget4 vb-jobs4"> <div class="kt-widget4__item"> No se han encontrado ofertas </div></div></div></div>
+</body></html>`;
+  const realEmptyJobs = parseViterbitBoard(realEmpty, ORIGIN, 'Acme');
+  if (Array.isArray(realEmptyJobs) && realEmptyJobs.length === 0) pass('an empty board as the real page renders it (container, inline CSS, no-offers block) is [], not a markup error');
+  else fail(`real empty board = ${JSON.stringify(realEmptyJobs)}`);
+
+  // A card whose link is blank is not a posting.
+  threw = undefined;
+  try {
+    parseViterbitBoard(page([card({ href: '', title: 'Blank Link' })]), ORIGIN, 'Acme');
+  } catch (e) { threw = e; }
+  if (threw && /job cards but none could be parsed/.test(threw.message)) pass('a card with a blank href is dropped (a board of only those throws)');
+  else fail(`blank href was not dropped: ${threw?.message ?? 'no throw'}`);
 
   threw = undefined;
   try {
