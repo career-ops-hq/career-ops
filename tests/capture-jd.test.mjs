@@ -272,13 +272,13 @@ test('independent processes racing one URL keep exactly the winner archive', asy
   const root = scratch();
   const moduleUrl = new URL('../capture-jd.mjs', import.meta.url).href;
   const script = `import { captureJd } from ${JSON.stringify(moduleUrl)};
-    console.log(JSON.stringify(await captureJd(JSON.parse(process.argv[1]))));`;
+    console.log(JSON.stringify(await captureJd(JSON.parse(process.env.CAPTURE_INPUT))));`;
   const results = await Promise.all(Array.from({ length: 4 }, (_, i) => new Promise((resolve, reject) => {
     const input = { url: 'https://acme.test/jobs/process-race', text: `process ${i}`,
       company: `Company ${i}`, role: `Role ${i}`, date: `2026-11-${12 + i}`,
       dataRoot: root, commit: false, push: false };
-    const child = spawn(process.execPath, ['--input-type=module', '-e', script, JSON.stringify(input)], {
-      cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'],
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      cwd: root, env: { ...process.env, CAPTURE_INPUT: JSON.stringify(input) }, stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
     let stderr = '';
