@@ -529,7 +529,11 @@ export default {
       // adp-workforcenow.mjs (adpTruncated) do, so a caller can tell this
       // board from a complete one without reading stderr.
       /** @type {any} */ (all).eightfoldTruncated = true;
-    } else if (!probing && total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
+    } else if (!probing && total !== null && all.length < total && maxPages * PAGE_SIZE < total
+      && pagesRead === maxPages && lastPageFull) {
+      // The walk has to have stopped at max_pages on a full page, as below:
+      // `count` is the pre-filter total on some tenants, so a board that ends
+      // on a short page under it is complete, not cut.
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
       // Same tag as the 429 branch above: the page cap cuts a board short just
       // as a rate limit does (2,000 of 2,083 on a real tenant), and a caller
