@@ -76,7 +76,21 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       const tag = node.tagName.toLowerCase();
       const type = ((node as HTMLInputElement).type || "").toLowerCase();
       if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(type)) return false;
-      if ((node as HTMLElement).offsetParent === null && type !== "radio" && type !== "checkbox") return false;
+      if ((node as HTMLElement).offsetParent === null) {
+        // Styled radios/checkboxes often hide their own <input> and show a
+        // label instead, so a hidden one still counts while its label or
+        // wrapper renders. A control inside a hidden container (a Recruitee
+        // "Apply" tab panel) does not: keeping it would pass a few hidden
+        // radios off as the form and skip opening the real one.
+        // Its labels count wherever they sit (a wrapping label or a
+        // label[for] outside a hidden wrapper). A box alone is not proof:
+        // a visibility:hidden panel keeps its boxes.
+        if (type !== "radio" && type !== "checkbox") return false;
+        const rendered = (proxy: Element | null) =>
+          !!proxy && proxy.getClientRects().length > 0 && getComputedStyle(proxy).visibility !== "hidden";
+        const labels = Array.from((node as HTMLInputElement).labels ?? []);
+        if (!labels.some(rendered) && !rendered(node.parentElement)) return false;
+      }
       if (node.closest('[class*="autofill" i]')) return false;
       return true;
     }
@@ -183,6 +197,7 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
     const fields: Array<Record<string, unknown>> = [];
     const seenRadio = new Set<string>();
+    const seenCheckbox = new Set<string>();
     const els = Array.from(document.querySelectorAll("input, textarea, select"));
     let n = 0;
 
@@ -221,11 +236,17 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
           continue;
         }
         if (name) seenRadio.add(name);
-        const group = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
-        const fullLabels = group.map((r) => normalize(labelFor(r)));
+        const allRadios = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
+        const allLabels = allRadios.map((r) => normalize(labelFor(r)));
+        // Only the options the person can see: a hidden choice gets no handle.
+        const group = allRadios.filter(isEligibleControl);
+        const fullLabels = group.map((r) => allLabels[allRadios.indexOf(r)]);
         // The same text on every radio is the question or the input name, not a
-        // choice. Use each input's value so Yes and No stay distinct.
-        const shared = fullLabels.length > 1 && fullLabels.every((text) => text && text === fullLabels[0]);
+        // choice. Use each input's value so Yes and No stay distinct. Judged on
+        // the visible radios when there are several, so a hidden one with its
+        // own text does not hide a shared label; on the whole group otherwise.
+        const judged = fullLabels.length > 1 ? fullLabels : allLabels;
+        const shared = judged.length > 1 && judged.every((text) => text && text === judged[0]);
         const options = group.map((r, i) => {
           const value = clean((r as HTMLInputElement).value);
           const full = fullLabels[i];
@@ -248,6 +269,60 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         const radioLabel = clean(radioRaw) || name;
         fields.push({ id: fid, type: "radio", label: radioLabel, required: requiredFor(clean(radioRaw) ? radioRaw : (name || "")), options });
         continue;
+      }
+
+      if (itype === "checkbox") {
+        const boxName = (el as HTMLInputElement).name;
+        // Whether this is a group is decided on every same-name box, so a group
+        // with one option hidden keeps its question.
+        const allBoxes = boxName
+          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`))
+          : [el];
+        if (allBoxes.length > 1) {
+          if (seenCheckbox.has(boxName)) {
+            n--;
+            continue;
+          }
+          seenCheckbox.add(boxName);
+          const allLabels = allBoxes.map((box) => normalize(labelFor(box)));
+          // Only the options the person can see: a hidden choice gets no handle.
+          const boxes = allBoxes.filter(isEligibleControl);
+          const fullLabels = boxes.map((box) => allLabels[allBoxes.indexOf(box)]);
+          // The same text on every box is the question or the input name, not a
+          // choice. Use each input's value so health and dental stay distinct.
+          // Judged on the visible boxes when there are several, so a hidden one
+          // with its own text does not hide a shared label; on the whole group
+          // otherwise.
+          const judged = fullLabels.length > 1 ? fullLabels : allLabels;
+          const shared = judged.length > 1 && judged.every((text) => text && text === judged[0]);
+          const optionText = (box: Element, i: number) => {
+            const value = clean((box as HTMLInputElement).value);
+            const full = fullLabels[i] || "";
+            const text = clean(full);
+            const rawName = (box as HTMLInputElement).name || "";
+            if (!full || full === rawName || (shared && value)) return value || text;
+            return text || value;
+          };
+          const options = boxes.map((box, i) => optionText(box, i)).filter(Boolean);
+          // Same words the fill step treats as consent. Kept here because this
+          // callback runs in the page and cannot import the Node helper.
+          const consentLabel = (text: string) => /\b(i (have )?read|i agree|i consent|i accept|consent to|privacy notice|terms|gdpr|data protection)\b/i.test(text);
+          boxes.forEach((box, i) => {
+            box.setAttribute("data-co-field", fid);
+            const shown = optionText(box, i) || String(i);
+            box.setAttribute("data-co-option", shown);
+            // A shared consent sentence is stored as the control value above.
+            // Mark the box from the original words so fill leaves it alone.
+            if (consentLabel(fullLabels[i] || "") || consentLabel(shown)) box.setAttribute("data-co-consent", "1");
+          });
+          const matchTexts = shared
+            ? options
+            : fullLabels.map((full, i) => full || normalize((boxes[i] as HTMLInputElement).value)).filter(Boolean);
+          const boxRaw = groupLabel(el, matchTexts.length ? matchTexts : options);
+          const boxLabel = clean(boxRaw) || boxName;
+          fields.push({ id: fid, type: "checkbox", label: boxLabel, required: requiredFor(clean(boxRaw) ? boxRaw : (boxName || "")), options });
+          continue;
+        }
       }
 
       el.setAttribute("data-co-field", fid);

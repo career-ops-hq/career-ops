@@ -42,7 +42,9 @@
           # Pi coding agent host (docs/SUPPORTED_CLIS.md), in the shell so the
           # integration runs without a global npm install:
           #   pi            interactive
-          #   pi -a -p "…"  headless worker (-a: trust this checkout for one run)
+          #   pi -p --no-approve --no-skills --skill .agents/skills/career-ops "/skill:career-ops …"
+          #                 headless worker: loads the router, never the
+          #                 checkout's extensions (docs/SUPPORTED_CLIS.md)
           # Taken from `nixpkgs-pi` (see the input comment): the toolchain pin
           # carries 0.64, which the OpenCode Go endpoint rejects.
           nixpkgs-pi.legacyPackages.${pkgs.stdenv.hostPlatform.system}.pi-coding-agent

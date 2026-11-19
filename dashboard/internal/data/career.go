@@ -253,6 +253,14 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 		if len(fields) < width {
 			continue
 		}
+		// Read the # cell before sanitizing. SanitizeTerminalText deletes control
+		// characters, so a cell of `3<US>2` would sanitize to `32` and the write
+		// would land on whichever row genuinely holds 32. Sanitization still
+		// applies to every cell that gets displayed.
+		rawNumber := ""
+		if idx, ok := cols["num"]; ok && idx >= 0 && idx < len(fields) {
+			rawNumber = fields[idx]
+		}
 		for i, field := range fields {
 			fields[i] = SanitizeTerminalText(field)
 		}
@@ -266,7 +274,6 @@ func ParseApplications(careerOpsPath string) ([]model.CareerApplication, error) 
 
 		num++
 		trackerNumber := num
-		rawNumber := at("num")
 		missingNumber := rawNumber == "" || strings.IndexFunc(rawNumber, func(r rune) bool { return r < '0' || r > '9' }) >= 0
 		if parsedNumber, err := strconv.Atoi(rawNumber); err == nil && !missingNumber {
 			trackerNumber = parsedNumber
@@ -1080,6 +1087,76 @@ func UpdateApplicationStatus(careerOpsPath string, app model.CareerApplication, 
 	return UpdateApplicationStatusAndNotes(careerOpsPath, app, newStatus, "")
 }
 
+// trackerIdentity is one way to name a row to set-status.mjs: a selector flag
+// and its value. Report numbers and tracker row numbers are two independent
+// counters sharing one number space (see set-status.mjs's header), so the flag
+// is what states which space the value belongs to — report #32 and row #32 are
+// different applications.
+type trackerIdentity struct{ flag, value string }
+
+// trackerIdentities returns every identity app carries, the one to write with
+// first. A row can carry both: #42 linking report #7 answers to either
+// selector, and a pending repair filed under one has to be findable under the
+// other once a merge adds a report link to a row that had none.
+//
+// The report link is preferred: it is the identity a report filename carries.
+// A row added without an evaluation has no report link at all (`tracker` mode,
+// a backfilled recruiter inbound), and its # cell is then the only identity it
+// has. A row whose # cell is a backfill sentinel carries neither, because
+// Number is then just its position in the table.
+//
+// `#0` is refused along with the sentinel: set-status.mjs accepts `--row 0` and
+// saves the status, but followup-seed.mjs rejects a non-positive application
+// number, so an Applied write would report a partial save that no retry can
+// repair. A refusal naming the row is the better failure.
+func trackerIdentities(app model.CareerApplication) []trackerIdentity {
+	var ids []trackerIdentity
+	if app.ReportNumber != "" {
+		ids = append(ids, trackerIdentity{"--report-link", app.ReportNumber})
+	}
+	if !app.TrackerNumberMissing && app.Number > 0 {
+		ids = append(ids, trackerIdentity{"--row", strconv.Itoa(app.Number)})
+	}
+	return ids
+}
+
+// trackerSelector returns the flag and value a status write should name app's
+// row with: the first of trackerIdentities.
+func trackerSelector(app model.CareerApplication) (flag, value string, ok bool) {
+	ids := trackerIdentities(app)
+	if len(ids) == 0 {
+		return "", "", false
+	}
+	return ids[0].flag, ids[0].value, true
+}
+
+// HasTrackerIdentity reports whether a status write can name app's row.
+func HasTrackerIdentity(app model.CareerApplication) bool {
+	return len(trackerIdentities(app)) > 0
+}
+
+// SameTrackerRow reports whether one selector addresses both rows, so a caller
+// can find a row again after re-reading the tracker. It compares the identities
+// a write could use, not the row's contents — a status write changes Status and
+// Notes. A row with no identity matches nothing, including itself.
+//
+// It intersects the identity SETS rather than comparing the preferred selector
+// of each, because the preferred one can change under a row while the row stays
+// the same: a merge that attaches report #7 to tracker row #32 moves it from
+// `--row 32` to `--report-link 7`, and comparing first-to-first would stop
+// recognising the row the cursor was on (#7331 review). The flag is part of each
+// key, so `--row 32` and `--report-link 32` are still two different rows.
+func SameTrackerRow(a, b model.CareerApplication) bool {
+	for _, want := range trackerIdentities(a) {
+		for _, got := range trackerIdentities(b) {
+			if want == got {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // UpdateApplicationStatusAndNotes delegates to the canonical writer so status,
 // notes, the transition ledger and Applied follow-up seeding share one path.
 // Notes use the CLI's idempotent "; " separator; empty notes are unchanged.
@@ -1091,10 +1168,11 @@ func UpdateApplicationStatusAndNotes(careerOpsPath string, app model.CareerAppli
 	if !isCanonicalStatusName(newStatus) {
 		return fmt.Errorf("unrecognized status: %q", newStatus)
 	}
-	if app.ReportNumber == "" {
-		return fmt.Errorf("application has no report identity; use set-status.mjs --row to select a tracker row")
+	ids := trackerIdentities(app)
+	if len(ids) == 0 {
+		return fmt.Errorf("application has no tracker identity: no report link, and its # cell is not a positive number — number the row to change its status")
 	}
-	return runStatusWriter(careerOpsPath, app.ReportNumber, newStatus, notesAppend)
+	return runStatusWriter(careerOpsPath, ids, newStatus, notesAppend)
 }
 
 // IsCanonicalStatusName reports whether status is one of the states.yml

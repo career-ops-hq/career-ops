@@ -109,7 +109,9 @@ export const ALSO_PERMITS = Object.freeze(['ODbL-1.0', 'CC0-1.0']);
 // reserved in the format so rows written later do not need a migration.
 export const TAG_VOCABULARY = Object.freeze([]);
 
-export const MANIFEST_ID_RE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)$/;
+// <YYYY-MM-DD>-<slug>, and for a later contribution of the same day a number
+// after a dot, 2 to 99 with no leading zero: <YYYY-MM-DD>-<slug>.<n>.
+export const MANIFEST_ID_RE = /^(\d{4}-\d{2}-\d{2})-([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)(?:\.([2-9]|[1-9]\d))?$/;
 export const GITHUB_LOGIN_RE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -377,6 +379,23 @@ contribution does not edit this file: maintainers regenerate it on main with
 `;
 
 /**
+ * The order of two contribution ids: by the id without its number, then by
+ * the number (none comes first), so <id>.2 sorts right after <id> and <id>.10
+ * after <id>.9. Two ids without a number compare as plain text.
+ * @param {string} a
+ * @param {string} b
+ */
+export function compareContributionIds(a, b) {
+  const split = (/** @type {string} */ id) => {
+    const m = /^(.*)\.(\d+)$/.exec(id);
+    return m ? [m[1], Number(m[2])] : [id, 1];
+  };
+  const [ab, an] = split(a);
+  const [bb, bn] = split(b);
+  return ab < bb ? -1 : ab > bb ? 1 : an - bn;
+}
+
+/**
  * Render CHANGELOG.md from manifests: one line per contribution, oldest first,
  * crediting it with its own attribution.
  * @param {Array<any>} manifests
@@ -384,7 +403,7 @@ contribution does not edit this file: maintainers regenerate it on main with
 export function renderChangelog(manifests) {
   const usable = manifests
     .filter((m) => m && typeof m === 'object' && typeof m.id === 'string' && typeof m.date === 'string')
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : compareContributionIds(a.id, b.id)));
   const lines = usable.map((m) => {
     const rows = Number.isInteger(m.rows) ? `${m.rows} board${m.rows === 1 ? '' : 's'}` : 'boards';
     return `- ${m.date} \`${m.id}\` (${rows}, source \`${m.source}\`): ${m.attribution}`;
@@ -452,7 +471,7 @@ function readRegistry(rootDir, report) {
       if (f === '.DS_Store') continue;
       const rel = `${REGISTRY_DIR}/contributions/${f}`;
       const id = f.endsWith('.json') ? f.slice(0, -5) : '';
-      if (!MANIFEST_ID_RE.test(id)) { err(rel, 0, 'manifests are named <YYYY-MM-DD>-<slug>.json (lowercase slug)'); continue; }
+      if (!MANIFEST_ID_RE.test(id)) { err(rel, 0, 'manifests are named <YYYY-MM-DD>-<slug>.json (lowercase slug), or <YYYY-MM-DD>-<slug>.<n>.json with n from 2 to 99'); continue; }
       if (!lstatOrNull(join(cdir, f))?.isFile()) { err(rel, 0, 'must be a regular file'); continue; }
       const text = readFileSync(join(cdir, f), 'utf8');
       let data = null;
@@ -614,14 +633,16 @@ const KNOWN_LINES_SHOWN = 20;
 /**
  * Validate the inbox against the registry it sits in. Errors: a bad name, a
  * bad line, a file over the limit, a board listed twice in the inbox, a
- * manifest that does not fit its boards files. Warning: boards already in
- * boards/ (one warning per file, however many lines), which the fold skips.
+ * manifest that does not fit its boards files, a numbered contribution id
+ * that contributions/ already has. Warning: boards already in boards/ (one
+ * warning per file, however many lines), which the fold skips.
  * @param {Inbox} inbox
  * @param {RowRecord[]} storeRows
+ * @param {Map<string, ManifestRecord>} storeManifests  contributions/, by id
  * @param {{err: (file: string, line: number, message: string) => void, warn: (file: string, line: number, message: string) => void, aggregatorDomains: Set<string>, latestDate: string}} ctx
  * @returns {number} how many inbox lines are already in the registry
  */
-function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate }) {
+function checkInbox(inbox, storeRows, storeManifests, { err, warn, aggregatorDomains, latestDate }) {
   /** @type {Map<string, RowRecord>} */
   const store = new Map();
   for (const r of storeRows) {
@@ -665,6 +686,22 @@ function checkInbox(inbox, storeRows, { err, warn, aggregatorDomains, latestDate
     if (typeof c === 'string' && GITHUB_LOGIN_RE.test(c) && c.toLowerCase() !== s.parsed.login) {
       err(s.file, 0, `contributor ${show(c)} is not the login in the file name (${s.parsed.login})`);
     }
+  }
+
+  // A contribution without a number whose id is taken is folded in as
+  // <id>-2, <id>-3, …; a numbered one keeps its id, so a taken one is an error.
+  /** @type {Map<string, string>} id → its first file */
+  const firstFile = new Map();
+  for (const x of [...inbox.files, ...inbox.sheets.values()].sort((a, b) => (a.file < b.file ? -1 : 1))) {
+    if (!firstFile.has(x.parsed.id)) firstFile.set(x.parsed.id, x.file);
+  }
+  for (const [id, file] of firstFile) {
+    if (!id.includes('.') || !storeManifests.has(id)) continue;
+    const base = id.slice(0, id.lastIndexOf('.'));
+    let n = 2;
+    while (n <= 99 && (storeManifests.has(`${base}.${n}`) || firstFile.has(`${base}.${n}`))) n++;
+    const next = n <= 99 ? `; the next free one is ${base}.${n}` : '';
+    err(file, 0, `contribution ${id} is already in the registry (contributions/${id}.json): give this one another number${next}`);
   }
   return knownTotal;
 }
@@ -880,7 +917,7 @@ export function validateRegistry({
     let manifest = null;
     if (hasOwn(row, 'contribution')) {
       const id = row.contribution;
-      if (typeof id !== 'string' || !MANIFEST_ID_RE.test(id)) e(`contribution ${show(id)} is not a manifest id (<YYYY-MM-DD>-<slug>)`);
+      if (typeof id !== 'string' || !MANIFEST_ID_RE.test(id)) e(`contribution ${show(id)} is not a manifest id (<YYYY-MM-DD>-<slug> or <YYYY-MM-DD>-<slug>.<n>)`);
       else if (!head.manifests.has(id)) e(`contribution ${show(id)} has no manifest at contributions/${id}.json`);
       else manifest = validManifests.get(id) || null;
     }
@@ -930,7 +967,7 @@ export function validateRegistry({
   }
 
   const inbox = readInbox(root, err);
-  const inboxKnown = checkInbox(inbox, head.rows, { err, warn, aggregatorDomains, latestDate });
+  const inboxKnown = checkInbox(inbox, head.rows, head.manifests, { err, warn, aggregatorDomains, latestDate });
 
   // CHANGELOG.md is not compared with the manifests: a contribution does not
   // touch it, and maintainers regenerate it on main (--write-changelog).

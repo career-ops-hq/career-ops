@@ -182,6 +182,26 @@ try {
     if (probed.truncated === undefined) pass('neogov.fetch() leaves the ctx.maxPages probe unmarked');
     else fail(`neogov.fetch() probe was marked: ${JSON.stringify(probed.truncated)}`);
 
+    // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+    // It is still a probe, so nothing warns and nothing is marked (#7180).
+    calls = [];
+    warnings.length = 0;
+    const probedAtCap = await neogov.fetch({ ...entry, max_pages: 1 }, { ...ctx, maxPages: 1 });
+    if (calls.length === 1 && !warnings.some((w) => /raise max_pages/.test(w)) && probedAtCap.truncated === undefined) {
+      pass('neogov.fetch() warns nothing and marks nothing for a probe on a max_pages: 1 entry');
+    } else {
+      fail(`neogov.fetch() probe at max_pages: 1 made ${calls.length} calls, truncated=${JSON.stringify(probedAtCap.truncated)}, warnings ${JSON.stringify(warnings)}`);
+    }
+    // The same entry in a real scan is still cut by its own ceiling.
+    calls = [];
+    warnings.length = 0;
+    const scannedAtCap = await neogov.fetch({ ...entry, max_pages: 1 }, ctx);
+    if (calls.length === 1 && warnings.some((w) => /raise max_pages/.test(w)) && scannedAtCap.truncated?.reason === 'page-cap') {
+      pass('neogov.fetch() still warns and marks page-cap for a real scan of a max_pages: 1 entry');
+    } else {
+      fail(`neogov.fetch() scan at max_pages: 1 made ${calls.length} calls, truncated=${JSON.stringify(scannedAtCap.truncated)}, warnings ${JSON.stringify(warnings)}`);
+    }
+
     // unwrapped rejection while probing
     class ProbeSentinel extends Error {}
     const sentinel = new ProbeSentinel('budget');

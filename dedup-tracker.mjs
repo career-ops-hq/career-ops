@@ -20,7 +20,7 @@ import { relatePostingLanguageKeys, postingLanguageKey, normalizeUrl } from './u
 import {
   openTrackerTransaction, rebuildRow, normalizeCompany, corporateFormTokensMatch,
   MIN_STEM_CHARS, loadCanonicalStates, resolveCanonicalStateId, resolveCanonicalState,
-  stripStatusDecoration,
+  stripStatusDecoration, appendLedgerRows,
   resolveWorkspaceRoot, containedReportFile, reportUrlToken,
 } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow, isUnsetUrlCell, normalizeVia, extractReqNumber, parseScore, normalizeTextKey } from './tracker-parse.mjs';
@@ -707,7 +707,6 @@ if (!DRY_RUN && removed > 0) {
     for (const p of promotions) releaseClaims.push(statusHooks.claimStatusActivity(p.keeper, `dedup-tracker → ${p.to}`));
   }
   trackerTransaction.replace(lines.join('\n'));
-  console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
   // Inside the lock window, like set-status's own append. The removed row's
   // history stays under its old number; this row says where the kept row's
   // status came from. dedup-tracker did not observe the transition, it found
@@ -715,18 +714,38 @@ if (!DRY_RUN && removed > 0) {
   // today, it would otherwise read as "applied today".
   // The keeper's own cell can be a dated legacy one too; strip it the same way
   // so a known prior state is not logged as unknown.
+  //
+  // A status the ledger does not hold cannot be undone, so a failed append puts
+  // the tracker back and the run fails, as set-status.mjs does since #7143.
+  // Every promotion goes in one append: appendLedgerRows() returns the ledger
+  // to the size it had before, so no line survives for a promotion that was
+  // put back.
   const ledgerState = status => resolveCanonicalState(stripStatusDecoration(status), CANONICAL_STATES) ?? '-';
-  for (const p of promotions) {
-    statusHooks.appendStatusTransition(APPS_FILE, {
-      num: p.keeper.num,
-      date: localToday(),
-      from: ledgerState(p.from),
-      to: ledgerState(p.to),
-      source: 'dedup-tracker',
-      note: `from #${p.donorNum}`,
-    });
+  let logged = true;
+  if (promotions.length > 0) {
+    const date = localToday();
+    const text = promotions
+      .map(p => `${p.keeper.num}\t${date}\t${ledgerState(p.from)}\t${ledgerState(p.to)}\tdedup-tracker\tfrom #${p.donorNum}\n`)
+      .join('');
+    try {
+      appendLedgerRows(statusHooks.statusLogPath(APPS_FILE), text);
+    } catch (err) {
+      logged = false;
+      let restored = false;
+      try {
+        trackerTransaction.replace(content);
+        restored = true;
+      } catch { /* reported below */ }
+      console.error(restored
+        ? `❌ Could not write the status log (${err.message}), so the tracker was put back: no duplicate was removed.`
+        : `❌ Could not write the status log (${err.message}), and could not put the tracker back: ${removed} duplicate(s) are gone and ${promotions.length} promoted status(es) have no status-log line. The original is in ${backupPath}.`);
+      process.exitCode = 1;
+    }
   }
-  committed = true;
+  if (logged) {
+    console.log(`✅ Written to ${APPS_FILE} (backup: ${backupPath})`);
+    committed = true;
+  }
 } else if (DRY_RUN) {
   console.log('(dry-run — no changes written)');
 } else {

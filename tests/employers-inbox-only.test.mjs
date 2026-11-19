@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ROOT } from './helpers.mjs';
@@ -40,6 +40,24 @@ test('yes: new boards files, numbered parts and a manifest, all directly in the 
     rejected: [],
     logins: ['acme-hr', 'octocat'],
   });
+});
+
+test('yes: a later contribution of the same day, numbered .2, its parts and its manifest; the login is listed once, without the number', () => {
+  const r = classifyInboxDiff([
+    add(`${IN}/2026-11-10-octocat.ndjson`),
+    add(`${IN}/2026-11-10-octocat.2-001.ndjson`),
+    add(`${IN}/2026-11-10-octocat.2-002.ndjson`),
+    add(`${IN}/2026-11-10-octocat.2.json`),
+  ]);
+  assert.deepEqual(r, {
+    inboxOnly: true,
+    files: [`${IN}/2026-11-10-octocat.2-001.ndjson`, `${IN}/2026-11-10-octocat.2-002.ndjson`, `${IN}/2026-11-10-octocat.2.json`, `${IN}/2026-11-10-octocat.ndjson`],
+    rejected: [],
+    logins: ['octocat'],
+  });
+  const bad = classifyInboxDiff([add(`${IN}/2026-11-10-octocat.1.ndjson`)]);
+  assert.equal(bad.inboxOnly, false);
+  assert.match(bad.rejected[0].reason, /runs from 2 to 99/);
 });
 
 for (const [label, entries, reason] of [
@@ -110,6 +128,16 @@ function gitRepo() {
   const commit = (msg) => { git('add', '-A'); git('commit', '-q', '-m', msg); };
   return { dir, git, commit };
 }
+// A symlink committed to git, made in the index instead of on disk, so it needs
+// no filesystem symlink and no Windows privilege. With core.symlinks=false,
+// `git add -A` keeps mode 120000 for the plain file holding the link text, the
+// way a Windows checkout does.
+const addSymlink = (dir, git, path, target) => {
+  git('config', 'core.symlinks', 'false');
+  writeFileSync(join(dir, path), target);
+  const blob = git('hash-object', '-w', join(dir, path)).trim();
+  git('update-index', '--add', '--cacheinfo', `120000,${blob},${path}`);
+};
 const cli = (dir, args, env = {}) => spawnSync(process.execPath, [VALIDATOR, '--inbox-only', ...args], { cwd: dir, encoding: 'utf8', env: { ...PLAIN_ENV, ...env } });
 
 test('CLI: a branch that only adds inbox files is recognised, and nothing is validated', () => {
@@ -144,7 +172,7 @@ test('CLI: an edited inbox file, a rename and a file elsewhere each make it "no"
     ['rename', (dir, git) => git('mv', `${IN}/2026-11-01-early.ndjson`, `${IN}/2026-11-10-early.ndjson`), 'R100'],
     ['outside', (dir) => writeFileSync(join(dir, 'README.md'), 'changed\n'), 'M'],
     ['delete', (dir, git) => git('rm', '-q', `${IN}/2026-11-01-early.ndjson`), 'D'],
-    ['symlink', (dir) => symlinkSync('../../README.md', join(dir, IN, '2026-11-10-link.ndjson')), 'A'],
+    ['symlink', (dir, git) => addSymlink(dir, git, `${IN}/2026-11-10-link.ndjson`, '../../README.md'), 'A'],
   ]) {
     const { dir, git, commit } = gitRepo();
     try {

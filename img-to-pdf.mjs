@@ -130,7 +130,7 @@ export async function convertImageToPdf(inputPath, outputPath, { force = false }
   // After argv checks. A static import made --help and a missing path wait
   // on playwright, and crash when the package was not installed.
   const { chromium } = await import('playwright');
-  const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
+  const browser = await chromium.launch(browserLaunchOptions({ headless: true }, { localContentOnly: true }));
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'load' });

@@ -19,7 +19,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
 
@@ -90,12 +90,24 @@ function rowsOf(dir) {
   return out;
 }
 
-/** A scratch checkout holding a copy of the real registry. */
+/**
+ * A scratch checkout holding a copy of the real registry, without its inbox.
+ * A pull request may add a file to employers/inbox/, and a board of it that the
+ * registry already lists is a warning, not an error: the fold skips it. So the
+ * tests of the registry read a copy without the inbox; the inbox has its own
+ * tests, and one test below runs the validator on the tree as it is.
+ */
+const notTheInbox = (src) => relative(REGISTRY, src).split(sep)[0] !== 'inbox';
 function checkout() {
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-'));
-  cpSync(REGISTRY, join(dir, 'employers'), { recursive: true });
+  cpSync(REGISTRY, join(dir, 'employers'), { recursive: true, filter: notTheInbox });
   return dir;
 }
+/** The committed registry, without its inbox: what every test below calls "the registry". */
+const COMMITTED = checkout();
+process.on('exit', () => rmSync(COMMITTED, { recursive: true, force: true }));
+/** The one warning a contribution waiting in the inbox may bring. */
+const ALREADY_LISTED = /^warning: employers\/inbox\/[^:]+:\d+: \d+ boards? (?:is|are) already in the registry and will be skipped when the inbox is folded in \(lines? [^)]*\)$/;
 const reg = (dir, ...p) => join(dir, 'employers', ...p);
 const readJson = (p) => JSON.parse(readFileSync(p, 'utf8'));
 const writeJson = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
@@ -117,14 +129,39 @@ function editRow(dir, careersUrl, edit) {
 // ── 1. The real registry ──────────────────────────────────────────────────
 
 test('the committed registry passes the validator', () => {
-  const r = run(ROOT);
+  const r = run(COMMITTED);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /employer registry is valid: \d+ rows/);
   assert.equal(r.stderr, '', 'no warnings either');
 });
 
+test('the tree as it is, inbox included, passes the validator, and warns only of inbox boards the registry already lists', () => {
+  const r = run(ROOT);
+  assert.equal(r.status, 0, r.stderr);
+  for (const line of r.stderr.split('\n').filter(Boolean)) assert.match(line, ALREADY_LISTED);
+});
+
+test('a contribution waiting in the inbox with a board the registry already lists: a warning, and the registry still passes', () => {
+  const dir = checkout();
+  try {
+    const { row } = rowsOf(reg(dir))[0];
+    mkdirSync(reg(dir, 'inbox'), { recursive: true });
+    const line = { ats: row.ats, board: row.board, name: row.name };
+    if (row.region) line.region = row.region;
+    writeFileSync(reg(dir, 'inbox', '2026-11-16-octocat.ndjson'), `${JSON.stringify(line)}\n`);
+    const r = run(dir);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /inbox: 1 board\(s\) in 1 file\(s\), 1 already in the registry/);
+    const warnings = r.stderr.split('\n').filter(Boolean);
+    assert.equal(warnings.length, 1, r.stderr);
+    assert.match(warnings[0], ALREADY_LISTED);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the committed registry passes against itself as the base (a PR that changes nothing)', () => {
-  const r = run(ROOT, ['--base', '.']);
+  const r = run(COMMITTED, ['--base', '.']);
   assert.equal(r.status, 0, r.stderr);
 });
 
@@ -292,10 +329,14 @@ test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real d
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {
   const idPatterns = [manifestSchema.properties.id.pattern, rowSchema.properties.contribution.pattern].map((p) => new RegExp(p));
-  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co'];
+  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co',
+    '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3',
+    '2026-11-20-acme.1', '2026-11-20-acme.0', '2026-11-20-acme.02', '2026-11-20-acme.100', '2026-11-20-acme.', '2026-11-20-acme.2.3', '2026-11-20-acme.2-2', '2026-11-20-.2'];
   for (const s of samples) {
     for (const re of idPatterns) assert.equal(re.test(s), MANIFEST_ID_RE.test(s), s);
   }
+  const accepted = samples.filter((s) => MANIFEST_ID_RE.test(s));
+  assert.deepEqual(accepted, ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3']);
 });
 
 // ── 4. Pull-request rules (--base), the size limit, the CHANGELOG ─────────
@@ -331,7 +372,7 @@ function pr(change) {
   const head = checkout();
   try {
     change(head);
-    return run(head, ['--base', ROOT]);
+    return run(head, ['--base', COMMITTED]);
   } finally {
     rmSync(head, { recursive: true, force: true });
   }
@@ -451,7 +492,7 @@ test('--base: a letter-case variant of a merged board fails on the new row, even
     const newLine = order.indexOf('https://crowdstrike.wd5.myworkdayjobs.com/CrowdStrikeCareers') + 1;
     const keptLine = order.indexOf(CROWDSTRIKE) + 1;
     assert.ok(newLine < keptLine, 'the variant sorts before the merged row');
-    const r = run(head, ['--base', ROOT]);
+    const r = run(head, ['--base', COMMITTED]);
     assert.equal(r.status, 1);
     const file = 'employers/boards/workday/c.ndjson';
     assert.match(r.stderr, new RegExp(`${file}:${newLine}: careers_url differs only in letter case from ${file}:${keptLine}, which is already merged and keeps its spelling`));
@@ -465,7 +506,7 @@ test('--base: a merged Workday board added again under the other host form fails
     const order = addWorkdayVariant(head, 'guidewire/wd5/external', 'jobs');
     const newLine = order.indexOf('https://guidewire.wd5.myworkdayjobs.com/external') + 1;
     const keptLine = order.indexOf(GUIDEWIRE) + 1;
-    const r = run(head, ['--base', ROOT]);
+    const r = run(head, ['--base', COMMITTED]);
     assert.equal(r.status, 1);
     const file = 'employers/boards/workday/g.ndjson';
     assert.match(r.stderr, new RegExp(`${file}:${newLine}: the same Workday board as ${file}:${keptLine}, which is already merged and keeps its spelling, under the other host form`));
@@ -581,9 +622,9 @@ test('boards/ has no hard size limit: above 25 MB it is a warning, never an erro
 });
 
 test('boards/ under the warning size is quiet, and the threshold is the only trigger', () => {
-  const quiet = validateRegistry({ root: ROOT });
+  const quiet = validateRegistry({ root: COMMITTED });
   assert.deepEqual(quiet.warnings, []);
-  const tight = validateRegistry({ root: ROOT, boardsWarnBytes: 1024 });
+  const tight = validateRegistry({ root: COMMITTED, boardsWarnBytes: 1024 });
   assert.deepEqual(tight.errors, []);
   assert.deepEqual(tight.warnings.map((w) => w.file), ['employers/boards']);
 });
@@ -662,7 +703,7 @@ test('in GitHub Actions, a valid registry passes with no ::error and a summary o
   const summary = join(tmp, 'summary.md');
   try {
     writeFileSync(summary, '# an earlier step\n');
-    const r = run(ROOT, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });
+    const r = run(COMMITTED, [], { GITHUB_ACTIONS: 'true', GITHUB_STEP_SUMMARY: summary });
     assert.equal(r.status, 0, r.stderr);
     assert.ok(!r.stdout.includes('::error') && !r.stdout.includes('::warning'), r.stdout);
     const md = readFileSync(summary, 'utf8');

@@ -37,7 +37,7 @@
  *   node scan.mjs --help                       # print this usage block and exit
  */
 
-import { buildWorkplacePolicy, isCountryKeyword } from './providers/_country.mjs';
+import { buildWorkplacePolicy, homeCountryCodes, isCountryKeyword, namesPlaceOutsideHome } from './providers/_country.mjs';
 import {
   closeSync,
   existsSync,
@@ -84,11 +84,12 @@ import { OBSERVATIONAL_SCAN_HISTORY_STATUSES, SCAN_HISTORY_COLUMNS, parseScanHis
 import { closesAtIso } from './lib/posting-close.mjs';
 import { escapeFormulaCell } from './lib/tsv-formula-escape.mjs';
 import { sectionKind } from './lib/pipeline-sections.mjs';
-import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity } from './url-key.mjs';
+import { canonicalJobKey, normalizeUrl, LANGUAGE_PARAMS, languageSubtag, promoteKnownFragmentIdentity, canonicalizeKnownPostingUrl, googleCareersJobId } from './url-key.mjs';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { checkLivenessViaApi } from './liveness-api.mjs';
 import { robotsAllows } from './robots-check.mjs';
 import { resolveExperienceFilter, applyExperienceFilter } from './jd-years.mjs';
+import { normalizeEmploymentType, parseEmploymentTypeFilterConfig } from './providers/_employment-type.mjs';
 
 const CODE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 export const DATA_ROOT = getCareerOpsRoot();
@@ -522,7 +523,39 @@ function compileLocationKeyword(keyword) {
   return (lower) => re.test(lower);
 }
 
-function compileLocationKeywordList(value) {
+// Washington, DC is written "DC", "D.C." and "District of Columbia", and its
+// city part is the name of a US state. Two consequences (#7293):
+//   - `block: ["DC"]` missed "Washington, D.C.": the entry "DC" was matched as
+//     an ISO code, so "D.C." never matched it. An entry spelled DC or D.C. (any
+//     case) now matches either spelling, in every tier.
+//   - `allow: ["Washington"]`, written for the state, admitted every DC
+//     posting through the city name. In `allow` and `always_allow` the state
+//     name "Washington" no longer matches the city of Washington, DC, so
+//     "Seattle, Washington" passes and "Washington, DC" (also written
+//     "Washington (DC)" or "Washington - DC") does not, while
+//     "Seattle, Washington; Washington, DC" still passes on its Seattle part.
+//     The abbreviation "WA" is not read as the state, before or after this
+//     change, so list "WA" separately to admit "Seattle, WA". `block`
+//     and `block_hard` keep matching both, so a block written as "Washington"
+//     never gets weaker. The built-in US-state expansion (#3633) is untouched:
+//     with "United States" in always_allow, DC still passes as a US place.
+const DC_TOKEN = String.raw`d\.?\s?c(?:\.|(?![\p{L}\p{M}\p{N}]))`;
+const DC_ENTRY_RE = /^d\.?\s?c\.?$/i;
+const DC_LOCATION_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${DC_TOKEN}`, 'u');
+const DC_CITY_RE = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])washington\\s*[,(\\-\u2013\u2014]?\\s*(?:district of columbia|${DC_TOKEN})`, 'gu');
+const withoutDcCity = (lower) => lower.replace(DC_CITY_RE, 'district of columbia');
+// A Workday URL hint puts the city first ("Washington", "Washington-United-States").
+// When the display location names Washington, DC, a hint that starts with a
+// bare "Washington" is that city, not the state. "Seattle-Washington" and
+// "Washington-State" keep naming the state, and with no DC in the display the
+// hint is read as before. The hint arrives with its dashes turned into spaces.
+const DC_CITY_TEST_RE = new RegExp(DC_CITY_RE.source, 'u');
+const LEADING_WASHINGTON_RE = /^washington(?![\p{L}\p{M}\p{N}])(?!\s+state(?![\p{L}\p{M}\p{N}]))/u;
+const hintWithoutDcCity = (hint, display) => (typeof display === 'string' && DC_CITY_TEST_RE.test(display)
+  ? hint.replace(LEADING_WASHINGTON_RE, 'district of columbia')
+  : hint);
+
+function compileLocationKeywordList(value, { stateNameSkipsDc = false } = {}) {
   // An entry written as two uppercase letters ("IN", "DE") is an ISO country
   // code. Lowercased like every other keyword it would match the plain word
   // "in" in "Anywhere in the World" (#6605), so it is matched against the
@@ -536,6 +569,12 @@ function compileLocationKeywordList(value) {
     .filter(k => typeof k === 'string' && k.trim())
     .map((entry) => {
       const trimmed = foldLocationWhitespace(entry).trim();
+      if (DC_ENTRY_RE.test(trimmed)) return (lower) => DC_LOCATION_RE.test(lower);
+      if (stateNameSkipsDc && trimmed.toLowerCase() === 'washington') {
+        const state = compileLocationKeyword('washington');
+        // `display` is passed only when `lower` is the URL hint.
+        return (lower, _original, display) => state(withoutDcCity(hintWithoutDcCity(lower, display)));
+      }
       if (!/^[A-Z]{2}$/.test(trimmed)) return compileLocationKeyword(trimmed.toLowerCase());
       const re = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${trimmed}(?![\\p{L}\\p{M}\\p{N}])`, 'u');
       return (lower, original) => typeof original === 'string' && re.test(original);
@@ -743,13 +782,17 @@ const WORLDWIDE_LOCATION_LABELS = new Set([
   'remote (worldwide)',
 ]);
 
+const GENERIC_REMOTE_ALLOW = new Set(['remote', 'remote work', 'work from home', 'anywhere', 'distributed']);
+const US_STATE_NAMES = new Set(USPS_STATES.map(([name]) => name).filter(name => !US_STATE_NAMES_ALSO_COUNTRIES.has(name)));
+const US_STATE_NAME_MATCHERS = [...US_STATE_NAMES].map(compileLocationKeyword);
+
 // `url` and `title` are optional. Callers that omit them get the original
 // location-only semantics, which is what the existing unit tests exercise.
 export function buildLocationFilter(locationFilter) {
   if (!locationFilter) return () => true;
   const workplacePolicy = buildWorkplacePolicy(locationFilter.workplace_policy);
   const alwaysAllowKeywords = normalizeKeywordList(locationFilter.always_allow).map(foldLocationWhitespace);
-  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow);
+  const alwaysAllow = compileLocationKeywordList(locationFilter.always_allow, { stateNameSkipsDc: true });
   // US-targeted configs list the country in always_allow and foreign cities
   // in block. "Dublin, OH" does not contain "United States", so without this
   // expansion block: [Dublin] rejects a real US job. Opt-in on the country
@@ -759,7 +802,7 @@ export function buildLocationFilter(locationFilter) {
     alwaysAllow.push(...US_STATE_ALWAYS_ALLOW_MATCHERS);
   }
   const allowKeywords = normalizeKeywordList(locationFilter.allow).map(foldLocationWhitespace);
-  const allow = compileLocationKeywordList(locationFilter.allow);
+  const allow = compileLocationKeywordList(locationFilter.allow, { stateNameSkipsDc: true });
   // Do not widen city-only or mixed city/country targeting. Reuse the shared
   // country vocabulary rather than introducing a second country-name list.
   const countryOnlyAllow = allowKeywords.length > 0
@@ -769,6 +812,14 @@ export function buildLocationFilter(locationFilter) {
   if (usExpansion && allow.length > 0) {
     allow.push(...US_STATE_ALLOW_MATCHERS);
   }
+  // A bare work-arrangement token says nothing about where the role is. When
+  // the lists also name a home country, it cannot admit a location that names
+  // only other places ("Remote (Hong Kong)" for a US list). With no home
+  // country to read, matching is unchanged.
+  const genericRemoteAllow = new Set(allow.filter((_, i) => GENERIC_REMOTE_ALLOW.has(allowKeywords[i])));
+  const homeCountries = genericRemoteAllow.size > 0 ? homeCountryCodes([...alwaysAllowKeywords, ...allowKeywords], US_STATE_NAMES) : new Set();
+  // The URL hint can name a place the display string leaves out ("Remote").
+  const outsideHome = (original, hint) => namesPlaceOutsideHome(hint ? `${original}; ${hint}` : original, homeCountries, segment => US_STATE_NAME_MATCHERS.some(m => m(segment)));
   const block = compileLocationKeywordList(locationFilter.block);
   const blockHard = compileLocationKeywordList(locationFilter.block_hard);
   // Opt-in: fail closed when there is nothing to judge on. Only meaningful when
@@ -787,7 +838,7 @@ export function buildLocationFilter(locationFilter) {
     // against a provider that never returns a location would otherwise let
     // every out-of-region posting through (#3276).
     if (lower === '' && hint === '') return !strict;
-    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint));
+    const matches = (m) => (lower !== '' && m(lower, original)) || (hint !== '' && m(hint, undefined, lower));
     // `block_hard` is the ONE tier always_allow cannot override. It exists because
     // a European city name can be a whole word inside a non-European location, so
     // word-boundary matching (#2087) does not catch it and always_allow's
@@ -809,11 +860,15 @@ export function buildLocationFilter(locationFilter) {
     if (alwaysAllow.length > 0 && alwaysAllow.some(matches)) return true;
     if (block.length > 0 && block.some(matches)) return false;
     if (allow.length === 0) return true;
-    if (allow.some(matches)) return true;
+    const allowHits = allow.filter(matches);
+    if (allowHits.some(m => !genericRemoteAllow.has(m))) return true;
+    if (allowHits.length > 0) return !outsideHome(original, hint);
     if (!strict && countryOnlyAllow && WORLDWIDE_LOCATION_LABELS.has(lower)) return true;
     // Last resort only. Deliberately placed AFTER `block` so a remote title can
     // never rescue a blocked location — "Program Manager - Remote" in Bengaluru
     // stays rejected. This widens `allow`, never `block`.
+    // Nor can a remote title admit a place outside the home countries.
+    if (outsideHome(original, hint)) return false;
     return locationFilter.remote_title_fallback !== false && titleSignalsRemote(title);
   };
   // Detail readers may recheck this opt-in policy without repeating legacy
@@ -1373,6 +1428,42 @@ export function buildVisaFilter(visaFilter) {
     if (!requireMention) return true;
     if (positive.length === 0) return true;
     return positive.some(k => lower.includes(k));
+  };
+}
+
+// ── Employment-type filter ──────────────────────────────────────────
+// Optional. If `employment_type_filter` is absent from portals.yml, all jobs
+// pass, byte-identical to before the filter existed.
+//
+// Reads the structured `job.employmentType` a provider sets from the source's
+// own field (providers/_employment-type.mjs; today Himalayas, We Work Remotely,
+// Remotive, Ashby and Lever), never the title or description. A local parser
+// may emit a raw label ("Contractor"); it is normalized here the same way.
+//
+// Semantics:
+//   - a type in `allow` → pass
+//   - a type not in `allow` → reject
+//   - no type (the source doesn't say, or says something unrecognized) → pass,
+//     unless `include_unknown: false`. Most providers expose no type at all,
+//     so dropping unknowns by default would silently empty every such board.
+//
+// Config shape (portals.yml), parsed once by parseEmploymentTypeFilterConfig():
+//   employment_type_filter:
+//     allow: [contract, part_time]
+//     include_unknown: true   # default
+
+/**
+ * Build the employment_type_filter predicate.
+ * @param {unknown} block - portals.yml `employment_type_filter`.
+ * @returns {(employmentType: unknown) => boolean} true when the job passes.
+ * @throws {Error} when the block is malformed (see parseEmploymentTypeFilterConfig).
+ */
+export function buildEmploymentTypeFilter(block) {
+  const cfg = parseEmploymentTypeFilterConfig(block);
+  if (!cfg) return () => true;
+  return (employmentType) => {
+    const type = normalizeEmploymentType(employmentType);
+    return type ? cfg.allow.has(type) : cfg.includeUnknown;
   };
 }
 
@@ -2100,6 +2191,7 @@ export function normalizeUrlForDedup(url) {
     }
   }
   promoteKnownFragmentIdentity(parsed);
+  canonicalizeKnownPostingUrl(parsed);
   parsed.hash = '';
   parsed.pathname = parsed.pathname.replace(/\/+$/, '').toLowerCase() || '/';
   return parsed.toString();
@@ -2986,13 +3078,17 @@ export const ANY_REQUISITION = '*';
  *   from the file. Forms read from a URL or from text must contain a digit;
  * - a Workday URL, via `workdayDedupKey` (the same parse the provider uses for
  *   cross-site dedupe, #3439, including its `-N` repost-suffix stripping);
+ * - a Google Careers URL, via `googleCareersJobId` (url-key.mjs): the job id in
+ *   the path is Google's only identifier for an opening, so it is read the way
+ *   a Workday id is;
  * - labelled free text (tracker Notes, a posting title) via the tracker's own
  *   `extractReqNumber`, the vocabulary merge-tracker.mjs already relies on to
  *   keep same-title rows apart (#1524).
  *
  * Only these explicit forms count. A generic board's numeric posting ID is not
  * read: a repost gets a new one, and treating it as a requisition would disable
- * the company+role key it is layered on.
+ * the company+role key it is layered on. Google is the exception because its id
+ * is the only thing that tells two same-titled openings in one city apart.
  *
  * A labelled ID with a trailing `-N` is ambiguous. On Workday the suffix is a
  * cross-site repost disambiguator and `JR25919-1` IS JR25919 (the URL path
@@ -3031,6 +3127,12 @@ export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
   const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
+  // Google Careers has no requisition field: the job id in the URL path is the
+  // posting's only identifier. Without it a second Google opening with the same
+  // title and city (another team, or a re-listing under a new id) matched the
+  // first one's company+role key and was dropped as a duplicate for good.
+  const googleId = googleCareersJobId(url);
+  if (googleId) return [googleId];
   let raws;
   if (workdayKey) {
     // `workday:{hostname}:{reqId}` — a hostname has no colon, so the ID is
@@ -3569,6 +3671,9 @@ export function formatScanHistoryRow(offer, date, status = 'added') {
     language: typeof offer.language === 'string' ? offer.language : '',
     listing_key: typeof offer.listingKey === 'string' ? offer.listingKey : '',
     closes_at: closesAtIso(offer.closesAt) || closesAtIso(offer),
+    // Job.employmentType, normalized again so a local parser's raw label
+    // ("Contractor") is stored the way a provider's is; '' when unknown.
+    employment_type: normalizeEmploymentType(offer.employmentType) ?? '',
   };
   return SCAN_HISTORY_COLUMNS.map((name) => sanitizeTsvField(record[name])).join('\t');
 }
@@ -4449,7 +4554,7 @@ export function progressTicker(total, { every = PROGRESS_EVERY, write = (line) =
 
 export async function verifyOffers(offers, { headedFallback = false, throttleBaseMs = 0, rediscover = false } = {}, {
   checkApi = checkLivenessViaApi,
-  loadPlaywright = () => import('playwright'),
+  loadPlaywright = () => import('./lib/hardened-chromium.mjs'),
   // Consulted before each headed retry (#5776); see robots-check.mjs.
   robotsGate = robotsAllows,
 } = {}) {
@@ -4682,7 +4787,7 @@ export function printBoardStats(stats, { verify = false } = {}) {
       console.log(`  ${name}: ${Object.entries(st.sourceDetail).map(([reason, n]) => `${reason} ${n}`).join(', ')}`);
     }
   }
-  console.log('  other = tier, declared field, salary, content, country, visa, cooldown and blacklist; seen = already in your history');
+  console.log('  other = tier, declared field, salary, employment type, content, country, visa, cooldown and blacklist; seen = already in your history');
 }
 
 const VALUE_FLAGS = ['--company', '--posted-after', '--posted-before', '--since'];
@@ -4853,6 +4958,15 @@ async function main() {
   // Derived by the same helper so the hint and the filter cannot disagree.
   const earlyStopSinceMs = resolveEarlyStopMs(effectiveAfter, config.max_posting_age_days);
   const salaryFilter = buildSalaryFilter(config.salary_filter);
+  // A malformed block exits here, before any network call: a typo in `allow`
+  // would otherwise drop every posting of the type it meant to keep.
+  let employmentTypeFilter;
+  try {
+    employmentTypeFilter = buildEmploymentTypeFilter(config.employment_type_filter);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
   const workplaceFilter = buildWorkplaceFilter(config.workplace_filter);
   const trustValidator = buildTrustValidator(config.trust_filter);
   const contentFilter = buildContentFilterOrExit(config.content_filter);
@@ -5112,6 +5226,9 @@ async function main() {
   let totalFilteredPostingAge = 0;
   let totalFilteredPostedDate = 0;
   let totalFilteredSalary = 0;
+  // Summary line and receipt total only, like totalFilteredDeclaredField:
+  // scan-runs.tsv keeps its columns.
+  let totalFilteredEmploymentType = 0;
   let totalFilteredWorkplace = 0;
   let totalFilteredContent = 0;
   // #6020. Title misses that content_filter.rescue_title_misses kept on their
@@ -5420,6 +5537,12 @@ async function main() {
         }
         if (!workplaceFilter(job.workplaceType)) {
           totalFilteredWorkplace++;
+          st.other++;
+          continue;
+        }
+        if (!employmentTypeFilter(job.employmentType)) {
+          totalFilteredEmploymentType++;
+          st.other++;
           continue;
         }
         if (titleMissed) {
@@ -5832,6 +5955,9 @@ async function main() {
   if (config.salary_filter || totalFilteredSalary > 0) {
     console.log(`Filtered by salary:    ${totalFilteredSalary} removed`);
   }
+  if (config.employment_type_filter) {
+    console.log(`Filtered by employment type: ${totalFilteredEmploymentType} removed`);
+  }
   if (config.workplace_filter || totalFilteredWorkplace > 0) {
     console.log(`Filtered by workplace: ${totalFilteredWorkplace} removed`);
   }
@@ -6127,7 +6253,7 @@ async function main() {
   if (jsonMode) {
     const filtered = totalFilteredTitle + totalFilteredDeclaredField + totalFilteredTier + totalFilteredLocation
       + totalFilteredPostingAge + totalFilteredPostedDate + totalFilteredSalary + totalFilteredWorkplace
-      + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
+      + totalFilteredEmploymentType + totalFilteredContent + totalFilteredCountryEligibility + totalFilteredBlacklist
       + totalFilteredVisa + totalFilteredCooldown;
     emitJsonReceipt({
       version: 'careerops.scan.receipt@1',

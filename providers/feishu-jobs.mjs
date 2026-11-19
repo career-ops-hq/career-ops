@@ -174,6 +174,9 @@ export default {
       return json;
     };
     let firstRequest = true;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    /** @type {'page-cap' | null} */
+    let partialReason = null;
 
     for (const keyword of keywords) {
       // Page 1 tells us the inventory size; the rest of the keyword's pages are
@@ -182,6 +185,9 @@ export default {
       let page = 1;
       let lastPage = 1;
       let total = 0;
+      // Raw rows of the last page read: an empty or short page is the end of
+      // the board, not a cap stop.
+      let lastRawRows = 0;
       while (page <= lastPage) {
         const batch = page === 1
           ? [1]
@@ -198,29 +204,41 @@ export default {
             console.error(`  ⚠ feishu-jobs: keyword "${keyword}" page ${batch[i]} failed (${err.message}) — keeping the ${seen.size} jobs collected so far`);
             // The rest of the board was never read: the result says so, so scan.mjs
             // logs it partial instead of reachable (ADDING_A_PROVIDER.md).
-            return markTruncated([...seen.values()], 'fetch-error', { fetched: seen.size });
+            return markTruncated([...seen.values()], partialReason ?? 'fetch-error', { fetched: seen.size });
           }
           const json = result.value;
           const sourcePage = Array.isArray(json?.data?.job_post_list) ? json.data.job_post_list : [];
           const parsed = parseFeishuJobsResponse(json, companyName, origin);
+          lastRawRows = sourcePage.length;
           if (sourcePage.length === 0) { exhausted = true; break; }
           for (const job of parsed.jobs) {
             if (!seen.has(job.url)) seen.set(job.url, job);
           }
           if (batch[i] === 1) {
             total = parsed.total;
-            lastPage = Math.min(maxPages, Math.ceil(total / PAGE_SIZE));
+            // With no count the page budget stands; a short page then ends the
+            // keyword below. A missing count used to leave a budget of zero pages.
+            lastPage = total > 0 ? Math.min(maxPages, Math.ceil(total / PAGE_SIZE)) : maxPages;
           }
+          if (total <= 0 && sourcePage.length < PAGE_SIZE) { exhausted = true; break; }
         }
         if (exhausted) break;
         page = batch[batch.length - 1] + 1;
       }
+      // Postings left: the reported count says so, or, with no count, the page
+      // budget ran out on a full page.
       const covered = Math.min(lastPage * PAGE_SIZE, total);
-      if (covered < total && lastPage === maxPages && probeMaxPages > entryMaxPages) {
-        console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${covered} of ${total} postings — raise max_pages for complete coverage`);
+      const moreLeft = total > 0 ? covered < total : true;
+      if (moreLeft && lastPage === maxPages && lastRawRows >= PAGE_SIZE && probeMaxPages > entryMaxPages) {
+        console.error(`  ⚠ feishu-jobs: keyword "${keyword}" truncated at ${total > 0 ? `${covered} of ${total}` : lastPage * PAGE_SIZE} postings — raise max_pages for complete coverage`);
+        partialReason ??= 'page-cap';
       }
     }
 
-    return [...seen.values()];
+    const result = [...seen.values()];
+    // A keyword max_pages cut is a page-cap stop: the warning above says so, and
+    // the result does too, so scan.mjs logs the board partial (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(result, partialReason, { fetched: result.length });
+    return result;
   },
 };
