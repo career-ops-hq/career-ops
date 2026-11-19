@@ -574,6 +574,36 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Portuguese (pt-BR / pt-PT) — the same failure as Spanish above: modes/pt/
+  // ships a Portuguese market set, but no Portuguese title resolved here, so
+  // cv.sections matched no section of a Portuguese CV and the order guard fell
+  // back to comparing raw titles. Titles that fold to a Spanish spelling
+  // (competências, experiência, habilidades, perfil, certificados, prêmios)
+  // already resolve through the Spanish block and are not repeated.
+  ['resumo', 'summary'],
+  ['resumo profissional', 'summary'],
+  ['perfil profissional', 'summary'],
+  ['sobre mim', 'summary'],
+  ['competências principais', 'competencies'],
+  ['competências-chave', 'competencies'],
+  ['principais competências', 'competencies'],
+  ['experiência profissional', 'experience'],
+  ['experiências profissionais', 'experience'],
+  ['histórico profissional', 'experience'],
+  ['projetos', 'projects'],
+  ['projetos pessoais', 'projects'],
+  ['projetos selecionados', 'projects'],
+  ['formação', 'education'],
+  ['formação acadêmica', 'education'],
+  ['formação académica', 'education'],
+  ['educação', 'education'],
+  ['escolaridade', 'education'],
+  ['certificações', 'certifications'],
+  ['cursos e certificações', 'certifications'],
+  ['prêmios e reconhecimentos', 'awards'],
+  ['competências técnicas', 'skills'],
+  ['conhecimentos técnicos', 'skills'],
+  ['interesses', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
