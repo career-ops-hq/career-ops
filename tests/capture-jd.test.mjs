@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { spawn, spawnSync } from 'node:child_process';
-import { captureJd, captureName, commitCapture, deriveLabels, appendPendingRow, urlAlreadyPresent, today } from '../capture-jd.mjs';
+import { atomicWrite, captureJd, captureName, commitCapture, deriveLabels, appendPendingRow, urlAlreadyPresent, today } from '../capture-jd.mjs';
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
 import { ensureToken, createServer } from '../capture-server.mjs';
 
@@ -603,4 +603,52 @@ test('pipeline atomic writing retains intentional symlink semantics', async (t) 
   assert.equal(result.appended, true);
   assert.equal(lstatSync(pipeline).isSymbolicLink(), true);
   assert.ok(readFileSync(target, 'utf8').includes('https://acme.test/jobs/pipeline-link'));
+});
+
+// --- review follow-ups ------------------------------------------------------
+
+test('a capture commit works when the data root is reached through a symlink', async (t) => {
+  const real = scratch();
+  const git = initRepo(real);
+  git('add', '--', 'data/pipeline.md');
+  assert.equal(git('commit', '-qm', 'init').status, 0, 'initial commit');
+  const link = path.join(sandbox, `link-${path.basename(real)}`);
+  try {
+    symlinkSync(real, link, 'junction');
+  } catch (error) {
+    if (['EACCES', 'EPERM', 'ENOSYS', 'UNKNOWN'].includes(error.code)) {
+      t.skip(`symlinks unavailable: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+  const result = await captureJd({
+    url: 'https://acme.com/jobs/symlinked-root',
+    text: 'JD',
+    title: 'Engineer at Acme',
+    dataRoot: link,
+    date: '2026-11-12',
+    commit: true,
+    push: false,
+  });
+  assert.equal(result.committed, true, JSON.stringify(result));
+});
+
+test('a failed atomic write leaves no temp file behind', () => {
+  const root = scratch();
+  const target = path.join(root, 'jds');
+  mkdirSync(target);
+  assert.throws(() => atomicWrite(target, 'text'));
+  assert.deepEqual(readdirSync(root).filter((name) => name.includes('.tmp-')), []);
+});
+
+test('--flag=value keeps every = after the first one', () => {
+  const root = scratch();
+  const script = path.join(import.meta.dirname, '..', 'capture-jd.mjs');
+  const run = spawnSync(process.execPath, [script, '--url=https://acme.test/jobs?id=5', '--json'], {
+    cwd: root, encoding: 'utf-8', input: '',
+    env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '' },
+  });
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(JSON.parse(run.stdout).url, 'https://acme.test/jobs?id=5');
 });

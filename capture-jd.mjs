@@ -45,7 +45,7 @@ import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync, existsSync, fchmodSync, fsyncSync, lstatSync, mkdirSync,
-  openSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync,
+  openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync,
 } from 'node:fs';
 import path from 'node:path';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -84,6 +84,7 @@ export function atomicWrite(filePath, text, { followSymlinks = true } = {}) {
     renameSync(tempPath, targetPath);
   } catch (err) {
     if (fd !== null) { try { closeSync(fd); } catch { /* already closed */ } }
+    try { unlinkSync(tempPath); } catch { /* never created, or already renamed */ }
     throw err;
   }
 }
@@ -313,6 +314,19 @@ export function urlAlreadyPresent(text, url) {
 }
 
 /**
+ * Whether two paths name the same directory. Git reports the real path, so a
+ * symlinked data root (macOS /var -> /private/var) or a Windows 8.3 short name
+ * (RUNNER~1) must be resolved before comparing. Case is ignored on win32 only.
+ */
+function sameDirectory(a, b) {
+  const real = (p) => {
+    try { return realpathSync.native(p); } catch { return path.resolve(p); }
+  };
+  const norm = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  return norm(real(a)) === norm(real(b));
+}
+
+/**
  * Stage only this capture's files, commit them, and optionally push.
  *
  * `git commit -- <paths>` commits those paths' working-tree content and ignores
@@ -323,8 +337,7 @@ export function urlAlreadyPresent(text, url) {
  * The data root must BE the repository root, not merely sit inside one. Without
  * that check a data root nested under an unrelated repository — a temp folder
  * under a home-directory repo, say — would have its capture committed into that
- * other repo's history. The comparison is case-insensitive because the paths
- * that reach here are typically Windows paths.
+ * other repo's history. Both sides are compared by real path (see sameDirectory).
  *
  * @returns {{committed: boolean, pushed: boolean, sha?: string, reason?: string}}
  */
@@ -335,8 +348,7 @@ export function commitCapture({ dataRoot, files, message, push = true }) {
   if (top.status !== 0) {
     return { committed: false, pushed: false, reason: 'not-a-git-repo' };
   }
-  const repoRoot = path.resolve(String(top.stdout).trim());
-  if (repoRoot.toLowerCase() !== path.resolve(dataRoot).toLowerCase()) {
+  if (!sameDirectory(String(top.stdout).trim(), dataRoot)) {
     return { committed: false, pushed: false, reason: 'data-root-not-repo-root' };
   }
 
@@ -451,7 +463,9 @@ function parseArgs(argv) {
       continue;
     }
     if (arg.startsWith('--')) {
-      const [name, inline] = arg.slice(2).split('=');
+      const eq = arg.indexOf('=');
+      const name = eq === -1 ? arg.slice(2) : arg.slice(2, eq);
+      const inline = eq === -1 ? undefined : arg.slice(eq + 1);
       out.flags[name] = inline === undefined ? true : inline;
       continue;
     }
