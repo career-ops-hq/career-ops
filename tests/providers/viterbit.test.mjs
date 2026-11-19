@@ -143,6 +143,21 @@ try {
   if (Array.isArray(dataClassJobs) && dataClassJobs.length === 0) pass('a data-class attribute naming a card class does not make an empty board throw');
   else fail(`empty board with data-class = ${JSON.stringify(dataClassJobs)}`);
 
+  // Card classes count only as whole tokens: a prefixed class is another class.
+  const prefixedEmpty = realEmpty.replace('<div id="list-jobs-container', '<div class="hover:vb-label-custom md:kt-widget4__username x" id="list-jobs-container');
+  let prefixedJobs;
+  try { prefixedJobs = parseViterbitBoard(prefixedEmpty, ORIGIN, 'Acme'); } catch (e) { prefixedJobs = e.message; }
+  if (Array.isArray(prefixedJobs) && prefixedJobs.length === 0) pass('a class that only contains a card class name (hover:vb-label-custom) does not make an empty board throw');
+  else fail(`empty board with prefixed classes = ${JSON.stringify(prefixedJobs)}`);
+
+  // A whole card class token still counts, quoted or not, next to other classes.
+  for (const attr of ['class="btn vb-label-custom"', "class='kt-widget4__username x'", 'class=vb-label-custom']) {
+    threw = undefined;
+    try { parseViterbitBoard(realEmpty.replace('<div id="list-jobs-container', `<a href="#" ${attr}>x</a><div id="list-jobs-container`), ORIGIN, 'Acme'); } catch (e) { threw = e; }
+    if (threw && /still carries job card markup/.test(threw.message)) pass(`a card class as a whole token (${attr}) next to the "no offers" block throws`);
+    else fail(`whole card class token (${attr}) did not throw: ${threw?.message ?? 'no throw'}`);
+  }
+
   // A card whose link is blank is not a posting.
   threw = undefined;
   try {
