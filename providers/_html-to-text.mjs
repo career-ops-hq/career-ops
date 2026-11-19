@@ -78,8 +78,7 @@ export function stripHtmlComments(text) {
  * @returns {string}
  */
 function stripMediaBlocks(text) {
-  const lower = text.toLowerCase();
-  const closers = { script: closerSpans(lower, 'script'), style: closerSpans(lower, 'style') };
+  const closers = { script: closerSpans(text, 'script'), style: closerSpans(text, 'style') };
   const opener = new RegExp(HTML_MEDIA_OPEN_RE.source, 'gi');
   let out = '';
   let from = 0;
@@ -99,17 +98,20 @@ function stripMediaBlocks(text) {
 
 /**
  * Every `</kind\s*>` in the text, in order, as start and end offsets.
- * @param {string} lower - the text, lower-cased
+ *
+ * Matched case-insensitively on the text itself, as the lazy regex matched
+ * its closer. Not on text.toLowerCase(): lower-casing can change the length
+ * (`İ` becomes `i` and a combining dot), and every offset after it would then
+ * point one character too far into the original text.
+ *
+ * @param {string} text
  * @param {string} kind - `script` or `style`
  * @returns {Array<{start: number, end: number}>}
  */
-function closerSpans(lower, kind) {
-  const head = `</${kind}`;
+function closerSpans(text, kind) {
   const spans = [];
-  for (let at = lower.indexOf(head); at >= 0; at = lower.indexOf(head, at + head.length)) {
-    let i = at + head.length;
-    while (i < lower.length && /\s/.test(lower[i])) i++;
-    if (lower[i] === '>') spans.push({ start: at, end: i + 1 });
+  for (const m of text.matchAll(new RegExp(`</${kind}\\s*>`, 'gi'))) {
+    spans.push({ start: m.index, end: m.index + m[0].length });
   }
   return spans;
 }

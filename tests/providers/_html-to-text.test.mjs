@@ -228,6 +228,10 @@ try {
     ['a<script>x and no closer', 'a x and no closer'],
     ['a<script x="<script>">y</script>b', 'a b'],
     ['a<style>p{}</style><script>z</script\t>b', 'a b'],
+    // Lower-casing turns `İ` into two characters, so closer offsets found in
+    // the lower-cased text pointed one character too far into the original.
+    ['<script>İ</script>Body', 'Body'],
+    ['<p>İstanbul</p><style>x</style>After', 'İstanbul After'],
   ]) {
     const out = htmlToText(input, { cap: Infinity });
     if (out === expected) pass(`htmlToText() strips script/style blocks as before: ${JSON.stringify(input)}`);
