@@ -41,6 +41,7 @@ const REFUSALS = [
   'This role is not eligible for sponsorship.',
   'Applicants must have work authorization that does not require sponsorship from the company now or in the future.',
   'Work authorization that does not require company sponsorship now or in the future.',
+  'You must hold work authorisation that doesn’t require sponsorship.',
   'Applicants must be legally authorized to work in the United States without requiring visa sponsorship now or in the future.',
   'Applicants must be authorized to work without the need for visa sponsorship by the start date.',
   'Must be legally eligible to work in Canada without requiring company sponsorship.',
@@ -53,6 +54,10 @@ const OFFERS = [
   'We are happy to provide visa sponsorship and relocation support.',
   'Visa sponsorship is available for exceptional candidates.',
   'We will sponsor your visa.',
+  // A candidate who does not need sponsorship is welcome too. This is an
+  // offer, so "not require sponsorship" on its own must not reject it.
+  'We offer visa sponsorship to candidates who need it and welcome those who do not require sponsorship.',
+  "We sponsor Blue Card visas, and candidates who don't need sponsorship are just as welcome.",
   'This role is eligible for sponsorship.',
   'We can support visa sponsorship for candidates outside the EU, including the EU Blue Card.',
   'We sponsor H-1B transfers.',

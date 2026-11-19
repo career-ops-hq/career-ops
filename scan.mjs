@@ -1433,9 +1433,16 @@ function visaRefusalPhrases() {
         .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
       sponsorship,
     ),
-    // "work authorization that does not require sponsorship", "you must be
-    // able to work without requiring visa sponsorship"
-    ...cross(['not require', "n't require", 'not need', "n't need"], anySponsorship),
+    // "work authorization that does not require sponsorship". Only in that
+    // framing: "we sponsor visas and welcome those who do not require
+    // sponsorship" offers sponsorship, so a bare "not require sponsorship"
+    // would drop it.
+    ...cross(
+      ['authorization', 'authorisation']
+        .flatMap(a => [`${a} that does not require`, `${a} that doesn't require`]),
+      anySponsorship,
+    ),
+    // "you must be able to work without requiring visa sponsorship"
     ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
     'without visa sponsorship',
     // "this position is not eligible for visa sponsorship"
