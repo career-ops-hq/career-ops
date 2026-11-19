@@ -1,9 +1,7 @@
-FROM node:24.15.0-bookworm-slim
+FROM node:24.15.0-bookworm-slim@sha256:4e6b70dd6cbfc88c8157ba19aa3d9f9cce6ba4703576d55459e45efcbc9c5f5d
 
-ARG ENGINE_REVISION
 ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    HOSTED_ENGINE_REVISION=${ENGINE_REVISION} \
     HOSTED_WORKSPACE_ROOT=/workspace
 
 WORKDIR /opt/career-ops
@@ -23,6 +21,11 @@ COPY modes/ ./modes/
 COPY fonts/ ./fonts/
 COPY config/ ./config/
 COPY hosted/ ./hosted/
+
+ARG ENGINE_REVISION
+ENV HOSTED_ENGINE_REVISION=${ENGINE_REVISION}
+LABEL org.opencontainers.image.revision=${ENGINE_REVISION}
+RUN node -e "if (!/^[0-9a-f]{40}$/.test(process.env.HOSTED_ENGINE_REVISION || '')) process.exit(1)"
 
 USER node
 ENTRYPOINT ["node", "hosted/worker.mjs"]
