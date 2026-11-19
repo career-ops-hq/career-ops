@@ -6,7 +6,7 @@ import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
-import { interpretFormWithAgent } from "./agent-interpret";
+import { interpretFormWithAgent, type AgentInterpretation } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
@@ -343,15 +343,17 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // Whether the user's CLI was actually LAUNCHED over the form, as reported by
   // the interpreter. Kept apart from aiInterpreted: a launched agent can come
   // back empty, and the fencing notice below is about the launch, not about the
-  // result. A missing CLI, an empty form or a fencing refusal (the throw the
-  // catch below absorbs) never launched anything, so no notice is owed.
+  // result. A missing CLI, an empty form or a fencing refusal never launched
+  // anything, so no notice is owed; a refusal carries its own reason instead.
   let agentSpawned = false;
+  let agentRefused: string | undefined;
   // Opt-in: ALWAYS interpret with AI (max robustness, ignores the deterministic
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
-    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
+    agentRefused = ai.refused;
     const aiFields = ai.fields;
     if (aiFields.length) {
       frame = aiFrame;
@@ -387,7 +389,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
-  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // interpretFormWithAgent just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
   // own, so the notice belongs here, where its callers already surface soft
@@ -397,6 +399,9 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  // The fencing check refused to start the interpreter (#2507). Say why rather
+  // than leave the user with fields the fallback never got to read.
+  if (agentRefused) issues.push({ level: "warn", code: "ai-interpret-refused", message: `AI couldn't read this form's fields: ${agentRefused}` });
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
@@ -451,10 +456,12 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (formHasPassword(form)) return null;
   let aiInterpreted = false;
   let agentSpawned = false; // see openSession: launch, not result
+  let agentRefused: string | undefined;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
-    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
+    agentRefused = ai.refused;
     const aiFields = ai.fields;
     if (aiFields.length && looksLikeApplicationForm({ title: form.title, url: form.url, fields: aiFields })) {
       frame = aiFrame;
@@ -468,7 +475,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (form.title) s.title = form.title;
   const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
-  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // interpretFormWithAgent just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
   // own, so the notice belongs here, where its callers already surface soft
@@ -478,6 +485,9 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  // The fencing check refused to start the interpreter (#2507). Say why rather
+  // than leave the user with fields the fallback never got to read.
+  if (agentRefused) issues.push({ level: "warn", code: "ai-interpret-refused", message: `AI couldn't read this form's fields: ${agentRefused}` });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
   return { title: s.title, fields: s.fields, issues };
