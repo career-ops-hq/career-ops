@@ -158,16 +158,25 @@ export function getCareerOpsRoot() {
 /**
  * Resolves the pipeline inbox override against the selected data root.
  * Absolute POSIX and Windows paths are preserved; a blank override uses the
- * default inbox under the data root.
+ * default inbox under the data root. Nonblank path text is preserved as-is.
  *
  * @param {string | undefined} lane Pipeline path override.
  * @param {string} [dataRoot=getCareerOpsRoot()] Root for relative overrides.
  * @returns {string} Absolute path to the pipeline inbox.
+ * @throws {TypeError} When a Windows drive-relative override is ambiguous.
  */
 export function resolvePipelinePath(lane, dataRoot = getCareerOpsRoot()) {
-  const file = lane?.trim();
-  if (!file) return join(dataRoot, 'data', 'pipeline.md');
-  if (isAbsolute(file) || win32.isAbsolute(file)) return file;
+  if (!lane?.trim()) return join(dataRoot, 'data', 'pipeline.md');
+  const file = lane;
+  const windowsPath = win32.parse(file);
+  if (process.platform === 'win32') {
+    if (/^[A-Za-z]:(?![\\/])/.test(file)) {
+      throw new TypeError('CAREER_OPS_PIPELINE must use an absolute path or a path relative to DATA_ROOT, not a drive-relative path');
+    }
+    if (windowsPath.root === '\\') return win32.resolve(dataRoot, file);
+  }
+  if (isAbsolute(file)) return file;
+  if (win32.isAbsolute(file) && windowsPath.root !== '\\') return file;
   return resolve(dataRoot, file);
 }
 

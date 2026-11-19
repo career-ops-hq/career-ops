@@ -35,6 +35,13 @@ test('the pipeline mode and its translations exist', () => {
 function pipelineModeUsesResolvedInbox(rel, _testContext) {
   const source = readFileSync(join(MODES, rel), 'utf-8');
   assert.ok(source.includes(RESOLVED_PENDING_SEARCH), `${rel} does not search the resolved inbox`);
+  if (rel === 'ja/pipeline.md') {
+    const heading = '## Liveness sweep';
+    const start = source.indexOf(heading);
+    const end = source.indexOf('## Workflow', start + heading.length);
+    assert.ok(start !== -1 && end !== -1, `${rel} is missing its bounded liveness-sweep section`);
+    assert.ok(source.slice(start, end).includes('{INBOX}'), `${rel} liveness sweep does not name the resolved inbox`);
+  }
 }
 
 for (const rel of pipelineModes) {

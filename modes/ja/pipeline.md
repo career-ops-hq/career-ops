@@ -1,6 +1,6 @@
 # モード: pipeline -- URL Inbox (Second Brain)
 
-`data/pipeline.md` に保存された job URLs を処理する。ユーザーはいつでも URL を追加し、後から `/career-ops pipeline` を実行してまとめて処理する。
+既定の inbox は `{DATA_ROOT}/data/pipeline.md` です。シェルまたは `{DATA_ROOT}/.env` に `CAREER_OPS_PIPELINE` が設定されている場合はそのパスを使い、相対パスは `{DATA_ROOT}` 基準で解決します。以下では実効パスを `{INBOX}` と呼びます。ユーザーはいつでも URL を追加し、後から `/career-ops pipeline` を実行してまとめて処理します。
 
 ## Liveness sweep
 
@@ -8,7 +8,7 @@
 
 Per-URL loop の前に、zero-token liveness checker で pending URLs をまとめて sweep する：
 
-1. "Pending" section のすべての `- [ ]` URL を temp file に集める（1 URL per line）。
+1. `{INBOX}` の "Pending" section にあるすべての `- [ ]` URL を temp file に集める（1 URL per line）。
 2. `node check-liveness.mjs --file <tmpfile>` を実行する（large batches では WAF rate limits を避けるため `--throttle` を追加。pure Playwright、zero Claude tokens）。Checker は URL ごとの verdict を出し、expired/uncertain がある場合は non-zero で終了する。
 3. Checker が **expired/closed** と報告した URL は処理せず pipeline entry を resolve する：`- [x] ~~URL | Company | Role~~ -- posting expired (liveness sweep)` として "Processed" に移し、すでに tracker row がある場合は `Discarded` にする。**JD extraction、evaluation、report/PDF generation はしない。**
 4. `uncertain` results は残し、normal per-URL extraction 中に確認する（一時的な timeout で live posting を落とさないため）。
@@ -18,7 +18,7 @@ Per-URL loop の前に、zero-token liveness checker で pending URLs をまと�
 
 ## Workflow
 
-1. **Read** `data/pipeline.md` (`grep -n -m 20 '^- \[ \] ' -- "{INBOX}"` で検索し、各バッチの後にこの実行で Pending に残した items だけが出るまで検索を繰り返し、ファイル全体は読まない) → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
+1. **Read** `{INBOX}` (`grep -n -m 20 '^- \[ \] ' -- "{INBOX}"` で検索し、各バッチの後にこの実行で Pending に残した items だけが出るまで検索を繰り返し、ファイル全体は読まない) → "Pending" section の `- [ ]` items を探す。最初に上の **Liveness sweep** を実行し、expired entries を落としてから続行する。
 2. **For each surviving pending URL**:
    a. `node reserve-report-num.mjs` を実行して次の `REPORT_NUM` を atomically claim する（report が書き込まれたら `node reserve-report-num.mjs --release <num>` で sentinel を release）
    b. **Extract JD** using Playwright（browser_navigate + browser_snapshot）→ WebFetch → WebSearch

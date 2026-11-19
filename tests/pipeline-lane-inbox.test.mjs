@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipelineRunHint } from '../scan.mjs';
 import { resolvePipelinePath } from '../path-resolver.mjs';
@@ -60,6 +60,14 @@ function sharedPipelinePathResolverPreservesPathSemantics() {
   assert.equal(resolvePipelinePath(absolute, dataRoot), absolute);
   assert.equal(resolvePipelinePath('   ', dataRoot), resolve(dataRoot, 'data', 'pipeline.md'));
   assert.equal(resolvePipelinePath('C:\\career-ops\\pipeline.md', dataRoot), 'C:\\career-ops\\pipeline.md');
+  assert.equal(resolvePipelinePath('data/pipeline.bridge.md ', dataRoot), resolve(dataRoot, 'data/pipeline.bridge.md '));
+  if (process.platform === 'win32') {
+    const otherDrive = win32.parse(dataRoot).root[0].toUpperCase() === 'C' ? 'D' : 'C';
+    assert.equal(resolvePipelinePath('\\lane.md', dataRoot), win32.resolve(dataRoot, '\\lane.md'));
+    assert.throws(() => resolvePipelinePath(`${otherDrive}:jobs.md`, dataRoot), /drive-relative path/);
+  } else {
+    assert.equal(resolvePipelinePath('\\lane.md', dataRoot), resolve(dataRoot, '\\lane.md'));
+  }
 }
 
 test('the shared pipeline path resolver preserves path semantics', sharedPipelinePathResolverPreservesPathSemantics);

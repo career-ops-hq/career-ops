@@ -2,16 +2,23 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { rmSync } from './helpers.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 
-function runDoctor(env, args = []) {
+/**
+ * Runs the doctor CLI with the supplied environment and working directory.
+ * @param {object} env Environment overrides for the child process.
+ * @param {string[]} [args=[]] Command-line arguments.
+ * @param {string} [cwd=root] Child process working directory.
+ * @returns {object} Child process result.
+ */
+function runDoctor(env, args = [], cwd = root) {
   const result = spawnSync(process.execPath, [join(root, 'doctor.mjs'), ...args], {
-    cwd: root,
+    cwd,
     encoding: 'utf8',
     env: { ...process.env, ...env },
   });
@@ -78,12 +85,15 @@ test('doctor creates the CAREER_OPS_PIPELINE parent when the override file is mi
  */
 function doctorResolvesRelativePipelineOverrideUnderDataRoot(t) {
   const { dataRoot, env } = fixture(t);
+  const cwd = resolve(dataRoot, '..', 'checkout');
+  mkdirSync(cwd);
   env.CAREER_OPS_PIPELINE = 'lanes/pipeline.md';
   const expected = join(dataRoot, 'lanes', 'pipeline.md');
-  const human = runDoctor(env);
+  const human = runDoctor(env, [], cwd);
   assert.equal(existsSync(expected), true, human.stdout + human.stderr);
   assert.ok(human.stdout.includes(`✓ ${expected} ready (auto-created)`), human.stdout);
   assert.equal(existsSync(join(dataRoot, 'data', 'pipeline.md')), false);
+  assert.equal(existsSync(join(cwd, 'lanes', 'pipeline.md')), false);
 }
 
 test(
