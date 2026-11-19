@@ -18,3 +18,11 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-18 `2026-11-18-santifer.7` (1325 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
 - 2026-11-18 `2026-11-18-santifer.8` (255 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
 - 2026-11-18 `2026-11-18-santifer.9` (156 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-18 `2026-11-18-santifer.10` (2017 boards, source `web-index:wayback@2026-11-18`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer` (1239 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer.2` (631 boards, source `ats-directory`): ATS Company Directory by LastRound AI, CC BY 4.0: https://lastroundai.com/blog/salary-transparency-study-2026
+- 2026-11-19 `2026-11-19-santifer.3` (345 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer.4` (124 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer.5` (428 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-19 `2026-11-19-santifer.6` (273 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-19 `2026-11-19-santifer.7` (181 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index

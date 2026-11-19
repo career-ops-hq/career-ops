@@ -114,9 +114,12 @@ test("tryApplyTrigger clicks Apply instead of following a vendor homepage link",
   if (!fx) return;
   const { page, requested, close } = fx;
   try {
-    // The page must be painted before the trigger runs: its click gives up
-    // after 3 s, which a cold browser on a slow runner can use up.
-    await page.locator("#cta").waitFor({ state: "visible" });
+    // The Apply control must be ready for a click before the trigger runs: its
+    // click gives up after 3 s and still reports the control as used, which a
+    // cold browser on a slow runner can use up. A trial click runs every check
+    // a real click waits for (visible, stable, enabled, receives events)
+    // without clicking, so the 3 s are left for the click itself.
+    await page.locator("#cta").click({ trial: true, timeout: 10_000 });
     const acted = await tryApplyTrigger(page);
     assert.ok(acted && typeof acted === "object" && "followed" in acted, "the Apply control should have been used");
     assert.deepEqual(requested.filter(isRecruiteeHost), []);

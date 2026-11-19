@@ -118,7 +118,11 @@ func TestStatusTargetUsesOnlyReportColumn(t *testing.T) {
 		{"unrelated-malformed-report", "| 6 | 2026-09-01 | Other Co | Engineer | 4.2/5 | Applied | ❌ | [8](reports/008.md) [9](reports/009.md) | see [7] |\n", "7", false},
 		{"duplicate-report", strings.Replace(statusTargetRow, "| 42 |", "| 99 |", 1), "7", true},
 		{"missing-report", "", "88", true},
-		{"empty-report", "", "", true},
+		// No report link falls back to the row's tracker # (#7331), which here
+		// names the same row: a row added without an evaluation has no other
+		// identity. A report id that IS present must still resolve through the
+		// Report column alone, which every case above covers.
+		{"empty-report-uses-tracker-row", "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CAREER_OPS_TRACKER", "")

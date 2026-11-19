@@ -42,10 +42,12 @@ when a directory has only one. You can tell an edit to your code from new files
 beside it.
 
 The files under a plugin's directory count toward its hash, except inside
-directories named `node_modules` or `.git`, which are skipped. That includes git
-worktrees and tool logs kept there. If you link a plugin checkout into
+directories named `node_modules` or `.git`, which are skipped. Everything else
+counts, including git worktrees and tool logs. If you link a plugin checkout into
 `plugins.local/`, keep worktrees and logs outside the plugin's own directory, for
-example `git worktree add ../my-plugin-worktrees/fix-1`.
+example `git worktree add ../my-plugin-worktrees/fix-1`. A community plugin
+cannot rely on that skip: `plugins.mjs add` refuses any plugin that contains a
+`node_modules` directory, so registry plugins stay dependency-free.
 
 ## Writing a plugin
 
