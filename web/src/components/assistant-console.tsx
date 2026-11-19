@@ -35,6 +35,7 @@ type Part =
   | StatusConfirmationPart;
 type Msg = { role: "user" | "assistant"; parts: Part[] };
 type RequestFeedback = { id: number; phase: "working" | "ready" | "error"; announce: boolean };
+class ChatHistoryRefreshError extends Error {}
 
 const loadMarkdown = () => import("@/components/assistant-markdown");
 const AssistantMarkdown = lazy(loadMarkdown);
@@ -156,6 +157,8 @@ export function AssistantConsole() {
   const [titleDraft, setTitleDraft] = useState("");
   const historyRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const titleEditorActive = useRef(false);
+  const historyListId = useId();
   const activeChat = useRef<{ id: string; revision: number; title?: string }>({ id: "", revision: 0 });
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -354,7 +357,11 @@ export function AssistantConsole() {
         current.title = chat.title;
         savedSnapshot.current = encoded;
         setSaveError("");
-        await refreshChats();
+        try {
+          await refreshChats();
+        } catch (e) {
+          throw new ChatHistoryRefreshError(e instanceof Error ? e.message : "Conversation history could not be refreshed");
+        }
       } catch (e) {
         setSaveError(e instanceof Error ? e.message : "Conversation was not saved");
         throw e;
@@ -471,11 +478,13 @@ export function AssistantConsole() {
   }
   function startRename() {
     const current = activeChat.current.title || chats.find(c => c.id === activeChat.current.id)?.title || "";
+    titleEditorActive.current = true;
     setTitleDraft(current);
     setIsEditingTitle(true);
     setHistoryOpen(false);
   }
   function commitRename(nextTitle: string) {
+    titleEditorActive.current = false;
     setIsEditingTitle(false);
     const currentId = activeChat.current.id;
     const prevTitle = activeChat.current.title || "";
@@ -488,9 +497,11 @@ export function AssistantConsole() {
     setChatPending(true);
 
     void flushChat(clean)
-      .catch(() => {
-        activeChat.current.title = prevTitle;
-        setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: prevTitle } : c));
+      .catch((error) => {
+        if (!(error instanceof ChatHistoryRefreshError)) {
+          activeChat.current.title = prevTitle;
+          setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: prevTitle } : c));
+        }
       })
       .finally(() => setChatPending(false));
   }
@@ -924,32 +935,34 @@ export function AssistantConsole() {
 
           <div className="flex items-center gap-2 border-b border-border px-4 py-2">
             {isEditingTitle ? (
-              <div className="flex min-w-0 flex-1 items-center gap-1.5">
+              <div
+                className="flex min-w-0 flex-1 items-center gap-1.5"
+                onBlur={(e) => {
+                  if (titleEditorActive.current && !e.currentTarget.contains(e.relatedTarget as Node | null)) commitRename(titleDraft);
+                }}
+              >
                 <input
                   ref={titleInputRef}
                   type="text"
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                       e.preventDefault();
                       commitRename(titleDraft);
                     } else if (e.key === "Escape") {
                       e.preventDefault();
+                      titleEditorActive.current = false;
                       setIsEditingTitle(false);
                     }
                   }}
-                  onBlur={() => commitRename(titleDraft)}
                   className="min-w-0 flex-1 rounded-md border border-brand/50 bg-surface px-2.5 py-1 text-sm text-foreground focus:outline-none"
                   placeholder="Conversation name"
                   aria-label="Conversation name"
                 />
                 <button
                   type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    commitRename(titleDraft);
-                  }}
+                  onClick={() => commitRename(titleDraft)}
                   className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
                   aria-label="Save name"
                   title="Save name"
@@ -958,8 +971,8 @@ export function AssistantConsole() {
                 </button>
                 <button
                   type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
+                  onClick={() => {
+                    titleEditorActive.current = false;
                     setIsEditingTitle(false);
                   }}
                   className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
@@ -978,8 +991,24 @@ export function AssistantConsole() {
                     aria-label="Conversation history"
                     aria-expanded={historyOpen}
                     aria-haspopup="listbox"
+                    aria-controls={historyOpen ? historyListId : undefined}
                     disabled={busy || chatPending || !chatReady}
                     onClick={() => setHistoryOpen(!historyOpen)}
+                    onKeyDown={(e) => {
+                      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                        e.preventDefault();
+                        setHistoryOpen(true);
+                        queueMicrotask(() => {
+                          const options = historyRef.current?.querySelectorAll<HTMLElement>('[role="option"]');
+                          if (!options?.length) return;
+                          const target = e.key === "ArrowUp" ? options[options.length - 1] : options[0];
+                          target.focus();
+                        });
+                      } else if (e.key === "Escape" && historyOpen) {
+                        e.preventDefault();
+                        setHistoryOpen(false);
+                      }
+                    }}
                     className="flex w-full items-center justify-between gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-left text-sm text-foreground transition-colors hover:border-brand/40 focus:border-brand/50 focus:outline-none disabled:opacity-40"
                   >
                     <span className="truncate">{chats.find(c => c.id === (chats.some(x => x.id === activeChat.current.id) ? activeChat.current.id : ""))?.title || "New chat"}</span>
@@ -987,7 +1016,29 @@ export function AssistantConsole() {
                   </button>
                   {historyOpen && (
                     <div
+                      id={historyListId}
                       role="listbox"
+                      onKeyDown={(e) => {
+                        const options = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
+                        const index = options.indexOf(document.activeElement as HTMLElement);
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setHistoryOpen(false);
+                          historyRef.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus();
+                        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                          e.preventDefault();
+                          const next = e.key === "ArrowDown"
+                            ? (index + 1) % options.length
+                            : (index - 1 + options.length) % options.length;
+                          options[next]?.focus();
+                        } else if (e.key === "Home") {
+                          e.preventDefault();
+                          options[0]?.focus();
+                        } else if (e.key === "End") {
+                          e.preventDefault();
+                          options[options.length - 1]?.focus();
+                        }
+                      }}
                       className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full space-y-0.5 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl"
                     >
                       <button
