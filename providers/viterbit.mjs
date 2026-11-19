@@ -53,10 +53,12 @@ export function resolveViterbitOrigin(raw) {
 /**
  * Markup that only a posting's card carries, independent of the title anchor's
  * class: the title link's `kt-widget4__username` and the apply button's
- * `vb-label-custom`. `vb-jobs-tab` is also the list container and sits inside
- * the "no offers" block, and `vb-job-title` is in the page's inline CSS, so
- * neither counts. */
-const LISTING_EVIDENCE = /\b(?:kt-widget4__username|vb-label-custom)\b/;
+ * `vb-label-custom`, counted only as a class in an element's `class`
+ * attribute, so a stylesheet or script that names them is not a card.
+ * `vb-jobs-tab` is also the list container and sits inside the "no offers"
+ * block, and `vb-job-title` is in the page's inline CSS, so neither counts. */
+const LISTING_EVIDENCE = /\bclass\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])(?:kt-widget4__username|vb-label-custom)(?![\w-])/;
+const STYLE_OR_SCRIPT = /<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 
 /** @param {string} html */
 function text(html) {
@@ -116,8 +118,9 @@ const WORKPLACE = /** @type {Array<[RegExp, string]>} */ ([
  * means this is not a Viterbit careers page or its markup changed. The "no
  * offers" block is also on pages that list postings, so it only counts when
  * nothing else on the page looks like a listing (the title link's or the apply
- * button's card-only class): a page with the block and either of those but no
- * readable card throws. A page with the block and no such evidence is
+ * button's card-only class in a class attribute; text in a <style> or <script>
+ * never counts): a page with the block and either of those but no readable
+ * card throws. A page with the block and no such evidence is
  * an empty board.
  *
  * @param {string} html
@@ -172,7 +175,7 @@ export function parseViterbitBoard(html, origin, company, nowMs = Date.now()) {
     if (!/id=["']empty-jobs["']/.test(page)) {
       throw new Error(`viterbit: no job list found at ${origin} — not a Viterbit careers site, or its markup changed`);
     }
-    if (LISTING_EVIDENCE.test(page)) {
+    if (LISTING_EVIDENCE.test(page.replace(STYLE_OR_SCRIPT, ' '))) {
       throw new Error(`viterbit: ${origin} shows the "no offers" block but its page still carries job card markup — the board markup changed`);
     }
   }

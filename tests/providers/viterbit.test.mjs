@@ -130,6 +130,12 @@ try {
   if (Array.isArray(realEmptyJobs) && realEmptyJobs.length === 0) pass('an empty board as the real page renders it (container, inline CSS, no-offers block) is [], not a markup error');
   else fail(`real empty board = ${JSON.stringify(realEmptyJobs)}`);
 
+  // A stylesheet or script that names the card-only classes is not a card: still an empty board.
+  const cssEmpty = realEmpty.replace('</style>', '.kt-widget4__username{font-weight:500}.vb-label-custom{color:#000}</style><script>var s = ".kt-widget4__username";</script>');
+  const cssEmptyJobs = parseViterbitBoard(cssEmpty, ORIGIN, 'Acme');
+  if (Array.isArray(cssEmptyJobs) && cssEmptyJobs.length === 0) pass('card class names inside an inline <style> or <script> do not make an empty board throw');
+  else fail(`empty board with card class names in CSS = ${JSON.stringify(cssEmptyJobs)}`);
+
   // A card whose link is blank is not a posting.
   threw = undefined;
   try {
