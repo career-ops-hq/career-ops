@@ -5537,6 +5537,7 @@ async function main() {
         }
         if (!workplaceFilter(job.workplaceType)) {
           totalFilteredWorkplace++;
+          st.other++;
           continue;
         }
         if (!employmentTypeFilter(job.employmentType)) {
