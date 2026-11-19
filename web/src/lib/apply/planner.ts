@@ -32,6 +32,19 @@ import type { CliSpec } from "@/lib/clis";
 const ADVISOR_SCOPE = scopeFrom("Read,Glob,Grep");
 
 /**
+ * Secrets the planner must never open. The planner reads a live application
+ * form, so a hostile label can ask it to read a file and type the contents into
+ * the page. The prompts fence the form text as untrusted data; this deny list
+ * is the second layer, on the one runtime that can express it. Claude applies
+ * Read rules to Glob and Grep as well, and the patterns are relative to the
+ * planner's cwd, the data root, where `.env` holds the API keys (and where
+ * docs/BACKUP_STRATEGIES.md suggests `.career-ops.env`). A path outside
+ * the cwd is not covered, and neither is any other CLI, which is why the prompt
+ * fencing stays the primary fix.
+ */
+export const SECRET_READ_DENY = "Read(**/.env),Read(**/.env.*),Read(**/*.env)";
+
+/**
  * One form control, as much of it as the planner needs. Structurally satisfied
  * by ApplyField; kept separate so this module does not import extract.ts and
  * with it playwright-core.
@@ -65,6 +78,12 @@ export function runPlanner(opts: {
   t0: number;
   log: (m: string) => void;
   /**
+   * The Claude allow list, when the caller needs less than the answer planner's
+   * Read,Glob,Grep. The form interpreter passes "Read". The deny list is still
+   * derived from it, never written by hand.
+   */
+  allowed?: string;
+  /**
    * Whose command-line limit decides if the prompt must move to a file. Defaults
    * to this process's platform; exists so tests can exercise the Windows limit
    * on any OS (mirrors spillOversizedPrompt's own parameter).
@@ -72,6 +91,7 @@ export function runPlanner(opts: {
   platform?: NodeJS.Platform;
 }): Promise<PlannerRun> {
   const { cliId, spec, binPath, prompt, fieldCount, cwd, t0, log, platform } = opts;
+  const scope = opts.allowed ? scopeFrom(opts.allowed) : ADVISOR_SCOPE;
 
   const isClaude = cliId === "claude";
   // --strict-mcp-config with no --mcp-config = load ZERO MCP servers → much
@@ -79,7 +99,7 @@ export function runPlanner(opts: {
   // the planner doesn't need; it only reads local files).
   const buildArgs = (p: string) =>
     isClaude
-      ? ["-p", p, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", ADVISOR_SCOPE.allowed, "--disallowedTools", ADVISOR_SCOPE.disallowed]
+      ? ["-p", p, "--permission-mode", "acceptEdits", "--strict-mcp-config", "--allowedTools", scope.allowed, "--disallowedTools", `${scope.disallowed},${SECRET_READ_DENY}`]
       : spec.args(p);
   // A runtime with no verified fencing mechanism plans with its default access.
   // log() is the caller's non-fatal channel; it surfaces in the collapsed

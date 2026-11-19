@@ -518,7 +518,7 @@ async function main() {
     // Loaded here, after --help / --dry-run / a missing pipeline have already
     // returned. A static import made those paths wait on the browser package
     // and crash when it was not installed.
-    const { chromium } = await import('playwright');
+    const { chromium } = await import('./lib/hardened-chromium.mjs');
     const browser = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       for (const { url, company, role } of targets) {

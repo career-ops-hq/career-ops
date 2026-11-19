@@ -55,7 +55,7 @@ it.
 employers/
 ├── README.md               this file
 ├── LICENSE                 CC BY 4.0
-├── THIRD_PARTY_NOTICES.md  notices for data under a third party's license (none yet)
+├── THIRD_PARTY_NOTICES.md  notices for data under a third party's license
 ├── CHANGELOG.md            one credit line per contribution, generated from the manifests by maintainers
 ├── schema.json             JSON Schema of a row and of a manifest, for editors
 ├── contributions/          one manifest per contribution

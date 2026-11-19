@@ -35,10 +35,11 @@ const ALLOWED_SMARTRECRUITERS_HOSTS = new Set(['api.smartrecruiters.com']);
 const SR_CAREERS_HOSTS = new Set(['careers.smartrecruiters.com', 'jobs.smartrecruiters.com']);
 const SR_PAGE_SIZE = 100;
 const SR_MAX_PAGES = 50;  // default cap (5000 postings @ 100/page) when the entry sets no max_pages
-// Upper bound an entry may opt in to with `max_pages` (10,000 postings). Bosch
-// alone listed 5,104 on 2026-11-10, past the default; the bound stays finite so
-// a typo can't walk a board forever.
-export const SR_HARD_MAX_PAGES = 100;
+// Upper bound an entry may opt in to with `max_pages` (30,000 postings). Bosch
+// alone listed 5,104 on 2026-11-10, past the default, and one board listed
+// 25,125 on 2026-11-18, which the API serves past offset 10,000; the bound stays
+// finite so a typo can't walk a board forever.
+export const SR_HARD_MAX_PAGES = 300;
 const SR_DETAIL_BATCH = 5;
 // A raised max_pages can mean 100 list requests to one public API host, so the
 // walk spaces its pages and retries a transient failure (429, 5xx, a dropped
