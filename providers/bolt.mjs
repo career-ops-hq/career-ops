@@ -114,9 +114,10 @@ export function parsePositions(html, entryName) {
       listingIdentity: { ats_provider: 'bolt', board_slug: 'bolt', posting_id: id },
     };
     if (places.length) job.locations = places;
-    // Structured country code only when every place that carries one agrees on a single country.
-    const codes = new Set(locs.map((/** @type {any} */ l) => (typeof l?.countryCode === 'string' ? l.countryCode.trim() : '')).filter(Boolean));
-    if (codes.size === 1) job.country = [...codes][0];
+    // Structured country code only when every place carries one and they all agree: a place
+    // without a code could be in another country, so the posting is then left without `country`.
+    const codes = locs.map((/** @type {any} */ l) => (typeof l?.countryCode === 'string' ? l.countryCode.trim() : ''));
+    if (codes.length > 0 && codes.every(Boolean) && new Set(codes).size === 1) job.country = codes[0];
     const postedAt = toEpochMs(r.body?.jobPostedDate);
     if (postedAt !== undefined) job.postedAt = postedAt;
     jobs.push(job);

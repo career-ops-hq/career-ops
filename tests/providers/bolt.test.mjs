@@ -13,6 +13,8 @@ try {
   const ID_A = '11111111-aaaa-4bbb-8ccc-000000000001';
   const ID_B = '11111111-aaaa-4bbb-8ccc-000000000002';
   const ID_C = '11111111-aaaa-4bbb-8ccc-000000000003';
+  const ID_D = '11111111-aaaa-4bbb-8ccc-000000000004';
+  const ID_E = '11111111-aaaa-4bbb-8ccc-000000000005';
   const BASE = 'https://bolt.eu/en/careers/positions/';
 
   // A position as the page ships it (shape captured from the live page, values fictional).
@@ -71,6 +73,14 @@ try {
   else fail(`b = ${JSON.stringify(b)}`);
   if (!('country' in a) && b?.country === 'es' && !('country' in c)) pass('bolt sets country only when the source places agree on one country code');
   else fail(`country = ${JSON.stringify([a?.country, b?.country, c?.country])}`);
+  {
+    const mixed = parsePositions(page([
+      position(ID_D, 'Mixed A', [{ city: 'Madrid', country: 'Spain', countryCode: 'es' }, { city: 'Lisbon', country: 'Portugal' }]),
+      position(ID_E, 'Mixed B', [{ city: 'Madrid', country: 'Spain', countryCode: 'es' }, { city: 'Sevilla', country: 'Spain', countryCode: 'es' }]),
+    ]), 'Acme');
+    if (!('country' in mixed[0]) && mixed[1]?.country === 'es') pass('bolt leaves country unset when one place has no code, and keeps it when every place agrees');
+    else fail(`mixed country = ${JSON.stringify(mixed.map((j) => j.country))}`);
+  }
   if (c?.location === '' && !('locations' in c)) pass('bolt position with no places gets an empty location and no locations key');
   else fail(`c = ${JSON.stringify(c)}`);
   if ('description' in a) fail('bolt must not set description from the teaser');
