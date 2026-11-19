@@ -136,6 +136,13 @@ try {
   if (Array.isArray(cssEmptyJobs) && cssEmptyJobs.length === 0) pass('card class names inside an inline <style> or <script> do not make an empty board throw');
   else fail(`empty board with card class names in CSS = ${JSON.stringify(cssEmptyJobs)}`);
 
+  // A data attribute that merely ends in "class" is not a class attribute: still an empty board.
+  const dataClassEmpty = realEmpty.replace('<div id="list-jobs-container', '<div data-class="kt-widget4__username" data-x-class="vb-label-custom" id="list-jobs-container');
+  let dataClassJobs;
+  try { dataClassJobs = parseViterbitBoard(dataClassEmpty, ORIGIN, 'Acme'); } catch (e) { dataClassJobs = e.message; }
+  if (Array.isArray(dataClassJobs) && dataClassJobs.length === 0) pass('a data-class attribute naming a card class does not make an empty board throw');
+  else fail(`empty board with data-class = ${JSON.stringify(dataClassJobs)}`);
+
   // A card whose link is blank is not a posting.
   threw = undefined;
   try {

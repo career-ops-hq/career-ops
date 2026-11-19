@@ -54,10 +54,11 @@ export function resolveViterbitOrigin(raw) {
  * Markup that only a posting's card carries, independent of the title anchor's
  * class: the title link's `kt-widget4__username` and the apply button's
  * `vb-label-custom`, counted only as a class in an element's `class`
- * attribute, so a stylesheet or script that names them is not a card.
+ * attribute (whitespace before `class`, so `data-class` does not count), so
+ * a stylesheet or script that names them is not a card.
  * `vb-jobs-tab` is also the list container and sits inside the "no offers"
  * block, and `vb-job-title` is in the page's inline CSS, so neither counts. */
-const LISTING_EVIDENCE = /\bclass\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])(?:kt-widget4__username|vb-label-custom)(?![\w-])/;
+const LISTING_EVIDENCE = /(?<=\s)class\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])(?:kt-widget4__username|vb-label-custom)(?![\w-])/;
 const STYLE_OR_SCRIPT = /<(style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 
 /** @param {string} html */
