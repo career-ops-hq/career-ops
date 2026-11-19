@@ -253,9 +253,13 @@ tracked_companies:
       script: ${board.script}
 `);
 
+    // An inherited CAREER_OPS_* override (a shell or CI setting) could point
+    // the child away from this temp folder, so none of them pass through.
+    const inherited = Object.fromEntries(Object.entries(process.env)
+      .filter(([k]) => !k.toUpperCase().startsWith('CAREER_OPS_')));
     const scan = () => execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
       cwd: dir,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals },
+      env: { ...inherited, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
