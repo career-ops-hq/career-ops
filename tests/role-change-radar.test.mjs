@@ -154,6 +154,45 @@ test('concurrent checks do not lose history or corrupt the baseline', async t =>
   const state = await radar(root, application, { action: 'load' });
   assert.equal(state.comparisons.length, 2); assert.equal(state.baseline.text, original);
 });
+test('adding a report number preserves tracker-only Radar history', async t => {
+  const { root, application } = fixture(t);
+  const changed = original.replace('Remote', 'Hybrid');
+  let state = await radar(root, { ...application, reportNum: null }, paste(changed));
+  const baseline = state.baseline;
+  const comparison = state.comparisons[0];
+
+  state = await radar(root, { ...application, reportNum: 7 }, { action: 'load' });
+  assert.deepEqual(state.baseline, baseline);
+  assert.equal(state.comparisons.length, 1);
+  assert.equal(state.comparisons[0].id, comparison.id);
+  assert.equal(state.identity, `tracker:${app.id}:${app.company}:${app.title}`);
+  assert.equal(fs.readdirSync(path.join(root, 'data', 'role-change-radar')).filter(name => name.endsWith('.json')).length, 1);
+});
+test('adding a report number preserves legacy report-keyed Radar history', async t => {
+  const { root, application } = fixture(t);
+  const changed = original.replace('Remote', 'Hybrid');
+  const directory = path.join(root, 'data', 'role-change-radar');
+  fs.mkdirSync(directory, { recursive: true });
+  const reportIdentity = 'report:7';
+  const reportFile = path.join(directory, `${hashText(reportIdentity)}.json`);
+  const capture = { text: changed, capturedAt: '2026-01-02T00:00:00.000Z', source: app.url, hash: hashText(changed) };
+  fs.writeFileSync(reportFile, `${JSON.stringify({
+    version: 1,
+    identity: reportIdentity,
+    baseline: { text: original, capturedAt: '2026-01-01T00:00:00.000Z', source: app.url, hash: hashText(original), basis: 'Saved for future checks', chronologyUncertain: false },
+    captures: [capture],
+    comparisons: [{ id: 'legacy-comparison', captureHash: capture.hash, source: capture.source, checkedAt: capture.capturedAt, reviewedAt: null, changes: [], warnings: [] }],
+    lastCheck: { at: capture.capturedAt, status: 'success', comparisonId: 'legacy-comparison' },
+  }, null, 2)}\n`);
+
+  const state = await radar(root, { ...application, reportNum: 7 }, { action: 'load' });
+  assert.equal(state.baseline.text, original);
+  assert.equal(state.captures.length, 1);
+  assert.equal(state.captures[0].text, changed);
+  assert.equal(state.comparisons.length, 1);
+  assert.equal(state.comparisons[0].id, 'legacy-comparison');
+  assert.equal(state.identity, `tracker:${app.id}:${app.company}:${app.title}`);
+});
 test('unsafe public URLs and archive traversal are rejected without network', async t => {
   for (const url of ['http://127.0.0.1/', 'http://169.254.169.254/', 'file:///etc/passwd', 'http://192.168.1.1/', 'http://localhost/']) await assert.rejects(fetchPosting(url), /Unable/);
   const { root, application } = fixture(t);
