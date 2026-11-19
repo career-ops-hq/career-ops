@@ -460,6 +460,57 @@ try {
       : fail(`429 handling: ${jobs.length} jobs, urls=${[...new Set(calls.map((c) => c.url.split('?')[0]))].join(' ')}`);
   }
 
+  // A 429 that clears is waited out, not treated as the end: the walk slows
+  // down, asks for the same page again and finishes the board (Netflix came
+  // back 100 of 394 every run when the first exhausted 429 ended the walk).
+  {
+    let hits = 0;
+    const { ctx } = recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start === 10 && hits++ < 2) throw httpErr(429, 'slow down');
+      const n = start < 20 ? 10 : 5;
+      return { positions: Array.from({ length: n }, (_, i) => position(String(start + i), `R${start + i}`)), count: 25 };
+    });
+    const jobs = await ef.fetch(TENANT, ctx);
+    jobs.length === 25 && !jobs.truncated && !jobs.eightfoldTruncated
+      ? pass('eightfold waits out a transient mid-walk 429 and reads the whole board')
+      : fail(`transient 429: ${jobs.length} jobs, truncated=${JSON.stringify(jobs.truncated)}`);
+  }
+
+  // A transient 5xx mid-walk is waited out the same way: never a short board.
+  {
+    let hits = 0;
+    const { ctx } = recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start === 20 && hits++ < 4) throw httpErr(503, 'unavailable');
+      const n = start < 20 ? 10 : 5;
+      return { positions: Array.from({ length: n }, (_, i) => position(String(start + i), `R${start + i}`)), count: 25 };
+    });
+    const jobs = await ef.fetch(TENANT, ctx);
+    jobs.length === 25 && !jobs.truncated
+      ? pass('eightfold waits out a transient mid-walk 503 and reads the whole board')
+      : fail(`transient 503: ${jobs.length} jobs, truncated=${JSON.stringify(jobs.truncated)}`);
+  }
+
+  // A 429 that never clears ends the walk once the patience budget is spent,
+  // keeping every page already read and saying the board is partial. Each
+  // outer wait stays within its 1s-60s bounds, and the walk slows down.
+  {
+    const waits = [];
+    const { ctx } = recording((c) => {
+      const start = Number(new URL(c.url).searchParams.get('start') || 0);
+      if (start >= 10) throw Object.assign(httpErr(429, 'slow down'), { retryAfter: '0' });
+      return { positions: Array.from({ length: 10 }, (_, i) => position(String(start + i), `R${start + i}`)), count: 500 };
+    });
+    ctx.sleep = async (ms) => { waits.push(ms); };
+    const jobs = await ef.fetch(TENANT, ctx);
+    const outerWaits = waits.filter((ms) => ms >= 1_000);
+    jobs.length === 10 && jobs.truncated?.reason === 'rate-limited' && jobs.truncated?.fetched === 10 && jobs.truncated?.total === 500
+      && outerWaits.length > 0 && outerWaits.every((ms) => ms <= 60_000)
+      ? pass(`eightfold gives up on a persistent 429 after its budget (${outerWaits.length} slowed retries) and reports the board partial`)
+      : fail(`persistent 429: ${jobs.length} jobs, truncated=${JSON.stringify(jobs.truncated)}, waits=${outerWaits.join(',')}`);
+  }
+
   // PCSX names its fields differently from v2. These keys are a live
   // /api/pcsx/search position (careers.qualcomm.com, 2026-10-07): postedTs and
   // atsJobId, never v2's t_create / ats_job_id / canonicalPositionUrl. Fed
