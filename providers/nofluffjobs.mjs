@@ -45,7 +45,7 @@ function normalizeLocation(posting) {
       const country = String(place?.country?.name || '').trim();
       if (city) parts.push(city);
       else if (province) parts.push(province);
-      else if (country) parts.push(country);
+      if (country) parts.push(country);
     }
   }
   return [...new Set(parts.filter(Boolean))].join(', ');

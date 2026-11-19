@@ -37,8 +37,10 @@ For office roles in selected Polish cities and remote roles the candidate can
 work from Poland, use the
 [Poland-first location policy](WORKPLACE_GEOGRAPHY.md#poland-first-eu-remote-example).
 The copyable example lists Polish cities in both `allow` and `onsite_locations`,
-with Poland in `onsite_countries` and `remote_countries`. EU region labels can
-match a generic EU-eligible remote posting when Poland is not named, but a role
+with Poland in `onsite_countries` and `remote_countries`. EU region labels in
+the posting's location or structured eligibility can match a generic EU-eligible
+remote posting when Poland is not named. A description naming only an EU region
+does not establish eligibility; a description must identify Poland. A role
 restricted to another country is not allowed. To add an EU office for
 relocation, add each destination city to `allow` and `onsite_locations`, and
 its country to `onsite_countries`. A remote-region label is not proof of work

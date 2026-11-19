@@ -22,18 +22,21 @@ and remote roles the candidate can work from Poland, use a narrower policy:
 
 ```yaml
 location_filter:
-  allow: [Warsaw, Warszawa, Kraków, Wrocław, Gdańsk, Poznań, Łódź, Poland, Remote, EU, European Union]
+  allow: [Warsaw, Warszawa, Kraków, Krakow, Wrocław, Wroclaw, Gdańsk, Gdansk, Poznań, Poznan, Łódź, Lodz, Poland, Remote, Worldwide, EU, European Union]
   workplace_policy:
-    onsite_locations: [Warsaw, Warszawa, Kraków, Wrocław, Gdańsk, Poznań, Łódź]
+    onsite_locations: [Warsaw, Warszawa, Kraków, Wrocław, Wroclaw, Gdańsk, Poznań, Łódź, Lodz]
     onsite_countries: [Poland]
     remote_countries: [Poland]
     remote_regions: [European Union, EU]
 ```
 
 This keeps office/hybrid roles in the listed Polish cities and permits remote
-roles whose description or structured eligibility identifies Poland or a
-generic EU region. `remote_countries: [Poland]` does not allow a remote role
-restricted to another country, such as Germany.
+roles whose location or structured eligibility identifies Poland or a
+configured region such as the EU. A description must identify Poland; naming
+only a generic EU region does not establish eligibility. `Worldwide` is
+included in `allow` so Poland-eligible remote postings labeled worldwide can
+reach the workplace-policy check. `remote_countries: [Poland]` still rejects
+a remote role restricted to another country, such as Germany.
 
 For relocation to another EU office, add each destination city to both `allow`
 and `onsite_locations`, and its country to `onsite_countries`. If you want all
