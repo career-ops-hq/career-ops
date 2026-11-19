@@ -3,6 +3,10 @@ name: Hosted engine adapter
 on:
   push:
     branches: [product/hosted-foundation]
+    paths-ignore:
+      - PROJECT_HANDOFF.md
+      - docs/**
+      - hosted/README.md
   pull_request:
     paths:
       - hosted/**
@@ -32,7 +36,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Linux is exercised in the actual worker container below. The native
+        # Windows run additionally verifies the supported local development path.
+        os: [windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
