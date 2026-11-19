@@ -41,7 +41,7 @@ jobs:
               ? `Welcome to career-ops, @${user}! Thanks for your first PR.\n\n`
                 + `A few things to know:\n`
                 + `- Tests run automatically, but on a first contribution they wait for a maintainer to approve the run: if it looks stuck, that queue is on us, not on you\n`
-                + `- Link a related issue if this is a feature (bug fixes, providers, docs and translations need no issue)\n`
+                + `- Link a related issue if your PR adds a feature or touches an [owner-reviewed path](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md#owner-reviewed-paths). Typo fixes on any path, other bug fixes, providers, docs and translations need no issue\n`
                 + `- [CONTRIBUTING.md](https://github.com/${owner}/${repo}/blob/main/CONTRIBUTING.md) has the specifics\n\n`
                 + `We review every PR by hand. Join our [Discord](https://discord.gg/8pRpHETxa4) if anything blocks you.`
               : `Thanks for opening your first issue, @${user}! We'll take a look soon.\n\n`

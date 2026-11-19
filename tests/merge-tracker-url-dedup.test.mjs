@@ -223,7 +223,7 @@ ok('URL match → status never downgrades (monotonic funnel)', () => {
     assert.equal(rows.length, 1);
     assert.ok(rows[0].includes('Interview'), 'status stays Interview, not downgraded to Evaluated');
     assert.ok(rows[0].includes('4.3/5'), 'score advances via LWW');
-    assert.ok(rows[0].includes('✅'), 'PDF ✅ is not lost to a ❌ re-eval (monotonic)');
+    assert.ok(rows[0].includes('✅'), 'PDF ✅ is not lost to a ❌ re-evaluation (monotonic)');
   } finally { cleanup(env); }
 });
 
@@ -271,7 +271,7 @@ ok('--backfill-urls fills empty url from the linked report, idempotently', () =>
 });
 
 // NOTE: an earlier revision of this PR also guarded against an unscoreable
-// re-eval (N/A → parseScore 0) overwriting a real score on a URL match. That
+// re-evaluation (N/A → parseScore 0) overwriting a real score on a URL match. That
 // guard is gone, deliberately: the hazard is neither URL-specific nor this
 // PR's. On pristine main an N/A re-eval already overwrites a real score through
 // the report-number tier — #2411 made re-evals write through in both
@@ -423,6 +423,13 @@ ok('REGRESSION: two employer-board URLs are still proof of two distinct openings
     'https://boards.greenhouse.io/acme/jobs/7001',
     'https://boards.greenhouse.io/acme/jobs/7002');
   assert.equal(rows.length, 2, 'employer-controlled URLs still block the fuzzy tier');
+});
+
+ok('one Workday posting with and without its /en-US/ locale stays ONE row', () => {
+  const rows = mergeTwoWithUrls(
+    'https://acme.wd5.myworkdayjobs.com/External/job/Remote-USA/Director-of-Marketing_R123',
+    'https://acme.wd5.myworkdayjobs.com/en-US/External/job/Remote-USA/Director-of-Marketing_R123');
+  assertMerged(rows, 'one Workday posting as the scanner stores it and as a browser shows it');
 });
 
 ok('one Greenhouse posting on boards. and job-boards.greenhouse.io stays ONE row', () => {
@@ -649,8 +656,8 @@ ok('different IDs across the /jobs/view and ?currentJobId= shapes stay TWO rows'
 
 ok('slug-vs-id spellings of ONE LinkedIn posting still collapse to ONE row', () => {
   const rows = mergeTwoWithUrls(
-    'https://www.linkedin.com/jobs/view/4001',
-    'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4001');
+    'https://www.linkedin.com/jobs/view/4000001',
+    'https://www.linkedin.com/jobs/view/director-of-marketing-at-acme-4000001');
   assertMerged(rows, 'same posting id → not evidence → fuzzy tier decides');
 });
 

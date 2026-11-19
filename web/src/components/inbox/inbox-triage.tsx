@@ -21,14 +21,19 @@ import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { createInboxSkipActions, queueInboxSkip, reportSkipRejections, restoreSkippedUrls } from "@/lib/inbox-skip-client.mjs";
 import { useEvaluationOptions } from "@/components/evaluation-options";
 import { CONFIG_KEY, subscribeConfig } from "@/lib/config-events.mjs";
+import { DEFAULT_INBOX_SORT, INBOX_SORT_STORAGE_KEY, readInboxSort, writeInboxSort } from "@/lib/inbox-sort-pref.mjs";
 
 const SHORTLIST_KEY = "career-ops:shortlist";
 const HIDDEN_KEY = "career-ops:hidden";
 const BATCH = 20;
+// Reading window.localStorage itself throws when storage is blocked.
+function browserStorage(): Storage | null {
+  try { return window.localStorage; } catch { return null; }
+}
 type UndoNotice = { label: string; fn: () => Promise<void>; busy?: boolean; error?: string };
 
 // The inbox as a TRIAGE surface: Abundance → Triage → Shortlist → Opt-in Score.
-// Default is the best 20 fits (never the full wall). Newest is a local toggle.
+// Default is the best 20 fits (never the full wall). Newest is a view toggle; "Make default" saves the choice per browser.
 // Free facets + Save/Skip narrow the list. Only "Score shortlist" spends tokens.
 export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const router = useRouter();
@@ -46,7 +51,17 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [locQ, setLocQ] = useState("");
   const [kw, setKw] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const [sortMode, setSortMode] = useState<"fit" | "newest">("fit");
+  // Both start on the default so server and client render the same; the mount
+  // effect loads this browser's saved default. Picking a sort only changes the
+  // view; "Make default" is what saves it.
+  const [sortMode, setSortMode] = useState<"fit" | "newest">(DEFAULT_INBOX_SORT);
+  const [defaultSort, setDefaultSort] = useState<"fit" | "newest">(DEFAULT_INBOX_SORT);
+  const [defaultSaveFailed, setDefaultSaveFailed] = useState(false);
+  const makeSortDefault = () => {
+    // Storage unavailable: nothing is saved and the button stays, so it is not a silent no-op.
+    if (writeInboxSort(browserStorage(), sortMode)) { setDefaultSort(sortMode); setDefaultSaveFailed(false); }
+    else setDefaultSaveFailed(true);
+  };
 
   // persisted triage state + ephemeral selection/undo
   const [shortlist, setShortlist] = useState<ShortItem[]>([]);
@@ -60,6 +75,9 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    const saved = readInboxSort(browserStorage());
+    setSortMode(saved);
+    setDefaultSort(saved);
     try {
       const s = localStorage.getItem(SHORTLIST_KEY);
       if (s) setShortlist(JSON.parse(s));
@@ -75,6 +93,16 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
     }
     setLoaded(true);
     // First SSR inbox only — later refreshes prune via the inbox effect below.
+  }, []);
+  // Another tab saved a default: keep the pill honest. Only defaultSort follows;
+  // sortMode stays, so this tab's current view is not changed under the user.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== null && event.key !== INBOX_SORT_STORAGE_KEY) return;
+      setDefaultSort(readInboxSort(browserStorage()));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
   }, []);
   useEffect(() => {
     function read() {
@@ -399,8 +427,18 @@ export function InboxTriage({ inbox }: { inbox: InboxJob[] }) {
         </p>
         <div className="flex items-center gap-3">
           <div role="group" aria-label="Sort inbox" className="flex items-center gap-2 text-xs">
-            <button type="button" aria-pressed={sortMode === "fit"} onClick={() => setSortMode("fit")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
-            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => setSortMode("newest")} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
+            <button type="button" aria-pressed={sortMode === "fit"} onClick={() => { setSortMode("fit"); setDefaultSaveFailed(false); }} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "fit" ? "font-medium text-foreground" : "text-faint")}>Best fit</button>
+            <button type="button" aria-pressed={sortMode === "newest"} onClick={() => { setSortMode("newest"); setDefaultSaveFailed(false); }} className={cn("inline-flex items-center hover:text-foreground max-sm:min-h-[44px] max-sm:min-w-[44px] max-sm:justify-center", sortMode === "newest" ? "font-medium text-foreground" : "text-faint")}>Newest</button>
+            <span aria-hidden="true" className="text-border">|</span>
+            <button
+              type="button"
+              disabled={sortMode === defaultSort}
+              onClick={makeSortDefault}
+              className="inline-flex items-center rounded-full border border-border px-2.5 py-0.5 text-faint hover:text-foreground disabled:border-transparent disabled:text-brand-text max-sm:min-h-[44px] max-sm:justify-center"
+            >
+              {sortMode === defaultSort ? "✓ Default" : "Make default"}
+            </button>
+            {defaultSaveFailed && <span role="status" className="text-red-700 dark:text-red-400">Can’t save in this browser</span>}
           </div>
           {hiddenCount > 0 && (
             <button type="button" onClick={() => void restoreHidden()} disabled={restoring} aria-busy={restoring} className="text-xs text-faint transition-colors hover:text-foreground disabled:opacity-50 max-sm:min-h-[44px]">

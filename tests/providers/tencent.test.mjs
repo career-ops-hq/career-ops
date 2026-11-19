@@ -184,7 +184,7 @@ try {
     Code: 200,
     Data: { Count: 500, Posts: Array.from({ length: 100 }, (_, i) => mkPost(3000 + i, `岗位C${i}`)) },
   }));
-  const { errors: cappedErrors } = await captureConsoleErrors(() =>
+  const { result: cappedJobs, errors: cappedErrors } = await captureConsoleErrors(() =>
     tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, capped.ctx));
   if (capped.calls.length === 1) {
     pass('tencent.fetch() honors entry.max_pages');
@@ -196,6 +196,40 @@ try {
     pass('tencent.fetch() warns when max_pages truncates the board instead of stopping silently');
   } else {
     fail(`tencent.fetch() truncation warnings = ${JSON.stringify(cappedErrors)}`);
+  }
+  // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+  if (cappedJobs.truncated?.reason === 'page-cap' && cappedJobs.truncated.fetched === 100) {
+    pass('tencent.fetch() marks the board page-cap when max_pages truncates it');
+  } else {
+    fail(`tencent.fetch() max_pages cut: truncated = ${JSON.stringify(cappedJobs.truncated)}`);
+  }
+  // A short page is the board's natural end, even at max_pages and whatever the
+  // reported total says: no cap warning, no mark.
+  const shortAtCap = mkCtx(() => ({ Code: 200, Data: { Count: 500, Posts: Array.from({ length: 50 }, (_, i) => mkPost(9000 + i, `岗位S${i}`)) } }));
+  const { result: shortJobs, errors: shortErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, shortAtCap.ctx));
+  if (shortJobs.truncated === undefined && !shortErrors.some((line) => String(line).includes('truncated at'))) {
+    pass('tencent.fetch() treats a short page at max_pages as the end of the board: no warning, no mark');
+  } else {
+    fail(`tencent.fetch() short page at max_pages: truncated = ${JSON.stringify(shortJobs.truncated)}, warnings = ${JSON.stringify(shortErrors)}`);
+  }
+  // With no Count, a full page cut by max_pages is still a cap, and a short
+  // page ends the walk: the stop reason does not depend on a total.
+  const noTotalFull = mkCtx((_keyword, page) => ({ Code: 200, Data: { Posts: Array.from({ length: 100 }, (_, i) => mkPost(9500 + page * 100 + i, `岗位N${i}`)) } }));
+  const { result: noTotalJobs, errors: noTotalErrors } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 1 }, noTotalFull.ctx));
+  if (noTotalJobs.length === 100 && noTotalJobs.truncated?.reason === 'page-cap' && noTotalErrors.some((line) => String(line).includes('truncated at 100 postings'))) {
+    pass('tencent.fetch() marks a full page cut by max_pages page-cap when the source sends no Count');
+  } else {
+    fail(`tencent.fetch() no Count, full page at max_pages: ${noTotalJobs.length} jobs, truncated = ${JSON.stringify(noTotalJobs.truncated)}, warnings = ${JSON.stringify(noTotalErrors)}`);
+  }
+  const noTotalShort = mkCtx((_keyword, page) => ({ Code: 200, Data: { Posts: Array.from({ length: page === 1 ? 100 : 30 }, (_, i) => mkPost(9800 + page * 100 + i, `岗位T${i}`)) } }));
+  const { result: noTotalShortJobs } = await captureConsoleErrors(() =>
+    tencent.fetch({ name: '腾讯', careers_url: TENCENT_URL, keywords: ['AI'], max_pages: 5 }, noTotalShort.ctx));
+  if (noTotalShort.calls.length === 2 && noTotalShortJobs.length === 130 && noTotalShortJobs.truncated === undefined) {
+    pass('tencent.fetch() walks past page 1 without a Count and ends on the first short page, unmarked');
+  } else {
+    fail(`tencent.fetch() no Count walk: ${noTotalShort.calls.length} requests, ${noTotalShortJobs.length} jobs, truncated = ${JSON.stringify(noTotalShortJobs.truncated)}`);
   }
 
   const probe = mkCtx(() => ({
@@ -216,6 +250,8 @@ try {
   } else {
     fail(`tencent.fetch() ctx.maxPages=1 warned: ${JSON.stringify(probeErrors)}`);
   }
+  if (probeJobs.truncated === undefined) pass('tencent.fetch() leaves the ctx.maxPages probe unmarked');
+  else fail(`tencent.fetch() probe was marked: ${JSON.stringify(probeJobs.truncated)}`);
 
   // The live whole board (2257 postings on 2026-10-12) outgrew the old 20-page default.
   const BOARD_SIZE = 2257;

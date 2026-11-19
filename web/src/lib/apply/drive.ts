@@ -4,7 +4,8 @@ import { resolveCli } from "@/lib/clis";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
-import { executeAction, factsOf } from "./drive-action.mjs";
+import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "./drive-action.mjs";
+import { listedDriveClick, listedDriveText } from "./blank-unknown.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
@@ -38,7 +39,7 @@ const MAX_REFS = 70;
  *  A submit control is listed WITHOUT a ref: the planner can see that it exists
  *  and stop, but it has no name for it, so no action can address it. `actionable`
  *  is the set of refs it may use, which every ref-bearing action is held to. */
-async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string> }> {
+async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<string>; controls: Map<string, { kind: string; label: string; group: string; question: string; option: string; identity: string }> }> {
   // A fresh prefix per snapshot. The guarantee is structural, not statistical:
   // every existing `data-co-ref` is stripped before this turn's are written, so
   // only the current epoch's refs exist on the page, and `actionable` is built
@@ -64,7 +65,8 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
   );
   const lines: string[] = [];
   const actionable = new Set<string>();
-  if (!tagged) return { text: "", actionable };
+  const controls = new Map<string, { kind: string; label: string; group: string; question: string; option: string; identity: string }>();
+  if (!tagged) return { text: "", actionable, controls };
   // One handle per candidate, read through the same extractor the action path
   // uses. Handles rather than one `$$eval` so there is a single copy of the
   // rule; the reads are issued together and the handles released straight after.
@@ -81,9 +83,10 @@ async function snapshot(frame: Frame): Promise<{ text: string; actionable: Set<s
     }
     actionable.add(el.ref);
     const kind = el.tag === "input" ? el.type || "text" : el.tag === "a" ? "link" : el.tag === "select" ? "select" : el.tag === "textarea" ? "textarea" : el.role;
-    lines.push(`[${el.ref}] ${kind} "${label}"`);
+    controls.set(el.ref, { kind, label, group: el.group || "", question: el.question || "", option: el.option || "", identity: listedFieldLabel(el) });
+    lines.push(snapshotChoiceLine(el.ref, kind, label, el.option || ""));
   }
-  return { text: lines.join("\n"), actionable };
+  return { text: lines.join("\n"), actionable, controls };
 }
 
 // The narrowest scope in the app. scopeFrom("") grants nothing, so every
@@ -143,7 +146,15 @@ function plannerTurn(binPath: string, prompt: string, resumeId: string | null): 
   });
 }
 
-type Action = { action: string; ref?: string; text?: string; value?: string; reason?: string };
+type Action = {
+  action: string;
+  ref?: string;
+  text?: string;
+  value?: string;
+  reason?: string;
+  expected?: { label: string; group: string; question: string; option: string; identity: string };
+  ensureChecked?: boolean;
+};
 
 function parseAction(out: string): Action | null {
   const m = out.match(/\{[\s\S]*?\}/);
@@ -179,11 +190,12 @@ export async function driveSession(
       return undefined;
     }
   };
-  const answersBlock = (answers ?? []).filter((a) => a.value?.trim()).map((a) => `- "${a.label}": ${a.value.replace(/\s+/g, " ").slice(0, 300)}`).join("\n");
+  const answersBlock = (answers ?? []).filter((a) => a.value?.trim()).map((a) => `- "${a.label}": ${a.value.replace(/\s+/g, " ")}`).join("\n");
   const goalText =
     goal === "reach"
       ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
       : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
+Leave blank any field whose answer is not listed below. Never guess or infer a value.
 ANSWERS (match by the field's label):
 ${answersBlock || "(no answers provided — just reach/observe)"}`;
   let resumeId: string | null = null;
@@ -193,7 +205,7 @@ ${answersBlock || "(no answers provided — just reach/observe)"}`;
     if (goal === "reach" && (await isFormReady().catch(() => false))) return { reached: true, turns: turn - 1, reason: "form-reached", steps };
     await dropNewTabs(page); // any "Apply" link/popup navigates in OUR tab, not a new one
     const frame = page.mainFrame();
-    const snap = await snapshot(frame).catch(() => ({ text: "", actionable: new Set<string>() }));
+    const snap = await snapshot(frame).catch(() => ({ text: "", actionable: new Set<string>(), controls: new Map() }));
     const prompt =
       turn === 1
         ? `You are an agent driving a real web browser for a job seeker (we execute your actions; the human submits at the end). ${goalText}
@@ -235,9 +247,37 @@ Reply ONE action JSON.`;
       return { reached: false, turns: turn, reason: act.reason || "stuck", steps };
     }
 
+    // A prompt line does not stop the model. On a full fill, type and select may
+    // enter only the answer listed for that field. Empty text clears a field.
+    // A radio or checkbox click has to be that field's listed option. A button
+    // or a link stays a click, so Next and Continue still work.
+    const control = act.ref ? snap.controls.get(act.ref) : undefined;
+    const fieldLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.group : control?.identity || control?.label;
+    const optionLabel = control?.kind === "radio" || control?.kind === "checkbox" ? control.option || control.label : control?.label;
+    const entered = act.action === "type" ? act.text : act.action === "select" ? act.value : undefined;
+    const blockedClick = goal === "full" && act.action === "click" && !listedDriveClick(control?.kind, optionLabel, control?.group, answers);
+    if (blockedClick || (goal === "full" && entered !== undefined && !listedDriveText(entered, answers, fieldLabel))) {
+      const s: DriveStep = {
+        turn,
+        action: act.action,
+        detail: "blocked an answer that was not listed",
+        thumb: await shot(),
+        note: "left blank",
+      };
+      steps.push(s);
+      emit(s);
+      continue;
+    }
+
     // execute the action on OUR session — NEVER submit. The executor, and the
     // guard it applies to every action naming a ref, live in drive-action.mjs so
     // a test can drive them: nothing here acts on an element directly.
+    if (control) act.expected = { label: control.label, group: control.group, question: control.question, option: control.option, identity: control.identity };
+    // A click toggles a checkbox. A listed choice is checked instead, so a box
+    // that is already on stays on. A button or a link stays a click.
+    if (goal === "full" && act.action === "click" && (control?.kind === "radio" || control?.kind === "checkbox")) {
+      act.ensureChecked = true;
+    }
     const { detail, note, refusal } = await executeAction(page, frame, act, snap.actionable);
     await page.waitForTimeout(700);
     const s: DriveStep = { turn, action: act.action, detail, thumb: await shot(), note: note || undefined, refusal };

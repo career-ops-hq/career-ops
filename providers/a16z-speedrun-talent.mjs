@@ -1,6 +1,7 @@
 // @ts-check
 import { fetchJsonWithRetry } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 /** @typedef {import('./_types.js').Provider} Provider */
 
@@ -156,11 +157,17 @@ export default {
   async fetch(entry, ctx) {
     assertFeedUrl(FEED_BASE);
     const maxPages = resolveMaxPages(entry);
+    // verify-portals' and audit-portals' health probe sets ctx.maxPages (1): it
+    // only needs to know the feed is live, so it reads that many pages and is
+    // never warned about or marked as a max_pages cut. Kept apart from
+    // maxPages, which a probe on a max_pages: 1 entry would equal (#7180).
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    const pagesToFetch = probing ? Math.min(maxPages, ctx.maxPages) : maxPages;
     const q = resolveQuery(entry);
     const fallbackCompany = entry?.name;
     const out = [];
 
-    for (let page = 0; page < maxPages; page++) {
+    for (let page = 0; page < pagesToFetch; page++) {
       const params = new URLSearchParams({ page: String(page), source: 'career-ops' });
       if (q) params.set('q', q);
       const url = `${FEED_BASE}?${params}`;
@@ -206,11 +213,14 @@ export default {
       }
       // Cap warning (same pattern as jibeapply/workday): the feed had more
       // pages than we were allowed to read — surface it, with the fix.
-      if (page + 1 >= maxPages && Number.isInteger(json.total_pages) && json.total_pages > maxPages) {
+      if (!probing && page + 1 >= maxPages && Number.isInteger(json.total_pages) && json.total_pages > maxPages) {
         const name = typeof fallbackCompany === 'string' && fallbackCompany ? fallbackCompany : 'a16z speedrun talent network';
         console.error(
           `⚠️  a16z-speedrun-talent: ${name} truncated at max_pages=${maxPages} (${out.length} of ${Number.isInteger(json.total) ? json.total : 'many'} jobs) — raise max_pages on this entry or narrow with q: for more`,
         );
+        // The same cut marks the result, so scan.mjs logs the board partial
+        // instead of reachable (lib/board-truncation.mjs).
+        markTruncated(out, 'page-cap', { fetched: out.length });
       }
     }
     return out;

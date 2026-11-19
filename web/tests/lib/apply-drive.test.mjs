@@ -27,8 +27,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { executeAction, factsOf } from "../../src/lib/apply/drive-action.mjs";
-import { isSubmitControl } from "../../src/lib/apply/submit-guard.mjs";
+import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "../../src/lib/apply/drive-action.mjs";
+import { isSubmitControl, snapshotLabel } from "../../src/lib/apply/submit-guard.mjs";
 
 // ── The fake page ──
 
@@ -75,6 +75,15 @@ class FakeHandle {
     if (this.el.clickFails) throw new Error("Timeout 6000ms exceeded while waiting for the element to be visible and enabled");
     this.page.log.push(`click:${this.el.id}`);
     if (this.el.submits) this.el.form.submits++;
+    // A checkbox click toggles. The listed-choice path must not use this.
+    if (String(this.el.attrs.type || "").toLowerCase() === "checkbox") this.el.checked = !this.el.checked;
+  }
+  async check() {
+    if (this.el.clickFails) throw new Error("Timeout 6000ms exceeded while waiting for the element to be visible and enabled");
+    const type = String(this.el.attrs.type || "").toLowerCase();
+    if (type !== "checkbox" && type !== "radio") throw new Error("Not a checkbox or radio button");
+    this.el.checked = true;
+    this.page.log.push(`check:${this.el.id}`);
   }
   async fill(text) {
     const { tag, attrs } = this.el;
@@ -526,6 +535,318 @@ test("a scripted planner fills the form and never submits it, however it tries",
   assert.ok(page.handles.every((h) => h.disposed));
 });
 
+test("a listed checkbox click checks it and leaves a checked box checked", async () => {
+  const page = new FakePage();
+  page.add("perk", { tag: "input", attrs: { type: "checkbox", name: "benefits", "aria-label": "Dental" }, value: "dental" });
+  const el = page.el("perk");
+  el.checked = true;
+
+  const on = await act(page, { action: "click", ref: page.ref("perk"), ensureChecked: true });
+
+  assert.equal(el.checked, true);
+  assert.equal(on.note, "");
+  assert.match(on.detail, /^check "/);
+  assert.deepEqual(page.log, ["check:perk"]);
+
+  el.checked = false;
+  page.log.length = 0;
+  const off = await act(page, { action: "click", ref: page.ref("perk"), ensureChecked: true });
+  assert.equal(el.checked, true);
+  assert.match(off.detail, /^check "/);
+  assert.deepEqual(page.log, ["check:perk"]);
+});
+
+test("a listed role checkbox that already says it is on is not clicked", async () => {
+  const page = new FakePage();
+  page.add("perk", { tag: "div", attrs: { role: "checkbox", "aria-checked": "true", "aria-label": "Dental" } });
+
+  const result = await act(page, { action: "click", ref: page.ref("perk"), ensureChecked: true });
+
+  assert.equal(result.note, "");
+  assert.match(result.detail, /^check "/);
+  assert.deepEqual(page.log, []);
+});
+
+test("a click that was meant to check a button is left blank", async () => {
+  const page = applicationForm();
+
+  const result = await act(page, { action: "click", ref: page.ref("next"), ensureChecked: true });
+
+  assert.equal(result.note, "left blank");
+  assert.match(result.detail, /not a choice/);
+  assert.deepEqual(page.log, []);
+});
+
+test("typing into a radio does not click it", async () => {
+  const page = new FakePage();
+  page.add("yes", { tag: "input", attrs: { type: "radio", name: "sponsor" }, value: "1" });
+  const result = await act(page, { action: "type", ref: page.ref("yes"), text: "" });
+  assert.equal(result.note, "left blank");
+  assert.match(result.detail, /choice control/);
+  assertUntouched(page);
+});
+
+test("a text field is gated on its aria name, not the visible label", () => {
+  assert.equal(
+    listedFieldLabel({ aria: "Email address", question: "Work email", placeholder: "type here", text: "", value: "", name: "email" }),
+    "Email address",
+  );
+  assert.equal(
+    listedFieldLabel({ aria: "Select", question: "Work email", placeholder: "Jane", text: "", value: "", name: "email" }),
+    "Work email",
+  );
+  assert.equal(
+    listedFieldLabel({ aria: "", question: "Work email", placeholder: "Jane", text: "", value: "", name: "email" }),
+    "Work email",
+  );
+});
+
+test("a wrapper heading names the field before its placeholder", () => {
+  const heading = (text) => ({
+    textContent: text,
+    offsetParent: {},
+    tagName: "H3",
+    cloneNode() {
+      return { textContent: text, querySelectorAll() { return []; } };
+    },
+  });
+  const control = (tag, placeholder) => {
+    const node = {
+      tagName: tag,
+      name: "email",
+      placeholder,
+      value: "",
+      textContent: "",
+      form: null,
+      parentElement: null,
+      getAttribute() { return null; },
+      closest() { return null; },
+    };
+    const box = {
+      parentElement: null,
+      querySelectorAll(selector) {
+        if (String(selector).includes("h3")) return [heading("Email address")];
+        if (String(selector).includes("input")) return [node];
+        return [];
+      },
+    };
+    node.parentElement = box;
+    return node;
+  };
+  const input = control("INPUT", "Jane Doe");
+  assert.equal(listedFieldLabel(factsOf(input, "e1")), "Email address");
+  const select = control("SELECT", "Jane Doe");
+  assert.equal(listedFieldLabel(factsOf(select, "e2")), "Email address");
+});
+
+test("a type is refused when the wrapper heading changed after the snapshot", async () => {
+  const page = new FakePage();
+  page.add("email", { tag: "input", attrs: { type: "text", name: "email", placeholder: "Jane Doe" } });
+  const el = page.el("email");
+  const heading = {
+    textContent: "Email address",
+    offsetParent: {},
+    tagName: "H3",
+    cloneNode() {
+      return { textContent: heading.textContent, querySelectorAll() { return []; } };
+    },
+  };
+  el.parentElement = {
+    parentElement: null,
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes("h3")) return [heading];
+      if (sel.includes("input")) return [el];
+      return [];
+    },
+  };
+  const expected = { label: "Jane Doe", group: "", question: "", option: "", identity: "Email address" };
+
+  const kept = await act(page, { action: "type", ref: page.ref("email"), text: "Ada", expected });
+  assert.equal(kept.note, "");
+  assert.deepEqual(page.log, ["fill:email=Ada"]);
+
+  heading.textContent = "Phone number";
+  page.log.length = 0;
+  const moved = await act(page, { action: "type", ref: page.ref("email"), text: "Ada", expected });
+  assert.equal(moved.note, "left blank");
+  assert.match(moved.detail, /label changed/);
+  assert.deepEqual(page.log, []);
+});
+
+test("a generic placeholder still fills until a heading appears", async () => {
+  const page = new FakePage();
+  page.add("field", { tag: "input", attrs: { type: "text", placeholder: "Select" } });
+  const el = page.el("field");
+  const before = factsOf(el, page.ref("field"));
+  assert.equal(before.identity, "");
+  const identity = listedFieldLabel(before);
+  assert.equal(identity, "Select");
+  const expected = { label: "Select", group: "", question: "", option: "", identity };
+
+  const kept = await act(page, { action: "type", ref: page.ref("field"), text: "Ada", expected });
+  assert.equal(kept.note, "");
+  assert.deepEqual(page.log, ["fill:field=Ada"]);
+
+  const heading = {
+    textContent: "Phone number",
+    offsetParent: {},
+    tagName: "H3",
+    cloneNode() {
+      return { textContent: heading.textContent, querySelectorAll() { return []; } };
+    },
+  };
+  el.parentElement = {
+    parentElement: null,
+    querySelectorAll(selector) {
+      const sel = String(selector);
+      if (sel.includes("h3")) return [heading];
+      if (sel.includes("input")) return [el];
+      return [];
+    },
+  };
+  page.log.length = 0;
+  const moved = await act(page, { action: "type", ref: page.ref("field"), text: "Ada", expected });
+  assert.equal(moved.note, "left blank");
+  assert.match(moved.detail, /label changed/);
+  assert.deepEqual(page.log, []);
+});
+
+test("a shared radio is refused when its option changed after the snapshot", async () => {
+  const page = new FakePage();
+  page.add("yes", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "1" });
+  page.add("no", { tag: "input", attrs: { type: "radio", name: "q", "aria-label": "Choice" }, value: "0" });
+  const previous = globalThis.document;
+  const previousCss = globalThis.CSS;
+  globalThis.document = {
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return [page.el("yes"), page.el("no")]; },
+  };
+  globalThis.CSS = { escape: (value) => String(value) };
+  const expected = { label: "Choice", group: "", question: "", option: "1" };
+  try {
+    const kept = await act(page, { action: "click", ref: page.ref("yes"), ensureChecked: true, expected });
+    assert.equal(kept.note, "");
+    assert.match(kept.detail, /^check /);
+    assert.deepEqual(page.log, ["check:yes"]);
+
+    page.el("yes").value = "0";
+    page.log.length = 0;
+    const moved = await act(page, { action: "click", ref: page.ref("yes"), ensureChecked: true, expected });
+    assert.equal(moved.note, "left blank");
+    assert.match(moved.detail, /label changed/);
+    assert.deepEqual(page.log, []);
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+    if (previousCss === undefined) delete globalThis.CSS;
+    else globalThis.CSS = previousCss;
+  }
+});
+
+test("a type is refused when the live label is no longer the one that was checked", async () => {
+  const page = new FakePage();
+  page.add("q", { tag: "input", attrs: { type: "text", "aria-label": "Sponsorship" } });
+  const result = await act(page, {
+    action: "type",
+    ref: page.ref("q"),
+    text: "Yes",
+    expected: { label: "Relocation", group: "", question: "" },
+  });
+  assert.equal(result.note, "left blank");
+  assert.match(result.detail, /label changed/);
+  assertUntouched(page);
+});
+
+test("a radio option is the visible choice when the values are machine ids", () => {
+  const labelFor = (text) => ({
+    textContent: text,
+    cloneNode() {
+      return { textContent: text, querySelectorAll() { return []; } };
+    },
+  });
+  const radio = (value, text) => ({
+    tagName: "INPUT",
+    value,
+    textContent: "",
+    placeholder: "",
+    name: "sponsor",
+    form: null,
+    getAttribute(name) {
+      return { type: "radio", name: "sponsor", value }[name] ?? null;
+    },
+    closest(selector) {
+      return selector === "label" ? labelFor(text) : null;
+    },
+  });
+  const yes = radio("1", "Yes");
+  const no = radio("0", "No");
+  const previous = globalThis.document;
+  const previousCss = globalThis.CSS;
+  globalThis.document = {
+    getElementById() { return null; },
+    querySelector() { return null; },
+    querySelectorAll() { return [yes, no]; },
+  };
+  globalThis.CSS = { escape: (value) => String(value) };
+  try {
+    assert.equal(factsOf(yes, "r1").option, "Yes");
+    const sharedYes = radio("Yes", "Will you relocate?");
+    const sharedNo = radio("No", "Will you relocate?");
+    globalThis.document.querySelectorAll = () => [sharedYes, sharedNo];
+    assert.equal(factsOf(sharedYes, "r2").option, "Yes");
+    const named = (value, text) => ({
+      tagName: "INPUT",
+      value,
+      textContent: "",
+      placeholder: "",
+      name: "sponsor",
+      form: null,
+      getAttribute(attr) {
+        return { type: "radio", name: "sponsor", value, "aria-label": "Choice" }[attr] ?? null;
+      },
+      closest(selector) {
+        return selector === "label" ? labelFor(text) : null;
+      },
+    });
+    const ariaYes = named("1", "Yes");
+    const ariaNo = named("0", "No");
+    globalThis.document.querySelectorAll = () => [ariaYes, ariaNo];
+    assert.equal(factsOf(ariaYes, "r3").option, "1");
+    assert.equal(factsOf(ariaNo, "r4").option, "0");
+    const shared = factsOf(ariaYes, "r3");
+    assert.equal(snapshotLabel(shared), "Choice");
+    assert.equal(
+      snapshotChoiceLine(shared.ref, "radio", snapshotLabel(shared), shared.option),
+      '[r3] radio "Choice" option "1"',
+    );
+    const prompt = (value, text) => ({
+      tagName: "INPUT",
+      value,
+      textContent: "",
+      placeholder: "",
+      name: "sponsor",
+      form: null,
+      getAttribute(attr) {
+        return { type: "radio", name: "sponsor", value, "aria-label": "Select" }[attr] ?? null;
+      },
+      closest(selector) {
+        return selector === "label" ? labelFor(text) : null;
+      },
+    });
+    const promptYes = prompt("1", "Yes");
+    const promptNo = prompt("0", "No");
+    globalThis.document.querySelectorAll = () => [promptYes, promptNo];
+    assert.equal(factsOf(promptYes, "r5").option, "Yes");
+  } finally {
+    if (previous === undefined) delete globalThis.document;
+    else globalThis.document = previous;
+    if (previousCss === undefined) delete globalThis.CSS;
+    else globalThis.CSS = previousCss;
+  }
+});
+
 // ── The loop uses this executor, and only this executor ──
 
 const DRIVE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/lib/apply/drive.ts"), "utf8");
@@ -537,6 +858,16 @@ test("driveSession hands every action to executeAction, with this turn's actiona
   const calls = DRIVE_CODE.match(/\bexecuteAction\(/g) ?? [];
   assert.equal(calls.length, 1, "drive.ts must execute planner actions in exactly one place");
   assert.match(DRIVE_CODE, /await executeAction\(page, frame, act, snap\.actionable\)/);
+  assert.match(DRIVE, /Leave blank any field whose answer is not listed below\. Never guess or infer a value\./);
+  assert.match(DRIVE_CODE, /listedDriveText\(/);
+  assert.match(DRIVE_CODE, /listedDriveClick\(/);
+  assert.match(DRIVE_CODE, /act\.ensureChecked = true/);
+  assert.match(DRIVE_CODE, /snapshotChoiceLine\(/);
+  assert.match(DRIVE_CODE, /identity: listedFieldLabel\(/);
+  assert.match(DRIVE_CODE, /control\?\.identity/);
+  assert.match(DRIVE_CODE, /option: control\.option/);
+  assert.match(DRIVE_CODE, /identity: control\.identity/);
+  assert.doesNotMatch(DRIVE_CODE, /slice\(0,\s*300\)/);
 });
 
 test("drive.ts does nothing to an element itself", () => {

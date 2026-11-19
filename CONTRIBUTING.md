@@ -19,7 +19,7 @@ New to all this? That's the point. Claim a good-first-issue by commenting `/assi
 
 **For a new feature, a new mode or command, or an architecture change, please open an issue first.** It saves you from investing time in something we'd have to redirect, and lets us align on direction before you write code.
 
-**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want.
+**Going straight to a PR is welcome — no issue needed — for:** bug fixes, new zero-auth scanner providers, docs, and translations. Don't let process slow these down; these are the contributions we most want. The one exception is a change to an [owner-reviewed path](#owner-reviewed-paths): open an issue first there, even for a bug fix or a docs change. A typo fix there needs no issue.
 
 A large *feature* PR that skipped this step may be asked to start with an issue if it doesn't fit the architecture or roadmap — that's a scope conversation, never a judgment on your work.
 
@@ -30,6 +30,26 @@ The review process you'll experience here is documented end-to-end in [Agentic m
 - Addresses a feature request that was discussed and approved
 - Includes a clear description of what changed and why
 - Follows the existing code style and project philosophy (simple, minimal, quality over quantity)
+
+### Owner-reviewed paths
+
+[`.github/CODEOWNERS`](.github/CODEOWNERS) sends a change to any of these paths to a maintainer for review. A bad change here usually passes CI, so that review is the real check.
+
+- Repo docs and governance: `README*.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`, `MAINTAINERS.md`, `ARCHITECTURE.md`, `.github/CODEOWNERS`
+- Coding-agent configuration: `.github/copilot-instructions.md`, `.github/agents/`
+- Agent instructions and the skill router: `CLAUDE.md`, `AGENTS.md`, `CODEX.md`, `OPENCODE.md`, `GEMINI.md`, `KIMI.md`, `.agents/skills/career-ops/SKILL.md`
+- Scoring and the data contract: `modes/_shared.md`, `DATA_CONTRACT.md`
+- The self-updater: `update-system.mjs`, `lib/update-manifest.mjs`, `updater-migration-tests.mjs`
+- Plugin governance: `plugins-registry/`, `validate-plugin-registry.mjs`, `plugin-install.mjs`, `plugin-audit.mjs`, `plugins/_engine.mjs`, `plugins/_lock.mjs`, `plugins/_net.mjs`, `plugins/_registry.mjs`, `.github/workflows/`, `docs/PLUGIN_REVIEW.md`
+- The employer registry: `employers/`, `seeds/employers-validate.mjs`, `lib/ats-board-url.mjs`
+- The web UI: `web/`
+
+What that means depends on who makes the change:
+
+- **A contributor**, working by hand or with a coding agent they are directing: open an issue first and link it from the PR, then expect a closer review. A typo fix needs no issue and goes straight to a PR. These paths are not off limits; several plugin-engine fixes landed this way.
+- **An unattended coding agent**, a session no person is watching (the Copilot cloud agent, for one): leave these paths alone. Stop and explain in the report why the task needs them, so a person can open the issue.
+
+The area owners at the bottom of `CODEOWNERS` (`tests/`, `dashboard/`, `providers/`) are not on this list: those entries route review to the area's maintainer and need no issue first. `tests/contributing-owner-paths.test.mjs` fails when this list and `CODEOWNERS` disagree.
 
 ## Quick Start
 
@@ -149,7 +169,7 @@ career-ops reads job listings from public sources: ATSes, job boards, company ca
 
    *On your machine.* A provider reads a posting on the job seeker's own machine so that person can understand it and, if it fits, apply on the employer's own page (rule 2). It builds no index and republishes nothing: what it reads is kept only in the user's own files.
 
-   *In the shared listings layer.* The project's aggregation layer (rule 5) does build an index: it reads the public job pages of employers and serves, to any agent that asks, a card for each posting: its title, the employer, where the job is and whether it is remote, hybrid or on site, the salary when the posting states one, the date it was posted, and the link to the employer's own page. It does not copy the text of the posting; to read it, a person goes to the employer. The layer is not a visitor and does not claim to be one. It does not treat a source's `robots.txt` as a gate; this is what it does instead. It reads only public job pages, and nothing behind a login. Every request says who it is, with a user agent that links to this policy, which says what it is and how to ask not to be read. It makes one request at a time to a host, at least a second apart, and keeps to a `Crawl-delay` or a `Retry-After` the host states. Every listing it serves links straight to the employer's own page (rule 2), and the layer adds no tracking of its own. An employer that asks not to be read is removed and stays removed, also when its postings would reach the layer through a job board.
+   *In the shared listings layer.* The project's aggregation layer (rule 5) does build an index: it reads the public job pages of employers and serves, to any agent that asks, a card for each posting: its title, the employer, where the job is and whether it is remote, hybrid or on site, the salary when the posting states one, the date it was posted, and the link to the employer's own page. It does not serve or republish the text of the posting; to read it, a person goes to the employer. It keeps a private working copy of that text while the posting is published and for 90 days after, and uses it only to derive the fields of the card and other closed facts about the posting, such as its level, its work mode or its salary. To derive them, it may send the text, without email addresses, phone numbers or links, to an outside AI model provider that processes it for the project under a data processing agreement and does not train on it. When an employer asks not to be read, the copy of its postings is deleted; the facts already derived from them are kept, with the employer's name, to study the job market. The layer is not a visitor and does not claim to be one. It does not treat a source's `robots.txt` as a gate; this is what it does instead. It reads only public job pages, and nothing behind a login. Every request says who it is, with a user agent that links to this policy, which says what it is and how to ask not to be read. It makes one request at a time to a host, at least a second apart, and keeps to a `Crawl-delay` or a `Retry-After` the host states. Every listing it serves links straight to the employer's own page (rule 2), and the layer adds no tracking of its own. An employer that asks not to be read is removed and stays removed, also when its postings would reach the layer through a job board.
 
    Three things stay a stop in both places: content behind a login or a user account (LinkedIn and the like); anything that needs a CAPTCHA solved; and a source whose operator asks career-ops not to read it, which is removed ([open an issue](https://github.com/career-ops-hq/career-ops/issues/new) to ask). Until 2026-11-08 a `Disallow` covering the listing paths was a stop; the [Source Indexing Log](docs/SOURCE_INDEXING_LOG.md#rule-6-changed-2026-11-08) records why that changed, and [what changed on 2026-11-12](docs/SOURCE_INDEXING_LOG.md#rules-4-and-6-changed-2026-11-12).
 

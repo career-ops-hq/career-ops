@@ -577,6 +577,140 @@ try {
     else fail(`themuse.fetch() layout-change marker = ${JSON.stringify(jobs.truncated)}`);
   }
 
+  // Cloudflare challenge (measured live 2026-11-15): HTTP 403 with
+  // `cf-mitigated: challenge` and a "Just a moment..." page. The stub calls
+  // opts.onResponse the way fetchInContext does, before the non-2xx throw.
+  const CHALLENGE_BODY = '<!DOCTYPE html><html><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt = { cType: \'managed\' };</script></body></html>';
+  const challengeError = (body = CHALLENGE_BODY) => {
+    const err = new Error('HTTP 403'); err.status = 403; err.body = body; return err;
+  };
+  const challengedFetchText = ({ header = 'challenge', body = CHALLENGE_BODY } = {}) => async (_url, opts) => {
+    opts?.onResponse?.({ status: 403, headers: new Headers(header ? { 'cf-mitigated': header } : {}) });
+    throw challengeError(body);
+  };
+  const { classifyFetchError } = await import(pathToFileURL(join(ROOT, 'verify-portals.mjs')).href);
+
+  // Page 1 challenged, seen through the cf-mitigated header.
+  {
+    let calls = 0;
+    const inner = challengedFetchText({ body: '' });
+    let thrown = null;
+    try {
+      await themuse.fetch(
+        { name: 'X', provider: 'themuse' },
+        { fetchText: async (url, opts) => { calls++; return inner(url, opts); }, sleep: async () => {} },
+      );
+    } catch (e) { thrown = e; }
+    if (thrown && /Cloudflare challenge/.test(thrown.message) && /cf-mitigated: challenge/.test(thrown.message)) {
+      pass('themuse.fetch() names a page-1 Cloudflare challenge seen in the cf-mitigated header');
+    } else {
+      fail(`themuse header challenge: expected a named challenge error, got ${JSON.stringify(thrown?.message)}`);
+    }
+    if (thrown?.status === 403 && thrown?.challenge === true) pass('themuse challenge error keeps status 403 and sets challenge: true');
+    else fail(`themuse challenge error fields: status=${thrown?.status}, challenge=${thrown?.challenge}`);
+    if (classifyFetchError(thrown) === 'auth') pass('verify-portals classifies the themuse challenge error from its 403 status');
+    else fail(`themuse challenge error: classifyFetchError = ${classifyFetchError(thrown)} (a message word may be matching first)`);
+    if (calls === 1) pass('themuse.fetch() does not retry a challenged 403');
+    else fail(`themuse challenge: expected 1 fetchText call, got ${calls}`);
+  }
+
+  // Search terms stay out of the message: a "network engineer" query must
+  // not turn a challenged 403 into a `network` classification.
+  {
+    let thrown = null;
+    try {
+      await themuse.fetch(
+        { name: 'X', provider: 'themuse', query: 'network engineer' },
+        { fetchText: challengedFetchText(), sleep: async () => {} },
+      );
+    } catch (e) { thrown = e; }
+    if (classifyFetchError(thrown) === 'auth' && !/network/i.test(thrown?.message ?? '')) {
+      pass('themuse challenge error keeps the search terms out of its message (a "network" query still classifies as auth)');
+    } else {
+      fail(`themuse challenge with a "network" query: classifyFetchError = ${classifyFetchError(thrown)}, message = ${JSON.stringify(thrown?.message)}`);
+    }
+    if (thrown?.url === 'https://www.themuse.com/search?q=network+engineer') {
+      pass('themuse challenge error carries the request URL on err.url');
+    } else {
+      fail(`themuse challenge error url = ${JSON.stringify(thrown?.url)}`);
+    }
+  }
+
+  // Page 1 challenged, header not seen: the challenge page's own markers.
+  {
+    let thrown = null;
+    try {
+      await themuse.fetch(
+        { name: 'X', provider: 'themuse' },
+        { fetchText: challengedFetchText({ header: null }), sleep: async () => {} },
+      );
+    } catch (e) { thrown = e; }
+    if (thrown && /Cloudflare challenge \(HTTP 403, challenge page\)/.test(thrown.message)) {
+      pass('themuse.fetch() names a page-1 challenge from the page markers when no header is seen');
+    } else {
+      fail(`themuse body challenge: expected a named challenge error, got ${JSON.stringify(thrown?.message)}`);
+    }
+  }
+
+  // A plain 403 (no header, no challenge markers) is not called a challenge.
+  {
+    let thrown = null;
+    try {
+      await themuse.fetch(
+        { name: 'X', provider: 'themuse' },
+        { fetchText: challengedFetchText({ header: null, body: '<html><body>Forbidden</body></html>' }), sleep: async () => {} },
+      );
+    } catch (e) { thrown = e; }
+    if (thrown?.message === 'HTTP 403' && thrown?.challenge === undefined) {
+      pass('themuse.fetch() leaves a plain 403 as HTTP 403, not a challenge');
+    } else {
+      fail(`themuse plain 403: expected "HTTP 403", got ${JSON.stringify(thrown?.message)}`);
+    }
+  }
+
+  // Probe: a challenged page 1 still throws, with the challenge named.
+  {
+    let thrown = null;
+    try {
+      await themuse.fetch(
+        { name: 'X', provider: 'themuse' },
+        { maxPages: 1, fetchText: challengedFetchText(), sleep: async () => {} },
+      );
+    } catch (e) { thrown = e; }
+    if (thrown?.status === 403 && /Cloudflare challenge/.test(thrown.message)) {
+      pass('themuse.fetch() probe throws a named challenge error with status 403');
+    } else {
+      fail(`themuse probe challenge: got ${JSON.stringify(thrown?.message)}`);
+    }
+  }
+
+  // A challenge on a later page truncates with a warning that names it.
+  {
+    const challengedPage = challengedFetchText();
+    const { result: jobs, errors } = await captureConsoleErrors(() =>
+      themuse.fetch(
+        { name: 'The Muse Board', provider: 'themuse' },
+        {
+          fetchText: async (url, opts) => {
+            if (new URL(url).searchParams.get('page') === null) return page(40, [card()]);
+            return challengedPage(url, opts);
+          },
+          sleep: async () => {},
+        },
+      ),
+    );
+    if (jobs.length === 1 && jobs.truncated?.reason === 'fetch-error') {
+      pass('themuse.fetch() keeps page 1 and marks a fetch-error stop when page 2 is challenged');
+    } else {
+      fail(`themuse later-page challenge: jobs=${jobs.length}, truncated=${JSON.stringify(jobs.truncated)}`);
+    }
+    if (errors.some((e) => /truncated at page 2/.test(e) && /Cloudflare challenge/.test(e))) {
+      pass('themuse.fetch() names the Cloudflare challenge in the later-page truncation warning');
+    } else {
+      fail(`themuse later-page challenge warning: ${JSON.stringify(errors)}`);
+    }
+  }
+
 } catch (e) {
   fail(`themuse provider tests crashed: ${e.message}`);
 }

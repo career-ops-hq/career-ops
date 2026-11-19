@@ -6,8 +6,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const checkout = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+// engines allows Node 22.13+, but importing route.ts and core-cli.ts needs type
+// stripping, which is on by default only from 22.18 (23.6 on 23.x). On an older
+// Node this skips rather than fails, as web/tests/lib's .ts importers do.
+const canImportTs = Boolean(process.features?.typescript);
 if (!fs.existsSync(path.join(checkout, 'web', 'src'))) {
   test('web core profile boundary', { skip: 'web/ not installed' }, () => {});
+} else if (!canImportTs) {
+  test('web core profile boundary', { skip: 'this Node cannot import route.ts (no type stripping)' }, () => {});
 } else {
   await import('../web/tests/helpers/web-ts-alias-loader.mjs');
   const { GET } = await import('../web/src/app/api/followups/route.ts');

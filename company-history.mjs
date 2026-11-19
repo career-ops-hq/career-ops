@@ -53,7 +53,7 @@ import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 import { loadYaml } from './lib/yaml-document.mjs';
 
-import { parseScanHistory, detectReposts, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
+import { parseScanHistory, detectReposts, companyKey, loadAggregatorCompanies, isKeyLookup } from './detect-reposts.mjs';
 import { normalizeCompanyName } from './invite-match.mjs';
 import { normalizeCompany, resolveTrackerPath } from './tracker-utils.mjs';
 import { resolveColumns, parseTrackerRow } from './tracker-parse.mjs';
@@ -244,11 +244,35 @@ export function loadFollowupRows(rootDir = DATA_ROOT, overridePath) {
   return { rows: parseFollowups(readFileSync(path, 'utf-8')), loaded: true };
 }
 
+function rowsFromCompanyKeysTouchingCard(rows, companyName) {
+  const cardKey = normalizeCompany(String(companyName || ''));
+  if (!cardKey) return rows;
+  const groups = new Map();
+  for (const row of rows) {
+    const key = companyKey(row);
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  }
+  const kept = [];
+  for (const group of groups.values()) {
+    let onCard = false;
+    for (const row of group) {
+      if (normalizeCompany(row.company) === cardKey) {
+        onCard = true;
+        break;
+      }
+    }
+    if (onCard) kept.push(...group);
+  }
+  return kept;
+}
+
 // Returns the clusters plus the aggregator key Set, because the card needs both:
 // the clusters to report, and the Set to explain why a given company has none.
 // Without the Set an aggregator would render as `none-detected`, which claims a
 // negative result from a check that never ran.
-export function loadRepostClusters(rootDir = DATA_ROOT, overridePath, portalsPath) {
+export function loadRepostClusters(rootDir = DATA_ROOT, overridePath, portalsPath, companyName) {
   const path = overridePath || join(rootDir, 'data/scan-history.tsv');
   // Same override scan.mjs and detect-reposts.mjs honour, so a sandboxed run
   // points all three at one config instead of silently reading the real one.
@@ -257,7 +281,8 @@ export function loadRepostClusters(rootDir = DATA_ROOT, overridePath, portalsPat
   );
   if (!existsSync(path)) return { clusters: [], aggregators, loaded: false };
   const rows = parseScanHistory(readFileSync(path, 'utf-8'));
-  return { clusters: detectReposts(rows, undefined, undefined, aggregators), aggregators, loaded: true };
+  const scoped = companyName ? rowsFromCompanyKeysTouchingCard(rows, companyName) : rows;
+  return { clusters: detectReposts(scoped, undefined, undefined, aggregators), aggregators, loaded: true };
 }
 
 // Dynamic-only dependency: funnel-velocity.mjs ships on main, but the
@@ -1712,7 +1737,7 @@ if (isMainModule(import.meta.url)) {
       // templates/benchmarks.yml is SYSTEM layer and ships with the code.
       const tracker = loadTrackerRows(DATA_ROOT);
       const followups = loadFollowupRows(DATA_ROOT, followupsOverride);
-      const scanHistory = loadRepostClusters(DATA_ROOT, scanHistoryOverride);
+      const scanHistory = loadRepostClusters(DATA_ROOT, scanHistoryOverride, undefined, company);
       const statusLog = await loadStatusLogSource();
 
       // parseArgs already validated the flag as a positive integer.

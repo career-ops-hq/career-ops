@@ -189,6 +189,23 @@ const fullRows = (start, n) => Array.from({ length: n }, (_, i) => row(start + i
   else fail(`clearcompany.fetch() cap warning: ${JSON.stringify(errors)}`);
 }
 
+// fetch() — max_pages: 1 on the entry: a probe's one page is also the entry's
+// last. It is still a probe, so nothing warns and the board is not tagged
+// (#7180). A real scan of the same entry is still cut by its own cap.
+{
+  const fullPage = async () => page(fullRows(1, 100), 1_000_000);
+  const { result: probed, errors: probeErrors } = await captureConsoleErrors(() => cc.fetch({ name: 'Acme', careers_url: API, max_pages: 1 }, {
+    maxPages: 1, sleep: async () => {}, fetchJson: fullPage,
+  }));
+  if (!probeErrors.some((w) => /raise max_pages/.test(w)) && probed.clearcompanyTruncated === undefined) pass('clearcompany.fetch() warns nothing and tags nothing for a probe on a max_pages: 1 entry');
+  else fail(`clearcompany.fetch() probe at max_pages: 1: clearcompanyTruncated=${probed.clearcompanyTruncated}, errors ${JSON.stringify(probeErrors)}`);
+  const { result: scanned, errors: scanErrors } = await captureConsoleErrors(() => cc.fetch({ name: 'Acme', careers_url: API, max_pages: 1 }, {
+    sleep: async () => {}, fetchJson: fullPage,
+  }));
+  if (scanErrors.some((w) => /raise max_pages/.test(w)) && scanned.clearcompanyTruncated === true) pass('clearcompany.fetch() still warns and tags a real scan of a max_pages: 1 entry');
+  else fail(`clearcompany.fetch() scan at max_pages: 1: clearcompanyTruncated=${scanned.clearcompanyTruncated}, errors ${JSON.stringify(scanErrors)}`);
+}
+
 // fetch() — a short final page at the cap boundary is a complete board.
 {
   let calls = 0;

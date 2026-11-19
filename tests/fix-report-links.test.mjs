@@ -43,7 +43,7 @@ function run(root, args = [], envExtra = { CAREER_OPS_ROOT: root }) {
   // usage text (#5380).
   return { ...r, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
 }
-const withRoot = (fn) => () => { const root = makeRoot(); try { fn(root); } finally { rmSync(root, { recursive: true, force: true }); } };
+const withRoot = (fn) => (t) => { const root = makeRoot(); try { fn(root, t); } finally { rmSync(root, { recursive: true, force: true }); } };
 
 const DEAD = '[1](../reports/001-acme-widgets-2026-07-15.md)';
 
@@ -331,7 +331,7 @@ test('CAREER_OPS_TRACKER override is honored', withRoot((root) => {
   assert.match(readFileSync(custom, 'utf-8'), /\| — \|/);
 }));
 
-test('a symlinked CAREER_OPS_TRACKER: the backup sits beside the real file and holds its original bytes', withRoot((root) => {
+test('a symlinked CAREER_OPS_TRACKER: the backup sits beside the real file and holds its original bytes', withRoot((root, t) => {
   // CodeRabbit (PR #4751): copying the link path would put the .bak beside the
   // link; the backup must follow the transaction's canonical path instead.
   const realDir = join(root, 'real');
@@ -343,7 +343,7 @@ test('a symlinked CAREER_OPS_TRACKER: the backup sits beside the real file and h
   mkdirSync(linkDir);
   const link = join(linkDir, 'applications.md');
   try { symlinkSync(real, link); } catch (e) {
-    if (e.code === 'EPERM' || e.code === 'EACCES') return; // symlinks need privileges on some Windows setups
+    if (e.code === 'EPERM' || e.code === 'EACCES') { t.skip(`this account cannot create a symlink (${e.code})`); return; }
     throw e;
   }
   const r = run(root, [], { CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: link });
@@ -353,7 +353,7 @@ test('a symlinked CAREER_OPS_TRACKER: the backup sits beside the real file and h
   assert.equal(existsSync(`${link}.bak`), false, 'no backup beside the link');
 }));
 
-test('a symlinked tracker FILE: links resolve from the link\'s own folder, not only the target\'s (#5374)', withRoot((root) => {
+test('a symlinked tracker FILE: links resolve from the link\'s own folder, not only the target\'s (#5374)', withRoot((root, t) => {
   // The tracker lives in another repo and data/applications.md links to it;
   // reports/ sits next to the link, not next to the target. Editors resolve
   // ../reports/ from data/, so both scripts must too.
@@ -364,7 +364,7 @@ test('a symlinked tracker FILE: links resolve from the link\'s own folder, not o
   const original = [...HEADER, row(1, 'Acme Widgets', DEAD), row(2, 'Bolt Gadgets', '[2](../reports/gone.md)'), ''].join('\n');
   writeFileSync(real, original);
   try { symlinkSync(real, trackerPath(root)); } catch (e) {
-    if (e.code === 'EPERM' || e.code === 'EACCES') return; // symlinks need privileges on some Windows setups
+    if (e.code === 'EPERM' || e.code === 'EACCES') { t.skip(`this account cannot create a symlink (${e.code})`); return; }
     throw e;
   }
   assert.equal(existsSync(join(privateData, '..', 'reports')), false, 'no reports/ next to the target');

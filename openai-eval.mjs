@@ -381,6 +381,26 @@ function buildTokenLimit(limit, host) {
 }
 
 // ---------------------------------------------------------------------------
+// Ending a run after a request
+// ---------------------------------------------------------------------------
+// Once a request has been made, the run ends by setting the exit code and
+// letting the event loop drain, not with process.exit(). On Windows, some Node
+// versions can abort in process.exit() after a request (nodejs/node#56645), and
+// the run then ends with exit code 3221226505 instead of 1; ollama-eval.mjs has
+// the versions and the measurement (#7096).
+//
+// This is top-level code, so the caller awaits the promise returned here. It
+// never settles, so nothing after the await runs, and Node exits with
+// process.exitCode once nothing else is pending: an exit code that is already
+// set wins over the unsettled-await code 13. The unref'd timer still ends a run
+// that something holds open, without holding the process open itself.
+function exitWhenDrained(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5_000).unref();
+  return new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Call the OpenAI-compatible endpoint
 // ---------------------------------------------------------------------------
 // Digits only (parseInt read "300s" as a 300 ms timeout) and at most 2^31-1 ms:
@@ -466,7 +486,7 @@ try {
     } else if (res.status === 404) {
       console.error(`    → Check --url (it should include any /v1 segment) and --model id.`);
     }
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 
   // Keep transport EOF distinct from a successfully completed generation.
@@ -567,7 +587,7 @@ try {
   } else {
     console.error(`❌  API call failed: ${err.message}`);
   }
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // ---------------------------------------------------------------------------

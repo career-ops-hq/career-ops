@@ -208,6 +208,17 @@ try {
   else fail(`deutschebahn.fetch() cap warning wrong: ${JSON.stringify(capped.warnings)}`);
   if (capped.jobs.truncated?.reason === 'page-cap' && capped.jobs.truncated.fetched === 3) pass('deutschebahn.fetch() marks the board partial when max_pages cuts the walk');
   else fail(`deutschebahn.fetch() max_pages cut: truncated = ${JSON.stringify(capped.jobs.truncated)}`);
+  // The health probe (ctx.maxPages: 1) reads one page, warns nothing and leaves
+  // the board unmarked, also on a max_pages: 1 entry, where the probe's page is
+  // the entry's last too (#7180). Before, it walked to max_pages (5 by default).
+  for (const probeEntry of [{}, { max_pages: 1 }]) {
+    let probeCalls = 0;
+    const probeCtx = { maxPages: 1, sleep: async () => {}, fetchText: async () => { probeCalls++; return fullPage([String(700300 + probeCalls)]); } };
+    const probed = await captureWarnings(async () => ({ jobs: await db.fetch({ name: 'Deutsche Bahn', api: 'https://db.jobs/service/search/de-de/5441588', ...probeEntry }, probeCtx) }));
+    const label = JSON.stringify(probeEntry);
+    if (probeCalls === 1 && probed.warnings.length === 0 && probed.jobs.truncated === undefined) pass(`deutschebahn.fetch() reads one page under a ctx.maxPages: 1 probe and reports no cut (entry ${label})`);
+    else fail(`deutschebahn.fetch() probe on entry ${label}: ${probeCalls} calls, warnings ${JSON.stringify(probed.warnings)}, truncated ${JSON.stringify(probed.jobs.truncated)}`);
+  }
   // The reported total shows the capped walk already covered the board: no warning.
   const coveredPage = (id) => fullPage([id]).replace('</html>', `${countHtml('2.500')}</html>`);
   let coveredCalls = 0;
@@ -223,7 +234,8 @@ try {
     let calls = 0;
     return {
       sleep: async () => {},
-      ...(probe ? { maxPages: 1 } : {}),
+      // A probe that reads two pages, so the failing page 1 is inside it.
+      ...(probe ? { maxPages: 2 } : {}),
       fetchText: async () => {
         calls++;
         if (calls === 1) return fullPage(['630365', '631112']);

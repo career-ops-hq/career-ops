@@ -470,7 +470,7 @@ export function flattenHtml(html) {
   if (typeof html !== 'string') return '';
   return decodeEntities(html
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' '))
+    .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)))
     .replace(CONTROL_CHARS, ' ')
     .replace(/\s+/g, ' ')
     .trim();
