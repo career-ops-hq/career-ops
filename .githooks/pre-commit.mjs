@@ -22,9 +22,9 @@
  *   lint        `npm run lint`, when a .mjs file is staged.
  *
  * paths, secrets, whitespace and gofmt read the index, so they grade exactly
- * what the commit will hold. coverage reads the index too, through `git
- * ls-files`. lint reads the working tree, so an unstaged edit to a staged .mjs
- * file is what it checks.
+ * what the commit will hold. coverage reads the index too: `git ls-files` for
+ * the file list and `--index` for the policy files. lint reads the working
+ * tree, so an unstaged edit to a staged .mjs file is what it checks.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -262,7 +262,9 @@ function checkPaths(root, staged) {
 }
 
 function checkSecrets(root) {
-  const diff = git(root, ['diff', '--cached', '-U0', '--no-color', '--no-ext-diff', '--diff-filter=ACMR']);
+  // --no-textconv as well as --no-ext-diff: a local textconv driver could
+  // rewrite the added lines before findSecrets reads them.
+  const diff = git(root, ['diff', '--cached', '-U0', '--no-color', '--no-ext-diff', '--no-textconv', '--diff-filter=ACMR']);
   const hits = findSecrets(diff);
   if (!hits.length) return { ok: true };
   return {
@@ -273,13 +275,29 @@ function checkSecrets(root) {
   };
 }
 
+/**
+ * The `file:line: problem` headers of `git diff --check` output, without the
+ * source line git prints under each one. That line can hold a credential with
+ * a trailing space, and the hook never prints what it scanned.
+ *
+ * @param {string} output - `git diff --check` stdout.
+ * @returns {string}
+ */
+export function whitespaceSummary(output) {
+  return output
+    .split('\n')
+    .filter((l) => l && !/^[+\- ]/.test(l))
+    .join('\n');
+}
+
 function checkWhitespace(root) {
-  const r = spawnSync('git', ['diff', '--cached', '--check', '--no-color', '--', '.', ':(exclude)*.md'], {
-    cwd: root,
-    encoding: 'utf-8',
-  });
+  const r = spawnSync(
+    'git',
+    ['diff', '--cached', '--check', '--no-color', '--no-ext-diff', '--no-textconv', '--', '.', ':(exclude)*.md'],
+    { cwd: root, encoding: 'utf-8' },
+  );
   if (r.status === 0) return { ok: true };
-  return { ok: false, detail: (r.stdout + r.stderr).trim() };
+  return { ok: false, detail: [whitespaceSummary(r.stdout), r.stderr.trim()].filter(Boolean).join('\n') };
 }
 
 function checkGofmt(root, staged) {
@@ -299,14 +317,15 @@ function checkGofmt(root, staged) {
   };
 }
 
-function runNode(root, script) {
-  const r = spawnSync(process.execPath, [script], { cwd: root, encoding: 'utf-8' });
+function runNode(root, script, args = []) {
+  const r = spawnSync(process.execPath, [script, ...args], { cwd: root, encoding: 'utf-8' });
   if (r.status === 0) return { ok: true };
   return { ok: false, detail: (r.stdout + r.stderr).trim() || `${script} exited ${r.status}` };
 }
 
 function checkCoverage(root) {
-  return runNode(root, 'validate-system-paths-coverage.mjs');
+  // --index: grade the staged SYSTEM_PATHS and USER_PATHS, not the working tree's.
+  return runNode(root, 'validate-system-paths-coverage.mjs', ['--index']);
 }
 
 function checkLint(root, staged) {

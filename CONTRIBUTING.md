@@ -271,8 +271,10 @@ without declaring it.
 ### Optional pre-commit hook
 
 `npm run hooks:install` points this clone's `core.hooksPath` at `.githooks/`.
-After that, every `git commit` runs a few checks that take about two seconds
-in total:
+If `core.hooksPath` already names another directory, the install stops rather
+than switch those hooks off; `npm run hooks:install -- --force` replaces it and
+prints the command that restores the old value. After that, every
+`git commit` runs a few checks that take about two seconds in total:
 
 | Check | What fails it |
 |---|---|
@@ -281,10 +283,14 @@ in total:
 | `whitespace` | `git diff --cached --check`, skipping Markdown, where two trailing spaces are a line break |
 | `gofmt` | An unformatted staged `dashboard/*.go` file. Skipped when `gofmt` is not on `PATH` |
 | `coverage` | `validate-system-paths-coverage.mjs` |
-| `lint` | `npm run lint`, when a `.mjs` file is staged |
+| `lint` | `npm run lint`, when a `.mjs` file is staged. It reads the working tree, so an unstaged fix can hide a syntax error in the staged copy |
 
-The hook is opt-in, and `npm install` never enables it. CI runs the same
-checks whether you use the hook or not. `CAREER_OPS_HOOK_SKIP=lint,coverage
+The hook is opt-in, and `npm install` never enables it. CI runs `lint`,
+`coverage`, `gofmt` (through the dashboard's Go tests) and the user-layer part
+of `paths` (`no-user-data.yml`) on every PR. CI does not scan for secrets,
+whitespace errors, a root-level CV or a `.env` file. Only the hook catches
+those, so a commit made with `--no-verify` reaches the PR unchecked for them.
+`CAREER_OPS_HOOK_SKIP=lint,coverage
 git commit …` skips the named checks for one commit, and `git commit
 --no-verify` skips all of them. For a test that has to hold a fake key, end the
 line with `pragma: allowlist secret`. To turn the hook off again, run

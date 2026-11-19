@@ -11,8 +11,9 @@
  * lives in the repo but the auto-updater won't propagate it to
  * clients on `apply`. That breaks them on the next test run.
  *
- * Run: node validate-system-paths-coverage.mjs
+ * Run: node validate-system-paths-coverage.mjs [--index]
  * Exit 0 = clean. Exit 1 = orphan files listed.
+ * --index reads SYSTEM_PATHS and USER_PATHS from the staged copies.
  */
 
 import { execFileSync } from 'child_process';
@@ -34,8 +35,30 @@ for (const path of [sourcePath, manifestPath]) {
   }
 }
 
-const SYSTEM_PATHS = extractArrayFromSource(readFileSync(manifestPath, 'utf-8'), 'SYSTEM_PATHS');
-const USER_PATHS = extractArrayFromSource(readFileSync(sourcePath, 'utf-8'), 'USER_PATHS');
+// --index reads the two policy files from the git index instead of the working
+// tree. The file list below comes from `git ls-files`, which already reads the
+// index, so this makes both sides of the comparison what a commit will hold.
+// .githooks/pre-commit.mjs passes it: without it, a new file staged with its
+// SYSTEM_PATHS entry left unstaged passes the hook and fails CI (#6535).
+const INDEX_MODE = process.argv.includes('--index');
+
+/**
+ * @param {string} path - Absolute path in the working tree.
+ * @param {string} rel - The same file, repo-relative, for `git show :<rel>`.
+ * @returns {string}
+ */
+function readPolicy(path, rel) {
+  if (!INDEX_MODE) return readFileSync(path, 'utf-8');
+  try {
+    return execFileSync('git', ['show', `:${rel}`], { cwd: ROOT, encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 });
+  } catch (err) {
+    console.error(`FAIL: could not read ${rel} from the index: ${String(err.stderr || err.message).trim()}`);
+    process.exit(1);
+  }
+}
+
+const SYSTEM_PATHS = extractArrayFromSource(readPolicy(manifestPath, 'lib/update-manifest.mjs'), 'SYSTEM_PATHS');
+const USER_PATHS = extractArrayFromSource(readPolicy(sourcePath, 'update-system.mjs'), 'USER_PATHS');
 
 if (SYSTEM_PATHS.length === 0 || USER_PATHS.length === 0) {
   console.error('FAIL: SYSTEM_PATHS not found in lib/update-manifest.mjs, or USER_PATHS not found in update-system.mjs');

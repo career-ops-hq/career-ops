@@ -30,7 +30,9 @@ import {
   findSecrets,
   isScaffold,
   parseSkip,
+  whitespaceSummary,
 } from '../.githooks/pre-commit.mjs';
+import { HOOKS_PATH, planInstall } from '../.githooks/install.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const WORKFLOW = '.github/workflows/no-user-data.yml';
@@ -107,11 +109,56 @@ test('.githooks/pre-commit is tracked as executable', () => {
 
 test('hooks:install is opt-in and nothing installs the hook for you', () => {
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
-  assert.equal(pkg.scripts['hooks:install'], 'git config core.hooksPath .githooks');
+  assert.equal(pkg.scripts['hooks:install'], 'node .githooks/install.mjs');
   for (const [name, cmd] of Object.entries(pkg.scripts)) {
     if (name === 'hooks:install') continue;
-    assert.doesNotMatch(cmd, /hooksPath/, `npm script "${name}" sets core.hooksPath; the hook must stay opt-in`);
+    assert.doesNotMatch(
+      cmd,
+      /hooksPath|githooks\/install|hooks:install/,
+      `npm script "${name}" installs the hook; it must stay opt-in`,
+    );
   }
+});
+
+test('hooks:install keeps an existing core.hooksPath unless forced', () => {
+  assert.equal(planInstall(null, false).action, 'set');
+  assert.equal(planInstall(HOOKS_PATH, false).action, 'keep');
+  assert.equal(planInstall('.husky', false).action, 'refuse');
+  const forced = planInstall('.husky', true);
+  assert.equal(forced.action, 'set');
+  assert.match(forced.message, /git config core\.hooksPath "\.husky"/, 'a forced install must say how to restore the old value');
+});
+
+test('whitespaceSummary keeps the git --check headers and drops the echoed lines', () => {
+  const out = 'src/a.mjs:3: trailing whitespace.\n+const k = 1;   \nsrc/a.mjs:9: new blank line at EOF.\n';
+  assert.equal(whitespaceSummary(out), 'src/a.mjs:3: trailing whitespace.\nsrc/a.mjs:9: new blank line at EOF.');
+});
+
+test('the coverage check reads SYSTEM_PATHS from the index under --index', (t) => {
+  // A temporary index that stages a manifest without the .githooks/ entry,
+  // while the working tree keeps it. Only --index should see the gap.
+  const realIndex = execFileSync('git', ['-C', ROOT, 'rev-parse', '--path-format=absolute', '--git-path', 'index'], {
+    encoding: 'utf-8',
+  }).trim();
+  const scratch = mkdtempSync(join(tmpdir(), 'co-cov-index-'));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const index = join(scratch, 'index');
+  copyFileSync(realIndex, index);
+  const env = { ...process.env, GIT_INDEX_FILE: index };
+
+  const manifest = readFileSync(join(ROOT, 'lib', 'update-manifest.mjs'), 'utf-8');
+  const dropped = manifest.replace("  '.githooks/',\n", '');
+  assert.notEqual(dropped, manifest, "lib/update-manifest.mjs has no '.githooks/' entry to drop");
+  const blob = execFileSync('git', ['-C', ROOT, 'hash-object', '-w', '--stdin'], { input: dropped, encoding: 'utf-8' }).trim();
+  execFileSync('git', ['-C', ROOT, 'update-index', '--cacheinfo', `100644,${blob},lib/update-manifest.mjs`], { env });
+
+  const run = (args) =>
+    spawnSync(process.execPath, ['validate-system-paths-coverage.mjs', ...args], { cwd: ROOT, encoding: 'utf-8', env });
+  const tree = run([]);
+  assert.equal(tree.status, 0, describeSpawn(tree, 'the working-tree read should still see .githooks/'));
+  const staged = run(['--index']);
+  assert.ok(exitedNonZero(staged), describeSpawn(staged, '--index passed a staged manifest missing .githooks/'));
+  assert.match(staged.stdout + staged.stderr, /\.githooks\/pre-commit/);
 });
 
 test('the path check blocks private files and lets their neighbours through', () => {
@@ -221,7 +268,7 @@ function hookRepo(t) {
   const dir = mkdtempSync(join(tmpdir(), 'co-githooks-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, '.githooks'));
-  for (const f of ['pre-commit', 'pre-commit.mjs']) copyFileSync(join(ROOT, '.githooks', f), join(dir, '.githooks', f));
+  for (const f of ['install.mjs', 'pre-commit', 'pre-commit.mjs']) copyFileSync(join(ROOT, '.githooks', f), join(dir, '.githooks', f));
   // The hook imports these two for its flag handling and entry guard.
   mkdirSync(join(dir, 'lib'));
   for (const f of ['cli-flags.mjs', 'is-main-module.mjs']) copyFileSync(join(ROOT, 'lib', f), join(dir, 'lib', f));
@@ -254,7 +301,7 @@ function hookRepo(t) {
     }
     return git('commit', '-q', '-m', 'change');
   };
-  return { commit, git };
+  return { commit, dir, env, git };
 }
 
 test('a commit runs the hook and is refused over a private file', (t) => {
@@ -285,6 +332,39 @@ test('trailing whitespace blocks code but not Markdown', (t) => {
   assert.match(code.stderr, /✗ whitespace/);
 });
 
+test('a key with trailing spaces stays out of the whitespace report', (t) => {
+  const { commit } = hookRepo(t);
+  const key = FAKES['AWS access key ID'];
+  const r = commit({ 'src/k.mjs': `export const k = '${key}';   \n` });
+  assert.ok(exitedNonZero(r), describeSpawn(r, 'the commit went through with a key staged'));
+  assert.match(r.stderr, /✗ whitespace[\s\S]*src\/k\.mjs:1: trailing whitespace/);
+  assert.ok(!r.stderr.includes(key), 'git --check echoed the line holding the key');
+});
+
+test('hooks:install sets core.hooksPath, and refuses to replace another value without --force', (t) => {
+  const { dir, env, git } = hookRepo(t);
+  const install = (...args) =>
+    spawnSync(process.execPath, [join('.githooks', 'install.mjs'), ...args], { cwd: dir, encoding: 'utf-8', env });
+  const hooksPath = () => git('config', '--get', 'core.hooksPath').stdout.trim();
+
+  assert.equal(install().status, 0, 'an install over its own value should be a no-op success');
+
+  assert.equal(git('config', 'core.hooksPath', '.husky').status, 0);
+  const refused = install();
+  assert.ok(exitedNonZero(refused), describeSpawn(refused, 'install replaced an existing core.hooksPath'));
+  assert.equal(hooksPath(), '.husky', 'a refused install still changed core.hooksPath');
+
+  const forced = install('--force');
+  assert.equal(forced.status, 0, describeSpawn(forced, 'install --force'));
+  assert.equal(hooksPath(), '.githooks');
+  assert.match(forced.stdout, /git config core\.hooksPath "\.husky"/);
+
+  assert.equal(git('config', '--unset', 'core.hooksPath').status, 0);
+  const fresh = install();
+  assert.equal(fresh.status, 0, describeSpawn(fresh, 'install with no hooksPath set'));
+  assert.equal(hooksPath(), '.githooks');
+});
+
 test('a clean commit passes and reports what it skipped', (t) => {
   const { commit } = hookRepo(t);
   const r = commit({ 'src/c.mjs': 'export const c = 1;\n' });
@@ -294,7 +374,7 @@ test('a clean commit passes and reports what it skipped', (t) => {
 
 const hasGofmt = !spawnSync('gofmt', ['-h']).error;
 
-test('gofmt flags an unformatted staged dashboard .go file',{ skip: !hasGofmt && 'gofmt not on PATH' }, (t) => {
+test('gofmt flags an unformatted staged dashboard .go file', { skip: !hasGofmt && 'gofmt not on PATH' }, (t) => {
   const { commit } = hookRepo(t);
   const bad = commit({ 'dashboard/x.go': 'package main\nfunc  main()  {}\n' });
   assert.ok(exitedNonZero(bad), describeSpawn(bad, 'an unformatted .go file passed'));
