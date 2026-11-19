@@ -62,6 +62,7 @@ export const DEFAULT_CADENCE = {
   responded_initial: 1,
   responded_subsequent: 3,
   interview_thankyou: 1,
+  interview_followups: true,
 };
 
 const PROFILE_CADENCE_KEYS = {
@@ -95,6 +96,9 @@ export function loadProfileCadence(profilePath = PROFILE_FILE) {
   for (const [profileKey, cadenceKey] of Object.entries(PROFILE_CADENCE_KEYS)) {
     const parsed = positiveInteger(source[profileKey]);
     if (parsed !== null) cadence[cadenceKey] = parsed;
+  }
+  if (typeof source.interview_followups === 'boolean') {
+    cadence.interview_followups = source.interview_followups;
   }
   return cadence;
 }
@@ -839,6 +843,7 @@ export function computeUrgency(status, daysSinceApp, daysSinceLastFollowup, foll
     return 'waiting';
   }
   if (status === 'interview') {
+    if (CADENCE.interview_followups === false) return 'waiting';
     if (daysSinceLastFollowup !== null) {
       return daysSinceLastFollowup >= CADENCE.responded_subsequent ? 'overdue' : 'waiting';
     }
@@ -860,6 +865,7 @@ export function computeNextFollowupDate(status, appDate, lastFollowupDate, follo
     return addDays(parseDate(appDate), CADENCE.responded_initial);
   }
   if (status === 'interview') {
+    if (CADENCE.interview_followups === false) return null;
     // After the thank-you is logged, subsequent touches follow the responded
     // cadence (modes/followup.md: "Every 3 days · No limit").
     if (lastFollowupDate) return addDays(parseDate(lastFollowupDate), CADENCE.responded_subsequent);
@@ -928,6 +934,9 @@ export function analyzeFromContent(trackerContent, followupsContent = '', { enab
   for (const app of apps) {
     const normalized = normalizeStatus(app.status);
     if (!ACTIONABLE_STATUSES.includes(normalized)) continue;
+    // Interview scheduling can be managed separately from follow-up cadence.
+    // Exclude before pins so an old next-date cannot revive a disabled row.
+    if (normalized === 'interview' && CADENCE.interview_followups === false) continue;
 
     // appDateSource travels with the entry so a consumer can tell a measured
     // age from one inferred off the evaluation date.

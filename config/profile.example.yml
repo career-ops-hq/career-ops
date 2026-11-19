@@ -151,6 +151,7 @@ language:
 #   responded_initial_days: 1
 #   responded_subsequent_days: 3
 #   interview_thankyou_days: 1
+#   interview_followups: false  # Optional: omit interview rows; defaults to true
 
 # (Optional) Rename the session after the posting it handles, e.g.
 # "VP Infrastructure, Acme Health", in hosts that let the agent set its own
