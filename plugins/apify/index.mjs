@@ -97,7 +97,7 @@ export function htmlToText(s) {
   let prev;
   do {
     prev = cleaned;
-    cleaned = cleaned.replace(/<[^>]+>/g, '');
+    cleaned = cleaned.replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? '' : tag));
   } while (cleaned !== prev);
   return cleaned
     // Decode &amp; LAST so `&amp;#60;` round-trips to `&#60;` not `<`.

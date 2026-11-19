@@ -29,13 +29,17 @@ function sha256(buf) {
  * Hash EVERY regular file in a plugin directory tree, recursively. NOT a curated
  * subset — the entry can `import('./anything.mjs')`, so a partial hash would let
  * a rug-pull mutate an un-hashed file. Rejects symlinks (a symlinked file would
- * pass the hash while pointing elsewhere). Excludes node_modules + .git.
+ * pass the hash while pointing elsewhere). Excludes .git, which git refuses to
+ * check out below a clone's root, and node_modules, which a developer's linked
+ * checkout fills with dependencies and symlinks. A community plugin cannot pin
+ * one: install runs plugin-audit.mjs, which fails any tree containing
+ * node_modules. `files` has no prototype, so a file named `__proto__` is kept.
  *
  * @param {string} dir absolute plugin directory
  * @returns {{ files: Record<string,string>, integrity: string }}
  */
 export function hashPluginTree(dir) {
-  const files = {};
+  const files = Object.create(null);
   const walk = (abs, rel) => {
     let entries;
     try { entries = readdirSync(abs, { withFileTypes: true }); }

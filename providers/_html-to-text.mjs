@@ -29,7 +29,9 @@ export const DESCRIPTION_CAP = 4000;
 // quadratically: every opener rescans the whole rest of the input, which
 // takes seconds on a full JD body.
 export const HTML_TAG_RE = /<(?=[a-z/!?])(?:[^<>"']|"[^"]*"|'[^']*')+>/gi;
-const HTML_MEDIA_RE = /<(script|style)\b(?:[^<>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1\s*>/gi;
+// The opener of a <script> or <style> block. Its body, up to the closer, is
+// found with indexOf in stripMediaBlocks() below, not with a lazy regex.
+const HTML_MEDIA_OPEN_RE = /<(script|style)\b(?:[^<>"']|"[^"]*"|'[^']*')*>/gi;
 
 /**
  * Remove complete HTML comments (`<!-- ... -->`) in one linear pass.
@@ -59,9 +61,80 @@ export function stripHtmlComments(text) {
   return from === 0 ? text : out + text.slice(from);
 }
 
+/**
+ * Remove complete <script> and <style> blocks without a lazy regex.
+ *
+ * A lazy regex (`<(script|style)\b…>[\s\S]*?<\/\1\s*>`) is quadratic on text
+ * with many openers and no closer, the same way `<!--[\s\S]*?-->` is above:
+ * every opener scans the rest of the input for its closer and fails. 40,000
+ * `<script>` openers took about a second. The blocks removed are the ones that
+ * regex removed: an opener up to the first closer of its own kind at or after
+ * the opener's end, case-insensitive, with whitespace allowed before the
+ * closing `>`. The closers of each kind are listed once, and each opener looks
+ * its closer up in that list, so the cost grows with the text, not with the
+ * number of openers times the text.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripMediaBlocks(text) {
+  const closers = { script: closerSpans(text, 'script'), style: closerSpans(text, 'style') };
+  const opener = new RegExp(HTML_MEDIA_OPEN_RE.source, 'gi');
+  let out = '';
+  let from = 0;
+  for (let m = opener.exec(text); m; m = opener.exec(text)) {
+    const close = firstAtOrAfter(closers[m[1].toLowerCase()], m.index + m[0].length);
+    if (!close) {
+      // No block opens here; try the next position, as the regex would.
+      opener.lastIndex = m.index + 1;
+      continue;
+    }
+    out += `${text.slice(from, m.index)} `;
+    from = close.end;
+    opener.lastIndex = close.end;
+  }
+  return from === 0 ? text : out + text.slice(from);
+}
+
+/**
+ * Every `</kind\s*>` in the text, in order, as start and end offsets.
+ *
+ * Matched case-insensitively on the text itself, as the lazy regex matched
+ * its closer. Not on text.toLowerCase(): lower-casing can change the length
+ * (`İ` becomes `i` and a combining dot), and every offset after it would then
+ * point one character too far into the original text.
+ *
+ * @param {string} text
+ * @param {string} kind - `script` or `style`
+ * @returns {Array<{start: number, end: number}>}
+ */
+function closerSpans(text, kind) {
+  const spans = [];
+  for (const m of text.matchAll(new RegExp(`</${kind}\\s*>`, 'gi'))) {
+    spans.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return spans;
+}
+
+/**
+ * The first span starting at or after `pos`, by binary search.
+ * @param {Array<{start: number, end: number}>} spans
+ * @param {number} pos
+ */
+function firstAtOrAfter(spans, pos) {
+  let lo = 0;
+  let hi = spans.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (spans[mid].start < pos) lo = mid + 1;
+    else hi = mid;
+  }
+  return spans[lo];
+}
+
 /** @param {string} content */
 function stripMarkup(content) {
-  return stripHtmlComments(content).replace(HTML_MEDIA_RE, ' ').replace(HTML_TAG_RE, ' ');
+  return stripMediaBlocks(stripHtmlComments(content)).replace(HTML_TAG_RE, ' ');
 }
 
 /**

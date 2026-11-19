@@ -35,7 +35,7 @@ Paste the registry entry (one object), pinned to the exact reviewed commit:
 - [ ] Manifest valid: apiVersion 1, `humanInTheLoop: true`, hooks ⊆ {provider, ingest, search, notify, export} — **no apply/submit**
 - [ ] MIT-compatible LICENSE; no personal data in the repo
 - [ ] Egress: `allowedHosts` are real public hosts; no IP literals / metadata / `*.internal`; no localhost without `allowsLocalhost` + a reason
-- [ ] Static audit clean: no `child_process`/`playwright`/raw sockets/global `fetch`/`eval`/bare-dependency imports (egress only via `ctx.fetch`)
+- [ ] Static audit clean: no `child_process`/`playwright`/raw sockets/global `fetch`/`eval`/bare-dependency imports (egress only via `ctx.fetch`), no committed `node_modules` or `getBuiltinModule`; every `⚠ file:line` computed-load warning (`import()`, `require()`, an alias of `require`, `createRequire`, `arguments[...]`, a `.constructor` read, `Function` as a value, `Reflect.construct`) read by hand
 - [ ] No core-owned secrets in `requiredEnv`
 - [ ] Reads PUBLIC data or the user's OWN account only — no centralized infrastructure, no auto-submit, no blind-apply
 - [ ] No commercial / hosted-service / monetization wording (the project is free and local-first)

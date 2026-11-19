@@ -971,6 +971,11 @@ function main() {
 // Entry guard (repo convention, cf. contacts.mjs / stats.mjs / invite-match.mjs):
 // without it, importing this module to unit-test its exports runs the whole CLI
 // and exits the test process.
+//
+// process.exitCode, not process.exit(): a write to a pipe can still be queued
+// when main() returns (it is on macOS), and process.exit() drops it, so a
+// result over the 64 KiB pipe buffer reached `| jq` or an agent's shell cut
+// off mid-JSON. main() is synchronous, so the process ends once stdout drains.
 if (isMainModule(import.meta.url)) {
-  process.exit(main());
+  process.exitCode = main();
 }
