@@ -13,7 +13,7 @@ import { ROOT } from './helpers.mjs';
 
 const read = (path) => readFileSync(join(ROOT, path), 'utf8');
 const LINE = /^needs_confirmation: [a-z_]+ \S.* - [^?]+$/;
-const MODES = ['oferta', 'auto-pipeline', 'cover', 'apply', 'add', 'expand', 'intake', 'interview'];
+const MODES = ['oferta', 'auto-pipeline', 'cover', 'apply', 'add', 'expand', 'intake', 'interview', 'proposal'];
 
 function unattendedParagraph(text) {
   const start = text.indexOf('**Unattended runs**');
