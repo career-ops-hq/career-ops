@@ -317,6 +317,44 @@ try {
     else fail(`repeat at total: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}`);
   }
   {
+    // The reported total is not the end of the walk: a stale count on a full first page
+    // must not hide the next page.
+    const stale = (n) => (n === 1 ? searchReply(many(0, 50), 50) : searchReply(many(50, 30), 80));
+    const ctx = makeCtx({ replies: { search: stale } });
+    const out = await sfc.fetch(entry, ctx);
+    if (out.length === 80 && ctx.searchCalls.n === 2 && !out.truncated) pass('a full first page with a stale total of 50 does not end the walk: the next page is read');
+    else fail(`stale total: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}`);
+  }
+  {
+    // A board of exactly PAGE_SIZE: the server answers the page past the end with the same
+    // rows (checked live), which is the end once the rows read reach the count.
+    const ctx = makeCtx({ replies: { search: () => searchReply(many(0, 50), 50) } });
+    const { result: out, errors } = await captureConsoleErrors(() => sfc.fetch(entry, ctx));
+    if (out.length === 50 && ctx.searchCalls.n === 2 && !out.truncated && errors.length === 0) pass('a board of exactly 50 postings ends as complete when the page past the end repeats it');
+    else fail(`exact page: ${out.length} jobs, ${ctx.searchCalls.n} searches, truncated=${JSON.stringify(out.truncated)}, warns=${JSON.stringify(errors)}`);
+    // An empty page past the end is the end as well.
+    const empty = makeCtx({ replies: { search: (n) => (n === 1 ? searchReply(many(0, 50), 50) : searchReply([], 50)) } });
+    const e = await sfc.fetch(entry, empty);
+    if (e.length === 50 && empty.searchCalls.n === 2 && !e.truncated) pass('an empty page past the end ends the walk as complete');
+    else fail(`empty past end: ${e.length} jobs, truncated=${JSON.stringify(e.truncated)}`);
+  }
+  {
+    // A title holding DWR statements is data: neither the declaration scan nor the assignment
+    // scan reads inside a string literal.
+    const evil = [posting(1, 'Engineer var s0={};'), posting(2, 'Analyst s1.id=999; s1.title="x";'), posting(3, 'Plain')];
+    const ctx = makeCtx({ replies: { search: () => searchReply(evil) } });
+    const out = await sfc.fetch(entry, ctx);
+    if (out.length === 3 && out[0].title === 'Engineer var s0={};' && out[1].title === 'Analyst s1.id=999; s1.title="x";' && out[1].listingIdentity.posting_id === '2') pass('a title containing DWR declarations or assignments does not corrupt the parse');
+    else fail(`statements in titles: ${JSON.stringify(out.map((j) => [j.title, j.listingIdentity.posting_id]))}`);
+  }
+  {
+    // language is the posting's own default locale, as the source names it, and absent without one.
+    const ctx = makeCtx({ replies: { search: () => searchReply([posting(1, 'A', '17/11/2026', 'pt_BR'), { id: 2, title: 'B', postingDate: '17/11/2026' }]) } });
+    const out = await sfc.fetch(entry, ctx);
+    if (out[0].language === 'pt_BR' && !('language' in out[1])) pass('each job carries its own default locale as language, and none when the posting names no locale');
+    else fail(`language: ${JSON.stringify(out.map((j) => j.language))}`);
+  }
+  {
     // A full page whose rows all fail normalization does not end the walk (the board omits its total).
     const noTotal = (r) => r.split(';').filter((x) => !x.includes('postingCount')).join(';');
     const untitled = Array.from({ length: 50 }, (_, i) => ({ id: 900 + i, title: '' }));

@@ -49,6 +49,12 @@ import { cookieHeaderFrom } from './csod.mjs';
 // The posting URL is the public job page, which needs no session:
 //   {origin}{detailURLPrefix}{id}, with the prefix's `rcm_site_locale` set to
 //   the posting's own default locale.
+// That locale (es_ES) is also each job's `language`, as the source names it.
+//
+// The walk ends on a short or empty page, never on the postingCount the replies carry (it can
+// be stale). A page past the end answers with the board's rows again, not an empty list
+// (checked live), so a repeated page is the end once the rows read reach that count, and a
+// page-ignored partial read otherwise.
 //
 // `robots.txt` on these hosts disallows any path with a company query. Per the Source Indexing
 // Policy it is not a gate (the read is one anonymous visitor's, five requests
@@ -65,6 +71,7 @@ const FALLBACK_VIEW_ID = '/ui/rcmcareer/pages/careersite/career.jsp.xhtml';
 // A SAP-hosted tenant: <label>.successfactors.eu / .com, anchored over the
 // whole hostname (the dots escaped, the end anchored).
 const HOST_RE = /^[a-z0-9-]+\.successfactors\.(?:eu|com)$/;
+const LOCALE_RE = /^[a-z]{2}_[A-Z]{2}$/; // a posting's own default locale, e.g. es_ES
 const COMPANY_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 /**
@@ -155,9 +162,12 @@ export function parseDwr(text) {
   if (!/^dwr\.engine\._remoteHandleCallback\(/m.test(text)) {
     throw new Error('successfactors-classic: reply is not a DWR reply (session or CSRF key rejected, or a login page)');
   }
+  // Statements are recognized on a copy whose string literals are blanked to the same length, so a
+  // title holding "var s0={};" or "s0.id=5;" is data. Values are read from the original text.
+  const code = text.replace(/"(?:[^"\\]|\\.)*"/g, (lit) => `"${' '.repeat(lit.length - 2)}"`);
   /** @type {Map<string, any>} */
   const vars = new Map();
-  for (const m of text.matchAll(/var (s\d+)=(\{\}|\[\]);/g)) vars.set(m[1], m[2] === '{}' ? {} : []);
+  for (const m of code.matchAll(/var (s\d+)=(\{\}|\[\]);/g)) vars.set(m[1], m[2] === '{}' ? {} : []);
   /** @param {string} tok */
   const val = (tok) => {
     if (tok[0] === '"') return unescapeJs(tok.slice(1, -1));
@@ -166,9 +176,10 @@ export function parseDwr(text) {
     if (tok === 'null') return null;
     return /^s\d+$/.test(tok) ? vars.get(tok) : Number(tok);
   };
-  for (const m of text.matchAll(/(s\d+)(?:\.(\w+)|\['([^']*)'\]|\[(\d+)\])=("(?:[^"\\]|\\.)*"|-?[\d.]+|true|false|null|s\d+);/g)) {
+  for (const m of code.matchAll(/(s\d+)(?:\.(\w+)|\['([^']*)'\]|\[(\d+)\])=("(?:[^"\\]|\\.)*"|-?[\d.]+|true|false|null|s\d+);/dg)) {
     const target = vars.get(m[1]);
-    if (target) target[m[2] ?? m[3] ?? m[4]] = val(m[5]);
+    const [from, to] = /** @type {number[]} */ (m.indices?.[5]);
+    if (target) target[m[2] ?? m[3] ?? m[4]] = val(text.slice(from, to));
   }
   return [...vars.values()];
 }
@@ -207,7 +218,7 @@ function postingUrl(origin, prefix, posting) {
   const id = coerceId(posting?.id);
   const seg = id === undefined ? null : safeEncodeURIComponent(id);
   if (!seg || !/^\/career\?/.test(prefix)) return null;
-  const locale = /^[a-z]{2}_[A-Z]{2}$/.test(posting.defaultLocale) ? posting.defaultLocale : null;
+  const locale = LOCALE_RE.test(posting.defaultLocale) ? posting.defaultLocale : null;
   const path = prefix
     .replace(/%5f/gi, '_')
     .replace(/(rcm_site_locale=)[A-Za-z_]+/, (_m, k) => (locale ? k + locale : _m));
@@ -251,6 +262,7 @@ export function parseSearchReply(objects, cfg, companyName, lang) {
       company: companyName,
       location: '',
       ...(postedAt !== undefined ? { postedAt } : {}),
+      ...(LOCALE_RE.test(p.defaultLocale) ? { language: p.defaultLocale } : {}),
       listingIdentity: { ats_provider: 'successfactors-classic', board_slug: cfg.company, posting_id: String(coerceId(p.id)) },
     });
   }
@@ -333,7 +345,7 @@ export default {
     ]);
     const filters = init.filter((o) => o && !Array.isArray(o) && typeof o.fieldName === 'string' && 'fieldType' in o);
     const languages = init
-      .filter((o) => o && !Array.isArray(o) && typeof o.value === 'string' && /^[a-z]{2}_[A-Z]{2}$/.test(o.value))
+      .filter((o) => o && !Array.isArray(o) && typeof o.value === 'string' && LOCALE_RE.test(o.value))
       .map((o) => o.value);
     if (!filters.length || !languages.length) {
       throw new Error('successfactors-classic: no filter fields or keyword languages in the initial data (protocol changed?)');
@@ -389,23 +401,26 @@ export default {
         seen.add(job.listingIdentity.posting_id);
         jobs.push(job);
       }
-      // A later page made only of rows an earlier page already returned means the
-      // server ignored the page number: the rest of the board is out of reach, so
-      // the read is partial. Judged on the rows as the source sent them, before any
-      // is dropped, and before the counted total is consulted: a repeated page can
-      // also reach that total.
+      // A later page made only of rows an earlier page already returned. The source answers a
+      // page past its end with the board's rows again (checked live), so a board of an exact
+      // multiple of PAGE_SIZE ends this way: complete when the counted total says every row was
+      // already read. Otherwise the server ignored the page number, the rest of the board is out
+      // of reach and the read is partial. Judged on the rows as the source sent them, before
+      // any is dropped.
       const repeated = page > 1 && parsed.keys.length > 0 && parsed.keys.every((k) => seenKeys.has(k));
       if (repeated) {
+        if (total !== null && seenKeys.size >= total) break;
         console.error(`⚠️  successfactors-classic: ${entry.name} ignored the page number (page ${page} repeated earlier postings), keeping ${jobs.length} postings`);
         stopReason = 'page-ignored';
         break;
       }
       for (const k of parsed.keys) seenKeys.add(k);
-      // Rows the source returned, before malformed ones were dropped: a short
-      // page, or the counted total, is the board's own end. A full page whose
-      // rows all failed normalization is not: the next page may hold valid ones.
-      if (parsed.rawCount < PAGE_SIZE || (total !== null && page * PAGE_SIZE >= total)) break;
-      if (page === pagesToFetch && !probing) stopReason = 'cap';
+      // Rows the source returned, before malformed ones were dropped: a short or empty page is
+      // the board's own end. A full page whose rows all failed normalization is not: the next
+      // page may hold valid ones. The counted total can be stale, so it never ends the walk
+      // early; it only settles a full page at the cap, where no further request is allowed.
+      if (parsed.rawCount < PAGE_SIZE) break;
+      if (page === pagesToFetch && !probing && !(total !== null && seenKeys.size >= total)) stopReason = 'cap';
     }
     if (total !== null && total > 0 && jobs.length === 0) {
       throw new Error('successfactors-classic: postings counted but none read (protocol changed?)');
