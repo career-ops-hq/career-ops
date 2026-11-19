@@ -149,7 +149,7 @@ export function resolveConfig(entry) {
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^<>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 // RMK job paths encode the city as the leading slug segment:

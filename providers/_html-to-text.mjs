@@ -108,10 +108,13 @@ export function htmlToText(content, { cap = DESCRIPTION_CAP } = {}) {
  * @returns {string}
  */
 export function visibleText(fragment) {
+  // stripHtmlComments, not /<!--[\s\S]*?-->/: the lazy regex rescans the rest
+  // of the text from every `<!--` that has no `-->`. A tag that never closes
+  // is consumed once and kept as it was, which is what /<[^>]+>/ left behind,
+  // without rescanning the rest of the text from every later `<`.
   return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^<>]+>/g, ' '),
+    stripHtmlComments(String(fragment ?? ''))
+      .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)),
   )
     .replace(/\s+/g, ' ')
     .trim();
