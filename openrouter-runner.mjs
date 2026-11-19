@@ -874,7 +874,7 @@ export async function fetchJobPage(url, { fetchApi = fetchJdViaKnownApi } = {}) 
     });
     if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
     const html = await r.text();
-    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+    const text = html.replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)).replace(/\s+/g, ' ').trim();
     const unreadable = unreadableJobPage({ status: r.status, requestedUrl: url, finalUrl: r.url, text });
     if (unreadable) throw new Error(`no job description (${unreadable})`);
     return text.slice(0, JD_TEXT_CAP);
