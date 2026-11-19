@@ -524,3 +524,41 @@ test("the fill step names a field the same way extraction does when its group la
     await close();
   }
 });
+
+test("the fill step reads a radio's option within its own form, like extraction", async (t) => {
+  const html = `<!doctype html>
+    <form id="newsletter"><label><input type="radio" name="consent" value="yes">I agree</label></form>
+    <form id="application"><label><input type="radio" name="consent" value="yes">I agree</label></form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => f.options), [["I agree"], ["I agree"]]);
+    const facts = await page.locator('#application input[name="consent"]').evaluate(factsOf, null);
+    assert.equal(facts.option, "I agree");
+  } finally {
+    await close();
+  }
+});
+
+test("the fill step ignores a visibility:hidden control when it names a field, like extraction", async (t) => {
+  const html = `<!doctype html><form>
+    <div class="form-group">
+      <div class="label">Full name</div>
+      <div style="visibility:hidden"><input name="trap"></div>
+      <input name="full_name">
+    </div>
+  </form>`;
+  const fx = await fixturePage(t, html);
+  if (!fx) return;
+  const { page, close } = fx;
+  try {
+    const form = await extractForm(page);
+    assert.deepEqual(form.fields.map((f) => f.label), ["Full name"]);
+    const facts = await page.locator('input[name="full_name"]').evaluate(factsOf, null);
+    assert.equal(facts.identity, "Full name");
+  } finally {
+    await close();
+  }
+});
