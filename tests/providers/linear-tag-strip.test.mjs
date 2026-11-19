@@ -28,6 +28,7 @@ import { parseHnComment } from '../../providers/hackernews.mjs';
 import { visibleText } from '../../providers/_html-to-text.mjs';
 import { parsePersonioHtml } from '../../providers/personio.mjs';
 import { parseJobBankFeed } from '../../providers/jobbankca.mjs';
+import { parseSearchPage } from '../../providers/themuse.mjs';
 
 const PROVIDERS = join(dirname(dirname(dirname(fileURLToPath(import.meta.url)))), 'providers');
 
@@ -82,6 +83,7 @@ test('a Hacker News comment or a fragment of unclosed "<" or "<!--" is stripped 
   assertFast('parseHnComment on 100,000 unclosed "<"', () => parseHnComment('<'.repeat(100_000)));
   assertFast('visibleText on 100,000 unclosed "<"', () => visibleText('<'.repeat(100_000)));
   assertFast('visibleText on 100,000 unclosed "<!--"', () => visibleText('<!--'.repeat(100_000)));
+  assertFast('themuse on 100,000 unclosed "<!--"', () => parseSearchPage(`<h1 class="sr-count">${'<!--'.repeat(100_000)}12 jobs</h1>`));
 });
 
 const N = 50_000;
@@ -108,4 +110,7 @@ test('well-formed markup strips as before', () => {
   assert.equal(visibleText('<a title="x<y">text</a>'), 'text');
   assert.deepEqual(parsePersonioHtml(personioPage('Data <b<i>x> Engineer'), 'Acme', 'acme.jobs.personio.de').map((j) => j.title), ['Data x> Engineer']);
   assert.deepEqual(parseJobBankFeed(jobBankFeed('Acme &lt;b&lt;i&gt;x&gt; Ltd')).map((j) => j.company), ['Acme x Ltd']);
+  // A complete comment is removed and an unclosed one kept, as the lazy regex did.
+  assert.equal(parseSearchPage('<h1 class="sr-count"><!-- 99 -->56 jobs</h1>').total, 56);
+  assert.equal(parseSearchPage('<h1 class="sr-count"><!-- 78 jobs</h1>').total, 78);
 });
