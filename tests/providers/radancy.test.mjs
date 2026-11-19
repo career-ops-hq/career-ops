@@ -322,6 +322,31 @@ try {
   if (mjRows[0]?.location === 'Lyon, Auvergne-Rhône-Alpes, France' && mjRows[1]?.location === '') pass('radancy.parseResults() reads a modern row’s <span class="job-location"> and leaves a location-less row empty');
   else fail(`radancy.parseResults() modern job-location locations = ${JSON.stringify(mjRows.map(r => r.location))}`);
 
+  // Review follow-up. A title element holding a nested element of its own type
+  // is read whole, not cut at the inner closing tag.
+  const NESTED_TITLE = `
+<ul>
+<li class="list__item"><a class="list__item--content" href="/en/job/madrid/lead/1299/701" data-job-id="701">
+<div class="jobtitle">Lead <div class="tag">Hybrid</div> Analyst</div><span class="job-location">Madrid, Spain</span></a></li>
+</ul>`;
+  const nestedRows = parseResults(NESTED_TITLE, 'https://careers.acme.example');
+  if (nestedRows.length === 1 && /^Lead\b.*Analyst$/.test(nestedRows[0].title) && nestedRows[0].location === 'Madrid, Spain') pass('radancy.parseResults() reads a title element that nests a same-type element in full');
+  else fail(`radancy.parseResults() nested title rows = ${JSON.stringify(nestedRows)}`);
+
+  // The last modern row has no location of its own and the page carries a
+  // location-classed element after the list: the row must stay empty.
+  const MODERN_TRAILING = `
+<ul>
+<li class="search-results-list__item ">
+<a class="search-results-list__job-link" href="/en/job/turin/buyer/3456/801" data-job-id="801">
+<h3 class="search-results-list__job-title">Buyer</h3></a></li>
+</ul>
+<div class="footer"><span class="job-location">Elsewhere, Nowhere</span></div>`;
+  const trailRows = parseResults(MODERN_TRAILING, 'https://careers.acme.example');
+  if (trailRows.length === 1 && trailRows[0].location === '') pass('radancy.parseResults() keeps the location fallback inside the last modern row');
+  else fail(`radancy.parseResults() trailing location rows = ${JSON.stringify(trailRows)}`);
+
+
   // A <p class="job-location"> and a row with no location at all: the sibling
   // fallback must read the former and must not invent a location for the latter
   // (nor borrow the next row's).

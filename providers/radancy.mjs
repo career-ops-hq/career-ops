@@ -216,6 +216,25 @@ export function readFragmentTotals(html) {
 const LEGACY_LOCATION_RE = /class="(?:[^"]*\bjob-location\b[^"]*|(?:[^"]*\s)?location(?:\s[^"]*)?)"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i;
 
 /**
+ * Content of the element whose opening tag ends at `from`, up to its matching
+ * closing tag: same-named elements nested inside are counted, so
+ * `<div>a<div>b</div>c</div>` reads as `a<div>b</div>c`, not `a<div>b`. An
+ * unclosed element runs to the end of the string.
+ * @param {string} html @param {string} tag @param {number} from
+ * @returns {string}
+ */
+function elementContent(html, tag, from) {
+  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, 'gi');
+  re.lastIndex = from;
+  let depth = 1;
+  for (let m; (m = re.exec(html));) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return html.slice(from, m.index);
+  }
+  return html.slice(from);
+}
+
+/**
  * The title element inside a result anchor: a heading, else an element whose
  * class holds `job-title` or `jobtitle` (`<span class="jobtitle">` on
  * www.ccep.jobs, `<h3 class="search-results-list__job-title">` on
@@ -226,8 +245,9 @@ const LEGACY_LOCATION_RE = /class="(?:[^"]*\bjob-location\b[^"]*|(?:[^"]*\s)?loc
  */
 function titleElementText(inner) {
   const head = inner.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
-  const el = head ? null : inner.match(/<(\w+)\b[^>]*class="[^"]*job-?title[^"]*"[^>]*>([\s\S]*?)<\/\1>/i);
-  return clean(head ? head[1] : (el ? el[2] : '')) || null;
+  const el = head ? null : inner.match(/<(\w+)\b[^>]*class="[^"]*job-?title[^"]*"[^>]*>/i);
+  const text = head ? head[1] : (el ? elementContent(inner, el[1], el.index + el[0].length) : '');
+  return clean(text) || null;
 }
 
 /**
@@ -315,7 +335,10 @@ export function parseModernResults(html, origin) {
   const seen = new Set();
   // Split on the stable generic list-item class; slice(0) is the page head.
   const blocks = html.split(/<li class="search-results-list__item/).slice(1);
-  for (const block of blocks) {
+  for (const raw of blocks) {
+    // The split leaves everything after this item in its block, so cut it at the
+    // item's own </li>: the location fallback below must not read the next markup.
+    const block = elementContent(raw, 'li', raw.indexOf('>') + 1);
     const link = block.match(/search-results-list__job-link[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/);
     if (!link) continue;
     const href = decodeEntities(link[1]);
