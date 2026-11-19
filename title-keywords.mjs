@@ -124,13 +124,39 @@ export function foldAccents(s) {
   return String(s ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-// Lowercase, fold accents and collapse whitespace runs. Boards ship titles
-// with no-break spaces and doubled spaces ("Product\u00a0Manager"), and a
-// multi-word keyword is a substring test, so without the collapse the
-// positive "product manager" missed and the negative "sales engineer" let
-// the posting through.
+// Gender-inclusive title suffixes, stripped on BOTH sides of the comparison
+// like accents above, so the comparison stays symmetric.
+//
+// Quebec and France boards publish "Chargé·e de projets" and "Chargé(e) de
+// projet"; German boards publish "Projektleiter:in" and "Projektleiter*in";
+// Spanish boards publish "Coordinador/a". These are orthographic variants of
+// one title, not different roles, but a substring test misses every one of
+// them: "chargé de projet" is not a substring of "chargé·e de projets".
+//
+// The plural is already fine — it is a suffix, so "chargé de projet" matches
+// "chargé de projets". Only the inserted marker breaks the match.
+//
+// Deliberately narrow, because this runs on every title:
+//   - the middle-dot form takes any letters after the dot (·e, ·rice, ·ne);
+//   - the parenthesised form takes only a known closed set, so a real
+//     parenthetical ("Manager (Engineering)") is untouched;
+//   - :in and *in require the marker to sit directly against "in";
+//   - /a requires at least three letters before it, so "R/A" and "N/A" are
+//     untouched while "coordinador/a" is not.
+const INCLUSIVE_SUFFIX_RE = /[\u00b7\u2022\u2027\u2219]\p{L}+|\((?:e|a|s|in|ne|se|rice|trice|euse|ra)\)|(?<=\p{L})[:*]in\b|(?<=\p{L}{3})\/a\b/giu;
+
+/** @param {unknown} s @returns {string} the title with inclusive markers removed. */
+export function foldInclusive(s) {
+  return String(s ?? '').replace(INCLUSIVE_SUFFIX_RE, '');
+}
+
+// Lowercase, fold accents, strip inclusive markers and collapse whitespace
+// runs. Boards ship titles with no-break spaces and doubled spaces
+// ("Product\u00a0Manager"), and a multi-word keyword is a substring test, so
+// without the collapse the positive "product manager" missed and the negative
+// "sales engineer" let the posting through.
 export function foldTitle(s) {
-  return foldAccents(String(s ?? '').toLowerCase()).replace(/\s+/g, ' ');
+  return foldInclusive(foldAccents(String(s ?? '').toLowerCase())).replace(/\s+/g, ' ');
 }
 
 export function compileKeyword(kw) {
