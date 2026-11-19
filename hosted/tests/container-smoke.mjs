@@ -26,6 +26,12 @@ function docker(args, input = '') {
 }
 
 const limits = ['--init', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges', '--pids-limit=256', '--memory=1g', '--cpus=1', '--shm-size=256m', '--tmpfs=/tmp:rw,nosuid,noexec,size=128m'];
+// Native Linux bind mounts preserve the host UID. Match that non-root UID
+// rather than making private fixture directories world-writable for Docker.
+if (typeof process.getuid === 'function') {
+  if (process.getuid() === 0) throw new Error('Run the container smoke test from a non-root host account');
+  limits.push(`--user=${process.getuid()}:${process.getgid()}`);
+}
 const seccomp = process.env.HOSTED_TEST_SECCOMP;
 if (seccomp) limits.push(`--security-opt=seccomp=${path.resolve(seccomp)}`);
 
