@@ -9,7 +9,12 @@
  *   - voice: cv-voice.mjs against cv.md and the candidate's own words; skipped
  *            when the file is cv.md itself, since it is the source
  *   - --links: every http(s) URL in the file answers. A 4xx/5xx or no answer
- *            fails; linkedin.com only warns, because it refuses scripts. When
+ *            fails; linkedin.com only warns, because it refuses scripts. Each
+ *            request carries the same egress guard as lib/jd-page-fetch.mjs:
+ *            redirects are followed by hand, and every hop is checked as a
+ *            literal, by a DNS pre-check, and again at connect time, so a link
+ *            that resolves or redirects to a private address is never dialled.
+ *            When
  *            the file links a github.com/<user> profile and `gh` is signed in,
  *            it also warns about repos the file names that are not pinned
  *            there. Without `gh` that step says so and is skipped.
@@ -24,15 +29,20 @@
  */
 
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { isIP } from 'node:net';
+import { basename, dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
+import { resolveUserPath } from './keyword-match.mjs';
+import { isBlockedAddress } from './providers/_ip-guard.mjs';
 import { candidateOwnWords, voiceDashWarning, voiceIssues, voiceTellMessage } from './cv-voice.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOFT_HOSTS = /(^|\.)linkedin\.com$/i;
+const MAX_REDIRECTS = 5;
+const LINK_TIMEOUT_MS = 15000;
 
 /**
  * Every http(s) URL in the file, plus bare www./github.com/linkedin.com/gitlab.com
@@ -55,15 +65,19 @@ export function extractUrls(text) {
 /**
  * Loopback, private and link-local hosts are not checked: a CV has no reason
  * to link one, and fetching it would probe the user's own network.
+ *
+ * This is the literal check only. Address ranges apply to IP literals, so a
+ * public name that merely starts like one (fcc.gov, fdic.gov, 127.example.com)
+ * is still checked; a name that resolves to a private address is caught by the
+ * DNS pre-check and the connect-time guard in guardedStatus().
  * @param {string} url
  * @returns {boolean}
  */
 export function isPrivateHost(url) {
   let host;
-  try { host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase(); } catch { return true; }
-  return host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')
-    || /^(127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host)
-    || host === '::1' || /^f[cd]|^fe80:/.test(host);
+  try { host = new URL(url).hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase(); } catch { return true; }
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host === 'localhost.localdomain') return true;
+  return isIP(host) !== 0 && isBlockedAddress(host);
 }
 
 /**
@@ -74,7 +88,13 @@ export function isPrivateHost(url) {
  * @returns {string[]}
  */
 export function unpinnedNamed(text, publicRepos, pinned) {
-  const words = new Set(text.replace(/<[^>]+>/g, ' ').toLowerCase().match(/[a-z0-9._-]+/g) || []);
+  const words = new Set();
+  for (const w of text.replace(/<[^>]+>/g, ' ').toLowerCase().match(/[a-z0-9._-]+/g) || []) {
+    words.add(w);
+    // "rootcause." ends a sentence: also try the word without the punctuation
+    // around it, keeping inner dots and hyphens (my.repo, litmus-x).
+    words.add(w.replace(/^[._-]+|[._-]+$/g, ''));
+  }
   const pin = new Set(pinned.map((r) => r.toLowerCase()));
   return publicRepos.filter((r) => r && words.has(r.toLowerCase()) && !pin.has(r.toLowerCase()));
 }
@@ -102,17 +122,82 @@ function checkVoice(path, text, root) {
   return true;
 }
 
+/**
+ * Status of one link, through the egress guard lib/jd-page-fetch.mjs uses:
+ * redirects followed by hand (at most MAX_REDIRECTS), and on every hop the
+ * literal check, the DNS pre-check (validateUrlSecurity) and the connect-time
+ * dns.lookup guard (providerFetchContext), so a name that answers
+ * public-then-private is refused at the socket, not only at the pre-check.
+ *
+ * @param {string} url
+ * @param {{validateUrlSecurity: Function, providerFetchContext: import('node:async_hooks').AsyncLocalStorage}} guard
+ * @returns {Promise<{status: number|string}|{blocked: string}>}
+ */
+async function guardedStatus(url, guard) {
+  const signal = AbortSignal.timeout(LINK_TIMEOUT_MS);
+  let current = url;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    if (isPrivateHost(current)) return { blocked: hop ? `redirects to a private or local host (${current})` : 'private or local host' };
+    try {
+      await guard.validateUrlSecurity(current);
+    } catch (err) {
+      // A name with no address is dead for a reader too, so it fails. A DNS
+      // filter's 0.0.0.0 answer and a real private address are not dialled.
+      if (err?.livenessCode === 'dns_no_addresses') return { status: 'no answer (the name does not resolve)' };
+      const why = err?.livenessCode === 'dns_sinkhole' ? 'blocked by a DNS filter' : 'resolves to a private address';
+      return { blocked: hop ? `redirects to ${current}, which ${why === 'blocked by a DNS filter' ? 'is ' : ''}${why}` : why };
+    }
+    const targetHost = new URL(current).hostname.replace(/^\[|\]$/g, '');
+    let res;
+    try {
+      res = await guard.providerFetchContext.run({ url: current, targetHost }, async () => {
+        const r = await fetch(current, { redirect: 'manual', headers: { 'User-Agent': 'Mozilla/5.0 (career-ops verify-all)' }, signal });
+        await r.body?.cancel().catch(() => {});
+        return r;
+      });
+    } catch {
+      return { status: 'no answer' };
+    }
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      if (!location) return { status: res.status };
+      try { current = new URL(location, current).href; } catch { return { status: `${res.status} to an invalid location` }; }
+      continue;
+    }
+    return { status: res.status };
+  }
+  return { status: `more than ${MAX_REDIRECTS} redirects` };
+}
+
 async function checkLinks(urls) {
+  // The connect-time guard lives in the patched dns.lookup, so the patch has
+  // to be in place, and a fetch through an untrusted HTTP proxy would hide the
+  // destination from it: fail closed in both cases, as jd-page-fetch does.
+  const { dnsLookupPatched } = await import('./providers/_dns-cache.mjs');
+  const { providerFetchContext } = await import('./providers/_ip-guard.mjs');
+  const { validateUrlSecurity } = await import('./liveness-browser.mjs');
+  if (!dnsLookupPatched()) {
+    console.log('  [info] links not checked: the connect-time address guard is off (CAREER_OPS_NO_DNS_CACHE)');
+    return true;
+  }
+  if (/^(1|true)$/i.test(process.env.NODE_USE_ENV_PROXY ?? '') && process.env.CAREER_OPS_TRUST_PROXY_EGRESS !== '1') {
+    console.log('  [info] links not checked: NODE_USE_ENV_PROXY is set without CAREER_OPS_TRUST_PROXY_EGRESS=1');
+    return true;
+  }
+  const guard = { validateUrlSecurity, providerFetchContext };
   let dead = 0;
   for (const u of urls) {
-    if (isPrivateHost(u)) { console.log(`  [info] not checked (private or local host): ${u}`); continue; }
-    let status = 'no answer';
-    try {
-      const res = await fetch(u, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (career-ops verify-all)' }, signal: AbortSignal.timeout(15000) });
-      status = res.status;
-    } catch { /* reported below */ }
+    let hostname;
+    try { hostname = new URL(u).hostname; } catch {
+      dead++;
+      console.log(`  [fail] ${u}: not a valid URL`);
+      continue;
+    }
+    const result = await guardedStatus(u, guard);
+    if (result.blocked) { console.log(`  [info] not checked (${result.blocked}): ${u}`); continue; }
+    const { status } = result;
     if (typeof status === 'number' && status < 400) continue;
-    const soft = SOFT_HOSTS.test(new URL(u).hostname);
+    const soft = SOFT_HOSTS.test(hostname);
     if (!soft) dead++;
     console.log(`  [${soft ? 'warn' : 'fail'}] ${u}: ${status}`);
   }
@@ -146,23 +231,37 @@ function selfTest() {
   };
   eq(extractUrls('<a href="https://x.dev/a?b=1&amp;c=2">site</a>. See linkedin.com/in/jo and github.com/Jo, mail j@x.com, built with node.js (https://jo.github.io).'),
     ['https://x.dev/a?b=1&c=2', 'https://jo.github.io', 'https://linkedin.com/in/jo', 'https://github.com/Jo'], 'extractUrls');
-  eq([isPrivateHost('http://localhost:3000'), isPrivateHost('http://192.168.1.4/x'), isPrivateHost('https://example.com')], [true, true, false], 'isPrivateHost');
-  eq(unpinnedNamed('Built rootcause and litmus. Also mention-me.', ['rootcause', 'litmus', 'other'], ['Litmus']), ['rootcause'], 'unpinnedNamed');
+  eq([isPrivateHost('http://localhost:3000'), isPrivateHost('http://192.168.1.4/x'), isPrivateHost('https://example.com'), isPrivateHost('https://fcc.gov')], [true, true, false, false], 'isPrivateHost');
+  eq(unpinnedNamed('Built litmus and rootcause. Also mention-me.', ['rootcause', 'litmus', 'other'], ['Litmus']), ['rootcause'], 'unpinnedNamed');
   console.log('verify-all self-test passed');
 }
 
+const USAGE = `Usage: node verify-all.mjs <cv.md|generated.html> [--links]
+       node verify-all.mjs --self-test
+
+  --links      also check that every http(s) link answers, and warn about
+               repos the file names that are not pinned on the linked GitHub profile
+  --self-test  run the built-in checks and exit
+  -h, --help   show this help
+
+A bare relative path names a file in the data root; ./ or ../ means the working directory.
+Exit 0 when every check passes, 1 when one fails, 2 on a usage error.`;
+
 async function main(args) {
+  if (args.includes('--help') || args.includes('-h')) { console.log(USAGE); return 0; }
   if (args.includes('--self-test')) { selfTest(); return 0; }
-  const unknown = args.filter((a) => a.startsWith('--') && a !== '--links');
-  const files = args.filter((a) => !a.startsWith('--'));
+  const unknown = args.filter((a) => a.startsWith('-') && a !== '--links');
+  const files = args.filter((a) => !a.startsWith('-'));
   if (unknown.length || files.length !== 1) {
-    console.error('Usage: node verify-all.mjs <cv.md|generated.html> [--links]\n       node verify-all.mjs --self-test');
+    console.error(USAGE);
     return 2;
   }
-  const path = isAbsolute(files[0]) ? files[0] : resolve(process.cwd(), files[0]);
-  if (!existsSync(path)) { console.error(`ERROR: file not found: ${files[0]}`); return 2; }
-  const text = readFileSync(path, 'utf8');
+  // A bare relative path names a file in the data root (output/cv-acme.html),
+  // which can live outside the checkout; ./ or ../ names the working directory.
   const root = getCareerOpsRoot();
+  const path = resolveUserPath(files[0], root);
+  if (!existsSync(path)) { console.error(`ERROR: file not found: ${path}`); return 2; }
+  const text = readFileSync(path, 'utf8');
   let ok = true;
 
   console.log('== facts'); ok = runGate('verify-cv-facts.mjs', [path]) && ok;

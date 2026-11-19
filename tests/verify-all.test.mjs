@@ -27,9 +27,9 @@ function workspace(files) {
   return dir;
 }
 
-function run(dir, args) {
+function run(dir, args, cwd = dir) {
   return spawnSync(process.execPath, [SCRIPT, ...args], {
-    cwd: dir,
+    cwd,
     encoding: 'utf8',
     env: { ...process.env, CAREER_OPS_ROOT: dir },
   });
@@ -49,8 +49,60 @@ test('isPrivateHost refuses loopback and private ranges only', () => {
   }
 });
 
+test('isPrivateHost applies address ranges to IP literals only, not to names that start like one', () => {
+  for (const u of ['https://fcc.gov', 'https://fdic.gov/about', 'https://127.example.com', 'https://10x.dev', 'https://fe80.example.org']) {
+    assert.equal(isPrivateHost(u), false, u);
+  }
+  for (const u of ['http://169.254.169.254/latest', 'http://[::ffff:127.0.0.1]/', 'http://[fd12::1]/', 'http://[fe80::1]/', 'http://printer.local/', 'http://localhost./']) {
+    assert.equal(isPrivateHost(u), true, u);
+  }
+});
+
 test('unpinnedNamed matches whole repo names, case-insensitively', () => {
   assert.deepEqual(unpinnedNamed('<p>Shipped RootCause and litmus-x</p>', ['rootcause', 'litmus', 'litmus-x'], ['LITMUS-X']), ['rootcause']);
+});
+
+test('unpinnedNamed still finds a repo name followed by sentence punctuation', () => {
+  assert.deepEqual(unpinnedNamed('I built rootcause. Then litmus-x, and my.repo!', ['rootcause', 'litmus-x', 'my.repo'], []), ['rootcause', 'litmus-x', 'my.repo']);
+});
+
+test('a bare relative path resolves in the data root, not the working directory', () => {
+  const dir = workspace({ 'cv.md': CV, 'clean.md': '- Ran the weekly release train for the payments app\n' });
+  const elsewhere = mkdtempSync(join(tmpdir(), 'verify-all-cwd-'));
+  try {
+    const r = run(dir, ['clean.md'], elsewhere);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    // ./ names the working directory on purpose, where there is no such file.
+    assert.equal(run(dir, ['./clean.md'], elsewhere).status, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+test('--links never dials a private literal, however it is spelled', () => {
+  const dir = workspace({
+    'cv.md': CV,
+    'links.md': '- Ran the weekly release train for the payments app\n\nhttp://2130706433:9/ http://0x7f.1:9/ http://169.254.169.254/latest\n',
+  });
+  try {
+    const r = run(dir, ['links.md', '--links']);
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    assert.equal((r.stdout.match(/not checked \(private or local host\)/g) || []).length, 3, r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('--links reports a malformed link as a failure instead of throwing', () => {
+  const dir = workspace({ 'cv.md': CV, 'bad.md': '- Ran the weekly release train for the payments app\n\nhttp://[::1\n' });
+  try {
+    const r = run(dir, ['bad.md', '--links']);
+    assert.equal(r.status, 1, r.stdout + r.stderr);
+    assert.match(r.stdout, /\[fail\] http:\/\/\[::1: not a valid URL/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('usage errors exit 2', () => {
