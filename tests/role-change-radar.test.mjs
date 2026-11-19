@@ -168,6 +168,81 @@ test('adding a report number preserves tracker-only Radar history', async t => {
   assert.equal(state.identity, `tracker:${app.id}:${app.company}:${app.title}`);
   assert.equal(fs.readdirSync(path.join(root, 'data', 'role-change-radar')).filter(name => name.endsWith('.json')).length, 1);
 });
+test('different migration baselines recompute imported comparisons', async t => {
+  const { root, application } = fixture(t);
+  const directory = path.join(root, 'data', 'role-change-radar');
+  fs.mkdirSync(directory, { recursive: true });
+
+  const trackerIdentity = `tracker:${app.id}:${app.company}:${app.title}`;
+  fs.writeFileSync(path.join(directory, `${hashText(trackerIdentity)}.json`), `${JSON.stringify({
+    version: 1,
+    identity: trackerIdentity,
+    baseline: { text: original, hash: hashText(original), basis: 'Saved for future checks' },
+    captures: [],
+    comparisons: [],
+    lastCheck: null,
+  }, null, 2)}\n`);
+
+  const legacyIdentity = 'report:7';
+  const legacyBaseline = original.replace('Remote', 'Hybrid');
+  const legacyCapture = legacyBaseline;
+  const capture = { text: legacyCapture, capturedAt: '2026-01-02T00:00:00.000Z', source: app.url, hash: hashText(legacyCapture) };
+  fs.writeFileSync(path.join(directory, `${hashText(legacyIdentity)}.json`), `${JSON.stringify({
+    version: 1,
+    identity: legacyIdentity,
+    baseline: { text: legacyBaseline, hash: hashText(legacyBaseline), basis: 'Saved for future checks' },
+    captures: [capture],
+    comparisons: [{
+      id: 'legacy-comparison',
+      captureHash: capture.hash,
+      source: capture.source,
+      checkedAt: capture.capturedAt,
+      reviewedAt: '2026-01-03T00:00:00.000Z',
+      changes: [],
+      warnings: [],
+    }],
+    lastCheck: null,
+  }, null, 2)}\n`);
+
+  const state = await radar(root, { ...application, reportNum: 7 }, { action: 'load' });
+  assert.equal(state.comparisons.length, 1);
+  assert.equal(state.comparisons[0].reviewedAt, null);
+  assert.ok(state.comparisons[0].changes.some(change => change.categories.includes('Work arrangement')));
+});
+test('merged comparisons stay chronological for the latest-revision check', async t => {
+  const { root, application } = fixture(t);
+  const directory = path.join(root, 'data', 'role-change-radar');
+  fs.mkdirSync(directory, { recursive: true });
+
+  const trackerIdentity = `tracker:${app.id}:${app.company}:${app.title}`;
+  const newerCapture = original.replace('London', 'Paris');
+  const trackerCapture = { text: newerCapture, capturedAt: '2026-01-03T00:00:00.000Z', source: app.url, hash: hashText(newerCapture) };
+  fs.writeFileSync(path.join(directory, `${hashText(trackerIdentity)}.json`), `${JSON.stringify({
+    version: 1,
+    identity: trackerIdentity,
+    baseline: { text: original, hash: hashText(original), basis: 'Saved for future checks' },
+    captures: [trackerCapture],
+    comparisons: [{ id: 'tracker-newer', captureHash: trackerCapture.hash, source: trackerCapture.source, checkedAt: trackerCapture.capturedAt, reviewedAt: null, changes: [], warnings: [] }],
+    lastCheck: null,
+  }, null, 2)}\n`);
+
+  const legacyIdentity = 'report:7';
+  const olderCapture = original.replace('Remote', 'Hybrid');
+  const legacyCapture = { text: olderCapture, capturedAt: '2026-01-02T00:00:00.000Z', source: 'https://legacy.example/jobs/7', hash: hashText(olderCapture) };
+  fs.writeFileSync(path.join(directory, `${hashText(legacyIdentity)}.json`), `${JSON.stringify({
+    version: 1,
+    identity: legacyIdentity,
+    baseline: { text: original, hash: hashText(original), basis: 'Saved for future checks' },
+    captures: [legacyCapture],
+    comparisons: [{ id: 'legacy-older', captureHash: legacyCapture.hash, source: legacyCapture.source, checkedAt: legacyCapture.capturedAt, reviewedAt: null, changes: [], warnings: [] }],
+    lastCheck: null,
+  }, null, 2)}\n`);
+
+  const state = await radar(root, { ...application, reportNum: 7 }, paste(newerCapture));
+  assert.equal(state.comparisons.at(-1).captureHash, trackerCapture.hash);
+  assert.ok(state.comparisons.map(c => c.checkedAt).every((value, index, values) => index === 0 || values[index - 1] <= value));
+  assert.equal(state.lastCheck.status, 'success');
+});
 test('adding a report number preserves legacy report-keyed Radar history', async t => {
   const { root, application } = fixture(t);
   const changed = original.replace('Remote', 'Hybrid');

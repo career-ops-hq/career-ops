@@ -112,13 +112,33 @@ export async function radar(root, app, input, { extract = fetchPosting, now = ()
         for (const capture of legacy.captures) {
           if (!state.captures.some(c => c.hash === capture.hash && c.source === capture.source)) state.captures.push(capture);
         }
+        const retainedBaseline = state.baseline;
+        const baselinesDiffer = Boolean(
+          retainedBaseline?.hash
+          && migrationBaseline?.hash
+          && retainedBaseline.hash !== migrationBaseline.hash
+        );
         for (const comparison of legacy.comparisons) {
           if (!state.comparisons.some(c => c.captureHash === comparison.captureHash && c.source === comparison.source && c.checkedAt === comparison.checkedAt)) {
             let id = comparison.id;
             if (state.comparisons.some(c => c.id === id)) id = `${comparison.checkedAt}-${state.comparisons.length}`;
-            state.comparisons.push({ ...comparison, id });
+            if (baselinesDiffer) {
+              const capture = state.captures.find(c => c.hash === comparison.captureHash && c.source === comparison.source);
+              if (capture) {
+                state.comparisons.push({
+                  ...comparison,
+                  id,
+                  reviewedAt: null,
+                  ...compareDescriptions(retainedBaseline.text, capture.text),
+                });
+              }
+            } else {
+              state.comparisons.push({ ...comparison, id });
+            }
           }
         }
+        state.comparisons.sort((a, b) => String(a.checkedAt || '').localeCompare(String(b.checkedAt || ''))
+          || String(a.id || '').localeCompare(String(b.id || '')));
         if (!state.lastCheck && legacy.lastCheck) state.lastCheck = legacy.lastCheck;
       }
     }
