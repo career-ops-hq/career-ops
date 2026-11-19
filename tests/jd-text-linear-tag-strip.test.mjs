@@ -66,10 +66,12 @@ test('each helper strips 100,000 unclosed "<" in linear time', () => {
 test("apify's strip-until-nothing-changes loop stays linear on nested \"<a…>\"", () => {
   const nested = `${'<a'.repeat(50_000)}${'>'.repeat(50_000)}`;
   const started = performance.now();
-  apifyText(nested);
+  const out = apifyText(nested);
   const elapsed = performance.now() - started;
   // One pass per level of nesting took 3.7 s here; the loop now ends after two.
   assert.ok(elapsed < 1500, `apify htmlToText took ${Math.round(elapsed)} ms on 50,000 nested "<a"`);
+  // As before: the first pass removes everything up to the first ">".
+  assert.equal(out, '>'.repeat(49_999));
 });
 
 test('malformed markup strips as before: a "<" inside a tag is part of the tag', () => {
