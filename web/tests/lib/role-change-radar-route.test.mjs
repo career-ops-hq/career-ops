@@ -10,7 +10,7 @@ import '../helpers/web-ts-alias-loader.mjs';
 const codeRoot = fileURLToPath(new URL('../../../', import.meta.url));
 const description = 'Title: Engineer\nCompany: Fictional Labs\nWork arrangement: Remote\nResponsibilities\nBuild reliable systems and maintain service documentation.\nQualifications\nKnowledge of SQL and testing.';
 function fixture(t, reportFile, archived) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'radar-route-'));
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'radar-route-')));
   const env = { CAREER_OPS_ROOT: root, CAREER_OPS_CODE_ROOT: codeRoot, CAREER_OPS_DATA_DIR: '', CAREER_OPS_TRACKER: path.join(root, 'data', 'applications.md') };
   const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
   Object.assign(process.env, env);
