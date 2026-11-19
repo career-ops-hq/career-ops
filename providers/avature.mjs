@@ -40,6 +40,18 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 // huge global board to a cheap-to-walk one. A first page with posting-shaped
 // `JobDetail/` links but zero parsed articles throws (a markup change), never
 // silently reads as an empty board — see `assertParsedSomething`.
+//
+// A page with no posting rows is read as an empty board or as the end of the
+// walk, so it must be an Avature listing page before it is trusted as either:
+// a challenge, login or error page served with HTTP 200 carries no rows either
+// and would otherwise return [] or a truncated board as if complete. Every
+// real listing page seen on 2026-11-19 (Enel, Siemens, Macquarie, Deloitte
+// USI, careers.avature.net, Booz Allen, Lenovo and Bloomberg), their
+// no-results pages included, carries the `list-controls` toolbar, and
+// Avature's own "Oops" error page (HTTP 200, served for an offset far past
+// what a walk asks for) does not. A row-less page without the toolbar throws,
+// on every page (the first, later ones, the self-heal retry and a
+// verify-portals probe).
 
 const PAGE_SIZE = 6; // Avature serves exactly 6 results per page
 const DEFAULT_MAX_PAGES = 50; // ~300 postings; override via entry.max_pages
@@ -89,6 +101,11 @@ function resolveConfig(entry) {
   }
   return { searchUrl: `${u.origin}${searchPath}`, origin: u.origin, extraParams };
 }
+
+// The result-list toolbar (`<div class="list-controls ...">`, sort and pagination),
+// rendered on every Avature listing page including one whose only card says
+// "No jobs found". Matched as a class token in an attribute, not in CSS or script.
+const LISTING_PAGE = /\sclass\s*=\s*(?:"[^"]*?|'[^']*?)(?<![\w-])list-controls(?![\w-])/i;
 
 /** @param {string} s */
 function clean(s) {
@@ -296,13 +313,14 @@ export default {
     // fetchTextWithRetry (429, 5xx, transport) on a page past the first keeps the
     // pages already collected, warns and tags the board partial, so one flaky
     // response does not drop the whole listing. Page 0 (nothing collected), a
-    // non-transient failure (403, a challenge, a refused redirect) and a
-    // verify-portals probe (`ctx.maxPages`, whose request-budget error must stay
-    // unwrapped) all throw. The "raise max_pages" advice is never given for it.
+    // non-transient failure (403, a challenge, a refused redirect, a 200 page
+    // that is not an Avature listing page) and a verify-portals probe
+    // (`ctx.maxPages`, whose request-budget error must stay unwrapped) all throw.
+    // The "raise max_pages" advice is never given for it.
     const probing = Number(ctx.maxPages) > 0;
     let fetchError = null;
     const tolerates = (err, page) => {
-      if (page === 0 || probing || !isRetryableError(err)) return false;
+      if (page === 0 || probing || err?.notListingPage || !isRetryableError(err)) return false;
       fetchError = err;
       return true;
     };
@@ -315,7 +333,15 @@ export default {
         redirect: 'error',
         headers: { accept: 'text/html' },
       });
-      return { url, html: htmlText, articles: parseArticles(htmlText, cfg.origin), cards: countArticles(htmlText) };
+      const articles = parseArticles(htmlText, cfg.origin);
+      // Rows prove a listing page; without any, the page must still be one.
+      if (articles.length === 0 && !LISTING_PAGE.test(String(htmlText ?? ''))) {
+        throw Object.assign(
+          new Error(`avature: ${url} does not look like an Avature listing page (a challenge, login or error page?)`),
+          { notListingPage: true },
+        );
+      }
+      return { url, html: htmlText, articles, cards: countArticles(htmlText) };
     };
     // Absorb a page's articles, returning how many were not already seen.
     const absorb = (articles) => {

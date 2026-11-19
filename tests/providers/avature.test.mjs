@@ -171,12 +171,19 @@ try {
     fail(`parseArticles jobId extraction wrong: ${JSON.stringify(qArts.map((a) => a.id))}`);
   }
 
+  // A listing page with no rows: the result-list toolbar every real Avature listing page carries
+  // (captured on Enel, Siemens, Macquarie, Deloitte USI, careers.avature.net), here without cards.
+  const emptyListing = '<div class="list-controls list-controls--top"></div>';
+  // What those tenants serve past the last page: the toolbar and one card that says "No jobs found".
+  const noJobsPage = '<div class="list-controls list-controls--top"></div><div class="article article--result"><div class="article__header"><h3 class="article__header__text__title">No jobs found</h3></div></div>';
+  // A bot-wall or error page served with HTTP 200: no rows, no toolbar.
+  const challengePage = '<html><head><title>Just a moment...</title></head><body><div id="challenge-form">Checking your browser before accessing the site.</div></body></html>';
   // Pagination key — default `jobOffset`, self-heals to `offset` for tenants
   // that ignore it (Siemens). Mock fetchText with an article-less page so
   // fetch() stops after one request and we can read the URL it built.
   const captureFirstUrl = async (entry) => {
     let firstUrl;
-    const ctx = { sleep: async () => {}, fetchText: async (url) => { if (firstUrl === undefined) firstUrl = url; return '<div>no articles</div>'; } };
+    const ctx = { sleep: async () => {}, fetchText: async (url) => { if (firstUrl === undefined) firstUrl = url; return emptyListing; } };
     await avature.fetch(entry, ctx);
     return firstUrl;
   };
@@ -191,7 +198,7 @@ try {
   // Self-heal — jobOffset→offset when the primary key is inert.
   const originB = 'https://acme.avature.net';
   const mkHtml = (ids) => ids.map((id) =>
-    `<article class="article article--result"><h3 class="title"><a class="link" href="${originB}/careers/JobDetail/Role-${id}/${id}">Role ${id}</a></h3></article>`).join('');
+    `<article class="article article--result"><h3 class="title"><a class="link" href="${originB}/careers/JobDetail/Role-${id}/${id}">Role ${id}</a></h3></article>`).join('') || emptyListing;
   // Build a ctx whose fetchText answers from a {param: (pageIndex)=>ids} map.
   const mkCtx = () => {
     const calls = [];
@@ -211,7 +218,7 @@ try {
           if (n === 2) return mkHtml([13, 14]); // partial → last page
           return mkHtml([]);
         }
-        return '<div>no articles</div>';
+        return emptyListing;
       },
     };
     return { ctx, calls, sleeps: () => sleeps };
@@ -268,7 +275,7 @@ try {
   // A full page whose links are all dropped (non-http scheme) is not an empty or
   // repeated page: the walk must go on to the next one instead of stopping there.
   const scriptCard = (id) => `<article class="article article--result"><h3 class="title"><a class="link" href="javascript:void(0)//JobDetail?jobId=${id}">Role ${id}</a></h3></article>`;
-  const droppedPageCtx = mkPagedCtx([mkHtml([1, 2, 3, 4, 5, 6]), [7, 8, 9, 10, 11, 12].map(scriptCard).join(''), mkHtml([13, 14])]);
+  const droppedPageCtx = mkPagedCtx([mkHtml([1, 2, 3, 4, 5, 6]), emptyListing + [7, 8, 9, 10, 11, 12].map(scriptCard).join(''), mkHtml([13, 14])]);
   const droppedPageJobs = await avature.fetch({ name: 'X', api: base }, droppedPageCtx);
   if (droppedPageJobs.length === 8 && droppedPageCtx.calls.length === 3) pass('avature.fetch() keeps paging past a full page whose links were all dropped');
   else fail(`avature.fetch() returned ${droppedPageJobs.length} jobs after ${droppedPageCtx.calls.length} calls, expected 8 after 3`);
@@ -290,7 +297,7 @@ try {
         if (n === 2) return mkHtml([13, 14]);
         return mkHtml([]);
       }
-      return '<div>no articles</div>';
+      return emptyListing;
     },
   };
   const emptyHealed = await avature.fetch({ name: 'X', api: base }, emptyP1Ctx);
@@ -307,7 +314,7 @@ try {
     const capturedUrls = [];
     const facetCtx = {
       sleep: async () => {},
-      fetchText: async (url) => { capturedUrls.push(url); return '<div>no articles</div>'; },
+      fetchText: async (url) => { capturedUrls.push(url); return emptyListing; },
     };
     await avature.fetch({ name: 'X', api: facetBase }, facetCtx);
     const firstUrl = capturedUrls[0] ? new URL(capturedUrls[0]) : null;
@@ -323,7 +330,7 @@ try {
     const collideUrls = [];
     const collideCtx = {
       sleep: async () => {},
-      fetchText: async (url) => { collideUrls.push(url); return '<div>no articles</div>'; },
+      fetchText: async (url) => { collideUrls.push(url); return emptyListing; },
     };
     await avature.fetch({ name: 'X', api: collideBase }, collideCtx);
     const collideUrl = collideUrls[0] ? new URL(collideUrls[0]) : null;
@@ -387,7 +394,7 @@ try {
 
     const genuinelyEmptyCtx = {
       sleep: async () => {},
-      fetchText: async () => '<html><body>No open roles right now.</body></html>',
+      fetchText: async () => `<html><body>${emptyListing}No open roles right now.</body></html>`,
     };
     let jobs;
     let threwOnEmpty = false;
@@ -400,6 +407,46 @@ try {
       pass('avature.fetch() returns [] for a genuinely empty first page (no JobDetail links)');
     } else {
       fail(`avature.fetch() mishandled a genuinely empty board: threw=${threwOnEmpty}, jobs=${JSON.stringify(jobs)}`);
+    }
+  }
+
+  // A challenge, login or error page served with HTTP 200 is a named failure on every page.
+  {
+    const page = (n) => mkHtml([1, 2, 3, 4, 5, 6].map((i) => i + n * 6));
+    const run = async (ctx, entry = { name: 'X', api: base }) => {
+      try { return { jobs: await avature.fetch(entry, ctx) }; } catch (e) { return { err: e }; }
+    };
+    const named = (r) => r.err && /does not look like an Avature listing page/.test(r.err.message);
+    const first = await run({ sleep: async () => {}, fetchText: async () => challengePage });
+    if (named(first)) pass('avature.fetch() throws a named error when the first page is a 200 challenge page, not []');
+    else fail(`challenge on page 0: ${JSON.stringify(first.jobs ?? first.err?.message)}`);
+
+    const later = await run({ sleep: async () => {}, fetchText: async (url) => (Number(new URL(url).searchParams.get('jobOffset')) === 0 ? page(0) : challengePage) });
+    if (named(later)) pass('avature.fetch() throws when a later page is a 200 challenge page, instead of returning the earlier pages as a complete board');
+    else fail(`challenge on page 1: ${JSON.stringify(later.jobs?.length ?? later.err?.message)}`);
+
+    const third = await run({ sleep: async () => {}, fetchText: async (url) => { const n = Number(new URL(url).searchParams.get('jobOffset')) / 6; return n < 2 ? page(n) : challengePage; } });
+    if (named(third)) pass('avature.fetch() throws on a challenge page after several good pages');
+    else fail(`challenge on page 2: ${JSON.stringify(third.jobs?.length ?? third.err?.message)}`);
+
+    // Self-heal retry: page 1 repeats page 0 under jobOffset, and the offset retry is the challenge.
+    const heal = await run({ sleep: async () => {}, fetchText: async (url) => (new URL(url).searchParams.get('offset') !== null && Number(new URL(url).searchParams.get('offset')) > 0 ? challengePage : page(0)) });
+    if (named(heal)) pass('avature.fetch() throws when the self-heal retry page is a challenge page');
+    else fail(`challenge on the heal retry: ${JSON.stringify(heal.jobs?.length ?? heal.err?.message)}`);
+
+    const probe = await run({ maxPages: 5, sleep: async () => {}, fetchText: async (url) => (Number(new URL(url).searchParams.get('jobOffset')) === 0 ? page(0) : challengePage) });
+    if (named(probe) && !probe.err.truncated) pass('avature.fetch() propagates the challenge failure under a verify-portals probe');
+    else fail(`challenge under probe: ${JSON.stringify(probe.jobs?.length ?? probe.err?.message)}`);
+
+    // A real no-results page: [] on page 0, a clean end on a later page.
+    const none0 = await run({ sleep: async () => {}, fetchText: async () => noJobsPage });
+    if (none0.jobs && none0.jobs.length === 0) pass('avature.fetch() returns [] for a real no-results page ("No jobs found" card)');
+    else fail(`no-results page 0: ${JSON.stringify(none0.err?.message ?? none0.jobs)}`);
+
+    for (const end of [noJobsPage, emptyListing]) {
+      const ended = await run({ sleep: async () => {}, fetchText: async (url) => (Number(new URL(url).searchParams.get('jobOffset')) === 0 ? page(0) : end) });
+      if (ended.jobs && ended.jobs.length === 6 && !ended.jobs.truncated) pass('avature.fetch() ends the walk cleanly on a real no-results page after good pages');
+      else fail(`no-results page 1: ${JSON.stringify(ended.err?.message ?? ended.jobs?.length)}`);
     }
   }
 
