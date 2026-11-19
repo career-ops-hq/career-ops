@@ -32,10 +32,12 @@
 // with no cards, which is where the walk stops (as does a page that serves
 // the same postings as the one before it, in case a board ignores `page`).
 // The stop is decided from what the page returned, never from how many of its
-// postings are new. Page 1 must look like a Bizneo career site (`career-site`
-// body class). On every page, cards of which none parse, or `/jobs/<slug>`
-// links with no card at all, mean the markup changed and this throws instead
-// of reading as an empty board.
+// postings are new. Every page must look like a Bizneo career site
+// (`career-site` body class; a page past the end still carries it): one that
+// does not, such as an error or maintenance page answered with 200, throws
+// instead of ending the walk as if the board were complete. On every page,
+// cards of which none parse, or `/jobs/<slug>` links with no card at all, mean
+// the markup changed and this throws instead of reading as an empty board.
 //
 // `careers_url` must be a public named https host (no credentials, port, IP
 // address or local name; checked on the hostname only, before any request).
@@ -193,11 +195,13 @@ export default {
         redirect: 'error',
       });
 
-      if (page === 1 && !CAREER_SITE_RE.test(html)) {
+      // Every page is checked: an error page answered with 200 has no cards either,
+      // and must not read as the end of the board.
+      if (!CAREER_SITE_RE.test(html)) {
         throw new Error(`bizneo: ${url} does not look like a Bizneo career site (no career-site page)`);
       }
       const { jobs: parsed, cards } = parseListingPage(html, host, company);
-      // Every page is checked: a markup change can start on a later one.
+      // A markup change can start on a later page too.
       if (cards > 0 && parsed.length === 0) {
         throw new Error(`bizneo: ${url} has job cards but none could be parsed — the listing markup changed`);
       }

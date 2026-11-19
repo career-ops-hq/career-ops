@@ -195,4 +195,9 @@ const U = 'https://empleo.acme.example.com/jobs';
   err = undefined;
   try { await bizneo.fetch(entry, makeCtx(new Map([[U, '<html><body><h1>Maintenance</h1></body></html>']]))); } catch (e) { err = e; }
   check(err && /does not look like a Bizneo career site/.test(err.message), 'a page that is not a Bizneo career site throws');
+
+  // A later page that is not a career site (200 error or maintenance page) is a broken read, not the end.
+  err = undefined;
+  try { await bizneo.fetch(entry, makeCtx(new Map([[U, PAGE1], [`${U}?page=2`, '<html><body><h1>Service unavailable</h1></body></html>']]))); } catch (e) { err = e; }
+  check(err && /does not look like a Bizneo career site/.test(err.message) && /page=2/.test(err.message), 'a later page that is not a career site throws');
 }
