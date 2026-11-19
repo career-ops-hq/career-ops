@@ -35,30 +35,18 @@ try {
   if (provider.id === 'bolt') pass('bolt.id is "bolt"');
   else fail(`bolt.id is ${JSON.stringify(provider.id)}`);
 
-  // ── detect() ──
-  const detect = (careers_url) => provider.detect({ name: 'Acme', careers_url });
-  if (detect('https://bolt.eu/en/careers/positions/')?.url === 'https://bolt.eu/en/careers/positions/') pass('bolt.detect() claims the positions page');
-  else fail('bolt.detect() should claim bolt.eu/en/careers/positions/');
-  if (detect('https://www.bolt.eu/et/careers/')) pass('bolt.detect() claims another locale of the careers path');
-  else fail('bolt.detect() should claim /et/careers/ on www.bolt.eu');
-  const junk = [
-    ['bolt.eu outside the careers path', 'https://bolt.eu/en/'],
-    ['look-alike host', 'https://bolt.eu.example.com/en/careers/positions/'],
-    ['other host', 'https://careers.example.com/en/careers/positions/'],
-    ['non-HTTPS', 'http://bolt.eu/en/careers/positions/'],
-    ['malformed URL', 'not a url'],
-    ['empty string', ''],
-    ['non-string', 42],
-    ['missing', undefined],
-  ];
-  for (const [label, url] of junk) {
-    let got;
-    try { got = detect(url); } catch (err) { got = `threw ${err.message}`; }
-    if (got === null) pass(`bolt.detect() returns null for ${label}`);
-    else fail(`bolt.detect() for ${label} returned ${JSON.stringify(got)}`);
+  // ── detect(): none, bolt.eu is a branded domain reached only with `provider: bolt` ──
+  if (provider.detect === undefined) pass('bolt omits detect(): reachable only by an explicit provider: bolt');
+  else fail('bolt must not define detect() (a branded domain is never matched by URL)');
+  {
+    const { loadProviders, resolveProvider } = await import(pathToFileURL(join(ROOT, 'providers', '_registry.mjs')).href);
+    const providers = await loadProviders(join(ROOT, 'providers'));
+    const url = 'https://bolt.eu/en/careers/positions/';
+    const viaUrl = resolveProvider({ name: 'Bolt', careers_url: url, scan_method: 'websearch' }, providers);
+    const viaId = resolveProvider({ name: 'Bolt', careers_url: url, provider: 'bolt' }, providers);
+    if (viaUrl?.provider?.id !== 'bolt' && viaId?.provider?.id === 'bolt') pass('bolt is selected by provider: bolt and never claimed by the bolt.eu URL alone');
+    else fail(`bolt registry resolution: url -> ${JSON.stringify(viaUrl)}, provider -> ${viaId?.provider?.id}`);
   }
-  if (provider.detect(undefined) === null && provider.detect({}) === null) pass('bolt.detect() returns null with no entry or no careers_url');
-  else fail('bolt.detect() should return null with no entry or no careers_url');
 
   // ── parsePositions(): normalization ──
   const rows = [
@@ -81,6 +69,8 @@ try {
   else fail(`postedAt = ${JSON.stringify(a?.postedAt)}`);
   if (b?.title === 'Account Manager' && b.location === 'Spain' && !('postedAt' in b)) pass('bolt trims the title, drops an empty city, and leaves a bad date off');
   else fail(`b = ${JSON.stringify(b)}`);
+  if (!('country' in a) && b?.country === 'es' && !('country' in c)) pass('bolt sets country only when the source places agree on one country code');
+  else fail(`country = ${JSON.stringify([a?.country, b?.country, c?.country])}`);
   if (c?.location === '' && !('locations' in c)) pass('bolt position with no places gets an empty location and no locations key');
   else fail(`c = ${JSON.stringify(c)}`);
   if ('description' in a) fail('bolt must not set description from the teaser');
@@ -118,7 +108,12 @@ try {
   // ── fetch() ──
   const makeCtx = (respond) => {
     const calls = [];
-    const fetchText = async (url, opts = {}) => { calls.push({ url, opts }); return respond(url, calls.length); };
+    const fetchText = async (url, opts = {}) => {
+      // Every request, probe and retry included, must refuse redirects.
+      if (opts.redirect !== 'error') throw new Error(`bolt request without redirect: 'error' (${url})`);
+      calls.push({ url, opts });
+      return respond(url, calls.length);
+    };
     return { calls, ctx: { sleep: async () => {}, fetchText, fetchJson: async () => { throw new Error('bolt must not call fetchJson'); } } };
   };
 

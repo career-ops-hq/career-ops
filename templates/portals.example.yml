@@ -1395,7 +1395,6 @@ search_queries:
 #   tencent         careers.tencent.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   meituan         zhaopin.meituan.com  (zh-CN board; each keywords: entry queried server-side, results deduped)
 #   alibaba         talent.alibaba.com   (zh-CN board; each keywords: entry queried server-side, results deduped)
-#   bolt            bolt.eu/<locale>/careers/...        (Bolt's own careers site; always reads the English positions page, one request)
 #   aldi-nord       www.aldi-nord.de, www.aldi.(nl|be|lu|fr|es|pt|pl)  (ALDI Nord's own country sites; optional aldi_nord: block, see below)
 #   gupy            portal.gupy.io       (pt-BR board-wide Gupy search; each gupy.keywords entry swept separately, results
 #                   deduped. A single tenant's <slug>.gupy.io career page is NOT claimed)
@@ -1952,8 +1951,8 @@ search_queries:
 #   enabled: true
 #
 # - name: Bolt                           # single-company; Next.js careers page, every position in one HTML response
-#   careers_url: https://bolt.eu/en/careers/positions/   # auto-detects on bolt.eu's careers path
-#   provider: bolt                        # optional; the careers path also auto-detects
+#   careers_url: https://bolt.eu/en/careers/positions/   # a branded domain: never auto-detected
+#   provider: bolt                        # required; always reads the English positions page, one request
 #   enabled: true                         # the whole worldwide board (~190 postings, one request); location is left to location_filter
 #
 # - name: Dassault Systèmes              # single-company; Exalead card_search_api
@@ -3258,6 +3257,7 @@ tracked_companies:
 
   - name: Bolt
     careers_url: https://bolt.eu/en/careers/positions/
+    provider: bolt
     notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which the scanner reads directly (every position is in one page); the Ashby board named Bolt has no postings."
     enabled: true
 

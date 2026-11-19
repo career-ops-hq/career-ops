@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { fetchTextWithRetry } from './_http.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { readFlightStream } from './deel.mjs';
 
 // Bolt provider — Bolt's own careers site (bolt.eu/en/careers/positions/). A single-company
 // `tracked_companies:` adapter, like dassault.mjs and ibm.mjs. The site is a Next.js app-router
@@ -15,36 +16,20 @@ import { safeEncodeURIComponent } from './_safe-url.mjs';
 // one GET returns the whole board (187 postings on 2026-11-18, about 590 KB). The inventory is
 // returned as it is; location is left to the scanner's filters.
 //
+// The flight stream is joined by `readFlightStream` from deel.mjs (the same Next.js app-router
+// stream, with the same rule: one chunk that will not decode is skipped, not fatal).
+//
 // Config (portals.yml):
 //   - name: Bolt
-//     careers_url: https://bolt.eu/en/careers/positions/   # auto-detects on bolt.eu's careers path
-//     provider: bolt                                        # optional
+//     careers_url: https://bolt.eu/en/careers/positions/
+//     provider: bolt                                        # required: bolt.eu is a branded domain, never auto-detected
 //     enabled: true
 
-const HOSTS = new Set(['bolt.eu', 'www.bolt.eu']);
 // The listing is always read from this fixed page, whatever path or locale the entry carries:
 // only the host is a trust boundary.
 const POSITIONS_URL = 'https://bolt.eu/en/careers/positions/';
-const FLIGHT_CHUNK_RE = /self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)/g;
 const JOB_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PARSED_JOBS_KEY = '"parsedJobs":[';
-
-/**
- * Concatenate the flight chunks (each a JSON string literal) back into one text stream.
- * A malformed chunk is skipped.
- * @param {string} html
- */
-function flightText(html) {
-  let out = '';
-  for (const m of html.matchAll(FLIGHT_CHUNK_RE)) {
-    try {
-      out += JSON.parse(m[1]);
-    } catch {
-      /* skip a malformed chunk */
-    }
-  }
-  return out;
-}
 
 /**
  * The `parsedJobs` array of the flight stream, found with a string-aware bracket match.
@@ -99,7 +84,7 @@ function toEpochMs(value) {
  * @param {string} [entryName]
  */
 export function parsePositions(html, entryName) {
-  const rows = typeof html === 'string' ? extractParsedJobs(flightText(html)) : null;
+  const rows = typeof html === 'string' ? extractParsedJobs(readFlightStream(html)) : null;
   if (!rows) {
     throw new Error('bolt: job data (parsedJobs) not found in the careers page — markup changed?');
   }
@@ -115,7 +100,8 @@ export function parsePositions(html, entryName) {
     if (seg === null) continue;
     seen.add(id);
 
-    const places = (Array.isArray(r.header.locations) ? r.header.locations : [])
+    const locs = Array.isArray(r.header.locations) ? r.header.locations : [];
+    const places = locs
       .map((/** @type {any} */ l) => [l?.city, l?.country].filter((p) => typeof p === 'string' && p.trim()).map((p) => p.trim()).join(', '))
       .filter(Boolean);
 
@@ -128,6 +114,9 @@ export function parsePositions(html, entryName) {
       listingIdentity: { ats_provider: 'bolt', board_slug: 'bolt', posting_id: id },
     };
     if (places.length) job.locations = places;
+    // Structured country code only when every place that carries one agrees on a single country.
+    const codes = new Set(locs.map((/** @type {any} */ l) => (typeof l?.countryCode === 'string' ? l.countryCode.trim() : '')).filter(Boolean));
+    if (codes.size === 1) job.country = [...codes][0];
     const postedAt = toEpochMs(r.body?.jobPostedDate);
     if (postedAt !== undefined) job.postedAt = postedAt;
     jobs.push(job);
@@ -144,19 +133,8 @@ export function parsePositions(html, entryName) {
 export default {
   id: 'bolt',
 
-  detect(entry) {
-    const url = entry?.careers_url;
-    if (typeof url !== 'string') return null;
-    try {
-      const u = new URL(url);
-      if (u.protocol === 'https:' && HOSTS.has(u.hostname.toLowerCase()) && /^\/[a-z]{2}(?:-[a-z]{2})?\/careers(?:\/|$)/i.test(u.pathname)) {
-        return { url };
-      }
-    } catch {
-      /* not an absolute URL */
-    }
-    return null;
-  },
+  // No detect(): bolt.eu is a branded domain, so the provider is reached only by an explicit
+  // `provider: bolt` entry (providers/ADDING_A_PROVIDER.md, section 1).
 
   async fetch(entry, ctx) {
     const html = await fetchTextWithRetry(ctx, POSITIONS_URL, {
