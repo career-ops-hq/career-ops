@@ -471,8 +471,76 @@ try {
   const countryJobs = await avature.fetch({ name: 'X', careers_url: countryUrl, provider: 'avature' }, countryCtx);
   if (countryJobs.length === 8 && countryJobs.every((j) => j.location === 'Spain')) pass('avature.fetch() walks a JobOpenings<Country> list page (8 jobs, row location kept)');
   else fail(`avature.fetch() JobOpenings page wrong: ${JSON.stringify(countryJobs.map((j) => j.title))}`);
-  if (countryCtx.calls.every((c) => c.url.startsWith(countryUrl + '?jobOffset=') && c.redirect === 'error')) pass('avature.fetch() requests the given JobOpenings path with redirect:error (no rewrite to /careers/SearchJobs)');
+  if (JSON.stringify(countryCtx.calls) === JSON.stringify([0, 6].map((n) => ({ url: `${countryUrl}?jobOffset=${n}`, redirect: 'error' })))) pass('avature.fetch() requests exactly the given JobOpenings path at offsets 0 and 6 with redirect:error (no rewrite to /careers/SearchJobs)');
   else fail(`avature.fetch() JobOpenings requests wrong: ${JSON.stringify(countryCtx.calls)}`);
+
+  // Transient failures on a listing page (review follow-up). A 503 that clears
+  // on retry loses nothing; one that outlasts the retries keeps the pages already
+  // read, warns without the max_pages advice and tags the board partial.
+  const flaky = (failOn) => {
+    const ctx = {
+      calls: [],
+      sleep: async () => {},
+      fetchText: async function (url) {
+        this.calls.push(url);
+        const n = Number(new URL(url).searchParams.get('jobOffset')) / 6;
+        const err = failOn(n, this.calls.filter((u) => u === url).length);
+        if (err) throw err;
+        return n === 0 ? divPage([1, 2, 3, 4, 5, 6]) : divPage([7, 8]);
+      },
+    };
+    return ctx;
+  };
+  const http = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const countryEntry = { name: 'X', careers_url: countryUrl, provider: 'avature' };
+  const recoverCtx = flaky((n, attempt) => (n === 1 && attempt === 1 ? http(503) : null));
+  const recovered = await avature.fetch(countryEntry, recoverCtx);
+  if (recovered.length === 8 && !recovered.truncated && recoverCtx.calls.length === 3) pass('avature.fetch() retries a transient 503 on a listing page and loses nothing');
+  else fail(`avature.fetch() 503 retry: ${recovered.length} jobs, ${recoverCtx.calls.length} calls`);
+
+  const origErr = console.error;
+  const warnings = [];
+  console.error = (m) => warnings.push(String(m));
+  let kept;
+  try {
+    kept = await avature.fetch(countryEntry, flaky((n) => (n === 1 ? http(503) : null)));
+  } finally {
+    console.error = origErr;
+  }
+  if (kept.length === 6 && kept.truncated?.reason === 'fetch-error') pass('avature.fetch() keeps the pages read and tags the board partial when a later page keeps failing');
+  else fail(`avature.fetch() exhausted retry: ${kept.length} jobs, ${JSON.stringify(kept.truncated)}`);
+  if (warnings.length === 1 && /fetch error/.test(warnings[0]) && !/max_pages/.test(warnings[0])) pass('avature.fetch() warns about the fetch error without the raise-max_pages advice');
+  else fail(`avature.fetch() exhausted retry warning: ${JSON.stringify(warnings)}`);
+
+  const throwsOn = async (ctx, entry = countryEntry) => {
+    try { await avature.fetch(entry, ctx); return null; } catch (e) { return e; }
+  };
+  const firstErr = await throwsOn(flaky((n) => (n === 0 ? http(503) : null)));
+  if (firstErr && firstErr.status === 503) pass('avature.fetch() still throws when the first page fails (nothing to keep)');
+  else fail('avature.fetch() swallowed a first-page failure');
+  const blockedErr = await throwsOn(flaky((n) => (n === 1 ? http(403) : null)));
+  if (blockedErr && blockedErr.status === 403) pass('avature.fetch() throws on a non-transient 403 instead of returning a partial board');
+  else fail('avature.fetch() swallowed a 403 on a later page');
+  const probeCtx = flaky((n) => (n === 1 ? http(503) : null));
+  probeCtx.maxPages = 1;
+  const probeErr = await throwsOn(probeCtx);
+  if (probeErr && probeErr.status === 503) pass('avature.fetch() lets a failure propagate unwrapped while verify-portals probes (ctx.maxPages)');
+  else fail('avature.fetch() swallowed a failure during a probe');
+
+  // Posting ids come from the path and from ?jobId= only, never from another parameter.
+  const idRows = parseArticles(
+    mkDivRow(31, 'Path id').replace(/href="[^"]*"/, 'href="https://jobs.acme.example.com/en_US/careers/JobDetail/slug/31?team=Ops"') +
+    mkDivRow(32, 'Query id').replace(/href="[^"]*"/, 'href="https://jobs.acme.example.com/en_US/careers/JobDetail?jobId=456&returnUrl=/JobDetail/31"'),
+    'https://jobs.acme.example.com');
+  if (idRows.map((r) => r.id).join() === '31,456') pass('parseArticles reads the posting id from the path or from jobId, not from another query parameter');
+  else fail(`parseArticles ids = ${JSON.stringify(idRows.map((r) => r.id))}`);
+
+  // list-item-location keeps its priority over subtitle--location, wherever they sit in the card.
+  const locRows = parseArticles(
+    '<article class="article article--result"><span class="subtitle--location">Spain</span><h3 class="title"><a class="link" href="/careers/JobDetail/Role/41">Role</a></h3><span class="list-item-location">Madrid, Spain</span></article>',
+    'https://acme.avature.net');
+  if (locRows[0]?.location === 'Madrid, Spain') pass('parseArticles prefers list-item-location over an earlier subtitle--location');
+  else fail(`parseArticles location = ${JSON.stringify(locRows[0]?.location)}`);
 } catch (e) {
   fail(`avature provider tests crashed: ${e.message}`);
 }

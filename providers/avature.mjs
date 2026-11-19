@@ -1,7 +1,8 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
-import { sleep } from './_http.mjs';
+import { fetchTextWithRetry, isRetryableError, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Avature provider — parses the public Avature career-site job list.
 // Auto-detects from a careers_url on `*.avature.net`; a branded custom domain
@@ -105,12 +106,33 @@ function parsePosted(block) {
   return Number.isNaN(ms) ? undefined : ms;
 }
 
+/**
+ * Posting id of an absolute JobDetail URL: `/JobDetail/<slug>/<id>` or
+ * `/JobDetail/<id>` read from the path only, `?jobId=<id>` from the query only,
+ * so an id inside another parameter (`returnUrl=/JobDetail/123`) is never taken.
+ * @param {string} url
+ * @returns {string|null}
+ */
+function postingId(url) {
+  let u;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const pathM = u.pathname.match(/\/JobDetail\/[^/]*\/(\d+)/) || u.pathname.match(/\/JobDetail\/(\d+)\/?$/);
+  if (pathM) return pathM[1];
+  const q = u.searchParams.get('jobId');
+  return /\/JobDetail\/?$/.test(u.pathname) && q && /^\d+$/.test(q) ? q : null;
+}
+
 // Best-effort location: some tenants tag it with a list-item-location span or a
 // map-marker glyph; most (e.g. Synopsys) render none, so this returns ''.
 /** @param {string} block */
 function parseLocation(block) {
   const m =
-    block.match(/(?:list-item-location|subtitle--location)[^>]*>([\s\S]*?)<\/span>/i) ||
+    block.match(/list-item-location[^>]*>([\s\S]*?)<\/span>/i) ||
+    block.match(/subtitle--location[^>]*>([\s\S]*?)<\/span>/i) ||
     block.match(/class="[^"]*\blocation\b[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div|li)>/i) ||
     block.match(/glyphicon-map-marker[\s\S]{0,80}?>([^<]{2,60})</i) ||
     block.match(/icon-address[^>]*><\/span>([^<]{2,80})</i);
@@ -204,9 +226,9 @@ export function parseArticles(htmlText, origin) {
       // so new URL keeps it as it is: only http(s) is a job link.
       if (!/^https?:\/\//i.test(url)) continue;
     }
-    const idM = url.match(/\/JobDetail\/[^/]*\/(\d+)/) || url.match(/\/JobDetail\/(\d+)(?:[/?#]|$)/) || url.match(/\/JobDetail\?(?:[^#]*&)?jobId=(\d+)/i);
+    const id = postingId(url);
     out.push({
-      id: idM ? idM[1] : url,
+      id: id ?? url,
       title,
       url,
       location: parseLocation(block),
@@ -251,11 +273,26 @@ export default {
     const jobs = [];
     const seen = new Set();
 
+    // Exhaustion policy: a request that still fails transiently after
+    // fetchTextWithRetry (429, 5xx, transport) on a page past the first keeps the
+    // pages already collected, warns and tags the board partial, so one flaky
+    // response does not drop the whole listing. Page 0 (nothing collected), a
+    // non-transient failure (403, a challenge, a refused redirect) and a
+    // verify-portals probe (`ctx.maxPages`, whose request-budget error must stay
+    // unwrapped) all throw. The "raise max_pages" advice is never given for it.
+    const probing = Number(ctx.maxPages) > 0;
+    let fetchError = null;
+    const tolerates = (err, page) => {
+      if (page === 0 || probing || !isRetryableError(err)) return false;
+      fetchError = err;
+      return true;
+    };
+
     const getPage = async (param, page) => {
       const usp = new URLSearchParams(cfg.extraParams);
       usp.set(param, String(page * PAGE_SIZE));
       const url = `${cfg.searchUrl}?${usp.toString()}`;
-      const htmlText = await ctx.fetchText(url, {
+      const htmlText = await fetchTextWithRetry(ctx, url, {
         redirect: 'error',
         headers: { accept: 'text/html' },
       });
@@ -286,7 +323,13 @@ export default {
 
     for (let page = 0; page < maxPages; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
-      let result = await getPage(offsetParam, page);
+      let result;
+      try {
+        result = await getPage(offsetParam, page);
+      } catch (err) {
+        if (!tolerates(err, page)) throw err;
+        break;
+      }
       let fresh = absorb(result.articles);
 
       // Self-heal: the first paginated page didn't advance — either it repeated
@@ -300,7 +343,13 @@ export default {
       if (stalled(result, fresh) && canHeal && page === 1) {
         canHeal = false;
         await sleep(INTER_PAGE_DELAY_MS, ctx);
-        const altResult = await getPage(FALLBACK_OFFSET_PARAM, page);
+        let altResult;
+        try {
+          altResult = await getPage(FALLBACK_OFFSET_PARAM, page);
+        } catch (err) {
+          if (!tolerates(err, page)) throw err;
+          break;
+        }
         const altFresh = absorb(altResult.articles);
         if (altFresh > 0) {
           offsetParam = FALLBACK_OFFSET_PARAM;
@@ -317,6 +366,10 @@ export default {
       // dropped (non-http scheme, no title) still advanced, so the walk goes on.
       if (stalled(result, fresh)) break; // empty page / looped / offset ignored / last page
       if (result.cards < PAGE_SIZE) break; // last page (raw card count, not the parsed one)
+    }
+    if (fetchError) {
+      console.error(`⚠️  avature: ${entry.name} stopped after a fetch error (${fetchError.message}); kept ${jobs.length} postings`);
+      markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
     }
     return jobs;
   },
