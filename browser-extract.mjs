@@ -1412,7 +1412,7 @@ async function main() {
 
   let chromium;
   try {
-    ({ chromium } = await import('playwright'));
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
   } catch {
     console.error(JSON.stringify({ error: 'playwright not installed', code: 'no_playwright' }));
     process.exit(1);

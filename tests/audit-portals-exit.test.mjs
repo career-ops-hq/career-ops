@@ -5,7 +5,7 @@
 // into exit 99, which fails on every platform.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,6 +20,13 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 function runAudit(argsFor, preloadBody = '') {
   const dir = mkdtempSync(join(tmpdir(), 'audit-portals-exit-'));
   try {
+    // A checkout with its own .env or config/plugins.yml makes the engine warn on
+    // stderr that they sit beside the code, not in the data folder (#7286). An
+    // empty copy in the data folder keeps these stderr checks the same for every
+    // checkout.
+    mkdirSync(join(dir, 'config'));
+    writeFileSync(join(dir, '.env'), '');
+    writeFileSync(join(dir, 'config', 'plugins.yml'), '');
     const portals = join(dir, 'portals.yml');
     writeFileSync(portals, `tracked_companies:
   - name: Fictional Employer

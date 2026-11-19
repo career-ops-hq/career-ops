@@ -229,6 +229,11 @@
 # structured location only. Reverse scans do not consume those field gates;
 # unlike the shared location filter, that alternative does not use URL hints.
 #
+# "Washington" in allow or always_allow means the state: it does not match
+# Washington, DC, so "Seattle, Washington" passes and "Washington, DC" does
+# not. To target DC, list "DC" or "D.C." (either one matches both spellings).
+# In block and block_hard, "Washington" still matches both.
+#
 # A generic allow entry ("Remote", "Remote work", "Work from home", "Anywhere",
 # "Distributed") says nothing about where the role is. When always_allow or
 # allow also names a country ("United States", "Germany") or a US state name,
