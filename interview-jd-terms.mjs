@@ -411,7 +411,7 @@ function selfTest() {
 
 function main() {
   const args = process.argv.slice(2);
-  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--top'] });
+  validateFlags(args, KNOWN_FLAGS, USAGE, { valueFlags: ['--top'], requireOperand: true });
   if (hasFlag(args, '--self-test')) process.exit(selfTest() ? 0 : 1);
   const top = safeIntFlag(flagValue(args, '--top'), DEFAULT_TOP);
   const result = analyzeRoot(getCareerOpsRoot(), { top });
