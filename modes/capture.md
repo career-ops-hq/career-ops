@@ -22,17 +22,19 @@ If the user pastes a URL or a JD with no such qualifier, the router's
 
 ## Steps
 
-1. Take the URL. If the user supplied JD text, pass it on stdin; otherwise the
+1. Take the URL. If the user supplied JD text, save it to a file with the file-write tool and pass `--text-file`; otherwise the
    capture is URL-only and a later evaluation fetches the JD itself.
 2. Run, from `PROJECT_ROOT`:
 
    ```bash
-   # With the job description:
-   printf '%s' "$JD_TEXT" | node capture-jd.mjs --url "<url>" --title "<page title>" --commit --json
+   # With the job description (saved first with the file-write tool, never echoed through the shell):
+   node capture-jd.mjs --url '<url>' --title '<page title>' --text-file '<path to the saved JD text>' --commit --json
 
    # URL only:
-   node capture-jd.mjs --url "<url>" --title "<page title>" --commit --json
+   node capture-jd.mjs --url '<url>' --title '<page title>' --commit --json
    ```
+
+   **Quote untrusted values for the shell.** The URL, page title, company, role and file path come from outside: wrap each one in single quotes, replacing every embedded `'` with `'\''`, and never place them inside double quotes, where `$(...)`, backticks and `$VAR` still expand. The page title is the one value with no file or stdin alternative, so it gets the same single-quote escaping.
 
    `--title` lets the script derive company and role. When the user states either
    explicitly, pass `--company` / `--role` — an explicit label always beats a
