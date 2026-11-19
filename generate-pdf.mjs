@@ -2451,7 +2451,7 @@ export async function inlineLocalFonts(html) {
 export async function launchChromium(options = {}) {
   const { chromium } = await import('playwright');
   const { projectRoot, ...launchOptions } = options;
-  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot, localContentOnly: true }));
 }
 
 /**
