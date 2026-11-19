@@ -19,3 +19,5 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-18 `2026-11-18-santifer.8` (255 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
 - 2026-11-18 `2026-11-18-santifer.9` (156 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
 - 2026-11-18 `2026-11-18-santifer.10` (2017 boards, source `web-index:wayback@2026-11-18`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer.3` (345 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
+- 2026-11-19 `2026-11-19-santifer.4` (124 boards, source `web-index:wayback@2026-11-12`): Found by the project's discoverer in a public web index
