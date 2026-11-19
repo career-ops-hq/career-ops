@@ -17,7 +17,9 @@
 //     stays a duplicate;
 //   - end to end through the CLI: the labelled tracker row lets JR25853 through
 //     once (not again on a second run), and an Applied row with no requisition
-//     lets later labelled openings through.
+//     lets later labelled openings through;
+//   - a pipeline row whose scan-history write never landed keeps the
+//     duplicate, since its requisition id was lost rather than absent.
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -25,9 +27,12 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 import {
   ANY_REQUISITION,
+  appendToPipeline,
+  appendToScanHistory,
   collectSeenCompanyRoles,
   companyRoleDedupKey,
   isDistinctRequisition,
+  loadDedupSnapshot,
   matchesSeenCompanyRole,
   requisitionIdForDedup,
   requisitionIdsForDedup,
@@ -476,4 +481,53 @@ ${workday.replace('London', 'New-York')}_JR200\t2026-09-22\tAcme\tEngineer\tAcme
       eq('located keys: an unlabelled locationless row still hides a later row with no id', matches('Paris', []), true);
     }
   }
+}
+
+// ── 6. Only the pipeline write landed (PR #7138 review) ──────────────────────
+// The scanner writes pipeline.md first and scan-history second, and a
+// provider-only requisition id lives in scan-history alone. When the history
+// write fails, the pipeline row has lost its id, not named none, so a new URL
+// for the same requisition must stay a duplicate. Once history has the row,
+// the id is back; a history row that names no id lets a labelled opening in.
+{
+  const offer = (url, requisitionId) => ({
+    url, company: 'Acme', title: 'Engineer', source: 'fixture', ...(requisitionId ? { requisitionId } : {}),
+  });
+  const seenOpening = 'https://jobs.example.com/acme/1001';
+  const candidate = (snapshot, requisition) => matchesSeenCompanyRole({
+    key: companyRoleDedupKey('Acme', 'Engineer'),
+    baseKey: companyRoleDedupKey('Acme', 'Engineer'),
+    seen: snapshot.seenCompanyRoles,
+    requisitions: snapshot.seenCompanyRoleRequisitions,
+    locatedRequisitions: snapshot.locatedRequisitionsByBase,
+  }, requisition);
+  const run = async (historyOffer) => {
+    const dir = mkdtempSync(join(tmpdir(), 'scan-reqdedup-pipeline-only-'));
+    try {
+      const pipelinePath = join(dir, 'pipeline.md');
+      const scanHistoryPath = join(dir, 'scan-history.tsv');
+      const applicationsPath = join(dir, 'applications.md');
+      await appendToPipeline([offer(seenOpening, 'JR100')], { pipelinePath, scanHistoryPath, historyPolicy: {} });
+      if (historyOffer) await appendToScanHistory([historyOffer], '2026-11-02', 'added', { historyPath: scanHistoryPath, historyPolicy: {} });
+      return loadDedupSnapshot({}, undefined, { pipelinePath, scanHistoryPath, applicationsPath });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const eq = (label, actual, expected) => {
+    if (actual === expected) pass(label);
+    else fail(`${label}: got ${actual}, want ${expected}`);
+  };
+
+  const pipelineOnly = await run(null);
+  eq('pipeline-only write: a new URL for JR100 stays a duplicate', candidate(pipelineOnly, ['JR100']), true);
+  eq('pipeline-only write: a new URL with no id stays a duplicate', candidate(pipelineOnly, []), true);
+
+  const both = await run(offer(seenOpening, 'JR100'));
+  eq('both writes: a new URL for JR100 is a duplicate', candidate(both, ['JR100']), true);
+  eq('both writes: JR200 under the same title is a different opening', candidate(both, ['JR200']), false);
+
+  const noId = await run(offer(seenOpening));
+  eq('history names no id: a labelled JR100 opening is not hidden', candidate(noId, ['JR100']), false);
+  eq('history names no id: a later row with no id stays a duplicate', candidate(noId, []), true);
 }
