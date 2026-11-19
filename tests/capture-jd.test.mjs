@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { atomicWrite, captureJd, captureName, commitCapture, deriveLabels, appendPendingRow, urlAlreadyPresent, today } from '../capture-jd.mjs';
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
-import { ensureToken, createServer } from '../capture-server.mjs';
+import { ensureToken, createServer, startEvaluation } from '../capture-server.mjs';
 
 // Isolate every Git subprocess, including production calls inheriting process.env.
 for (const key of Object.keys(process.env)) {
@@ -651,4 +651,45 @@ test('--flag=value keeps every = after the first one', () => {
   });
   assert.equal(run.status, 0, run.stderr);
   assert.equal(JSON.parse(run.stdout).url, 'https://acme.test/jobs?id=5');
+});
+
+test('startEvaluation on win32 keeps the URL on one quoted command-line argument', () => {
+  const root = scratch();
+  const calls = [];
+  const fakeSpawn = (bin, args, options) => {
+    calls.push({ bin, args, options });
+    return { unref() {} };
+  };
+  const url = 'https://acme.test/jobs/42?id=5';
+  const result = startEvaluation({ url, dataRoot: root, cli: 'opencode', platform: 'win32', spawnFn: fakeSpawn });
+  assert.equal(result.started, true, JSON.stringify(result));
+  assert.equal(calls.length, 1);
+  const { args, options } = calls[0];
+  assert.equal(options.shell, true);
+  assert.ok(args.every((arg) => !/[\r\n]/.test(arg)), 'no newline survives to cmd.exe');
+  const prompt = args[args.length - 1];
+  assert.ok(prompt.startsWith('"') && prompt.endsWith('"'), 'prompt is one quoted argument');
+  assert.ok(prompt.includes(url), 'the URL reaches the spawned CLI');
+});
+
+test('startEvaluation on win32 refuses a URL with cmd.exe metacharacters', () => {
+  const root = scratch();
+  for (const url of ['https://acme.test/jobs?a=1&b=2', 'https://acme.test/%PATH%', 'https://acme.test/a"b', 'https://acme.test/a^b', 'https://acme.test/<x>']) {
+    const calls = [];
+    const result = startEvaluation({ url, dataRoot: root, cli: 'opencode', platform: 'win32', spawnFn: (...a) => { calls.push(a); return { unref() {} }; } });
+    assert.equal(result.started, false, url);
+    assert.match(result.reason, /cmd\.exe|unsafe/i);
+    assert.equal(calls.length, 0, `${url} must not spawn`);
+  }
+});
+
+test('startEvaluation off win32 spawns without a shell and passes the URL unquoted', () => {
+  const root = scratch();
+  const calls = [];
+  const url = 'https://acme.test/jobs?a=1&b=2';
+  const result = startEvaluation({ url, dataRoot: root, cli: 'claude', platform: 'linux', spawnFn: (bin, args, options) => { calls.push({ args, options }); return { unref() {} }; } });
+  assert.equal(result.started, true);
+  assert.notEqual(calls[0].options.shell, true);
+  assert.ok(calls[0].args[1].includes(url));
+  assert.ok(!/\n/.test(calls[0].args[1]));
 });

@@ -121,37 +121,47 @@ function readBody(req) {
 }
 
 /**
+ * Characters cmd.exe treats specially even inside a double-quoted argument that
+ * a `shell: true` spawn builds by joining argv with spaces. Control characters
+ * and whitespace are already refused by validateCaptureUrl; they are checked
+ * again here so this function stays safe on its own.
+ */
+const CMD_UNSAFE = /["&|<>^%\p{Cc}\s]/u;
+
+/**
  * Start one detached evaluation session for a just-captured posting.
  *
  * Deliberately fire-and-forget: the response returns as soon as the process is
  * spawned, and every byte it writes lands in the log. A capture that could not
  * start its evaluation is still a successful capture.
  *
+ * The prompt is a single line: on Windows the spawn goes through cmd.exe
+ * (`shell: true`), which cuts a command line at the first newline, so a
+ * multi-line prompt never delivered the URL. There the prompt is also wrapped in
+ * double quotes, and a URL containing a cmd.exe metacharacter is refused rather
+ * than escaped.
+ *
+ * `platform` and `spawnFn` are injectable for tests.
+ *
  * @returns {{started: boolean, command?: string, log?: string, reason?: string}}
  */
-export function startEvaluation({ url, dataRoot, cli }) {
+export function startEvaluation({ url, dataRoot, cli, platform = process.platform, spawnFn = spawn }) {
   const logPath = path.join(dataRoot, 'data', 'capture-evals.log');
+  const useShell = platform === 'win32';
+  if (useShell && CMD_UNSAFE.test(String(url))) {
+    return { started: false, reason: 'url contains characters unsafe for cmd.exe (& | < > ^ % or ")', log: logPath };
+  }
   mkdirSync(path.dirname(logPath), { recursive: true });
 
-  const prompt = [
-    '# career-ops',
-    '',
-    url,
-    '',
-    'Load the career-ops skill:',
-    '',
-    '```javascript',
-    'skill({ name: "career-ops" })',
-    '```',
-  ].join('\n');
+  const prompt = `career-ops auto-pipeline ${url} - load the career-ops skill first`;
+  const promptArg = useShell ? `"${prompt}"` : prompt;
 
   const bin = cli || process.env.CAREER_OPS_CLI || 'opencode';
-  const args = bin === 'opencode' ? ['run', prompt] : ['-p', prompt];
-  const useShell = process.platform === 'win32';
+  const args = bin === 'opencode' ? ['run', promptArg] : ['-p', promptArg];
 
   try {
     const fd = openSync(logPath, 'a');
-    const child = spawn(bin, args, {
+    const child = spawnFn(bin, args, {
       cwd: dataRoot,
       detached: true,
       stdio: ['ignore', fd, fd],
