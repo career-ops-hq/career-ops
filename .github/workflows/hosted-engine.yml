@@ -32,9 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Pin the Linux environment: newer image defaults restrict unprivileged
-        # browser namespaces. Keep the Chromium sandbox enabled in every test.
-        os: [ubuntu-22.04, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     steps:
@@ -62,6 +60,16 @@ jobs:
       - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: docker build -f hosted/Dockerfile --build-arg ENGINE_REVISION=${{ github.sha }} -t hosted-career-worker:local .
       - run: node hosted/prepare-seccomp.mjs "${RUNNER_TEMP}/hosted-seccomp.json"
+      - name: Run the full Linux suite in the constrained worker image
+        run: >-
+          docker run --rm --init --network=none --read-only
+          --cap-drop=ALL --security-opt=no-new-privileges
+          --security-opt=seccomp=${RUNNER_TEMP}/hosted-seccomp.json
+          --pids-limit=512 --memory=2g --cpus=2 --shm-size=256m
+          --tmpfs=/tmp:rw,nosuid,noexec,size=256m
+          --mount type=bind,source=${{ github.workspace }}/hosted/tests,target=/opt/career-ops/hosted/tests,readonly
+          --workdir=/opt/career-ops/hosted --entrypoint=node
+          hosted-career-worker:local --test 'tests/*.test.mjs'
       - run: npm --prefix hosted run test:container
         env:
           HOSTED_TEST_SECCOMP: ${{ runner.temp }}/hosted-seccomp.json

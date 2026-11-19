@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { parseScoreSummary, normalizedTrackerScore } from '../lib/tracker-addition.mjs';
 import { resolveColumns, parseTrackerRow, parseMarkdownLinks } from '../tracker-parse.mjs';
 import { loadYaml } from '../lib/yaml-document.mjs';
@@ -104,8 +105,22 @@ export function createEngine({ provider, engineRevision, browserExecutable, allo
         const html = contained(root, htmlRelative), pdf = contained(root, pdfRelative);
         await fs.mkdir(path.dirname(html), { recursive: true });
         await fs.copyFile(stagedHtml, html, fs.constants.COPYFILE_EXCL);
-        const renderEnv = { ...env, OPENAI_API_KEY: '', PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: browserExecutable };
-        const rendered = await run('hosted/render.mjs', [html, pdf, '--kind=cv', `--report=${source.reportNumber}`, '--strict-fact-check', '--strict-pages', '--max-pages=2'], { runEnv: renderEnv, failureCode: 'cv_render_failed' });
+        // Chromium puts Unix sockets under TMPDIR; the nested workspace/job
+        // home can exceed sockaddr_un's path limit. Use a short private temp
+        // directory, while HOME and candidate files stay workspace-scoped.
+        const tempParent = await fs.realpath(process.platform === 'win32' ? os.tmpdir() : '/tmp');
+        const browserTemp = await fs.mkdtemp(path.join(tempParent, 'hc-'));
+        let rendered;
+        try {
+          await fs.chmod(browserTemp, 0o700);
+          const renderEnv = { ...env, OPENAI_API_KEY: '', PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: browserExecutable, TMPDIR: browserTemp, TMP: browserTemp, TEMP: browserTemp };
+          rendered = await run('hosted/render.mjs', [html, pdf, '--kind=cv', `--report=${source.reportNumber}`, '--strict-fact-check', '--strict-pages', '--max-pages=2'], { runEnv: renderEnv, failureCode: 'cv_render_failed' });
+        } finally {
+          // Verify the exact private target before recursive cleanup on Windows
+          // as well as Unix. Never follow a replaced directory/symlink.
+          if (path.dirname(browserTemp) !== tempParent || !path.basename(browserTemp).startsWith('hc-') || await fs.realpath(browserTemp) !== browserTemp) throw new EngineError('unsafe_temp_cleanup');
+          await fs.rm(browserTemp, { recursive: true, force: true });
+        }
         const bytes = await fs.readFile(pdf);
         if (bytes.length < 100 || bytes.subarray(0, 5).toString() !== '%PDF-') throw new EngineError('invalid_pdf');
         const metadata = JSON.parse(rendered.stdout.match(/^HOSTED_RENDER_RESULT=(.+)$/m)?.[1] || '{}');
