@@ -4,7 +4,7 @@
  * generate-pdf.mjs — HTML → PDF via Playwright
  *
  * Usage:
- *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
+ *   node career-ops/generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check] [--upload-copy] [--upload-role="Role"]
  *   node career-ops/generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]
  *
  * --batch renders every document in a JSON manifest (an array of
@@ -56,13 +56,25 @@
  * means no gate, and combining the two is rejected rather than silently
  * honouring one over the other. A `block` verdict already fails without it.
  *
+ * --upload-copy also writes a copy of a CV under the name an employer should
+ * see, for uploads made by hand (LinkedIn Easy Apply, email):
+ * {output dir}/upload/{output stem}/First-Last-Role-CV.pdf. The name comes from
+ * candidate.full_name in config/profile.yml and the role: --upload-role="…",
+ * else the tracker row linked to --report, else the CV's printed headline
+ * (lib/upload-name.mjs, the builder the web apply flow uses, #6399).
+ * --upload-role implies --upload-copy. The copy
+ * is never indexed in data/pdf-index.tsv and never replaces the output; one
+ * folder per output file means two applications for the same role never
+ * collide, and a re-render refreshes its own copy. `cv.upload_copy: true` in
+ * config/profile.yml turns it on for every single-file CV render.
+ *
  * Requires: @playwright/test (or playwright) installed.
  * Uses Chromium headless to render the HTML and produce a clean, ATS-parseable PDF.
  */
 
-import { resolve, dirname, relative, sep, isAbsolute, basename } from 'path';
+import { resolve, dirname, relative, sep, isAbsolute, basename, join } from 'path';
 import { readFile } from 'fs/promises';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
@@ -71,6 +83,7 @@ import { loadYaml } from './lib/yaml-document.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
+import { linkedReportNumbers, parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { localToday } from './lib/local-today.mjs';
 import { stripEmptyRenderedSections } from './cv-sections-core.mjs';
@@ -1385,6 +1398,91 @@ export function warnLongPortalFields(html, outputPath, limit = PORTAL_LENGTH_LIM
 }
 
 /**
+ * The manual-upload copy of a CV: {output dir}/upload/{output stem}/{name},
+ * where {name} is `First-Last-Role-CV.pdf` (lib/upload-name.mjs) from the
+ * profile's full name and the role: the caller's (--upload-role, else the
+ * tracker row), else the CV's printed headline. A name over the portal limit
+ * (#5629) drops the role. Exported for tests.
+ *
+ * The name builder loads only when a copy is asked for, so a render that
+ * wants none needs nothing beyond what it needed before.
+ *
+ * @param {string} outputPath - The canonical PDF path.
+ * @param {{ fullName?: string, role?: string, html?: string }} opts
+ * @returns {Promise<string>}
+ */
+export async function uploadCopyPath(outputPath, { fullName = '', role = '', html = '' } = {}) {
+  const { cvUploadName } = await import('./lib/upload-name.mjs');
+  let name = cvUploadName({ fullName, role: role || headlineText(html) });
+  if ([...name].length > PORTAL_LENGTH_LIMIT) name = cvUploadName({ fullName });
+  const stem = basename(outputPath).replace(/\.pdf$/i, '');
+  return join(dirname(outputPath), 'upload', stem, name);
+}
+
+/**
+ * What config/profile.yml says about the upload copy: the candidate's full
+ * name, and whether `cv.upload_copy` turns the copy on. A value that is not
+ * true or false is reported, not guessed at. Exported for tests.
+ *
+ * @param {string} profilePath
+ * @returns {{ fullName: string, uploadCopy: boolean, invalid?: string }}
+ */
+export function readUploadCopySettings(profilePath) {
+  let doc;
+  try {
+    if (!existsSync(profilePath)) return { fullName: '', uploadCopy: false };
+    doc = loadYaml(readFileSync(profilePath, 'utf-8')) || {};
+  } catch {
+    return { fullName: '', uploadCopy: false };
+  }
+  const fullName = typeof doc?.candidate?.full_name === 'string' ? doc.candidate.full_name.trim() : '';
+  const raw = doc?.cv?.upload_copy;
+  if (raw == null || typeof raw === 'boolean') return { fullName, uploadCopy: raw === true };
+  return { fullName, uploadCopy: false, invalid: `cv.upload_copy "${raw}" is not true or false` };
+}
+
+/**
+ * The Role cell of the tracker row whose report link is `reportNum`, or ''.
+ * The posting's own title, which is what the web apply flow names its upload
+ * after (#6399); a CV headline often joins two titles. Exported for tests.
+ *
+ * @param {string} reportNum
+ * @param {string} trackerFile
+ * @returns {string}
+ */
+export function trackerRoleForReport(reportNum, trackerFile) {
+  if (!reportNum) return '';
+  let lines;
+  try {
+    lines = readFileSync(trackerFile, 'utf-8').split(/\r?\n/);
+  } catch {
+    return '';
+  }
+  const colmap = resolveColumns(lines);
+  for (const line of lines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row && linkedReportNumbers(row.report, row.notes).some((n) => Number(n) === Number(reportNum))) return row.role;
+  }
+  return '';
+}
+
+/**
+ * Copy a rendered CV to its manual-upload path. Only a plain file copy: the
+ * canonical PDF and data/pdf-index.tsv are left as they are. Exported for
+ * tests.
+ *
+ * @param {string} outputPath - The canonical PDF, already written.
+ * @param {{ fullName?: string, role?: string, html?: string }} opts
+ * @returns {Promise<string>} The copy's path.
+ */
+export async function writeUploadCopy(outputPath, opts = {}) {
+  const target = await uploadCopyPath(outputPath, opts);
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(outputPath, target);
+  return target;
+}
+
+/**
  * The text of the first real section title in html[start, end), skipping any
  * that sits in raw text (a heading quoted inside a script names nothing).
  *
@@ -2334,6 +2432,7 @@ async function generatePDF() {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
   let strictFactCheck = false;
+  let uploadCopyFlag = false, uploadRole = '';
 
   // Parse arguments
   // Empty, not 'cv': an omitted --kind must fall through to inference from the
@@ -2413,6 +2512,11 @@ async function generatePDF() {
       strictFactCheck = true;
     } else if (arg === '--skip-fact-check') {
       skipFactCheck = true;
+    } else if (arg === '--upload-copy') {
+      uploadCopyFlag = true;
+    } else if (arg.startsWith('--upload-role=')) {
+      uploadCopyFlag = true;
+      uploadRole = arg.slice('--upload-role='.length).trim();
     } else if (!inputPath) {
       inputPath = arg;
     } else if (!outputPath) {
@@ -2514,11 +2618,17 @@ async function generatePDF() {
       console.error('--kind is not valid with --batch. Set "kind" per entry in the manifest instead.');
       process.exit(1);
     }
+    // A batch renders many CVs for many applications in one go; the upload
+    // copy is for the one CV a person is about to attach by hand.
+    if (uploadCopyFlag) {
+      console.error('--upload-copy is not valid with --batch. Render the CV you are about to upload on its own.');
+      process.exit(1);
+    }
     return runBatchFromManifest(batchManifestPath, { format, flagFormat, country, flagBudget, profileBudget, allowReorder, allowNonChronological, skipFactCheck, strictFactCheck });
   }
 
   if (!inputPath || !outputPath) {
-    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
+    console.error('Usage: node generate-pdf.mjs <input.html> <output.pdf> [--format=letter|a4] [--country=XX] [--report=NNN] [--kind=cv|cover] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check] [--upload-copy] [--upload-role="Role"]');
     console.error('   or: node generate-pdf.mjs --batch=<manifest.json> [--format=letter|a4] [--country=XX] [--allow-reorder] [--allow-nonchronological] [--max-pages=N] [--strict-pages] [--strict-fact-check] [--skip-fact-check]');
     console.error('');
     console.error('Batch mode renders every document in the JSON manifest (an array of');
@@ -2627,7 +2737,7 @@ async function generatePDF() {
     else warnFactGateNotRun();
   }
 
-  return renderHtmlToPdf(html, outputPath, {
+  const result = await renderHtmlToPdf(html, outputPath, {
     format,
     baseDir: dirname(inputPath),
     reportNum,
@@ -2637,6 +2747,22 @@ async function generatePDF() {
     strictPages: budget.strictPages,
     styleTokens: readStyleTokens(workspaceProfilePath()),
   });
+
+  // The manual-upload copy: a CV only, and only once the output path holds
+  // the render (an overflow draft is not the CV anyone should send).
+  const upload = readUploadCopySettings(workspaceProfilePath());
+  if (upload.invalid) console.warn(`⚠️  ${upload.invalid}; no upload copy from config/profile.yml. Pass --upload-copy for this render.`);
+  if ((uploadCopyFlag || upload.uploadCopy) && !result.draftPath) {
+    if (resolveArtifactKind(kindFlag, outputPath).kind === 'cv') {
+      const role = uploadRole || trackerRoleForReport(reportNum, trackerPath);
+      const copy = await writeUploadCopy(result.outputPath || outputPath, { fullName: upload.fullName, role, html });
+      console.log(`📎 Upload copy: ${copy}`);
+      result.uploadCopyPath = copy;
+    } else if (uploadCopyFlag) {
+      console.warn('⚠️  --upload-copy applies to a CV only; no copy written for this document.');
+    }
+  }
+  return result;
 }
 
 /**
