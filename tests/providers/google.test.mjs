@@ -294,6 +294,74 @@ try {
       : fail(`google probe rejection: ${threw?.message}`);
   }
 
+  // ── full_board: one unqueried walk of the whole listing ──
+  {
+    const FULL = { name: 'Google', google: { full_board: true, queries: ['strategy', 'ops'], location: 'United States' } };
+    // Page 1 is the real card markup (title, employer, locations); pages 2..N
+    // are full link pages; the last is short.
+    const lastPage = 60;
+    const respond = (c) => {
+      const page = Number(pageOf(c.url) || '1');
+      if (page === 1) return CARDS_HTML.replace('</ul>', linkPage(fullPageIds(900000).slice(0, PAGE_SIZE - 2)) + '</ul>');
+      if (page < lastPage) return linkPage(fullPageIds(1000000 + page * PAGE_SIZE));
+      return linkPage(['7', '8', '9']);
+    };
+    const { ctx, calls } = recordingCtx(respond);
+    let jobs;
+    const logged = await captureErrors(async () => { jobs = await provider.fetch(FULL, ctx); });
+
+    calls.every((c) => qOf(c.url) === null && /[?&]location=United\+States\b/.test(c.url) && /[?&]sort_by=date\b/.test(c.url) && c.opts?.redirect === 'error')
+      ? pass('full_board requests the listing with no q, keeps location and sort_by=date, redirect:"error" throughout')
+      : fail(`full_board request URLs: ${calls.slice(0, 3).map((c) => c.url).join(' ')}`);
+    calls.length === lastPage
+      ? pass('full_board walks one listing past the 50-page query cap to its short last page, and ignores queries')
+      : fail(`full_board made ${calls.length} requests, expected ${lastPage}`);
+    jobs.truncated === undefined && !logged.some((l) => /cap/.test(l))
+      ? pass('full_board that reaches the end of the listing is not marked partial')
+      : fail(`full_board end: truncated=${JSON.stringify(jobs.truncated)}, logged ${JSON.stringify(logged)}`);
+    const yt = jobs.find((x) => x.externalId === '127792359805985478');
+    yt?.title === 'Product Manager II, YouTube Ads & AI/ML' && yt?.company === 'YouTube'
+      && yt?.location === 'Kirkland, WA, USA; Mountain View, CA, USA'
+      ? pass('full_board rows carry the card\'s real title, employer and locations, so title, blacklist and location filters see them')
+      : fail(`full_board card row = ${JSON.stringify(yt)}`);
+    JSON.stringify(yt?.locations) === JSON.stringify(['Kirkland, WA, USA', 'Mountain View, CA, USA'])
+      && !('locations' in (jobs.find((x) => x.externalId === '7') || { locations: 1 }))
+      ? pass('google.fetch() returns the card\'s separate locations as locations, omitted when the card names none')
+      : fail(`locations = ${JSON.stringify(yt?.locations)}`);
+  }
+  {
+    // The full-board budget: 200 pages by default, max_pages overrides up to 300.
+    resolveMaxPages({ google: { full_board: true } }) === 200
+      && resolveMaxPages({ google: { full_board: true }, max_pages: 120 }) === 120
+      && resolveMaxPages({ google: { full_board: true }, max_pages: 9999 }) === 300
+      && resolveMaxPages({ google: { queries: ['x'] }, max_pages: 9999 }) === 50
+      && resolveMaxPages({ google: {} }) === 10
+      ? pass('resolveMaxPages() gives full_board its own budget (default 200, cap 300) and leaves query mode at 10/50')
+      : fail('resolveMaxPages() full_board budget wrong');
+    const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(5000000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
+    let jobs;
+    const logged = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { full_board: true }, max_pages: 3 }, ctx); });
+    calls.length === 3 && jobs.truncated?.reason === 'page-cap' && jobs.truncated?.fetched === PAGE_SIZE * 3
+      && logged.some((l) => /3-page cap on the full board \(60 postings read\) — raise max_pages on this entry for more \(up to 300\)/.test(l))
+      ? pass('full_board at its page cap marks page-cap and names the full-board budget')
+      : fail(`full_board cap: ${calls.length} calls, truncated=${JSON.stringify(jobs?.truncated)}, logged ${JSON.stringify(logged)}`);
+  }
+  {
+    const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(6000000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
+    await provider.fetch({ name: 'Google', google: { full_board: true } }, { ...ctx, maxPages: 1 });
+    calls.length === 1 && qOf(calls[0].url) === null
+      ? pass('full_board under ctx.maxPages makes one request')
+      : fail(`full_board probe: ${calls.length} calls`);
+    const boom = new Error('down');
+    let thrown = null;
+    try {
+      await provider.fetch({ name: 'Google', google: { full_board: true } }, { ...recordingCtx(() => { throw boom; }).ctx, maxPages: 1 });
+    } catch (e) { thrown = e; }
+    thrown === boom
+      ? pass('full_board propagates a rejection unwrapped during a probe')
+      : fail(`full_board probe rejection: ${thrown}`);
+  }
+
 } catch (e) {
   fail(`google provider tests crashed: ${e.message}`);
 }

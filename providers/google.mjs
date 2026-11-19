@@ -35,6 +35,22 @@ import { markTruncated } from '../lib/board-truncation.mjs';
 //     location: "United States"      # optional
 //     queries: ["business strategy", "business operations", ...]
 //   max_pages: 10                     # optional, per query
+//
+// FULL BOARD (opt-in, `google: { full_board: true }`). The query walk reads
+// only what the queries match, and nothing reports the titles it never
+// matched (#7315). The same results page with NO `q` lists the whole board,
+// newest first, with the full card on every posting (3,127 worldwide, 1,799
+// under location=United States on 2026-11-19). full_board walks that one
+// unqueried listing instead of the queries, so every row carries the real
+// title, employer and locations the scan's title, location and blacklist
+// filters need. `location` still applies; `queries` is not used. The walk has
+// its own page budget (FULL_BOARD_DEFAULT_MAX_PAGES, ceiling
+// FULL_BOARD_MAX_PAGES_CAP, `max_pages` overrides) because one listing of
+// the whole board needs far more pages than one query; hitting it marks the
+// board partial ('page-cap') like any other cap.
+//   google:
+//     full_board: true
+//     location: "United States"      # optional
 
 const BASE = 'https://www.google.com/about/careers/applications/jobs/results/';
 // A full results page carries 20 cards; a shorter page is the last one for that
@@ -42,6 +58,10 @@ const BASE = 'https://www.google.com/about/careers/applications/jobs/results/';
 const PAGE_SIZE = 20;
 const DEFAULT_MAX_PAGES = 10; // 200 postings per query
 const MAX_PAGES_CAP = 50; // hard ceiling even for a max_pages override
+// full_board walks one unqueried listing of the whole board: 200 pages is
+// 4,000 postings, room over the 3,127 seen worldwide on 2026-11-19.
+const FULL_BOARD_DEFAULT_MAX_PAGES = 200;
+const FULL_BOARD_MAX_PAGES_CAP = 300;
 const INTER_PAGE_DELAY_MS = 400;
 // The anchor that closes each card; the markup since the previous anchor is that
 // card. Google serves the href relative ("jobs/results/…"); a path prefix is
@@ -63,11 +83,17 @@ function getConfig(entry) {
   return { location: c.location || 'United States', queries };
 }
 
+/** @param {any} entry @returns {boolean} */
+function isFullBoard(entry) {
+  return entry?.google?.full_board === true;
+}
+
 /** @param {any} entry @returns {number} */
 export function resolveMaxPages(entry) {
+  const full = isFullBoard(entry);
   const v = entry?.max_pages;
-  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
-  return DEFAULT_MAX_PAGES;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, full ? FULL_BOARD_MAX_PAGES_CAP : MAX_PAGES_CAP);
+  return full ? FULL_BOARD_DEFAULT_MAX_PAGES : DEFAULT_MAX_PAGES;
 }
 
 function titleFromSlug(slug) {
@@ -128,7 +154,10 @@ export default {
   },
 
   async fetch(entry, ctx) {
-    const { location, queries } = getConfig(entry);
+    const full = isFullBoard(entry);
+    const { location, queries: configured } = getConfig(entry);
+    // full_board: one unqueried walk of the whole listing (q omitted).
+    const queries = full ? [''] : configured;
     // `ctx.maxPages` means verify-portals is probing, not scanning: walk one
     // query and one page, so a liveness check costs one request instead of
     // queries x pages (providers/ADDING_A_PROVIDER.md).
@@ -154,7 +183,8 @@ export default {
       for (let page = 1; page <= maxPages; page++) {
         // URLSearchParams, not hand-built encodeURIComponent: q and location come from
         // portals.yml, and URLSearchParams never throws on a malformed string.
-        const params = new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' });
+        const params = new URLSearchParams({ location: String(location), sort_by: 'date' });
+        if (q !== '') params.set('q', String(q));
         if (page > 1) params.set('page', String(page));
         const url = `${BASE}?${params}`;
         if (requestsMade > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
@@ -173,7 +203,7 @@ export default {
             firstPageFailures += 1;
           }
           const cause = err instanceof Error ? err.message : String(err);
-          console.error(`⚠️  google: ${entry.name} stopped "${q}" at page ${page} (${byId.size} jobs so far): ${cause}`);
+          console.error(`⚠️  google: ${entry.name} stopped ${q === '' ? 'the full board' : `"${q}"`} at page ${page} (${byId.size} jobs so far): ${cause}`);
           break;
         }
         requestsMade += 1;
@@ -187,6 +217,7 @@ export default {
             url: `${BASE}${id}-${slug}`,
             company: employer || entry.name,
             location: locations.join('; '),
+            ...(locations.length > 0 ? { locations } : {}),
             ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
           });
         }
@@ -201,7 +232,9 @@ export default {
     }
     let jobs = [...byId.values()];
     if (truncated) {
-      console.error(`⚠️  google: ${entry.name} hit the ${maxPages}-page cap on at least one query — raise max_pages on this entry for more`);
+      console.error(full
+        ? `⚠️  google: ${entry.name} hit the ${maxPages}-page cap on the full board (${jobs.length} postings read) — raise max_pages on this entry for more (up to ${FULL_BOARD_MAX_PAGES_CAP})`
+        : `⚠️  google: ${entry.name} hit the ${maxPages}-page cap on at least one query — raise max_pages on this entry for more`);
       jobs = markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     if (fetchFailed) {
