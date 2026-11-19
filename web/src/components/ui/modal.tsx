@@ -75,7 +75,7 @@ export function Modal({
   if (!isOpen) return null;
   return (
     <div
-      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-md transition-opacity", overlayClassName)}
+      className={cn("fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm transition-opacity", overlayClassName)}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
