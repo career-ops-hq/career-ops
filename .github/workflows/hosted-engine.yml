@@ -8,6 +8,12 @@ on:
       - hosted/**
       - .github/workflows/hosted-engine.yml
       - openai-eval.mjs
+      - openai-tailor.mjs
+      - generate-pdf.mjs
+      - verify-cv-facts.mjs
+      - mark-pdf-ready.mjs
+      - templates/**
+      - modes/**
       - merge-tracker.mjs
       - tracker-parse.mjs
       - lib/**
@@ -33,5 +39,6 @@ jobs:
         with:
           node-version: '24.15.0'
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
       - run: npm --prefix hosted test
       - run: node validate-system-paths-coverage.mjs

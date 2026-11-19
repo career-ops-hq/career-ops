@@ -1,0 +1,32 @@
+# Deny by default: no candidate documents, logs, credentials, Git history,
+# development dependencies or arbitrary files enter the build context.
+**
+!package.json
+!package-lock.json
+!VERSION
+!tracker-aliases.json
+!*.mjs
+!lib/
+!lib/**
+!utils/
+!utils/**
+!providers/
+!providers/**
+!templates/
+!templates/**
+templates/cv-*.html
+!templates/cv-template*.html
+templates/cover-*.html
+!templates/cover-letter-template*.html
+!modes/
+!modes/**
+modes/_profile.md
+modes/_custom.md
+modes/_brief.md
+!fonts/
+!fonts/**
+!config/
+!config/*.example.*
+!hosted/
+!hosted/*.mjs
+!hosted/package.json

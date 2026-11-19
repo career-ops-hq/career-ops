@@ -592,7 +592,7 @@ function sectionKey(text) {
   return SECTION_ALIASES.get(normalized) ?? normalized;
 }
 
-function extractRenderedSectionOrder(html) {
+export function extractRenderedSectionOrder(html) {
   const titleMatches = [...html.matchAll(/class=["'][^"']*\bsection-title\b[^"']*["'][^>]*>([\s\S]*?)<\/[^>]+>/gi)];
   const sections = [];
 
@@ -605,7 +605,7 @@ function extractRenderedSectionOrder(html) {
   return sections;
 }
 
-function extractSourceSectionOrder(markdown) {
+export function extractSourceSectionOrder(markdown) {
   const sections = [];
 
   for (const line of markdown.split(/\r?\n/)) {
@@ -1849,7 +1849,7 @@ function warnFactGateNotRun() {
  *
  * @returns {Promise<{outputPath: string, pageCount: number, size: number}>}
  */
-async function generatePDF() {
+export async function generatePDF({ launchBrowser } = {}) {
   const args = process.argv.slice(2);
   let skipFactCheck = false;
   let strictFactCheck = false;
@@ -2129,6 +2129,7 @@ async function generatePDF() {
   }
 
   return renderHtmlToPdf(html, outputPath, {
+    ...(launchBrowser ? { launchBrowser } : {}),
     format,
     baseDir: dirname(inputPath),
     reportNum,

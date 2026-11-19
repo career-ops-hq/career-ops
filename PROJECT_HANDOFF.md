@@ -1,6 +1,6 @@
 # Hosted product: shared agent handoff
 
-Last updated: 2026-11-19. Status: shared documentation published; evaluation adapter implemented and locally verified; full hosted product not yet built.
+Last updated: 2026-11-19. Status: complete synthetic evaluation-to-CV/PDF flow verified locally; container worker interface prepared; full hosted product not yet built.
 
 ## Start here, regardless of AI tool
 
@@ -42,7 +42,7 @@ Suggested order:
 - [x] Implement the initial allowlisted evaluation/merge adapter with explicit per-child environments, safe paths, bounded output, timeouts and cancellation. Other operations remain unfinished.
 - [x] Establish deterministic tests using synthetic profiles and a local mock model server. These run real upstream evaluator/merger processes; no external model is called.
 - [ ] Install pinned dependencies and run a real engine fixture flow where credentials/runtime permit. No paid model calls without a configured authorized project credential/budget.
-- [ ] Verify tracker/report relationships, fact/structure validation and PDF output.
+- [x] Verify tracker/report relationships, strict fact checks, section retention/order, locked sections and real PDF output using synthetic fixtures. Real-model quality remains unmeasured.
 - [ ] Add durable orchestration, workspace snapshots and tenant isolation before exposing an API publicly.
 - [ ] Add auth, tenant authorization, uploads, progress events and existing UI integration.
 
@@ -73,8 +73,13 @@ After each meaningful implementation chunk, update the Progress section below wi
 - 2026-11-19: Added `hosted/tests/engine.test.mjs`, package scripts, README and a dedicated Linux/Windows GitHub Actions workflow. Added root AGENTS.md entry so coding agents discover this file automatically. Committed a root dependency lockfile for reproducible adapter CI; `config/local-paths.txt` intentionally tracks fork-owned files using the upstream-supported declaration mechanism.
 - Local validation: `npm --prefix hosted test` — 6 tests passed, including real evaluator/merge across two synthetic tenants, idempotency, malformed output, required tracker, input/config rejection, workspace contention, timeout/cancellation/output cap and sanitized failures. `node tests/evaluator-score-cell.test.mjs` — 27 score cases plus single-source check passed. `node --test tests/openai-eval-stream-usage.test.mjs` — 7 passed. `node validate-system-paths-coverage.mjs`, changed-module syntax checks and staged diff whitespace checks passed.
 - Environment note: loopback model-server tests require network-enabled execution in this desktop sandbox. No external provider calls, real candidate data, paid services or deployments were used.
-- Current limitations: evaluation only, based on pasted text; no live liveness/research, tailoring/PDF adapter, public API, authentication, durable queue, production leases/snapshots or container isolation. Passing process tests does not establish tenant security in production. The supervisor must supply the correct immutable engine commit. Failed runs may leave partial private workspace changes; do not publish them.
-- Next concrete action: implement tailoring and strict fact/structure/PDF gates against synthetic fixtures, then the durable isolated worker supervisor. Configure a project model credential and budget before real provider quality/cost testing. Check the branch's hosted-engine Actions results before relying on cross-platform CI.
+- 2026-11-19 continuation: implemented `tailor()` with source-context checks, verified evaluation UUID references, per-job staging, strict facts, real Chromium rendering, manifest verification and `mark-pdf-ready.mjs`. Corrected the distinction between report number and tracker application number. A shared `hosted/job.mjs` now owns locking, deadlines, schema-2 receipts and artifact-hash verification; receipt JSON is atomically renamed into place. Schema-1 receipts from the initial prototype require recovery.
+- Rendering reuses the full upstream CLI pipeline. The only core changes export its callable entrypoint/section parsers and accept an optional browser factory; ordinary CLI defaults are unchanged. `hosted/render.mjs` requests Chromium's sandbox explicitly, retains the upstream JavaScript/CSP/resource restrictions and rejects missing recognized source sections. Hosted profile photos remain unsupported and are rejected before model work.
+- Added a bounded JSON stdin/stdout worker with server-owned configuration, strict operation/field allowlists and sanitized errors; prepared a non-root Dockerfile and an allowlisted build context. Container build/runtime verification is pending at this entry.
+- Latest local checks: `npm --prefix hosted test` — 19 tests passed using fixed mock model replies and real Playwright Chromium 158.0.8127.18. Two candidates completed evaluation, tailoring, one-page PDF rendering and tracker readiness in independent workspaces. Tests cover invented metrics, incomplete HTML, missing source sections, locked sections, unsupported local photo paths, page overflow, stale/cross-workspace evaluations, artifact modification, blocked HTML scripts/network images, worker input limits and server-owned execution settings.
+- Upstream regression checks passed: `node tests/generate-pdf-strict-fact-check.test.mjs` (7 checks), `node tests/generate-pdf-experience-order.test.mjs` (37 checks), `node tests/cv-locked-sections.test.mjs` (12 checks). The prior evaluation foundation passed Linux/Windows GitHub CI at commit c3dc1c2; the expanded pipeline still needs remote CI confirmation.
+- Current limitations: no public API, authentication, durable queue, production fencing/snapshots, billing or hosted UI integration. No live posting research or real-model quality measurements. HTML validators depend on supported source/template conventions and do not prove every source entry was retained. Directory checks/process tests do not establish production tenant isolation; failed disposable workspaces must not be published.
+- Next concrete action: verify the container worker, then implement the durable supervisor with per-tenant isolation, leases/fencing and atomic workspace snapshot publication. Configure a project model credential and budget before real-provider quality/cost testing. Keep using product/hosted-foundation and inspect current GitHub Actions results.
 
 ## Next-agent resume procedure
 
