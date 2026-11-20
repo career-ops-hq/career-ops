@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { decodeEntities } from './_html-entities.mjs';
+import { replaceScriptStyleBlocks } from './_html-to-text.mjs';
 import { sleep } from './_http.mjs';
 import { countryName } from './_country.mjs';
 
@@ -66,7 +67,7 @@ export { countryName };
  */
 export function stripHtml(html) {
   if (typeof html !== 'string' || !html) return '';
-  const noMedia = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+  const noMedia = replaceScriptStyleBlocks(html, ' ');
   return decodeEntities(noMedia.replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 

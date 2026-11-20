@@ -24,8 +24,10 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseHnComment } from '../../providers/hackernews.mjs';
-import { visibleText } from '../../providers/_html-to-text.mjs';
+import { parseHnComment, replaceAnchorsWithHref } from '../../providers/hackernews.mjs';
+import { visibleText, replaceScriptStyleBlocks } from '../../providers/_html-to-text.mjs';
+import { stripHtml as agenticStripHtml } from '../../providers/agentic-jobs.mjs';
+import { parseWorkableWidget } from '../../providers/workable.mjs';
 import { parsePersonioHtml } from '../../providers/personio.mjs';
 import { parseJobBankFeed } from '../../providers/jobbankca.mjs';
 import { parseSearchPage } from '../../providers/themuse.mjs';
@@ -98,6 +100,63 @@ test('the strip-until-nothing-changes loops stay linear on unclosed and on neste
   assertFast('personio on nested "<a…>"', () => parsePersonioHtml(personioPage(`Engineer ${'<a'.repeat(N)}${'>'.repeat(N)}`), 'Acme', 'acme.jobs.personio.de'));
   assertFast('jobbankca on unclosed "<a"', () => parseJobBankFeed(jobBankFeed(`Acme ${'&lt;a'.repeat(N)}`)));
   assertFast('jobbankca on nested "<a…>"', () => parseJobBankFeed(jobBankFeed(`Acme ${'&lt;a'.repeat(N)}${'&gt;'.repeat(N)}`)));
+});
+
+// A deterministic string generator: the same strings on every run.
+function tokenStrings(tokens, count, maxTokens, seed) {
+  let state = seed;
+  const rnd = (n) => { state = (state * 1103515245 + 12345) & 0x7fffffff; return state % n; };
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    let s = '';
+    const len = 1 + rnd(maxTokens);
+    for (let j = 0; j < len; j++) s += tokens[rnd(tokens.length)];
+    out.push(s);
+  }
+  return out;
+}
+
+// The passes CodeRabbit flagged next to the generic strips: agentic-jobs' and
+// workable's script/style removal and Hacker News' anchor and block-tag passes.
+// Each is replaced by a linear form, checked here against the pattern it replaces.
+test('the script/style block strip matches the regex it replaces', () => {
+  const tokens = ['<script', '<script>', '<SCRIPT', '<style', '<style>', '<Style a="x>y">', '</script>', '</SCRIPT>',
+    '</style>', '</Style>', '</script >', '<scripts>', '<styles', 'İ', 'ſ', 'a', ' ', '>', '<', '/', '"', '\n'];
+  for (const wordBoundary of [false, true]) {
+    const re = new RegExp(`<(script|style)${wordBoundary ? '\\b' : ''}[^>]*>[\\s\\S]*?<\\/\\1>`, 'gi');
+    for (const s of tokenStrings(tokens, 20_000, 12, wordBoundary ? 7 : 8)) {
+      const got = replaceScriptStyleBlocks(s, ' ', { wordBoundary });
+      if (got !== s.replace(re, ' ')) assert.fail(`wordBoundary=${wordBoundary} differs on ${JSON.stringify(s)}`);
+    }
+  }
+});
+
+test('the Hacker News anchor pass matches the regex it replaces', () => {
+  const re = /<a\s[^>]*href="([^"]+)"[^>]*>.*?<\/a>/gi;
+  const tokens = ['<a ', '<A\t', '<a\n', '<a\u00a0', 'href="', 'HREF="', 'x', 'y', '"', '>', '</a>', '</A>', '\n', '\r',
+    '\u2028', ' ', '<a href="u">', '<', 'a', '/', '='];
+  for (const s of tokenStrings(tokens, 20_000, 14, 11)) {
+    if (replaceAnchorsWithHref(s) !== s.replace(re, (_, href) => href)) assert.fail(`differs on ${JSON.stringify(s)}`);
+  }
+});
+
+test('the Hacker News block-tag pass matches the regex it replaces', () => {
+  const tokens = ['<p', '<P ', '</p', '<br', '<pre', '<div', '</li', '<h2', '<h7', '<hr', '>', 'x', ' ', '/', '<'];
+  for (const s of tokenStrings(tokens, 20_000, 10, 13)) {
+    const got = s.replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*(>?)/gi, (tag, close) => (close ? '\n' : tag));
+    if (got !== s.replace(/<\/?(?:p|br|div|li|h[1-6])\b[^>]*>/gi, '\n')) assert.fail(`differs on ${JSON.stringify(s)}`);
+  }
+});
+
+test('those passes stay linear on unclosed openers', () => {
+  const workable = (description) => parseWorkableWidget({ jobs: [{ title: 'Engineer', shortlink: 'https://apply.workable.com/j/ABC123', description }] }, 'Acme', 'acme');
+  assertFast('agentic-jobs on 100,000 "<script" with no ">"', () => agenticStripHtml('<script'.repeat(100_000)));
+  assertFast('agentic-jobs on 100,000 "<script>" with no closer', () => agenticStripHtml('<script>'.repeat(100_000)));
+  assertFast('workable on 100,000 "<script " with no ">"', () => workable('<script '.repeat(100_000)));
+  assertFast('workable on 100,000 "<style>" with no closer', () => workable('<style>'.repeat(100_000)));
+  assertFast('parseHnComment on 100,000 "<a " with no ">"', () => parseHnComment('<a '.repeat(100_000)));
+  assertFast('parseHnComment on 100,000 "<p " with no ">"', () => parseHnComment(`x\n${'<p '.repeat(100_000)}`));
+  assertFast('parseHnComment on 100,000 "<a href" with no "</a>"', () => parseHnComment('<a href="x">'.repeat(100_000)));
 });
 
 test('well-formed markup strips as before', () => {
