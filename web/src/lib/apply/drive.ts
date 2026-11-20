@@ -238,6 +238,10 @@ ${snap.text}
 Reply ONE action JSON.`;
 
     const { out, sessionId } = await plannerTurn(resolved.binPath, prompt, resumeId);
+    // The page can move while the planner thinks: check it before acting on
+    // the reply, or before a "stuck" or "done" reply ends the drive.
+    const refusedAfterPlanning = await stopIfRefused(turn - 1);
+    if (refusedAfterPlanning) return refusedAfterPlanning;
     if (sessionId) resumeId = sessionId;
     const act = parseAction(out);
     if (!act) {

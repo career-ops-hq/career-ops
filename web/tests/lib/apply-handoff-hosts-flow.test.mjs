@@ -56,6 +56,7 @@ after(() => {
 const { setHostResolver } = await import(pathToFileURL(join(root, "liveness-browser.mjs")).href);
 const { openSession, refusedDestination, finalizeDrivenSession, getSession } = await import("../../src/lib/apply/session.ts");
 const { POST: drivePost } = await import("../../src/app/api/apply/drive/route.ts");
+const { driveSession } = await import("../../src/lib/apply/drive.ts");
 const { classifyEmpty, tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
 const { POST } = await import("../../src/app/api/apply/session/route.ts");
 
@@ -396,7 +397,12 @@ describe("the final host check before a session is kept", { concurrency: 1 }, ()
 // on `frameUrl`. With `controls`, the frame also reports that many controls to
 // richestControlFrame while `pageFields` sit in the main frame, so the
 // deterministic form and the agent's frame differ.
-function careerPageEmbedding(frameUrl, closed, { pageFields = [], frameFields = APPLICATION_FIELDS, controls = 0 } = {}) {
+function careerPageEmbedding(frameUrl, closed, { pageFields = [], frameFields = APPLICATION_FIELDS, controls = 0, control = {} } = {}) {
+  // control.setFrameUrl(href): the embedded frame navigates later, as an
+  // iframe that finishes loading during a drive would.
+  control.setFrameUrl = (href) => {
+    frameUrl = href;
+  };
   let current = "about:blank";
   const counting = (fn) => String(fn).includes("contenteditable");
   const main = {
@@ -589,6 +595,50 @@ describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
     assert.equal(events.filter((e) => e.t === "step").length, 0, "no drive step ran");
     assert.equal(existsSync(join(fakeBin, "ran")), false, "the CLI was never started");
     assert.deepEqual(closed, [true]);
+  });
+
+  test("the reach drive sends the application number, so the refusal keeps its checklist link", () => {
+    const provider = readFileSync(join(here, "../../src/components/apply/apply-provider.tsx"), "utf8");
+    assert.match(provider, /goal: "reach", application: nRef\.current/);
+  });
+
+  test("a listed host's iframe that loads into a session's page is refused at finalization", async () => {
+    const closed = [];
+    const control = {};
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageEmbedding("https://boards.acme-ats.test/embed/1", closed, { control });
+    const opened = await openSession("https://careers.acme.test/jobs/1");
+    assert.ok(opened.id, JSON.stringify(opened).slice(0, 300));
+    control.setFrameUrl(LISTED);
+    const fin = await finalizeDrivenSession(opened.id);
+    assert.equal(fin?.unsupported?.vendor, "handoff");
+    assert.equal(fin?.unsupported?.postingUrl, LISTED);
+    assert.equal(fin?.fields, undefined);
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("a page that moves while the planner thinks is refused, even when the reply is \"stuck\"", async () => {
+    // The stand-in claude replies "stuck". The destination check sees nothing
+    // before the first step and a listed host once the planner has replied.
+    const hit = { vendor: "handoff", label: "gupy.io", postingUrl: LISTED };
+    let checks = 0;
+    const refused = async () => (++checks > 1 ? hit : null);
+    const frame = { url: () => "https://careers.acme.test/jobs/1", evaluate: async () => { throw new Error("document is not defined"); } };
+    const page = {
+      url: () => "https://careers.acme.test/jobs/1",
+      title: async () => "Acme role",
+      screenshot: async () => Buffer.from("career"),
+      mainFrame: () => frame,
+      frames: () => [frame],
+      context: () => ({ pages: () => [] }),
+      waitForTimeout: async () => {},
+    };
+    const result = await driveSession(page, "claude", "full", async () => false, () => {}, 3, [], refused);
+    assert.ok(existsSync(join(fakeBin, "ran")), "the planner (the stand-in claude) ran once");
+    assert.equal(result.reason, "unsupported", JSON.stringify(result).slice(0, 300));
+    assert.deepEqual(result.unsupported, hit);
+    assert.equal(result.turns, 0, "no action was taken");
+    rmSync(join(fakeBin, "ran"), { force: true });
   });
 });
 

@@ -514,22 +514,31 @@ export function isApplicationFormFn(form: ExtractedForm): boolean {
 export async function refusedDestination(id: string): Promise<UnsupportedApplySession["unsupported"] | null> {
   const s = SESSIONS.get(id);
   if (!s) return null;
-  let hit = await unsupportedInAppAts(s.page.url(), { handoffHosts: s.handoffHosts });
-  if (!hit) {
-    const { frame } = await pickFormFrame(s.page);
-    hit = await unsupportedInAppAts(frame.url(), { handoffHosts: s.handoffHosts });
+  const { frame } = await pickFormFrame(s.page);
+  return refuseSessionAt(id, s, [s.page.url(), frame.url()]);
+}
+
+// The first of these URLs that is a refused host closes the session's window
+// and is returned; otherwise null.
+async function refuseSessionAt(id: string, s: Session, hrefs: string[]): Promise<UnsupportedApplySession["unsupported"] | null> {
+  for (const href of hrefs) {
+    const hit = await unsupportedInAppAts(href, { handoffHosts: s.handoffHosts });
+    if (!hit) continue;
+    await closeSession(id);
+    return hit;
   }
-  if (hit) await closeSession(id);
-  return hit;
+  return null;
 }
 
 export async function finalizeDrivenSession(id: string, cliId?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | { unsupported: UnsupportedApplySession["unsupported"] } | null> {
-  // A drive that ended on a refused host must not leave a form to fill there.
-  const refused = await refusedDestination(id);
-  if (refused) return { unsupported: refused };
   const s = SESSIONS.get(id);
   if (!s) return null;
   let { frame, form } = await pickFormFrame(s.page);
+  // A drive that ended on a refused host must not leave a form to fill there.
+  // The frame checked is the one this form was read from, so nothing loaded
+  // after the check can supply the form.
+  const refused = await refuseSessionAt(id, s, [s.page.url(), frame.url()]);
+  if (refused) return { unsupported: refused };
   await enrichFromAts(s.url, form.fields);
   if (formHasPassword(form)) return null;
   let aiInterpreted = false;
@@ -537,11 +546,8 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   let agentRefused: string | undefined;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
-    const aiHit = await unsupportedInAppAts(aiFrame.url(), { handoffHosts: s.handoffHosts });
-    if (aiHit) {
-      await closeSession(id);
-      return { unsupported: aiHit };
-    }
+    const aiHit = await refuseSessionAt(id, s, [aiFrame.url()]);
+    if (aiHit) return { unsupported: aiHit };
     const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
     agentRefused = ai.refused;
