@@ -32,6 +32,17 @@ test('a bare --ats exits before a directory sweep', () => {
   }
 });
 
+test('an empty argument is not a full sweep', () => {
+  for (const args of [[''], ['', 'greenhouse'], ['--ats', ''], ['--seeds', '']]) {
+    const r = run(...args);
+    assert.equal(r.status, 1, `${JSON.stringify(args)} ${r.stdout}\n${r.stderr}`);
+    assert.doesNotMatch(`${r.stdout}\n${r.stderr}`, /portals\.yml not found/);
+  }
+  assert.match(run('').stderr, /unexpected argument ""/);
+  assert.match(run('--ats', '').stderr, /--ats needs a source/);
+  assert.match(run('--seeds', '').stderr, /--seeds needs a source/);
+});
+
 test('a bare source name is not a full sweep', () => {
   const r = run('greenhouse');
   assert.equal(r.status, 1, `${r.stdout}\n${r.stderr}`);

@@ -689,7 +689,9 @@ export function parseArgs(argv) {
     if (typeof next === 'string' && !next.startsWith('-')) consumed.add(idx + 1);
   });
   const unexpected = args.find((token, idx) => !consumed.has(idx) && typeof token === 'string' && !token.startsWith('-'));
-  if (unexpected) {
+  // "" is a present argument. A truthiness check treated it as absent and the
+  // run selected every source.
+  if (unexpected !== undefined) {
     console.error(`Error: unexpected argument "${unexpected}". Pass a source with --ats, for example --ats ${unexpected}.`);
     process.exit(1);
   }
