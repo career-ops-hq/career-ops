@@ -620,10 +620,10 @@ try {
   // Nor when the reorder worked. A custom heading elsewhere in the CV is the
   // user's business; the warning is about the setting failing, not about the
   // alias table being incomplete in the abstract.
-  const mixed = FIXTURE.replace('>Certifications<', '>Auszeichnungen<');
+  const mixed = FIXTURE.replace('>Certifications<', '>Sertifikaatit<');
   const mixedRun = captureWarnings(() => reorderCvSections(mixed, ['skills', 'education']));
   if (JSON.stringify(renderedTitles(mixedRun.value)) === JSON.stringify(
-        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Auszeichnungen', 'Education'])
+        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Sertifikaatit', 'Education'])
       && mixedRun.warnings.length === 0) {
     pass('an unrecognized title elsewhere is silent when the configured sections did resolve');
   } else {
