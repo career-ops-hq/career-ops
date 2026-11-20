@@ -127,7 +127,7 @@ const MAX_JOBS_CAP = MAX_PAGES * FRAGMENT_RECORDS_PER_PAGE;
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Resolve the search-jobs list URL from api:/careers_url; default /en. */

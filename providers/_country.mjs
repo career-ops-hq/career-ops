@@ -340,7 +340,7 @@ const REMOTE = /\b(?:remote|work from (?:home|anywhere)|distributed)\b/;
 const REMOTE_TITLE = /(?<![a-z])remote(?=$|\s*[^a-z\s]|\s+in\b)/;
 const NOT_REMOTE = /\b(?:non|not|no)[^a-z]*remote\b/;
 const OFFICE = /\b(?:hybrid|on[ -]?site|in[ -]?office|office[ -]?based)\b/;
-const plain = (v) => fold(v).replace(/<[^>]*>/g, ' ').replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ');
+const plain = (v) => fold(v).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag)).replace(/&nbsp;|&#160;/g, ' ').replace(/\s+/g, ' ');
 
 function excludedHome(text, homes) {
   return homes.some(h => [

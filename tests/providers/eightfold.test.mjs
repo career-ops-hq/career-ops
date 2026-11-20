@@ -558,9 +558,49 @@ try {
       ? pass('eightfold tags a max_pages-truncated board eightfoldTruncated, and not a complete one')
       : fail(`max_pages tag: capped=${capped.length}/${capped.eightfoldTruncated} roomy=${roomy.length}/${roomy.eightfoldTruncated}`);
 
-    // Under a probe, the stop is classified by whichever cap limited the walk:
-    // a ctx.maxPages below max_pages is the probe's own budget (no warning, no
-    // tag); one equal to or above it leaves max_pages as the limit.
+    // A response with no `count`: a walk that stops at max_pages on a full page
+    // is still a cut, warned about and tagged; a short page at the ceiling is
+    // still the board's own end.
+    const noCountErrors = [];
+    const errorBefore = console.error;
+    console.error = (...args) => { noCountErrors.push(args.join(' ')); };
+    let noCount;
+    let noCountShort;
+    try {
+      noCount = await ef.fetch({ ...TENANT, max_pages: 2 }, recording((c) => ({ positions: page(Number(new URL(c.url).searchParams.get('start') || 0)) })).ctx);
+      noCountShort = await ef.fetch({ ...TENANT, max_pages: 2 }, recording((c) => {
+        const start = Number(new URL(c.url).searchParams.get('start') || 0);
+        return { positions: start < 10 ? page(start) : page(start).slice(0, 5) };
+      }).ctx);
+    } finally {
+      console.error = errorBefore;
+    }
+    noCount.length === 20 && noCount.eightfoldTruncated === true && noCountShort.length === 15 && noCountShort.eightfoldTruncated === undefined
+      && noCountErrors.length === 1 && /truncated at max_pages=2 \(20 jobs; the response gave no count\)/.test(noCountErrors[0])
+      ? pass('eightfold warns and tags a max_pages cut when the response gives no count, and not a short last page')
+      : fail(`no-count cut: capped=${noCount?.length}/${noCount?.eightfoldTruncated} short=${noCountShort?.length}/${noCountShort?.eightfoldTruncated} errors=${JSON.stringify(noCountErrors)}`);
+
+    // A reported count above what the board serves is not a cut either: a walk
+    // that ends on a short page before max_pages is the board's own end, since
+    // `count` is the pre-filter total on some tenants.
+    const shortErrors = [];
+    console.error = (...args) => { shortErrors.push(args.join(' ')); };
+    let countShort;
+    try {
+      countShort = await ef.fetch({ ...TENANT, max_pages: 2 }, recording((c) => {
+        const start = Number(new URL(c.url).searchParams.get('start') || 0);
+        return { positions: start < 10 ? page(start) : page(start).slice(0, 5), count: 500 };
+      }).ctx);
+    } finally {
+      console.error = errorBefore;
+    }
+    countShort.length === 15 && countShort.eightfoldTruncated === undefined && shortErrors.length === 0
+      ? pass('eightfold does not report a max_pages cut when the board ends on a short page under its count')
+      : fail(`short page under count: ${countShort?.length}/${countShort?.eightfoldTruncated} errors=${JSON.stringify(shortErrors)}`);
+
+    // A probe never reports a max_pages cut (#7180), whichever cap limited the
+    // walk: a ctx.maxPages below, equal to or above max_pages warns nothing and
+    // tags nothing. With max_pages: 1 an equal probe is every probe.
     const errors = [];
     const origError = console.error;
     console.error = (...args) => { errors.push(args.join(' ')); };
@@ -579,8 +619,8 @@ try {
     below.jobs.length === 10 && below.jobs.eightfoldTruncated === undefined && below.warned === 0
       ? pass('eightfold neither tags nor warns when a probe below max_pages stops the walk')
       : fail(`probe below max_pages: ${below.jobs.length} jobs, tag=${below.jobs.eightfoldTruncated}, warnings=${below.warned}`);
-    [equal, above].every((r) => r.jobs.length === 20 && r.jobs.eightfoldTruncated === true && r.warned === 1)
-      ? pass('eightfold tags and warns when max_pages, not the probe, stops the walk')
+    [equal, above].every((r) => r.jobs.length === 20 && r.jobs.eightfoldTruncated === undefined && r.warned === 0)
+      ? pass('eightfold neither tags nor warns when a probe at or above max_pages ends at the cap')
       : fail(`probe at/above max_pages: equal=${equal.jobs.eightfoldTruncated}/${equal.warned} above=${above.jobs.eightfoldTruncated}/${above.warned}`);
   }
 

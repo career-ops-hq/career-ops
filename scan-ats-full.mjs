@@ -1665,7 +1665,7 @@ export async function parallelEach(items, limit, fn, onItemDone = null, shouldSt
 async function filterLive(offers) {
   let chromium, checkUrlLiveness, newLivenessPage;
   try {
-    ({ chromium } = await import('playwright'));
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
     ({ checkUrlLiveness, newLivenessPage } = await import('./liveness-browser.mjs'));
   } catch (err) {
     throw new Error(

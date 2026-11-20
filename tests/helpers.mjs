@@ -2,7 +2,7 @@
 // Moved verbatim from test-all.mjs (issue #1440); no framework by design:
 // the suite must run on a fresh clone with only Node.
 import { execFileSync } from 'child_process';
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, writeFileSync } from 'fs';
+import { accessSync, constants, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync as _rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { basename, join, dirname, resolve, sep, delimiter } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
@@ -214,7 +214,36 @@ export function isolatedBatchStatePath(additionsDir) {
 // option still wins, and a removal that keeps failing still throws. Same
 // wrapper test-all.mjs applies to its own call sites (#3066), shared so the
 // suites under tests/ cannot drift from it.
-export const rmSync = (target, opts = {}) => _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+export const rmSync = (target, opts = {}) => {
+  // A junction (or directory symlink) reports itself as a directory, so
+  // _rmSync treats it as a real directory and throws ERR_FS_EISDIR instead of
+  // dropping the link. Match Node's own rmSync semantics: a symbolic link is
+  // removed as the link itself, never recursed into — even with recursive.
+  const targetStat = lstatSync(target, { throwIfNoEntry: false });
+  if (targetStat?.isSymbolicLink()) {
+    // unlinkSync has no retry support of its own, so give the link removal
+    // the same transient-failure policy _rmSync applies below — the very
+    // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
+    // wrapper exists for — still removing only the link. Node retries with
+    // linear backoff (retry 1 waits retryDelay, retry 2 waits 2×retryDelay,
+    // …), so the wait scales with the attempt; Atomics.wait is the blocking
+    // sleep a synchronous retry loop needs.
+    const maxRetries = opts.maxRetries ?? 10;
+    const retryDelay = opts.retryDelay ?? 100;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        unlinkSync(target);
+        return;
+      } catch (err) {
+        if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, (attempt + 1) * retryDelay);
+      }
+    }
+  }
+  return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
+};
+
+const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 /**
  * The per-script budget run() applies when a caller does not override it.

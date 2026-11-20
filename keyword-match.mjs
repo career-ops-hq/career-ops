@@ -594,7 +594,7 @@ export function htmlToText(html) {
     // tolerate whitespace in the closing tag — a stricter filter CodeQL accepts.
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))
     .replace(/&nbsp;/gi, ' ')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
@@ -870,12 +870,22 @@ export function parseMatchArgs(argv) {
 }
 
 /**
+ * A refusal the CLI prints and exits 1 on. It is thrown rather than followed
+ * by process.exit(1) because it can come right after the --url request, and
+ * on Windows Node 24 aborts when process.exit() runs right after a request
+ * (nodejs/node#56645, the crash in #3788): it prints a libuv assertion and
+ * exits with a crash code instead of 1. The entry point prints the message
+ * and sets process.exitCode. The refusals before any request keep
+ * process.exit().
+ */
+class KeywordMatchRefusal extends Error {}
+
+/**
  * @param {string} sourceLabel
  * @returns {never}
  */
 function refuseNoSkills(sourceLabel) {
-  console.error(`No known skills found in JD text from ${sourceLabel}. ${REFUSE_BETTER_SOURCE}`);
-  process.exit(1);
+  throw new KeywordMatchRefusal(`No known skills found in JD text from ${sourceLabel}. ${REFUSE_BETTER_SOURCE}`);
 }
 
 /**
@@ -914,10 +924,7 @@ export function resolveUserPath(arg, root) {
 export async function resolveKeywords(input, root) {
   if (input.kind === 'url') {
     const body = await resolveUrlJdBody(input.url);
-    if (!body.ok) {
-      console.error(body.message);
-      process.exit(1);
-    }
+    if (!body.ok) throw new KeywordMatchRefusal(body.message);
     const keywords = keywordsFromJdText(body.text);
     if (!keywords.length) refuseNoSkills(input.url);
     return {
@@ -1080,17 +1087,16 @@ async function runKeywordMatch(args) {
     ? resolveUserPath(cvArg, getCareerOpsRoot())
     : join(getCareerOpsRoot(), 'cv.md');
 
+  // Thrown, not process.exit(1): with --url this runs after the request.
   if (!existsSync(cvPath) || !statSync(cvPath).isFile()) {
-    console.error(`CV not found: ${cvPath}. Pass --cv <path> to point at your CV.`);
-    process.exit(1);
+    throw new KeywordMatchRefusal(`CV not found: ${cvPath}. Pass --cv <path> to point at your CV.`);
   }
 
   let rawCv;
   try {
     rawCv = readFileSync(cvPath, 'utf-8');
   } catch {
-    console.error(`Unable to read CV: ${cvPath}`);
-    process.exit(1);
+    throw new KeywordMatchRefusal(`Unable to read CV: ${cvPath}`);
   }
   // The words a reader sees. htmlToText() already drops an HTML CV's hrefs; a
   // markdown CV kept its link targets, so "[modules](https://…/terraform-modules)"
@@ -1126,7 +1132,10 @@ if (isMainModule(import.meta.url)) {
     process.exit(1);
   }
   runKeywordMatch(args).catch((err) => {
-    console.error(`keyword-match: unexpected error — ${err?.message || err}`);
-    process.exit(1);
+    console.error(err instanceof KeywordMatchRefusal
+      ? err.message
+      : `keyword-match: unexpected error — ${err?.message || err}`);
+    // process.exitCode, not process.exit(1), for the reason given at KeywordMatchRefusal.
+    process.exitCode = 1;
   });
 }

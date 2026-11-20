@@ -333,12 +333,19 @@ async function runDiscovered(filter = null, tools = null) {
       continue;
     }
     if (kind === 'node-test') {
-      const out = run(NODE, ['--test', f]);
+      // node:test suites get the same FACTOR-scaled budget the parallel loop
+      // gives each spawned suite: they spawn child processes per test, which
+      // a bare 30s script budget cannot cover on slow-spawn platforms
+      // (Windows). Derived from the helpers constant so sandbox runs that
+      // shrink the default shrink this budget with it.
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
-      // run()'s timeout is DEFAULT_SCRIPT_TIMEOUT_MS. Said the way the parallel
-      // loop says it, since a killed suite has no exit status to print.
+      // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
+      // Said the way the parallel loop says it, since a killed suite has no
+      // exit status to print — and the line reports the budget actually given.
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
-        ? `killed after ${DEFAULT_SCRIPT_TIMEOUT_MS / 1000}s`
+        ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
       reportNodeTestSuite(rel, out !== null, out ?? '', failure, how);
       continue;
@@ -977,7 +984,7 @@ const scripts = [
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
   { name: 'validate-profile.mjs --self-test', expectExit: 0 },
-  { name: 'updater-migration-tests.mjs', expectExit: 0 },
+  { name: 'updater-migration-tests.mjs', expectExit: 0, timeoutMs: 300_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -2060,13 +2067,15 @@ try {
   // guard calls the ESM namespace bindings of `dns/promises`, which no mock can
   // reach, so the previous `mock.method(dnsModule.default, …)` stub never
   // applied. The test passed anyway — the real resolver found nothing for
-  // `ssrf-blocked-host.local` and the guard blocked on the empty address list,
+  // `ssrf-blocked-host.example` and the guard blocked on the empty address list,
   // so the loopback-rejection branch under test was never executed, and each
   // run spent ~12s waiting for mDNS/LLMNR to time out. The injected resolver
   // hands back a loopback address, which is the case that matters, and keeps
-  // the whole section off the network.
+  // the whole section off the network. The name is not a `.local` one: those
+  // are refused by name before any lookup (isPrivateUseName), which would skip
+  // the DNS layer this case exists to exercise.
   const restoreHostResolver = setHostResolver(async (hostname) => {
-    if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    if (hostname === 'ssrf-blocked-host.example') return ['127.0.0.1'];
     // A shut-down analytics vendor: the name still appears in the page, but it
     // resolves to nothing at all. Distinct from the loopback case above, which
     // resolves fine and is blocked for being private.
@@ -2086,7 +2095,7 @@ try {
         if (routeCallback) {
           let aborted = false;
           const mockRoute = {
-            request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+            request: () => ({ url: () => 'http://ssrf-blocked-host.example/sensitive-internal' }),
             abort: async () => {
               aborted = true;
             },
@@ -2333,10 +2342,10 @@ try {
   //    that resolves into loopback. Without the DNS layer this hop is allowed,
   //    which is the whole reason validateUrlSecurity is reused here.
   const restoreArchiveResolver = setHostResolver(async (hostname) => (
-    hostname === 'ssrf-blocked-host.local' ? ['127.0.0.1'] : ['93.184.216.34']
+    hostname === 'ssrf-blocked-host.example' ? ['127.0.0.1'] : ['93.184.216.34']
   ));
   try {
-    const dnsHop = await runGuard('http://ssrf-blocked-host.local/sensitive-internal');
+    const dnsHop = await runGuard('http://ssrf-blocked-host.example/sensitive-internal');
     if (dnsHop.verdict?.action === 'abort' && dnsHop.verdict.code === 'blockedbyclient') {
       pass('archive-posting egress guard blocks a hostname that resolves to loopback');
     } else {
@@ -6173,14 +6182,163 @@ try {
   const dashboardWriter = readFile('dashboard/internal/data/status_writer.go');
   const runWriterStart = dashboardWriter.indexOf('func runStatusWriter(');
   const runWriterBody = runWriterStart === -1 ? '' : dashboardWriter.slice(runWriterStart);
+  // The row selector moved out of the writer into career.go's
+  // trackerIdentities, which names a row by its report link or, for a row with
+  // no report, by its tracker # — so check the flags there, not a literal in
+  // the writer. The selector must still be one of those two: a write that named
+  // a row any other way would be matching on something the tracker does not
+  // guarantee.
+  //
+  // Read the argv slice, not the whole function: `includes('ids[0].flag')` over
+  // the body also matches the parameter list, so an argv that hardcoded a flag
+  // and ignored the one it was handed would still have passed. And every
+  // selector-returning line must RESOLVE — an unparseable one fails the guard
+  // instead of being skipped, because a skipped bad branch beside a good one
+  // reads as a pass (#7331 review).
+  const dashboardSelector = readFile('dashboard/internal/data/career.go');
+  const selectorStart = dashboardSelector.indexOf('func trackerIdentities(');
+  // A function with nothing after it ends at EOF, not at index -1, which would
+  // silently drop its last character.
+  const selectorEnd = dashboardSelector.indexOf('\nfunc ', selectorStart + 1);
+  const selectorBody = selectorStart === -1
+    ? ''
+    : dashboardSelector.slice(selectorStart, selectorEnd === -1 ? undefined : selectorEnd);
+  // EVERY flag-shaped literal in the function, however it is written: a regex
+  // keyed to one return shape skips a branch spelled differently, and a skipped
+  // bad branch beside a good one reads as a pass.
+  const selectorSource = selectorBody.replace(/^\s*\/\/.*$/gm, '');
+  const selectorFlags = [...selectorSource.matchAll(/"(--[a-z-]+)"/g)].map((m) => m[1]);
+  // A flag-shaped literal ANYWHERE in the function is not the flag that gets
+  // sent: that is whatever sits in the first field of each trackerIdentity
+  // construction, and an expression there can rewrite a literal which still
+  // reads as correct — `strings.Replace("--row", "row", "report", 1)` keeps the
+  // `--row` the check above wants and sends `--report` (#7331 review). So read
+  // that field and require a BARE literal: an expression the guard cannot
+  // resolve fails it, rather than passing on the literal inside it.
+  // Keyed fields are a legitimate spelling and carry no order (`{value: v,
+  // flag: "--row"}` is the same selector), so find the named field wherever it
+  // sits and fall back to the first positional field.
+  const identityField = (construction, name, position) => {
+    const fields = construction.split(',').map((f) => f.trim());
+    const keyed = fields.find((f) => new RegExp(`^${name}\\s*:`).test(f));
+    if (keyed !== undefined) return keyed.replace(new RegExp(`^${name}\\s*:\\s*`), '');
+    // A positional construction cannot mix in keys: Go rejects that outright.
+    if (fields.some((f) => /^[a-z]\w*\s*:/.test(f))) return null;
+    return fields[position] ?? null;
+  };
+  const identityFlagField = (construction) => {
+    const flag = identityField(construction, 'flag', 0);
+    const bare = flag === null ? null : flag.match(/^"(--[a-z-]+)"$/);
+    return bare ? bare[1] : null;
+  };
+  const selectorIdentities = [...selectorSource.matchAll(/trackerIdentity\{([^}]*)\}/g)]
+    .map((m) => ({
+      flag: identityFlagField(m[1]),
+      value: identityField(m[1], 'value', 1),
+    }));
+  const selectorFlagFields = selectorIdentities.map((id) => id.flag);
+  // Presence of both flags is not enough: branches that SWAP their flag
+  // literals while keeping their values pass every presence check, and then a
+  // report linked as #7 on tracker row #32 sends `--row 7`, which the CLI
+  // accepts as a tracker selector (#7331 review). So pair each flag with the
+  // field it must carry.
+  // Matched as a whole field reference, not a substring: `app.ReportNumber`
+  // CONTAINS `Number`, so a substring test would accept
+  // `trackerIdentity{"--row", app.ReportNumber}` — a one-sided swap, which is
+  // the half of the swap the two-sided check would miss (#7331 review).
+  const selectorPairs = {
+    '--report-link': /\bapp\.ReportNumber\b/,
+    '--row': /\bapp\.Number\b/,
+  };
+  const mispaired = selectorIdentities
+    .filter(({ flag, value }) => flag !== null
+      && (value === null || !(selectorPairs[flag] ?? /(?!)/).test(value)))
+    .map(({ flag }) => flag);
+  const argsStart = runWriterBody.indexOf('args := []string{');
+  const argvLiteral = argsStart === -1
+    ? ''
+    : runWriterBody.slice(argsStart, runWriterBody.indexOf('}', argsStart) + 1);
+  // Presence of each token is not enough: the two checks below are independent,
+  // so `{script, ids[0].value, ids[0].flag, status, ...}` passes both while
+  // sending the status as the selector value (#7331 review). The flag must be
+  // the element immediately before its value — an argv the guard cannot split
+  // into elements resolves to none and fails closed.
+  const selectorArgvAdjacent = (literal) => {
+    const open = literal.indexOf('{');
+    if (open === -1 || !literal.endsWith('}')) return false;
+    const elements = literal.slice(open + 1, -1).split(',').map((f) => f.trim());
+    const flagAt = elements.indexOf('ids[0].flag');
+    return flagAt !== -1 && elements[flagAt + 1] === 'ids[0].value';
+  };
   const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
     && runWriterBody.includes('exec.CommandContext')
-    && runWriterBody.includes('"--report-link"')
+    && argvLiteral.includes('ids[0].flag')
+    && argvLiteral.includes('ids[0].value')
+    && selectorArgvAdjacent(argvLiteral)
+    && !/"--(?:row|report|report-link)"/.test(argvLiteral)
+    && selectorFlags.every((flag) => flag === '--report-link' || flag === '--row')
+    // Every identity the selector builds must name its flag with a literal the
+    // guard can read, and there must be at least the two.
+    && selectorFlagFields.length >= 2
+    && selectorFlagFields.every((flag) => flag === '--report-link' || flag === '--row')
+    // Both must survive: losing --row is the bug #7331 fixed, and losing
+    // --report-link would renumber every existing row's writes.
+    && selectorFlagFields.includes('--report-link')
+    && selectorFlagFields.includes('--row')
+    && mispaired.length === 0
     && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
   if (delegatesToCanonicalWriter) {
     pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
   } else {
     fail('dashboard status writer bypasses the shared set-status transaction scope');
+  }
+
+  // The guard above is only as good as that flag-field read, and its failure
+  // mode is silent: a selector it cannot resolve would pass on a literal that
+  // merely sits nearby. So check the read itself against the shapes that
+  // motivated it — each one sends a flag the repo does not accept while leaving
+  // an acceptable literal in the text (#7331 review).
+  const resolvableFlagFields = [
+    ['a bare literal', '"--row", strconv.Itoa(app.Number)', '--row'],
+    ['keyed fields', 'flag: "--report-link", value: app.ReportNumber', '--report-link'],
+    ['keyed fields in the other order', 'value: strconv.Itoa(app.Number), flag: "--row"', '--row'],
+    ['rewritten at runtime', 'strings.Replace("--row", "row", "report", 1), strconv.Itoa(app.Number)', null],
+    ['built from a variable', 'rowFlag, strconv.Itoa(app.Number)', null],
+    ['concatenated', '"--" + "report", strconv.Itoa(app.Number)', null],
+    ['parenthesized', '("--report"), strconv.Itoa(app.Number)', null],
+  ];
+  // Pairing is checked on the same principle: each shape below sends a flag the
+  // repo does not accept while leaving an acceptable literal in the text.
+  const pairedValues = [
+    ['the row value', '--row', 'strconv.Itoa(app.Number)', true],
+    ['the report value', '--report-link', 'app.ReportNumber', true],
+    ['the report field under --row', '--row', 'app.ReportNumber', false],
+    ['the row field under --report-link', '--report-link', 'strconv.Itoa(app.Number)', false],
+    ['a value that names neither field', '--row', 'app.Company', false],
+  ];
+  const pairingMisreads = pairedValues
+    .filter(([, flag, value, want]) => (selectorPairs[flag] ?? /(?!)/).test(value) !== want)
+    .map(([name]) => name);
+  // Arrangement is checked on the same principle: each shape below contains
+  // both selector tokens, so the presence checks accept every one of them.
+  const argvArrangements = [
+    ['the flag before its value', 'args := []string{script, ids[0].flag, ids[0].value, status, "--json"}', true],
+    ['the flag and its value swapped', 'args := []string{script, ids[0].value, ids[0].flag, status, "--json"}', false],
+    ['the status between the two', 'args := []string{script, ids[0].flag, status, ids[0].value, "--json"}', false],
+    ['the value as the last element', 'args := []string{script, ids[0].flag, status, "--json", ids[0].value}', false],
+    ['an unsplittable argv', 'args := []string{script, ids[0].flag, ids[0].value', false],
+  ];
+  const argvMisreads = argvArrangements
+    .filter(([, literal, want]) => selectorArgvAdjacent(literal) !== want)
+    .map(([name]) => name);
+  const flagFieldMisreads = resolvableFlagFields
+    .filter(([, construction, want]) => identityFlagField(construction) !== want)
+    .map(([name]) => name);
+  const guardSelfCheck = [...flagFieldMisreads, ...pairingMisreads, ...argvMisreads];
+  if (guardSelfCheck.length === 0) {
+    pass('dashboard selector guard resolves every tracker-identity flag and value, or fails closed');
+  } else {
+    fail(`dashboard selector guard misreads a tracker identity: ${guardSelfCheck.join(', ')}`);
   }
 
 } catch (e) {

@@ -69,8 +69,9 @@ export function validateInstall(dir, expectId) {
   const manifest = validateManifest(parsed, dir, expectId);
   if (!manifest) return { ok: false, problems: ['manifest failed validation (see ⚠️ above)'], manifest: null, dir };
   const audit = auditPlugin(dir);
-  if (!audit.ok) return { ok: false, problems: audit.findings.map(f => `${f.file}: ${f.issue}`), manifest, dir };
-  return { ok: true, problems: [], manifest, dir };
+  const warnings = audit.warnings.map(w => `${w.file}:${w.line}: ${w.issue}`);
+  if (!audit.ok) return { ok: false, problems: audit.findings.map(f => `${f.file}: ${f.issue}`), warnings, manifest, dir };
+  return { ok: true, problems: [], warnings, manifest, dir };
 }
 
 /**
@@ -94,16 +95,18 @@ export function installFromRepo(root, { url, sha }) {
   cpSync(result.dir, dest, { recursive: true });
   rmSync(result.dir, { recursive: true, force: true });
   const tree = hashPluginTree(dest);
-  return { id, manifest: { ...result.manifest, dir: dest }, integrity: tree.integrity, files: tree.files, repo: safeUrl, sha };
+  return { id, manifest: { ...result.manifest, dir: dest }, integrity: tree.integrity, files: tree.files, repo: safeUrl, sha, warnings: result.warnings };
 }
 
 /**
  * Clone + statically validate a registry entry WITHOUT installing it (used by
  * the registry-validate CI). Executes NO plugin code — manifest is parsed, the
- * audit is static. Returns problems (empty = clean).
+ * audit is static. Returns problems (empty = clean); audit warnings, which do
+ * not make an entry invalid, go to `onWarning`.
+ * @param {(warning: string) => void} [onWarning]
  * @returns {string[]}
  */
-export function auditRegistryEntry(url, sha, expectId) {
+export function auditRegistryEntry(url, sha, expectId, onWarning = () => {}) {
   let parsed;
   try { parsed = parseRepoArg(url); } catch (e) { return [e.message]; }
   if (expectId && parsed.id !== expectId) return [`repo "${url}" → id "${parsed.id}" but registry id is "${expectId}"`];
@@ -113,6 +116,7 @@ export function auditRegistryEntry(url, sha, expectId) {
   try { result = validateInstall(dir, parsed.id); }
   catch (e) { rmSync(dir, { recursive: true, force: true }); return [e.message]; }
   try { rmSync(result.dir || dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+  for (const w of result.warnings || []) onWarning(w);
   return result.ok ? [] : result.problems;
 }
 
