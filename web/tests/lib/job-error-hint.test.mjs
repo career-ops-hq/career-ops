@@ -76,6 +76,7 @@ test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", ()
 test("a real sign-in line still asks you to sign in", () => {
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (please login)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (No CLI configured; login required)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; authentication failed)"))?.kind, "auth");
   assert.equal(
     jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (please login)"))?.kind,
     "auth",

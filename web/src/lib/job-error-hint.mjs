@@ -44,6 +44,8 @@ const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|co
 // The key itself failed. "network connection failed" does not count.
 const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:is\s+|was\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)|(?:\bnot\b|\bno\b)\s+(?:\w+\s+){0,3}configured\b/i;
 const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
+// An authentication failure keeps the hint even when the same line says a key is configured.
+const AUTH_FAILURE_RE = /\bauthentication\s+failed\b|\bnot\s+authenticated\b|\bunauthenticated\b|\bunauthorized\b/i;
 
 const PARTIAL_RUN_PREFIX = "This run hit an error before finishing";
 
@@ -66,6 +68,7 @@ function nonAuthQuote(label) {
 function quoteIsSignIn(detail) {
   if (!detail || RATE_LIMIT_PATTERN.test(detail)) return false;
   if (SIGN_IN_REQUEST_RE.test(detail)) return true;
+  if (AUTH_FAILURE_RE.test(detail)) return true;
   if (!AUTH_PATTERN.test(detail)) return false;
   if (SIGN_IN_SUCCESS_RE.test(detail) && !KEY_FAILURE_RE.test(detail)) return false;
   return true;
