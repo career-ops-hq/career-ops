@@ -33,7 +33,8 @@ after(() => {
 const HANG = 'process.on("SIGTERM", () => {});\nsetInterval(() => {}, 1e9);\n';
 const EXIT_ON_TERM = 'process.on("SIGTERM", () => { console.log(JSON.stringify({ added: 1, already: 0, found: 1, message: "Added 1." })); process.exit(0); });\nsetInterval(() => {}, 1e9);\n';
 // Windows kills SIGTERM immediately, like SIGKILL, so the handler never runs
-// and the grace window never elapses. Those two checks stay on POSIX.
+// and the grace window never elapses. The timeout message still has to show
+// on every platform. The grace floor and the exit-on-signal case stay on POSIX.
 const canCatchTerm = process.platform !== "win32";
 
 test("a tracker delete that ignores SIGTERM is stopped and the next delete can run", async () => {
@@ -48,11 +49,9 @@ test("a tracker delete that ignores SIGTERM is stopped and the next delete can r
   const body = await res.json();
   const elapsed = Date.now() - started;
   assert.equal(res.status, 400);
+  assert.equal(body.error, "Delete timed out after 30 seconds and was stopped.");
   assert.ok(elapsed < 8_000, `the request stayed open (${elapsed}ms)`);
-  if (canCatchTerm) {
-    assert.equal(body.error, "Delete timed out after 30 seconds and was stopped.");
-    assert.ok(elapsed >= 1_500, `killed too soon (${elapsed}ms)`);
-  }
+  if (canCatchTerm) assert.ok(elapsed >= 1_500, `killed too soon (${elapsed}ms)`);
 
   writeFileSync(join(codeRoot, "tracker.mjs"), "// tracker.mjs delete --num\nprocess.exit(0);\n");
   const again = await POST(new Request("http://localhost/api/tracker/delete", {
@@ -87,10 +86,10 @@ test("a LinkedIn import that ignores SIGTERM is stopped", async () => {
   const elapsed = Date.now() - started;
   assert.equal(res.status, 500);
   assert.equal(body.uncertain, true);
-  assert.ok(elapsed < 8_000, `the request stayed open (${elapsed}ms)`);
-  if (!canCatchTerm) return;
   assert.equal(body.message, "The import timed out after 30 seconds and was stopped. Check Pipeline before pasting again.");
-  assert.ok(elapsed >= 1_500, `killed too soon (${elapsed}ms)`);
+  assert.ok(elapsed < 8_000, `the request stayed open (${elapsed}ms)`);
+  if (canCatchTerm) assert.ok(elapsed >= 1_500, `killed too soon (${elapsed}ms)`);
+  if (!canCatchTerm) return;
 
   writeFileSync(join(codeRoot, "linkedin-import.mjs"), EXIT_ON_TERM);
   const kept = await POST(new Request("http://localhost/api/linkedin-import", {
