@@ -515,6 +515,7 @@ const SECTION_ALIASES = new Map([
   // section's everyday headings. Lower-casing turns "İ" into "i" plus a dot that
   // foldDiacritics drops, so "İş" folds to "is"; the dotless "ı" stays as written.
   ['özet', 'summary'],
+  ['profil', 'summary'],
   ['profesyonel özet', 'summary'],
   ['kariyer özeti', 'summary'],
   ['hakkımda', 'summary'],

@@ -25,7 +25,7 @@ const cvMd = '# CV\n\n## Özet\n\n## Eğitim\n\n## Yetkinlikler\n\n## İş Deney
 
 test('sectionKey resolves the Turkish spellings CVs use', () => {
   const cases = [
-    ['Özet', 'summary'], ['Profesyonel Özet', 'summary'], ['Hakkımda', 'summary'],
+    ['Özet', 'summary'], ['Profil', 'summary'], ['Profesyonel Özet', 'summary'], ['Hakkımda', 'summary'],
     ['Temel Yetkinlikler', 'competencies'], ['Yetkinlikler', 'competencies'],
     ['İş Deneyimi', 'experience'], ['İş Deneyimleri', 'experience'], ['Deneyim', 'experience'], ['Profesyonel Deneyim', 'experience'],
     ['Projeler', 'projects'], ['Öne Çıkan Projeler', 'projects'],
