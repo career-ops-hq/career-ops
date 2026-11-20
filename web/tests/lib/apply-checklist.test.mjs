@@ -162,7 +162,9 @@ test("the indexed resume PDF stays the resume row, and its HTML is the paste sou
 // file. There it skips with the reason, and the case above still runs in full.
 test("an indexed HTML under output/ that is a symlink out of the workspace is not the paste source", (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-paste-"));
-  const secret = path.join(path.dirname(root), "apply-paste-secret.html");
+  // Outside the workspace, and named after this run's root, so a concurrent run
+  // never removes the file this run's link points at.
+  const secret = path.join(path.dirname(root), `${path.basename(root)}-secret.html`);
   try {
     const output = path.join(root, "output");
     fs.mkdirSync(output);
