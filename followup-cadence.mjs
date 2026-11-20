@@ -326,64 +326,140 @@ const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|
 // `\b` before the word, so "arrow 51" and "narrow 51" cannot match. The digit
 // run is bounded to 4: a tracker `#` is 1-4 digits, and the bound keeps the
 // pattern off a long identifier that happens to follow the word.
-const ROW_WORD_REF = String.raw`\b(?:rows?|entr(?:y|ies))[\s:]*#?\s*\d{1,4}\b`;
+//
+// The trailing `(?!-\d{2}-\d{2})` refuses the YEAR of an ISO date. Without it
+// "Data entry 2026-08-05; Applied 2026-08-06" matched "entry 2026" -- `\b`
+// holds between the `6` and the `-` -- and the backward scan then threw away
+// August 6. Narrow on purpose: it rejects only a full date continuation, so a
+// span like "row 51-52" is still read as a pointer.
+const ROW_WORD_REF = String.raw`\b(?:rows?|entr(?:y|ies))[\s:]*#?\s*\d{1,4}\b(?!-\d{2}-\d{2})`;
+const ROW_WORD_REF_RE = new RegExp(ROW_WORD_REF, 'i');
 
-// Either spelling, for the backward scan. The `#NNN` branch keeps its own
-// lookbehind (an external tag like "job-search#7" is not a row pointer); the
-// word branch needs none, since the word itself is the discriminator.
+// Either spelling. The `#NNN` branch keeps its own lookbehind (an external tag
+// like "job-search#7" is not a row pointer); the word branch needs none, since
+// the word itself is the discriminator.
 const CROSS_REF_TOKEN_RE = new RegExp(String.raw`(?<![\w-])#\d+\b|${ROW_WORD_REF}`, 'gi');
 
-// How far PAST a date the guard will look for a citation that the date belongs
-// to. The shape that motivated this puts the pointer after the date, inside a
+// How far PAST a date the guard will look for a citation the date belongs to.
+// The shape that motivated this puts the pointer after the date, inside a
 // parenthetical: "applied 2026-09-20 to their other Staff req (row 51, 4.6/5)".
 // No lookback length can reach that -- the text before the date is a couple of
 // words -- so a forward window is not an optional extra here, it is the half of
 // the bug the backward scan cannot express.
 //
-// Deliberately much tighter than the backward scan, and in three ways, because
-// forward attribution is the easier direction to get wrong:
-//
-//   1. BRACKETED ONLY. The pointer must sit inside a `(...)` or `[...]` group,
-//      which is an appositive attached to the clause just read, and whose
-//      brackets give a hard scope delimiter instead of a guess about where the
-//      clause ended. "Applied 2026-11-20 and row 51 applied 2026-09-20" is
-//      genuinely ambiguous prose, and it stays OWN rather than being guessed
-//      foreign, because the pointer is not bracketed.
-//   2. WORD SPELLING ONLY. `#NNN` is not accepted forward: "applied 2026-08-06
-//      (Req #1311)" is a row stating its own date and its own posting id, and
-//      reading that parenthetical as a pointer would discard a real date. The
-//      backward scan needs REQ_LABELLED_HASH_RE to tell those apart; forward,
-//      restricting to the word avoids the whole class.
-//   3. SHORT, AND CLAUSE-BOUNDED. The bracket must open within
-//      CROSS_REF_FORWARD chars of the date with no sentence or clause boundary
-//      in between, so "Applied 2026-11-20; (row 51 is the other one)" does not
-//      reach across the separator.
+// Deliberately much tighter than the backward scan, because forward
+// attribution is the easier direction to get wrong: the pointer must sit inside
+// a COMPLETE bracket group that opens within this many characters of the date
+// and in the date's own clause, and only the word spelling counts there
+// ("applied 2026-08-06 (Req #1311)" is a row stating its own date and its own
+// posting id). Unbracketed prose is left alone: "Applied 2026-11-20 and row 51
+// applied 2026-09-20" is genuinely ambiguous and keeps its own date.
 const CROSS_REF_FORWARD = 60;
-const FORWARD_ROW_REF_RE = new RegExp(
-  String.raw`^[^.;|!?\r\n\u2028\u2029(\[]{0,${CROSS_REF_FORWARD}}[(\[][^)\]]*?${ROW_WORD_REF}`,
-  'i',
-);
+
+// The first clause boundary in `s`, or -1. A sentence break needs trailing
+// whitespace so "4.6/5" and "e.g." are not boundaries; `;` and `|` never appear
+// inside numbers or abbreviations, so they stand alone. Same vocabulary the
+// backward scan's scope rules use, kept in one place so the two directions
+// cannot drift.
+function firstClauseBoundary(s) {
+  const m = /[.!?]\s|[;|]|[\r\n\u2028\u2029]/.exec(s);
+  return m ? m.index : -1;
+}
+
+// The pointers in `scope` that really are pointers at another row, in order.
+// `text`/`scopeStart` are only needed so a token sitting exactly on the scope's
+// first character can be checked against what precedes it in the full note.
+function* acceptedPointers(scope, text, scopeStart) {
+  for (const m of scope.matchAll(CROSS_REF_TOKEN_RE)) {
+    // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
+    // on the scope's first character is checked against the original text.
+    // Applies to the word spelling too: a scope starting mid-word would let
+    // `\b` assert at offset 0 and read "arrow 51" as "row 51".
+    if (m.index === 0 && /[\w-]/.test(text[scopeStart - 1] ?? '')) continue;
+    // Only the `#NNN` spelling can be an ATS identifier for this row; the word
+    // spelling is a row pointer by construction.
+    //
+    // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
+    // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
+    // this row's own date, and reading it as a cross-reference would discard a
+    // genuine date. The label vocabulary is the one merge-tracker.mjs already
+    // recognises in this same Notes column (tracker-parse.mjs REQ_NUMBER_RE),
+    // kept in sync by being written the same way rather than imported --
+    // merge-tracker's regex also captures the id itself, which is not wanted
+    // here.
+    if (m[0].startsWith('#') && REQ_LABELLED_HASH_RE.test(scope.slice(0, m.index))) continue;
+    yield m;
+  }
+}
+
+// Whether a bracket group in the date's own clause, opening within
+// CROSS_REF_FORWARD characters after it, cites another row.
+//
+// Walked in code rather than matched with one regex, because the three things
+// that make this safe cannot be said in a regex: a group must be CLOSED, a
+// group without a pointer must not hide a later one, and a clause separator
+// inside a group ends the citation just as it would outside. Expressed as a
+// pattern, each of those silently became a wrong answer:
+//   - "Applied 2026-11-20 (compare with row 51"            unfinished group
+//   - "Applied 2026-09-20 (via Greenhouse) ... (row 51)"   pointer in group 2
+//   - "Applied 2026-11-20 (via Greenhouse; see row 51 ...)" separator inside
+// The first and third discarded the row's own date, the second adopted a
+// foreign one.
+function forwardCitedPointer(text, from) {
+  const horizon = text.slice(from, from + CROSS_REF_FORWARD + 1);
+  const boundary = firstClauseBoundary(horizon);
+  const clause = boundary === -1 ? horizon : horizon.slice(0, boundary);
+
+  for (let i = 0; i < clause.length; i += 1) {
+    if (clause[i] !== '(' && clause[i] !== '[') continue;
+    const closer = clause[i] === '(' ? ')' : ']';
+    // The group may run past the horizon, so its closer is looked for in the
+    // full note. No closer at all means an unfinished note, not a citation.
+    const closeAt = text.indexOf(closer, from + i + 1);
+    if (closeAt === -1) return false;
+    const inner = text.slice(from + i + 1, closeAt);
+    const innerBoundary = firstClauseBoundary(inner);
+    const cited = innerBoundary === -1 ? inner : inner.slice(0, innerBoundary);
+    if (ROW_WORD_REF_RE.test(cited)) return true;
+    // This group named no row; a later group in the same clause still might.
+    const closeRel = closeAt - from;
+    if (closeRel > i) i = closeRel;
+  }
+  return false;
+}
+
+// A clause that points BACK at something already named rather than recording
+// this row's own submission. Only consulted to decide whether a long chain of
+// clauses has carried a pointer's scope too far (see the separator rule at the
+// end of isCrossReferencedMention), never on its own.
+const REFERS_BACK_RE =
+  /\b(?:that|those|this|the|same)\s+(?:sibling|row|entry|req|requisition|posting|opening|role|listing|one)\b|\bto\s+(?:it|them|that|those)\b|\bsiblings?\b/i;
 
 /**
  * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
  *
- * Heuristic, and deliberately a narrow one: a row pointer shortly before the
- * date, with no sentence boundary between them, means the date is inside that
- * reference's clause. A sentence break ends the reference's scope, so
- * "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this row's
- * own date.
+ * Heuristic, and deliberately a narrow one: a row pointer near the date, with
+ * no clause boundary separating them, means the date is inside that pointer's
+ * clause. A sentence break ends the pointer's scope, so "Sibling #140 was slow.
+ * Applied 2026-08-06." is correctly read as this row's own date.
  *
  * A pointer is either `#NNN` or the word form ("row 51", "row #51", "tracker
  * row 51", "entry 51"). Prose is the more natural spelling and was the one the
  * guard missed (#4953).
  *
- * The scan runs in BOTH directions, because a citation is as often placed after
- * the date it owns as before it: "applied 2026-09-20 to their other Staff req
- * (row 51, 4.6/5)" has only a word or two in front of the date. The forward test
- * is much stricter than the backward one — bracketed, word-spelled and
- * clause-bounded — for the reasons set out at CROSS_REF_FORWARD.
+ * Three places are searched, in increasing order of how much they can get
+ * wrong, and the first hit wins:
  *
- * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE REFERENCE HAS ITS OWN DATE.
+ *   1. BETWEEN "applied" AND ITS DATE. "Applied to their other req (row 51) on
+ *      2026-09-20" names the row inside the matched span itself, where neither
+ *      window reaches.
+ *   2. AFTER the date, in a bracketed citation in the same clause -- see
+ *      forwardCitedPointer. A citation is as often placed after the date it
+ *      owns as before it.
+ *   3. BEFORE the date, within CROSS_REF_LOOKBACK, subject to the scope rules
+ *      below.
+ *
+ * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE POINTER HAS ITS OWN DATE.
  * These are the separators this Notes column actually uses, and they do two
  * different jobs depending on what came before:
  *
@@ -412,106 +488,105 @@ const FORWARD_ROW_REF_RE = new RegExp(
  *
  * @param {string} text
  * @param {number} index - offset of the "applied" match within `text`
- * @param {number} [endIndex] - offset just past the matched date, for the
- *   forward scan. Defaults to `index`, which only disables the forward test.
+ * @param {number} [endIndex] - offset just past the matched date. Defaults to
+ *   `index`, which disables the two scans that need the date's end.
  * @returns {boolean}
  */
 function isCrossReferencedMention(text, index, endIndex = index) {
-  // The date may be cited by a pointer that FOLLOWS it, which the backward scan
-  // below cannot see at any window length. Checked first because it is the
-  // cheaper and stricter of the two tests; see CROSS_REF_FORWARD.
-  if (FORWARD_ROW_REF_RE.test(text.slice(endIndex, endIndex + CROSS_REF_FORWARD + 64))) return true;
+  // 1. Inside the matched span, between "applied" and the date it governs.
+  // "Applied to their other req (row 51) on 2026-09-20" puts the pointer where
+  // the backward window (which ends at the span's start) and the forward one
+  // (which begins at its end) both miss it. The date itself is trimmed off so a
+  // bare date is never read as a row number.
+  const span = text.slice(index, endIndex).replace(/~?\d{4}-\d{2}-\d{2}$/, '');
+  for (const _ of acceptedPointers(span, text, index)) return true;
 
+  // 2. After the date, in a bracketed citation in the same clause.
+  if (endIndex > index && forwardCitedPointer(text, endIndex)) return true;
+
+  // 3. Before the date.
   const windowStart = Math.max(0, index - CROSS_REF_LOOKBACK);
   const window = text.slice(windowStart, index);
   let refEnd = -1;
-  // A `#NNN` glued to a preceding word character or hyphen is an external tag
-  // ("job-search#7", "gh#12"), not a pointer at a tracker row. Reading it as a
-  // row reference discarded the row's own date: "job-search#7; Applied
-  // 2026-09-21" attributed the date to row #7.
-  for (const m of window.matchAll(CROSS_REF_TOKEN_RE)) {
-    // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
-    // on the window's first character is checked against the original text.
-    // Applies to the word spelling too: a window starting mid-word would let
-    // `\b` assert at offset 0 and read "arrow 51" as "row 51".
-    if (m.index === 0 && /[\w-]/.test(text[windowStart - 1] ?? '')) continue;
-    // Only the `#NNN` spelling can be an ATS identifier for this row; the word
-    // spelling is a row pointer by construction, so the label exemption below
-    // does not apply to it.
-    if (m[0].startsWith('#')) {
-      // A `#NNN` tagged as a req/job/posting/reference id is not a row
-      // reference: "Req #1311 - applied 2026-08-06" is this row's own posting
-      // id followed by this row's own date, and reading it as a cross-reference
-      // would discard a genuine date. The label vocabulary is the one
-      // merge-tracker.mjs already recognises in this same Notes column
-      // (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by being written the
-      // same way rather than imported — merge-tracker's regex also captures the
-      // id itself, which is not wanted here.
-      if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
-    }
+  let refStart = -1;
+  for (const m of acceptedPointers(window, text, windowStart)) {
     refEnd = m.index + m[0].length;
+    refStart = m.index;
   }
   if (refEnd === -1) return false;
 
   const sinceRef = window.slice(refEnd);
-  // A sentence break always ends the reference's scope.
+  // A sentence break always ends the pointer's scope.
   if (/[.!?]\s/.test(sinceRef)) return false;
 
-  // A semicolon or pipe ends it too — but only once the reference has already
-  // been GIVEN a date. Those are the separators this Notes column actually uses,
-  // and they do two different jobs depending on what came before:
+  const separators = [...sinceRef.matchAll(/[;|]/g)];
+  const lastSeparator = separators[separators.length - 1];
+
+  // Has the pointer already been GIVEN a date? If so a separator does end its
+  // scope, and what follows is this row's own.
   //
-  //   "#154 Sr PM (applied 2026-08-04); applied 2026-06-15"
-  //        the citation already has its date, so the second one is a new
-  //        subject: this row's own. Reading the whole note as #154's loses a
-  //        real measured date, and that is the more common shape — two roles
-  //        live at one employer, and the note naming the sibling is usually the
-  //        same note recording this submission.
-  //
-  //   "#154 is already live; applied 2026-08-04"
-  //        the citation has NO date yet, so the one after the semicolon is
-  //        still its own: a semicolon joins independent clauses within a
-  //        sentence and the subject carries across it. Treating it as a break
-  //        here adopts a foreign date and reports it as MEASURED, which is the
-  //        failure this whole function exists to prevent.
-  //
-  // "Has the reference already been satisfied?" is what separates them, and it
-  // is checked against the text before the LAST separator so a date belonging
-  // to the citation cannot be read as belonging to a later clause.
-  //
+  // The date can sit on either side of the pointer. Checking only the text
+  // after it missed "Applied 2026-09-20 to their other Staff req (row 51);
+  // Applied 2026-11-20", where the September date precedes the citation and
+  // only a `)` follows it -- so the scope carried across the semicolon and
+  // discarded this row's own November date. The clause the pointer sits in is
+  // read from the last boundary before it, so a date belonging to an earlier
+  // clause cannot satisfy a later pointer.
+  const pointerClauseStart = (() => {
+    const before = window.slice(0, refStart);
+    let last = -1;
+    for (let i = 0; i < before.length; i += 1) {
+      const b = firstClauseBoundary(before.slice(i));
+      if (b === -1) break;
+      last = i + b;
+      i = last;
+    }
+    return last === -1 ? 0 : last + 1;
+  })();
+  const citationAlreadyDated =
+    APPLIED_DATE_HAS_DATE_RE.test(window.slice(pointerClauseStart, refStart))
+    || (lastSeparator ? APPLIED_DATE_HAS_DATE_RE.test(sinceRef.slice(0, lastSeparator.index)) : false);
+
   // No trailing-whitespace requirement, unlike the sentence rule above. A full
   // stop needs one to avoid firing on "3.5" or "e.g.", but `;` and `|` do not
   // appear inside numbers or abbreviations, and a hand-typed note writes
   // ";applied 2026-06-15" as readily as "; applied 2026-06-15".
-  const separators = [...sinceRef.matchAll(/[;|]/g)];
-  const lastSeparator = separators[separators.length - 1];
-  if (lastSeparator) {
-    const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
-    if (APPLIED_DATE_HAS_DATE_RE.test(beforeSeparator)) return false;
-  }
+  if (lastSeparator && citationAlreadyDated) return false;
 
-  // ...and the subject carries across ONE semicolon-joined clause, not across a
-  // chain of them. The rule above reasons about a single separator joining two
-  // independent clauses; that reasoning does not survive four, where the
-  // clauses in between are plainly about other things.
+  // ...and an UNDATED pointer's subject carries across ONE semicolon-joined
+  // clause, not across a chain of them. The rule above reasons about a single
+  // separator joining two independent clauses; that reasoning does not survive
+  // four, where the clauses in between are plainly about other things.
   //
   // Found by replaying this guard over a populated tracker (#4953), on a row
   // shaped like "...not row 39 (a different employer); no prior application
   // there; one-active-application policy unverified; posted: 2026-10-29;
   // Applied 2026-10-30 via Greenhouse" -- the pointer is ~110 chars and four
   // clauses away from a date that is unmistakably this row's own, and none of
-  // the existing scope rules ended it: there is no sentence break, and the
-  // "citation already dated" test does not fire because "application" is not
-  // "applied". That is the EXPENSIVE failure direction -- a false positive
-  // discards a real measured submission date and silently degrades a live
-  // follow-up -- so it earns a rule rather than being left to the fallback.
+  // the other scope rules ended it. That is the EXPENSIVE failure direction --
+  // a false positive discards a real measured submission date and silently
+  // degrades a live follow-up -- so it earns a rule rather than being left to
+  // the fallback.
   //
-  // One separator, not zero, because the existing dateless-citation fixture
-  // ("#154 is already live;applied 2026-08-04") is exactly the shape the
-  // single-semicolon reasoning was written for. Over that tracker the two
-  // populations did not overlap at all: every genuine cross-reference sat 0
-  // separators and <=37 chars from its date, the lone false positive at 4.
-  if (separators.length > 1) return false;
+  // One separator, not zero, because the dateless-citation shape above
+  // ("#154 is already live;applied 2026-08-04") is exactly what the
+  // single-semicolon reasoning was written for.
+  //
+  // It stops IMPLICIT carryover only. A date whose own clause points back at
+  // something already named -- "Sibling #154 is live; same ATS; applied
+  // 2026-08-04 to that sibling" -- is still the sibling's, however many
+  // clauses intervene, and the pre-#4953 guard was right to refuse it.
+  if (separators.length > 1) {
+    const dateClauseStart = index - (CROSS_REF_LOOKBACK - refEnd) >= 0 && lastSeparator
+      ? windowStart + refEnd + lastSeparator.index + 1
+      : index;
+    const after = text.slice(endIndex);
+    const afterBoundary = firstClauseBoundary(after);
+    const dateClause =
+      text.slice(dateClauseStart, index)
+      + (afterBoundary === -1 ? after : after.slice(0, afterBoundary));
+    if (!REFERS_BACK_RE.test(dateClause)) return false;
+  }
 
   return true;
 }
