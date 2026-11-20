@@ -93,7 +93,7 @@ function resolveHost(entry) {
   // resulting URL still goes through assertPersonioUrl(), so the host allowlist
   // and HTTPS check below remain the only way a request URL is accepted.
   if (typeof entry.personio === 'string') {
-    const slug = entry.personio.trim();
+    const slug = entry.personio.trim().toLowerCase();
     if (PERSONIO_SLUG_RE.test(slug)) return `${slug}.jobs.personio.de`;
   }
   const raw = typeof entry.careers_url === 'string' ? entry.careers_url : '';
