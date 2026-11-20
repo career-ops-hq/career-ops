@@ -2657,25 +2657,28 @@ function defaultCompanyNormalizer(name) {
   return String(name ?? '').trim().toLowerCase();
 }
 
-const LEGAL_SUFFIX_RES = LEGAL_SUFFIXES.map((suffix) => new RegExp(`\\s${suffix}$`));
+// Longer forms first so "incorporated" is taken whole. The separator is only
+// the suffix boundary: punctuation inside the remaining name stays, so
+// "C++ Consulting" does not collapse into "C Consulting".
+const TRAILING_LEGAL_SUFFIX_RE = new RegExp(
+  `(?:^|[\\s,.])(?:${[...LEGAL_SUFFIXES].sort((a, b) => b.length - a.length).join('|')})\\.?$`,
+  'u',
+);
 
 function companyStemForDedup(name) {
   let key = String(name ?? '')
     .normalize('NFKC')
     .toLowerCase()
-    .replace(/[^\p{L}\p{M}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   const folded = key;
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const re of LEGAL_SUFFIX_RES) {
-      if (re.test(key)) {
-        key = key.replace(re, '').trim();
-        changed = true;
-      }
-    }
+  let guard = 0;
+  while (key && guard++ < LEGAL_SUFFIXES.length + 1) {
+    const match = TRAILING_LEGAL_SUFFIX_RE.exec(key);
+    // A name that is only a suffix keeps that suffix. Stripping it would make
+    // every such label the same empty key.
+    if (!match || match.index === 0) break;
+    key = key.slice(0, match.index).replace(/[\s,.]+$/u, '').trim();
   }
   return key || folded;
 }
@@ -2722,9 +2725,14 @@ export function buildCompanyCanonicalizer(aliases) {
       const arr = Array.isArray(list) ? list : [list];
       for (const a of arr) {
         const alias = defaultCompanyNormalizer(a);
-        if (!alias || canonicalKeys.has(alias)) continue;
-        if (!aliasTargets.has(alias)) aliasTargets.set(alias, new Set());
-        aliasTargets.get(alias).add(canon);
+        const stemmed = companyStemForDedup(alias);
+        for (const form of stemmed && stemmed !== alias ? [alias, stemmed] : [alias]) {
+          // A canonical key keeps its own identity, even when it is also the
+          // suffix-stripped form of someone else's alias.
+          if (!form || canonicalKeys.has(form)) continue;
+          if (!aliasTargets.has(form)) aliasTargets.set(form, new Set());
+          aliasTargets.get(form).add(canon);
+        }
       }
     }
 
@@ -2743,7 +2751,10 @@ export function buildCompanyCanonicalizer(aliases) {
    */
   return function canonicalizeCompany(name) {
     const key = defaultCompanyNormalizer(name);
-    return map.get(key) ?? key;
+    if (map.has(key)) return map.get(key);
+    const stemmed = companyStemForDedup(key);
+    if (stemmed !== key && map.has(stemmed)) return map.get(stemmed);
+    return key;
   };
 }
 
