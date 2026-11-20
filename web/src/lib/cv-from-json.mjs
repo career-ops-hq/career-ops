@@ -185,7 +185,7 @@ export async function materializeTailoredCv({
   const payload = {
     ...envelope.payload,
     experience: Array.isArray(envelope.payload.experience)
-      ? envelope.payload.experience.map((entry) => (entry && typeof entry === "object" ? { ...entry } : entry))
+      ? envelope.payload.experience.map(copyEntry)
       : envelope.payload.experience,
   };
   // The sheet is envelope.format. The body width is payload.page_format.
@@ -230,6 +230,25 @@ export async function materializeTailoredCv({
       return { ok: false, error: `The tailored CV HTML was not written: ${err.message}` };
     }
 
+    const repair = await restoreDriftedBullets({ coreRoot, dataRoot, payload, html });
+    if (repair.warnings.length) {
+      try {
+        fs.writeFileSync(scratch.json, JSON.stringify(payload));
+        const rebuilt = await runNode(dataRoot, [
+          path.join(coreRoot, "build-cv-html.mjs"),
+          scratch.json,
+          scratch.html,
+          template,
+        ]);
+        if (rebuilt.ok) {
+          html = fs.readFileSync(scratch.html, "utf8");
+          warnings.push(...repair.warnings);
+        }
+      } catch {
+        // Keep the first build. generate-pdf's fact gate still decides.
+      }
+    }
+
     const report = reportPath(dataRoot, reportFile);
     if (report && fs.existsSync(/* turbopackIgnore: true */ report)) {
       warnings.push(...await keywordWarnings(coreRoot, dataRoot, report, scratch.html));
@@ -247,6 +266,59 @@ export async function materializeTailoredCv({
   } finally {
     if (!keepScratch) fs.rmSync(scratch.dir, { recursive: true, force: true });
   }
+}
+
+function copyEntry(entry) {
+  if (!entry || typeof entry !== "object") return entry;
+  return Array.isArray(entry.bullets) ? { ...entry, bullets: [...entry.bullets] } : { ...entry };
+}
+
+function bulletKey(check, text) {
+  return check.normalizeClaim(text).replace(/[.;:,]+$/g, "").trim();
+}
+
+function clip(text, max = 160) {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/**
+ * The fact gate blocks a bullet whose verb the model changed ("Worked with"
+ * became "Ran"). The CLI repairs that by restoring the cv.md wording; this does
+ * the same on the local payload copy, once. It only replaces whole bullets a
+ * blocking drift finding points at. It never edits config, and generate-pdf's
+ * gate stays the final check. Any failure here leaves the first build as is.
+ *
+ * @returns {Promise<{warnings: string[]}>}
+ */
+async function restoreDriftedBullets({ coreRoot, dataRoot, payload, html }) {
+  const warnings = [];
+  try {
+    const check = await loadCore(coreRoot, "verify-cv-facts.mjs");
+    const result = check.verifyFacts(html, {
+      sourcePaths: [path.join(dataRoot, "cv.md"), path.join(dataRoot, "article-digest.md")],
+      configPath: path.join(dataRoot, "config", "cv-facts.json"),
+    });
+    const drifts = (result?.unsupportedFacts ?? []).filter((fact) => fact.kind === "drift" && fact.blocking === true);
+    for (const drift of drifts) {
+      if (typeof drift.line !== "string" || typeof drift.sourceLine !== "string") continue;
+      const claim = bulletKey(check, drift.line);
+      if (!claim) continue;
+      const entries = Array.isArray(payload.experience) ? payload.experience : [];
+      for (const entry of entries) {
+        if (!Array.isArray(entry?.bullets)) continue;
+        const index = entry.bullets.findIndex((bullet) => typeof bullet === "string" && bulletKey(check, bullet).includes(claim));
+        if (index === -1) continue;
+        const tailored = entry.bullets[index];
+        entry.bullets[index] = drift.sourceLine;
+        const added = Array.isArray(drift.added) && drift.added.length ? ` (not in cv.md: "${drift.added.join('", "')}")` : "";
+        warnings.push(`Restored the cv.md wording for a bullet the fact check would block${added}. Tailored: "${clip(tailored)}" → cv.md: "${clip(drift.sourceLine)}"`);
+        break;
+      }
+    }
+  } catch {
+    return { warnings: [] };
+  }
+  return { warnings };
 }
 
 function reportPath(dataRoot, reportFile) {
