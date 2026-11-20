@@ -588,6 +588,7 @@ test("the fallback does not fail a run because a word appeared", () => {
     "Errors: 0",
     "Logged in as santifer",
     "npm notice New minor version",
+    "request ID req-429-abc",
   ]) {
     assert.equal(isFatalGenericStderr(line), false, `benign line treated as fatal: ${line}`);
   }
@@ -605,6 +606,8 @@ test("the fallback still catches every real failure it caught before", () => {
     "missing credentials",
     "quota exceeded",
     "rate limit hit",
+    "HTTP 429",
+    "too many requests",
     "permission denied",
     "fatal: not a git repository",
     "command not found",
@@ -698,6 +701,20 @@ test("a rate limit says to wait, and a real sign-in failure still says so", () =
   });
   assert.match(authWithRequestId, /is it installed and authenticated/);
   assert.doesNotMatch(authWithRequestId, /^Rate limit/);
+  const expired = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: configured API key has expired",
+  });
+  assert.match(expired, /is it installed and authenticated/);
+  const signedIn = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: authenticated successfully; connection refused",
+  });
+  assert.equal(signedIn, "The CLI exited with an error. (Error: authenticated successfully; connection refused)");
 });
 
 test("a non-clean exit still appends the snippet", () => {

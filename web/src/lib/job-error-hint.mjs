@@ -42,7 +42,7 @@ const RATE_LIMIT_PATTERN = /(?<![\w-])429(?![\w-])|rate limit|too many requests/
 // "please login" is still a request when the same line says the key is configured.
 const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|configured)\b/i;
 // The key itself failed. "network connection failed" does not count.
-const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:is\s+|was\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)|(?:\bnot\b|\bno\b)\s+(?:\w+\s+){0,3}configured\b/i;
+const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:(?:is|was|has|have|had)\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)|(?:\bnot\b|\bno\b)\s+(?:\w+\s+){0,3}configured\b/i;
 const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 // An authentication failure keeps the hint even when the same line says a key is configured.
 const AUTH_FAILURE_RE = /\bauthentication\s+failed\b|\bnot\s+authenticated\b|\bunauthenticated\b|\bunauthorized\b/i;
@@ -52,13 +52,14 @@ const PARTIAL_RUN_PREFIX = "This run hit an error before finishing";
 /**
  * The stderr quote on a message that did not already say to sign in.
  * The partial-run message is cut at 200 characters, so the closing
- * parenthesis may be missing.
+ * parenthesis may be missing. The quote starts at the first parenthesis
+ * after the prefix, so a nested "(HTTP 401)" stays inside it.
  */
 function nonAuthQuote(label) {
   const match = label.match(/^(The CLI returned nothing\.|The CLI exited with an error\.) \((.*)\)$/);
   if (match) return match[2];
   if (!label.startsWith(PARTIAL_RUN_PREFIX)) return null;
-  const open = label.lastIndexOf(" (");
+  const open = label.indexOf(" (", PARTIAL_RUN_PREFIX.length);
   if (open === -1) return null;
   const detail = label.slice(open + 2);
   return detail.endsWith(")") ? detail.slice(0, -1) : detail;

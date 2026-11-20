@@ -81,6 +81,10 @@ test("a real sign-in line still asks you to sign in", () => {
     jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (please login)"))?.kind,
     "auth",
   );
+  assert.equal(
+    jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (authentication failed (HTTP 401))"))?.kind,
+    "auth",
+  );
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Configuration loaded; please login)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (not authenticated)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Invalid API key)"))?.kind, "auth");
