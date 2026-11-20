@@ -362,6 +362,47 @@ try {
       : fail(`full_board probe rejection: ${thrown}`);
   }
 
+  // ── page 1 links to postings but no card parses -> throw, not an empty board ──
+  {
+    const sq = (id) => `<a href='jobs/results/${id}-role'>x</a>`; // single-quoted: ANCHOR_RE skips it
+    const page1 = `<!doctype html>${['111', '222', '333'].map(sq).join('\n')}`;
+    let thrown = null;
+    try {
+      await provider.fetch({ name: 'Google', google: { full_board: true } }, recordingCtx(() => page1).ctx);
+    } catch (e) { thrown = e; }
+    thrown && /no card could be parsed/.test(thrown.message)
+      ? pass('page 1 with posting links but no parsed cards throws')
+      : fail(`unparsable page 1 should throw, got ${thrown}`);
+    const empty = await provider.fetch({ name: 'Google', google: { full_board: true } },
+      recordingCtx(() => '<!doctype html><a href="jobs/results/?location=US">all</a>').ctx);
+    Array.isArray(empty) && empty.length === 0
+      ? pass('page 1 with no posting links still returns []')
+      : fail(`empty page 1 should return [], got ${JSON.stringify(empty)}`);
+    const { ctx, calls } = recordingCtx(({ n }) => (n === 0 ? linkPage(fullPageIds(1000)) : page1));
+    const later = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx);
+    later.length === PAGE_SIZE && calls.length === 2
+      ? pass('an unparsable later page ends the walk without throwing')
+      : fail(`later unparsable page: ${later.length} jobs, ${calls.length} calls`);
+  }
+
+  // ── short-page stop counts posting links, not parsed cards ──
+  {
+    // 19 parsable cards + 1 single-quoted posting link = a full page of 20.
+    const mixed = (start) => `<!doctype html>${fullPageIds(start).slice(0, PAGE_SIZE - 1).map((id) => link(id)).join('\n')}
+<a href='jobs/results/${start + PAGE_SIZE - 1}-odd'>x</a>`;
+    const { ctx, calls } = recordingCtx(({ n }) => (n === 0 ? mixed(2000) : linkPage(['3000', '3001'])));
+    const jobs = await provider.fetch({ name: 'Google', google: { full_board: true } }, ctx);
+    calls.length === 2 && jobs.length === PAGE_SIZE - 1 + 2
+      ? pass('a full page with one unparsable posting link is not read as short')
+      : fail(`mixed full page: ${calls.length} calls, ${jobs.length} jobs`);
+    const { countPostingLinks } = mod;
+    countPostingLinks(mixed(2000)) === PAGE_SIZE
+      && countPostingLinks('<a href="jobs/results/?q=x">a</a><a href="https://www.google.com/about/careers/applications/jobs/results/">b</a>') === 0
+      && countPostingLinks(`${link('5')}${link('5')}`) === 1
+      ? pass('countPostingLinks counts distinct postings and skips listing links')
+      : fail('countPostingLinks miscounted');
+  }
+
 } catch (e) {
   fail(`google provider tests crashed: ${e.message}`);
 }

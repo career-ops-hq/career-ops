@@ -67,6 +67,11 @@ const INTER_PAGE_DELAY_MS = 400;
 // card. Google serves the href relative ("jobs/results/…"); a path prefix is
 // tolerated, and the URL is rebuilt from BASE either way.
 const ANCHOR_RE = /<a\b[^>]*?\bhref="(?:[^"]*\/)?jobs\/results\/(\d+)-([a-z0-9-]+)[^"]*"[^>]*>/g;
+// Any link to a posting under jobs/results/, whatever its quoting or ID shape.
+// It counts the postings a page links to before ANCHOR_RE filters them, so a
+// card the parser cannot read still counts toward a full page (#7320 review).
+// The bare listing link ("jobs/results/?…") has no path segment and is skipped.
+const POSTING_LINK_RE = /\bhref\s*=\s*["']?(?:[^"'\s>]*\/)?jobs\/results\/([^"'\s>?#/]+)/gi;
 const H3_RE = /<h3\b[^>]*>([^<]+)<\/h3>/g;
 const EMPLOYER_LINE_RE = /<p class="l103df">([\s\S]*?)<\/p>/g;
 const ARIA_TITLE_RE = /\baria-label="Learn more about ([^"]+)"/;
@@ -144,6 +149,18 @@ export function parseResultsPage(html) {
   return cards;
 }
 
+/**
+ * Count the distinct postings a results page links to, before card parsing.
+ *
+ * @param {string} html
+ * @returns {number}
+ */
+export function countPostingLinks(html) {
+  const seen = new Set();
+  for (const m of String(html).matchAll(POSTING_LINK_RE)) seen.add(m[1]);
+  return seen.size;
+}
+
 /** @type {Provider} */
 
 export default {
@@ -208,6 +225,13 @@ export default {
         }
         requestsMade += 1;
         const cards = parseResultsPage(html);
+        const postingLinks = countPostingLinks(html);
+        // Page 1 links to postings but no card parsed: the markup changed under
+        // the parser. Returning [] would read as an empty board, so fail loudly
+        // (ADDING_A_PROVIDER.md). A page with no posting links is a real empty.
+        if (page === 1 && cards.length === 0 && postingLinks > 0) {
+          throw new Error(`google: ${entry.name} page 1 links to ${postingLinks} posting(s) but no card could be parsed — the results markup may have changed`);
+        }
         let newThisQuery = 0;
         for (const { id, slug, title, employer, locations } of cards) {
           if (!seenThisQuery.has(id)) { seenThisQuery.add(id); newThisQuery += 1; }
@@ -222,8 +246,9 @@ export default {
           });
         }
         // Stop at this query's last page: empty, re-served (no new ids), or
-        // short (a full page is PAGE_SIZE cards).
-        if (cards.length === 0 || newThisQuery === 0 || cards.length < PAGE_SIZE) break;
+        // short. "Short" counts every posting link on the page, not the parsed
+        // cards, so one unparsable card on a full page does not end the walk.
+        if (cards.length === 0 || newThisQuery === 0 || postingLinks < PAGE_SIZE) break;
         if (page === maxPages && !probing) truncated = true;
       }
     }
