@@ -44,6 +44,12 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-20 `2026-11-20-santifer.13` (178 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
 - 2026-11-20 `2026-11-20-santifer.15` (19 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
 - 2026-11-20 `2026-11-20-santifer.16` (153 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-20 `2026-11-20-santifer.22` (29 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-20 `2026-11-20-santifer.23` (8 boards, source `ats-directory`): open-jobs, repository elliottdehn/open-jobs, CC0-1.0: https://github.com/elliottdehn/open-jobs
+- 2026-11-20 `2026-11-20-santifer.24` (37 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-20 `2026-11-20-santifer.25` (246 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-20 `2026-11-20-santifer.26` (138 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-20 `2026-11-20-santifer.27` (527 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
 - 2026-11-20 `2026-11-20-santifer.42` (6 boards, source `web-index:wayback@2026-11-14`): Found by the project's discoverer in a public web index
 - 2026-11-20 `2026-11-20-santifer.43` (2 boards, source `ats-directory`): ATS Company Directory by LastRound AI, CC BY 4.0: https://lastroundai.com/blog/salary-transparency-study-2026
 - 2026-11-20 `2026-11-20-santifer.54` (4 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
