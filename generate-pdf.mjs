@@ -611,6 +611,35 @@ const SECTION_ALIASES = new Map([
   ['conocimientos técnicos', 'skills'],
   ['herramientas e idiomas', 'skills'],
   ['intereses', 'interests'],
+  // Turkish (modes/tr) — the same failure as the blocks around it: no Turkish
+  // title resolved here, so cv.sections matched no section of a Turkish CV and
+  // the order guard compared raw titles. "Beceriler" and "İş deneyimi" are the
+  // skills and career-history terms in modes/tr/README.md; the rest are each
+  // section's everyday headings. Lower-casing turns "İ" into "i" plus a dot that
+  // foldDiacritics drops, so "İş" folds to "is"; the dotless "ı" stays as written.
+  ['özet', 'summary'],
+  ['profil', 'summary'],
+  ['profesyonel özet', 'summary'],
+  ['kariyer özeti', 'summary'],
+  ['hakkımda', 'summary'],
+  ['temel yetkinlikler', 'competencies'],
+  ['yetkinlikler', 'competencies'],
+  ['iş deneyimi', 'experience'],
+  ['iş deneyimleri', 'experience'],
+  ['deneyim', 'experience'],
+  ['profesyonel deneyim', 'experience'],
+  ['projeler', 'projects'],
+  ['öne çıkan projeler', 'projects'],
+  ['eğitim', 'education'],
+  ['eğitim bilgileri', 'education'],
+  ['sertifikalar', 'certifications'],
+  ['ödüller', 'awards'],
+  ['ödüller ve başarılar', 'awards'],
+  ['beceriler', 'skills'],
+  ['teknik beceriler', 'skills'],
+  ['yetenekler', 'skills'],
+  ['ilgi alanları', 'interests'],
+  ['hobiler', 'interests'],
   // Italian (modes/it) — the same failure as the blocks around it: no Italian
   // title resolved here, so cv.sections matched no section of an Italian CV and
   // the order guard compared raw titles. A bare "Competenze" is the key-skills
