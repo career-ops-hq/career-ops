@@ -475,10 +475,11 @@ const KEY_MENTION_RE = /(?:credentials?|api[ -]?key)/i;
 const KEY_STATUS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|configured)\b/i;
 const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:(?:is|was|has|have|had)\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)/i;
 const AUTH_FAILURE_RE = /\bauthentication\s+failed\b|\bnot\s+authenticated\b|\bunauthenticated\b|\bunauthorized\b/i;
+const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 
 /** A stderr line asks for sign-in when sign-in failed, not when a key merely loaded. */
 function stderrIsSignIn(line) {
-  if (AUTH_FAILURE_RE.test(line)) return true;
+  if (SIGN_IN_REQUEST_RE.test(line) || AUTH_FAILURE_RE.test(line)) return true;
   if (SIGN_IN_CORE_RE.test(line)) {
     if (KEY_STATUS_RE.test(line) && !KEY_FAILURE_RE.test(line)) return false;
     return true;

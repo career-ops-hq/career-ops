@@ -715,6 +715,13 @@ test("a rate limit says to wait, and a real sign-in failure still says so", () =
     stderrSnippet: "Error: authenticated successfully; connection refused",
   });
   assert.equal(signedIn, "The CLI exited with an error. (Error: authenticated successfully; connection refused)");
+  const pleaseLogin = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: please login (API key configured)",
+  });
+  assert.match(pleaseLogin, /is it installed and authenticated/);
 });
 
 test("a non-clean exit still appends the snippet", () => {
