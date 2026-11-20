@@ -80,6 +80,11 @@ check(fileRole('docker-compose.prod.yml') === 'config' && fileRole('Dockerfile.d
   const goSkills = manifestSignals(R, 'go.mod', goMod).map((x) => x.skill);
   check(goSkills.includes('PostgreSQL') && goSkills.includes('Redis'), 'go.mod module prefixes match versioned paths');
   check(manifestSignals(R, 'requirements.txt', 'redisx==1\nnot-redis==2\n').length === 0, 'package names match on boundaries only (redisx, not-redis)');
+  check(manifestSignals(R, 'go.mod', 'module x\nrequire github.com/aws/aws-sdk-go-v2/service/s3 v1.58.0\n').some((x) => x.skill === 'AWS'), 'go.mod aws-sdk-go-v2 → AWS');
+  const pom = '<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency>';
+  check(manifestSignals(R, 'pom.xml', pom).some((x) => x.skill === 'Spring'), 'pom.xml Spring Boot starter → Spring');
+  const gradle = 'plugins { id("org.springframework.boot") version "3.3.0" }\ndependencies { implementation("org.springframework.boot:spring-boot-starter-web") }\n';
+  check(manifestSignals(R, 'build.gradle.kts', gradle).some((x) => x.skill === 'Spring'), 'build.gradle.kts Spring Boot starter → Spring');
 }
 {
   const dockerfile = 'FROM --platform=linux/amd64 node:20-alpine AS build\nRUN npm ci\nFROM nginx:1.25\n';

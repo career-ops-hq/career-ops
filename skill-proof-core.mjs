@@ -256,11 +256,16 @@ const PACKAGE_SKILLS = {
     'github.com/lib/pq': 'PostgreSQL', 'github.com/jackc/pgx': 'PostgreSQL', 'github.com/go-redis/redis': 'Redis',
     'github.com/redis/go-redis': 'Redis', 'go.mongodb.org/mongo-driver': 'MongoDB', 'google.golang.org/grpc': 'gRPC',
     'github.com/go-sql-driver/mysql': 'MySQL', 'github.com/aws/aws-sdk-go': 'AWS', 'github.com/segmentio/kafka-go': 'Kafka',
+    'github.com/aws/aws-sdk-go-v2': 'AWS',
   },
   rust: { 'tokio-postgres': 'PostgreSQL', postgres: 'PostgreSQL', redis: 'Redis', mongodb: 'MongoDB', tonic: 'gRPC' },
   ruby: { pg: 'PostgreSQL', redis: 'Redis', rails: 'Rails', mysql2: 'MySQL', mongoid: 'MongoDB' },
   php: { 'laravel/framework': 'Laravel', 'symfony/symfony': 'Symfony', 'predis/predis': 'Redis' },
-  jvm: { postgresql: 'PostgreSQL', 'spring-boot': 'Spring', 'spring-core': 'Spring', jedis: 'Redis', 'kafka-clients': 'Kafka' },
+  // Spring Boot projects declare starters (`spring-boot-starter-web`), always under this groupId.
+  jvm: {
+    postgresql: 'PostgreSQL', 'spring-boot': 'Spring', 'org.springframework.boot': 'Spring', 'spring-core': 'Spring',
+    jedis: 'Redis', 'kafka-clients': 'Kafka',
+  },
 };
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
