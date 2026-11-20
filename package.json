@@ -61,6 +61,7 @@
     "add": "node add-entry.mjs",
     "reposts": "node detect-reposts.mjs",
     "filter-audit": "node filter-audit.mjs --summary",
+    "interview-jd-terms": "node interview-jd-terms.mjs",
     "digest": "node weekly-digest.mjs",
     "freshness": "node check-table-freshness.mjs",
     "jd-archive": "node check-jd-archive.mjs",
