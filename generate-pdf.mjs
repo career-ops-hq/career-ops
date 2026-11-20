@@ -639,6 +639,46 @@ const SECTION_ALIASES = new Map([
   ['competências técnicas', 'skills'],
   ['conhecimentos técnicos', 'skills'],
   ['interesses', 'interests'],
+  // Russian (modes/ru) and Ukrainian (modes/ua) — the same failure as the blocks
+  // above: no title in either resolved here, so cv.sections matched no section
+  // of such a CV and the order guard compared raw titles. The skills and
+  // career-history terms are the ones in the two READMEs (Навыки, Опыт работы;
+  // Навички, Досвід роботи); the rest are each section's everyday headings.
+  // foldDiacritics turns й into и and ї into і on both sides of the lookup.
+  ['о себе', 'summary'],
+  ['обо мне', 'summary'],
+  ['профиль', 'summary'],
+  ['про себе', 'summary'],
+  ['профіль', 'summary'],
+  ['ключевые навыки', 'competencies'],
+  ['ключевые компетенции', 'competencies'],
+  ['компетенции', 'competencies'],
+  ['ключові навички', 'competencies'],
+  ['ключові компетенції', 'competencies'],
+  ['компетенції', 'competencies'],
+  ['опыт работы', 'experience'],
+  ['опыт', 'experience'],
+  ['профессиональный опыт', 'experience'],
+  ['досвід роботи', 'experience'],
+  ['досвід', 'experience'],
+  ['професійний досвід', 'experience'],
+  ['проекты', 'projects'],
+  ['проєкти', 'projects'],
+  ['проекти', 'projects'],
+  ['образование', 'education'],
+  ['освіта', 'education'],
+  ['сертификаты', 'certifications'],
+  ['сертифікати', 'certifications'],
+  ['награды', 'awards'],
+  ['нагороди', 'awards'],
+  ['навыки', 'skills'],
+  ['технические навыки', 'skills'],
+  ['навички', 'skills'],
+  ['технічні навички', 'skills'],
+  ['интересы', 'interests'],
+  ['хобби', 'interests'],
+  ['інтереси', 'interests'],
+  ['хобі', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
