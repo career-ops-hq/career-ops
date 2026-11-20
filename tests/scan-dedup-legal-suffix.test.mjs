@@ -62,6 +62,22 @@ test('an explicit alias wins over a stem inferred from another alias', () => {
   assert.notEqual(canon('Acme'), canon('Alpha'));
 });
 
+test('punctuated spellings of one collision stay unresolved', () => {
+  const canon = buildCompanyCanonicalizer({ Alpha: ['Acme Inc.'], Beta: ['Acme Inc'] });
+  assert.equal(canon('Acme Inc.'), 'acme inc');
+  assert.equal(canon('Acme Inc'), 'acme inc');
+  assert.equal(canon('Acme, Inc.'), 'acme inc');
+  assert.notEqual(canon('Acme Inc.'), 'alpha');
+  assert.notEqual(canon('Acme Inc'), 'beta');
+  const named = buildCompanyCanonicalizer({
+    'Acme Inc.': [],
+    Alpha: ['Acme Inc'],
+    Beta: ['Acme Inc'],
+  });
+  assert.equal(named('Acme Inc.'), 'acme inc.');
+  assert.equal(named('Acme Inc'), 'acme inc');
+});
+
 test('an ambiguous alias stays itself when its stem is a canonical name', () => {
   const canon = buildCompanyCanonicalizer({ Acme: [], Beta: ['Acme Inc'], Gamma: ['Acme Inc'] });
   assert.equal(canon('Acme Inc'), 'acme inc');

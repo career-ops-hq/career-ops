@@ -2762,8 +2762,15 @@ export function buildCompanyCanonicalizer(aliases) {
     }
 
     // An explicit alias wins over a stem inferred from a different alias.
-    // An ambiguous explicit alias stays out of the map.
+    // An ambiguous explicit alias stays out of the map. A punctuated form
+    // of that alias is the same collision, so it stays out too.
     for (const [alias, targets] of explicitTargets) {
+      const spelled = companyAliasSpelling(alias);
+      if ((explicitTargets.get(spelled)?.size ?? 0) > 1) {
+        ambiguousExplicit.add(spelled);
+        if (spelled !== alias) ambiguousExplicit.add(alias);
+        continue;
+      }
       if (targets.size === 1) map.set(alias, targets.values().next().value);
       else ambiguousExplicit.add(alias);
     }
@@ -2781,14 +2788,15 @@ export function buildCompanyCanonicalizer(aliases) {
    */
   return function canonicalizeCompany(name) {
     const key = defaultCompanyNormalizer(name);
+    const spelled = companyAliasSpelling(key);
+    // A canonical name keeps its identity. Any other spelling of an
+    // ambiguous alias stays unresolved, including "Acme Inc." when "acme inc"
+    // is already claimed twice.
+    const ownName = map.has(key) && map.get(key) === key;
+    if (!ownName && ambiguousExplicit.has(spelled)) return spelled;
     if (ambiguousExplicit.has(key)) return key;
     if (map.has(key)) return map.get(key);
-    // Suffix punctuation is still the explicit alias. The stem comes after.
-    const spelled = companyAliasSpelling(key);
-    if (spelled !== key) {
-      if (ambiguousExplicit.has(spelled)) return spelled;
-      if (map.has(spelled)) return map.get(spelled);
-    }
+    if (spelled !== key && map.has(spelled)) return map.get(spelled);
     const stemmed = companyStemForDedup(key);
     if (stemmed !== key && map.has(stemmed)) return map.get(stemmed);
     return key;
