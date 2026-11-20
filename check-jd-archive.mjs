@@ -1282,5 +1282,8 @@ if (isMainModule(import.meta.url)) {
     }, null, 2));
   }
 
-  process.exit(hasMissingArchive(result.findings) ? 1 : 0);
+  // process.exitCode, not process.exit(): a write to a pipe can still be
+  // queued here (it is on macOS), and process.exit() drops it, so a result
+  // over the 64 KiB pipe buffer reached an agent's shell cut off mid-JSON.
+  process.exitCode = hasMissingArchive(result.findings) ? 1 : 0;
 }

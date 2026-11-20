@@ -405,9 +405,11 @@ export default {
     const branded = brandedHost(entry);
 
     const maxPages = resolveMaxPages(entry, ctx);
-    // A probe's ctx.maxPages below the entry's own cap is the probe's budget,
-    // not a max_pages cut: such a stop is neither warned about nor tagged.
-    const probeLimited = maxPages < resolveMaxPages(entry);
+    // A probe (ctx.maxPages set) never reports a max_pages cut, whichever cap
+    // ended its walk: neither warned about nor tagged. Comparing the caps cannot
+    // tell them apart: with max_pages: 1 on the entry, the probe's one page is
+    // also the entry's last (#7180).
+    const probing = Number(ctx?.maxPages) > 0;
     const all = [];
     /** @type {number|null} */
     let total = null;
@@ -418,6 +420,11 @@ export default {
     // endpoints' orderings together (duplicated or skipped postings).
     let api = 'v2';
     let rateLimited = false;
+    // Pages read, and whether the last one was full by the source's own row
+    // count: with no `count` in the responses, a walk that read every page
+    // max_pages allows and ended on a full one may have left postings unread.
+    let pagesRead = 0;
+    let lastPageFull = false;
 
     for (let page = 0; page < maxPages; page++) {
       const start = page * PAGE_SIZE;
@@ -504,6 +511,8 @@ export default {
       if (total === null && typeof json?.count === 'number' && Number.isFinite(json.count)) {
         total = json.count;
       }
+      pagesRead += 1;
+      lastPageFull = positions.length >= PAGE_SIZE;
 
       // Stop conditions, in the order they can be trusted:
       //   - an empty or short page is the end of the board;
@@ -520,11 +529,21 @@ export default {
       // adp-workforcenow.mjs (adpTruncated) do, so a caller can tell this
       // board from a complete one without reading stderr.
       /** @type {any} */ (all).eightfoldTruncated = true;
-    } else if (!probeLimited && total !== null && all.length < total && maxPages * PAGE_SIZE < total) {
+    } else if (!probing && total !== null && all.length < total && maxPages * PAGE_SIZE < total
+      && pagesRead === maxPages && lastPageFull) {
+      // The walk has to have stopped at max_pages on a full page, as below:
+      // `count` is the pre-filter total on some tenants, so a board that ends
+      // on a short page under it is complete, not cut.
       console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} of ${total} jobs) — raise max_pages on this entry for more`);
       // Same tag as the 429 branch above: the page cap cuts a board short just
       // as a rate limit does (2,000 of 2,083 on a real tenant), and a caller
       // that cannot see the stderr line must still be able to tell.
+      /** @type {any} */ (all).eightfoldTruncated = true;
+    } else if (!probing && total === null && pagesRead === maxPages && lastPageFull) {
+      // No `count` to compare with, but the walk read every page max_pages
+      // allows and the last one was full: the board may go on, so this is
+      // the same cut, warned about and tagged the same way.
+      console.error(`⚠️  eightfold: ${entry.name} truncated at max_pages=${maxPages} (${all.length} jobs; the response gave no count) — raise max_pages on this entry for more`);
       /** @type {any} */ (all).eightfoldTruncated = true;
     }
 

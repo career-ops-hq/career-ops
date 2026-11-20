@@ -29,7 +29,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run upskill` | `upskill.mjs` | Aggregate skill-gap map from tracked reports (or `--url-text <url\|file>` for a single-JD targeted gap analysis) |
 | `npm run add` | `add-entry.mjs` | Dedup + insert a `/career-ops add` entry into cv.md / article-digest.md |
 | `node clean-markers.mjs` | `clean-markers.mjs` | Audit or strip invisible Unicode from generated text files (see [CLEAN_MARKERS.md](CLEAN_MARKERS.md)) |
-| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, never with `--provider` or a `--dest` inside a provider folder at its default location; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder; `--include-claude-memory` also copies Claude Code's auto-memory for the checkout into `claude-memory/`, or from a folder you name with `--claude-memory-dir <dir>`) |
+| `node backup.mjs --dest <dir>` | `backup.mjs` | Copy your User Layer (the updater's `USER_PATHS`) to a folder you choose, or a cloud drive with `--provider` (never deletes at the destination; the contact files `data/Connections.csv`, `data/contacts.tsv`, `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) only with `--include-contacts`, refused with `--provider` or a `--dest` inside a provider folder at its default location unless `--allow-synced-contacts` is also passed; a synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder; `--include-claude-memory` also copies Claude Code's auto-memory for the checkout into `claude-memory/`, or from a folder you name with `--claude-memory-dir <dir>`) |
 | `npm run update:check` | `update-system.mjs check` | Check for a newer published release |
 | `npm run update` | `update-system.mjs apply --confirm` | Apply upstream update |
 | `npm run rollback` | `update-system.mjs rollback` | Rollback last update |
@@ -956,7 +956,7 @@ A row is a candidate when its status resolves to `Applied` (aliases such as `Sen
 
 Every other state (Evaluated, Responded, Assessment, Interview, Offer, Hired, Rejected, Discarded, SKIP) is never touched.
 
-`--confirm` rewrites the candidates inside one tracker transaction (the lock and atomic replace `dedup-tracker.mjs` uses): Status becomes `--status` (default `Discarded`; any canonical state except `Applied`, aliases accepted), the fixed tag `no response (auto-closed YYYY-MM-DD, Nd)` is appended to Notes so these rows can be told apart from real rejections and found again if a reply arrives, and one `source=close-stale` line per row is appended to `data/status-log.tsv`. To reopen a row that did get a reply, use `set-status.mjs`. Re-running changes nothing.
+`--confirm` rewrites the candidates inside one tracker transaction (the lock and atomic replace `dedup-tracker.mjs` uses): Status becomes `--status` (default `Discarded`; any canonical state except `Applied`, aliases accepted), the fixed tag `no response (auto-closed YYYY-MM-DD, Nd)` is appended to Notes so these rows can be told apart from real rejections and found again if a reply arrives, and one `source=close-stale` line per row is appended to `data/status-log.tsv`. If those lines cannot be written, the command fails and tries to put the tracker back, so that no row is closed without its ledger line. That holds when the write left the log unchanged and the tracker could be put back. If the tracker cannot be put back, the rows stay closed with no ledger line. If the failed write may have left lines in the log (it changed the log's size, or the size could not be checked), the rows stay closed to match them. In both cases the error names `data/status-log.tsv`: check its last lines before running `close-stale` again. To reopen a row that did get a reply, use `set-status.mjs`. Re-running changes nothing.
 
 ```bash
 node close-stale.mjs                       # dry run, JSON (metadata, candidates, skipped)
@@ -1040,14 +1040,14 @@ Possible JSON responses:
 | `status` | Meaning |
 |----------|---------|
 | `up-to-date` | Local version matches remote |
-| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`) |
+| `update-available` | Newer version exists (includes `local`, `remote`, `changelog`). With `--channel main`, also reported when system files differ from `main`, when the comparison with `main` fails, or when main's commit cannot be resolved, and it carries `reason` |
 | `dismissed` | User said no to this release (`update-system.mjs dismiss --version X.Y.Z`); a newer release reports again |
 | `offline` | Could not reach GitHub (carries `detail`: what failed and why). With `--channel main`, both curl sources and a `git ls-remote` fallback failed |
 | `no-remote-version` | GitHub answered without a usable `career-ops-vX.Y.Z` release (with `--channel main`, may carry `detail` when the git fallback reached upstream but found no release tag) |
 | `worktree-without-main` | Run from a linked git worktree while no checkout has `main` checked out (see **update** below) |
 | `checkout-unreadable` | A git checkout whose commit git cannot read (git missing, no commit yet, or git refusing the directory, e.g. "detected dubious ownership"). Carries `detail`: the first line of the error. No version verdict, on either channel |
 
-`check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift (`reason: system-files-changed`).
+`check --force` ignores a dismissal. `check --channel main` keeps the previous behaviour for installs that follow `main`: main's `VERSION` plus system-file drift. Its `reason` is the first that applies: `system-files-changed` when system files differ from `main` or when fetching `main` or comparing the trees fails, `version-changed` when the remote version is newer, and `main-commit-unresolved` when the lookup of main's commit failed in a git checkout, since `check` then cannot tell whether the install matches `main`.
 
 The `local` field in the JSON output stays a bare semver string (e.g., `"1.32.0"`). A separate `local_sha` field is provided alongside it when the install is a git checkout — containing the short commit SHA (e.g., `"ae919b6f"`). For tarball installs without git metadata, `local_sha` will be omitted. This lets a bug report identify the exact tree under test, not just the release name (two installs pulled days apart can share a version string while running different code — see #3203).
 
@@ -1741,9 +1741,17 @@ fails or returns no usable JSON exits 1, `--dry-run` included.
 ```bash
 node rank-pipeline.mjs                  # rank up to 20 pending entries
 node rank-pipeline.mjs --limit 10
+node rank-pipeline.mjs --url <url>      # rank one pending row
 node rank-pipeline.mjs --cli codex      # override auto-detection
 node rank-pipeline.mjs --dry-run        # print annotations, write nothing
 ```
+
+`--url <url>` ranks only the first unranked row in the Pending section (from
+its heading to the next `##` heading, as `sync-batch-input.mjs` reads it; a
+file with no Pending heading is read whole) whose first cell is exactly that
+URL. When there is none, because the row was ranked or skipped,
+or its URL is not the first cell, the script exits 4 before it looks for a CLI,
+so nothing is called. The dashboard's Inbox runs it for its `a` key.
 
 Writes go through `pipeline-lock.mjs`, the same lock `scan.mjs` and
 `scan-ats-full.mjs` use, and the file is re-read inside the lock — so a
@@ -2157,7 +2165,7 @@ Exit status: `0` success, `1` invalid option or write error, `2` missing tracker
 
 Copies the User Layer to a backup folder. The file list is `USER_PATHS` in `update-system.mjs` (the updater's own list of what is yours: CV, profile, `portals.yml`, everything under `data/`, `reports/`, `output/`, `jds/`, `interview-prep/`, `documents/`, `writing-samples/`, the web app's `.career-ops-web/` stores and more), plus any paths a fork declares in `config/local-paths.txt`, plus the files under `templates/` that are yours (generated per-application CVs and cover letters, and the template variant `config/profile.yml` selects; the shipped templates are not copied). It reads `CAREER_OPS_ROOT` / `.career-ops-data` like every other script. Files are copied whole, and nothing is ever deleted at the destination. Unchanged files (same size and modification time) are skipped, so a repeat run is cheap.
 
-Never copied: `.env` files, `data/cache/`, lock and temp files (except `plugins.lock`, which is yours), editor swap and autosave files of any file (vim `.name.swp`/`.swo`/`.swn`, emacs `#name#` and `.#name`, and `name~`), `.git/` and `node_modules/` folders inside nested checkouts, symlinks and anything under a symlinked folder, and anything outside the User Layer. `data/Connections.csv` (a LinkedIn export), `data/contacts.tsv` and `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) and their `.bak`/`.orig`/`.old`/`.save` copies such as `contacts.tsv.bak` (other people's contact details), are copied only with `--include-contacts` (their editor swap, autosave and lock files stay excluded even then), which cannot be combined with `--provider` or with a `--dest` inside a provider folder at its default location. A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder.
+Never copied: `.env` files, `data/cache/`, lock and temp files (except `plugins.lock`, which is yours), editor swap and autosave files of any file (vim `.name.swp`/`.swo`/`.swn`, emacs `#name#` and `.#name`, and `name~`), `.git/` and `node_modules/` folders inside nested checkouts, symlinks and anything under a symlinked folder, and anything outside the User Layer. `data/Connections.csv` (a LinkedIn export), `data/contacts.tsv` and `data/reply-candidates.json` and `output/contacts.vcf` (and any other `.vcf` file) and their `.bak`/`.orig`/`.old`/`.save` copies such as `contacts.tsv.bak` (other people's contact details), are copied only with `--include-contacts` (their editor swap, autosave and lock files stay excluded even then), which is refused with `--provider` or with a `--dest` inside a provider folder at its default location, because a sync client would upload other people's contact details. Add `--allow-synced-contacts` to say they may be uploaded there; the run then still prints a warning. A synced folder moved elsewhere is not detected, so keep contact exports out of any synced folder.
 
 Claude Code's auto-memory for the checkout is outside the data root, in `<config dir>/projects/<slug>/memory/`: the config dir is `CLAUDE_CONFIG_DIR` or `~/.claude`, and the slug is the checkout path with every non-alphanumeric character replaced by `-`. `--include-claude-memory` copies it to `claude-memory/` at the destination by the same rules as every other file (unchanged files skipped, nothing deleted, `.env` files, editor leftovers and symlinks left out). It works with `--provider` and with a synced `--dest`. Memory files are compared byte for byte before being skipped as unchanged (the size and time check alone is not enough for them). When the folder does not exist the run says so and carries on; a folder that exists but cannot be read is a failure. An empty `--claude-memory-dir` value is a usage error (exit `2`). From a linked git worktree the main checkout's folder is used, because Claude Code shares one memory folder per repository. If Claude Code keeps the memory somewhere else (a session started in another folder, a plugin install, or a Claude Code setting that moves it), name the folder with `--claude-memory-dir <dir>`: it implies the copy, and a folder that does not exist is then a failure (exit `1`). A destination that holds the memory folder, or sits inside it, is refused. If a fork declares its own `claude-memory` path in `config/local-paths.txt`, that path is backed up as usual and the memory copy is reported as failed instead of writing over it. The `--json` result reports the number of memory files as `claudeMemory`; they do not count towards the "nothing to back up" check on the data root.
 
@@ -2169,6 +2177,7 @@ node backup.mjs --provider google-drive    # <Google Drive>/Backups/career-ops; 
 node backup.mjs --provider google-drive --account work@example.com   # when several accounts are signed in
 node backup.mjs --provider dropbox --folder Work/career-ops       # folder under the drive (default Backups/career-ops)
 node backup.mjs --dest ~/Backups/career-ops --include-contacts # also copy the four contact files
+node backup.mjs --provider google-drive --include-contacts --allow-synced-contacts  # contacts into a synced folder: the sync client uploads them
 node backup.mjs --dest ~/Backups/career-ops --include-claude-memory  # also copy Claude Code's auto-memory into claude-memory/
 node backup.mjs --dest ~/Backups/career-ops --claude-memory-dir ~/notes/claude-memory  # the same, from a memory folder you name
 node backup.mjs --dest ~/Backups/career-ops --dry-run             # print the counts and bytes that would be copied, copy nothing

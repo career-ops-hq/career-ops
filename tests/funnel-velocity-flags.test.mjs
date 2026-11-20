@@ -4,7 +4,7 @@
 import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,8 @@ import { describeSpawn } from './helpers/describe-spawn.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const SCRIPT = join(ROOT, 'funnel-velocity.mjs');
-const SANDBOX = mkdtempSync(join(tmpdir(), 'career-ops-funnel-flags-'));
+// realpath: the tracker path is canonicalized, and macOS tmpdir is a /var -> /private/var symlink.
+const SANDBOX = realpathSync(mkdtempSync(join(tmpdir(), 'career-ops-funnel-flags-')));
 const NO_TRACKER = join(SANDBOX, 'applications.md');
 const NO_BENCHMARKS = join(SANDBOX, 'benchmarks.yml');
 

@@ -225,3 +225,4 @@ public commit with a stated reason.
 - @amolkadutech-afk | 2026-11-09 | id:234717522 | src:https://github.com/career-ops-hq/career-ops/discussions/6781 | n:177
 - @jf-xia | Jack | 2026-11-10 | "Great AI assistant career operation, thanks." | id:18513205 | src:https://github.com/career-ops-hq/career-ops/discussions/6797 | n:178
 - @clintam123 | Tam Do | 2026-11-12 | "I want hiring to become an evaluation of capability and future impact, rather than a checklist of historical titles." | id:64732827 | src:https://github.com/career-ops-hq/career-ops/discussions/6945 | n:179
+- @hribcek | Bostjan Hribar | 2026-11-20 | "I want hiring to become more humanised again" | id:5717813 | src:https://github.com/career-ops-hq/career-ops/discussions/7462 | n:180

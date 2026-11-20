@@ -114,6 +114,7 @@ const LOW_FIT_SCORE = 4.0;
 import { extractSkills } from './skill-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
+import { rejectPrivateOrInvalid, validateUrlSecurity as validateResolvedAddresses } from './liveness-browser.mjs';
 export { extractSkills };
 
 // --- Known-skills text assembly ---
@@ -775,36 +776,17 @@ soft_gaps:
   process.exit(0);
 }
 
-// Helper function to enforce egress guard against SSRF (Private/Loopback IPs)
-const dnsCache = new Map();
-
-async function validateUrlSecurity(urlString) {
-  const dns = await import('dns/promises');
+// The egress guard for --url-text (SSRF). It used to keep its own list, checked
+// on DNS answers only: `http://[::1]/` passed (the bracketed name resolves to
+// nothing, so no address was checked), and so did 0.0.0.0, IPv4-mapped IPv6 and
+// 100.64.0.0/10. It now asks the liveness guard, the literal host first and then
+// every address the name resolves to, both judged by providers/_ip-guard.mjs
+// isBlockedAddress. Exported for tests.
+export async function validateUrlSecurity(urlString) {
   const url = new URL(urlString.endsWith('.') ? urlString.slice(0, -1) : urlString);
-  const hostname = url.hostname;
-
-  if (hostname === 'localhost' || hostname.endsWith('.local')) {
-    throw new Error('Access denied: Localhost or internal domain target detected.');
-  }
-
-  let addresses;
-  if (dnsCache.has(hostname)) {
-    addresses = dnsCache.get(hostname);
-  } else {
-    addresses = await dns.resolve(hostname).catch(() => []);
-    const lookupRes = await dns.lookup(hostname).catch(() => null);
-    if (lookupRes) addresses.push(lookupRes.address);
-    dnsCache.set(hostname, addresses);
-  }
-
-  for (const ip of addresses) {
-    if (/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|169\.254\.)/.test(ip)) {
-      throw new Error(`Access denied: Egress guard blocked private target IP ${ip}`);
-    }
-    if (ip === '::1' || ip.startsWith('fe80:') || ip.startsWith('fc00:') || ip.startsWith('fd00:')) {
-      throw new Error(`Access denied: Egress guard blocked private target IPv6 ${ip}`);
-    }
-  }
+  const verdict = rejectPrivateOrInvalid(url.href);
+  if (verdict) throw new Error(`Access denied: Egress guard refused ${verdict.reason}`);
+  await validateResolvedAddresses(url.href);
   return url.toString();
 }
 
@@ -891,16 +873,25 @@ if (isMain) {
         let browser;
         try {
           const secureUrl = await validateUrlSecurity(inputSource);
-          const { chromium } = await import('playwright');
+          const { chromium } = await import('./lib/hardened-chromium.mjs');
           browser = await chromium.launch(browserLaunchOptions({ headless: true }));
           const page = await browser.newPage();
 
           await page.route('**/*', async (route) => {
             const requestUrl = route.request().url();
+            // data: and blob: never leave the browser.
+            if (/^(?:data|blob):/i.test(requestUrl)) return route.continue();
             try {
               await validateUrlSecurity(requestUrl);
               await route.continue();
             } catch (err) {
+              // A subresource host that does not exist, or that the user's DNS
+              // filter sinkholes, is a dead tracker, not an attack: drop that
+              // request and keep reading the page.
+              if (route.request().resourceType() !== 'document'
+                && (err?.livenessCode === 'dns_no_addresses' || err?.livenessCode === 'dns_sinkhole')) {
+                return route.abort('blockedbyclient');
+              }
               console.error(`Security Violation on Redirect: ${err.message}`);
               await route.abort('blockedbyclient');
               process.exit(1);
@@ -917,8 +908,10 @@ if (isMain) {
             // steer the fetch at an internal host (SSRF). The Playwright path
             // re-validates per hop, but this plain fetch must refuse redirects
             // outright — fail closed rather than follow an unvetted Location (#1851).
-            const res = await fetch(secureUrl, { signal: AbortSignal.timeout(30000), redirect: 'error' });
-            if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+            // Through providers/_http.mjs: its lookup-time guard checks the
+            // address it actually dials, which a check made before fetch() cannot.
+            const { fetchResponse } = await import('./providers/_http.mjs');
+            const res = await fetchResponse(secureUrl, { redirect: 'error', timeoutMs: 30_000 });
             targetText = await res.text();
           } catch (fetchErr) {
             console.error(`Fatal: Failed to fetch JD from URL: ${fetchErr.message}`);

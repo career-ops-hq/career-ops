@@ -58,7 +58,7 @@
         "contribution": {
           "description": "The id of the manifest in contributions/ that added this row.",
           "type": "string",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\\.(?:[2-9]|[1-9]\\d))?$"
         },
         "added": {
           "description": "The date the row was added (YYYY-MM-DD).",
@@ -114,9 +114,9 @@
       "required": ["id", "contributor", "signed_by", "rows", "source", "origin", "no_conflicting_contract", "personal_data", "exclusive", "license", "also_permits", "attribution", "date"],
       "properties": {
         "id": {
-          "description": "<YYYY-MM-DD>-<slug>, the same as the file name without .json.",
+          "description": "<YYYY-MM-DD>-<slug>, or <YYYY-MM-DD>-<slug>.<n> (n from 2 to 99) for a later contribution of the same day; the same as the file name without .json.",
           "type": "string",
-          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\\.(?:[2-9]|[1-9]\\d))?$"
         },
         "contributor": {
           "description": "GitHub username of the account that opens the pull request, without @.",

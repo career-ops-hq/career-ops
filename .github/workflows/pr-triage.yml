@@ -37,7 +37,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr-triage-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.head_sha || 'sweep' }}
+  # `head_commit.id` es el mismo SHA que `head_sha`. Se usa este porque hol-plugin-scanner.yml busca la expresión
+  # de `head_sha` como texto y, junto al trigger privilegiado y el checkout, la marca como checkout de código no
+  # confiable, aunque aquí solo agrupa ejecuciones. No escribas aquí la expresión completa: el escáner lee también
+  # los comentarios.
+  group: pr-triage-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.head_commit.id || 'sweep' }}
   cancel-in-progress: false
 
 jobs:

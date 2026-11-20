@@ -468,7 +468,9 @@ export default {
 
     // The warning is tied to the entry's own bound, never to a ctx.maxPages
     // probe cap: a health probe truncating on purpose is not a misconfiguration.
-    if (stopReason === 'cap' && maxPages === entryMaxPages) {
+    // With max_pages: 1 on the entry, maxPages === entryMaxPages holds under
+    // the probe too, so the probe is excluded by name (#7180).
+    if (stopReason === 'cap' && maxPages === entryMaxPages && !probing) {
       // Past MAX_PAGES_CAP the gateway clamps `currentPage` anyway, so the
       // "raise max_pages" advice would be a dead end there.
       const advice = maxPages < MAX_PAGES_CAP

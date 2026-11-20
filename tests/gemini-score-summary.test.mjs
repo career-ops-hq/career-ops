@@ -53,12 +53,17 @@ const env = (dir, extra = {}) => ({
   PATH: process.env.PATH, HOME: dir, CAREER_OPS_ROOT: dir, MODEL_REPLY: BOLD, ...extra,
 });
 
-/** The one tracker addition a run wrote, as { label: value }. */
+/**
+ * The one tracker addition a run wrote, as { label: value }. It is still
+ * pending, or in merged/ once the run's own merge-tracker call took it (that
+ * merge creates the tracker when the data root has none).
+ */
 function addition(dir) {
   const additionsDir = join(dir, 'batch', 'tracker-additions');
-  const files = existsSync(additionsDir) ? readdirSync(additionsDir).filter((f) => f.endsWith('.tsv')) : [];
+  const files = [additionsDir, join(additionsDir, 'merged')]
+    .flatMap((d) => (existsSync(d) ? readdirSync(d).filter((f) => f.endsWith('.tsv')).map((f) => join(d, f)) : []));
   if (files.length !== 1) return null;
-  const [labels, row] = readFileSync(join(additionsDir, files[0]), 'utf-8').trim().split('\n').map((l) => l.split('\t'));
+  const [labels, row] = readFileSync(files[0], 'utf-8').trim().split('\n').map((l) => l.split('\t'));
   return Object.fromEntries(labels.map((label, i) => [label, row[i]]));
 }
 
