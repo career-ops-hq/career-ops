@@ -131,9 +131,10 @@ test('allowed roots are this checkout and the configured data root only', async 
 });
 
 test('freshLaunchOptions starts a new browser and refuses an attached one', async () => {
-  const { freshLaunchOptions, ApplyScopeError, HEADED_APPLY_LAUNCH } = await import('../apply-scope.mjs');
+  const { freshLaunchOptions, ApplyScopeError, HEADED_APPLY_LAUNCH, BUNDLED_HEADED_LAUNCH, defaultLaunchOptions } = await import('../apply-scope.mjs');
+  const { chromiumSandboxStatus } = await import('../lib/browser-launch.mjs');
   const fresh = freshLaunchOptions({ headless: false });
-  assert.deepEqual(fresh, { headless: false });
+  assert.deepEqual(fresh, { chromiumSandbox: chromiumSandboxStatus().enabled, headless: false });
   assert.equal(JSON.stringify(fresh).includes('remote-debugging'), false);
   assert.equal(Object.hasOwn(fresh, 'userDataDir'), false);
 
@@ -148,6 +149,16 @@ test('freshLaunchOptions starts a new browser and refuses an attached one', asyn
   for (const options of refused) {
     assert.throws(() => freshLaunchOptions(options), ApplyScopeError);
   }
+
+  // A form is a third-party page: no launch goes without the sandbox, and no
+  // caller can ask for one, since the key is refused like any attach option.
+  // The headed launch names the chrome channel, whose setuid helper can start
+  // the sandbox on Linux where the bundled Chromium cannot.
+  assert.equal(HEADED_APPLY_LAUNCH.chromiumSandbox, chromiumSandboxStatus({ channel: 'chrome' }).enabled);
+  for (const launch of [BUNDLED_HEADED_LAUNCH, defaultLaunchOptions()]) {
+    assert.equal(launch.chromiumSandbox, chromiumSandboxStatus().enabled);
+  }
+  assert.throws(() => freshLaunchOptions({ chromiumSandbox: false }), ApplyScopeError);
 
   assert.equal(HEADED_APPLY_LAUNCH.channel, 'chrome');
   assert.equal(HEADED_APPLY_LAUNCH.headless, false);

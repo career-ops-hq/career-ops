@@ -63,6 +63,10 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     [{ text: 'req REQ-2026-10' }, ['REQ-2026-10'], 'a two-digit tail on a hyphenated base is part of the ID: one form (#3882)'],
     [{ url: 'https://careers.walmart.com/us/en/job/R-2593225' }, [], 'non-Workday URL is not parsed as a requisition'],
     [{ url: 'https://job-boards.greenhouse.io/acme/jobs/4244715009' }, [], 'generic board posting id is not a requisition'],
+    [{ url: 'https://www.google.com/about/careers/applications/jobs/results/100000000000000001' }, ['100000000000000001'], 'Google careers job id in the URL path is the requisition'],
+    [{ url: 'https://www.google.com/about/careers/applications/jobs/results/100000000000000002-software-engineer?location=Zurich' }, ['100000000000000002'], 'Google slugged URL yields the same id as the id-only form'],
+    [{ url: 'https://www.google.com/about/careers/applications/jobs/results/?q=engineer' }, [], 'Google results page names no posting'],
+    [{ url: 'https://www.example.com/about/careers/applications/jobs/results/100000000000000001' }, [], 'the Google id shape on another host is not read'],
     [{ text: 'remote Canada; base CAD 140K' }, [], 'unlabelled note'],
   ];
   for (const [input, want, label] of cases) {
@@ -111,6 +115,43 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
   } else {
     fail(`collectSeenCompanyRoles seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], want [JR25919]`);
   }
+}
+
+// ── 3a. Google: a second opening with the same title and city is not a duplicate
+{
+  const G = 'https://www.google.com/about/careers/applications/jobs/results/';
+  const seenOpening = `${G}100000000000000001-software-engineer`;
+  const seed = (scanHistoryText) => {
+    const requisitionsByBase = new Map();
+    const result = collectSeenCompanyRoles({ scanHistoryText }, {}, undefined, { requisitionsByBase });
+    return { requisitionsByBase, result, base: companyRoleDedupKey('Google', 'Software Engineer') };
+  };
+  const history = `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${seenOpening}\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`;
+  const { requisitionsByBase, base } = seed(history);
+  const seeded = requisitionsByBase.get(base);
+  if (seeded && seeded.size === 1 && seeded.has('100000000000000001')) pass('collectSeenCompanyRoles: a Google scan-history URL seeds its job id');
+  else fail(`collectSeenCompanyRoles seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], want [100000000000000001]`);
+
+  const other = requisitionIdsForDedup({ url: `${G}200000000000000002-software-engineer` });
+  if (isDistinctRequisition(seeded, other)) pass('a Google opening under a new job id is a distinct requisition');
+  else fail('a Google opening under a new job id was treated as a duplicate');
+  const same = requisitionIdsForDedup({ url: `${G}100000000000000001` });
+  if (!isDistinctRequisition(seeded, same)) pass('the same Google job id, slugged or not, is still a duplicate');
+  else fail('the same Google job id was treated as a distinct requisition');
+  // A Google URL that names no posting (the results page) is a real row that
+  // names no requisition: it must seed the wildcard, and the key keeps its
+  // historical answer, a duplicate.
+  const noId = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${G}?q=software-engineer\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
+  const wildcard = noId.requisitionsByBase.get(noId.base);
+  if (wildcard && wildcard.size === 1 && wildcard.has(ANY_REQUISITION)) pass('a Google URL with no job id seeds the wildcard requisition');
+  else fail(`a Google URL with no job id seeded [${wildcard ? [...wildcard].join(', ') : 'nothing'}], want [${ANY_REQUISITION}]`);
+  if (wildcard && !isDistinctRequisition(wildcard, other)) pass('a Google row with no job id keeps the duplicate');
+  else fail('a Google row with no job id was treated as distinct');
+  // A row with an empty URL is skipped by the seeder outright, so it seeds
+  // nothing at all (kept apart from the wildcard case above).
+  const noUrl = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
+  if (noUrl.requisitionsByBase.get(noUrl.base) === undefined) pass('a scan-history row with an empty URL seeds nothing');
+  else fail('a scan-history row with an empty URL was seeded');
 }
 
 // ── 3b. A tracker with a URL column passes the URL through ───────────────────

@@ -350,9 +350,13 @@ export function parseGrokEvent(line) {
     // total an earlier frame already established.
     if (!usage || typeof usage !== "object") return null;
     // Same subtraction as Codex: cached input is billed at a different rate, so
-    // counting it at full rate overstates the run. Clamped at 0 so a malformed
-    // usage block can never report negative tokens.
-    const fresh = Math.max(0, tokenCount(usage.input_tokens) - tokenCount(usage.cached_input_tokens));
+    // counting it at full rate overstates the run. Cache is a subset of input.
+    // A frame where cache is larger than input is not a total: clamping the
+    // fresh input at 0 and then replacing the running total wipes it.
+    const input = tokenCount(usage.input_tokens);
+    const cached = tokenCount(usage.cached_input_tokens);
+    if (cached > input) return null;
+    const fresh = input - cached;
     /** @type {ParsedEvent} */
     const result = { tokens: fresh + tokenCount(usage.output_tokens), tokensAreTotal: true };
     // Last NUMERIC cost wins upstream, so emitting null here would not erase a

@@ -75,7 +75,7 @@ const NEXT_PAGE_RE = /pagination_next["'][^>]*onclick=["']researchAnnounces\(\s*
  * @param {string} fragment
  */
 function visibleText(fragment) {
-  return decodeEntities(String(fragment ?? '').replace(/<[^>]+>/g, ' '))
+  return decodeEntities(String(fragment ?? '').replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)))
     .replace(/\s+/g, ' ')
     .trim();
 }

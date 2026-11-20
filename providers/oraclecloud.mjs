@@ -19,6 +19,12 @@
 // PIN the host before every fetch, so it enumerates a finite apex family and
 // never degrades into `oraclecloud<anything>.com`.
 //
+// Branded hosts: an employer that serves ORC only on its own domain (Dell:
+// enterpriseplatform.dell.com, behind a CDN, with no *.oraclecloud.com pod host
+// discoverable) is reached by naming that ONE host in `oracle_host:` on the
+// entry. It is compared exactly, never as a pattern, like eightfold_host in
+// providers/eightfold.mjs.
+//
 // Career page URL:
 //   https://<host>/hcmUI/CandidateExperience/<lang>/sites/<siteNumber>/jobs
 //   siteNumber is the segment after `sites/` (usually CX_1, CX_1002, …; default CX_1).
@@ -62,8 +68,36 @@ const INTER_PAGE_DELAY_MS = 250;  // WAF-aware spacing between same-host pages
 // facetsList is a fixed constant on the finder; %3B is the encoded ';' separator.
 const FACETS_LIST = 'LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS';
 
-/** @param {string} url */
-function assertOracleUrl(url) {
+// A bare DNS name, same shape as providers/eightfold.mjs's BRANDED_HOST_RE.
+const BRANDED_HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * The entry's opt-in branded ORC host (`oracle_host`), lowercased, or null.
+ *
+ * Some employers serve Oracle Recruiting Cloud only on their own domain behind
+ * a CDN, with the *.oraclecloud.com pod host undiscoverable (Dell: jobs.dell.com
+ * -> enterpriseplatform.dell.com, Akamai DNS, a *.dell.com-only certificate, no
+ * pod host in the page). The CE REST API answers there unchanged. Mirrors
+ * upstream's `eightfold_host` (providers/eightfold.mjs): the pin stays exact —
+ * only the one host the entry names is trusted, never a pattern.
+ *
+ * @param {any} entry
+ * @returns {string|null}
+ */
+export function brandedOracleHost(entry) {
+  const raw = entry?.oracle_host;
+  if (typeof raw !== 'string') return null;
+  const host = raw.trim().toLowerCase();
+  return host.length <= 253 && BRANDED_HOST_RE.test(host) ? host : null;
+}
+
+/** @param {string} hostname @param {string|null} branded */
+function isTrustedOracleHost(hostname, branded) {
+  return ORACLE_HOST_RE.test(hostname) || (branded !== null && hostname.toLowerCase() === branded);
+}
+
+/** @param {string} url @param {string|null} [branded] */
+function assertOracleUrl(url, branded = null) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -71,8 +105,8 @@ function assertOracleUrl(url) {
     throw new Error(`oraclecloud: invalid URL: ${url}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`oraclecloud: URL must use HTTPS: ${url}`);
-  if (!ORACLE_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud[1-99].com`);
+  if (!isTrustedOracleHost(parsed.hostname, branded)) {
+    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud[1-99].com or the entry's oracle_host`);
   }
   return url;
 }
@@ -95,6 +129,7 @@ function toEpochMs(value) {
  * @returns {{host:string, lang:string, siteNumber:string, locationId:(string|null)}|null}
  */
 export function resolveSite(entry) {
+  const branded = brandedOracleHost(entry);
   for (const raw of [entry.api, entry.careers_url]) {
     if (typeof raw !== 'string' || !raw) continue;
     let parsed;
@@ -104,7 +139,7 @@ export function resolveSite(entry) {
       continue;
     }
     if (parsed.protocol !== 'https:') continue;
-    if (!ORACLE_HOST_RE.test(parsed.hostname)) continue;
+    if (!isTrustedOracleHost(parsed.hostname, branded)) continue;
 
     const segs = parsed.pathname.split('/').filter(Boolean);
     // Path shape: /hcmUI/CandidateExperience/<lang>/sites/<siteNumber>/...
@@ -262,7 +297,7 @@ export default {
     for (let page = 0; page < maxPages; page++) {
       const offset = page * PAGE_SIZE;
       const apiUrl = buildApiUrl(site, offset, PAGE_SIZE);
-      assertOracleUrl(apiUrl); // SSRF guard before every fetch
+      assertOracleUrl(apiUrl, brandedOracleHost(entry)); // SSRF guard before every fetch
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const json = await fetchJsonWithRetry(ctx, apiUrl, {

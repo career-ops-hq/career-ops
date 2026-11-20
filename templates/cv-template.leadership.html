@@ -180,13 +180,19 @@ version: 1.0.0
   .competency-tag:last-child::after { content: ""; }
 
   /* === WORK EXPERIENCE ===
-     Two-row header: company + dates, then role + location. The builder emits
-     .job-role and .job-location as separate block divs, so the role floats left
-     and the location's shortened line box right-aligns beside it. */
-  .job { margin-bottom: 11px; }
+     Grid, not float: Chromium writes a floated role into the PDF text layer
+     before the header, so an extractor reads the job title first. */
+  .job {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 10px;
+    align-items: baseline;
+    margin-bottom: 11px;
+  }
   .job:last-child { margin-bottom: 0; }
 
   .job-header {
+    grid-column: 1 / -1;
     display: flex;
     justify-content: space-between;
     align-items: baseline;
@@ -209,24 +215,24 @@ version: 1.0.0
   }
 
   .job-role {
-    float: left;
+    grid-column: 1;
+    grid-row: 2;
     font-size: 11px;
     font-weight: 700;
     color: #1b1b1b;
   }
 
   .job-location {
+    grid-column: 2;
+    grid-row: 2;
     font-size: 9.5px;
     color: #55606d;
-    text-align: right;
+    text-align: end;
   }
 
-  /* Cleared onto its own line under the floated role; floated full-width so
-     the location after it in the DOM still sits beside the role. */
   .job-context {
-    clear: both;
-    float: left;
-    width: 100%;
+    grid-column: 1 / -1;
+    grid-row: 3;
     font-style: italic;
     font-size: 10px;
     line-height: 1.5;
@@ -235,7 +241,8 @@ version: 1.0.0
   }
 
   .job ul {
-    clear: both;   /* required: ends the .job-role float before the bullets */
+    grid-column: 1 / -1;
+    grid-row: 4;
     margin-top: 4px;
     padding-left: 15px;
   }
@@ -359,7 +366,6 @@ version: 1.0.0
   .job-role,
   .job-location,
   .job-context,
-  .edu-location,
   .project-title {
     break-after: avoid;
     page-break-after: avoid;
@@ -378,7 +384,6 @@ version: 1.0.0
     text-align: right;
     font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
   }
-  html[lang="ar"] .job-role { float: right; }
   html[lang="ar"] .job-location { text-align: left; }
   html[lang="ar"] .job ul { padding-right: 15px; padding-left: 0; }
   html[lang="ar"] .cv-photo { float: left; margin: 0 14px 8px 0; }

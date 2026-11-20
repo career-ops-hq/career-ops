@@ -376,6 +376,15 @@ cover_letter:
 #   # default_sender_note: "the email used to send this message"
 #   # signature_name: "Jane Smith"
 
+# ── Proposal Drafts ─────────────────────────────────────────────────────────
+#
+# Used by `/career-ops proposal` to choose where draft markdown files are saved.
+# Optional — when unset, the mode uses a house rule in modes/_custom.md or asks
+# interactively (and stops with a needs_confirmation line in headless runs).
+#
+# proposals:
+#   output_dir: "proposals"
+
 # ── Scan / JD extractor ─────────────────────────────────────────────────────
 #
 # How the scan and JD-extraction steps read SPA job pages.
