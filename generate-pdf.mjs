@@ -505,6 +505,10 @@ const SECTION_ALIASES = new Map([
   ['connaissances techniques', 'skills'],
   ["centres d'intérêt", 'interests'],
   ["centres d'intérêts", 'interests'],
+  // The same heading with the typographic apostrophe (U+2019), which word
+  // processors and generated CVs write; foldDiacritics keeps it as is.
+  ['centres d’intérêt', 'interests'],
+  ['centres d’intérêts', 'interests'],
   ['intérêts', 'interests'],
   ['loisirs', 'interests'],
   // Spanish — the same failure again: with no entries here, a Spanish CV
