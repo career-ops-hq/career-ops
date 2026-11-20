@@ -23,7 +23,6 @@ test("spendTierFrom follows the documented resolution", () => {
   assert.equal(spendTierFrom("candidate:\n  full_name: A\n"), "standard", "absent key");
   assert.equal(spendTierFrom("spend_tier: turbo\n"), "standard", "invalid value");
   assert.equal(spendTierFrom("spend_tier: [economy]\n"), "standard", "non-string value");
-  assert.equal(spendTierFrom(": : not yaml"), "standard", "unparseable profile");
   assert.equal(spendTierFrom(null), "standard", "no profile");
 });
 
@@ -45,6 +44,21 @@ test("a missing profile resolves to standard", () => {
   const root = rootWithProfile(null);
   try {
     assert.equal(withSpendTierModel("claude", { cwd: root, env: {} }).env.ANTHROPIC_MODEL, CLAUDE_TIER_MODELS.standard);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a broken or unreadable profile throws with its path instead of picking standard", () => {
+  assert.throws(() => spendTierFrom("spend_tier: [economy\n"));
+  const root = rootWithProfile("spend_tier: [economy\n");
+  try {
+    const file = join(root, "config", "profile.yml");
+    const named = (err) => err instanceof Error && err.message.includes(file);
+    assert.throws(() => withSpendTierModel("claude", { cwd: root, env: {} }), named);
+    rmSync(file);
+    mkdirSync(file); // reading a directory fails with EISDIR, not ENOENT
+    assert.throws(() => withSpendTierModel("claude", { cwd: root, env: {} }), named);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
