@@ -10,3 +10,8 @@ test('a pipe and the stored slash are the same title', () => {
 test('a pipe does not merge two different titles', () => {
   assert.equal(roleFuzzyMatch('VP | Engineering', 'VP / Sales'), false);
 });
+
+test('a pipe at the edge matches the stored slash', () => {
+  assert.equal(roleFuzzyMatch('VP |', 'VP /'), true);
+  assert.equal(roleFuzzyMatch('| Engineering', '/ Engineering'), true);
+});
