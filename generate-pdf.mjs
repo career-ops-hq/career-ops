@@ -471,6 +471,42 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // French (modes/fr) — the same failure as the blocks around it: no French
+  // title resolved here, so cv.sections matched no section of a French CV and
+  // the order guard compared raw titles. A bare "Compétences" is the key-skills
+  // block and "Compétences techniques" the skills list, as the Spanish and
+  // Portuguese blocks read their own words. "Expérience" and "Éducation" fold
+  // to the English keys and already resolve, so they are not repeated.
+  ['résumé', 'summary'],
+  ['résumé professionnel', 'summary'],
+  ['profil', 'summary'],
+  ['profil professionnel', 'summary'],
+  ['à propos', 'summary'],
+  ['à propos de moi', 'summary'],
+  ['compétences', 'competencies'],
+  ['compétences clés', 'competencies'],
+  ['compétences principales', 'competencies'],
+  ['expérience professionnelle', 'experience'],
+  ['expériences professionnelles', 'experience'],
+  ['parcours professionnel', 'experience'],
+  ['projets', 'projects'],
+  ['projets sélectionnés', 'projects'],
+  ['projets personnels', 'projects'],
+  ['formation', 'education'],
+  ['formations', 'education'],
+  ['études', 'education'],
+  ['parcours académique', 'education'],
+  ['diplômes', 'education'],
+  ['certificats', 'certifications'],
+  ['distinctions', 'awards'],
+  ['prix', 'awards'],
+  ['prix et distinctions', 'awards'],
+  ['compétences techniques', 'skills'],
+  ['connaissances techniques', 'skills'],
+  ["centres d'intérêt", 'interests'],
+  ["centres d'intérêts", 'interests'],
+  ['intérêts', 'interests'],
+  ['loisirs', 'interests'],
   // Spanish — the same failure again: with no entries here, a Spanish CV
   // rendered in the documented modes/pdf.md order (Experiencia before Formación)
   // was rejected against a cv.md listing Formación first, and --allow-reorder was
