@@ -393,8 +393,18 @@ test('--base: a base with no registry (the bootstrap PR) counts every row as new
   // have some: the copy it is checked from drops those marks.
   const head = checkout();
   try {
-    for (const { row } of rowsOf(reg(head)).filter((r) => r.row.retired === true)) {
-      editRow(head, row.careers_url, ({ retired, retired_reason, ...rest }) => rest);
+    // One pass per file. Looking each retired row up with editRow() read the whole registry once per
+    // retired row, so this test grew with the registry times its retired rows.
+    for (const ats of readdirSync(reg(head, 'boards'))) {
+      for (const f of readdirSync(reg(head, 'boards', ats))) {
+        const path = reg(head, 'boards', ats, f);
+        const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+        const next = lines.map((l) => {
+          const { retired, retired_reason, ...rest } = JSON.parse(l);
+          return retired === true ? JSON.stringify(rest) : l;
+        });
+        if (next.some((l, i) => l !== lines[i])) writeFileSync(path, `${next.join('\n')}\n`);
+      }
     }
     const r = run(head, ['--base', empty]);
     assert.equal(r.status, 0, r.stderr);
@@ -616,7 +626,7 @@ test('boards/ has no hard size limit: above 25 MB it is a warning, never an erro
     mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
     writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(BOARDS_WARN_BYTES) })}\n`);
     const { errors, warnings } = validateRegistry({ root: head });
-    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
+    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+(?:\.\d+)? MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
     assert.deepEqual(errors.filter((e) => e.file === 'employers/boards'), [], 'the size is never an error');
   } finally { rmSync(head, { recursive: true, force: true }); }
 });

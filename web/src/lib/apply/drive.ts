@@ -6,6 +6,7 @@ import { dropNewTabs } from "./diagnose";
 import { isSubmitControl, snapshotLabel } from "./submit-guard.mjs";
 import { executeAction, factsOf, listedFieldLabel, snapshotChoiceLine } from "./drive-action.mjs";
 import { listedDriveClick, listedDriveText } from "./blank-unknown.mjs";
+import { driveGoalText } from "./drive-goal.mjs";
 import type { DriveStep } from "./issue";
 import { CAPS } from "../worker-capabilities.mjs";
 import { scopeFrom } from "../claude-invocation.mjs";
@@ -190,14 +191,7 @@ export async function driveSession(
       return undefined;
     }
   };
-  const answersBlock = (answers ?? []).filter((a) => a.value?.trim()).map((a) => `- "${a.label}": ${a.value.replace(/\s+/g, " ")}`).join("\n");
-  const goalText =
-    goal === "reach"
-      ? `Your goal: navigate to the actual fillable JOB APPLICATION form (click 'Apply', pass any interstitial/pre-screen, reach the page with the Name/Email/Resume fields). Do NOT fill anything yet. Reply {"action":"reached_form"} once the form with those fields is visible.`
-      : `Your goal: FILL this job application with the candidate's answers below, matching each answer to its field by label, across all pages (click 'Next'/'Continue' between pages). Skip any field already correctly filled, and skip file-uploads (handled separately). NEVER submit — when everything is filled and you're on the final page, reply {"action":"done"}.
-Leave blank any field whose answer is not listed below. Never guess or infer a value.
-ANSWERS (match by the field's label):
-${answersBlock || "(no answers provided — just reach/observe)"}`;
+  const goalText = driveGoalText(goal, answers);
   let resumeId: string | null = null;
 
   const stopVerb = goal === "reach" ? '{"action":"reached_form"}            STOP — the fillable application form is now visible' : '{"action":"done"}                    STOP — every answer is filled (you NEVER submit; the human does)';

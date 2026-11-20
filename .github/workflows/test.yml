@@ -39,8 +39,22 @@ jobs:
           # the merge queue, the entry's squash commit with its parent, the base.
           fetch-depth: 2
           persist-credentials: false
+      # The classifier that decides whether to skip four jobs and two OS legs must
+      # not be one the PR can edit: a PR that rewrote docs-only-change.mjs to always
+      # answer "docs only" would skip its own checks on itself. Run the BASE
+      # branch's copy against the PR's diff instead. It reads the diff from the
+      # working directory (the PR checkout above) and imports its helpers relative
+      # to itself, so the base copy of every module it loads comes with it. This
+      # step goes AFTER the PR checkout, which cleans the workspace.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pull_request: the target branch name. merge_group: base_ref is empty,
+          # so pin the commit the group was built on.
+          ref: ${{ github.base_ref || github.event.merge_group.base_sha }}
+          path: base
+          persist-credentials: false
       - id: classify
-        run: node .github/scripts/docs-only-change.mjs
+        run: node base/.github/scripts/docs-only-change.mjs
         env:
           MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
 

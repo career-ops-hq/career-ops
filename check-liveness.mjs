@@ -321,7 +321,7 @@ async function main() {
   let browser = null, page = null, headed = null;
   async function ensureBrowser() {
     if (browser) return;
-    const { chromium } = await import('playwright');
+    const { chromium } = await import('./lib/hardened-chromium.mjs');
     const launched = await chromium.launch(browserLaunchOptions({ headless: true }));
     try {
       page = await newLivenessPage(launched);

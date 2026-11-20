@@ -15,8 +15,11 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import {
   resolveBrowserExecutable,
+  remotePageBrowser,
+  chromiumSandboxStatus,
   browserLaunchOptions,
   snapshotBrowserProcessEnv,
+  SANDBOX_ENV,
   __resetBrowserLaunchCacheForTest,
 } from '../lib/browser-launch.mjs';
 
@@ -28,7 +31,7 @@ const generatePdfSource = readFileSync(new URL('../generate-pdf.mjs', import.met
 if (/import\s*\{[^}]*\bbrowserLaunchOptions\b[^}]*\}\s*from\s*['"]\.\/lib\/browser-launch\.mjs['"]/.test(generatePdfSource)
     && /export\s+async\s+function\s+launchChromium\b/.test(generatePdfSource)
     && /const\s*\{\s*projectRoot\s*,\s*\.\.\.launchOptions\s*\}\s*=\s*options/.test(generatePdfSource)
-    && /chromium\.launch\(browserLaunchOptions\(launchOptions,\s*\{\s*projectRoot\s*\}\)\)/.test(generatePdfSource)
+    && /chromium\.launch\(browserLaunchOptions\(launchOptions,\s*\{\s*projectRoot,\s*localContentOnly:\s*true\s*\}\)\)/.test(generatePdfSource)
     && /projectRoot:\s*opts\.workspaceRoot\s*\|\|\s*getCareerOpsRoot\(\)/.test(generatePdfSource)) {
   pass('generate-pdf delegates launch options and defaults browser settings to the data root');
 } else {
@@ -108,6 +111,11 @@ if (windowsSnapshot.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH === 'C:\\Browsers\\brave
 } else {
   fail(`Windows browser setting snapshot lost canonical keys: ${JSON.stringify(windowsSnapshot)}`);
 }
+if (snapshotBrowserProcessEnv({ [SANDBOX_ENV]: 'off', UNRELATED: 'x' }, 'linux')[SANDBOX_ENV] === 'off') {
+  pass(`the pre-dotenv snapshot keeps ${SANDBOX_ENV}`);
+} else {
+  fail(`the pre-dotenv snapshot drops ${SANDBOX_ENV}`);
+}
 
 // Several suites run a copied generate-pdf.mjs in an isolated directory. A
 // new static import must travel with every one of those fixtures; otherwise the
@@ -135,15 +143,16 @@ if (fixtureWithoutBrowserHelper.length === 0) {
 const EXE = 'PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH';
 const AUTO = 'CAREER_OPS_BROWSER_AUTODETECT';
 const SAVED = Object.fromEntries(
-  [EXE, AUTO, 'CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR'].map(k => [k, process.env[k]]),
+  [EXE, AUTO, SANDBOX_ENV, 'CAREER_OPS_ROOT', 'CAREER_OPS_DATA_DIR'].map(k => [k, process.env[k]]),
 );
 
 // Each case starts from a known environment: the data root points at a temp dir
 // so no stray .env is read, and absent keys are deleted rather than emptied
 // (an empty shell value means "off" and would not fall through to .env).
-function setEnv({ exe, auto, root }) {
+function setEnv({ exe, auto, sandbox, root }) {
   if (exe === undefined) delete process.env[EXE]; else process.env[EXE] = exe;
   if (auto === undefined) delete process.env[AUTO]; else process.env[AUTO] = auto;
+  if (sandbox === undefined) delete process.env[SANDBOX_ENV]; else process.env[SANDBOX_ENV] = sandbox;
   process.env.CAREER_OPS_ROOT = root;
   delete process.env.CAREER_OPS_DATA_DIR;
   __resetBrowserLaunchCacheForTest();
@@ -159,18 +168,21 @@ function restoreEnv() {
 const emptyRoot = mkdtempSync(join(tmpdir(), 'co-browser-empty-'));
 const envRoot = mkdtempSync(join(tmpdir(), 'co-browser-env-'));
 const relativeEnvRoot = mkdtempSync(join(tmpdir(), 'co-browser-relative-env-'));
+const sandboxOffRoot = mkdtempSync(join(tmpdir(), 'co-browser-sandbox-off-'));
 // No trailing newline: Node 22.13's parser needs the resolver to normalize one
 // or it retains the inline comment as part of the executable path.
 writeFileSync(join(envRoot, '.env'), `${EXE}=/opt/fromdotenv/browser # browser override`);
 writeFileSync(join(relativeEnvRoot, '.env'), `${EXE}=browsers/brave\n`);
+writeFileSync(join(sandboxOffRoot, '.env'), `${SANDBOX_ENV}=off\n`);
 
 try {
   // Negative control: nothing configured -> bundled Chromium, options untouched.
   setEnv({ root: emptyRoot });
   const none = resolveBrowserExecutable();
-  const noneOpts = browserLaunchOptions({ headless: true });
-  if (none === null && noneOpts.headless === true && !('executablePath' in noneOpts)) {
-    pass('nothing configured -> no executablePath, options unchanged (bundled Chromium)');
+  const noneBase = { headless: true };
+  const noneOpts = browserLaunchOptions(noneBase, { localContentOnly: true });
+  if (none === null && noneOpts === noneBase) {
+    pass('local content, nothing configured -> options unchanged (bundled Chromium)');
   } else {
     fail(`expected an unchanged default: ${JSON.stringify(none)} / ${JSON.stringify(noneOpts)}`);
   }
@@ -265,6 +277,211 @@ try {
     fail(`caller choice overridden: ${JSON.stringify(preset)} / ${JSON.stringify(channel)}`);
   }
 
+  // A page this project does not control: the installed Chrome and the sandbox.
+  // Everything goes through the probe seam, so no result depends on this machine.
+  const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const onMac = { platform: 'darwin', pathExists: candidate => candidate === CHROME, browsersPath: '' };
+  setEnv({ root: emptyRoot });
+  const remote = browserLaunchOptions({ headless: true }, onMac);
+  if (remote.executablePath === CHROME && remote.chromiumSandbox === true && remote.headless === true) {
+    pass('a remote page opens in the installed Chrome with the sandbox on');
+  } else {
+    fail(`expected the system Chrome and the sandbox: ${JSON.stringify(remote)}`);
+  }
+
+  const localPage = browserLaunchOptions({ headless: true }, { ...onMac, localContentOnly: true });
+  if (!('executablePath' in localPage) && !('chromiumSandbox' in localPage)) {
+    pass('local content does not switch to the installed Chrome or change the sandbox');
+  } else {
+    fail(`local content options changed: ${JSON.stringify(localPage)}`);
+  }
+
+  // No Chrome: the bundled Chromium, still with the sandbox.
+  const noChrome = browserLaunchOptions({ headless: true }, { ...onMac, pathExists: () => false });
+  if (!('executablePath' in noChrome) && noChrome.chromiumSandbox === true) {
+    pass('no Chrome installed -> the bundled Chromium, with the sandbox on');
+  } else {
+    fail(`no-Chrome fallback is wrong: ${JSON.stringify(noChrome)}`);
+  }
+
+  // PLAYWRIGHT_BROWSERS_PATH keeps Playwright's browsers (Docker, the NixOS flake).
+  if (remotePageBrowser({ ...onMac, browsersPath: '/nix/store/browsers' }) === null) {
+    pass('an explicit PLAYWRIGHT_BROWSERS_PATH keeps Playwright\'s browsers');
+  } else {
+    fail('PLAYWRIGHT_BROWSERS_PATH should keep Playwright\'s browsers');
+  }
+  // Read from the real environment: scan.mjs passes a snapshot without it as processEnv.
+  const savedBrowsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  process.env.PLAYWRIGHT_BROWSERS_PATH = '/nix/store/browsers';
+  const fromRealEnv = remotePageBrowser({ platform: 'darwin', pathExists: onMac.pathExists, processEnv: {} });
+  if (savedBrowsersPath === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
+  else process.env.PLAYWRIGHT_BROWSERS_PATH = savedBrowsersPath;
+  if (fromRealEnv === null) pass('PLAYWRIGHT_BROWSERS_PATH is read from process.env, not the snapshot');
+  else fail(`PLAYWRIGHT_BROWSERS_PATH ignored with a snapshot: ${JSON.stringify(fromRealEnv)}`);
+
+  // Precedence: the explicit settings and the caller beat the system Chrome,
+  // and every one of them still gets the sandbox.
+  setEnv({ exe: '/opt/custom/brave', root: emptyRoot });
+  const configured = browserLaunchOptions({ headless: true }, onMac);
+  if (configured.executablePath === '/opt/custom/brave' && configured.chromiumSandbox === true) {
+    pass(`${EXE} beats the system Chrome and keeps the sandbox`);
+  } else {
+    fail(`configured browser lost to the system Chrome: ${JSON.stringify(configured)}`);
+  }
+  setEnv({ root: emptyRoot });
+  const callerChannel = browserLaunchOptions({ headless: true, channel: 'msedge' }, onMac);
+  const callerPath = browserLaunchOptions({ executablePath: '/already/set' }, onMac);
+  if (callerChannel.channel === 'msedge' && !('executablePath' in callerChannel) && callerChannel.chromiumSandbox === true
+      && callerPath.executablePath === '/already/set' && callerPath.chromiumSandbox === true) {
+    pass('a caller\'s channel or executablePath beats the system Chrome and keeps the sandbox');
+  } else {
+    fail(`caller browser overridden: ${JSON.stringify(callerChannel)} / ${JSON.stringify(callerPath)}`);
+  }
+  if (browserLaunchOptions({ chromiumSandbox: false }, onMac).chromiumSandbox === false) {
+    pass('a caller\'s explicit chromiumSandbox is kept');
+  } else {
+    fail('a caller\'s explicit chromiumSandbox was overridden');
+  }
+
+  // Each platform's Chrome locations, including a per-user install on macOS and Windows.
+  const chromeOn = (platform, path, extra = {}) => remotePageBrowser({ platform, pathExists: c => c === path, browsersPath: '', ...extra })?.path === path;
+  if (chromeOn('linux', '/opt/google/chrome/chrome') && chromeOn('linux', '/usr/bin/google-chrome-stable')
+      && chromeOn('win32', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe')
+      && chromeOn('win32', 'C:\\Users\\a\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe', { localAppData: 'C:\\Users\\a\\AppData\\Local' })
+      && chromeOn('darwin', '/var/home/a/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', { homeDir: '/var/home/a' })) {
+    pass('finds Chrome at its install locations on Linux, Windows and macOS');
+  } else {
+    fail('Chrome install locations are wrong');
+  }
+
+  // The sandbox on Linux: on where a user namespace can be created, off for root
+  // and where that fails, and macOS and Windows never need the check.
+  const spawnWith = (status) => {
+    const calls = [];
+    const spawn = (cmd, args) => { calls.push([cmd, ...args].join(' ')); return { status }; };
+    return { spawn, calls };
+  };
+  const linuxOk = spawnWith(0);
+  const linuxDenied = spawnWith(1);
+  const rootUser = spawnWith(0);
+  const macOs = spawnWith(1);
+  const linuxOn = chromiumSandboxStatus({ platform: 'linux', getuid: () => 1000, spawn: linuxOk.spawn });
+  const linuxOff = chromiumSandboxStatus({ platform: 'linux', getuid: () => 1000, spawn: linuxDenied.spawn });
+  const missingTool = chromiumSandboxStatus({ platform: 'linux', getuid: () => 1000, spawn: () => ({ status: null, error: new Error('ENOENT') }) });
+  const asRoot = chromiumSandboxStatus({ platform: 'linux', getuid: () => 0, spawn: rootUser.spawn });
+  const onDarwin = chromiumSandboxStatus({ platform: 'darwin', getuid: () => 0, spawn: macOs.spawn });
+  if (linuxOn.enabled === true && linuxOk.calls[0] === 'unshare --user --map-root-user true') {
+    pass('Linux: sandbox on where a user namespace can be created');
+  } else {
+    fail(`Linux sandbox check is wrong: ${JSON.stringify(linuxOn)} / ${linuxOk.calls}`);
+  }
+  if (linuxOff.enabled === false && linuxOff.reason === 'user-namespaces' && missingTool.reason === 'user-namespaces') {
+    pass('Linux: sandbox off when the namespace is denied or the check cannot run');
+  } else {
+    fail(`Linux denied namespace: ${JSON.stringify(linuxOff)} / ${JSON.stringify(missingTool)}`);
+  }
+  if (asRoot.enabled === false && asRoot.reason === 'root' && rootUser.calls.length === 0) {
+    pass('Linux: sandbox off for root, without probing');
+  } else {
+    fail(`Linux root: ${JSON.stringify(asRoot)}`);
+  }
+  if (onDarwin.enabled === true && macOs.calls.length === 0) {
+    pass('macOS: sandbox on, even as root, without probing');
+  } else {
+    fail(`macOS sandbox: ${JSON.stringify(onDarwin)}`);
+  }
+  // Google Chrome's setuid helper: /usr/bin/google-chrome resolves into
+  // /opt/google/chrome, where chrome-sandbox sits. Every file lookup is a seam.
+  const helperAt = (mode, uid = 0) => {
+    const looked = [];
+    return {
+      looked,
+      realpath: p => (p === '/usr/bin/google-chrome' ? '/opt/google/chrome/google-chrome' : p),
+      stat: (p) => {
+        looked.push(p);
+        if (p !== '/opt/google/chrome/chrome-sandbox') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+        return { uid, mode };
+      },
+    };
+  };
+  const linuxUser = { platform: 'linux', getuid: () => 1000 };
+  const setuid = helperAt(0o104755);
+  const viaHelper = spawnWith(1);
+  const chromeWithHelper = chromiumSandboxStatus({ ...linuxUser, ...setuid, spawn: viaHelper.spawn, executablePath: '/usr/bin/google-chrome' });
+  if (chromeWithHelper.enabled === true && viaHelper.calls.length === 0 && setuid.looked[0] === '/opt/google/chrome/chrome-sandbox') {
+    pass('Linux: Chrome with a setuid-root chrome-sandbox gets the sandbox without the namespace probe');
+  } else {
+    fail(`Linux setuid helper: ${JSON.stringify(chromeWithHelper)} / ${viaHelper.calls} / ${setuid.looked}`);
+  }
+  const notSetuid = chromiumSandboxStatus({ ...linuxUser, ...helperAt(0o100755), spawn: linuxDenied.spawn, executablePath: '/usr/bin/google-chrome' });
+  const notRootOwned = chromiumSandboxStatus({ ...linuxUser, ...helperAt(0o104755, 1000), spawn: linuxDenied.spawn, executablePath: '/usr/bin/google-chrome' });
+  if (notSetuid.reason === 'user-namespaces' && notRootOwned.reason === 'user-namespaces') {
+    pass('Linux: a chrome-sandbox without setuid, or not owned by root, falls back to the namespace probe');
+  } else {
+    fail(`Linux helper not set up: ${JSON.stringify(notSetuid)} / ${JSON.stringify(notRootOwned)}`);
+  }
+  const channelHelper = helperAt(0o104755);
+  const viaChannel = chromiumSandboxStatus({ ...linuxUser, realpath: p => p, stat: channelHelper.stat, spawn: linuxDenied.spawn, channel: 'chrome' });
+  if (viaChannel.enabled === true && channelHelper.looked[0] === '/opt/google/chrome/chrome-sandbox') {
+    pass('Linux: channel "chrome" is checked at the path Playwright launches it from');
+  } else {
+    fail(`Linux chrome channel: ${JSON.stringify(viaChannel)} / ${channelHelper.looked}`);
+  }
+  const bundledHelper = helperAt(0o104755);
+  const bundled = chromiumSandboxStatus({ ...linuxUser, ...bundledHelper, spawn: linuxDenied.spawn });
+  const asRootWithHelper = chromiumSandboxStatus({ ...setuid, platform: 'linux', getuid: () => 0, spawn: linuxOk.spawn, executablePath: '/usr/bin/google-chrome' });
+  if (bundled.reason === 'user-namespaces' && bundledHelper.looked.length === 0 && asRootWithHelper.reason === 'root') {
+    pass('Linux: the bundled Chromium still needs the namespace, and root stays off with a helper');
+  } else {
+    fail(`Linux bundled/root with helper: ${JSON.stringify(bundled)} / ${JSON.stringify(asRootWithHelper)}`);
+  }
+
+  const ubuntu = { ...onMac, ...linuxUser, pathExists: c => c === '/usr/bin/google-chrome', spawn: linuxDenied.spawn };
+  const lockedDown = browserLaunchOptions({ headless: true }, { ...ubuntu, ...helperAt(0o100755) });
+  if (lockedDown.chromiumSandbox === false && lockedDown.executablePath === '/usr/bin/google-chrome') {
+    pass('Linux without user namespaces or a setuid helper still gets the current Chrome, sandbox off');
+  } else {
+    fail(`Linux fallback: ${JSON.stringify(lockedDown)}`);
+  }
+  const ubuntuChrome = browserLaunchOptions({ headless: true }, { ...ubuntu, ...helperAt(0o104755) });
+  if (ubuntuChrome.chromiumSandbox === true && ubuntuChrome.executablePath === '/usr/bin/google-chrome') {
+    pass('Ubuntu 24.04 shape: no user namespaces, Google Chrome installed -> Chrome with the sandbox on');
+  } else {
+    fail(`Ubuntu with Chrome: ${JSON.stringify(ubuntuChrome)}`);
+  }
+
+  // One probe per process for the real spawn; the seam keys the cache.
+  const counted = spawnWith(0);
+  chromiumSandboxStatus({ ...linuxUser, spawn: counted.spawn });
+  chromiumSandboxStatus({ ...linuxUser, spawn: counted.spawn });
+  if (counted.calls.length === 1) pass('Linux: the namespace probe runs once per spawn function');
+  else fail(`Linux probe ran ${counted.calls.length} times`);
+
+  // The opt-out: off everywhere, from the shell or the data-root .env, and
+  // nothing else turns the sandbox off.
+  setEnv({ sandbox: 'off', root: emptyRoot });
+  const offOnMac = browserLaunchOptions({ headless: true }, onMac);
+  const offOnLinux = chromiumSandboxStatus({ ...linuxUser, spawn: linuxOk.spawn });
+  setEnv({ root: sandboxOffRoot });
+  const offFromFile = chromiumSandboxStatus({ platform: 'darwin' });
+  setEnv({ sandbox: '', root: sandboxOffRoot });
+  const emptyShellWins = chromiumSandboxStatus({ platform: 'darwin' });
+  setEnv({ sandbox: 'on', root: emptyRoot });
+  const onValue = chromiumSandboxStatus({ platform: 'darwin' });
+  const snapshotOff = chromiumSandboxStatus({ platform: 'darwin', processEnv: { [SANDBOX_ENV]: 'OFF' }, projectRoot: emptyRoot });
+  setEnv({ root: emptyRoot });
+  if (offOnMac.chromiumSandbox === false && offOnLinux.reason === 'disabled' && offFromFile.reason === 'disabled'
+      && snapshotOff.reason === 'disabled') {
+    pass(`${SANDBOX_ENV}=off turns the sandbox off, from the shell, a snapshot or the data-root .env`);
+  } else {
+    fail(`${SANDBOX_ENV}=off ignored: ${JSON.stringify({ offOnMac, offOnLinux, offFromFile, snapshotOff })}`);
+  }
+  if (emptyShellWins.enabled === true && onValue.enabled === true) {
+    pass(`an empty or other ${SANDBOX_ENV} value leaves the sandbox on`);
+  } else {
+    fail(`${SANDBOX_ENV} misread: ${JSON.stringify(emptyShellWins)} / ${JSON.stringify(onValue)}`);
+  }
+
   // Auto-detect is opt-in: off by default even when a browser is installed.
   setEnv({ root: emptyRoot });
   if (resolveBrowserExecutable() === null) {
@@ -301,4 +518,5 @@ try {
   rmSync(emptyRoot, { recursive: true, force: true });
   rmSync(envRoot, { recursive: true, force: true });
   rmSync(relativeEnvRoot, { recursive: true, force: true });
+  rmSync(sandboxOffRoot, { recursive: true, force: true });
 }
