@@ -1789,6 +1789,9 @@ process_offer() {
     fi
 
     if is_session_limit_log "$log_file"; then
+      # A paused row is not "failed", so merge-tracker would keep its tracker
+      # line. Move the attempt aside before the pause, same as a retry.
+      quarantine_attempt_artifacts session-pause
       mark_paused_rate_limit "$id" "$url" "$started_at" "$report_num" "$retries" "$log_file"
       echo "    ⏸️  Session/rate limit reached; pausing batch without consuming retry budget."
       terminal_failure_recorded=true
@@ -1797,6 +1800,7 @@ process_offer() {
 
     if is_rate_limit_log "$log_file" && (( retries < MAX_RETRIES )); then
       if (( RATE_LIMIT_SLEEP <= 0 )); then
+        quarantine_attempt_artifacts rate-pause
         mark_paused_rate_limit "$id" "$url" "$started_at" "$report_num" "$retries" "$log_file"
         echo "    ⏸️  Rate limited and --rate-limit-sleep is 0; pausing batch without consuming retry budget."
         terminal_failure_recorded=true
@@ -1805,6 +1809,7 @@ process_offer() {
       local retry_delay
       retry_delay=$(rate_limit_delay "$log_file" "$retries")
       if [[ "$retry_delay" == pause ]]; then
+        quarantine_attempt_artifacts rate-pause
         mark_paused_rate_limit "$id" "$url" "$started_at" "$report_num" "$retries" "$log_file"
         echo "    ⏸️  Retry-After exceeds --rate-limit-sleep; pausing batch without consuming retry budget."
         terminal_failure_recorded=true

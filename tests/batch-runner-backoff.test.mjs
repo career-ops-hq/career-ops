@@ -85,7 +85,7 @@ test('ceiling validation normalizes decimal zeros and rejects unsafe or overflow
   }
 }));
 
-function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429', successAfter = 99, cli = 'claude', secondLog = log } = {}) {
+function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429', successAfter = 99, cli = 'claude', secondLog = log, reports = '', tracker = '', logs = '' } = {}) {
   writeFileSync(join(dir, 'first.log'), log);
   writeFileSync(join(dir, 'second.log'), secondLog);
   const quarantineAt = source.indexOf('quarantine_attempt_artifacts() {');
@@ -98,6 +98,9 @@ function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429'
     PAUSE_FILE=pause.tsv
     THROTTLE_FILE=throttle.marker
     BATCH_PAUSED=false
+    ${reports ? `REPORTS_DIR='${reports}'` : ''}
+    ${tracker ? `TRACKER_DIR='${tracker}'` : ''}
+    ${logs ? `LOGS_DIR='${logs}'` : ''}
     calls=0
     claude() {
       calls=$((calls + 1))
@@ -213,6 +216,37 @@ test('full runner resumes persisted retries and schedules paused rows only with 
     const final = readFileSync(stateFile, 'utf8').trim().split('\n')[1].split('\t');
     assert.equal(final[2], 'failed');
     assert.equal(final[8], '2');
+  }
+}));
+
+test('a pause moves the attempt aside before the batch can merge it', () => fixture(ctx => {
+  const seed = (label) => {
+    const reports = join(ctx.dir, `${label}-reports`);
+    const tracker = join(ctx.dir, `${label}-tracker`);
+    const logs = join(ctx.dir, `${label}-logs`);
+    mkdirSync(reports);
+    mkdirSync(tracker);
+    mkdirSync(logs);
+    writeFileSync(join(reports, '001-role.md'), 'report\n');
+    writeFileSync(join(reports, '001-RESERVED.md'), 'reserved\n');
+    writeFileSync(join(tracker, '1.tsv'), 'row\n');
+    writeFileSync(join(tracker, '002-other.tsv'), 'other\n');
+    return { reports, tracker, logs };
+  };
+  for (const [label, options, reason] of [
+    ['session', { log: 'session limit' }, 'session-pause'],
+    ['zero', { cap: 0, log: '429 rate limit exceeded' }, 'rate-pause'],
+    ['over', { log: '429\nRetry-After: 301' }, 'rate-pause'],
+  ]) {
+    const dirs = seed(label);
+    const out = runLoop(ctx, { cli: 'grok', ...options, ...dirs });
+    assert.match(out, /STATE:paused_rate_limit/);
+    assert.equal(existsSync(join(dirs.reports, '001-role.md')), false, label);
+    assert.equal(readFileSync(join(dirs.reports, '001-RESERVED.md'), 'utf8'), 'reserved\n');
+    assert.equal(existsSync(join(dirs.tracker, '1.tsv')), false, label);
+    assert.equal(readFileSync(join(dirs.tracker, '002-other.tsv'), 'utf8'), 'other\n');
+    assert.equal(readFileSync(join(dirs.logs, 'quarantine', `1-${reason}-001-role.md`), 'utf8'), 'report\n');
+    assert.equal(readFileSync(join(dirs.logs, 'quarantine', `1-${reason}-1.tsv`), 'utf8'), 'row\n');
   }
 }));
 
