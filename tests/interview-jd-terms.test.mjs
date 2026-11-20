@@ -7,12 +7,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  MIN_POSITIVE, MIN_BASELINE, classifyRows, jdFromReport, rankTerms, resolveJd, smoothedLog2Lift, termsOf,
+  MIN_POSITIVE, MIN_BASELINE, classifyRows, jdFromReport, rankTerms, resolveJd, smoothedLog2Lift, stripHtmlComments, termsOf,
 } from '../interview-jd-terms.mjs';
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'interview-jd-terms.mjs');
@@ -123,9 +123,47 @@ test('a PDF-only capture is flagged, not read', () => {
   }
 });
 
+test('a newer PDF does not hide an older readable text capture', () => {
+  const root = mkdtempSync(join(tmpdir(), 'interview-jd-terms-'));
+  try {
+    mkdirSync(join(root, 'jds'));
+    const text = 'Platform analyst role working with dashboards, SQL reporting and stakeholder requests across teams.';
+    writeFileSync(join(root, 'jds', '007-example.txt'), text);
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(join(root, 'jds', '007-example.txt'), old, old);
+    writeFileSync(join(root, 'jds', '007-example.pdf'), 'not text');
+    const r = resolveJd(root, [7]);
+    assert.equal(r.source, 'capture');
+    assert.match(r.text, /dashboards/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an unreadable report or capture is skipped, not fatal', () => {
+  const root = mkdtempSync(join(tmpdir(), 'interview-jd-terms-'));
+  try {
+    mkdirSync(join(root, 'reports'));
+    mkdirSync(join(root, 'jds'));
+    // A directory named like a report makes readFileSync throw EISDIR.
+    mkdirSync(join(root, 'reports', '009-example.md'));
+    mkdirSync(join(root, 'jds', '009-example.txt'));
+    assert.deepEqual(resolveJd(root, [9]), { text: '', source: null, pdfOnly: false });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('HTML comments never leak a skill, and no opener survives stripping', () => {
+  assert.equal(stripHtmlComments('a <!-- b --> c').includes('<!--'), false);
+  assert.equal(stripHtmlComments('x <!<!---->--> y').includes('<!--'), false);
+  assert.equal(stripHtmlComments('keep <!-- never closed'), 'keep ');
+  assert.equal(termsOf('Plain text role. <!-- SQL -->').has('sql'), false, 'comment-only skill is not a term');
+});
+
 // ── Statistics ──
 
-const doc = (extra) => `Example Corp is hiring an analyst. ${extra} You will join the platform team.`;
+const doc =(extra) => `Example Corp is hiring an analyst. ${extra} You will join the platform team.`;
 
 test('minimum-support guard: below it only counts come back, no ratios', () => {
   const pos = Array.from({ length: MIN_POSITIVE - 1 }, () => doc('Needs kubernetes.'));

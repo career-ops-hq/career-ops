@@ -109,6 +109,21 @@ function tokenize(sentence) {
   return out;
 }
 
+/**
+ * Remove HTML comments. Scans with indexOf instead of a regex replace, so a
+ * nested or reassembled opener (`<!<!---->--`) cannot survive: the loop only
+ * ends when no opener is left, and an unterminated comment drops the rest.
+ */
+export function stripHtmlComments(text, replacement = ' ') {
+  let out = String(text ?? '');
+  for (;;) {
+    const start = out.indexOf('<!--');
+    if (start === -1) return out;
+    const end = out.indexOf('-->', start + 4);
+    out = end === -1 ? out.slice(0, start) : out.slice(0, start) + replacement + out.slice(end + 3);
+  }
+}
+
 const isNumeric = (t) => /^[\d.,-]+$/.test(t);
 const usableWord = (t) => t.length >= 2 && !isNumeric(t) && !STOP_WORDS.has(t) && !BOILERPLATE.has(t);
 
@@ -118,8 +133,8 @@ const usableWord = (t) => t.length >= 2 && !isNumeric(t) && !STOP_WORDS.has(t) &
  */
 export function termsOf(text) {
   const terms = new Map();
-  const clean = String(text ?? '')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
+  const uncommented = stripHtmlComments(text);
+  const clean = uncommented
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/[`*_>#|]/g, ' ')
     .toLowerCase();
@@ -134,7 +149,7 @@ export function termsOf(text) {
       if (b !== undefined && usableWord(b)) terms.set(`${a} ${b}`, 'phrase');
     }
   }
-  for (const skill of extractSkills(String(text ?? ''))) terms.set(skill.toLowerCase(), 'skill');
+  for (const skill of extractSkills(uncommented)) terms.set(skill.toLowerCase(), 'skill');
   return terms;
 }
 
@@ -191,14 +206,7 @@ export function jdFromReport(reportText) {
   if (!m) return '';
   const rest = text.slice(m.index + m[0].length);
   const next = rest.search(/^##[ \t]/m);
-  let body = next === -1 ? rest : rest.slice(0, next);
-  // Strip HTML comments until stable so nested markers cannot reassemble, then drop any stray opener.
-  let prev;
-  do {
-    prev = body;
-    body = body.replace(/<!--[\s\S]*?-->/g, '');
-  } while (body !== prev);
-  body = body.replace(/<!--/g, '').trim();
+  const body = stripHtmlComments(next === -1 ? rest : rest.slice(0, next), '').trim();
   return body.length >= MIN_JD_CHARS ? body : '';
 }
 
@@ -216,18 +224,30 @@ export function resolveJd(root, reportNums) {
       for (const name of readdirSync(reportsDir).sort()) {
         const m = /^(\d+)-.*\.md$/.exec(name);
         if (!m || Number(m[1]) !== n) continue;
-        const jd = jdFromReport(readFileSync(join(reportsDir, name), 'utf-8'));
+        let jd = '';
+        try {
+          jd = jdFromReport(readFileSync(join(reportsDir, name), 'utf-8'));
+        } catch { /* unreadable report: try the next source, never stop the run */ }
         if (jd) return { text: jd, source: 'report' };
       }
     }
+    // Captures: take the newest readable text capture, not just the newest file.
+    // A PDF that is newer than a valid .txt must not hide the text JD.
     const cap = findCaptureForReport(jdsDir, n);
     if (cap) {
-      if (TEXT_CAPTURE_EXTS.has(cap.ext.toLowerCase())) {
-        const text = readFileSync(cap.path, 'utf-8').trim();
-        if (text.length >= MIN_JD_CHARS) return { text, source: 'capture' };
-      } else {
-        pdfOnly = true;
+      let sawPdf = false;
+      let found = null;
+      for (const filename of cap.candidates ?? [cap.filename]) {
+        const dot = filename.lastIndexOf('.');
+        const ext = dot === -1 ? '' : filename.slice(dot).toLowerCase();
+        if (!TEXT_CAPTURE_EXTS.has(ext)) { sawPdf = true; continue; }
+        try {
+          const text = readFileSync(join(jdsDir, filename), 'utf-8').trim();
+          if (text.length >= MIN_JD_CHARS) { found = text; break; }
+        } catch { /* unreadable capture: try the next candidate */ }
       }
+      if (found) return { text: found, source: 'capture' };
+      if (sawPdf) pdfOnly = true;
     }
   }
   return { text: '', source: null, pdfOnly };
