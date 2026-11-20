@@ -550,6 +550,8 @@ const SECTION_ALIASES = new Map([
   // Karriereforløb, Erhvervserfaring; Kompetanse, Arbeidserfaring, Yrkeserfaring);
   // the rest are each section's everyday headings, listed once where the two
   // languages share a spelling (Erfaring, Priser, Interesser).
+  ['profil', 'summary'],
+  ['resumé', 'summary'],
   ['sammenfatning', 'summary'],
   ['om mig', 'summary'],
   ['sammendrag', 'summary'],

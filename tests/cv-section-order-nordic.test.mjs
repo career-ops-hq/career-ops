@@ -25,6 +25,7 @@ const cvMd = '# CV\n\n## Sammenfatning\n\n## Uddannelse\n\n## Kernekompetencer\n
 
 test('sectionKey resolves the Danish and Norwegian spellings CVs use', () => {
   const cases = [
+    ['Profil', 'summary'], ['Resumé', 'summary'], ['Resume', 'summary'],
     ['Sammenfatning', 'summary'], ['Om mig', 'summary'], ['Sammendrag', 'summary'], ['Om meg', 'summary'],
     ['Kernekompetencer', 'competencies'], ['Kjernekompetanse', 'competencies'],
     ['Erhvervserfaring', 'experience'], ['Karriereforløb', 'experience'], ['Arbejdserfaring', 'experience'], ['Arbeidserfaring', 'experience'], ['Yrkeserfaring', 'experience'], ['Erfaring', 'experience'],
