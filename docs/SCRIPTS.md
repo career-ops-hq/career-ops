@@ -21,6 +21,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `npm run sync-check` | `cv-sync-check.mjs` | Validate CV/profile consistency |
 | `npm run cv:verify-facts` | `verify-cv-facts.mjs` | Check a generated CV against `cv.md` and `article-digest.md` (read-only) |
 | `npm run cv:verify-ats` | `verify-ats.mjs` | Score a generated CV HTML for ATS parseability, 0–100 (read-only) |
+| `npm run cv:verify-all` | `verify-all.mjs` | Every pre-send check on one file: facts, ATS (HTML), voice, and with `--links` dead links and unpinned repos (read-only) |
 | `npm run test:cv-visual` | `playwright.cv.config.mjs` | Visual regression suite for CV templates; canonical run is the Linux container in [CV_VISUAL_TESTING.md](CV_VISUAL_TESTING.md) |
 | `npm run patterns` | `analyze-patterns.mjs` | Analyze tracker outcomes and report patterns |
 | `npm run keyword-match` | `keyword-match.mjs` | Report which keywords from a report the CV actually covers (read-only; never edits the CV) |
@@ -416,6 +417,22 @@ npm run cv:verify-ats -- --self-test
 ```
 
 Exit `0` when the structural score is at least `--min-score` (default 70) and there is no critical issue; `1` otherwise.
+
+---
+
+## cv:verify-all
+
+Runs every pre-send check on one candidate-facing file in one command: `verify-cv-facts.mjs`, `verify-ats.mjs` (HTML files only) and the voice check from `cv-voice.mjs` against `cv.md` (skipped when the file is `cv.md` itself). Read-only.
+
+With `--links` it also fetches every http(s) link in the file. A 4xx/5xx or no answer fails. linkedin.com only warns, because it refuses scripts. A name that does not resolve fails too. Loopback and private-network hosts are never dialled: redirects are followed by hand and every hop goes through the same egress guard as the JD page fetch (literal check, DNS pre-check, connect-time address check), so a link that resolves or redirects to a private address is reported as not checked. A malformed link always fails, even when the network checks are skipped. Those checks are skipped, with an `[info]` line, when `CAREER_OPS_NO_DNS_CACHE` turns off the connect-time address guard, or when `NODE_USE_ENV_PROXY` is set without `CAREER_OPS_TRUST_PROXY_EGRESS=1` (an HTTP proxy would hide the destination from the guard); no link is then fetched. A bare relative path names a file in the data root (`CAREER_OPS_ROOT`); start it with `./` to mean the working directory. When the file links a `github.com/<user>` profile and `gh` is signed in, it warns about public repos the file names that are not pinned on that profile; without `gh` that step is skipped and says so.
+
+```bash
+npm run cv:verify-all -- output/cv-acme.html
+npm run cv:verify-all -- output/cv-acme.html --links
+npm run cv:verify-all -- --self-test
+```
+
+Exit `0` when every check passes, `1` when one fails, `2` on a usage error. Warnings never fail.
 
 ---
 
