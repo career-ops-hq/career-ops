@@ -18,12 +18,24 @@ test("handoffHostsFrom reads apply.handoff_hosts and normalizes entries", () => 
   assert.deepEqual(handoffHostsFrom(text), ["gupy.io", "linkedin.com", "apply.workable.com"]);
 });
 
-test("handoffHostsFrom is empty for an absent, malformed or unreadable setting", () => {
+test("handoffHostsFrom is empty for an absent or malformed setting", () => {
   assert.deepEqual(handoffHostsFrom(null), []);
   assert.deepEqual(handoffHostsFrom("candidate:\n  full_name: A\n"), []);
   assert.deepEqual(handoffHostsFrom("apply:\n  handoff_hosts: gupy.io\n"), []);
   assert.deepEqual(handoffHostsFrom("apply: true\n"), []);
-  assert.deepEqual(handoffHostsFrom(": : not yaml"), []);
+});
+
+test("a profile that is not valid YAML throws instead of switching handoff off", () => {
+  assert.throws(() => handoffHostsFrom('apply:\n  handoff_hosts: ["gupy.io"\n'));
+});
+
+test("a configured host written with a trailing dot still matches", () => {
+  const hosts = handoffHostsFrom('apply:\n  handoff_hosts: ["gupy.io.", "LinkedIn.com..", "https://apply.workable.com./x"]\n');
+  assert.deepEqual(hosts, ["gupy.io", "linkedin.com", "apply.workable.com"]);
+  assert.equal(matchHandoffHost("https://gupy.io/jobs/1", hosts), "gupy.io");
+  assert.equal(matchHandoffHost("https://acme.gupy.io/jobs/1", hosts), "gupy.io");
+  assert.equal(matchHandoffHost("https://acme.gupy.io./jobs/1", hosts), "gupy.io");
+  assert.equal(matchHandoffHost("https://www.linkedin.com/jobs/view/1", hosts), "linkedin.com");
 });
 
 test("a host matches itself and its subdomains, nothing else", () => {
@@ -43,7 +55,22 @@ test("readHandoffHosts reads the profile from the data root", () => {
     mkdirSync(join(root, "config"));
     writeFileSync(join(root, "config", "profile.yml"), 'apply:\n  handoff_hosts: ["gupy.io"]\n');
     assert.deepEqual(readHandoffHosts({ CAREER_OPS_ROOT: root }), ["gupy.io"]);
-    assert.deepEqual(readHandoffHosts({ CAREER_OPS_ROOT: join(root, "missing") }), []);
+    assert.deepEqual(readHandoffHosts({ CAREER_OPS_ROOT: join(root, "missing") }), [], "a missing profile states no hosts");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readHandoffHosts surfaces a broken or unreadable profile with its path", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoff-hosts-"));
+  try {
+    mkdirSync(join(root, "config"));
+    const file = join(root, "config", "profile.yml");
+    writeFileSync(file, 'apply:\n  handoff_hosts: ["gupy.io"\n');
+    assert.throws(() => readHandoffHosts({ CAREER_OPS_ROOT: root }), (err) => err instanceof Error && err.message.startsWith(`${file}: `));
+    rmSync(file);
+    mkdirSync(file); // reading a directory fails with EISDIR, not ENOENT
+    assert.throws(() => readHandoffHosts({ CAREER_OPS_ROOT: root }), (err) => err instanceof Error && err.message.startsWith(`${file}: `));
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
