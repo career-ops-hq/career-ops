@@ -294,6 +294,17 @@ const parseJson = (s) => {
  * @param {string} text
  * @returns {Signal[]}
  */
+// Drops the comments a line filter cannot see: XML comments in a pom and block
+// comments in a Gradle script. Quoted strings are kept whole, so a glob such as
+// "**/*.jar" does not open a comment.
+function stripBlockComments(file, text) {
+  if (file === 'pom.xml') return text.replace(/<!--[\s\S]*?-->/g, '');
+  if (file === 'build.gradle' || file === 'build.gradle.kts') {
+    return text.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|\/\*[\s\S]*?\*\//g, (m, quoted) => quoted ?? '');
+  }
+  return text;
+}
+
 export function manifestSignals(repo, path, text) {
   const file = basename(path).toLowerCase();
   const out = [];
@@ -327,7 +338,7 @@ export function manifestSignals(repo, path, text) {
     'cargo.toml': 'rust', gemfile: 'ruby', 'pom.xml': 'jvm', 'build.gradle': 'jvm', 'build.gradle.kts': 'jvm',
   }[file];
   if (!ecosystem) return out;
-  const lines = String(text ?? '').split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l));
+  const lines = stripBlockComments(file, String(text ?? '')).split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l));
   let body;
   if (ecosystem === 'go') {
     // Only `require` directives add dependencies; `replace`/`exclude` do not.
