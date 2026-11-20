@@ -281,3 +281,23 @@ test("without legitimacy, grouping is by score alone", () => {
     ["Recommended"],
   );
 });
+
+test("Apply next skips a posting that closed before today", () => {
+  const rows = [
+    { ...queued("2", "4.8/5", "Fixture Closed"), closesAt: "2026-11-01" },
+    { ...queued("3", "3.0/5", "Fixture Open"), closesAt: "2026-12-01" },
+  ];
+  const target = pickApplyNext(rows, scoreOf, () => "Apply", () => "", "2026-11-15");
+  assert.equal(target?.company, "Fixture Open");
+  assert.ok(pickAwaitingDecision(rows, scoreOf).some((row) => row.company === "Fixture Closed"));
+});
+
+test("a posting that closes today is still Apply next", () => {
+  const rows = [{ ...queued("2", "4.8/5", "Fixture Today"), closesAt: "2026-11-15" }];
+  assert.equal(pickApplyNext(rows, scoreOf, () => "Apply", () => "", "2026-11-15")?.company, "Fixture Today");
+});
+
+test("a row with no close date stays Apply next", () => {
+  const rows = [queued("2", "4.8/5", "Fixture Undated")];
+  assert.equal(pickApplyNext(rows, scoreOf, () => "Apply", () => "", "2026-11-15")?.company, "Fixture Undated");
+});

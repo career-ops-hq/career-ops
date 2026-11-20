@@ -1,4 +1,4 @@
-import { readApplications, readInbox, requestReportReader, doctorState } from "@/lib/career-ops";
+import { readApplications, readInbox, requestReportReader, doctorState, withCloseDates } from "@/lib/career-ops";
 import { pickAwaitingDecision, pickApplyNext, includeApplyTarget } from "@/lib/home/awaiting.mjs";
 import { cardReason } from "@/lib/machine-summary.mjs";
 import type { CardReason } from "@/lib/machine-summary.mjs";
@@ -16,7 +16,9 @@ import { TodayDashboard } from "@/components/home/today-dashboard";
 export const dynamic = "force-dynamic"; // always read fresh local files at request time (never at build — CI has no user data)
 
 export default async function Home() {
-  const snapshot = { applications: readApplications(), inbox: readInbox() };
+  // Pipeline already joins scan-history closes_at. Today has to as well, or
+  // Apply next can name a posting that closed.
+  const snapshot = { applications: await withCloseDates(readApplications()), inbox: readInbox() };
   const { phase, onboardingNeeded } = doctorState(snapshot);
   // First run (truly empty install): the CV-upload takeover IS the home — value
   // before commitment. The full dashboard returns once they have a CV or any data.
