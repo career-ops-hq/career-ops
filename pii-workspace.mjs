@@ -1,40 +1,12 @@
-/**
- * pii-workspace.mjs — optional on-disk tokenization for interactive AI CLIs.
- *
- * WHAT THIS IS FOR
- * ----------------
- * `lib/privacy-guard.mjs` + `lib/pii-interceptor.mjs` guard the requests
- * career-ops itself makes. They cannot see a CLI agent — Claude Code, OpenCode,
- * Codex — reading `cv.md` and `config/profile.yml` from disk with its own file
- * tools. This tool is the manual companion for that gap: it rewrites the chosen
- * user-layer files with placeholder tokens before a CLI session, and puts the
- * real values back afterwards, so the files on disk hold no PII while the CLI
- * is reading them.
- *
- *   node pii-workspace.mjs status    # is each file tokenized or holding real PII?
- *   node pii-workspace.mjs scrub     # replace configured values with tokens
- *   node pii-workspace.mjs restore    # put the real values back
- *
- * CAVEATS — read before using scrub
- * ---------------------------------
- * `scrub` MUTATES YOUR CV AND PROFILE IN PLACE. A crash, a lost laptop or a
- * forgotten `restore` leaves those files tokenized, and the tokens are only
- * reversible while `.pii-token-map.json` exists. Run `restore` when the session
- * ends. Tokens are also only as good as the configured values: rename a value in
- * `config/privacy.yml` and the old tokens no longer map to it.
- *
- * The token map is written to the data root and gitignored; it holds your real
- * values, so treat it exactly as you treat `cv.md`. Warn AI agents not to read
- * the token map, or place `CAREER_OPS_ROOT` outside the agent workspace.
- */
+#!/usr/bin/env node
+// pii-workspace.mjs — redact and restore PII across local workspace files.
 
 import fs from 'node:fs';
 import path from 'node:path';
-import 'dotenv/config';
 import {
-  loadPrivacyGuard,
   readPrivacyConfig,
   getPrivacyConfigPath,
+  loadPrivacyGuard,
 } from './lib/privacy-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
@@ -50,12 +22,11 @@ const TOKEN_MAP_NAME = '.pii-token-map.json';
 const USAGE = `Usage: node pii-workspace.mjs <scrub|restore|status>
 
 Commands:
-  status   Report whether user files are tokenized or contain real PII
-  scrub    Replace configured PII values with placeholder tokens in user files
-  restore  Restore original PII values from token map into user files
-
-Options:
-  -h, --help  Show this help message
+  scrub    Replace configured PII in user files with stable tokens,
+           saving the reverse mapping to ${TOKEN_MAP_NAME}.
+  restore  Restore real values from ${TOKEN_MAP_NAME} into user files
+           and remove the map once restored.
+  status   Report whether user files contain tokens or unredacted PII.
 `;
 
 const root = getCareerOpsRoot();
@@ -64,20 +35,21 @@ const tokenMapPath = path.join(root, TOKEN_MAP_NAME);
 /** Escape a literal so it can be used inside a RegExp. */
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const METADATA_KEYS = new Set(['__files__']);
+const METADATA_KEYS = new Set(['__files__', '__restored__']);
 const isTokenKey = (k) => !METADATA_KEYS.has(k);
 
 function loadTokenMap(explicitPath) {
   const mapPath = explicitPath ?? tokenMapPath;
   if (!fs.existsSync(mapPath)) return {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(mapPath, 'utf-8'));
+    const raw = fs.readFileSync(mapPath, 'utf8');
+    const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('invalid token map structure');
+      throw new Error(`invalid token map structure in ${mapPath}`);
     }
     return parsed;
   } catch (err) {
-    throw new Error(`[privacy] Error reading token map at ${mapPath}: ${err.message}`);
+    throw new Error(`Error reading token map at ${mapPath}: ${err.message}`);
   }
 }
 
@@ -120,10 +92,16 @@ function scrub(text, guard, map) {
   const sortedValues = [...guard.textValues].sort((a, b) => b.length - a.length);
   for (const value of sortedValues) {
     if (value.length < 5) continue;
-    for (const m of text.matchAll(new RegExp(escapeRe(value), 'gi'))) {
+    const re = new RegExp(escapeRe(value), 'gi');
+    let m;
+    while ((m = re.exec(text)) !== null) {
       const start = m.index;
       const end = start + m[0].length;
-      if (overlaps(start, end)) continue;
+      if (overlaps(start, end)) {
+        // Resume searching after candidate start to find later non-overlapping occurrences.
+        re.lastIndex = start + 1;
+        continue;
+      }
       const matched = m[0];
       // Reuse an existing token only when the spelling and casing match exactly.
       const existing = Object.entries(map).find(([k, v]) => isTokenKey(k) && v === matched);
@@ -264,6 +242,21 @@ async function main() {
           );
         } else {
           console.log(`[privacy] ${file}: real values restored`);
+          let mapDirty = false;
+          if (Array.isArray(map.__files__) && map.__files__.includes(file)) {
+            map.__files__ = map.__files__.filter((f) => f !== file);
+            mapDirty = true;
+          }
+          if (restoredTokens.size > 0) {
+            const prevRestored = new Set(Array.isArray(map.__restored__) ? map.__restored__ : []);
+            const beforeSize = prevRestored.size;
+            for (const t of restoredTokens) prevRestored.add(t);
+            if (prevRestored.size !== beforeSize) {
+              map.__restored__ = [...prevRestored];
+              mapDirty = true;
+            }
+          }
+          if (mapDirty) saveTokenMap(map);
         }
       } else {
         const hasTokens = /PRIVACY_VALUE_|PRIVACY_REDACTED_|CANDIDATE_/.test(content);
@@ -276,8 +269,12 @@ async function main() {
     } else if (mode === 'restore') {
       const tokenizedFiles = Array.isArray(map.__files__) ? map.__files__ : [];
       const absentTokenized = tokenizedFiles.filter((f) => !fs.existsSync(path.join(root, f)));
+      const allRestored = new Set([
+        ...(Array.isArray(map.__restored__) ? map.__restored__ : []),
+        ...restoredTokens,
+      ]);
       const mapTokens = Object.keys(map).filter(isTokenKey);
-      const unrestored = mapTokens.filter((t) => !restoredTokens.has(t));
+      const unrestored = mapTokens.filter((t) => !allRestored.has(t));
       if (unrestored.length > 0) {
         console.warn(
           `[privacy] WARNING: ${unrestored.length} token map entry(ies) not restored; retaining ${TOKEN_MAP_NAME}`

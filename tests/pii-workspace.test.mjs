@@ -99,6 +99,39 @@ test('scrub handles numeric-only guard without throwing', () => {
   assert.equal(Object.keys(map).length, 0);
 });
 
+test('scrub resumes searching after start of rejected overlapping match to scrub later occurrence', () => {
+  const mockGuard = {
+    textValues: new Set(['professor anna', 'anna anna']),
+  };
+  const map = {};
+  const text = 'Professor Anna Anna Anna';
+  const scrubbed = scrub(text, mockGuard, map);
+
+  // 'Professor Anna' is scrubbed as PRIVACY_VALUE_1.
+  // The first 'Anna Anna' overlaps with 'Professor Anna' and is rejected.
+  // Resuming after start finds the later non-overlapping 'Anna Anna'.
+  assert.equal(scrubbed, 'PRIVACY_VALUE_1 PRIVACY_VALUE_2');
+  assert.equal(map['PRIVACY_VALUE_1'], 'Professor Anna');
+  assert.equal(map['PRIVACY_VALUE_2'], 'Anna Anna');
+
+  // Verify rehydration restores the original text
+  const restored = rehydrate(scrubbed, map);
+  assert.equal(restored, text);
+});
+
+test('scrub matches against original text so placeholder tokens are never processed as input', () => {
+  // If guard has 'value' (>= 5 chars) which matches inside 'PRIVACY_VALUE_1'
+  const mockGuard = {
+    textValues: new Set(['jane doe', 'value']),
+  };
+  const map = {};
+  const text = 'Jane Doe';
+  const scrubbed = scrub(text, mockGuard, map);
+  assert.equal(scrubbed, 'PRIVACY_VALUE_1');
+  assert.equal(map['PRIVACY_VALUE_1'], 'Jane Doe');
+  assert.equal(map['PRIVACY_VALUE_2'], undefined);
+});
+
 test('rehydrate performs single-pass lookup avoiding prefix corruption for overlapping tokens', () => {
   const map = {
     PRIVACY_VALUE_1: 'Alice',
@@ -420,10 +453,12 @@ test('scrub records tokenized files and restore removes map when all tokenized f
     const cvFile = path.join(dir, 'cv.md');
     fs.writeFileSync(cvFile, 'Candidate: Jane Doe', 'utf8');
 
+    const privacyPath = path.join(configDir, 'privacy.yml');
+
     // Run scrub
     const resScrub = spawnSync(process.execPath, [scriptPath, 'scrub'], {
       encoding: 'utf8',
-      env: { ...process.env, CAREER_OPS_ROOT: dir },
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PRIVACY: privacyPath },
     });
     assert.equal(resScrub.status, 0);
     assert.equal(fs.existsSync(tokenMap), true);
@@ -433,7 +468,7 @@ test('scrub records tokenized files and restore removes map when all tokenized f
     // Run restore
     const resRestore = spawnSync(process.execPath, [scriptPath, 'restore'], {
       encoding: 'utf8',
-      env: { ...process.env, CAREER_OPS_ROOT: dir },
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PRIVACY: privacyPath },
     });
     assert.equal(resRestore.status, 0);
     assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Jane Doe');
@@ -441,8 +476,9 @@ test('scrub records tokenized files and restore removes map when all tokenized f
   });
 });
 
-test('isTokenKey distinguishes metadata __files__ from tokens including double-underscore tokens', () => {
+test('isTokenKey distinguishes metadata __files__ and __restored__ from tokens including double-underscore tokens', () => {
   assert.equal(isTokenKey('__files__'), false);
+  assert.equal(isTokenKey('__restored__'), false);
   assert.equal(isTokenKey('__NAME__'), true);
   assert.equal(isTokenKey('__EMAIL__'), true);
   assert.equal(isTokenKey('PRIVACY_VALUE_1'), true);
@@ -502,5 +538,61 @@ test('restore retains token map when legacy double-underscore token like __NAME_
     assert.match(res.stderr + res.stdout, /1 token map entry\(ies\) not restored; retaining/);
   });
 });
+
+test('restore preserves completed progress across retries when a later file write fails', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+    const profileDir = path.join(dir, 'config');
+    fs.mkdirSync(profileDir, { recursive: true });
+    const profileFile = path.join(profileDir, 'profile.yml');
+
+    fs.writeFileSync(cvFile, 'Candidate: PRIVACY_VALUE_1', 'utf8');
+    fs.writeFileSync(profileFile, 'name: PRIVACY_VALUE_2', 'utf8');
+
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __files__: ['cv.md', 'config/profile.yml'],
+        PRIVACY_VALUE_1: 'Alice Smith',
+        PRIVACY_VALUE_2: 'Secret Name',
+      }),
+      'utf8'
+    );
+
+    // Make profile.yml read-only so write fails with permission error
+    fs.chmodSync(profileFile, 0o444);
+
+    const resFail = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+
+    // First attempt failed on profile.yml
+    assert.equal(resFail.status, 1);
+    // cv.md was already restored
+    assert.equal(fs.readFileSync(cvFile, 'utf8'), 'Candidate: Alice Smith');
+    // Token map is preserved with both mappings retained
+    assert.equal(fs.existsSync(tokenMap), true);
+    const midMap = JSON.parse(fs.readFileSync(tokenMap, 'utf8'));
+    assert.equal(midMap.PRIVACY_VALUE_1, 'Alice Smith');
+    assert.equal(midMap.PRIVACY_VALUE_2, 'Secret Name');
+
+    // Make profile.yml writable again and retry restore
+    fs.chmodSync(profileFile, 0o666);
+
+    const resRetry = spawnSync(process.execPath, [scriptPath, 'restore'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+
+    assert.equal(resRetry.status, 0);
+    assert.equal(fs.readFileSync(profileFile, 'utf8'), 'name: Secret Name');
+    // Token map is cleanly removed after retry finishes restoring remaining file
+    assert.equal(fs.existsSync(tokenMap), false);
+  });
+});
+
 
 
