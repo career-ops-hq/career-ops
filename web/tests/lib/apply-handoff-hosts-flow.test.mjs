@@ -262,23 +262,26 @@ describe("the host list is read once per Apply session", { concurrency: 1 }, () 
   });
 });
 
+const APPLICATION_FIELDS = [
+  { id: "co0", type: "text", label: "Full name", required: true },
+  { id: "co1", type: "email", label: "Email", required: true },
+  { id: "co2", type: "file", label: "Resume", required: true },
+];
+const SIGN_IN_FIELDS = [
+  { id: "si0", type: "email", label: "Email", required: true },
+  { id: "si1", type: "password", label: "Password", required: true },
+];
+
 // A career page with no form at first; scrolling it (nudgeScroll) moves it to
-// `movesTo`, where a usable application form is shown.
-function careerPageMovingOnScroll(movesTo, closed) {
+// `movesTo`, where `fields` are shown (a usable application form by default).
+function careerPageMovingOnScroll(movesTo, closed, fields = APPLICATION_FIELDS) {
   let current = "about:blank";
   const formHere = () => current === movesTo;
   const frame = {
     url: () => current,
     evaluate: async () => {
       if (!formHere()) throw new Error("document is not defined");
-      return {
-        title: "Apply",
-        fields: [
-          { id: "co0", type: "text", label: "Full name", required: true },
-          { id: "co1", type: "email", label: "Email", required: true },
-          { id: "co2", type: "file", label: "Resume", required: true },
-        ],
-      };
+      return { title: "Apply", fields };
     },
     waitForSelector: async () => null,
   };
@@ -362,6 +365,138 @@ describe("the final host check before a session is kept", { concurrency: 1 }, ()
     assert.ok(result.id, JSON.stringify(result).slice(0, 300));
     assert.equal(result.unsupported, undefined);
     assert.deepEqual(closed, [], "the window stays open for filling");
+  });
+
+  test("a move to a listed host's sign-in page gets the handoff panel, not the login-wall error", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageMovingOnScroll(LISTED, closed, SIGN_IN_FIELDS);
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.equal(result.unsupported?.vendor, "handoff");
+    assert.equal(result.unsupported?.postingUrl, LISTED);
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("a move to an unlisted sign-in page still gets the login-wall error", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageMovingOnScroll("https://login.acme-careers.test/", closed, SIGN_IN_FIELDS);
+    await assert.rejects(openSession("https://careers.acme.test/jobs/1"), /log ?in|sign ?in|account/i);
+    assert.deepEqual(closed, [true]);
+  });
+});
+
+// An unlisted career page (no form of its own) that embeds a form in a frame
+// on `frameUrl`. With `controls`, the frame also reports that many controls to
+// richestControlFrame while `pageFields` sit in the main frame, so the
+// deterministic form and the agent's frame differ.
+function careerPageEmbedding(frameUrl, closed, { pageFields = [], frameFields = APPLICATION_FIELDS, controls = 0 } = {}) {
+  let current = "about:blank";
+  const counting = (fn) => String(fn).includes("contenteditable");
+  const main = {
+    url: () => current,
+    evaluate: async (fn) => {
+      if (counting(fn)) return pageFields.length;
+      if (!pageFields.length) throw new Error("document is not defined");
+      return { title: "Acme role", fields: pageFields };
+    },
+    waitForSelector: async () => null,
+  };
+  const child = {
+    url: () => frameUrl,
+    evaluate: async (fn) => (counting(fn) ? controls : { title: "", fields: frameFields }),
+    waitForSelector: async () => null,
+  };
+  const none = { count: async () => 0, isVisible: async () => false, getAttribute: async () => null, click: async () => {}, first() { return this; }, or() { return this; } };
+  const context = {
+    route: async () => {},
+    routeWebSocket: async () => {},
+    setDefaultTimeout() {},
+    pages: () => [],
+    newPage: async () => page,
+    close: async () => {
+      closed.push(true);
+    },
+  };
+  const page = {
+    url: () => current,
+    context: () => context,
+    goto: async (href) => {
+      current = href;
+      return { status: () => 200, headers: () => ({}) };
+    },
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    screenshot: async () => Buffer.from("career"),
+    title: async () => "Acme role",
+    evaluate: async () => {
+      throw new Error("document is not defined");
+    },
+    frames: () => [main, child],
+    mainFrame: () => main,
+    locator: () => ({ first: () => none, evaluateAll: async () => [] }),
+    getByRole: () => none,
+  };
+  return { isConnected: () => false, newContext: async () => context };
+}
+
+describe("a form embedded from another host", { concurrency: 1 }, () => {
+  let restore;
+  before(() => {
+    restore = setHostResolver(async () => ["93.184.216.34"]);
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io"]\n');
+  });
+  after(() => {
+    restore?.();
+    clearTimeout(globalThis.__coIdleTimer);
+    globalThis.__coIdleTimer = undefined;
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = undefined;
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io", "linkedin.com."]\n');
+  });
+
+  test("a listed host's form inside an unlisted page is refused", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageEmbedding(LISTED, closed);
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.equal(result.id, undefined, "no session was registered");
+    assert.equal(result.unsupported?.vendor, "handoff");
+    assert.equal(result.unsupported?.postingUrl, LISTED);
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("a listed host's embedded sign-in form gets the handoff panel, not the login-wall error", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageEmbedding(LISTED, closed, { frameFields: SIGN_IN_FIELDS });
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.equal(result.unsupported?.vendor, "handoff");
+    assert.equal(result.unsupported?.postingUrl, LISTED);
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("an unlisted host's embedded form is still supported", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageEmbedding("https://boards.acme-ats.test/embed/1", closed);
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.ok(result.id, JSON.stringify(result).slice(0, 300));
+    assert.deepEqual(closed, []);
+  });
+
+  test("with the AI interpreter forced on, a listed host's frame is refused before the agent reads it", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () =>
+      careerPageEmbedding(LISTED, closed, { pageFields: APPLICATION_FIELDS, frameFields: [], controls: 12 });
+    // An unregistered CLI id: should the check be missing, the interpreter
+    // refuses it instead of launching anything.
+    const result = await openSession("https://careers.acme.test/jobs/1", "not-a-registered-cli", true);
+    assert.equal(result.id, undefined, "no session was registered");
+    assert.equal(result.unsupported?.vendor, "handoff");
+    assert.equal(result.unsupported?.postingUrl, LISTED);
+    assert.deepEqual(closed, [true]);
   });
 });
 

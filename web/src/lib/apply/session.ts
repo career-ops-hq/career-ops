@@ -267,6 +267,19 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     if (SESSIONS.size === 0) scheduleIdleClose();
     throw new Error(msg);
   };
+  // The first of these URLs that is a refused host (Workday, iCIMS, UKG or
+  // apply.handoff_hosts) closes this window and becomes the refusal panel.
+  // Used once the page or a frame of it may have moved since navigation.
+  const refuseAt = async (...hrefs: string[]): Promise<UnsupportedApplySession | null> => {
+    for (const href of hrefs) {
+      const hit = await unsupportedInAppAts(href, { handoffHosts });
+      if (!hit) continue;
+      await context.close().catch(() => {});
+      if (SESSIONS.size === 0) scheduleIdleClose();
+      return { unsupported: hit, message: unsupportedAtsMessage(hit, true) };
+    }
+    return null;
+  };
   // Capture the real form as we read it → a "behind the scenes" progress strip
   // that proves we genuinely opened + parsed THEIR form (not magic). The last
   // shot doubles as a subtle blurred backdrop behind the clean proxy.
@@ -321,6 +334,10 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   //    trigger lazy/virtualized fields, then (b) clicking an "Apply" button (SPA;
   //    never a submit) — re-settling and re-extracting after each.
   let { frame, form } = await pickFormFrame(page);
+  // A form embedded from a refused host gets the refusal panel, even when it
+  // is a sign-in form (checked first, so it is not reported as a login wall).
+  const embeddedAts = await refuseAt(frame.url());
+  if (embeddedAts) return embeddedAts;
   // A password box is a login wall. Stop before scroll, Apply clicks, or the
   // agent, so nothing is typed into the password field.
   if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
@@ -330,6 +347,10 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     await nudgeScroll(page);
     await page.waitForTimeout(400);
     ({ frame, form } = await pickFormFrame(page));
+    // The scroll can move the page. A refused host gets its own panel, not
+    // the login-wall message its password field would otherwise trigger.
+    const moved = await refuseAt(page.url(), frame.url());
+    if (moved) return moved;
     if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   }
   if (!noApplyBtn && !looksLikeApplicationForm(form)) {
@@ -354,6 +375,8 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
         return { unsupported: lateAts, message: unsupportedAtsMessage(lateAts, true) };
       }
       ({ frame, form } = await pickFormFrame(page));
+      const followedAts = await refuseAt(page.url(), frame.url());
+      if (followedAts) return followedAts;
       if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
       await snap();
     }
@@ -361,14 +384,11 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // Recovering the form above (scroll, a second pickFormFrame) gives the page
   // time to move on its own. Check where it is now, with the same list, before
   // a usable form there is enriched, interpreted or registered: a refused host
-  // (Workday, iCIMS, UKG or apply.handoff_hosts) must not slip through just
-  // because it showed a form.
-  const finalAts = await unsupportedInAppAts(page.url(), { handoffHosts });
-  if (finalAts) {
-    await context.close().catch(() => {});
-    if (SESSIONS.size === 0) scheduleIdleClose();
-    return { unsupported: finalAts, message: unsupportedAtsMessage(finalAts, true) };
-  }
+  // must not slip through just because it showed a form. The form's own frame
+  // is checked too: an unlisted page can embed a listed host's form, while an
+  // embedded form on an unlisted host stays supported.
+  const finalAts = await refuseAt(page.url(), frame.url());
+  if (finalAts) return finalAts;
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
   await snap();
 
@@ -384,6 +404,9 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
+    // The agent reads this frame's controls, which may not be the form's frame.
+    const aiAts = await refuseAt(aiFrame.url());
+    if (aiAts) return aiAts;
     const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
     agentRefused = ai.refused;
