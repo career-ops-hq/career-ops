@@ -4780,8 +4780,12 @@ every target it tried failed (with --json: when any target failed).`;
 export function readThrottleBaseMs(args) {
   const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
   if (eq && /^--throttle=0*[1-9]\d*$/.test(eq)) {
-    const n = Number(eq.slice('--throttle='.length));
+    const raw = eq.slice('--throttle='.length);
+    const n = Number(raw);
     if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: null };
+    // A digit string that does not fit a safe integer used to fall through and
+    // return ms: 0, which turns the pause off. The flag was present.
+    return { error: `Error: --throttle expects a positive number of milliseconds, got "${raw}"` };
   }
   const idx = args.indexOf('--throttle');
   if (idx === -1) return { ms: 0, consumedIndex: null };

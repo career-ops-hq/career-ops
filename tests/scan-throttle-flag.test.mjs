@@ -63,6 +63,18 @@ test('a space-separated positive number is the base, not the 5000 default', asyn
   assertAccepted(scan('--verify', '--throttle', '8000', '--dry-run'));
 });
 
+test('an equals-form value past the safe integer range is an error', async () => {
+  const { readThrottleBaseMs } = await import('../scan.mjs');
+  const raw = '99999999999999999999';
+  assert.deepEqual(readThrottleBaseMs([`--throttle=${raw}`]), {
+    error: `Error: --throttle expects a positive number of milliseconds, got "${raw}"`,
+  });
+  const r = scan('--verify', `--throttle=${raw}`, '--dry-run');
+  assert.equal(r.status, 1, r.output);
+  assert.match(r.output, /--throttle expects a positive number of milliseconds/);
+  assert.doesNotMatch(r.output, /portals\.yml not found/);
+});
+
 test('a word after --throttle is refused and does not fall back to 5000', async () => {
   const { readThrottleBaseMs } = await import('../scan.mjs');
   assert.deepEqual(
