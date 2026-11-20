@@ -312,6 +312,25 @@ test('importList: canonical inbox lines, every default written out; duplicates a
   }
 });
 
+test('importList: a Teamtailor timestamp is allowed in the board URL, but a phone number is rejected in the name', () => {
+  const board = 'eyesandmoregmbh-1681220218';
+  const url = `https://${board}.teamtailor.com`;
+  const clean = importList(`url,name\n${url},Eyes and More`, { aggregatorDomains: new Set() });
+  assert.deepEqual(clean.lines, [{ ats: 'teamtailor', board, name: 'Eyes and More' }]);
+  assert.deepEqual(clean.rejected, []);
+
+  const phone = importList(`url,name\n${url},Eyes and More 212-555-0123`, { aggregatorDomains: new Set() });
+  assert.deepEqual(phone.lines, []);
+  assert.equal(phone.rejected.length, 1);
+  assert.match(phone.rejected[0].reason, /^name contains a phone number\b/);
+
+  // Known limitation: with no name given, the name is made from the board id, and its ten digits read as a phone number.
+  const bare = importList(`url,name\n${url},`, { aggregatorDomains: new Set() });
+  assert.deepEqual(bare.lines, []);
+  assert.equal(bare.rejected.length, 1);
+  assert.match(bare.rejected[0].reason, /^name contains a phone number\b/);
+});
+
 test('importList: a Personio or Zoho Recruit region is written only off the default host; an alias host is a duplicate', () => {
   const r = importList([
     'https://acme.zohorecruit.com/jobs/Careers',
@@ -368,21 +387,24 @@ function checkout() {
 test('CLI: the committed boards and new ones become an inbox the validator accepts, known boards as a warning', () => {
   const dir = checkout();
   try {
-    const known = committedRows().map((r) => r.careers_url);
-    const list = join(dir, 'list.txt');
-    writeFileSync(list, [...known, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-one')}`, 'https://nope.example/jobs', ''].join('\n'));
+    const known = committedRows().map(({ careers_url, name }) => `${careers_url},"${name.replaceAll('"', '""')}"`);
+    const list = join(dir, 'list.csv');
+    // newco-one has an empty name cell; newco-two is a bare URL line with no comma, the shape of a plain list of addresses.
+    writeFileSync(list, ['url,name', ...known, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-one')},`, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-two')}`, 'https://nope.example/jobs,', ''].join('\n'));
     const r = node(IMPORTER, [list, '--login', 'OctoCat', '--date', '2026-11-10'], dir);
     assert.equal(r.status, 0, r.stderr);
     // The registry no longer fits one inbox file: the contribution is written in as many parts as it needs.
-    const parts = Math.ceil((known.length + 1) / INBOX_MAX_LINES);
-    assert.match(r.stdout, new RegExp(`wrote ${known.length + 1} board\\(s\\) in ${parts} file\\(s\\)`));
+    const parts = Math.ceil((known.length + 2) / INBOX_MAX_LINES);
+    assert.match(r.stdout, new RegExp(`wrote ${known.length + 2} board\\(s\\) in ${parts} file\\(s\\)`));
+    // Both new boards came without a name, so both names were made from the board id.
+    assert.match(r.stdout, /^2 name\(s\) were made from the board id\b/m);
     const files = parts === 1
       ? ['2026-11-10-octocat.ndjson']
       : Array.from({ length: parts }, (_, i) => `2026-11-10-octocat-${String(i + 1).padStart(3, '0')}.ndjson`);
     const written = files.map((f) => readFileSync(join(dir, 'employers', 'inbox', f), 'utf8').split('\n').filter(Boolean).length);
-    assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 1);
+    assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 2);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
-      + `${known.length + 2},https://nope.example/jobs,`
+      + `${known.length + 4},https://nope.example/jobs,`
       + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
