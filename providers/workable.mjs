@@ -39,6 +39,7 @@
 // uses it; scan-ats-full.mjs does, as its Workable source.
 
 import { decodeEntities } from './_html-entities.mjs';
+import { replaceScriptStyleBlocks } from './_html-to-text.mjs';
 import { BROWSER_LIKE_USER_AGENT, fetchTextStream, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
 
 const ALLOWED_WORKABLE_HOSTS = new Set(['apply.workable.com']);
@@ -239,11 +240,10 @@ function formatLocation(job) {
 function toPlainText(html) {
   if (typeof html !== 'string' || !html) return '';
   return decodeEntities(
-    html
-      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    replaceScriptStyleBlocks(html, ' ', { wordBoundary: true })
       .replace(/<br\s*\/?>/gi, '\n')
       .replace(/<\/(p|div|li|h[1-6])>/gi, '\n')
-      .replace(/<[^>]+>/g, ' '),
+      .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)),
   ).replace(/[ \t ]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
 }
 

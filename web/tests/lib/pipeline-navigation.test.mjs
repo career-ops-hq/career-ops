@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { pipelineQuery, pipelineTab, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref, PIPELINE_TABS } from "../../src/lib/pipeline-navigation.mjs";
+import { pipelineQuery, pipelineTab, pipelineTabCounts, rowOnPipelineTab, tabStripScrollLeft, trackerDetailHref, PIPELINE_TABS } from "../../src/lib/pipeline-navigation.mjs";
 import { classifyLeaf } from "../../src/lib/pipeline-sankey.mjs";
 
 test("direct report visits retain the default Pipeline destination", () => {
@@ -85,4 +85,41 @@ test("pipelineTab falls back to INBOX and reads the first repeated value", () =>
     [pipelineTab(undefined), pipelineTab(""), pipelineTab("FOO"), pipelineTab("applied"), pipelineTab(["INBOX", "APPLIED"]), pipelineTab(["foo", "ALL"])],
     ["INBOX", "INBOX", "INBOX", "APPLIED", "INBOX", "INBOX"],
   );
+});
+
+// pipelineTabCounts replaces the tab strip's per-tab row scans. It must agree
+// with rowOnPipelineTab exactly, including the two cases a naive tally gets
+// wrong: an unknown status is OTHER, and an EMPTY status tokenizes to DISCARDED
+// rather than OTHER. These assert the two functions against each other over the
+// same rows rather than against hand-written numbers, so neither can drift.
+test("pipelineTabCounts agrees with rowOnPipelineTab on every tab", () => {
+  const rows = [
+    { status: "Evaluated" }, { status: "Evaluated" }, { status: "Applied" },
+    { status: "Aplicado 2026-08-20" }, { status: "Interview" }, { status: "Offer" },
+    { status: "Hired" }, { status: "Rejected" }, { status: "Discarded" },
+    { status: "SKIP" }, { status: "Responded" }, { status: "Assessment" },
+    { status: "Paused" }, { status: "" }, { status: "**Applied**" },
+  ];
+  const counts = pipelineTabCounts(rows);
+  for (const tab of PIPELINE_TABS) {
+    if (tab === "INBOX" || tab === "ALL") continue;
+    const viaScan = rows.filter((r) => rowOnPipelineTab(r.status, tab)).length;
+    assert.equal(counts.get(tab) ?? 0, viaScan, `tab ${tab}`);
+  }
+  let sum = 0;
+  for (const value of counts.values()) sum += value;
+  assert.equal(sum, rows.length, "every row is counted exactly once");
+});
+
+test("pipelineTabCounts puts an unknown status under OTHER and an empty one under DISCARDED", () => {
+  const counts = pipelineTabCounts([{ status: "Paused" }, { status: "" }, { status: "Evaluated" }]);
+  assert.equal(counts.get("OTHER"), 1);
+  assert.equal(counts.get("DISCARDED"), 1);
+  assert.equal(counts.get("EVALUATED"), 1);
+});
+
+test("pipelineTabCounts on no rows is an empty tally", () => {
+  const counts = pipelineTabCounts([]);
+  assert.equal(counts.size, 0);
+  for (const tab of PIPELINE_TABS) assert.equal(counts.get(tab) ?? 0, 0);
 });

@@ -199,10 +199,21 @@ export function getProfilePath(rootDir) {
  */
 export function canonicalizeTrackerPath(path) {
   const absolutePath = resolve(path);
-  try {
-    return realpathSync(absolutePath);
-  } catch {
-    return absolutePath;
+  // A tracker that does not exist yet (first merge) still gets the identity it
+  // will have once created: resolve the nearest existing ancestor and keep the
+  // rest as written. Returning the lexical path here made the lock key differ
+  // before and after creation whenever an ancestor (e.g. data/) is a symlink.
+  let existing = absolutePath;
+  const missing = [];
+  for (;;) {
+    try {
+      return join(realpathSync(existing), ...missing);
+    } catch {
+      const parent = dirname(existing);
+      if (parent === existing) return absolutePath;
+      missing.unshift(basename(existing));
+      existing = parent;
+    }
   }
 }
 

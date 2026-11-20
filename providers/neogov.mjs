@@ -143,7 +143,7 @@ export default {
 };
 
 /** @param {string} s */
-const text = (s) => decodeEntities(String(s).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+const text = (s) => decodeEntities(String(s).replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 
 /**
  * How many job cards a list page carries as the source sent it, split the way
