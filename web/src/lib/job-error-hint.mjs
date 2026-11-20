@@ -21,7 +21,7 @@
 //   can still say "login" or "API key".
 //   "The CLI returned nothing." and "The CLI exited with an error." quote a
 //   stderr line. The quote asks for sign-in only when that line is a sign-in
-//   failure. "API key loaded successfully" is not one.
+//   failure. "API key loaded successfully" and "API key configured" are not.
 //   Everything else (bad input, missing CV, no report written, etc.) -> null;
 //   the error text itself is the explanation.
 
@@ -37,10 +37,10 @@ const AUTH_PATTERN =
 // helper and arrive as the raw CLI line, so the hint has to recognize them too.
 const RATE_LIMIT_PATTERN = /\b429\b|rate limit|too many requests/i;
 
-// A success line can name a key without asking anyone to sign in.
-// "please login" is still a request when the same line says something loaded.
-const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded)\b/i;
-const SIGN_IN_FAILURE_RE = /\b(?:invalid|missing|expired|rejected|fail(?:ed|ure)?|unauthorized|revoked|denied)\b/i;
+// A status line can name a key without asking anyone to sign in.
+// "please login" is still a request when the same line says the key is configured.
+const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|configured)\b/i;
+const SIGN_IN_FAILURE_RE = /\b(?:invalid|missing|expired|rejected|fail(?:ed|ure)?|unauthorized|revoked|denied|not)\b/i;
 const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 
 /** The stderr quote on a canned message that did not already say to sign in. */
