@@ -574,6 +574,33 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Dutch (modes/nl) — the same failure as the blocks around it: no Dutch title
+  // resolved here, so cv.sections matched no section of a Dutch CV and the
+  // order guard compared raw titles. "Interesses" folds to the Portuguese key
+  // below and already resolves, so it is not repeated.
+  ['profiel', 'summary'],
+  ['persoonlijk profiel', 'summary'],
+  ['samenvatting', 'summary'],
+  ['over mij', 'summary'],
+  ['kerncompetenties', 'competencies'],
+  ['competenties', 'competencies'],
+  ['werkervaring', 'experience'],
+  ['professionele ervaring', 'experience'],
+  ['ervaring', 'experience'],
+  ['loopbaan', 'experience'],
+  ['projecten', 'projects'],
+  ['geselecteerde projecten', 'projects'],
+  ['opleiding', 'education'],
+  ['opleidingen', 'education'],
+  ['onderwijs', 'education'],
+  ['certificaten', 'certifications'],
+  ['certificeringen', 'certifications'],
+  ['prijzen', 'awards'],
+  ['onderscheidingen', 'awards'],
+  ['vaardigheden', 'skills'],
+  ['technische vaardigheden', 'skills'],
+  ['kennis en vaardigheden', 'skills'],
+  ["hobby's", 'interests'],
   // Portuguese (pt-BR / pt-PT) — the same failure as Spanish above: modes/pt/
   // ships a Portuguese market set, but no Portuguese title resolved here, so
   // cv.sections matched no section of a Portuguese CV and the order guard fell
