@@ -262,3 +262,106 @@ describe("the host list is read once per Apply session", { concurrency: 1 }, () 
   });
 });
 
+// A career page with no form at first; scrolling it (nudgeScroll) moves it to
+// `movesTo`, where a usable application form is shown.
+function careerPageMovingOnScroll(movesTo, closed) {
+  let current = "about:blank";
+  const formHere = () => current === movesTo;
+  const frame = {
+    url: () => current,
+    evaluate: async () => {
+      if (!formHere()) throw new Error("document is not defined");
+      return {
+        title: "Apply",
+        fields: [
+          { id: "co0", type: "text", label: "Full name", required: true },
+          { id: "co1", type: "email", label: "Email", required: true },
+          { id: "co2", type: "file", label: "Resume", required: true },
+        ],
+      };
+    },
+    waitForSelector: async () => null,
+  };
+  const none = { count: async () => 0, isVisible: async () => false, getAttribute: async () => null, click: async () => {}, first() { return this; }, or() { return this; } };
+  const context = {
+    route: async () => {},
+    routeWebSocket: async () => {},
+    setDefaultTimeout() {},
+    pages: () => [],
+    newPage: async () => page,
+    close: async () => {
+      closed.push(true);
+    },
+  };
+  const page = {
+    url: () => current,
+    context: () => context,
+    goto: async (href) => {
+      current = href;
+      return { status: () => 200, headers: () => ({}) };
+    },
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    screenshot: async () => Buffer.from("career"),
+    title: async () => "Acme role",
+    // nudgeScroll calls page.evaluate with a scroll offset: the page moves then.
+    evaluate: async (_fn, arg) => {
+      if (typeof arg === "number") current = movesTo;
+      throw new Error("document is not defined");
+    },
+    frames: () => [frame],
+    mainFrame: () => frame,
+    locator: () => ({ first: () => none, evaluateAll: async () => [] }),
+    getByRole: () => none,
+  };
+  return { isConnected: () => false, newContext: async () => context };
+}
+
+describe("the final host check before a session is kept", { concurrency: 1 }, () => {
+  let restore;
+  before(() => {
+    restore = setHostResolver(async () => ["93.184.216.34"]);
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io"]\n');
+  });
+  after(() => {
+    restore?.();
+    clearTimeout(globalThis.__coIdleTimer);
+    globalThis.__coIdleTimer = undefined;
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = undefined;
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io", "linkedin.com."]\n');
+  });
+
+  test("a page that moves to a listed host while the form is recovered is refused, not registered", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageMovingOnScroll(LISTED, closed);
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.equal(result.id, undefined, "no session was registered");
+    assert.equal(result.unsupported?.vendor, "handoff");
+    assert.equal(result.unsupported?.postingUrl, LISTED);
+    assert.deepEqual(closed, [true], "the Apply window was closed");
+  });
+
+  test("the same move onto Workday is refused too", async () => {
+    const workday = "https://acme.wd1.myworkdayjobs.com/en-US/External/job/Role";
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageMovingOnScroll(workday, closed);
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.equal(result.id, undefined);
+    assert.equal(result.unsupported?.vendor, "workday");
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("a move to an unlisted host keeps the session", async () => {
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageMovingOnScroll("https://apply.acme-careers.test/form", closed);
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.ok(result.id, JSON.stringify(result).slice(0, 300));
+    assert.equal(result.unsupported, undefined);
+    assert.deepEqual(closed, [], "the window stays open for filling");
+  });
+});
+

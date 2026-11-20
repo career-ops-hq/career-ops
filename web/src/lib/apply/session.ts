@@ -358,6 +358,17 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       await snap();
     }
   }
+  // Recovering the form above (scroll, a second pickFormFrame) gives the page
+  // time to move on its own. Check where it is now, with the same list, before
+  // a usable form there is enriched, interpreted or registered: a refused host
+  // (Workday, iCIMS, UKG or apply.handoff_hosts) must not slip through just
+  // because it showed a form.
+  const finalAts = await unsupportedInAppAts(page.url(), { handoffHosts });
+  if (finalAts) {
+    await context.close().catch(() => {});
+    if (SESSIONS.size === 0) scheduleIdleClose();
+    return { unsupported: finalAts, message: unsupportedAtsMessage(finalAts, true) };
+  }
   await enrichFromAts(url, form.fields); // clean labels + real options for known ATS (Greenhouse)
   await snap();
 
