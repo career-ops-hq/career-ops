@@ -19,7 +19,7 @@ Conductor (headed browser mode)
   └─ End: merge tracker-additions → applications.md + summary
 ```
 
-Each worker is a headless child process with a clean 200K token context. The conductor only orchestrates. See the **Headless / Batch Mode** table in `AGENTS.md` for the correct command per CLI.
+Each worker is a headless child process with a clean 200K token context. The conductor only orchestrates. See the headless command table in `modes/_headless.md` for the correct command per CLI.
 
 ## Pre-screen gate (standard / premium tiers only)
 
@@ -55,7 +55,7 @@ batch/
    d. Execute via Bash:
 
       ```bash
-      # Use your CLI's headless command (see AGENTS.md — Headless / Batch Mode)
+      # Use your CLI's headless command (see `modes/_headless.md`)
       <headless-cmd> "Process this job. URL: {url}. JD: /tmp/batch-jd-{id}.txt. Report: {num}. ID: {id}"
       ```
 
@@ -139,7 +139,7 @@ The standalone script cannot ask a human or authenticate a conversational answer
 
 ## Workers (headless mode)
 
-Each worker receives `batch-prompt.md` as a system prompt. It is self-contained. Use your CLI's headless command — see the **Headless / Batch Mode** table in `AGENTS.md`.
+Each worker receives `batch-prompt.md` as a system prompt. It is self-contained. Use your CLI's headless command — see the headless command table in `modes/_headless.md`.
 
 The worker produces:
 1. `.md` report in `reports/`
