@@ -224,8 +224,10 @@ export const rmSync = (target, opts = {}) => {
     // unlinkSync has no retry support of its own, so give the link removal
     // the same transient-failure policy _rmSync applies below — the very
     // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
-    // wrapper exists for — still removing only the link. Atomics.wait is the
-    // blocking sleep a synchronous retry loop needs.
+    // wrapper exists for — still removing only the link. Node retries with
+    // linear backoff (retry 1 waits retryDelay, retry 2 waits 2×retryDelay,
+    // …), so the wait scales with the attempt; Atomics.wait is the blocking
+    // sleep a synchronous retry loop needs.
     const maxRetries = opts.maxRetries ?? 10;
     const retryDelay = opts.retryDelay ?? 100;
     for (let attempt = 0; ; attempt++) {
@@ -234,7 +236,7 @@ export const rmSync = (target, opts = {}) => {
         return;
       } catch (err) {
         if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
-        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelay);
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, (attempt + 1) * retryDelay);
       }
     }
   }
