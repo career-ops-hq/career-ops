@@ -88,6 +88,7 @@ import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratc
 import { MARKER_FILE } from './tests/data-root-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { holdTestQueue } from './lib/test-queue.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -693,6 +694,20 @@ if (WANTS_HELP) {
   process.exit(0);
 }
 
+// Below the project's Node floor (lib/node-floor.mjs, #4801) the tracker's
+// node:sqlite cannot load, so every suite that runs tracker.mjs or doctor.mjs
+// fails, each with the cause buried in its own output, and only after a full
+// run. Say so once, up front, the way doctor.mjs does, and run nothing. Called
+// where each kind of run starts, after its own flag checks, so a usage error
+// is still reported as one on any Node.
+function requireNodeFloor() {
+  const floor = nodeFloor(process.versions.node);
+  if (floor.pass) return;
+  console.log(`  ❌ ${floor.label}`);
+  for (const line of floor.fix ?? []) console.log(`     → ${line}`);
+  process.exit(1);
+}
+
 // Set in the process a run with more than one job starts for the inline
 // sections: the file its counters go to. See startInlineSections().
 const INLINE_CHILD = hasFlag(process.argv, '--inline-child') ? (flagValue(process.argv, '--inline-child') ?? '') : null;
@@ -789,6 +804,7 @@ if (NEEDS !== null) {
   }
   // Set before any suite starts: children inherit it, and toolRequired()
   // reads it on every call in this process.
+  requireNodeFloor();
   for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
   console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
   await runDiscovered(ONLY || null, tools);
@@ -800,6 +816,7 @@ if (ONLY !== null) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
     process.exit(1);
   }
+  requireNodeFloor();
   console.log('\n🧪 career-ops test suite (--only ' + ONLY + ')\n');
   await runDiscovered(ONLY);
   finish();
@@ -810,6 +827,7 @@ if (ONLY !== null) {
 // lib/test-queue.mjs. Not in the inline sections' child, whose parent holds the
 // queue already.
 if (INLINE_CHILD === null) {
+  requireNodeFloor();
   try {
     await holdTestQueue();
   } catch (err) {
