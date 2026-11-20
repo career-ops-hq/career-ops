@@ -105,7 +105,10 @@ export const factsOf = (el, ref) => {
     const ownChoice = choiceLabel(el);
     let labels = [ownChoice];
     if (name && typeof document !== "undefined") {
-      const nodes = Array.from(document.querySelectorAll(`input[type="${CSS.escape(type)}"][name="${CSS.escape(name)}"]`));
+      // One form's group only, as extraction groups them: a same-name control
+      // in another form is not an option of this question.
+      const nodes = Array.from(document.querySelectorAll(`input[type="${CSS.escape(type)}"][name="${CSS.escape(name)}"]`))
+        .filter((node) => node.form === field.form);
       if (nodes.length) labels = nodes.map((node) => choiceLabel(node));
     }
     const shared = labels.length > 1 && labels.every((text) => text && text === labels[0]);
@@ -125,6 +128,10 @@ export const factsOf = (el, ref) => {
     return flat(copy.textContent);
   };
   const shown = (node) => {
+    // Same rule as extractForm's isVisibleNode: a visibility:hidden label keeps
+    // its layout box, and naming a field after it would make the two paths
+    // disagree on the field, so its listed answer would be refused.
+    if (typeof getComputedStyle === "function" && getComputedStyle(node).visibility === "hidden") return false;
     let current = node;
     const body = typeof document !== "undefined" ? document.body : null;
     while (current && current !== body) {
@@ -143,7 +150,18 @@ export const factsOf = (el, ref) => {
       const nodeType = flat(node.getAttribute?.("type")).toLowerCase();
       const nodeTag = String(node.tagName || "").toLowerCase();
       if (nodeTag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(nodeType)) continue;
-      if (node.offsetParent == null && nodeType !== "radio" && nodeType !== "checkbox") continue;
+      // The same rule as extraction's isEligibleControl: a control with no box
+      // or one hidden with visibility:hidden is not another question. A styled
+      // radio or checkbox hides its own input, so it still counts while one of
+      // its labels or its parent renders.
+      const hiddenStyle = (n) => typeof getComputedStyle === "function" && getComputedStyle(n).visibility === "hidden";
+      if (node.offsetParent == null || hiddenStyle(node)) {
+        if (nodeType !== "radio" && nodeType !== "checkbox") continue;
+        const rendered = (proxy) =>
+          !!proxy && (typeof proxy.getClientRects !== "function" || proxy.getClientRects().length > 0) && !hiddenStyle(proxy);
+        const labels = Array.from(node.labels ?? []);
+        if (!labels.some(rendered) && !rendered(node.parentElement)) continue;
+      }
       if (typeof node.closest === "function" && node.closest('[class*="autofill" i]')) continue;
       if (nodeType === "radio" && ownName && (node.name || "") === ownName) continue;
       const shell = typeof node.closest === "function" && node.closest('[class*="select__"], .select-shell');

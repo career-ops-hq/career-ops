@@ -17,6 +17,15 @@ falls back to the tracker's own Date cell (the evaluation date, which nothing
 rewrites) for rows with no ledger history. The date sort orders by the same
 value.
 
+A status change is written by `set-status.mjs`, never by editing the table.
+The row is named by its report link (`--report-link`) or, for a row added
+without an evaluation and so without one, by its tracker `#` (`--row`) — two
+independent counters, so the selector always states which. A row with neither
+identity — no report link, and a `#` cell that is not a positive number (a
+backfill sentinel `N/A` / `—`, or a literal `0`) — cannot be changed from the
+TUI: nothing identifies it but its position in the table. Give that row a
+number first.
+
 ### Inbox tab
 
 The INBOX tab, left of ALL, lists the unchecked rows of the Pending section of

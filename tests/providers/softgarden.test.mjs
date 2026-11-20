@@ -24,6 +24,24 @@ try {
     fail('softgarden.detect() should reject spoofed hosts');
   }
 
+  // An `http:` board is upgraded, never fetched in the clear: the widget page is
+  // what the whole board is read from.
+  const upgraded = resolveWidgetUrl({ api: 'http://acme.softgarden.io/de/widgets/jobs' });
+  if (upgraded === 'https://acme.softgarden.io/de/widgets/jobs') pass('softgarden.resolveWidgetUrl() upgrades an http: board to https');
+  else fail(`softgarden.resolveWidgetUrl() kept a plaintext board: ${upgraded}`);
+
+  // A card href is page-controlled, and resolving it preserves an absolute
+  // scheme: `javascript:alert(1)//job/42` still contains /job/.
+  const card = (href) => `<div class="matchElement" id="job_id_7"><div class="matchValue title"><a href="${href}">Engineer</a></div></div>`;
+  const widgetUrl = 'https://acme.softgarden.io/de/widgets/jobs';
+  const hostileRows = parseWidget(card('javascript:alert(1)//job/7/x'), widgetUrl);
+  const normalRows = parseWidget(card('../../job/7/x'), widgetUrl);
+  if (hostileRows.length === 0 && normalRows.length === 1 && /^https:\/\//.test(normalRows[0].url)) {
+    pass('softgarden.parseWidget() drops a non-http(s) href and keeps a relative one');
+  } else {
+    fail(`softgarden.parseWidget() href handling wrong: hostile=${JSON.stringify(hostileRows)} normal=${JSON.stringify(normalRows.map((r) => r.url))}`);
+  }
+
   if (parseSoftgardenDate('04.07.26') === Date.UTC(2026, 6, 4) && parseSoftgardenDate('7/4/26') === Date.UTC(2026, 6, 4) && parseSoftgardenDate('junk') === undefined) {
     pass('softgarden.parseSoftgardenDate() reads D.M.YY and M/D/YY, rejects junk');
   } else {

@@ -217,14 +217,16 @@ func (m appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if err != nil {
 			// A sidecar failure can follow a successful tracker write. Reflect
 			// the persisted status, retaining the old one if it cannot be read
-			// or the report identity is no longer unique.
-			if msg.App.ReportNumber != "" {
+			// or the row's identity is no longer unique. Re-find the row by the
+			// same identity the write addressed it with, which for a row with no
+			// report link is its tracker #.
+			if data.HasTrackerIdentity(msg.App) {
 				savedStatus, matches := "", 0
 				// A failed re-read leaves matches at 0, so the displayed status
 				// stays as it was — which is what the comment above promises.
 				saved, _ := data.ParseApplications(m.careerOpsPath)
 				for _, app := range saved {
-					if app.ReportNumber == msg.App.ReportNumber {
+					if data.SameTrackerRow(app, msg.App) {
 						savedStatus = app.Status
 						matches++
 					}

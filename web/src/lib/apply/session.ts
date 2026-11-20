@@ -6,7 +6,7 @@ import { resolveCodeRoot, resolveRootScript } from "@/lib/core/code-root.mjs";
 import { extractForm, type ApplyField, type ExtractedForm } from "./extract";
 import { parseGreenhouse, fetchGreenhouseSchema } from "./greenhouse";
 import { statusBlock, dismissConsent, tryApplyTrigger, blockedAfterAction, waitForBlankPopup, dropNewTabs, classifyEmpty, captchaWarning, multiStepInfo, verifyFill, LOGIN_WALL_MESSAGE, type ApplyIssue } from "./diagnose";
-import { interpretFormWithAgent } from "./agent-interpret";
+import { interpretFormWithAgent, type AgentInterpretation } from "./agent-interpret";
 import { pickComboboxOption } from "./option-match.mjs";
 import { checkboxOptionWanted, checkboxSelections, confirmCheckbox } from "./checkbox-options.mjs";
 import { isResumeLabel } from "./resume-label.mjs";
@@ -19,23 +19,39 @@ import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mj
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
-function applyScopeFile(): string {
+/** A core script (`apply-scope`, `lib/egress-proxy`) by its root-relative name. */
+function rootScriptFile(name: string): string {
   const explicit = (process.env.CAREER_OPS_CODE_ROOT || "").trim();
-  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope");
+  if (explicit) return resolveRootScript(resolveCodeRoot(process.cwd(), process.env), name);
   // resolveCodeRoot assumes cwd is <checkout>/web. node --test from the
-  // checkout walks up to the parent and misses apply-scope.mjs.
+  // checkout walks up to the parent and misses the script.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), "apply-scope"),
-    resolveRootScript(path.resolve(process.cwd()), "apply-scope"),
-    resolveRootScript(path.resolve(here, "../../../.."), "apply-scope"),
+    resolveRootScript(resolveCodeRoot(process.cwd(), process.env), name),
+    resolveRootScript(path.resolve(process.cwd()), name),
+    resolveRootScript(path.resolve(here, "../../../.."), name),
   ];
   return candidates.find((file) => existsSync(file)) || candidates[0];
 }
 
 async function applyLaunch(): Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }> {
-  const file = applyScopeFile();
+  const file = rootScriptFile("apply-scope");
   return import(/* webpackIgnore: true */ pathToFileURL(file).href) as Promise<{ HEADED_APPLY_LAUNCH: ApplyLaunch; BUNDLED_HEADED_LAUNCH: ApplyLaunch }>;
+}
+
+type EgressLaunch = ApplyLaunch & { proxy?: { server: string; bypass?: string } };
+
+/** The launch options with the core egress filter (lib/egress-proxy.mjs) as the
+ *  browser's proxy. installApplyEgressGuard's route() sees only the first URL of
+ *  a redirected request, so a page that redirected into private space was
+ *  loaded (GHSA-wwfx); the filter sees every connection, redirect hops included,
+ *  and checks the address it dials. */
+async function withEgressFilter(options: ApplyLaunch): Promise<EgressLaunch> {
+  const file = rootScriptFile("lib/egress-proxy");
+  const { egressLaunchOptions } = (await import(/* webpackIgnore: true */ pathToFileURL(file).href)) as {
+    egressLaunchOptions: (o: ApplyLaunch) => Promise<EgressLaunch>;
+  };
+  return egressLaunchOptions(options);
 }
 
 /** The frame with the most interactive controls — where the agentic interpreter
@@ -181,12 +197,12 @@ async function headedBrowser(): Promise<Browser> {
   const { HEADED_APPLY_LAUNCH, BUNDLED_HEADED_LAUNCH } = await applyLaunch();
   let nb: Browser;
   try {
-    nb = await chromium.launch(HEADED_APPLY_LAUNCH);
+    nb = await chromium.launch(await withEgressFilter(HEADED_APPLY_LAUNCH));
   } catch {
     // No system Google Chrome → fall back to Playwright's bundled Chromium if
     // present; otherwise a clear, actionable error.
     try {
-      nb = await chromium.launch(BUNDLED_HEADED_LAUNCH);
+      nb = await chromium.launch(await withEgressFilter(BUNDLED_HEADED_LAUNCH));
     } catch {
       throw new Error("The apply feature needs Google Chrome. Install Chrome (or run: npx playwright install chromium) and try again.");
     }
@@ -343,15 +359,17 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // Whether the user's CLI was actually LAUNCHED over the form, as reported by
   // the interpreter. Kept apart from aiInterpreted: a launched agent can come
   // back empty, and the fencing notice below is about the launch, not about the
-  // result. A missing CLI, an empty form or a fencing refusal (the throw the
-  // catch below absorbs) never launched anything, so no notice is owed.
+  // result. A missing CLI, an empty form or a fencing refusal never launched
+  // anything, so no notice is owed; a refusal carries its own reason instead.
   let agentSpawned = false;
+  let agentRefused: string | undefined;
   // Opt-in: ALWAYS interpret with AI (max robustness, ignores the deterministic
   // result) — for users who'd rather pay tokens than risk a heuristic miss.
   if (forceAgent && cliId) {
     const aiFrame = await richestControlFrame(page);
-    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || (await page.title().catch(() => ""))).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
+    agentRefused = ai.refused;
     const aiFields = ai.fields;
     if (aiFields.length) {
       frame = aiFrame;
@@ -387,7 +405,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (cap) issues.push(cap);
   if (multi) issues.push(multi);
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "This form had an uncommon layout, so AI read its fields live — give them an extra check before submitting." });
-  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // interpretFormWithAgent just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
   // own, so the notice belongs here, where its callers already surface soft
@@ -397,6 +415,9 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  // The fencing check refused to start the interpreter (#2507). Say why rather
+  // than leave the user with fields the fallback never got to read.
+  if (agentRefused) issues.push({ level: "warn", code: "ai-interpret-refused", message: `AI couldn't read this form's fields: ${agentRefused}` });
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
@@ -451,10 +472,12 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (formHasPassword(form)) return null;
   let aiInterpreted = false;
   let agentSpawned = false; // see openSession: launch, not result
+  let agentRefused: string | undefined;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
-    const ai = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
+    const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
+    agentRefused = ai.refused;
     const aiFields = ai.fields;
     if (aiFields.length && looksLikeApplicationForm({ title: form.title, url: form.url, fields: aiFields })) {
       frame = aiFrame;
@@ -468,7 +491,7 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   if (form.title) s.title = form.title;
   const issues: ApplyIssue[] = [{ level: "info", code: "ai-navigated", message: "AI navigated to reach this application form on your machine — review the fields before submitting." }];
   if (aiInterpreted) issues.push({ level: "info", code: "ai-interpreted", message: "AI also read the fields live (uncommon layout) — give them an extra check." });
-  // agentInterpretForm just ran the user's chosen CLI over this form. If that
+  // interpretFormWithAgent just ran the user's chosen CLI over this form. If that
   // runtime has no verified fencing mechanism it read the page with its default
   // access, and the user should know — agent-interpret.ts has no stream of its
   // own, so the notice belongs here, where its callers already surface soft
@@ -478,6 +501,9 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   // it (no CLI, no controls, refused argv) owes no warning.
   const interpretFencing = agentSpawned && cliId ? fencingReport({ cliId, cliName: resolveCli(cliId)?.spec.name ?? cliId, capabilities: CAPS.localReadOnly }) : null;
   if (interpretFencing?.notice) issues.push({ level: "warn", code: "cli-unfenced", message: interpretFencing.notice });
+  // The fencing check refused to start the interpreter (#2507). Say why rather
+  // than leave the user with fields the fallback never got to read.
+  if (agentRefused) issues.push({ level: "warn", code: "ai-interpret-refused", message: `AI couldn't read this form's fields: ${agentRefused}` });
   const cap = await captchaWarning(s.page);
   if (cap) issues.push(cap);
   return { title: s.title, fields: s.fields, issues };
