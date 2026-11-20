@@ -1,6 +1,7 @@
 // A child that ignores SIGTERM used to leave the request open. These two
-// routes now escalate to SIGKILL and answer. CAREER_OPS_CHILD_TIMEOUT_MS
-// shortens the first wait so the test spends its time on the grace period.
+// routes now escalate to SIGKILL and answer. CAREER_OPS_CHILD_TIMEOUT_MS is
+// the startup budget: the child has to be running, with its handler
+// installed, before the first signal. The route's grace period is still 2s.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -12,13 +13,20 @@ const codeRoot = mkdtempSync(join(tmpdir(), "co-child-timeout-code-"));
 const dataRoot = mkdtempSync(join(tmpdir(), "co-child-timeout-data-"));
 const ENV_KEYS = ["CAREER_OPS_CODE_ROOT", "CAREER_OPS_ROOT", "CAREER_OPS_DATA_DIR", "CAREER_OPS_TRACKER", "CAREER_OPS_CHILD_TIMEOUT_MS"];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+// Windows kills SIGTERM immediately, like SIGKILL, so the handler never runs
+// and the grace window never elapses. The timeout message still has to show
+// on every platform. The grace floor and the exit-on-signal case stay on POSIX.
+const canCatchTerm = process.platform !== "win32";
+const STARTUP_MS = 2_000;
+const GRACE_MS = 2_000;
+const graceFloor = STARTUP_MS + GRACE_MS - 500;
 
 before(() => {
   process.env.CAREER_OPS_CODE_ROOT = codeRoot;
   process.env.CAREER_OPS_ROOT = dataRoot;
   process.env.CAREER_OPS_DATA_DIR = "";
   process.env.CAREER_OPS_TRACKER = "";
-  process.env.CAREER_OPS_CHILD_TIMEOUT_MS = "100";
+  process.env.CAREER_OPS_CHILD_TIMEOUT_MS = String(STARTUP_MS);
 });
 
 after(() => {
@@ -32,10 +40,6 @@ after(() => {
 
 const HANG = 'process.on("SIGTERM", () => {});\nsetInterval(() => {}, 1e9);\n';
 const EXIT_ON_TERM = 'process.on("SIGTERM", () => { console.log(JSON.stringify({ added: 1, already: 0, found: 1, message: "Added 1." })); process.exit(0); });\nsetInterval(() => {}, 1e9);\n';
-// Windows kills SIGTERM immediately, like SIGKILL, so the handler never runs
-// and the grace window never elapses. The timeout message still has to show
-// on every platform. The grace floor and the exit-on-signal case stay on POSIX.
-const canCatchTerm = process.platform !== "win32";
 
 test("a tracker delete that ignores SIGTERM is stopped and the next delete can run", async () => {
   writeFileSync(join(codeRoot, "tracker.mjs"), `// tracker.mjs delete --num\n${HANG}`);
@@ -50,8 +54,8 @@ test("a tracker delete that ignores SIGTERM is stopped and the next delete can r
   const elapsed = Date.now() - started;
   assert.equal(res.status, 400);
   assert.equal(body.error, "Delete timed out after 30 seconds and was stopped.");
-  assert.ok(elapsed < 8_000, `the request stayed open (${elapsed}ms)`);
-  if (canCatchTerm) assert.ok(elapsed >= 1_500, `killed too soon (${elapsed}ms)`);
+  assert.ok(elapsed < 12_000, `the request stayed open (${elapsed}ms)`);
+  if (canCatchTerm) assert.ok(elapsed >= graceFloor, `killed too soon (${elapsed}ms)`);
 
   writeFileSync(join(codeRoot, "tracker.mjs"), "// tracker.mjs delete --num\nprocess.exit(0);\n");
   const again = await POST(new Request("http://localhost/api/tracker/delete", {
@@ -87,8 +91,8 @@ test("a LinkedIn import that ignores SIGTERM is stopped", async () => {
   assert.equal(res.status, 500);
   assert.equal(body.uncertain, true);
   assert.equal(body.message, "The import timed out after 30 seconds and was stopped. Check Pipeline before pasting again.");
-  assert.ok(elapsed < 8_000, `the request stayed open (${elapsed}ms)`);
-  if (canCatchTerm) assert.ok(elapsed >= 1_500, `killed too soon (${elapsed}ms)`);
+  assert.ok(elapsed < 12_000, `the request stayed open (${elapsed}ms)`);
+  if (canCatchTerm) assert.ok(elapsed >= graceFloor, `killed too soon (${elapsed}ms)`);
   if (!canCatchTerm) return;
 
   writeFileSync(join(codeRoot, "linkedin-import.mjs"), EXIT_ON_TERM);
