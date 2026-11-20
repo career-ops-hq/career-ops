@@ -46,7 +46,13 @@
  * appended to Notes, and one `source=close-stale` line per row is appended to
  * data/status-log.tsv. The tag is how these rows are told apart from real
  * rejections and found again if a reply arrives later. Re-running changes
- * nothing: closed rows are no longer Applied.
+ * nothing: closed rows are no longer Applied. When the status-log lines cannot
+ * be written, the command fails and tries to put the tracker back, so nothing
+ * is closed when the log is unchanged and the restore works. If the restore
+ * fails, the rows stay closed with no ledger line. If the failed write may have
+ * left lines in the log (its size changed or could not be checked), the rows
+ * stay closed to match them. In both cases the error names the log, and its
+ * last lines need checking before the next run.
  *
  * Run: node close-stale.mjs                        (dry run, JSON to stdout)
  *      node close-stale.mjs --summary              (dry run, human-readable)
@@ -58,7 +64,7 @@
  * Paths follow CAREER_OPS_ROOT / CAREER_OPS_DATA_DIR / CAREER_OPS_TRACKER.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -299,6 +305,18 @@ function fail(message, code = 2) {
 }
 
 /**
+ * The status log's size in bytes: 0 while it does not exist, null when it
+ * cannot be measured.
+ */
+function ledgerSize(path) {
+  try {
+    return statSync(path).size;
+  } catch (err) {
+    return err?.code === 'ENOENT' ? 0 : null;
+  }
+}
+
+/**
  * Contents of a file that may legitimately not exist yet.
  *
  * ENOENT is the only failure that means '' here. A user who has never logged a
@@ -447,15 +465,41 @@ if (isMainModule(import.meta.url)) {
         const newLines = applyClosures([...classified.lines], classified.colmap, classified.candidates, { targetStatus, tag });
         tx.replace(newLines.join('\n'));
         closed = classified.candidates.length;
-        // Observation trail only: the tracker stays the source of truth, so a
-        // failed append is a warning (same policy as set-status.mjs).
+        // The ledger line is what makes a closure an auto-close: calibrate.mjs
+        // counts the row as no_response from it, and a set-status undo reads it.
+        // A closure the ledger did not record is a plain Discarded row, so a
+        // failed append puts the tracker back and the command fails, as
+        // set-status.mjs does since #7143.
+        //
+        // appendLedgerRows() puts the ledger back to its old size when the
+        // append fails, and throws a "could not be put back" error when that
+        // truncate fails too. That error does not say whether any line landed:
+        // a read-only ledger fails both calls with nothing written. The size
+        // does. Every ledger writer appends inside the tracker lock, which this
+        // run holds, so nothing else changes it between the two reads.
+        const logPath = statusLogPath(trackerPath);
+        const sizeBefore = ledgerSize(logPath);
         try {
           const text = classified.candidates
             .map((c) => `${c.num}\t${today}\tApplied\t${targetStatus}\t${LEDGER_SOURCE}\t${cell(`${days}d`)}\n`)
             .join('');
-          appendLedgerRows(statusLogPath(trackerPath), text);
+          appendLedgerRows(logPath, text);
         } catch (err) {
-          warnings.push(`status-log append failed (tracker was updated): ${err.message}`);
+          // Lines did land. Putting the tracker back would leave close-stale
+          // lines naming Applied rows, and the next run would skip those rows
+          // for good as previously auto-closed. The rows stay closed to match.
+          const sizeAfter = ledgerSize(logPath);
+          if (sizeAfter === null || sizeAfter !== sizeBefore) {
+            throw new Error(`Could not write the status log (${err.message}). ${closed} row(s) stay closed, because ${logPath} may now hold part or all of their ${LEDGER_SOURCE} lines. Check its last lines before running close-stale again.`);
+          }
+          let restored = false;
+          try {
+            tx.replace(content);
+            restored = true;
+          } catch { /* reported below */ }
+          throw new Error(restored
+            ? `Could not write the status log (${err.message}). The log is unchanged, so no row was closed.`
+            : `Could not write the status log (${err.message}), and could not put the tracker back: ${closed} row(s) now read ${targetStatus} with no line in ${logPath}.`);
         }
       }
       report = buildReport({ classified, today, days, targetStatus, confirm, closed, warnings, trackerPath });

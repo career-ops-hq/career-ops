@@ -54,6 +54,7 @@ const DEFAULT_ATS_ALLOWLIST = [
   'recruitmentplatform.com',
   'taleez.com',
   'kula.ai',
+  'wellfound.com',
 ];
 
 /** @type {Record<string, number>} */

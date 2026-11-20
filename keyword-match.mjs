@@ -594,7 +594,7 @@ export function htmlToText(html) {
     // tolerate whitespace in the closing tag — a stricter filter CodeQL accepts.
     .replace(/<script\b[^>]*>[\s\S]*?<\/script\s*>/gi, ' ')
     .replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
+    .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag))
     .replace(/&nbsp;/gi, ' ')
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')

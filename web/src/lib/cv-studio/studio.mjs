@@ -122,6 +122,18 @@ export function buildStudioDoc({ tree, base, keywords, sourceHash, keywordsIn, i
   return { sourceHash, keywords, fixedKeywords: keywordsIn(fixedText), sections };
 }
 
+/**
+ * The id an added-back bullet answers to in `order`, so it moves among the
+ * tailored bullets like any other. Tailored bullets are `{item}b{n}`; the `r`
+ * keeps the two from ever colliding.
+ *
+ * @param {string} itemId
+ * @param {number} index into the item's `restorable`
+ */
+export function restoredId(itemId, index) {
+  return `${itemId}r${index}`;
+}
+
 /** @param {string} sourceHash @returns {StudioEdits} */
 export function emptyEdits(sourceHash) {
   return { v: 1, sourceHash, preset: { ...DEFAULT_PRESET }, use: {}, hidden: [], shown: [], order: {}, restored: {} };
@@ -218,7 +230,9 @@ export function studioReducer(edits, action, doc) {
       return { ...edits, hidden: presetHides ? edits.hidden : [...without(edits.hidden), action.id], shown: without(edits.shown) };
     }
     case "move": {
-      const order = [...(edits.order[action.parent] ?? action.siblings)];
+      // Drop ids that are no longer siblings (an added-back bullet that was
+      // removed again), or a click would swap with something not on screen.
+      const order = (edits.order[action.parent] ?? action.siblings).filter((id) => action.siblings.includes(id));
       for (const id of action.siblings) if (!order.includes(id)) order.push(id);
       const from = order.indexOf(action.id);
       const to = from + action.by;
@@ -230,8 +244,15 @@ export function studioReducer(edits, action, doc) {
       const list = edits.restored[action.item] ?? [];
       return list.includes(action.index) ? edits : { ...edits, restored: { ...edits.restored, [action.item]: [...list, action.index] } };
     }
-    case "unrestore":
-      return { ...edits, restored: { ...edits.restored, [action.item]: (edits.restored[action.item] ?? []).filter((i) => i !== action.index) } };
+    case "unrestore": {
+      const id = restoredId(action.item, action.index);
+      const order = edits.order[action.item];
+      return {
+        ...edits,
+        restored: { ...edits.restored, [action.item]: (edits.restored[action.item] ?? []).filter((i) => i !== action.index) },
+        order: order?.includes(id) ? { ...edits.order, [action.item]: order.filter((x) => x !== id) } : edits.order,
+      };
+    }
     case "preset": {
       const preset = { ...edits.preset, ...action.preset };
       if (preset.length === edits.preset.length && preset.tone === edits.preset.tone) return edits;
@@ -296,7 +317,7 @@ export function bulletShown(b, edits) {
  *
  * @param {StudioDoc} doc
  * @param {StudioEdits} edits
- * @returns {{view: import("./html-blocks.mjs").BlockView, added: Record<string, string[]>,
+ * @returns {{view: import("./html-blocks.mjs").BlockView, added: Record<string, import("./html-blocks.mjs").AddedBullet[]>,
  *            coverage: {present: string[], missing: string[], pct: number|null}}}
  */
 export function resolveStudio(doc, edits) {
@@ -314,10 +335,10 @@ export function resolveStudio(doc, edits) {
           if (shown.source !== "tailored") text[b.id] = shown.text;
           if (!hidden.has(b.id)) shown.keywords.forEach((k) => found.add(k));
         }
-        const restored = (edits.restored[item.id] ?? []).map((i) => item.restorable[i]).filter(Boolean);
+        const restored = (edits.restored[item.id] ?? []).filter((i) => item.restorable[i]);
         if (restored.length) {
-          added[item.id] = restored.map((r) => r.text);
-          restored.forEach((r) => r.keywords.forEach((k) => found.add(k)));
+          added[item.id] = restored.map((i) => ({ id: restoredId(item.id, i), text: item.restorable[i].text }));
+          restored.forEach((i) => item.restorable[i].keywords.forEach((k) => found.add(k)));
         }
       }
     }
