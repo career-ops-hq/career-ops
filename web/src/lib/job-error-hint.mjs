@@ -16,6 +16,8 @@
 //     "Connection error"                                                  (job-store.tsx)
 //   Page reload orphaned a running job -> "interrupted":
 //     "Interrupted (page reloaded)"                                       (job-store.tsx restore effect)
+//   Rate limit. The label quotes the CLI line, which can say "login" or
+//   "API key", and that quote is still a rate limit -> null
 //   Everything else (bad input, missing CV, no report written, etc.) -> null;
 //   the error text itself is the explanation.
 
@@ -46,6 +48,9 @@ export function jobErrorHint(job) {
   if (!label) return null;
   if (label === "Connection error") return HINTS.connection;
   if (label === "Interrupted (page reloaded)") return HINTS.interrupted;
+  // The rate-limit message quotes the CLI line. "API key" or "login" in that
+  // quote is the reason for the 429, not a request to sign in.
+  if (label.startsWith("Rate limit.")) return null;
   if (AUTH_PATTERN.test(label)) return HINTS.auth;
   return null;
 }

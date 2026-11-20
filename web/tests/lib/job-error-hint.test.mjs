@@ -45,6 +45,8 @@ test("'no output' canned message -> auth hint", () => {
 
 test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", () => {
   assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit exceeded, try again later)")), null);
+  assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit exceeded for API key)")), null);
+  assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit on login endpoint)")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing.")), null);
   assert.equal(jobErrorHint(errorJob("rate limit reached for this account")), null);
 });
