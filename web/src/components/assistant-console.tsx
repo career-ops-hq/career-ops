@@ -1,6 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2, ChevronDown, Check, Trash2 } from "lucide-react";
@@ -428,6 +429,14 @@ export function AssistantConsole() {
     return () => document.removeEventListener("visibilitychange", save);
   }, [chatReady, chatPending]);
 
+  function finishConversationAction(update: () => void, target = '[role="combobox"]') {
+    // Commit enabled controls before focusing them. Preserve focus if the user
+    // moved elsewhere while the request was pending.
+    flushSync(update);
+    if (document.activeElement === document.body) {
+      panelRef.current?.querySelector<HTMLButtonElement>(`${target}:not(:disabled)`)?.focus();
+    }
+  }
   async function selectChat(id?: string) {
     if (busy || chatPending || !chatReady) return;
     setChatPending(true);
@@ -445,7 +454,7 @@ export function AssistantConsole() {
       setRequestFeedback(null);
       setAnnouncement("");
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not switch conversations"); }
-    finally { setChatPending(false); }
+    finally { finishConversationAction(() => setChatPending(false)); }
   }
   function exportChat() {
     // Export the live draft even if it exceeds the storage limits.
@@ -483,13 +492,20 @@ export function AssistantConsole() {
     setIsEditingTitle(true);
     setHistoryOpen(false);
   }
-  function commitRename(nextTitle: string) {
+  function cancelRename() {
+    titleEditorActive.current = false;
+    finishConversationAction(() => setIsEditingTitle(false));
+  }
+  function commitRename(nextTitle: string, restoreFocus = false) {
     titleEditorActive.current = false;
     setIsEditingTitle(false);
     const currentId = activeChat.current.id;
     const prevTitle = activeChat.current.title || "";
     const clean = nextTitle.trim();
-    if (!clean || clean === prevTitle) return;
+    if (!clean || clean === prevTitle) {
+      if (restoreFocus) finishConversationAction(() => setIsEditingTitle(false));
+      return;
+    }
 
     // Optimistic UI update: instant local reflect
     activeChat.current.title = clean;
@@ -503,7 +519,10 @@ export function AssistantConsole() {
           setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: prevTitle } : c));
         }
       })
-      .finally(() => setChatPending(false));
+      .finally(() => {
+        if (restoreFocus) finishConversationAction(() => setChatPending(false));
+        else setChatPending(false);
+      });
   }
   function renameChat() {
     startRename();
@@ -529,7 +548,7 @@ export function AssistantConsole() {
       setAnnouncement("");
       await refreshChats();
     } catch (e) { setSaveError(e instanceof Error ? e.message : "Could not delete conversation"); }
-    finally { setChatPending(false); }
+    finally { finishConversationAction(() => setChatPending(false), '[aria-label="New chat"]'); }
   }
 
   useEffect(() => {
@@ -947,13 +966,13 @@ export function AssistantConsole() {
                   value={titleDraft}
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+                    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+                    if (e.key === "Enter") {
                       e.preventDefault();
-                      commitRename(titleDraft);
+                      commitRename(titleDraft, true);
                     } else if (e.key === "Escape") {
                       e.preventDefault();
-                      titleEditorActive.current = false;
-                      setIsEditingTitle(false);
+                      cancelRename();
                     }
                   }}
                   className="min-w-0 flex-1 rounded-md border border-brand/50 bg-surface px-2.5 py-1 text-sm text-foreground focus:outline-none"
@@ -962,7 +981,7 @@ export function AssistantConsole() {
                 />
                 <button
                   type="button"
-                  onClick={() => commitRename(titleDraft)}
+                  onClick={() => commitRename(titleDraft, true)}
                   className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
                   aria-label="Save name"
                   title="Save name"
@@ -971,10 +990,7 @@ export function AssistantConsole() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    titleEditorActive.current = false;
-                    setIsEditingTitle(false);
-                  }}
+                  onClick={cancelRename}
                   className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
                   aria-label="Cancel"
                   title="Cancel"
@@ -1216,7 +1232,7 @@ export function AssistantConsole() {
         isOpen={deleteModalOpen}
         onClose={() => setDeleteModalOpen(false)}
         labelledBy="delete-chat-title"
-        overlayClassName="z-[60]"
+        overlayClassName="z-[60] bg-black/50 backdrop-blur-sm"
         panelClassName="max-w-md p-5"
       >
         <div className="space-y-3">

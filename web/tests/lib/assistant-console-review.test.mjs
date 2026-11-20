@@ -10,7 +10,7 @@ test("conversation rename distinguishes write and refresh failures", () => {
 });
 
 test("conversation title Enter ignores IME confirmation and blur commits outside editor", () => {
-  assert.match(source, /e\.key === "Enter" && !e\.nativeEvent\.isComposing && e\.keyCode !== 229/);
+  assert.match(source, /if \(e\.nativeEvent\.isComposing \|\| e\.keyCode === 229\) return;\s+if \(e\.key === "Enter"\)/);
   assert.match(source, /!e\.currentTarget\.contains\(e\.relatedTarget as Node \| null\)/);
   assert.match(source, /titleEditorActive\.current = false/);
 });
