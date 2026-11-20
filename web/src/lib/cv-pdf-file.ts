@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { styledCvNames } from "@/lib/apply/ats-pdf.mjs";
 import { resolveTailoredCv } from "@/lib/apply/cv";
-import { matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
+import { matchesCompanyKeys, matchesTailoredCv, sortNewestFirst } from "@/lib/apply/cv-match.mjs";
 import { careerOpsRoot, isRegularContainedFile, pdfPathStatusForReport } from "@/lib/career-ops";
 import { companySlug } from "@/lib/company-slug.mjs";
 import { TAILORED_CV_MISSING } from "@/lib/tailored-cv-ready.mjs";
@@ -46,7 +46,7 @@ export async function locateTailoredPdf(query: CvPdfSelectors): Promise<LocatedC
   if (!company) return { status: 400, message: "company required" };
   const key = companySlug(company);
   if (!key) return { status: 404, message: TAILORED_CV_MISSING };
-  const { slug } = key;
+  const { keys } = key;
   const dir = path.join(careerOpsRoot(), "output");
 
   let files: string[];
@@ -54,7 +54,7 @@ export async function locateTailoredPdf(query: CvPdfSelectors): Promise<LocatedC
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      .filter((f) => matchesTailoredCv(f.toLowerCase(), slug))
+      .filter((f) => matchesCompanyKeys(matchesTailoredCv, f.toLowerCase(), keys))
       // sortNewestFirst already drops directories and files that vanish under
       // it, but not a symlink PLACED in output/ that resolves elsewhere: that
       // one stats as a regular file and would be served. The realpath check is

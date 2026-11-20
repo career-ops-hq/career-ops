@@ -75,6 +75,29 @@ export function promoteKnownFragmentIdentity(url) {
 }
 
 /**
+ * Give one Microsoft requisition one URL shape, as the core's
+ * canonicalizeKnownPostingUrl does (#7292): `/careers/job/{pid}` and
+ * `/careers?pid={pid}&domain=microsoft.com` are the same posting. Only the
+ * `apply.careers.microsoft.com` host is read, and a `/careers` results page with
+ * no pid is left alone.
+ *
+ * @param {URL} url
+ */
+export function canonicalizeKnownPostingUrl(url) {
+  const host = foldHostname(url.hostname);
+  if (host !== "apply.careers.microsoft.com") return;
+  const match = /^\/careers(?:\/job\/(\d+))?\/?$/i.exec(url.pathname);
+  if (!match) return;
+  const pid = match[1] ?? url.searchParams.get("pid");
+  if (!pid || !/^\d+$/.test(pid)) return;
+  url.hostname = host;
+  url.pathname = "/careers";
+  url.search = "";
+  url.searchParams.set("pid", pid);
+  url.searchParams.set("domain", "microsoft.com");
+}
+
+/**
  * Reduce a posting URL to a stable comparison key.
  *
  * @param {string} raw - A posting URL (or any string).
@@ -99,6 +122,7 @@ export function normalizeUrl(raw) {
   u.protocol = "https:";
   u.hostname = foldHostname(u.hostname);
   promoteKnownFragmentIdentity(u);
+  canonicalizeKnownPostingUrl(u);
   u.hash = "";
 
   const keep = [];
@@ -362,6 +386,10 @@ export function canonicalJobKey(raw) {
   try { u = new URL(s); } catch { return ""; }
   if (u.protocol !== "http:" && u.protocol !== "https:") return "";
   u.hostname = foldHostname(u.hostname);
+  // A known posting shape is folded first, so its own id wins over a stray
+  // query id (a Microsoft `/careers/job/{pid}?gh_jid=…` link is the pid's
+  // posting, not a Greenhouse one).
+  canonicalizeKnownPostingUrl(u);
 
   const indeed = indeedJobId(u);
   if (indeed) return `indeed.com:${indeed}`;

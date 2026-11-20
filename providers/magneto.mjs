@@ -43,7 +43,7 @@ const POSTING_HREF_RE = /href="(?:https:\/\/(?:www\.)?magneto365\.com)?\/[a-z]{2
 
 /** @param {unknown} s */
 function clean(s) {
-  return decodeEntities(String(s ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(String(s ?? '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Keep user overrides bounded so a typo cannot turn one board into an unbounded crawl. */

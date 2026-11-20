@@ -68,3 +68,8 @@ test('the router sends a first run to the onboarding steps', () => {
   const router = read('.agents/skills/career-ops/SKILL.md');
   assert.match(router, /onboardingNeeded[^\n]*`modes\/_onboarding\.md`/);
 });
+
+test('the router stops on dataRootError before it reads the onboarding steps', () => {
+  const router = read('.agents/skills/career-ops/SKILL.md');
+  assert.match(router, /reports `dataRootError`, stop[^\n]*`modes\/_onboarding\.md`/);
+});

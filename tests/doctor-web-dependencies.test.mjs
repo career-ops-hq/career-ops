@@ -30,7 +30,12 @@ function checkout({ web, installed }) {
 }
 
 function doctorOutput(dir) {
-  const run = spawnSync(process.execPath, [DOCTOR, '--target', dir], { cwd: dir, encoding: 'utf-8' });
+  // No browser launches: this suite tests the web dependency check, not them.
+  const run = spawnSync(process.execPath, [DOCTOR, '--target', dir], {
+    cwd: dir,
+    encoding: 'utf-8',
+    env: { ...process.env, CAREER_OPS_DOCTOR_SKIP_BROWSER: '1' },
+  });
   assert.equal(run.stderr, '', `doctor wrote to stderr: ${run.stderr}`);
   return run.stdout;
 }

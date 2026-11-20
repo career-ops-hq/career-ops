@@ -160,6 +160,12 @@ try {
   } else {
     fail(`jdHtmlToText => ${JSON.stringify(html)}`);
   }
+  const commented = jdHtmlToText('<p>Pay</p><!-- salary < 100000 --><p>Benefits</p>');
+  if (commented === 'Pay\nBenefits') {
+    pass('jdHtmlToText strips a comment whose body holds an unquoted <');
+  } else {
+    fail(`jdHtmlToText comment => ${JSON.stringify(commented)}`);
+  }
   if (jdHtmlToText('&lt;p&gt;Escaped &lt;b&gt;markup&lt;/b&gt;&lt;/p&gt;') === 'Escaped markup') {
     pass('jdHtmlToText double-decodes entity-escaped markup');
   } else {

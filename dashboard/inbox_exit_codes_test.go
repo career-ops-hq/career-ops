@@ -23,6 +23,9 @@ func TestInboxExitCodesMatchTheScripts(t *testing.T) {
 		{"inbox-skip.mjs", "SKIP_EXIT", map[string]int{
 			"UNCHANGED": skipExitUnchanged, "NOT_PENDING": skipExitNotPending,
 		}},
+		{"rank-pipeline.mjs", "RANK_EXIT", map[string]int{
+			"NOT_PENDING": rankExitNotPending,
+		}},
 	}
 	for _, c := range cases {
 		src, err := os.ReadFile(filepath.Join("..", c.script))

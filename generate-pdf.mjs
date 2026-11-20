@@ -67,6 +67,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections, readCvPageBudget } from './theme-style.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -507,6 +508,41 @@ const SECTION_ALIASES = new Map([
   ['conocimientos técnicos', 'skills'],
   ['herramientas e idiomas', 'skills'],
   ['intereses', 'interests'],
+  // Italian (modes/it) — the same failure as the blocks around it: no Italian
+  // title resolved here, so cv.sections matched no section of an Italian CV and
+  // the order guard compared raw titles. A bare "Competenze" is the key-skills
+  // block and "Competenze tecniche" the skills list, as the Spanish block reads
+  // its own words.
+  ['profilo', 'summary'],
+  ['profilo professionale', 'summary'],
+  ['sommario', 'summary'],
+  ['riepilogo', 'summary'],
+  ['chi sono', 'summary'],
+  ['competenze', 'competencies'],
+  ['competenze chiave', 'competencies'],
+  ['competenze principali', 'competencies'],
+  ['esperienza', 'experience'],
+  ['esperienza professionale', 'experience'],
+  ['esperienze professionali', 'experience'],
+  ['esperienza lavorativa', 'experience'],
+  ['esperienze lavorative', 'experience'],
+  ['percorso professionale', 'experience'],
+  ['progetti', 'projects'],
+  ['progetti selezionati', 'projects'],
+  ['progetti personali', 'projects'],
+  ['formazione', 'education'],
+  ['istruzione', 'education'],
+  ['istruzione e formazione', 'education'],
+  ['titoli di studio', 'education'],
+  ['certificazioni', 'certifications'],
+  ['certificati', 'certifications'],
+  ['premi', 'awards'],
+  ['riconoscimenti', 'awards'],
+  ['premi e riconoscimenti', 'awards'],
+  ['competenze tecniche', 'skills'],
+  ['conoscenze tecniche', 'skills'],
+  ['capacità tecniche', 'skills'],
+  ['interessi', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -573,6 +609,36 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Portuguese (pt-BR / pt-PT) — the same failure as Spanish above: modes/pt/
+  // ships a Portuguese market set, but no Portuguese title resolved here, so
+  // cv.sections matched no section of a Portuguese CV and the order guard fell
+  // back to comparing raw titles. Titles that fold to a Spanish spelling
+  // (competências, experiência, habilidades, perfil, certificados, prêmios)
+  // already resolve through the Spanish block and are not repeated.
+  ['resumo', 'summary'],
+  ['resumo profissional', 'summary'],
+  ['perfil profissional', 'summary'],
+  ['sobre mim', 'summary'],
+  ['competências principais', 'competencies'],
+  ['competências-chave', 'competencies'],
+  ['principais competências', 'competencies'],
+  ['experiência profissional', 'experience'],
+  ['experiências profissionais', 'experience'],
+  ['histórico profissional', 'experience'],
+  ['projetos', 'projects'],
+  ['projetos pessoais', 'projects'],
+  ['projetos selecionados', 'projects'],
+  ['formação', 'education'],
+  ['formação acadêmica', 'education'],
+  ['formação académica', 'education'],
+  ['educação', 'education'],
+  ['escolaridade', 'education'],
+  ['certificações', 'certifications'],
+  ['cursos e certificações', 'certifications'],
+  ['prêmios e reconhecimentos', 'awards'],
+  ['competências técnicas', 'skills'],
+  ['conhecimentos técnicos', 'skills'],
+  ['interesses', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
@@ -2450,7 +2516,7 @@ export async function inlineLocalFonts(html) {
 export async function launchChromium(options = {}) {
   const { chromium } = await import('playwright');
   const { projectRoot, ...launchOptions } = options;
-  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot, localContentOnly: true }));
 }
 
 /**
@@ -2537,6 +2603,88 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   }
 }
 
+// What the CV page may load while it renders (GHSA-m426).
+//
+// The page is written to a temporary file and loaded from file://, so that a
+// template can load an image next to the CV by a relative path. But markup
+// that needs no JavaScript (<iframe>, <embed>, <object>, <img>, <link
+// rel=stylesheet>) loads any file: URL the HTML names, and page.pdf() paints
+// it. The route used to let every file: request through, so HTML influenced by
+// a job posting could put ~/.env or config/profile.yml into the PDF the user
+// sends to an employer.
+//
+// Now a file: request loads only when it is:
+//   - the document itself, in the main frame, or
+//   - an image, font or stylesheet under the CV's own directory (symlinks
+//     resolved, so a link cannot point out of it), or
+//   - the image the user set as candidate.photo in config/profile.yml, which
+//     modes/pdf.md lets the agent reference by path.
+// An image, font or stylesheet cannot paint a text file's contents, and a
+// frame or plugin object never loads. data: stays allowed (inlineLocalFonts
+// turns template fonts into data: URLs), and anything else is aborted, as before.
+const LOCAL_ASSET_TYPES = new Set(['image', 'font', 'stylesheet']);
+
+/**
+ * Whether the PDF page may load one request.
+ *
+ * @param {{ url: string, resourceType?: string, isMainDocument?: boolean }} request
+ * @param {{ mainDocUrl: string, baseDir: string, photoPath?: string | null }} scope
+ *   `baseDir` and `photoPath` are real paths (realpathSync).
+ * @returns {boolean}
+ */
+export function pdfRequestAllowed({ url, resourceType = '', isMainDocument = true }, { mainDocUrl, baseDir, photoPath = null }) {
+  if (url.startsWith('data:')) return true;
+  if (!url.startsWith('file:')) return false;
+  if (url === mainDocUrl) return isMainDocument;
+  if (!LOCAL_ASSET_TYPES.has(resourceType)) return false;
+  let real;
+  try {
+    real = realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+  if (resourceType === 'image' && photoPath && real === photoPath) return true;
+  const rel = relative(baseDir, real);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+// The same rule as a second layer the page enforces itself, should the route
+// ever be bypassed: no frames, no plugin objects, local or inline assets only.
+export const RENDER_CSP = "default-src 'none'; img-src file: data:; font-src file: data:; "
+  + "style-src 'unsafe-inline' file: data:; frame-src 'none'; child-src 'none'; object-src 'none'; "
+  + "base-uri 'none'; form-action 'none'";
+
+/** Put RENDER_CSP first in <head>, so it governs everything after it. */
+export function injectRenderCsp(html) {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
+  if (/<head\b[^>]*>/i.test(html)) return html.replace(/<head\b[^>]*>/i, (tag) => `${tag}${meta}`);
+  if (/<html\b[^>]*>/i.test(html)) return html.replace(/<html\b[^>]*>/i, (tag) => `${tag}<head>${meta}</head>`);
+  return `${meta}${html}`;
+}
+
+// The real path of candidate.photo when it names a local file: the one local
+// image outside the CV's directory that a render may load. A relative value
+// resolves from the data root, then the checkout, as in build-cv-html.mjs.
+function configuredPhotoPath(profilePath) {
+  let value = '';
+  try {
+    const doc = loadYaml(readFileSync(profilePath, 'utf-8'));
+    value = typeof doc?.candidate?.photo === 'string' ? doc.candidate.photo.trim() : '';
+  } catch {
+    return null;
+  }
+  if (!value || /^[a-z][a-z0-9+.-]+:/i.test(value)) return null;
+  const candidates = isAbsolute(value) ? [value] : [resolve(getCareerOpsRoot(), value), resolve(__dirname, value)];
+  for (const candidate of candidates) {
+    try {
+      return realpathSync(candidate);
+    } catch {
+      // try the next location
+    }
+  }
+  return null;
+}
+
 /**
  * Render one already-normalized HTML document to a PDF on an already-launched
  * browser. This is the page-level half of the render — it owns the per-document
@@ -2614,6 +2762,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
 
   html = injectPrintPageCss(html, format, opts.country);
   html = await inlineLocalFonts(html);
+  html = injectRenderCsp(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
   // origin that can load local images, fonts, and other resources.
@@ -2629,7 +2778,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     // cv.md, the job posting and the evaluation report, and postings are untrusted
     // input (AGENTS.md). With JS off an injected <script> cannot run; with
     // non-local requests aborted an injected <img src="https://…"> cannot beacon
-    // out. file:/data: subresources still load, which is all a template needs.
+    // out. Local requests are narrowed by pdfRequestAllowed (GHSA-m426).
     //
     // newContext(), not newPage(): javaScriptEnabled is a Playwright context
     // option with no per-page equivalent, and a fresh context per document also
@@ -2640,17 +2789,30 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       ? await browser.newContext({ javaScriptEnabled: false })
       : null;
     page = context ? await context.newPage() : await browser.newPage();
+    const mainDocUrl = pathToFileURL(tmpHtmlPath).href;
     if (page.route) {
+      const scope = {
+        mainDocUrl,
+        baseDir: realpathSync(baseDir),
+        photoPath: configuredPhotoPath(workspaceProfilePath(opts.workspaceRoot)),
+      };
       await page.route('**/*', (route) => {
-        const url = route.request().url();
-        return url.startsWith('file:') || url.startsWith('data:')
+        const request = route.request();
+        // A test double may implement only url(); then the only file: request
+        // it can describe is the document itself.
+        const isMainDocument = typeof request.isNavigationRequest === 'function'
+          && typeof request.frame === 'function' && typeof page.mainFrame === 'function'
+          ? request.isNavigationRequest() && request.frame() === page.mainFrame()
+          : true;
+        const resourceType = typeof request.resourceType === 'function' ? request.resourceType() : '';
+        return pdfRequestAllowed({ url: request.url(), resourceType, isMainDocument }, scope)
           ? route.continue()
           : route.abort();
       });
     }
 
-    // Load from file:// so the page origin allows local subresources
-    await page.goto(pathToFileURL(tmpHtmlPath).href, {
+    // Load from file:// so the page origin allows the CV's local images
+    await page.goto(mainDocUrl, {
       waitUntil: 'load',
     });
 

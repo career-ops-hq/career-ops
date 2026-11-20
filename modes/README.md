@@ -30,6 +30,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `text.md` | `text` | Tailored markdown CV (no PDF) |
 | `cover.md` | `cover` | Cover letter generator |
 | `email.md` | `email` | Application email drafts (draft-only) |
+| `proposal.md` | `proposal` | Job/Upwork proposal drafts as markdown files (draft-only; never submits) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
 | `gambit.md` | `gambit` | Create-a-role pitch for a role the company has not posted (records `Speculative`) |
@@ -65,10 +66,10 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `_brief.template.md` | Seed for your `modes/_brief.md` (compact context for `triage`) |
 | `_writing.md` | Shared writing guidance (Voice DNA, writing style, ATS rules) loaded by modes that write candidate-facing prose |
 | `_community-asks.md` | The one-time star and manifesto asks, and the Hired Wall offer at a hire |
-| `_files.md` | Every script and data file with what it does, and the `jds/` capture filenames |
+| `_files.md` | The main scripts and data files with what each does, and the `jds/` capture filenames |
 | `_headless.md` | Headless command per CLI, headless worker permissions, report-number reservation for fan-outs |
 | `_markets.md` | The market mode sets and how a `language.modes_dir` list works |
-| `_onboarding.md` | First-run setup steps, read when `doctor.mjs --json` reports `onboardingNeeded` (AGENTS.md → First Run) |
+| `_onboarding.md` | First-run setup steps, read when `doctor.mjs --json` reports `onboardingNeeded` and no `dataRootError` (AGENTS.md → First Run) |
 | `_tracker-tsv.md` | Tracker-addition TSV format, read before writing a TSV to `batch/tracker-additions/` |
 
 AGENTS.md is loaded into every session and stays under 40,000 characters, so reference only one workflow needs lives in these `_`-prefixed files and AGENTS.md points to them.

@@ -121,8 +121,14 @@ function httpUrlForGuard(url) {
 }
 
 /**
- * Context-wide route interceptor (main document, redirect hops, subresources,
- * and WebSockets). Same host check as archive-posting.mjs / liveness-browser.mjs.
+ * Context-wide route interceptor (main document, subresources and WebSockets).
+ * Same host check as archive-posting.mjs / liveness-browser.mjs.
+ *
+ * It does NOT see redirect hops: Playwright calls a route handler only for the
+ * first URL of a redirected request, so a page that answered 302 into private
+ * space got through it (GHSA-wwfx). Those hops are refused by the egress filter
+ * session.ts launches the browser with (lib/egress-proxy.mjs), which sees every
+ * connection the browser opens.
  *
  * Playwright does not send WebSocket handshakes through `context.route()`.
  * Close without `connectToServer` when the guard refuses the host. An allowed

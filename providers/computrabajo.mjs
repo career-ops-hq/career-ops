@@ -49,7 +49,7 @@ const POSTING_HREF_RE = /href="(?:https:\/\/[a-z]{2}\.computrabajo\.com)?\/ofert
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(String(s).replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(String(s).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Keep user overrides bounded so a typo cannot turn one board into a ban-prone crawl. */
