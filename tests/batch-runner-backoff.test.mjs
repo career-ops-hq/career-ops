@@ -85,9 +85,25 @@ test('ceiling validation normalizes decimal zeros and rejects unsafe or overflow
   }
 }));
 
-function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429', successAfter = 99, cli = 'claude', secondLog = log, reports = '', tracker = '', logs = '' } = {}) {
+function runLoop({ invoke, dir }, {
+  cap = 300,
+  retries = 0,
+  max = 2,
+  log = '429',
+  successAfter = 99,
+  cli = 'claude',
+  secondLog = log,
+  // An omitted path would search /001-*.md, and an inherited REPORTS_DIR
+  // would quarantine the developer's files. Every run stays in the fixture.
+  reports = join(dir, 'reports'),
+  tracker = join(dir, 'tracker'),
+  logs = join(dir, 'logs'),
+} = {}) {
   writeFileSync(join(dir, 'first.log'), log);
   writeFileSync(join(dir, 'second.log'), secondLog);
+  mkdirSync(reports, { recursive: true });
+  mkdirSync(tracker, { recursive: true });
+  mkdirSync(logs, { recursive: true });
   const quarantineAt = source.indexOf('quarantine_attempt_artifacts() {');
   const quarantine = source.slice(quarantineAt, source.indexOf('\n# Retry wrapper', quarantineAt));
   return invoke(`${functions}
@@ -98,9 +114,9 @@ function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429'
     PAUSE_FILE=pause.tsv
     THROTTLE_FILE=throttle.marker
     BATCH_PAUSED=false
-    ${reports ? `REPORTS_DIR='${reports}'` : ''}
-    ${tracker ? `TRACKER_DIR='${tracker}'` : ''}
-    ${logs ? `LOGS_DIR='${logs}'` : ''}
+    REPORTS_DIR='${reports}'
+    TRACKER_DIR='${tracker}'
+    LOGS_DIR='${logs}'
     calls=0
     claude() {
       calls=$((calls + 1))
