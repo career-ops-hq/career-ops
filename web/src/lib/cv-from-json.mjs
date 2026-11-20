@@ -273,8 +273,41 @@ function copyEntry(entry) {
   return Array.isArray(entry.bullets) ? { ...entry, bullets: [...entry.bullets] } : { ...entry };
 }
 
+// stripMarkup first, as the verifier does for drift.line: an entity, tag or
+// trademark sign left in the payload bullet would stop it matching its drift.
 function bulletKey(check, text) {
-  return check.normalizeClaim(text).replace(/[.;:,]+$/g, "").trim();
+  return check.normalizeClaim(check.stripMarkup(text)).replace(/[.;:,]+$/g, "").trim();
+}
+
+const LIST_ITEM_RE = /^\s*(?:[-*+•‣◦⁃∙]|\d+[.)])\s+/u;
+const BLOCK_START_RE = /^\s*(?:[-*+•‣◦⁃∙]\s|\d+[.)]\s|#|\||>|<)|^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/u;
+
+/**
+ * Whole bullets and paragraphs of a Markdown source, soft-wrapped lines joined,
+ * list markers dropped. drift.sourceLine is one sentence of one of these; the
+ * restore writes the whole block back so its other sentences are not lost.
+ */
+function sourceBlocks(text) {
+  const blocks = [];
+  let current = null;
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    if (!line.trim()) { current = null; continue; }
+    if (current === null || BLOCK_START_RE.test(line)) {
+      current = { heading: /^\s*#/.test(line), text: line.replace(LIST_ITEM_RE, "").trim() };
+      blocks.push(current);
+    } else {
+      current.text += ` ${line.trim()}`;
+    }
+  }
+  return blocks.filter((block) => !block.heading).map((block) => block.text);
+}
+
+/** The full source bullet a drift's anchor sentence belongs to, or null. */
+function fullSourceBullet(check, blocks, sourceLine) {
+  const key = bulletKey(check, sourceLine);
+  if (!key) return null;
+  const match = blocks.find((block) => bulletKey(check, block).includes(key));
+  return match ? check.stripMarkup(match) : null;
 }
 
 function clip(text, max = 160) {
@@ -294,26 +327,38 @@ async function restoreDriftedBullets({ coreRoot, dataRoot, payload, html }) {
   const warnings = [];
   try {
     const check = await loadCore(coreRoot, "verify-cv-facts.mjs");
+    const sourcePaths = [path.join(dataRoot, "cv.md"), path.join(dataRoot, "article-digest.md")];
     const result = check.verifyFacts(html, {
-      sourcePaths: [path.join(dataRoot, "cv.md"), path.join(dataRoot, "article-digest.md")],
+      sourcePaths,
       configPath: path.join(dataRoot, "config", "cv-facts.json"),
     });
     const drifts = (result?.unsupportedFacts ?? []).filter((fact) => fact.kind === "drift" && fact.blocking === true);
+    if (!drifts.length) return { warnings };
+    const blocks = sourcePaths
+      .filter((file) => fs.existsSync(/* turbopackIgnore: true */ file))
+      .flatMap((file) => sourceBlocks(fs.readFileSync(/* turbopackIgnore: true */ file, "utf8")));
+    const entries = Array.isArray(payload.experience) ? payload.experience : [];
+    const restored = new Set();
     for (const drift of drifts) {
       if (typeof drift.line !== "string" || typeof drift.sourceLine !== "string") continue;
       const claim = bulletKey(check, drift.line);
       if (!claim) continue;
-      const entries = Array.isArray(payload.experience) ? payload.experience : [];
-      for (const entry of entries) {
-        if (!Array.isArray(entry?.bullets)) continue;
-        const index = entry.bullets.findIndex((bullet) => typeof bullet === "string" && bulletKey(check, bullet).includes(claim));
-        if (index === -1) continue;
-        const tailored = entry.bullets[index];
-        entry.bullets[index] = drift.sourceLine;
-        const added = Array.isArray(drift.added) && drift.added.length ? ` (not in cv.md: "${drift.added.join('", "')}")` : "";
-        warnings.push(`Restored the cv.md wording for a bullet the fact check would block${added}. Tailored: "${clip(tailored)}" → cv.md: "${clip(drift.sourceLine)}"`);
-        break;
-      }
+      // Without the whole source bullet, leave it: writing the one anchor
+      // sentence would drop the bullet's other sentences. The gate decides.
+      const source = fullSourceBullet(check, blocks, drift.sourceLine);
+      if (!source) continue;
+      const added = Array.isArray(drift.added) && drift.added.length ? ` (not in cv.md: "${drift.added.join('", "')}")` : "";
+      // verifyFacts reports identical bullets once, so every copy in every role is restored.
+      entries.forEach((entry, entryIndex) => {
+        if (!Array.isArray(entry?.bullets)) return;
+        entry.bullets.forEach((bullet, index) => {
+          const slot = `${entryIndex}:${index}`;
+          if (restored.has(slot) || typeof bullet !== "string" || !bulletKey(check, bullet).includes(claim)) return;
+          entry.bullets[index] = source;
+          restored.add(slot);
+          warnings.push(`Restored the cv.md wording for a bullet the fact check would block${added}. Tailored: "${clip(bullet)}" → cv.md: "${clip(source)}"`);
+        });
+      });
     }
   } catch {
     return { warnings: [] };

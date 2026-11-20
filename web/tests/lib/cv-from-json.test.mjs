@@ -310,7 +310,7 @@ const DRIFT_CV_MD = `## Experience
 - Shipped the weekly report
 `;
 
-async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD } = {}) {
+async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD, experience = null } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "cv-drift-"));
   const saved = {
     root: process.env.CAREER_OPS_ROOT,
@@ -325,7 +325,7 @@ async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD } = {}) {
     writeFileSync(path.join(dir, "config", "profile.yml"), "name: Jane Doe\n");
     writeFileSync(path.join(dir, "cv.md"), cvMd);
     const body = payload();
-    body.experience = [{
+    body.experience = experience ?? [{
       company: "Globex",
       role: "Analyst",
       location: "Remote",
@@ -378,4 +378,43 @@ test("a bullet that does not link to any cv.md line is left alone", async () => 
   assert.equal(result.ok, true, result.error);
   assert.ok(result.html.includes("Orchestrated unrelated quarterly gardening"));
   assert.ok(!result.warnings.some((w) => /Restored the cv\.md wording/.test(w)));
+});
+
+test("a drift anchored to one sentence of a two-sentence cv.md bullet restores the whole bullet", async () => {
+  const cvMd = DRIFT_CV_MD.replace(
+    "- Worked with a third-party NLP engine to classify support tickets\n",
+    "- Worked with a third-party NLP engine to classify support tickets. Cut triage time by 40%.\n",
+  );
+  const { result } = await buildWithBullets([DRIFTED, "Shipped the weekly report"], { cvMd });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "drifted wording is gone");
+  assert.ok(result.html.includes(SOURCE_WORDING), "the anchored sentence is restored");
+  assert.ok(result.html.includes("Cut triage time by 40%"), "the bullet's other cv.md sentence is kept");
+});
+
+test("every bullet matching a drift is restored, in every role", async () => {
+  const cvMd = `${DRIFT_CV_MD}
+### Initech -- Remote
+
+**Associate**
+2016 - 2019
+
+- Worked with a third-party NLP engine to classify support tickets
+`;
+  const experience = [
+    { company: "Globex", role: "Analyst", location: "Remote", dates: "2020 - 2024", bullets: [DRIFTED, "Shipped the weekly report", DRIFTED] },
+    { company: "Initech", role: "Associate", location: "Remote", dates: "2016 - 2019", bullets: [DRIFTED] },
+  ];
+  const { result } = await buildWithBullets(null, { cvMd, experience });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "no drifted copy is left");
+  assert.equal(result.warnings.filter((w) => /Restored the cv\.md wording/.test(w)).length, 3);
+});
+
+test("a trademark sign in a tailored bullet does not stop it matching its drift line", async () => {
+  const drifted = "Ran a third-party NLP™ engine to classify support tickets";
+  const { result } = await buildWithBullets([drifted, "Shipped the weekly report"]);
+  assert.equal(result.ok, true, result.error);
+  assert.ok(result.html.includes(SOURCE_WORDING), "cv.md wording is rendered");
+  assert.ok(!result.html.includes("Ran a third-party"), "drifted wording is gone");
 });
