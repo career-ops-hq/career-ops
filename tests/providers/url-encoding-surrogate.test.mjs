@@ -465,6 +465,24 @@ try {
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.themuse.com/jobs/acme/good-id',
   );
+
+  // successfactors-classic.parseSearchReply — for…of over the DWR search
+  // reply's postings; the posting id ends the public detail URL (the dedup key).
+  const { parseSearchReply: parseSfClassicReply } = await load('successfactors-classic.mjs');
+  check(
+    'successfactors-classic.parseSearchReply',
+    () => parseSfClassicReply(
+      [{
+        detailURLPrefix: '/career?career%5fns=job%5flisting&company=ACME001&navBarLevel=JOB%5fSEARCH&rcm%5fsite%5flocale=es%5fES&career_job_req_id=',
+        postingCount: 2,
+        postings: [{ id: `${LONE}9`, title: 'Bad' }, { id: 7, title: 'Good' }],
+      }],
+      { origin: 'https://career5.successfactors.eu', company: 'ACME001' },
+      'Acme',
+      'es',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('career_job_req_id=7'),
+  );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);
 }
