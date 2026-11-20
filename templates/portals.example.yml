@@ -1372,6 +1372,7 @@ search_queries:
 #   deel            jobs.deel.com/<slug>                (Deel job board; a tenant that redirects off-host is not readable)
 #   inrecruiting    <tenant>.intervieweb.it             (Zucchetti InRecruiting career page; /en/career etc. picks the language)
 #   keka            <tenant>.keka.com                   (Keka careers page, /careers; the feed id is read off that page)
+#   velorahr        <tenant>.career.velorahr.com/<slug>-<siteId>   (Velora HR career site, any path under it; the site id ending the first path segment is required)
 #   kula            careers.kula.ai/<slug>              (Kula career site, any path under it; reads the tenant RSS feed /<slug>/feed)
 #   darwinbox       <tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/...   (or darwinbox.com; the company id is required; a bare tenant host is not claimed)
 #   turbohire       <tenant>.turbohire.co               (TurboHire careers page, any path; the org id is looked up from the subdomain)
@@ -1541,6 +1542,10 @@ search_queries:
 #
 # - name: Example Keka Co
 #   careers_url: https://exampleco.keka.com/careers       # any <tenant>.keka.com host
+#   enabled: true
+#
+# - name: Example VeloraHR Co
+#   careers_url: https://exampleco.career.velorahr.com/exampleco-123   # any <tenant>.career.velorahr.com host; the number ending the first path segment is the site id
 #   enabled: true
 #
 # - name: Example Kula Co
@@ -3457,6 +3462,13 @@ tracked_companies:
   - name: Maggioli
     careers_url: https://maggioli.intervieweb.it/it/career
     notes: "Santarcangelo di Romagna IT. Software and services for public administration; developer, data and analyst roles across Italy."
+    enabled: false
+
+  # -- Spain (Velora HR career sites) --
+
+  - name: Calidad Pascual
+    careers_url: https://pascual.career.velorahr.com/calidad-pascual-248
+    notes: "Madrid. Food and dairy group (Pascual, Cafés Saula, Priégola); a few dozen offers at most, mostly operations, supply chain and administration. Velora HR is a Spanish ATS."
     enabled: false
 
   # -- AI / Developer Tools --
