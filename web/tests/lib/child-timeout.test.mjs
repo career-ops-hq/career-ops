@@ -2,9 +2,10 @@
 // routes now escalate to SIGKILL and answer. CAREER_OPS_CHILD_TIMEOUT_MS is
 // the startup budget: the child has to be running, with its handler
 // installed, before the first signal. The route's grace period is still 2s.
+import { execFileSync } from "node:child_process";
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../helpers/web-ts-alias-loader.mjs";
@@ -43,34 +44,63 @@ after(() => {
 
 // The fixture records its pid before it waits. Node's own test timeout is
 // infinite, so a route that never answers would never reach the elapsed
-// check. The cap rejects and stops that process so the run can exit.
+// check. The cap rejects, and the fixture is stopped when the request
+// settles, including when the route answers while the child is still alive.
 function fixture(source) {
   return `import { writeFileSync } from "node:fs";
 if (process.env.CO_FIXTURE_PID) writeFileSync(process.env.CO_FIXTURE_PID, String(process.pid));
 ${source}`;
 }
 
-function stopFixture() {
+function parentPid(pid) {
   try {
-    const pid = Number(readFileSync(pidFile, "utf8"));
-    if (Number.isInteger(pid) && pid > 0 && pid !== process.pid) process.kill(pid, "SIGKILL");
+    const out = process.platform === "win32"
+      ? execFileSync("powershell.exe", [
+          "-NoProfile",
+          "-Command",
+          `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").ParentProcessId`,
+        ], { encoding: "utf8", timeout: 5_000, windowsHide: true })
+      : execFileSync("ps", ["-o", "ppid=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 });
+    const parent = Number(String(out).trim());
+    return Number.isInteger(parent) ? parent : null;
   } catch {
-    // No pid file, or the child has already exited.
+    return null;
+  }
+}
+
+function stopFixture() {
+  let pid;
+  try {
+    pid = Number(readFileSync(pidFile, "utf8"));
+  } catch {
+    return;
+  }
+  if (!Number.isInteger(pid) || pid <= 0 || pid === process.pid) return;
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return;
+  }
+  // A reused pid belongs to some other process. Only our child is stopped.
+  if (parentPid(pid) !== process.pid) return;
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    // It exited between the checks.
   }
 }
 
 async function finishOrStop(work) {
+  try { unlinkSync(pidFile); } catch { /* the first request has no pid file */ }
   let timer;
   const cap = new Promise((_, reject) => {
-    timer = setTimeout(() => {
-      stopFixture();
-      reject(new Error(`request stayed open past ${REQUEST_CAP_MS}ms`));
-    }, REQUEST_CAP_MS);
+    timer = setTimeout(() => reject(new Error(`request stayed open past ${REQUEST_CAP_MS}ms`)), REQUEST_CAP_MS);
   });
   try {
     return await Promise.race([Promise.resolve(work), cap]);
   } finally {
     clearTimeout(timer);
+    stopFixture();
   }
 }
 
