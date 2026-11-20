@@ -191,7 +191,14 @@ export function jdFromReport(reportText) {
   if (!m) return '';
   const rest = text.slice(m.index + m[0].length);
   const next = rest.search(/^##[ \t]/m);
-  const body = (next === -1 ? rest : rest.slice(0, next)).replace(/<!--[\s\S]*?-->/g, '').trim();
+  let body = next === -1 ? rest : rest.slice(0, next);
+  // Strip HTML comments until stable so nested markers cannot reassemble, then drop any stray opener.
+  let prev;
+  do {
+    prev = body;
+    body = body.replace(/<!--[\s\S]*?-->/g, '');
+  } while (body !== prev);
+  body = body.replace(/<!--/g, '').trim();
   return body.length >= MIN_JD_CHARS ? body : '';
 }
 
