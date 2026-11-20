@@ -21,6 +21,10 @@ export type Job = {
   input?: string; // the URL/posting it processed (links inbox rows to their worker)
   kind?: string;
   evaluationSections?: string[];
+  // A cover run's answers to modes/cover.md Step 6, kept so a failed run still
+  // shows them on its run page and refills the form (#7441). Read through
+  // storedCoverBrief(): a job restored from localStorage may predate this.
+  brief?: Record<string, string>;
   batchId?: string; // groups jobs fired together (e.g. "evaluate all Anthropic")
   status: "running" | "done" | "error" | "gated";
   gate?: JobGate;
@@ -148,6 +152,7 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         input: opts.input,
         kind: opts.kind,
         evaluationSections: opts.evaluationSections ? [...opts.evaluationSections] : undefined,
+        brief: opts.brief ? { ...opts.brief } : undefined,
         batchId: opts.batchId,
         status: "running",
         steps: [{ kind: "status", label: "Starting…", ts: Date.now() }],

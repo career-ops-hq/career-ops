@@ -246,6 +246,7 @@ const ATS_PROVIDERS = [
   {
     id: 'workday',
     // {tenant}.{shard}.myworkdayjobs.com[/{xx-XX}]/{site}/job/{jobPath...}
+    // {shard}.myworkdaysite.com[/{xx-XX}]/recruiting/{tenant}/{site}/job/{jobPath...}
     // Mirrors the tenant/shard/site detection in providers/workday.mjs, but for a
     // single posting rather than the board-wide CXS search endpoint. Workday's
     // per-job CXS endpoint (`/wday/cxs/{tenant}/{site}/job/{jobPath}`) is a
@@ -260,15 +261,23 @@ const ATS_PROVIDERS = [
     // it component-by-component.
     match(u) {
       if (atsVendorOf(u.href) !== 'workday') return null;
-      const m = `${u.hostname}${u.pathname}`.match(
+      const jobs = `${u.hostname}${u.pathname}`.match(
         /^([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)\/job\/(.+?)\/?$/
       );
-      if (!m) return null;
-      const [, tenant, shard, site, jobPath] = m;
-      return { tenant, shard, site, jobPath };
+      if (jobs) {
+        const [, tenant, shard, site, jobPath] = jobs;
+        return { hostKind: 'jobs', tenant, shard, site, jobPath };
+      }
+      const siteMatch = `${u.hostname}${u.pathname}`.match(
+        /^(wd[\w-]*)\.myworkdaysite\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?recruiting\/([\w-]+)\/([^/?#]+)\/job\/(.+?)\/?$/
+      );
+      if (!siteMatch) return null;
+      const [, shard, tenant, site, jobPath] = siteMatch;
+      return { hostKind: 'site', tenant: tenant.toLowerCase(), shard, site, jobPath };
     },
-    api: ({ tenant, shard, site, jobPath }) =>
-      `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobPath}`,
+    api: ({ hostKind, tenant, shard, site, jobPath }) => hostKind === 'site'
+      ? `https://${shard}.myworkdaysite.com/wday/cxs/${tenant}/${site}/job/${jobPath}`
+      : `https://${tenant}.${shard}.myworkdayjobs.com/wday/cxs/${tenant}/${site}/job/${jobPath}`,
     interpretStatuses: [403],
     async interpret(res) {
       let json;
