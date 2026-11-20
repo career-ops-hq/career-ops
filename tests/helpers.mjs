@@ -221,11 +221,27 @@ export const rmSync = (target, opts = {}) => {
   // removed as the link itself, never recursed into — even with recursive.
   const targetStat = lstatSync(target, { throwIfNoEntry: false });
   if (targetStat?.isSymbolicLink()) {
-    unlinkSync(target);
-    return;
+    // unlinkSync has no retry support of its own, so give the link removal
+    // the same transient-failure policy _rmSync applies below — the very
+    // Windows handle window (EBUSY/EMFILE/ENFILE/ENOTEMPTY/EPERM) this
+    // wrapper exists for — still removing only the link. Atomics.wait is the
+    // blocking sleep a synchronous retry loop needs.
+    const maxRetries = opts.maxRetries ?? 10;
+    const retryDelay = opts.retryDelay ?? 100;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        unlinkSync(target);
+        return;
+      } catch (err) {
+        if (attempt >= maxRetries || !TRANSIENT_UNLINK_ERRORS.has(err?.code)) throw err;
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelay);
+      }
+    }
   }
   return _rmSync(target, { maxRetries: 10, retryDelay: 100, ...opts });
 };
+
+const TRANSIENT_UNLINK_ERRORS = new Set(['EBUSY', 'EMFILE', 'ENFILE', 'ENOTEMPTY', 'EPERM']);
 
 /**
  * The per-script budget run() applies when a caller does not override it.
