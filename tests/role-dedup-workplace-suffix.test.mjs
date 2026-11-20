@@ -24,3 +24,12 @@ test('a seniority or team tag stays in the key', () => {
   assert.notEqual(normalizeRoleForDedup('Engineering Manager | Payments'), normalizeRoleForDedup('Engineering Manager'));
   assert.notEqual(normalizeRoleForDedup('Engineer - Platform'), normalizeRoleForDedup('Engineer'));
 });
+
+test('only the last workplace suffix is removed', () => {
+  const platform = normalizeRoleForDedup('Engineer - Platform');
+  assert.equal(normalizeRoleForDedup('Engineer - Platform - Remote'), platform);
+  assert.equal(normalizeRoleForDedup('Engineer - Platform, Remote'), platform);
+  assert.equal(normalizeRoleForDedup('Engineer - Platform — On-site'), platform);
+  assert.notEqual(platform, normalizeRoleForDedup('Engineer'));
+  assert.equal(normalizeRoleForDedup('Engineer - Remote - On-site'), normalizeRoleForDedup('Engineer'));
+});
