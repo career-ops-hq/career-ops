@@ -60,12 +60,26 @@ test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", ()
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing.")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key loaded successfully)")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; report not found)")), null);
+  assert.equal(
+    jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (API key loaded successfully)")),
+    null,
+  );
+  assert.equal(
+    jobErrorHint(errorJob(("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (API key loaded successfully; " + "x".repeat(120)).slice(0, 200))),
+    null,
+  );
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (API key loaded successfully)")), null);
   assert.equal(jobErrorHint(errorJob("rate limit reached for this account")), null);
 });
 
 test("a real sign-in line still asks you to sign in", () => {
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (please login)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (No CLI configured; login required)"))?.kind, "auth");
+  assert.equal(
+    jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (please login)"))?.kind,
+    "auth",
+  );
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Configuration loaded; please login)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (not authenticated)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Invalid API key)"))?.kind, "auth");

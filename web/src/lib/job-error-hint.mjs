@@ -19,9 +19,10 @@
 //   Rate limit. Any label that is a rate limit stays null. A Grok error event
 //   can be the 429 line itself, with no "Rate limit." prefix, and that line
 //   can still say "login" or "API key".
-//   "The CLI returned nothing." and "The CLI exited with an error." quote a
-//   stderr line. The quote asks for sign-in only when that line is a sign-in
-//   failure. "API key loaded successfully" and "API key configured" are not.
+//   "The CLI returned nothing.", "The CLI exited with an error.", and the
+//   partial-run message quote a stderr line. The quote asks for sign-in only
+//   when that line is a sign-in failure. "API key loaded successfully" and
+//   "API key configured" are not. "No CLI configured" is.
 //   Everything else (bad input, missing CV, no report written, etc.) -> null;
 //   the error text itself is the explanation.
 
@@ -41,13 +42,24 @@ const RATE_LIMIT_PATTERN = /(?<![\w-])429(?![\w-])|rate limit|too many requests/
 // "please login" is still a request when the same line says the key is configured.
 const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|configured)\b/i;
 // The key itself failed. "network connection failed" does not count.
-const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:is\s+|was\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)/i;
+const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:is\s+|was\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)|(?:\bnot\b|\bno\b)\s+(?:\w+\s+){0,3}configured\b/i;
 const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 
-/** The stderr quote on a canned message that did not already say to sign in. */
+const PARTIAL_RUN_PREFIX = "This run hit an error before finishing";
+
+/**
+ * The stderr quote on a message that did not already say to sign in.
+ * The partial-run message is cut at 200 characters, so the closing
+ * parenthesis may be missing.
+ */
 function nonAuthQuote(label) {
   const match = label.match(/^(The CLI returned nothing\.|The CLI exited with an error\.) \((.*)\)$/);
-  return match ? match[2] : null;
+  if (match) return match[2];
+  if (!label.startsWith(PARTIAL_RUN_PREFIX)) return null;
+  const open = label.lastIndexOf(" (");
+  if (open === -1) return null;
+  const detail = label.slice(open + 2);
+  return detail.endsWith(")") ? detail.slice(0, -1) : detail;
 }
 
 /** A quoted line asks for sign-in only when it is a sign-in failure. */
