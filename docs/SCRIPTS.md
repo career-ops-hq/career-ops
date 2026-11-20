@@ -1761,10 +1761,12 @@ that the flag cannot raise), and a summary prints the entries ranked, the number
 of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
 row is skipped, so you can work through a large pipeline in bounded passes.
 
-The ranking is done by the first agent CLI it finds installed, from its own
-list in `rank-pipeline.mjs`: `claude`, `opencode`, `codex`, `copilot`, `qwen`,
-`agy`, `grok`, `pi`, `omp`. No API key, no new
-dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
+`--cli <name>` picks the agent CLI that does the ranking. Without it, the
+ranker uses the CLI saved in `CAREER_OPS_CLI` (`node remember-cli.mjs <cli>`)
+when that one is installed. Otherwise it takes the first one installed from
+its own list in `rank-pipeline.mjs`: `claude`, `opencode`, `codex`, `copilot`,
+`qwen`, `agy`, `grok`, `pi`, `omp`. No API key, no new dependency, no new
+network endpoint. Each call sends a `cv.md` excerpt (the
 first ~2000 chars) and the selected postings through that CLI's own auth and
 provider handling — review your chosen CLI's data-retention/provider settings
 before running this on sensitive CV content.
