@@ -1204,7 +1204,7 @@ quarantine_attempt_artifacts() {
   shopt -s nullglob
   # The tracker path is not a glob, so a missing file would still be a loop
   # item. A rate-limit failure often has no report yet. Move only what exists.
-  for retry_artifact in "${REPORTS_DIR:-}/$report_num-"*.md "${TRACKER_DIR:-}/$id.tsv"; do
+  for retry_artifact in "${REPORTS_DIR:-}/$report_num-"*.md "${TRACKER_DIR:-}/$report_num-"*.tsv "${TRACKER_DIR:-}/$id.tsv"; do
     [[ -e "$retry_artifact" ]] || continue
     [[ "$retry_artifact" == *-RESERVED.md ]] && continue
     mkdir -p "$retry_quarantine"

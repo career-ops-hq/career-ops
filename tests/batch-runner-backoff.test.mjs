@@ -234,6 +234,8 @@ test('a rate-limit retry moves the failed report aside and leaves the reservatio
   writeFileSync(join(dir, 'reports', '001-role.md'), 'report\n');
   writeFileSync(join(dir, 'reports', '001-RESERVED.md'), 'reserved\n');
   writeFileSync(join(dir, 'tracker', '7.tsv'), 'row\n');
+  writeFileSync(join(dir, 'tracker', '001-acme.tsv'), 'match\n');
+  writeFileSync(join(dir, 'tracker', '002-other.tsv'), 'other\n');
   invoke(`${fn}
 REPORTS_DIR='${dir}/reports'
 TRACKER_DIR='${dir}/tracker'
@@ -244,6 +246,9 @@ quarantine_attempt_artifacts rate-retry`);
   assert.equal(existsSync(join(dir, 'reports', '001-role.md')), false);
   assert.equal(readFileSync(join(dir, 'reports', '001-RESERVED.md'), 'utf8'), 'reserved\n');
   assert.equal(existsSync(join(dir, 'tracker', '7.tsv')), false);
+  assert.equal(existsSync(join(dir, 'tracker', '001-acme.tsv')), false);
+  assert.equal(readFileSync(join(dir, 'tracker', '002-other.tsv'), 'utf8'), 'other\n');
   assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-001-role.md'), 'utf8'), 'report\n');
   assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-7.tsv'), 'utf8'), 'row\n');
+  assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-001-acme.tsv'), 'utf8'), 'match\n');
 }));
