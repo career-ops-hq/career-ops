@@ -73,7 +73,7 @@
 {"ats":"workable","board":"irth-solutions","careers_url":"https://apply.workable.com/irth-solutions","name":"Irth Solutions","source":"web-index:wayback@2026-11-14","contribution":"2026-11-18-santifer.4","added":"2026-11-18"}
 {"ats":"workable","board":"islacare","careers_url":"https://apply.workable.com/islacare","name":"Isla","source":"web-index:wayback@2026-11-14","contribution":"2026-11-18-santifer.4","added":"2026-11-18"}
 {"ats":"workable","board":"it1","careers_url":"https://apply.workable.com/it1","name":"iT1","source":"web-index:wayback@2026-11-14","contribution":"2026-11-18-santifer.4","added":"2026-11-18"}
-{"ats":"workable","board":"itac-1","careers_url":"https://apply.workable.com/itac-1","name":"ITAC","source":"ats-directory","contribution":"2026-11-20-santifer.66","added":"2026-11-20"}
+{"ats":"workable","board":"itac-1","careers_url":"https://apply.workable.com/itac-1","name":"ITAC","source":"ats-directory","contribution":"2026-11-20-santifer.66","added":"2026-11-20","retired":true,"retired_reason":"policy"}
 {"ats":"workable","board":"itecor","careers_url":"https://apply.workable.com/itecor","name":"Itecor","source":"web-index:wayback@2026-11-14","contribution":"2026-11-18-santifer.4","added":"2026-11-18"}
 {"ats":"workable","board":"item-america","careers_url":"https://apply.workable.com/item-america","name":"item America","source":"web-index:wayback@2026-11-14","contribution":"2026-11-18-santifer.4","added":"2026-11-18"}
 {"ats":"workable","board":"itg","careers_url":"https://apply.workable.com/itg","name":"Inspired Thinking Group (ITG)","source":"web-index:wayback@2026-11-14","contribution":"2026-11-18-santifer.4","added":"2026-11-18"}
