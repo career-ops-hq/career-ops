@@ -30,6 +30,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `text.md` | `text` | Tailored markdown CV (no PDF) |
 | `cover.md` | `cover` | Cover letter generator |
 | `email.md` | `email` | Application email drafts (draft-only) |
+| `proposal.md` | `proposal` | Job/Upwork proposal drafts as markdown files (draft-only; never submits) |
 | `contacto.md` | `contacto` | LinkedIn outreach messages |
 | `deep.md` | `deep` | Deep company-research prompt |
 | `gambit.md` | `gambit` | Create-a-role pitch for a role the company has not posted (records `Speculative`) |

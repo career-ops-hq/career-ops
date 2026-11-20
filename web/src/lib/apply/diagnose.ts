@@ -5,6 +5,8 @@ import { pickComboboxOption } from "./option-match.mjs";
 import { checkboxSelections } from "./checkbox-options.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
 import { isApplicationHref } from "./apply-link.mjs";
+import { factsOf } from "./drive-action.mjs";
+import { isSubmitControl } from "./submit-guard.mjs";
 
 export type { ApplyIssue };
 
@@ -197,10 +199,19 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
       const blocked = await blockedTriggerHref(page, href);
       if (blocked) return { blocked };
       const before = urlSnapshot(page);
-      await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).catch(() => {});
-      const landed = await blockedAfterAction(page, before, false);
-      if (landed) return { blocked: landed };
-      return { followed: before };
+      // A link that fails to load can leave the posting in place, and then
+      // the Apply control below is still the way in. A marker on the posting's
+      // window tells that apart from an error page that replaced it: Chrome's
+      // error page still reports the posting's URL.
+      const mark = `co-${Date.now()}-${Math.random()}`;
+      await page.evaluate((m) => { (window as unknown as { __coPosting?: string }).__coPosting = m; }, mark).catch(() => {});
+      const failed = await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 }).then(() => false, () => true);
+      const stayed = failed && (await page.evaluate(() => (window as unknown as { __coPosting?: string }).__coPosting).catch(() => null)) === mark;
+      if (!stayed) {
+        const landed = await blockedAfterAction(page, before, false);
+        if (landed) return { blocked: landed };
+        return { followed: before };
+      }
     }
     // 2) Otherwise click a visible Apply CTA (never a submit). dropNewTabs() has
     //    already neutralised target=_blank / window.open so it stays in-tab.
@@ -211,6 +222,11 @@ export async function tryApplyTrigger(page: Page): Promise<boolean | { blocked: 
     if ((await t.count().catch(() => 0)) && (await t.isVisible().catch(() => false))) {
       const label = (await t.innerText().catch(() => "")).toLowerCase();
       if (/submit|applied|withdraw/.test(label)) return false;
+      // The wording test misses a form's own <button type="submit">Apply</button>,
+      // and clicking that would file the form. Same guard as the drive loop;
+      // a control whose facts cannot be read is not clicked either.
+      const facts = await t.evaluate(factsOf, null).catch(() => null);
+      if (!facts || isSubmitControl(facts)) return false;
       const href = await t.getAttribute("href").catch(() => null);
       const blocked = await blockedTriggerHref(page, href);
       if (blocked) return { blocked };

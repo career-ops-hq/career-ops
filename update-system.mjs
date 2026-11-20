@@ -4217,9 +4217,10 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     try {
       const release = JSON.parse(releaseRaw);
       changelog = release.body || '';
-      const rawTag = String(release.tag_name || '').trim();
-      const match = rawTag.match(SEMVER_RE);
-      releaseVersion = match ? match[1] : '';
+      // Only a career-ops release counts, the same test apply() and the release
+      // channel's latestRelease() use. SEMVER_RE alone takes any `-v<semver>`
+      // tag, so a sibling `web-v2.0.0` release read as career-ops 2.0.0 (#7329).
+      releaseVersion = releaseTagVersion(release.tag_name);
     } catch {
       // Unparseable body; treat as no release source
     }
