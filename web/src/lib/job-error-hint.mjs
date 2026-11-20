@@ -38,8 +38,10 @@ const AUTH_PATTERN =
 const RATE_LIMIT_PATTERN = /\b429\b|rate limit|too many requests/i;
 
 // A success line can name a key without asking anyone to sign in.
+// "please login" is still a request when the same line says something loaded.
 const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded)\b/i;
 const SIGN_IN_FAILURE_RE = /\b(?:invalid|missing|expired|rejected|fail(?:ed|ure)?|unauthorized|revoked|denied)\b/i;
+const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 
 /** The stderr quote on a canned message that did not already say to sign in. */
 function nonAuthQuote(label) {
@@ -49,7 +51,9 @@ function nonAuthQuote(label) {
 
 /** A quoted line asks for sign-in only when it is a sign-in failure. */
 function quoteIsSignIn(detail) {
-  if (!detail || RATE_LIMIT_PATTERN.test(detail) || !AUTH_PATTERN.test(detail)) return false;
+  if (!detail || RATE_LIMIT_PATTERN.test(detail)) return false;
+  if (SIGN_IN_REQUEST_RE.test(detail)) return true;
+  if (!AUTH_PATTERN.test(detail)) return false;
   if (SIGN_IN_SUCCESS_RE.test(detail) && !SIGN_IN_FAILURE_RE.test(detail)) return false;
   return true;
 }
