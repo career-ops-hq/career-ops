@@ -1794,11 +1794,13 @@ const PERSONALIZATION_FILES = [
     path: 'modes/_profile.md',
     template: 'modes/_profile.template.md',
     impact: 'evaluations score against the template author\'s targeting, not yours',
+    emptyImpact: 'evaluations have none of your archetypes or targeting',
   },
   {
     path: 'modes/_brief.md',
     template: 'modes/_brief.template.md',
     impact: 'triage reads literal {placeholders} instead of your archetypes',
+    emptyImpact: 'triage has none of your archetypes',
   },
 ];
 
@@ -1813,7 +1815,7 @@ function templatePlaceholders(text) {
 // content. Missing files are NOT reported here — that is `missing`'s job.
 function unpersonalizedFiles(root) {
   const out = [];
-  for (const { path, template, impact } of PERSONALIZATION_FILES) {
+  for (const { path, template, impact, emptyImpact } of PERSONALIZATION_FILES) {
     const targetPath = join(root, ...path.split('/'));
     // The checkout's template first, as the web reads it, so doctor and the web
     // agree on which sections are still template text even when a separate data
@@ -1833,7 +1835,7 @@ function unpersonalizedFiles(root) {
     // placeholder, so it would pass as personalized while the web asks for
     // every section (#5340).
     if (!target.trim()) {
-      out.push({ path, reason: 'is empty', impact });
+      out.push({ path, reason: 'is empty', impact: emptyImpact });
       continue;
     }
     if (path === 'modes/_profile.md') {
