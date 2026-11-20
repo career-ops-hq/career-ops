@@ -6,6 +6,13 @@
 // row's own date to a positional scan (#2607). `isCrossReferencedMention` drops
 // the foreign ones.
 //
+// Attribution is decided by one clause model (see followup-cadence.mjs): the
+// note is split into clauses, each "applied ... date" owns a segment inside its
+// clause, every row pointer is attributed to exactly one date, and an undated
+// pointer's subject carries into the next clause across a `;`/`|` only. These
+// cases are the contract for that model, including the cases it deliberately
+// cannot read.
+//
 // The two failure directions are NOT symmetric, and every case below is written
 // with that in mind:
 //   - a false positive (a genuine date called foreign) discards a real measured
@@ -44,15 +51,18 @@ const FOREIGN = [
   // passes those and still fails these.
   ['applied 2026-09-20 to their other Staff req (row 51, 4.6/5)', 'pointer after the date'],
   ['Applied 2026-09-20 (via Greenhouse) to their other Staff req (row 51)', 'pointer in a LATER bracket group'],
+  // Depth-matched brackets: searching for the first `)` read this group as
+  // closing after "US" and missed the pointer entirely.
+  ['Applied 2026-09-20 elsewhere (via Ashby (US), row 51)', 'pointer after a NESTED bracket group'],
+  // A bare `#NNN` is the tracker-row spelling in this column wherever it sits;
+  // the label is what marks a req id. Asserted on both sides of the date so the
+  // two directions cannot drift apart.
+  ['Applied 2026-08-06 (#1311)', 'bare #id parenthetical after the date'],
 
   // #4953: and it can sit INSIDE the matched span, between "applied" and the
   // date it governs, where neither window reaches.
   ['Applied to their other req (row 51) on 2026-09-20', 'pointer between "applied" and its date'],
 
-  // #4953: a date whose own clause points BACK at a sibling stays the
-  // sibling's, however many clauses intervene. The separator rule below must
-  // stop implicit carryover only.
-  ['Sibling #154 is live; same ATS; applied 2026-08-04 to that sibling', 'date clause refers back to the sibling'],
 ];
 
 // Dates that are THIS row's own. Several of these are deliberate exclusions
@@ -68,7 +78,11 @@ const OWN = [
   ['Applied on 2026-08-25 via Ashby', '2026-08-25', 'channel phrasing after the date (#4084)'],
   // First-wins among a row's OWN dates: a later status date must not displace
   // the submission date.
-  ['Applied 2026-06-09. No response; discarded 2026-06-18.', '2026-06-09', 'first of several own dates'],
+  // Two real `applied` candidates, so this actually pins the ordering: with
+  // only one candidate (a later date after "discarded") a switch to last-wins
+  // would still pass.
+  ['Applied 2026-06-09 via Ashby; applied 2026-06-18 again by mistake', '2026-06-09', 'first of several own dates'],
+  ['Applied 2026-06-09. No response; discarded 2026-06-18.', '2026-06-09', 'a later non-apply date is not a candidate'],
 
   // A sentence break always ends a pointer's scope, in both directions.
   ['Sibling #140 was slow. Applied 2026-08-06.', '2026-08-06', 'sentence break after the pointer'],
@@ -110,10 +124,25 @@ const OWN = [
 
   // The forward scan is bracketed, word-spelled and clause-bounded. Each limit
   // keeps a real date that a looser rule discarded or a tighter one adopted.
-  ['Applied 2026-11-20 and row 51 applied 2026-09-20', '2026-11-20', 'unbracketed forward prose is left alone'],
-  ['Applied 2026-08-06 (Req #1311)', '2026-08-06', 'forward labelled-hash parenthetical'],
-  ['Applied 2026-08-06 (#1311)', '2026-08-06', 'forward bare-hash parenthetical'],
-  ['Applied 2026-11-20 (via Greenhouse, see notes)', '2026-11-20', 'forward bracket naming no row'],
+  // A pointer BETWEEN two dates: unbracketed it is the subject of the "applied"
+  // that follows it, bracketed it is an appositive for the clause just read. A
+  // comma is not a clause boundary, so without that distinction both dates in
+  // the second note were thrown away.
+  ['Applied 2026-11-20 and row 51 applied 2026-09-20', '2026-11-20', 'unbracketed pointer belongs to the NEXT date'],
+  ['Applied 2026-11-20 here, applied 2026-09-20 elsewhere (row 51)', '2026-11-20', 'bracketed pointer belongs to the PRECEDING date'],
+  // A TRAILING pointer cites the date before it only when it is bracketed. Both
+  // of these put a pointer after a date with nothing after it, so position
+  // alone cannot separate an appositive citation from prose that merely
+  // COMPARES this submission with a sibling's. The second is a real tracker
+  // row, found by replaying the model over one: calling it a citation discards
+  // a genuine measured date.
+  [
+    'APPLIED 2026-11-13 via the Ashby form (https://jobs.example.com/x), confirmed submitted, same day as #267',
+    '2026-11-13',
+    'an unbracketed trailing pointer is a comparison, not a citation',
+  ],
+  ['Applied 2026-08-06 (Req #1311)', '2026-08-06', 'labelled-hash parenthetical after the date'],
+  ['Applied 2026-11-20 (via Greenhouse, see notes)', '2026-11-20', 'bracket naming no row'],
   ['Applied 2026-11-20; (row 51 is the other one)', '2026-11-20', 'a separator blocks the forward scan'],
   [
     'Applied 2026-11-20 (via Greenhouse; see row 51 for a different role)',
@@ -121,6 +150,12 @@ const OWN = [
     'a separator INSIDE the bracket ends the citation',
   ],
   ['Applied 2026-11-20 (compare with row 51', '2026-11-20', 'an unfinished bracket is not a citation'],
+  // A line break is a hard clause boundary, like a sentence break: a pointer's
+  // subject never carries across one.
+  ['Applied 2026-09-20 elsewhere (row 51)\nApplied 2026-11-20', '2026-11-20', 'a line break ends the pointer\'s scope'],
+  // "this role" names the CURRENT row, so a rule that read such wording as a
+  // reference to the sibling discarded this date.
+  ['Sibling #154 is live; same ATS; Applied 2026-08-04 for this role', '2026-08-04', 'a pointer two clauses back does not carry'],
 
   // An undated pointer's subject carries across ONE semicolon-joined clause,
   // not a chain of them. Found by replaying the guard over a populated tracker:
@@ -208,4 +243,29 @@ test("a note stating this row's own date is reported as measured", () => {
     { appliedDate: '2026-11-20', appDateSource: 'notes' },
     'the notes outrank both the ledger and the evaluation date',
   );
+});
+
+// What the model deliberately cannot read, asserted so the limit is visible
+// rather than discovered. An undated pointer's subject carries exactly one
+// clause, so a pointer further back stops governing -- which is right for a
+// note whose later clauses are about other things, and wrong for one that
+// points back in words.
+//
+// Telling those apart needs the anaphora ("to that sibling") read. Matching
+// such wording was tried and produced three fresh misattributions, including
+// discarding a real date from "Applied 2026-08-04 for this role", where the
+// wording names the CURRENT row. One documented limit in the cheaper direction
+// beats three bugs, so these resolve to the row's own date.
+test('known limit: a pointer that is referred back to in words is not followed', () => {
+  for (const notes of [
+    'Sibling #154 is live; same ATS; applied 2026-08-04 to that sibling',
+    'Sibling #154 is live; same ATS; For that sibling, Applied 2026-08-04',
+    'Sibling #154 is live; same ATS; Applied to that sibling on 2026-08-04',
+  ]) {
+    assert.equal(parseAppliedDate(notes), '2026-08-04', notes);
+  }
+
+  // One clause closer and it does carry, which is what keeps the common
+  // two-roles-at-one-employer note correct.
+  assert.equal(parseAppliedDate('Sibling #154 is live; applied 2026-08-04 to that sibling'), null);
 });
