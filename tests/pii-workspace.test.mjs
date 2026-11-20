@@ -656,5 +656,94 @@ test('scrub removes re-scrubbed tokens from map.__restored__ before saving map',
   });
 });
 
+test('scrub reserves IDs already used by markers in text so new tokens do not collide', () => {
+  const mockGuard = { textValues: new Set(['Jane Smith']) };
+  const map = {};
+  // text already contains unmapped marker PRIVACY_VALUE_1
+  const text = 'Existing note: PRIVACY_VALUE_1; Candidate: Jane Smith';
+  const scrubbed = scrub(text, mockGuard, map);
+
+  // Jane Smith must NOT receive PRIVACY_VALUE_1; it must receive PRIVACY_VALUE_2
+  assert.equal(scrubbed, 'Existing note: PRIVACY_VALUE_1; Candidate: PRIVACY_VALUE_2');
+  assert.equal(map['PRIVACY_VALUE_1'], undefined);
+  assert.equal(map['PRIVACY_VALUE_2'], 'Jane Smith');
+
+  // On restore, unmapped PRIVACY_VALUE_1 is preserved as-is
+  const restored = rehydrate(scrubbed, map);
+  assert.equal(restored, text);
+});
+
+test('scrubbing PRIVACY_VALUE_10 does not invalidate progress for PRIVACY_VALUE_1 in map.__restored__', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+    const configDir = path.join(dir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    const privacyPath = path.join(configDir, 'privacy.yml');
+
+    fs.writeFileSync(
+      privacyPath,
+      'protected:\n  names:\n    - Target Company\n',
+      'utf8'
+    );
+    fs.writeFileSync(cvFile, 'Works at: Target Company', 'utf8');
+
+    // Token map already has 9 tokens, so next token allocated is PRIVACY_VALUE_10
+    const existingTokens = {};
+    for (let i = 1; i <= 9; i++) {
+      existingTokens[`PRIVACY_VALUE_${i}`] = `Value_${i}`;
+    }
+
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __files__: ['cv.md'],
+        __restored__: ['PRIVACY_VALUE_1'],
+        ...existingTokens,
+      }),
+      'utf8'
+    );
+
+    const resScrub = spawnSync(process.execPath, [scriptPath, 'scrub'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PRIVACY: privacyPath },
+    });
+    assert.equal(resScrub.status, 0);
+
+    const savedMap = JSON.parse(fs.readFileSync(tokenMap, 'utf8'));
+    // Target Company received PRIVACY_VALUE_10
+    assert.equal(savedMap['PRIVACY_VALUE_10'], 'Target Company');
+    // PRIVACY_VALUE_1 must remain in __restored__
+    assert.deepEqual(savedMap.__restored__, ['PRIVACY_VALUE_1']);
+  });
+});
+
+test('status detects legacy tokens in map present in user files', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+
+    // Token map contains legacy token __NAME__
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __NAME__: 'Alice Smith',
+      }),
+      'utf8'
+    );
+    fs.writeFileSync(cvFile, 'Candidate: __NAME__', 'utf8');
+
+    const res = spawnSync(process.execPath, [scriptPath, 'status'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /cv\.md: contains tokens/);
+  });
+});
+
+
 
 

@@ -72,6 +72,10 @@ function scrub(text, guard, map) {
       if (n > maxIndex) maxIndex = n;
     }
   }
+  for (const match of text.matchAll(/\bPRIVACY_VALUE_(\d+)\b/g)) {
+    const n = parseInt(match[1], 10);
+    if (n > maxIndex) maxIndex = n;
+  }
   let index = maxIndex;
 
   // Every match is found in the original text, never in text an earlier value
@@ -224,7 +228,9 @@ async function main() {
           if (!map.__files__) map.__files__ = [];
           if (!map.__files__.includes(file)) map.__files__.push(file);
           if (Array.isArray(map.__restored__)) {
-            map.__restored__ = map.__restored__.filter((t) => !scrubbed.includes(t));
+            map.__restored__ = map.__restored__.filter(
+              (t) => !new RegExp(`\\b${escapeRe(t)}\\b`).test(scrubbed)
+            );
           }
           // Persist the token map immediately before each rewritten file loses its real values.
           saveTokenMap(map);
@@ -262,7 +268,9 @@ async function main() {
           if (mapDirty) saveTokenMap(map);
         }
       } else {
-        const hasTokens = /PRIVACY_VALUE_|PRIVACY_REDACTED_|CANDIDATE_/.test(content);
+        const mapTokens = Object.keys(map).filter(isTokenKey);
+        const hasMapToken = mapTokens.some((t) => new RegExp(`\\b${escapeRe(t)}\\b`).test(content));
+        const hasTokens = hasMapToken || /PRIVACY_VALUE_|PRIVACY_REDACTED_|CANDIDATE_/.test(content);
         console.log(`[privacy] ${file}: ${hasTokens ? 'contains tokens' : 'no tokens detected'}`);
       }
     }
