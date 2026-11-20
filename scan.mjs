@@ -2683,6 +2683,23 @@ function companyStemForDedup(name) {
   return key || folded;
 }
 
+// "Acme, Inc." and "Acme Inc." are the same explicit alias as "Acme Inc".
+// The suffix word stays, so the label is not the stem "acme". Punctuation
+// inside the remaining name stays.
+function companyAliasSpelling(name) {
+  const key = String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = TRAILING_LEGAL_SUFFIX_RE.exec(key);
+  if (!match || match.index === 0) return key;
+  const suffixWord = match[0].replace(/^[\s,.]+/u, '').replace(/\.+$/u, '');
+  const head = key.slice(0, match.index).replace(/[\s,.]+$/u, '').trim();
+  if (!head || !suffixWord) return key;
+  return `${head} ${suffixWord}`;
+}
+
 /**
  * Build a company-name canonicalizer from `config.company_aliases`.
  *
@@ -2737,6 +2754,8 @@ export function buildCompanyCanonicalizer(aliases) {
       for (const a of arr) {
         const alias = defaultCompanyNormalizer(a);
         claim(explicitTargets, alias, canon);
+        const spelled = companyAliasSpelling(alias);
+        if (spelled !== alias) claim(explicitTargets, spelled, canon);
         const stemmed = companyStemForDedup(alias);
         if (stemmed && stemmed !== alias) claim(stemTargets, stemmed, canon);
       }
@@ -2764,6 +2783,12 @@ export function buildCompanyCanonicalizer(aliases) {
     const key = defaultCompanyNormalizer(name);
     if (ambiguousExplicit.has(key)) return key;
     if (map.has(key)) return map.get(key);
+    // Suffix punctuation is still the explicit alias. The stem comes after.
+    const spelled = companyAliasSpelling(key);
+    if (spelled !== key) {
+      if (ambiguousExplicit.has(spelled)) return spelled;
+      if (map.has(spelled)) return map.get(spelled);
+    }
     const stemmed = companyStemForDedup(key);
     if (stemmed !== key && map.has(stemmed)) return map.get(stemmed);
     return key;

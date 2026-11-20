@@ -49,12 +49,23 @@ test('an explicit alias wins over a stem inferred from another alias', () => {
   const canon = buildCompanyCanonicalizer({ Alpha: ['Acme Inc'], Beta: ['Acme'] });
   assert.equal(canon('Acme'), 'beta');
   assert.equal(canon('Acme Inc'), 'alpha');
+  assert.equal(canon('Acme Inc.'), 'alpha');
+  assert.equal(canon('Acme, Inc.'), 'alpha');
+  assert.equal(
+    companyRoleDedupKey('Acme Inc.', 'Engineer', canon),
+    companyRoleDedupKey('Acme Inc', 'Engineer', canon),
+  );
+  assert.notEqual(
+    companyRoleDedupKey('Acme', 'Engineer', canon),
+    companyRoleDedupKey('Acme Inc.', 'Engineer', canon),
+  );
   assert.notEqual(canon('Acme'), canon('Alpha'));
 });
 
 test('an ambiguous alias stays itself when its stem is a canonical name', () => {
   const canon = buildCompanyCanonicalizer({ Acme: [], Beta: ['Acme Inc'], Gamma: ['Acme Inc'] });
   assert.equal(canon('Acme Inc'), 'acme inc');
+  assert.equal(canon('Acme, Inc.'), 'acme inc');
   assert.equal(canon('Acme'), 'acme');
   assert.notEqual(canon('Acme Inc'), canon('Acme'));
 });
