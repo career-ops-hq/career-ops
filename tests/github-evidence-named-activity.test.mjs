@@ -276,12 +276,12 @@ function cli(root, args = ['--json'], runGh = fakeGh().runner) {
   try {
     const res = cli(root);
     check(res.code === 0, res.code === 0 ? 'CLI with a previous scan -> exit 0' : `CLI with a previous scan -> exit 0 (got ${res.code}: ${res.err.trim()})`);
-    const written = JSON.parse(readFileSync(join(root, 'output', 'github-evidence-2026-10-22.json'), 'utf8'));
+    const written = JSON.parse(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-22.json'), 'utf8'));
     check(written.scannedAt === '2026-10-22T09:00:00.000Z' && written.since.source === 'previous-scan' && written.since.at === SCANNED,
       'CLI: the written report has scannedAt and uses the previous scan as its baseline');
     const w = written.claimCheck.namedWithNewActivity.find((r) => r.repo === 'acme/widgets');
     check(w?.newMerged === 2 && w.newCommits?.count === 2, `CLI: commit times come through the commit search (got ${JSON.stringify(w && { m: w.newMerged, c: w.newCommits })})`);
-    check(readFileSync(join(root, 'output', 'github-evidence-2026-10-22.md'), 'utf8').includes('## Named in cv.md or article-digest.md: new activity'),
+    check(readFileSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-22.md'), 'utf8').includes('## Named in cv.md or article-digest.md: new activity'),
       'CLI: the Markdown report has the section');
     check(readFileSync(join(root, 'article-digest.md'), 'utf8') === digestBefore, 'CLI: article-digest.md is never modified');
 
@@ -313,7 +313,7 @@ function cli(root, args = ['--json'], runGh = fakeGh().runner) {
       const res = cli(root, bad, runner);
       check(res.code === 1 && calls.length === 0 && /--since takes a date/.test(res.err), `${bad.join(' ')} -> exit 1 before any gh call`);
     }
-    check(!existsSync(join(root, 'output', 'github-evidence-2026-10-22.json')), 'a rejected --since writes nothing');
+    check(!existsSync(join(root, 'output', 'diagnostics', 'github-evidence-2026-10-22.json')), 'a rejected --since writes nothing');
   } finally { rmSync(root, { recursive: true, force: true }); }
   const missing = spawnSync(NODE, [join(ROOT, 'github-evidence.mjs'), '--since'], { encoding: 'utf8', timeout: 30000 });
   check(missing.status === 1 && /--since/.test(missing.stderr), '--since with no value fails fast at the command line');

@@ -72,7 +72,7 @@ Before Block A or any tracker, report, or CV write, if the JD suggests an agency
 
 ## GitHub evidence freshness
 
-GitHub work reaches `cv.md` and `article-digest.md` only when the user runs `expand`, whose optional GitHub evidence step writes `output/github-evidence-{date}.json`. After the gates above and before Block A, run this once:
+GitHub work reaches `cv.md` and `article-digest.md` only when the user runs `expand`, whose optional GitHub evidence step writes `output/diagnostics/github-evidence-{date}.json`. After the gates above and before Block A, run this once:
 
 ```bash
 node evidence-freshness.mjs

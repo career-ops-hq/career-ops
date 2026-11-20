@@ -1667,7 +1667,9 @@ export const ARTIFACT_KINDS = ['cv', 'cover'];
  *
  * Precedence, most specific first:
  *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
- *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *   2. A standard name from lib/output-names.mjs (`{NNN}-{company}-{kind}-...`),
+ *      which carries its kind as a token after the report number and company.
+ *   2b. A `cv-` prefix, the CV convention every generator writes. It wins over
  *      the cover check so a company whose own name starts with "Cover" keeps
  *      its CV filed as a CV.
  *   3. `cover` as the leading or trailing token: both real conventions, the
@@ -1694,6 +1696,25 @@ export function resolveArtifactKind(explicit, outputPath) {
   }
 
   const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  // Standard names from lib/output-names.mjs (#6667) lead with the report
+  // number, so neither the prefix nor the suffix rules below see their kind
+  // token. A renderer-owned `.overflow` / `.overflow-2` draft keeps its kind.
+  // Read inline rather than imported: isolated generate-pdf fixtures copy a
+  // fixed list of this script's imports. tests/pdf-index-kind.test.mjs keeps it
+  // in step with parseOutputName(). Exactly one kind token, else it falls
+  // through (a name carrying two is ambiguous without the report's company).
+  const stdName = name.replace(/\.overflow(-\d+)?$/, '');
+  // Count only the kind words between two dashes in the name's head
+  // (`{company}-{kind}-{candidate}`), as parseOutputName() does: a company that
+  // starts with "Cover" or a candidate that ends with it carries no second
+  // kind, while adjacent tokens ("-cover-cv-") are both seen. Read inline
+  // rather than imported (fixtures copy a fixed list of imports);
+  // tests/pdf-index-kind.test.mjs keeps it in step with the builder.
+  const stdHead = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?$/.exec(stdName);
+  const stdKinds = stdHead
+    ? stdHead[1].split('-').slice(1, -1).filter((part) => part === 'cv' || part === 'cover')
+    : [];
+  if (stdKinds.length === 1) return { kind: stdKinds[0], source: 'name' };
   if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
   if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
     return { kind: 'cover', source: 'name' };
