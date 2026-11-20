@@ -2706,6 +2706,9 @@ function companyStemForDedup(name) {
  */
 export function buildCompanyCanonicalizer(aliases) {
   const map = new Map();
+  // An explicit alias claimed by two canonical names. Lookup returns that
+  // label unchanged, before the suffix stem can fold it into one of them.
+  const ambiguousExplicit = new Set();
   if (aliases && typeof aliases === 'object' && !Array.isArray(aliases)) {
     const entries = Object.entries(aliases);
     const canonicalKeys = new Set();
@@ -2718,28 +2721,36 @@ export function buildCompanyCanonicalizer(aliases) {
       canonicalKeys.add(canon);
     }
 
-    const aliasTargets = new Map();
+    const explicitTargets = new Map();
+    const stemTargets = new Map();
+    const claim = (bucket, form, canon) => {
+      // A canonical key keeps its own identity, even when it is also the
+      // suffix-stripped form of someone else's alias.
+      if (!form || canonicalKeys.has(form)) return;
+      if (!bucket.has(form)) bucket.set(form, new Set());
+      bucket.get(form).add(canon);
+    };
     for (const [canonical, list] of entries) {
       const canon = defaultCompanyNormalizer(canonical);
       if (!canon) continue;
       const arr = Array.isArray(list) ? list : [list];
       for (const a of arr) {
         const alias = defaultCompanyNormalizer(a);
+        claim(explicitTargets, alias, canon);
         const stemmed = companyStemForDedup(alias);
-        for (const form of stemmed && stemmed !== alias ? [alias, stemmed] : [alias]) {
-          // A canonical key keeps its own identity, even when it is also the
-          // suffix-stripped form of someone else's alias.
-          if (!form || canonicalKeys.has(form)) continue;
-          if (!aliasTargets.has(form)) aliasTargets.set(form, new Set());
-          aliasTargets.get(form).add(canon);
-        }
+        if (stemmed && stemmed !== alias) claim(stemTargets, stemmed, canon);
       }
     }
 
-    // Ambiguous aliases fail open as their raw normalized label. This may allow
-    // a duplicate through, but it cannot silently suppress another company.
-    for (const [alias, targets] of aliasTargets) {
+    // An explicit alias wins over a stem inferred from a different alias.
+    // An ambiguous explicit alias stays out of the map.
+    for (const [alias, targets] of explicitTargets) {
       if (targets.size === 1) map.set(alias, targets.values().next().value);
+      else ambiguousExplicit.add(alias);
+    }
+    for (const [stem, targets] of stemTargets) {
+      if (explicitTargets.has(stem) || targets.size !== 1) continue;
+      map.set(stem, targets.values().next().value);
     }
   }
 
@@ -2751,6 +2762,7 @@ export function buildCompanyCanonicalizer(aliases) {
    */
   return function canonicalizeCompany(name) {
     const key = defaultCompanyNormalizer(name);
+    if (ambiguousExplicit.has(key)) return key;
     if (map.has(key)) return map.get(key);
     const stemmed = companyStemForDedup(key);
     if (stemmed !== key && map.has(stemmed)) return map.get(stemmed);
