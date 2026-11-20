@@ -171,7 +171,7 @@ function stripTags(s) {
   let out = s;
   do {
     prev = out;
-    out = out.replace(/<[^>]+>/g, '');
+    out = out.replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? '' : tag));
   } while (out !== prev);
   // A malformed/nested bracket construct (`<<a>b>`) can leave a lone `>` (or,
   // symmetrically, a lone `<`) behind even at fixed point: the loop above only

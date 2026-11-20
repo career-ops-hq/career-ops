@@ -1,5 +1,5 @@
 // tests/openrouter-runner-finish-reason.test.mjs — openrouter-runner saves only
-// a reply that finished, as openai-eval (#3949) and openai-tailor already do.
+// a reply that finished, as openai-eval.mjs (#3949) and openai-tailor.mjs already do.
 //
 // The runner read choices[0].message.content and never looked at
 // finish_reason. A reply cut off at max_tokens still carries the block

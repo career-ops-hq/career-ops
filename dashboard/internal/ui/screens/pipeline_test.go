@@ -914,3 +914,290 @@ func TestSpeculativeHasItsOwnStatusColour(t *testing.T) {
 		}
 	}
 }
+
+// Company and role do not identify a tracker row. Two report-less rows for one
+// company and role — a leveled variant and its bare title — both match the
+// restore, so a status change that reorders them could leave the cursor on the
+// sibling. A retry after a partial save writes to whatever the cursor is on, so
+// the restore has to prefer the row's own identity (#7331 review).
+func TestWithReloadedDataRestoresTheSameRowAmongSiblings(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Applied"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.sortMode = sortStatus
+	pm.applyFilterAndSort()
+
+	idx := -1
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			idx = i
+		}
+	}
+	if idx == -1 {
+		t.Fatal("premise: #32 is visible")
+	}
+	pm.cursor = idx
+	if app, _ := pm.CurrentApp(); app.Number != 32 {
+		t.Fatalf("premise: the cursor is on #32, got #%d", app.Number)
+	}
+
+	// #32 moves to Discarded, which sorts it behind its Applied sibling.
+	refreshed := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Discarded"},
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Applied"},
+	}
+	reloaded := pm.WithReloadedData(refreshed, model.PipelineMetrics{Total: len(refreshed)})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 {
+		t.Fatalf("the cursor moved to #%d; a retry would write to the wrong row", app.Number)
+	}
+}
+
+// A row with no identity at all still falls back to company and role, which is
+// better than an index into a re-sorted table.
+func TestWithReloadedDataFallsBackToCompanyAndRole(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 1, TrackerNumberMissing: true, Company: "Acme", Role: "AI", Status: "Evaluated"},
+		{Number: 2, TrackerNumberMissing: true, Company: "Globex", Role: "Platform", Status: "Evaluated"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Globex" {
+			pm.cursor = i
+		}
+	}
+
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 1, TrackerNumberMissing: true, Company: "Zzz Co", Role: "Ops", Status: "Evaluated"},
+		{Number: 2, TrackerNumberMissing: true, Company: "Acme", Role: "AI", Status: "Evaluated"},
+		{Number: 3, TrackerNumberMissing: true, Company: "Globex", Role: "Platform", Status: "Evaluated"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok || app.Company != "Globex" {
+		t.Fatalf("want the Globex row selected, got %+v (ok=%v)", app, ok)
+	}
+}
+
+// A duplicate tracker # (#1704) makes several unrelated rows answer to the same
+// `--row 32`. Identity alone cannot pick between them, so company and role
+// decide among exactly those rows.
+//
+// The fixture forces BOTH fields to be used: one twin shares only the company,
+// another only the role, so narrowing on either alone stays ambiguous. A fourth
+// row shares both fields but carries a different #, to check that narrowing
+// never reaches outside the identity matches.
+func TestWithReloadedDataPicksAmongRowsSharingATrackerNumber(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Zeta", Role: "Engineer", Status: "Interview"},
+		{Number: 40, Company: "Acme", Role: "Engineer", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 && app.Company == "Acme" && app.Role == "Engineer" {
+			pm.cursor = i
+		}
+	}
+	if app, _ := pm.CurrentApp(); app.Number != 32 || app.Company != "Acme" || app.Role != "Engineer" {
+		t.Fatalf("premise: the cursor is on #32 Acme/Engineer, got #%d %s/%s", app.Number, app.Company, app.Role)
+	}
+
+	// The selected row is now last among the rows answering to `--row 32`, so a
+	// first-match restore would land on a twin.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Zeta", Role: "Engineer", Status: "Interview"},
+		{Number: 40, Company: "Acme", Role: "Engineer", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Acme", Role: "Engineer", Status: "Discarded"},
+	}, model.PipelineMetrics{Total: 4})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 || app.Company != "Acme" || app.Role != "Engineer" {
+		t.Fatalf("the cursor moved to #%d %s/%s; want #32 Acme/Engineer", app.Number, app.Company, app.Role)
+	}
+}
+
+// Ambiguity is a property of the tracker, not of the visible rows. A tab filter
+// that hides a row's twin must not make a duplicate # look like a unique match.
+func TestWithReloadedDataCountsDuplicateTrackerNumbersOutsideTheFilter(t *testing.T) {
+	interviewTab := 0
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterInterview {
+			interviewTab = i
+		}
+	}
+	// Gamma keeps the retained index pointing somewhere other than Beta, so the
+	// identity restore and the index fallback name different rows.
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Delta", Role: "Platform", Status: "Interview"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.activeTab = interviewTab
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Company == "Delta" {
+			pm.cursor = i
+		}
+	}
+	if app, _ := pm.CurrentApp(); app.Company != "Delta" {
+		t.Fatalf("premise: the cursor is on Delta, got %q", app.Company)
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: Delta sits at index 1, got %d", pm.cursor)
+	}
+
+	// Delta leaves the Interview tab, so Beta is the only visible `--row 32` —
+	// but the tracker still holds two, so the selector is still ambiguous.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Beta", Role: "Analyst", Status: "Interview"},
+		{Number: 32, Company: "Delta", Role: "Platform", Status: "Rejected"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Company == "Beta" {
+		t.Fatal("the cursor landed on the hidden twin's row Beta; it is a different opening")
+	}
+	if app.Company != "Gamma" {
+		t.Fatalf("want the retained index (Gamma), got %q", app.Company)
+	}
+}
+
+// A merge that attaches a report link to the selected row changes which selector
+// a write would prefer, from `--row 32` to `--report-link 7`. The row is the same
+// one, so the cursor must stay on it.
+func TestWithReloadedDataFollowsARowThatGainsAReportLink(t *testing.T) {
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Evaluated"},
+		{Number: 33, Company: "Other Co", Role: "Ops", Status: "Evaluated"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			pm.cursor = i
+		}
+	}
+
+	// #32 now links report #7, and sorts second, so the retained index alone
+	// would select the other row.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 33, Company: "Other Co", Role: "Ops", Status: "Evaluated"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Evaluated", ReportNumber: "7"},
+	}, model.PipelineMetrics{Total: 2})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number != 32 {
+		t.Fatalf("the cursor moved to #%d; the row only gained a report link", app.Number)
+	}
+}
+
+// When an identified row is gone from the filtered list, a sibling sharing its
+// company and role is a different opening. Fall through to the index instead of
+// selecting it: the cursor is what a retry after a partial save writes to.
+func TestWithReloadedDataDoesNotFallBackToASiblingOfAnIdentifiedRow(t *testing.T) {
+	// No scores, so the default score sort is stable and keeps input order.
+	initial := []model.CareerApplication{
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 40, Company: "Zeta", Role: "Ops", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Number == 32 {
+			pm.cursor = i
+		}
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: #32 sits at index 1, got %d", pm.cursor)
+	}
+
+	// #32 is gone from the reloaded set; its sibling #33 is now at index 0, so
+	// the company-and-role fallback and the retained index name different rows.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 33, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 40, Company: "Zeta", Role: "Ops", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 2})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number == 33 {
+		t.Fatal("the cursor landed on the sibling #33; a status write there hits a different opening")
+	}
+	if app.Number != 40 {
+		t.Fatalf("want the retained index (#40), got #%d", app.Number)
+	}
+}
+
+// Two rows alike in #, company AND role are indistinguishable to every signal
+// the dashboard has. If the selected one leaves the tab, narrowing must not
+// hand the cursor to the visible twin — a status write there targets the twin's
+// report.
+func TestWithReloadedDataWillNotNarrowOntoAHiddenRowsIdenticalTwin(t *testing.T) {
+	interviewTab := 0
+	for i, tab := range getPipelineTabs() {
+		if tab.filter == filterInterview {
+			interviewTab = i
+		}
+	}
+	// Both #32 rows carry the same company and role; Gamma keeps the retained
+	// index pointing somewhere other than the twin.
+	initial := []model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview", Notes: "the selected one"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}
+	pm := NewPipelineModel(theme.NewTheme(""), initial, model.PipelineMetrics{Total: len(initial)}, t.TempDir(), 120, 40)
+	pm.activeTab = interviewTab
+	pm.applyFilterAndSort()
+	for i, app := range pm.filtered {
+		if app.Notes == "the selected one" {
+			pm.cursor = i
+		}
+	}
+	if pm.cursor != 1 {
+		t.Fatalf("premise: the selected twin sits at index 1, got %d", pm.cursor)
+	}
+
+	// The selected twin leaves the Interview tab.
+	reloaded := pm.WithReloadedData([]model.CareerApplication{
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Interview"},
+		{Number: 32, Company: "Inbound Co", Role: "Senior Engineer", Status: "Rejected", Notes: "the selected one"},
+		{Number: 41, Company: "Gamma", Role: "Data", Status: "Interview"},
+	}, model.PipelineMetrics{Total: 3})
+
+	app, ok := reloaded.CurrentApp()
+	if !ok {
+		t.Fatal("no row selected after the reload")
+	}
+	if app.Number == 32 {
+		t.Fatal("the cursor landed on the hidden row's identical twin; a write there hits the twin")
+	}
+	if app.Company != "Gamma" {
+		t.Fatalf("want the retained index (Gamma), got %q", app.Company)
+	}
+}

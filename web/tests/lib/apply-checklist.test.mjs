@@ -128,7 +128,6 @@ test("the apply page pastes from the tailored HTML of the indexed resume, not cv
 
 test("the indexed resume PDF stays the resume row, and its HTML is the paste source", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-paste-"));
-  const secret = path.join(path.dirname(root), "apply-paste-secret.html");
   try {
     const output = path.join(root, "output");
     fs.mkdirSync(output);
@@ -153,8 +152,37 @@ test("the indexed resume PDF stays the resume row, and its HTML is the paste sou
     fs.writeFileSync(path.join(dotCache, "note.html"), "<div class=\"section-title\">Work Experience</div><p>Dot Cache Employer</p>");
     const dotted = "12\toutput/cover-only.pdf\toutput/..cache/note.html\tpdf\t2026-02-01\n";
     assert.match(tailoredResumeText(dotted, "output/cover-only.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), /Dot Cache Employer/);
-    fs.writeFileSync(secret, "<div class=\"section-title\">Work Experience</div><p>Linked Employer</p>");
-    fs.symlinkSync(secret, path.join(output, "linked.html"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Its own case, because it needs a file symlink: Windows refuses one to an account
+// without SeCreateSymbolicLinkPrivilege (EPERM), and a junction cannot point at a
+// file. There it skips with the reason, and the case above still runs in full.
+test("an indexed HTML under output/ that is a symlink out of the workspace is not the paste source", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "apply-paste-"));
+  // Outside the workspace, and named after this run's root, so a concurrent run
+  // never removes the file this run's link points at.
+  const secret = path.join(path.dirname(root), `${path.basename(root)}-secret.html`);
+  try {
+    const output = path.join(root, "output");
+    fs.mkdirSync(output);
+    fs.writeFileSync(path.join(output, "cover-only.pdf"), "%PDF-1.4\n");
+    const linkedText = "<div class=\"section-title\">Work Experience</div><p>Linked Employer</p>";
+    // The same text in a regular file under output/ is read, so a null below
+    // comes from the link and not from the row.
+    fs.writeFileSync(path.join(output, "plain.html"), linkedText);
+    const plain = "12\toutput/cover-only.pdf\toutput/plain.html\tpdf\t2026-02-01\n";
+    assert.match(tailoredResumeText(plain, "output/cover-only.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), /Linked Employer/);
+    fs.writeFileSync(secret, linkedText);
+    try {
+      fs.symlinkSync(secret, path.join(output, "linked.html"));
+    } catch (err) {
+      if (process.platform !== "win32" || err.code !== "EPERM") throw err;
+      t.skip(`needs a file symlink, which this account cannot create (${err.code})`);
+      return;
+    }
     const linked = "12\toutput/cover-only.pdf\toutput/linked.html\tpdf\t2026-02-01\n";
     assert.equal(tailoredResumeText(linked, "output/cover-only.pdf", root, (abs) => fs.readFileSync(abs, "utf8")), null);
   } finally {

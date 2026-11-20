@@ -178,7 +178,7 @@ function assertHost(url) {
 
 /** @param {string} s */
 function stripTags(s) {
-  return decodeEntities(String(s).replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(String(s).replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /**

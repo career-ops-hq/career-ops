@@ -112,7 +112,7 @@ export function parseSearchResult(json) {
     const d = item?.MatchedObjectDescriptor;
     if (!d) continue;
     const id = item.MatchedObjectId != null ? String(item.MatchedObjectId) : String(d.PositionID || '');
-    const title = decodeEntities(String(d.PositionTitle || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(d.PositionTitle || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     const url = String(d.PositionURI || '').trim();
     if (!id || !title || !/^https?:\/\//i.test(url)) continue;
     const locs = Array.isArray(d.PositionLocation) ? d.PositionLocation : [];

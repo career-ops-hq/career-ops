@@ -11,8 +11,8 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { openTrackerTransaction } from '../tracker-utils.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { openTrackerTransaction, trackerLockDirFor, canonicalizeTrackerPath } from '../tracker-utils.mjs';
 import { parseStatusLog } from '../funnel-velocity.mjs';
 import { loadCanonicalStates } from '../tracker-utils.mjs';
 import { daysBetween, isoMinusDays, noteTag, classifyRows } from '../close-stale.mjs';
@@ -45,7 +45,7 @@ function makeRoot(rows, extra = {}) {
 
 function run(root, args = [], env = {}) {
   const cleanEnv = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '', ...env };
-  const r = spawnSync(process.execPath, [SCRIPT, ...(args.includes('--today') ? [] : ['--today', TODAY]), ...args], { encoding: 'utf-8', env: cleanEnv });
+  const r = spawnSync(process.execPath, [SCRIPT, ...(args.includes('--today') ? [] : ['--today', TODAY]), ...args], { encoding: 'utf-8', env: cleanEnv, timeout: 30_000 });
   let json = null;
   try { json = JSON.parse(r.stdout); } catch { /* summary mode or error */ }
   return { ...r, json };
@@ -204,6 +204,134 @@ test('--confirm writes status, note tag and one status-log line per row; only th
     assert.equal(readFileSync(log, 'utf-8'), `1\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d\n2\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d\n`);
     // The tracker write is an atomic replace: no temp file or lock directory is left behind.
     assert.deepEqual(readdirSync(join(root, 'data')).sort(), ['applications.md', 'status-log.tsv']);
+  });
+});
+
+// The ledger write is made to fail by a preload that replaces fs.appendFileSync
+// (and, when asked, fs.truncateSync) for the ledger only, and republishes them
+// with syncBuiltinESMExports() so the ESM import in tracker-utils.mjs sees
+// them. A directory in place of the ledger fails the read before anything is
+// written, and chmod does not withhold access on Windows or from a privileged
+// process. Reads of the ledger still work.
+//   writeFirst      the append writes its bytes, then fails (a failed close)
+//   refuseTruncate  the truncate that would undo the append fails too
+function refuseLedger(root, { writeFirst = false, refuseTruncate = false, refuseRestore = false } = {}) {
+  const preload = join(root, 'refuse-ledger.mjs');
+  writeFileSync(preload, `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const realAppend = fs.appendFileSync;
+const realTruncate = fs.truncateSync;
+const realRename = fs.renameSync;
+const isLedger = (path) => String(path).endsWith('status-log.tsv');
+let trackerWrites = 0;
+const fail = (code, message) => Object.assign(new Error(code + ': ' + message), { code });
+fs.appendFileSync = function appendFileSync(path, data, options) {
+  if (!isLedger(path)) return realAppend.call(this, path, data, options);
+  if (${writeFirst}) {
+    realAppend.call(this, path, data, options);
+    throw fail('EIO', 'i/o error, close');
+  }
+  throw fail('EACCES', 'permission denied');
+};
+fs.truncateSync = function truncateSync(path, len) {
+  if (${refuseTruncate} && isLedger(path)) throw fail('EACCES', 'permission denied');
+  return realTruncate.call(this, path, len);
+};
+// The tracker is replaced by a rename over it: the first is the closure, the
+// second the restore.
+fs.renameSync = function renameSync(from, to) {
+  if (${refuseRestore} && String(to).endsWith('applications.md') && ++trackerWrites === 2) throw fail('EIO', 'i/o error, rename');
+  return realRename.call(this, from, to);
+};
+syncBuiltinESMExports();
+`);
+  return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, SCRIPT, '--today', TODAY, '--confirm'], {
+    encoding: 'utf-8',
+    env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_TRACKER: '', CAREER_OPS_DATA_DIR: '', CAREER_OPS_FOLLOWUPS: '' },
+    timeout: 30_000,
+  });
+}
+
+// The failed run must have released the tracker lock. A rerun alone cannot
+// show that: lib/dir-lock.mjs reclaims a lock whose owner process has exited,
+// so the lock directory itself is checked first. Then a confirmed run takes
+// the lock, with a short wait.
+const lockReleased = (tracker) => !existsSync(trackerLockDirFor(canonicalizeTrackerPath(tracker)));
+const confirmAfterwards = (root) => run(root, ['--confirm'], { CAREER_OPS_TRACKER_LOCK_TIMEOUT_MS: '500' });
+
+test('a status-log append that fails puts the tracker back and fails the run', () => {
+  const rows = [row(1, OLD, 'Old Co', 'Applied', 'sent by email'), row(2, D61, 'Edge Co', 'Applied'), row(3, D60, 'Keep Co', 'Applied')];
+  withRoot(rows, {}, ({ tracker, log, root }) => {
+    const before = readFileSync(tracker, 'utf-8');
+    const r = refuseLedger(root);
+    assert.ok(exitedNonZero(r), describeSpawn(r, 'a closure the ledger did not record must fail the run'));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
+    assert.match(r.stderr, /Could not write the status log \(EACCES: permission denied\)\. The log is unchanged, so no row was closed\./);
+    assert.equal(readFileSync(tracker, 'utf-8'), before, 'every row is still Applied');
+    assert.equal(existsSync(log), false);
+    // The rows are still candidates after the failed run.
+    const dry = run(root);
+    assert.equal(dry.status, 0, describeSpawn(dry));
+    assert.deepEqual(closedNums(dry.json), [1, 2]);
+    // A confirmed run takes the lock and closes them.
+    const confirmed = confirmAfterwards(root);
+    assert.equal(confirmed.status, 0, describeSpawn(confirmed));
+    assert.equal(confirmed.json.metadata.closed, 2);
+  });
+});
+
+test('a read-only status log fails the run with the log unchanged, and the rows can be closed later', () => {
+  // A read-only ledger refuses the append and the truncate that would undo it,
+  // so appendLedgerRows() reports that it could not put the ledger back. Nothing
+  // was written, so the tracker goes back and a later run is not blocked.
+  const prior = `99\t2026-10-01\t-\tEvaluated\tset-status\t\n`;
+  withRoot([row(1, OLD, 'Old Co', 'Applied'), row(2, D61, 'Edge Co', 'Applied')], { 'status-log.tsv': prior }, ({ tracker, log, root }) => {
+    const before = readFileSync(tracker, 'utf-8');
+    const r = refuseLedger(root, { refuseTruncate: true });
+    assert.ok(exitedNonZero(r), describeSpawn(r));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
+    assert.match(r.stderr, /could not be put back \(EACCES\)\)\. The log is unchanged, so no row was closed\./);
+    assert.equal(readFileSync(tracker, 'utf-8'), before);
+    assert.equal(readFileSync(log, 'utf-8'), prior);
+    const confirmed = confirmAfterwards(root);
+    assert.equal(confirmed.status, 0, describeSpawn(confirmed));
+    assert.equal(confirmed.json.metadata.closed, 2, 'neither row is skipped as previously auto-closed');
+  });
+});
+
+test('lines the failed write left in the status log keep their rows closed, and the run fails', () => {
+  // The append wrote its lines and failed on close, and the truncate that would
+  // undo it failed too, so the close-stale lines stay in the log. Putting the
+  // tracker back would leave them naming Applied rows, which every later run
+  // skips as previously auto-closed. The rows stay closed to match.
+  withRoot([row(1, OLD, 'Old Co', 'Applied'), row(2, D61, 'Edge Co', 'Applied')], {}, ({ tracker, log, root }) => {
+    const r = refuseLedger(root, { writeFirst: true, refuseTruncate: true });
+    assert.ok(exitedNonZero(r), describeSpawn(r));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
+    assert.match(r.stderr, /2 row\(s\) stay closed, because .*status-log\.tsv may now hold part or all of their close-stale lines\. Check its last lines before running close-stale again\./);
+    const after = readFileSync(tracker, 'utf-8');
+    const tag = noteTag(TODAY, 60);
+    assert.equal(lineFor(after, 1), row(1, OLD, 'Old Co', 'Discarded', tag));
+    assert.equal(lineFor(after, 2), row(2, D61, 'Edge Co', 'Discarded', tag));
+    assert.equal(readFileSync(log, 'utf-8'), `1\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d\n2\t${TODAY}\tApplied\tDiscarded\tclose-stale\t60d\n`);
+    // The lock is released, and nothing is left to close.
+    const confirmed = confirmAfterwards(root);
+    assert.equal(confirmed.status, 0, describeSpawn(confirmed));
+    assert.equal(confirmed.json.metadata.closed, 0);
+  });
+});
+
+test('a tracker that cannot be put back leaves its rows closed, and the error names the status log', () => {
+  withRoot([row(1, OLD, 'Old Co', 'Applied'), row(2, D61, 'Edge Co', 'Applied')], {}, ({ tracker, log, root }) => {
+    const r = refuseLedger(root, { refuseRestore: true });
+    assert.ok(exitedNonZero(r), describeSpawn(r));
+    assert.ok(lockReleased(tracker), 'the failed run released the tracker lock');
+    assert.match(r.stderr, /Could not write the status log \(EACCES: permission denied\), and could not put the tracker back: 2 row\(s\) now read Discarded with no line in .*status-log\.tsv\./);
+    const after = readFileSync(tracker, 'utf-8');
+    const tag = noteTag(TODAY, 60);
+    assert.equal(lineFor(after, 1), row(1, OLD, 'Old Co', 'Discarded', tag));
+    assert.equal(lineFor(after, 2), row(2, D61, 'Edge Co', 'Discarded', tag));
+    assert.equal(existsSync(log), false);
   });
 });
 
