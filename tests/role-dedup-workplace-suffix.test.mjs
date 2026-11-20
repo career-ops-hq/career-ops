@@ -12,6 +12,8 @@ test('dotted country tags and workplace suffixes match the bare title', () => {
     'Software Engineer (work from home)',
     'Software Engineer - Remote',
     'Software Engineer, Remote',
+    'Software Engineer - On-site',
+    'Software Engineer, Work-from-home',
   ]) {
     assert.equal(normalizeRoleForDedup(title), bare, title);
   }

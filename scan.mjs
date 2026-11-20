@@ -2914,7 +2914,10 @@ export function normalizeRoleForDedup(role) {
     }
     // "Engineer - Remote" and "Engineer, Remote". Only a known place or
     // workplace tag, so "Engineer - Platform" keeps the team.
-    const trailed = title.match(/\s*[-–—,]\s+([^,|\-–—]+?)\s*$/);
+    // Hyphens stay inside the suffix ("On-site", "Work-from-home"). The
+    // delimiter is still the separated dash or comma, so "Engineer - Platform"
+    // is not read as a workplace tag.
+    const trailed = title.match(/\s*[-–—,]\s+([^,|–—]+?)\s*$/);
     if (trailed && isRoleLocationSuffix(trailed[1])) {
       title = title.slice(0, trailed.index).trimEnd();
       continue;
