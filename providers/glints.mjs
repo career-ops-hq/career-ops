@@ -21,6 +21,7 @@
 //                     built-in default query is used.
 
 import { BROWSER_LIKE_USER_AGENT, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const DEFAULT_API = 'https://glints.com/api/v2-alc/graphql';
 const DEFAULT_COUNTRY = 'ID';
@@ -203,6 +204,8 @@ export default {
     const fallbackCompany = entry.name || '';
 
     const allJobs = [];
+    // Why the walk stopped before the board's end, if it did; null otherwise.
+    let partialReason = null;
 
     for (let page = 1; page <= maxPages; page++) {
       const variables = {
@@ -221,12 +224,15 @@ export default {
       } catch (err) {
         if (page === 1) throw err;
         console.error(`glints: page ${page} fetch failed — ${err.message}`);
+        partialReason = 'fetch-error';
         break;
       }
 
       const jobsInPage = json?.data?.searchJobsV3?.jobsInPage;
       if (!Array.isArray(jobsInPage)) {
         if (page === 1) throw new Error(`glints: unexpected API response — ${JSON.stringify(json).slice(0, 200)}`);
+        console.error(`glints: page ${page} returned an unexpected response — keeping the ${allJobs.length} jobs read so far`);
+        partialReason = 'unrecognised-page';
         break;
       }
 
@@ -245,6 +251,9 @@ export default {
       await sleep(300, ctx);
     }
 
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(allJobs, partialReason, { fetched: allJobs.length });
     return allJobs;
   },
 };

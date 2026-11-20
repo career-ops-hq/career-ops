@@ -15,12 +15,27 @@ here, so review is the real control.
   were absorbed). Adds a maintenance commitment + a `config/plugins.example.yml`
   block + an `.env.example` entry.
 
-## What CI already checked (don't re-do by hand)
+## What CI checks, and what it cannot
 
 `plugin-registry-validate` validates the entry shape + uniqueness, clones each
 entry at its pinned SHA, and runs the min-file / manifest / static-audit checks
 in a no-secret, read-only sandbox (no plugin code is executed). If it's red,
 stop.
+
+A green run is not a clean bill. The audit is a token scan, not containment, and
+it cannot see everything a plugin loads. It prints `⚠ file:line` warnings for
+the loads it cannot read: an `import()` or `require()` with a computed
+specifier, `require` used as a value (an alias, `(0, require)(x)`,
+`require.call`, `module.require`), `createRequire`, and `arguments[...]`, which
+reaches `require` in a CommonJS file. It also warns on the ways to reach the
+`Function` constructor or call code without writing `eval(`: a `.constructor`
+or `['constructor']` read, `Function` used as a value, `Function.call`/`apply`/
+`bind`, and `Reflect.construct`/`apply`. Those are the places a plugin can load
+code the audit and the integrity lock never saw, so a warning is where review
+starts, not something CI already settled. Read every warned line by hand and
+confirm what it can reach. Do not take a clean run as proof there is nothing
+to find: read the diff for loads the scan cannot see, and for the files it does
+not read at all.
 
 ## Your judgment calls (the checklist)
 

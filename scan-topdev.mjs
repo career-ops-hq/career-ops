@@ -40,7 +40,7 @@
  *   node scan-topdev.mjs --help|-h
  */
 
-import { chromium } from 'playwright';
+import { chromium } from './lib/hardened-chromium.mjs';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';

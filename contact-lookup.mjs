@@ -10,14 +10,22 @@
  * script answers that one question: "do I already have a saved contact at
  * {company}?"
  *
- * MATCHING. Deliberately exact-key, not fuzzy: `data/contacts.tsv`'s company
- * column is normally written by `contacto`/`add` from the SAME company string
- * already in the tracker, so it reuses normalizeCompany() from
- * tracker-utils.mjs — the identical key merge-tracker.mjs, set-status.mjs and
- * company-history.mjs already use for same-company lookups — rather than a
- * second, drifting definition of "same company" (see AGENTS.md's Data
- * Contract on reusing shared helpers instead of inventing new ones). This is
- * NOT linkedin-join.mjs's fuzzy token matching: that script joins against
+ * MATCHING. Exact key or corporate form, never fuzzy. A contact matches when
+ * its company has the same normalizeCompany() key as the query, or when
+ * companiesMatchIgnoringCorporateForm() accepts the pair ("Acme Inc." for
+ * "Acme"). Both come from tracker-utils.mjs and are the rule set-status.mjs
+ * and outcome.mjs use to find a company's tracker row, so this script does
+ * not grow a second, drifting definition of "same company" (see AGENTS.md's
+ * Data Contract on reusing shared helpers instead of inventing new ones).
+ * The corporate-form tier matters here because the contact's company cell
+ * and the new application's company are often written at different times,
+ * one with the legal suffix and one without. That rule only accepts a pair
+ * when the shorter name is a token prefix of the longer one and every extra
+ * token is a corporate form, so "Acme Robotics" still never matches "Acme".
+ * The two tiers are OR-ed in one pass rather than tried in turn: a lookup
+ * lists every saved contact at the employer, and an exact-first fallback
+ * would hide the "Acme Inc." contacts as soon as one "Acme" contact existed.
+ * This is NOT linkedin-join.mjs's fuzzy token matching: that script joins against
  * free-text LinkedIn export data, which genuinely needs tolerance for
  * "Siemens" vs "Siemens Digital Industries Software"; this one joins against
  * a phonebook the candidate's own prior session wrote, where a fuzzy match
@@ -40,7 +48,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { parseContacts } from './contacts.mjs';
-import { normalizeCompany } from './tracker-utils.mjs';
+import { normalizeCompany, companiesMatchIgnoringCorporateForm } from './tracker-utils.mjs';
 import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
@@ -76,7 +84,10 @@ const companyQuery = flagValue(args, '--company') ?? null;
 export function findContactsByCompany(contacts, company) {
   const key = normalizeCompany(company);
   if (!key) return [];
-  return contacts.filter((c) => normalizeCompany(c.company) === key).reverse();
+  return contacts
+    .filter((c) => normalizeCompany(c.company) === key
+      || companiesMatchIgnoringCorporateForm(c.company, company))
+    .reverse();
 }
 
 function renderSummary(company, matches) {
@@ -125,6 +136,14 @@ function selfTest() {
   // Most-recently-listed first.
   assert(folded[0].name === 'Old Jane', 'most-recently-listed row comes first (reversed order)');
 
+  // Corporate-form variant (companiesMatchIgnoringCorporateForm): "Acme" finds
+  // the contacts saved as "Acme Inc.", still newest first.
+  const bare = findContactsByCompany(contacts, 'Acme');
+  assert(bare.length === 2 && bare[0].name === 'Old Jane', `corporate-form variant finds both Acme contacts, got ${bare.length}`);
+
+  // An extra token that is not a corporate form names a different employer.
+  assert(findContactsByCompany(contacts, 'Acme Robotics').length === 0, '"Acme Robotics" never matches "Acme Inc."');
+
   // A company with no saved contact returns an empty array, not throwing.
   assert(findContactsByCompany(contacts, 'Globex').length === 0, 'no match -> empty array');
 
@@ -137,7 +156,7 @@ function selfTest() {
   assert(findContactsByCompany(contacts, '').length === 0, 'empty query -> empty array, never "matches everything"');
   assert(findContactsByCompany(contacts, '?').length === 0, '"?" placeholder query -> empty array');
 
-  console.log('contact-lookup self-test OK (exact + normalized company matching, empty/placeholder guards)');
+  console.log('contact-lookup self-test OK (exact, normalized and corporate-form company matching, empty/placeholder guards)');
 }
 
 function main() {

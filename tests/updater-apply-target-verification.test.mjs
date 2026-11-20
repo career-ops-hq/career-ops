@@ -28,6 +28,7 @@
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { runInThisContext } from 'vm';
 import { pass, fail, makeUpdaterRepo, hermeticGitRunner } from './helpers.mjs';
 import {
   pinRefToCommit, pinInheritedTarget, versionAtRef, downgradeRefusal,
@@ -622,7 +623,9 @@ console.log('\n🧪 Testing that apply() verifies its update target (#3052)...')
   if (start < 0 || end < 0) {
     fail('could not locate the preserved VERSION completion banner');
   } else {
-    const render = new Function('preservedSet', 'local', 'remote', 'localVersion', 'console', source.slice(start, end));
+    const render = runInThisContext(
+      `(function (preservedSet, local, remote, localVersion, console) {\n${source.slice(start, end)}\n})`,
+    );
     for (const scenario of ['normal', 'force', 'preserved']) {
       const { dir, g, ctx } = makeRepo('co-3052-banner-');
       try {

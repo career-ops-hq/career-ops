@@ -51,6 +51,7 @@
 
 import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, fetchTextWithRetry, sleep } from './_http.mjs';
 import { cachedLookup } from './_cached-lookup.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Getro returns `created_at` as Unix seconds, but older boards have been seen
 // emitting ISO strings, so both shapes are handled. Non-positive values return
@@ -247,6 +248,8 @@ export default {
     // Rows the API returned on the last page read, before any is dropped: a
     // short last page means the board ended there, whatever the cap.
     let lastPageRows = 0;
+    // Why part of the board went unread, first cause first; null while it is whole.
+    let partialReason = null;
     for (; page < maxPages && page * HITS_PER_PAGE < total; page++) {
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
@@ -296,6 +299,7 @@ export default {
           : `${attempts} attempt${attempts === 1 ? '' : 's'}`;
         const pagesToFetch = Math.min(maxPages, Math.ceil(total / HITS_PER_PAGE));
         console.error(`⚠️  getro: ${entry.name || collectionId} truncated at page ${page + 1} of ${pagesToFetch} after ${attemptsText} (${out.length} jobs): ${cause}`);
+        partialReason ??= 'fetch-error';
         break;
       }
 
@@ -352,7 +356,11 @@ export default {
         ? `the ${HARD_MAX_PAGES}-page hard cap, so raising getro_max_pages reads no more`
         : 'raise getro_max_pages on this entry for more';
       console.error(`⚠️  getro: ${entry.name || collectionId} truncated at getro_max_pages=${maxPages} (${out.length}${of} jobs) — ${advice}`);
+      partialReason ??= 'page-cap';
     }
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs).
+    if (partialReason) markTruncated(out, partialReason, { fetched: out.length });
     return out;
   },
 };

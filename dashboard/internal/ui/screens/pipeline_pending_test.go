@@ -141,10 +141,10 @@ func TestInboxTabStaysVisibleOnANarrowTerminal(t *testing.T) {
 	if !strings.Contains(tabs, "INBOX (3)") || !strings.Contains(tabs, "›") {
 		t.Fatalf("narrow tabs = %q, want the active INBOX tab and a › marker", tabs)
 	}
-	m, _ = press(m, "right", "right", "right")
+	m, _ = press(m, "right", "right", "right", "right")
 	tabs = ansi.Strip(m.renderTabs())
 	if !strings.Contains(tabs, "INTERVIEW (0)") || !strings.Contains(tabs, "‹") {
-		t.Fatalf("narrow tabs two past ALL = %q, want the active INTERVIEW tab and a ‹ marker", tabs)
+		t.Fatalf("narrow tabs three past ALL = %q, want the active INTERVIEW tab and a ‹ marker", tabs)
 	}
 }
 
@@ -318,8 +318,9 @@ func TestInboxTrackerKeysDoNothing(t *testing.T) {
 	m := onInbox(t, newInboxModel(t, inboxRows()))
 	m, _ = press(m, "j")
 	before := m
-	// `e` queues the row and has its own tests (pipeline_pending_queue_test.go).
-	for _, k := range []string{"c", "d", "y", "D", "v", "C", "enter", "x", "u", "T", "i", "n", " "} {
+	// `e` queues the row, and `x` and `u` skip and undo; each has its own tests
+	// (pipeline_pending_queue_test.go, pipeline_pending_skip_test.go).
+	for _, k := range []string{"c", "d", "y", "D", "v", "C", "enter", "T", "i", "n", " "} {
 		after, cmds := press(m, k)
 		if cmds[0] != nil {
 			t.Errorf("%q returned a command on the Inbox", k)

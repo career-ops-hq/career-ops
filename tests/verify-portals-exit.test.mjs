@@ -5,7 +5,7 @@
 // into exit 99, which fails on every platform.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -27,6 +27,13 @@ const BOARD = `tracked_companies:
 function runVerify(portalsYml, args, { answer = `new Response('', { status: 404 })`, preloadBody = '' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'verify-portals-exit-'));
   try {
+    // A checkout with its own .env or config/plugins.yml makes the engine warn on
+    // stderr that they sit beside the code, not in the data folder (#7286). An
+    // empty copy in the data folder keeps these stderr checks the same for every
+    // checkout.
+    mkdirSync(join(dir, 'config'));
+    writeFileSync(join(dir, '.env'), '');
+    writeFileSync(join(dir, 'config', 'plugins.yml'), '');
     const portals = join(dir, 'portals.yml');
     writeFileSync(portals, portalsYml);
     const preload = join(dir, 'preload.mjs');

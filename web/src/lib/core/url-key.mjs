@@ -48,16 +48,25 @@ function foldHostname(host) {
  * Promote a known identity-bearing SPA fragment into a functional query key
  * before generic URL normalization drops the fragment. Most fragments are
  * presentation-only. The narrow exceptions are recognized `#/job/{id}` and
- * `#/jobs/{id}` routes; MokaHR keeps its established board-specific key.
+ * `#/jobs/{id}` routes, including a trailing slash and a `#!` prefix.
+ * A lang, language, or locale query inside that fragment is copied onto the
+ * comparison URL. MokaHR keeps its established board-specific key.
  *
  * @param {URL} url
  */
 export function promoteKnownFragmentIdentity(url) {
-  const match = /^#\/jobs?\/([^/?#]+)(?:\?[^#]*)?$/i.exec(url.hash);
+  const match = /^#!?\/jobs?\/([^/?#]+)\/?(?:\?([^#]*))?$/i.exec(url.hash);
   if (!match) return;
   let jobId;
   try { jobId = decodeURIComponent(match[1]); } catch { return; }
   if (!jobId) return;
+  if (match[2]) {
+    const frag = new URLSearchParams(match[2]);
+    for (const name of LANGUAGE_PARAMS) {
+      const value = frag.get(name);
+      if (value && !url.searchParams.has(name)) url.searchParams.append(name, value);
+    }
+  }
   if (url.hostname.toLowerCase() === "app.mokahr.com") {
     url.searchParams.append("mokahr_job_id", jobId);
     return;
@@ -117,6 +126,35 @@ export function normalizeUrl(raw) {
 // Query params naming the language a posting page renders in.
 export const LANGUAGE_PARAMS = ["language", "lang", "locale"];
 
+/** Drop a language query from a known job fragment and report it.
+ *  promoteKnownFragmentIdentity copies that query onto the comparison URL,
+ *  which would put the language back into a key that just had it removed.
+ *  @param {URL} url
+ *  @returns {{language: string, script: string}}
+ */
+function stripFragmentLanguage(url) {
+  const match = /^#(!?)(\/jobs?\/[^/?#]+\/?)(?:\?([^#]*))?$/i.exec(url.hash);
+  if (!match?.[3]) return { language: "", script: "" };
+  const frag = new URLSearchParams(match[3]);
+  let language = "";
+  let script = "";
+  let removed = false;
+  for (const name of [...frag.keys()]) {
+    if (!LANGUAGE_PARAMS.includes(name.toLowerCase())) continue;
+    if (!language) {
+      const rawValue = frag.get(name);
+      language = languageSubtag(rawValue);
+      script = postingScript(rawValue);
+    }
+    frag.delete(name);
+    removed = true;
+  }
+  if (!removed) return { language: "", script: "" };
+  const rest = frag.toString();
+  url.hash = `#${match[1]}${match[2]}${rest ? `?${rest}` : ""}`;
+  return { language, script };
+}
+
 /**
  * The posting a URL names, apart from the language it asks for.
  *
@@ -138,6 +176,11 @@ export function postingLanguageKey(raw) {
       script = postingScript(raw);
     }
     u.searchParams.delete(name);
+  }
+  const fromFragment = stripFragmentLanguage(u);
+  if (!language && fromFragment.language) {
+    language = fromFragment.language;
+    script = fromFragment.script;
   }
   return { key: normalizeUrl(u.href), language, script };
 }
@@ -193,12 +236,30 @@ export function postingUrlRelation(rawA, rawB) {
   const a = postingLanguageKey(rawA);
   const b = postingLanguageKey(rawB);
   if (!a.key || !b.key) return "no-key";
-  if (a.key !== b.key) return "distinct";
+  if (a.key !== b.key && !sameJobSpelling(a.key, b.key)) return "distinct";
   if (a.language === b.language) {
     if (a.language && a.script && b.script && a.script !== b.script) return "distinct";
     return "same";
   }
   return a.language && b.language ? "distinct" : "one-sided-language";
+}
+
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com)$/;
+
+/**
+ * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an
+ * extracted id, whatever the rest of the query says, or one path on an ATS
+ * host whose spellings it folds, with the same query.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function sameJobSpelling(a, b) {
+  const job = canonicalJobKey(a);
+  if (!job || job !== canonicalJobKey(b)) return false;
+  if (!job.includes("://")) return true;
+  return PATH_FOLD_HOSTS.test(new URL(job).hostname) && new URL(a).search === new URL(b).search;
 }
 
 const SAME_JOB_TRACKING = [
@@ -220,8 +281,13 @@ function linkedInCanonicalKey(raw) {
   if (u.protocol !== "http:" && u.protocol !== "https:") return "";
   const host = foldHostname(u.hostname);
   if (!/(^|\.)linkedin\.com$/.test(host)) return "";
-  const path = u.pathname.match(/^\/(?:jobs\/view\/(?:.*-)?|comm\/jobs\/view\/)(\d+)\/?$/);
-  const pathId = path ? path[1] : null;
+  const path = u.pathname.match(/^\/(?:jobs\/view\/((?:.*-)?)|comm\/jobs\/view\/)(\d+)\/?$/);
+  let pathId = null;
+  if (path) {
+    const slug = path[1];
+    const id = path[2];
+    if (!(slug && id.length < 7)) pathId = id;
+  }
   const current = u.searchParams.get("currentJobId");
   const id = pathId || (current && /^\d+$/.test(current) ? current : null);
   return id ? `linkedin.com:${id}` : "";
@@ -231,7 +297,9 @@ function greenhouseJobId(url) {
   let pathId = null;
   if (GREENHOUSE_BOARD_HOSTS.has(url.hostname)) {
     const match = url.pathname.match(/\/jobs\/(\d+)\/?$/);
+    const token = /^\/embed\/job_app\/?$/.test(url.pathname) ? url.searchParams.get("token") : null;
     if (match) pathId = match[1];
+    else if (token && /^\d+$/.test(token)) pathId = token;
   }
   const query = url.searchParams.get("gh_jid");
   const queryId = query && /^\d+$/.test(query) ? query : null;
@@ -304,6 +372,10 @@ export function canonicalJobKey(raw) {
   const smartRecruiters = smartRecruitersJobId(u);
   if (smartRecruiters) return `smartrecruiters:${smartRecruiters}`;
 
+  if (u.hostname === "jobs.ashbyhq.com") {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/application\/*$/i, "$1");
+  }
+
   for (const key of [...u.searchParams.keys()]) {
     const lower = key.toLowerCase();
     if (LANGUAGE_PARAMS.includes(lower) || SAME_JOB_TRACKING.some((re) => re.test(key))) {
@@ -315,6 +387,15 @@ export function canonicalJobKey(raw) {
   const out = new URL(normalized);
   if (out.pathname.length > 1) {
     out.pathname = out.pathname.toLowerCase().replace(/\/+$/, "") || "/";
+  }
+  if (/^jobs\.(?:eu\.)?lever\.co$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^(\/[^/]+\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/apply$/, "$1");
+  }
+  if (out.hostname === "apply.workable.com") {
+    out.pathname = out.pathname.replace(/^\/(?:[^/]+\/)?j\/([a-z0-9_-]+)(?:\/apply)?$/, "/j/$1");
+  }
+  if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/[^/]+\/job\/)/, "");
   }
   return out.toString();
 }

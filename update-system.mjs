@@ -104,6 +104,35 @@ export function consumeReexecMarker() {
 
 const BACKUP_BRANCH_RE = /^backup-pre-update-\d+\.\d+\.\d+-\d{8}T\d{6}Z$/;
 
+/**
+ * Claim `.update-lock` atomically. `flag: 'wx'` is O_EXCL, so the kernel picks
+ * one winner when two `apply` runs start together; a check-then-write let both
+ * observe no lock and both proceed to mutate the same checkout.
+ * @param {string} root
+ * @returns {boolean} true when this run now holds the lock
+ */
+export function claimUpdateLock(root) {
+  try {
+    writeFileSync(join(root, '.update-lock'), new Date().toISOString(), { flag: 'wx' });
+    return true;
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
+ * Release `.update-lock`, tolerating one that is already gone.
+ * @param {string} root
+ */
+export function releaseUpdateLock(root) {
+  try {
+    unlinkSync(join(root, '.update-lock'));
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
+  }
+}
+
 function isLegacyReexec() {
   if (process.env.CAREER_OPS_UPDATE_REEXEC !== '1') {
     return false;
@@ -4158,11 +4187,12 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
   //
   // VERSION is release metadata, not a complete description of the system
   // tree. Compare the installed commit with main as well, so same-version
-  // manifest/file drift is visible (#2630). A failed commit lookup is
-  // deliberately conservative: version checks still work offline/behind a
-  // restricted git transport. The main-ref lookup runs alongside the version
-  // sources, not after them: sequentially, a black-holed network paid the curl
-  // budget twice before the git fallback even started.
+  // manifest/file drift is visible (#2630). A failed commit lookup in a git
+  // checkout reports update-available (reason main-commit-unresolved), never
+  // up-to-date (#7095): the user asked for main, and an unknown main commit is
+  // not proof the install matches it. The main-ref lookup runs alongside the
+  // version sources, not after them: sequentially, a black-holed network paid
+  // the curl budget twice before the git fallback even started.
   const [rawVersion, releaseRaw, remoteCommit] = await Promise.all([
     runCurlGet(RAW_VERSION_URL, [], (reason) => { failed.version = reason; }),
     runCurlGet(RELEASES_API, [
@@ -4187,9 +4217,10 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     try {
       const release = JSON.parse(releaseRaw);
       changelog = release.body || '';
-      const rawTag = String(release.tag_name || '').trim();
-      const match = rawTag.match(SEMVER_RE);
-      releaseVersion = match ? match[1] : '';
+      // Only a career-ops release counts, the same test apply() and the release
+      // channel's latestRelease() use. SEMVER_RE alone takes any `-v<semver>`
+      // tag, so a sibling `web-v2.0.0` release read as career-ops 2.0.0 (#7329).
+      releaseVersion = releaseTagVersion(release.tag_name);
     } catch {
       // Unparseable body; treat as no release source
     }
@@ -4274,7 +4305,14 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     }
   }
 
-  if (compareVersions(local, remote) >= 0 && !systemTreeDrift) {
+  // In a git checkout, a failed main-ref lookup (rate limit, filtered API host)
+  // leaves drift unknown (#7095). Saying up-to-date would end the update flow
+  // before the main preview the user asked for, so report the conservative
+  // answer instead. With no checkout (localCommit empty) there is no drift
+  // check to run, and the version comparison alone decides, as before.
+  const mainCommitUnresolved = Boolean(localCommit) && !remoteCommit;
+
+  if (compareVersions(local, remote) >= 0 && !systemTreeDrift && !mainCommitUnresolved) {
     return { status: 'up-to-date', local, remote, local_commit: localCommit || undefined, ...(localSha ? { local_sha: localSha } : {}), remote_commit: remoteCommit || undefined };
   }
 
@@ -4287,7 +4325,9 @@ async function checkMainChannel(local, marker, runCurlGet, localSha, runGitProbe
     status: 'update-available',
     local,
     remote,
-    reason: systemTreeDrift ? 'system-files-changed' : 'version-changed',
+    reason: systemTreeDrift
+      ? 'system-files-changed'
+      : (compareVersions(local, remote) < 0 ? 'version-changed' : 'main-commit-unresolved'),
     local_commit: localCommit || undefined,
     ...(localSha ? { local_sha: localSha } : {}),
     remote_commit: remoteCommit || undefined,
@@ -4311,6 +4351,17 @@ async function check() {
   // update-available would only lead the agent to offer an update that fails.
   if (outsideGitCheckout()) {
     console.log(JSON.stringify({ status: 'not-a-git-checkout', local: localVersion() }));
+    return;
+  }
+  // A checkout git cannot read: git missing, or refusing the directory (a
+  // container running git as a user other than the checkout's owner gets
+  // "detected dubious ownership"). Both channels would answer without the
+  // local commit, up-to-date included, while apply() fails here.
+  try {
+    gitQuiet('rev-parse', 'HEAD');
+  } catch (err) {
+    const detail = String(err.stderr || '').trim().split(/\r?\n/)[0] || err.message;
+    console.log(JSON.stringify({ status: 'checkout-unreadable', local: localVersion(), detail }));
     return;
   }
 
@@ -4799,16 +4850,10 @@ async function apply() {
     return;
   }
 
-  // Check for lock
-  const lockFile = join(ROOT, '.update-lock');
-  if (existsSync(lockFile) && !isReexec) {
+  // Claim the lock atomically: two concurrent applies must not both win.
+  if (!isReexec && !claimUpdateLock(ROOT)) {
     console.error('Update already in progress (.update-lock exists). If stuck, delete it manually.');
     process.exit(1);
-  }
-
-  // Create lock
-  if (!isReexec) {
-    writeFileSync(lockFile, new Date().toISOString());
   }
 
   try {
@@ -5657,7 +5702,7 @@ async function apply() {
 
   } finally {
     // Remove lock
-    if (!isReexec && existsSync(lockFile)) unlinkSync(lockFile);
+    if (!isReexec) releaseUpdateLock(ROOT);
   }
 }
 

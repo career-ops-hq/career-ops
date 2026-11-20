@@ -1,6 +1,7 @@
 // @ts-check
 import { decodeEntities } from './_html-entities.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { normalizeEmploymentType } from './_employment-type.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
 
 // We Work Remotely provider - board-wide RSS feed
@@ -97,15 +98,16 @@ function splitTitle(rawTitle, defaultCompany) {
  * Parse We Work Remotely's public RSS jobs feed. Exported for unit tests.
  *
  * Shape: `<rss><channel><item>...</item>...</channel></rss>`, each item
- * carrying `<title>`, `<link>`, `<pubDate>`, and often `<region>` plus
- * `<category>`, and `<description>` holds the posting's HTML. The title is
+ * carrying `<title>`, `<link>`, `<pubDate>`, and often `<region>`,
+ * `<category>` and `<type>` (the employment type, normalized into
+ * `employmentType`), and `<description>` holds the posting's HTML. The title is
  * usually "Company: Role"; when that split is present, company and title are
  * normalized separately. The RSS `<link>` is the dedup key; items without a
  * usable absolute URL are dropped.
  *
  * @param {string} xml - raw RSS feed body
  * @param {string} [defaultCompany] - fallback company for unsplittable titles
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string}>}
  */
 export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
   if (typeof xml !== 'string') return [];
@@ -136,6 +138,9 @@ export function parseWwrFeed(xml, defaultCompany = 'We Work Remotely') {
     // the "no signal" path each of those filters handles.
     const description = htmlToText(tagText(item, 'description'));
     if (description) job.description = description;
+    // <type> is the posting's employment type ("Full-Time", "Contract").
+    const employmentType = normalizeEmploymentType(tagText(item, 'type'));
+    if (employmentType) job.employmentType = employmentType;
     jobs.push(job);
   }
 

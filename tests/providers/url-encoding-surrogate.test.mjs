@@ -52,6 +52,17 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // goldman.toJob — role URL built from externalSource.sourceId.
+  const { toJob: goldmanToJob } = await load('goldman.mjs');
+  check(
+    'goldman.toJob',
+    () => [
+      goldmanToJob({ jobTitle: 'Bad', externalSource: { sourceId: `${LONE}bad` } }, 'Acme'),
+      goldmanToJob({ jobTitle: 'Good', externalSource: { sourceId: 'g-1' } }, 'Acme'),
+    ],
+    ([bad, good]) => bad === null && good !== null && good.url.endsWith('/roles/g-1'),
+  );
+
   // deel.parseDeelBoard — .map() over the board's jobPostings array.
   const { parseDeelBoard } = await load('deel.mjs');
   const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
@@ -73,6 +84,31 @@ try {
       'X', 'https://x.bamboohr.com',
     ),
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.bamboohr.com/careers/5',
+  );
+
+  // inhire.parseInhireResponse — for…of over jobsPage[]; jobId feeds the posting URL.
+  const { parseInhireResponse } = await load('inhire.mjs');
+  check(
+    'inhire.parseInhireResponse',
+    () => parseInhireResponse(
+      { jobsPage: [
+        { jobId: `${LONE}bad`, displayName: 'Bad Id', status: 'published' },
+        { jobId: 'ok-5', displayName: 'Good Id', status: 'published' },
+      ] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://x.inhire.app/vagas/ok-5/good-id',
+  );
+
+  // taleez.parseTaleezResponse — for…of over the site's jobs[]; slug feeds the posting URL.
+  const { parseTaleezResponse } = await load('taleez.mjs');
+  check(
+    'taleez.parseTaleezResponse',
+    () => parseTaleezResponse(
+      { jobs: [{ id: 1, label: 'Bad Slug', slug: `${LONE}bad` }, { id: 2, label: 'Good Slug', slug: 'ok-2' }] },
+      'X', 'x',
+    ),
+    (jobs) => jobs.length === 1 && jobs[0].url === 'https://taleez.com/apply/ok-2',
   );
 
   // hibob.parseHibobJobAds — for…of over jobAdDetails; id feeds the posting URL.
@@ -469,6 +505,7 @@ try {
     'feishu-jobs.mjs',
     'garena.mjs',
     'hibob.mjs',
+    'inhire.mjs',
     'jibeapply.mjs',
     'kalibrr.mjs',
     'keka.mjs',
@@ -480,6 +517,7 @@ try {
     'platsbanken.mjs',
     'polymer.mjs',
     'remote-com.mjs',
+    'taleez.mjs',
     'talentlink.mjs',
     'techinasia.mjs',
     'thehub.mjs',

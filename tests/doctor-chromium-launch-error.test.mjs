@@ -93,15 +93,39 @@ expectCause(
     'Browser logs:',
     '<launching> /pw/chrome-headless-shell --no-sandbox',
     '<launched> pid=9',
-    '[pid=9][err] [1021/101010.000:FATAL:zygote_host_impl_linux.cc(127)] No usable sandbox!',
+    '[pid=9][err] [1021/101010.000:FATAL:ozone_platform_x11.cc(240)] Missing X server or $DISPLAY',
     'Call log:',
   ].join('\n')));
-  if (cause.kind === 'launch-failed' && /No usable sandbox!/.test(cause.detail) && !/--no-sandbox/.test(cause.detail)) {
+  if (cause.kind === 'launch-failed' && /Missing X server/.test(cause.detail) && !/--no-sandbox/.test(cause.detail)) {
     pass('any other failure keeps the browser stderr line, not the launch command line');
   } else {
     fail(`any other failure should keep the browser stderr line: got ${JSON.stringify(cause)}`);
   }
 }
+
+// Chromium asked for its sandbox and could not start it: its own two messages,
+// whichever applies, with the FATAL log prefix dropped.
+expectCause(
+  'a sandbox Chromium cannot start is classified as sandbox-unavailable',
+  [
+    'browserType.launch: Target page, context or browser has been closed',
+    'Browser logs:',
+    '<launching> /opt/google/chrome/chrome --headless',
+    '<launched> pid=11',
+    '[pid=11][err] [1117/120000.000000:FATAL:zygote_host_impl_linux.cc(127)] No usable sandbox! Update your kernel or see https://example.invalid for more information.',
+    'Call log:',
+  ].join('\n'),
+  { kind: 'sandbox-unavailable', detail: 'No usable sandbox! Update your kernel or see https://example.invalid for more information.' },
+);
+expectCause(
+  'a setuid helper that is not set up as root is classified as sandbox-unavailable',
+  [
+    'browserType.launch: Target page, context or browser has been closed',
+    'Browser logs:',
+    '[pid=12][err] [1117/120000.000000:FATAL:setuid_sandbox_host.cc(163)] The SUID sandbox helper binary was found, but is not configured correctly.',
+  ].join('\n'),
+  { kind: 'sandbox-unavailable', detail: 'The SUID sandbox helper binary was found, but is not configured correctly.' },
+);
 
 expectCause(
   'a failure without browser logs falls back to the first line of the message',

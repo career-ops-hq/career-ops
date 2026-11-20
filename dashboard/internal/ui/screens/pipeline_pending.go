@@ -2,9 +2,12 @@ package screens
 
 // The Inbox tab (#5269): the Pending rows of data/pipeline.md, beside the
 // tracker tabs, with the first-pass rank and what the batch files record for
-// each row. One key acts on a row: `e` queues it for evaluation through
-// sync-batch-input.mjs (pipeline_pending_queue.go). No key skips, triages or
-// evaluates a row, and the dashboard itself writes no file.
+// each row. Five keys act on rows: `e` queues one for evaluation through
+// sync-batch-input.mjs (pipeline_pending_queue.go), `x` skips one and `u`
+// undoes that skip through inbox-skip.mjs (pipeline_pending_skip.go), and `a`
+// ranks one and `A` the unranked rows through rank-pipeline.mjs, after a `y`
+// (pipeline_pending_rank.go). No key evaluates a row, and the dashboard itself
+// writes no file.
 //
 // Two things keep tracker actions off this tab. applyFilterAndSort leaves the
 // tracker's row list empty while the Inbox is active, so CurrentApp has
@@ -253,6 +256,18 @@ func (m PipelineModel) handlePendingKey(msg tea.KeyMsg) (next PipelineModel, cmd
 	case "e":
 		next, cmd := m.queuePendingRow()
 		return next, cmd, true
+	case "x":
+		next, cmd := m.skipPendingRow()
+		return next, cmd, true
+	case "u":
+		next, cmd := m.undoPendingSkip()
+		return next, cmd, true
+	case "a":
+		next, cmd := m.askRankRow()
+		return next, cmd, true
+	case "A":
+		next, cmd := m.askRankAll()
+		return next, cmd, true
 	}
 	return m, nil, true
 }
@@ -473,12 +488,9 @@ func (m PipelineModel) renderPendingPreview() string {
 // renderPendingSummary takes the place of the tracker's status counts.
 func (m PipelineModel) renderPendingSummary() string {
 	style := lipgloss.NewStyle().Background(m.theme.Surface).Padding(0, 2)
-	unranked := 0
+	unranked := countUnranked(m.pending)
 	counts := map[string]int{}
 	for _, row := range m.pending {
-		if !row.HasRank {
-			unranked++
-		}
 		counts[row.Status]++
 	}
 	parts := []string{lipgloss.NewStyle().Foreground(m.theme.Text).
@@ -487,6 +499,11 @@ func (m PipelineModel) renderPendingSummary() string {
 		// The rows shown are from the last good read, or there are none.
 		parts = []string{lipgloss.NewStyle().Foreground(m.theme.Peach).
 			Render(sanitizeFlash(fmt.Sprintf(i18n.Current.InboxUnavailable, m.pendingErr)))}
+	}
+	if m.pendingRanking != nil {
+		// The flash goes at the next key; this stays until the run ends.
+		parts = append(parts, lipgloss.NewStyle().Foreground(m.theme.Blue).
+			Render(fmt.Sprintf(i18n.Current.InboxRankRunning, m.pendingRanking.Count)))
 	}
 	for _, s := range pendingStatuses {
 		if counts[s] > 0 {
@@ -520,6 +537,10 @@ func pendingHelpItems() []keyHelpItem {
 		{"r", i18n.Current.HelpRefresh},
 		{"o", i18n.Current.HelpOpenURL},
 		{"e", i18n.Current.HelpQueue},
+		{"x", i18n.Current.HelpSkip},
+		{"u", i18n.Current.HelpUndoSkip},
+		{"a", i18n.Current.HelpRankRow},
+		{"A", i18n.Current.HelpRankAll},
 		{"p", i18n.Current.HelpProgress},
 		{"S", i18n.Current.HelpStats},
 		{"t", i18n.Current.HelpLanguage},
