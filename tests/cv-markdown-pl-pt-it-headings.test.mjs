@@ -119,3 +119,28 @@ test('control: without a skills heading the same lines are resume prose', () => 
   assert.deepEqual(existing, []);
   assert.deepEqual(supportedByResume.sort(), ['Go', 'Kafka']);
 });
+
+test('a heading written with combining accents reads as the precomposed name', () => {
+  assert.ok(isExperienceHeading('Experie\u0302ncia Profissional'), 'decomposed Experiência Profissional');
+  assert.ok(isExperienceHeading('Dos\u0301wiadczenie zawodowe'), 'decomposed Doświadczenie zawodowe');
+  const portuguese = LANGUAGES[1];
+  const { existing } = classifySkillGaps(JD_SKILLS, cv(portuguese, '## Compete\u0302ncias Te\u0301cnicas'));
+  assert.deepEqual(existing.sort(), ['Go', 'Kafka']);
+});
+
+for (const employer of ['### Competenze S.r.l. — Milano', '### Kompetencje Sp. z o.o. — Kraków', '### Competências Ltda — Lisboa']) {
+  test(`the employer entry "${employer}" is not a skills section`, () => {
+    const text = ['## Doświadczenie zawodowe', '', employer, '', '- Go, Kafka'].join('\n');
+    const { existing, supportedByResume } = classifySkillGaps(JD_SKILLS, text);
+    assert.deepEqual(existing, []);
+    assert.deepEqual(supportedByResume.sort(), ['Go', 'Kafka']);
+  });
+}
+
+test('a dashed sub-heading inside a skills section is still a skills section', () => {
+  const text = ['## Doświadczenie zawodowe', '', '### Przykład — Warszawa', '**Inżynier**', '', '- Python', '',
+    '## Umiejętności', '', '- Python', '', '### Umiejętności — backend', '', '- Go, Kafka'].join('\n');
+  const { existing, supportedByResume } = classifySkillGaps(JD_SKILLS, text);
+  assert.deepEqual(existing.sort(), ['Go', 'Kafka']);
+  assert.deepEqual(supportedByResume, []);
+});
