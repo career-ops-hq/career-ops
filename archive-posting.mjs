@@ -220,8 +220,9 @@ function captureFilename(company, role, url) {
 }
 
 // Whole words only (plural allowed), so a company like "Headway" is not read as a
-// role for containing "head".
-const ROLE_KEYWORDS = /\b(?:engineer|manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect)s?\b/i;
+// role for containing "head". "Engineering" stays a role word, as it was before
+// the whole-word rule ("Data Engineering | Acme").
+const ROLE_KEYWORDS = /\b(?:engineer(?:s|ing)?|(?:manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect)s?)\b/i;
 
 /**
  * Try to extract company/role from the rendered page title.

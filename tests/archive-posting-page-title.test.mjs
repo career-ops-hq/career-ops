@@ -31,6 +31,9 @@ const cases = [
   // A role keyword inside a company name is not a role: "Headway" contains "head".
   ['Customer Success - Headway', 'Headway', 'Customer Success'],
   ['Headway | Operations', 'Headway', 'Operations'],
+  // "Engineering" is a role word too, so the whole-word rule keeps these right.
+  ['Data Engineering | Acme', 'Acme', 'Data Engineering'],
+  ['Software Engineering Intern | Stripe', 'Stripe', 'Software Engineering Intern'],
 ];
 
 test('an em-dash ATS suffix is stripped, not taken as the company', () => {
