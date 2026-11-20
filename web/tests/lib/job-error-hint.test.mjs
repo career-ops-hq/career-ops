@@ -63,6 +63,7 @@ test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", ()
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (career-ops is best on Claude Code.)")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured)")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; report not found)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI exited with an error. (Error: proxy not configured)")), null);
   assert.equal(
     jobErrorHint(errorJob("This run hit an error before finishing, so it isn't recorded as a confident result — re-run it to verify. (API key loaded successfully)")),
     null,
