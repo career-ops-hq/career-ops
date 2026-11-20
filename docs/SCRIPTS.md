@@ -1761,9 +1761,9 @@ that the flag cannot raise), and a summary prints the entries ranked, the number
 of CLI calls, and elapsed time. Re-runs are idempotent — an already-annotated
 row is skipped, so you can work through a large pipeline in bounded passes.
 
-The ranking is done by whichever agent CLI you already have installed (the
-Headless / Batch Mode table in `AGENTS.md`): `claude`, `opencode`, `codex`,
-`copilot`, `qwen`, `agy`, `grok` — first one found wins. No API key, no new
+The ranking is done by the first agent CLI it finds installed, from its own
+list in `rank-pipeline.mjs`: `claude`, `opencode`, `codex`, `copilot`, `qwen`,
+`agy`, `grok`, `pi`, `omp`. No API key, no new
 dependency, no new network endpoint. Each call sends a `cv.md` excerpt (the
 first ~2000 chars) and the selected postings through that CLI's own auth and
 provider handling — review your chosen CLI's data-retention/provider settings
