@@ -76,7 +76,10 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       const tag = node.tagName.toLowerCase();
       const type = ((node as HTMLInputElement).type || "").toLowerCase();
       if (tag === "input" && ["hidden", "submit", "button", "image", "reset"].includes(type)) return false;
-      if ((node as HTMLElement).offsetParent === null) {
+      // A visibility:hidden panel keeps its layout box, so offsetParent alone
+      // would keep its controls. visibility is inherited, so the control's own
+      // computed style says whether any ancestor hid it.
+      if ((node as HTMLElement).offsetParent === null || getComputedStyle(node).visibility === "hidden") {
         // Styled radios/checkboxes often hide their own <input> and show a
         // label instead, so a hidden one still counts while its label or
         // wrapper renders. A control inside a hidden container (a Recruitee
@@ -113,6 +116,9 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
     // A display:none honeypot has no box. display:contents also has no box,
     // but its text stays on screen, so walk up until an ancestor has one.
     function isVisibleNode(node: Element): boolean {
+      // A visibility:hidden label keeps its layout box, so the walk below would
+      // accept it. Computed visibility already includes a hidden ancestor.
+      if (getComputedStyle(node).visibility === "hidden") return false;
       let current: HTMLElement | null = node as HTMLElement;
       while (current && current !== document.body) {
         if (current.offsetParent !== null) return true;
@@ -195,9 +201,20 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
       return "";
     }
 
+    // Tags from an earlier pass would point at controls this pass no longer
+    // offers, and an old co0 would share its id with this pass's co0.
+    for (const stale of Array.from(document.querySelectorAll("[data-co-field], [data-co-option], [data-co-consent]"))) {
+      stale.removeAttribute("data-co-field");
+      stale.removeAttribute("data-co-option");
+      stale.removeAttribute("data-co-consent");
+    }
+
+    // Radios and checkboxes group by name within one form only, so a
+    // newsletter form's "consent" box is not an option of the application's.
+    const sameForm = (a: Element, b: Element) => (a as HTMLInputElement).form === (b as HTMLInputElement).form;
     const fields: Array<Record<string, unknown>> = [];
-    const seenRadio = new Set<string>();
-    const seenCheckbox = new Set<string>();
+    const seenRadio = new Set<Element>();
+    const seenCheckbox = new Set<Element>();
     const els = Array.from(document.querySelectorAll("input, textarea, select"));
     let n = 0;
 
@@ -231,12 +248,12 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
 
       if (itype === "radio") {
         const name = (el as HTMLInputElement).name;
-        if (name && seenRadio.has(name)) {
+        if (seenRadio.has(el)) {
           n--;
           continue;
         }
-        if (name) seenRadio.add(name);
-        const allRadios = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`));
+        const allRadios = Array.from(document.querySelectorAll(`input[type=radio][name="${CSS.escape(name)}"]`)).filter((r) => sameForm(r, el));
+        if (name) allRadios.forEach((r) => seenRadio.add(r));
         const allLabels = allRadios.map((r) => normalize(labelFor(r)));
         // Only the options the person can see: a hidden choice gets no handle.
         const group = allRadios.filter(isEligibleControl);
@@ -276,14 +293,14 @@ export async function extractForm(ctx: Page | Frame): Promise<ExtractedForm> {
         // Whether this is a group is decided on every same-name box, so a group
         // with one option hidden keeps its question.
         const allBoxes = boxName
-          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`))
+          ? Array.from(document.querySelectorAll(`input[type=checkbox][name="${CSS.escape(boxName)}"]`)).filter((box) => sameForm(box, el))
           : [el];
         if (allBoxes.length > 1) {
-          if (seenCheckbox.has(boxName)) {
+          if (seenCheckbox.has(el)) {
             n--;
             continue;
           }
-          seenCheckbox.add(boxName);
+          allBoxes.forEach((box) => seenCheckbox.add(box));
           const allLabels = allBoxes.map((box) => normalize(labelFor(box)));
           // Only the options the person can see: a hidden choice gets no handle.
           const boxes = allBoxes.filter(isEligibleControl);

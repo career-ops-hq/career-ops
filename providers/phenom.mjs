@@ -117,7 +117,7 @@ export function parsePhenomDate(raw) {
 // and collapses whitespace.
 /** @param {any} job @returns {string} */
 export function jobLocation(job) {
-  const direct = decodeEntities(String(job?.location || job?.cityStateCountry || job?.cityState || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  const direct = decodeEntities(String(job?.location || job?.cityStateCountry || job?.cityState || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
   if (direct) return direct;
   const parts = [job?.city, job?.state, job?.country].map((p) => String(p || '').trim()).filter(Boolean);
   return [...new Set(parts)].join(', ');
@@ -136,7 +136,7 @@ export function parseRefineSearch(json, cfg) {
   for (const job of list) {
     if (!job || typeof job !== 'object') continue;
     const id = job.jobId != null ? String(job.jobId) : '';
-    const title = decodeEntities(String(job.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(job.title || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     // A lone surrogate in id throws URIError out of encodeURIComponent and
     // aborts this loop; id is also the dedup key. Drop just this one.

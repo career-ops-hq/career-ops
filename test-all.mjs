@@ -333,12 +333,19 @@ async function runDiscovered(filter = null, tools = null) {
       continue;
     }
     if (kind === 'node-test') {
-      const out = run(NODE, ['--test', f]);
+      // node:test suites get the same FACTOR-scaled budget the parallel loop
+      // gives each spawned suite: they spawn child processes per test, which
+      // a bare 30s script budget cannot cover on slow-spawn platforms
+      // (Windows). Derived from the helpers constant so sandbox runs that
+      // shrink the default shrink this budget with it.
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
-      // run()'s timeout is DEFAULT_SCRIPT_TIMEOUT_MS. Said the way the parallel
-      // loop says it, since a killed suite has no exit status to print.
+      // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
+      // Said the way the parallel loop says it, since a killed suite has no
+      // exit status to print — and the line reports the budget actually given.
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
-        ? `killed after ${DEFAULT_SCRIPT_TIMEOUT_MS / 1000}s`
+        ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
       reportNodeTestSuite(rel, out !== null, out ?? '', failure, how);
       continue;
@@ -943,9 +950,11 @@ const scripts = [
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'keyword-match.mjs --self-test', expectExit: 0 },
+  { name: 'verify-all.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
+  { name: 'check-output-names.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
@@ -961,6 +970,7 @@ const scripts = [
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
+  { name: 'interview-jd-terms.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
@@ -977,7 +987,7 @@ const scripts = [
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
   { name: 'validate-profile.mjs --self-test', expectExit: 0 },
-  { name: 'updater-migration-tests.mjs', expectExit: 0 },
+  { name: 'updater-migration-tests.mjs', expectExit: 0, timeoutMs: 300_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each

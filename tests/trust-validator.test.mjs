@@ -377,6 +377,12 @@ section('buildTrustValidator — Rule 4: ATS allowlist bypasses mismatch');
   assert(!r.flags.includes('company_domain_mismatch'), 'join.com → ATS allowlist, no mismatch');
 }
 
+{
+  const v = buildTrustValidator({ enabled: true });
+  const r = v({ url: 'https://wellfound.com/jobs/4881145-qa-engineer', company: 'ExampleCo' });
+  assert(!r.flags.includes('company_domain_mismatch'), 'wellfound.com → ATS allowlist, no mismatch');
+}
+
 section('buildTrustValidator — Rule 4: empty company → no mismatch flag');
 
 {

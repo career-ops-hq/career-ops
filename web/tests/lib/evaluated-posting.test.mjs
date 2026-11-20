@@ -166,3 +166,18 @@ test("a different greenhouse id is a different posting", () => {
   };
   assert.equal(matchEvaluatedPosting(rows, offer, norm), null);
 });
+
+test("a Microsoft posting tracked in its job-path shape is evaluated when the scan writes the pid shape", () => {
+  const rows = [{
+    n: "7",
+    company: "Microsoft",
+    role: "Software Engineer II",
+    url: "https://apply.careers.microsoft.com/careers/job/1970000000000001",
+  }];
+  const offer = {
+    company: "Microsoft",
+    title: "Software Engineer II",
+    url: "https://apply.careers.microsoft.com/careers?pid=1970000000000001&domain=microsoft.com",
+  };
+  assert.equal(matchEvaluatedPosting(rows, offer, norm)?.n, "7");
+});

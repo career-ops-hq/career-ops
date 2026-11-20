@@ -52,6 +52,17 @@ try {
     ([bad, good]) => bad === null && good !== null && good.url.includes('ok-123'),
   );
 
+  // goldman.toJob — role URL built from externalSource.sourceId.
+  const { toJob: goldmanToJob } = await load('goldman.mjs');
+  check(
+    'goldman.toJob',
+    () => [
+      goldmanToJob({ jobTitle: 'Bad', externalSource: { sourceId: `${LONE}bad` } }, 'Acme'),
+      goldmanToJob({ jobTitle: 'Good', externalSource: { sourceId: 'g-1' } }, 'Acme'),
+    ],
+    ([bad, good]) => bad === null && good !== null && good.url.endsWith('/roles/g-1'),
+  );
+
   // deel.parseDeelBoard — .map() over the board's jobPostings array.
   const { parseDeelBoard } = await load('deel.mjs');
   const deelPage = (rows) => `<script>self.__next_f.push([1,${JSON.stringify(`2:{"jobPostings":${JSON.stringify(rows)}}\n`)}])</script>`;
@@ -453,6 +464,24 @@ try {
       `<h1 class="sr-count"><strong>2</strong> jobs</h1>${museCard(`/jobs/acme/${LONE}bad`, 'Bad Id')}${museCard('/jobs/acme/good-id', 'Good Id')}`,
     ).jobs,
     (jobs) => jobs.length === 1 && jobs[0].url === 'https://www.themuse.com/jobs/acme/good-id',
+  );
+
+  // successfactors-classic.parseSearchReply — for…of over the DWR search
+  // reply's postings; the posting id ends the public detail URL (the dedup key).
+  const { parseSearchReply: parseSfClassicReply } = await load('successfactors-classic.mjs');
+  check(
+    'successfactors-classic.parseSearchReply',
+    () => parseSfClassicReply(
+      [{
+        detailURLPrefix: '/career?career%5fns=job%5flisting&company=ACME001&navBarLevel=JOB%5fSEARCH&rcm%5fsite%5flocale=es%5fES&career_job_req_id=',
+        postingCount: 2,
+        postings: [{ id: `${LONE}9`, title: 'Bad' }, { id: 7, title: 'Good' }],
+      }],
+      { origin: 'https://career5.successfactors.eu', company: 'ACME001' },
+      'Acme',
+      'es',
+    ).jobs,
+    (jobs) => jobs.length === 1 && jobs[0].url.endsWith('career_job_req_id=7'),
   );
 } catch (e) {
   fail(`per-provider surrogate tests crashed: ${e.message}`);

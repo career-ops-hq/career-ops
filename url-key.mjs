@@ -79,7 +79,7 @@ const AGGREGATOR_SUPPLEMENT = [
   'glassdoor.com',   // primary board; employers post directly
   'ziprecruiter.com', // primary board; employers post directly
   'dice.com',        // primary board for tech; employers post directly
-  'wellfound.com',   // primary board for startups; employers post directly
+  'wellfound.com',   // primary board for startups; employers post directly; providers/wellfound.mjs
   // Boards this repository's own scanner reads (#3652). Each host is emitted by
   // the provider named beside it, so a row arriving through scan, pipeline and
   // evaluate carries one of these URLs rather than an employer-controlled one.
@@ -198,6 +198,8 @@ function foldHostname(host) {
 // feeds: every Himalayas `guid` is /companies/{companySlug}/jobs/{jobSlug} and
 // the feed's `applicationLink` is that URL plus utm params; every Jobicy `url`
 // is /jobs/{id}-{slug} where {id} equals the feed item's numeric `id`.
+// Wellfound is read by providers/wellfound.mjs, whose job URLs are
+// /jobs/{id}-{slug} with the listing's numeric `id`.
 //
 // Extractors are keyed on the DOMAIN, never on the path: `/jobs/view/{id}` is
 // also Workable's employer-board shape, where it means something else.
@@ -225,6 +227,12 @@ const AGGREGATOR_POSTING_ID = {
   // jobicy.com/jobs/{id}-{slug}: the leading number is the feed's job `id`. A
   // slug-only path carries no id and stays UNKNOWN.
   'jobicy.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
+  // wellfound.com/jobs/{id}-{slug}: the leading number is the listing `id`,
+  // and the id alone names the posting (one id is served under one slug at a
+  // time; any other slug answers 404). /company/{slug}/jobs/{id}-{slug}
+  // answers a redirect to /jobs/{id}-{slug} and is never a posting URL
+  // itself, so it is not read here.
+  'wellfound.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
 };
 
 /**

@@ -256,11 +256,16 @@ const PACKAGE_SKILLS = {
     'github.com/lib/pq': 'PostgreSQL', 'github.com/jackc/pgx': 'PostgreSQL', 'github.com/go-redis/redis': 'Redis',
     'github.com/redis/go-redis': 'Redis', 'go.mongodb.org/mongo-driver': 'MongoDB', 'google.golang.org/grpc': 'gRPC',
     'github.com/go-sql-driver/mysql': 'MySQL', 'github.com/aws/aws-sdk-go': 'AWS', 'github.com/segmentio/kafka-go': 'Kafka',
+    'github.com/aws/aws-sdk-go-v2': 'AWS',
   },
   rust: { 'tokio-postgres': 'PostgreSQL', postgres: 'PostgreSQL', redis: 'Redis', mongodb: 'MongoDB', tonic: 'gRPC' },
   ruby: { pg: 'PostgreSQL', redis: 'Redis', rails: 'Rails', mysql2: 'MySQL', mongoid: 'MongoDB' },
   php: { 'laravel/framework': 'Laravel', 'symfony/symfony': 'Symfony', 'predis/predis': 'Redis' },
-  jvm: { postgresql: 'PostgreSQL', 'spring-boot': 'Spring', 'spring-core': 'Spring', jedis: 'Redis', 'kafka-clients': 'Kafka' },
+  // Spring Boot projects declare starters (`spring-boot-starter-web`), always under this groupId.
+  jvm: {
+    postgresql: 'PostgreSQL', 'spring-boot': 'Spring', 'org.springframework.boot': 'Spring', 'spring-core': 'Spring',
+    jedis: 'Redis', 'kafka-clients': 'Kafka',
+  },
 };
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
@@ -279,6 +284,25 @@ function knownPackagesIn(text, table, { prefix = false } = {}) {
 const parseJson = (s) => {
   try { return JSON.parse(s); } catch { return null; }
 };
+
+// Drops the comments a line filter cannot see: XML comments in a pom and block
+// comments in a Gradle script. Quoted strings are kept whole, so a glob such as
+// "**/*.jar" does not open a comment.
+function stripBlockComments(file, text) {
+  if (file === 'pom.xml') {
+    // Repeat until nothing changes: removing one comment can leave a new
+    // `<!--` behind (`<!<!-- -->-- x -->`).
+    for (let prev = null; prev !== text;) {
+      prev = text;
+      text = text.replace(/<!--[\s\S]*?-->/g, '');
+    }
+    return text;
+  }
+  if (file === 'build.gradle' || file === 'build.gradle.kts') {
+    return text.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|\/\*[\s\S]*?\*\//g, (m, quoted) => quoted ?? '');
+  }
+  return text;
+}
 
 /**
  * Signals from one dependency manifest. Every one is declaration-level:
@@ -322,7 +346,7 @@ export function manifestSignals(repo, path, text) {
     'cargo.toml': 'rust', gemfile: 'ruby', 'pom.xml': 'jvm', 'build.gradle': 'jvm', 'build.gradle.kts': 'jvm',
   }[file];
   if (!ecosystem) return out;
-  const lines = String(text ?? '').split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l));
+  const lines = stripBlockComments(file, String(text ?? '')).split('\n').filter((l) => !/^\s*(#|\/\/)/.test(l));
   let body;
   if (ecosystem === 'go') {
     // Only `require` directives add dependencies; `replace`/`exclude` do not.

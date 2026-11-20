@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Ban, Clock, MapPin, ChevronDown, SlidersHorizontal } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { ATS_LABEL, ATS_SOURCES, cleanChips, type AtsSource, type ExploreFilters } from "@/lib/explore";
+import { commitsOnPaste, commitsOnType, splitChipText } from "@/lib/chip-text.mjs";
 
 import { CHINA_PRESET, CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import type { EmployerSource } from "@/lib/explore";
@@ -45,9 +46,9 @@ function KeywordField({
   // Split only on UNAMBIGUOUS item separators (comma / newline / semicolon) — never
   // bare spaces, which are legitimate inside multi-word entries ("AI platform",
   // "New York", "Costa Rica"). A space-only paste stays one chip on purpose (#1147).
+  // An entry in double quotes keeps its separators: "Portland, OR" is one chip (#7424).
   const commit = (text: string) => {
-    const parts = text.split(/[,\n;\t\r]+/);
-    const next = cleanChips([...values, ...parts]);
+    const next = cleanChips([...values, ...splitChipText(text)]);
     onChange(next);
     setDraft("");
   };
@@ -67,7 +68,7 @@ function KeywordField({
         value={draft}
         onChange={(e) => {
           const val = e.target.value;
-          if (/[,\n;\t\r]$/.test(val)) commit(val);
+          if (commitsOnType(val)) commit(val);
           else setDraft(val);
         }}
         onKeyDown={(e) => {
@@ -82,10 +83,10 @@ function KeywordField({
           e.preventDefault();
           const text = e.clipboardData.getData("text");
           const merged = draft + text;
-          // Only commit to chips when the paste contains item separators.
-          // A plain-text paste (e.g. pasting "-EMEA" after typing "Remote")
-          // stays in the input field so the user can keep editing.
-          if (/[,;\n\t\r]/.test(text)) commit(merged);
+          // Only commit to chips when the paste contains item separators
+          // outside quotes. A plain-text paste (e.g. pasting "-EMEA" after
+          // typing "Remote") stays in the input field so the user can keep editing.
+          if (commitsOnPaste(merged)) commit(merged);
           else setDraft(merged);
         }}
         onBlur={() => draft.trim() && commit(draft)}
@@ -165,7 +166,7 @@ export function FilterBuilder({
         <KeywordField
           values={filters.allow}
           tone="inc"
-          placeholder="Toronto, New York, Remote…"
+          placeholder='Toronto, "Portland, OR", Remote…'
           ariaLabel="City or location"
           onChange={(v) => set({ allow: v })}
         />

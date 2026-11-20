@@ -2847,6 +2847,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'canada',
   'chicago',
   'copenhagen',
+  'distributed',
   'dublin',
   'emea',
   'eu',
@@ -2857,6 +2858,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'germany',
   'hamburg',
   'helsinki',
+  'hybrid',
   'india',
   'ireland',
   'italy',
@@ -2896,10 +2898,14 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'united kingdom',
   'united states',
   'us',
+  'u s',
   'usa',
+  'u s a',
   'vancouver',
   'vienna',
   'warsaw',
+  'wfh',
+  'work from home',
   'zurich',
 ]);
 
@@ -3013,6 +3019,16 @@ export function normalizeRoleForDedup(role) {
       title = title.slice(0, piped.index).trimEnd();
       continue;
     }
+    // "Engineer - Remote", "Engineer, Remote", and
+    // "Engineer - Platform - Remote". The last separated dash or comma is
+    // the delimiter, so a team tag in front of Remote stays. A hyphen inside
+    // the suffix stays too ("On-site", "Work-from-home"). "Engineer - Platform"
+    // is not a workplace tag.
+    const trailed = title.match(/^(.*)\s*[-–—,]\s+([^,|–—]+)\s*$/);
+    if (trailed && isRoleLocationSuffix(trailed[2])) {
+      title = trailed[1].trimEnd();
+      continue;
+    }
     break;
   }
   // Unicode-aware (#2393 family): the [a-z0-9] strip this used to carry keyed
@@ -3123,10 +3139,23 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 
 /**
  * Marker for a seeded company+role row whose requisition is unknown (in the
- * language sets: whose language is unknown). A single such row keeps the key a
- * plain duplicate, exactly as if neither signal were read at all.
+ * language sets: whose language is unknown). It means this row named none, not
+ * that every id was seen. A later posting that names an id is a different
+ * opening. A later posting that also names none stays a duplicate.
  */
 export const ANY_REQUISITION = '*';
+
+/**
+ * Marker for a seeded pipeline row whose posting scan-history never recorded.
+ * The scanner writes pipeline.md first and scan-history second, and the
+ * requisition id lives only in scan-history. When only the pipeline write
+ * landed, the row's id is lost, not absent: it may have been a provider-only
+ * id such as `JR100`. Such a row keeps the duplicate, as an unknown row did
+ * before, so a new URL for the same requisition cannot come back through it.
+ * A row whose scan-history entry exists but names no id is still
+ * {@link ANY_REQUISITION}.
+ */
+export const UNRECORDED_REQUISITION = '?';
 
 /**
  * Canonical requisition IDs for company+role dedupe — every form the source
@@ -3192,7 +3221,10 @@ export const ANY_REQUISITION = '*';
  * @returns {string[]} Canonical requisition IDs, as-labelled form first.
  */
 export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
-  const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  const trimmedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  // `*` and `?` are the seed markers (ANY_REQUISITION, UNRECORDED_REQUISITION),
+  // not requisition IDs.
+  const suppliedId = trimmedId === ANY_REQUISITION || trimmedId === UNRECORDED_REQUISITION ? '' : trimmedId;
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
   // Google Careers has no requisition field: the job id in the URL path is the
@@ -3245,19 +3277,28 @@ export function requisitionIdForDedup(source) {
  * Whether a candidate that matched a seen company+role key is nevertheless a
  * different requisition.
  *
- * True only when every seeded row for the key named its requisition and none of
- * the candidate's forms was seen. Any unknown on either side keeps the
- * historical answer — a duplicate — so the check can only let through postings
- * the company itself labelled as distinct. An ambiguous source contributes
- * every form it could mean (see {@link requisitionIdsForDedup}), and one hit
- * on any of them is a duplicate.
+ * True when the candidate names an id and no seeded row named that id. A seed
+ * that named none does not count as a match, so the labelled posting comes
+ * back, including when the seed is an Applied row. False when the candidate
+ * names no id, when a seeded row named one of its forms, when a seeded
+ * pipeline row lost its id ({@link UNRECORDED_REQUISITION}), or when there is
+ * no seed. An ambiguous source contributes every form it could mean (see
+ * {@link requisitionIdsForDedup}), and one hit on any of them is a duplicate.
  *
  * @param {Set<string>|undefined} seededRequisitions - Requisitions seen for matching keys.
  * @param {string[]|string|null} candidateRequisitions - From {@link requisitionIdsForDedup}.
  * @returns {boolean}
  */
 export function isDistinctRequisition(seededRequisitions, candidateRequisitions) {
-  return unseenOnEveryRow(seededRequisitions, candidateRequisitions);
+  const forms = toRequisitionForms(candidateRequisitions);
+  // A row that names no requisition is still the same opening. A row that
+  // names one is a different opening when the seed named none: the `*` marker
+  // means "unknown", not "every id".
+  if (!(seededRequisitions instanceof Set) || seededRequisitions.size === 0 || forms.length === 0) return false;
+  if (seededRequisitions.has(UNRECORDED_REQUISITION)) return false;
+  const named = [...seededRequisitions].filter((form) => form !== ANY_REQUISITION);
+  if (named.length === 0) return true;
+  return forms.every((form) => !seededRequisitions.has(form));
 }
 
 /**
@@ -3354,7 +3395,9 @@ function recordForms(formsByKey, key, forms) {
 function recordLanguages(languagesByKey, key, requisitions, languages) {
   let byRequisition = languagesByKey.get(key);
   if (!byRequisition) languagesByKey.set(key, (byRequisition = new Map()));
-  const list = toRequisitionForms(requisitions);
+  // A row that lost its requisition is filed with the unknown ones here; only
+  // the requisition check reads UNRECORDED_REQUISITION.
+  const list = toRequisitionForms(requisitions).filter((form) => form !== UNRECORDED_REQUISITION);
   for (const requisition of list.length > 0 ? list : [ANY_REQUISITION]) {
     recordForms(byRequisition, requisition, languages);
   }
@@ -3411,7 +3454,10 @@ function recordLanguages(languagesByKey, key, requisitions, languages) {
  * Requisition id and language are recorded per posting URL in scan-history
  * (`requisition_id`, `language`). A tracker or pipeline row carries neither, so
  * it inherits them from the scan-history row with the same URL; a row whose URL
- * scan-history never recorded them for stays unknown.
+ * scan-history never recorded them for stays unknown. A pipeline row whose URL
+ * scan-history has no row for at all, and whose URL names no id itself, is
+ * seeded as {@link UNRECORDED_REQUISITION}: its history write never landed, so
+ * the id it may have had is missing rather than absent.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
 export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
@@ -3489,6 +3535,21 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       languageFormsForDedup(row.language));
   }
 
+  // An `added` row is the history write for the posting that entered the
+  // pipeline. A skipped or other observational row for the same URL is an
+  // earlier sighting, not proof that this write landed. Counting it left the
+  // pipeline row with no marker, so a later URL for the same id looked new.
+  let recordedUrls = null;
+  const recordedInHistory = (url) => {
+    if (!recordedUrls) {
+      recordedUrls = new Set();
+      for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
+        if (row.url && (row.status || 'added') === 'added') recordedUrls.add(seenJobKey(row.url.trim()));
+      }
+    }
+    return recordedUrls.has(seenJobKey(url.trim()));
+  };
+
   // pipeline.md — company/title are the two cells after the URL cell, plus
   // optional trailing columns (location, compensation, posted:/trust:/note:
   // segments). The URL is not always first, and expired/pre-screen shapes
@@ -3499,8 +3560,11 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     const pair = extractPipelineCompanyRole(line);
     if (!pair) continue;
     const attributes = attributesFor(pair.url);
-    add(pair.company, pair.role, pair.location,
-      requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId }),
+    let requisition = requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId });
+    if (requisition.length === 0 && typeof pair.url === 'string' && pair.url && !recordedInHistory(pair.url)) {
+      requisition = [UNRECORDED_REQUISITION];
+    }
+    add(pair.company, pair.role, pair.location, requisition,
       languageFormsForDedup(attributes.language));
   }
 
@@ -4868,6 +4932,7 @@ const USAGE = `Usage:
   node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
   node scan.mjs --verify --throttle          # jittered ~5-10s gap between browser checks
   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+  node scan.mjs --verify --throttle 8000     # same gap, value as the next argument
   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
   node scan.mjs --since 7                    # postings from the last 7 days
@@ -4879,6 +4944,32 @@ const USAGE = `Usage:
 
 Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when
 every target it tried failed (with --json: when any target failed).`;
+
+// --throttle stays out of VALUE_FLAGS. An equals form that is not a positive
+// integer has to remain an unrecognized flag, which is what the existing
+// throttle test locks. The space form is read here, after that check.
+export function readThrottleBaseMs(args) {
+  const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
+  if (eq && /^--throttle=0*[1-9]\d*$/.test(eq)) {
+    const raw = eq.slice('--throttle='.length);
+    const n = Number(raw);
+    if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: null };
+    // A digit string that does not fit a safe integer used to fall through and
+    // return ms: 0, which turns the pause off. The flag was present.
+    return { error: `Error: --throttle expects a positive number of milliseconds, got "${raw}"` };
+  }
+  const idx = args.indexOf('--throttle');
+  if (idx === -1) return { ms: 0, consumedIndex: null };
+  const next = args[idx + 1];
+  if (next === undefined || (typeof next === 'string' && next.startsWith('-'))) {
+    return { ms: 5000, consumedIndex: null };
+  }
+  if (typeof next === 'string' && /^0*[1-9]\d*$/.test(next)) {
+    const n = Number(next);
+    if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: idx + 1 };
+  }
+  return { error: `Error: --throttle expects a positive number of milliseconds, got "${next}"` };
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -4895,11 +4986,26 @@ async function main() {
   // URL in a headed browser. Off by default — headed Chromium needs a display, so
   // scheduled/unattended scans should not rely on it.
   const headedFallback = args.includes('--headed-fallback');
-  // --throttle or --throttle=<ms>: jittered gap between --verify checks to stay
-  // under rate-based WAF limits (pracuj.pl flags the session after a few rapid
-  // hits). Default base 5000ms. Off by default — most ATS feeds don't need it.
-  const throttleArg = args.find((a) => a === '--throttle' || a.startsWith('--throttle='));
-  const throttleBaseMs = throttleArg ? (Number(throttleArg.split('=')[1]) || 5000) : 0;
+  // --throttle or --throttle=<ms> or --throttle <ms>: jittered gap between
+  // --verify checks. Bare flag is 5000ms. Off when the flag is absent.
+  const throttle = readThrottleBaseMs(args);
+  if (throttle.error) {
+    console.error(throttle.error);
+    process.exit(1);
+  }
+  const throttleBaseMs = throttle.ms;
+  const consumed = new Set();
+  if (throttle.consumedIndex != null) consumed.add(throttle.consumedIndex);
+  args.forEach((token, idx) => {
+    if (!VALUE_FLAGS.includes(token)) return;
+    const next = args[idx + 1];
+    if (typeof next === 'string' && !next.startsWith('-')) consumed.add(idx + 1);
+  });
+  const unexpected = args.find((token, idx) => !consumed.has(idx) && typeof token === 'string' && !token.startsWith('-'));
+  if (unexpected) {
+    console.error(`Error: unexpected argument "${unexpected}". Pass a company with --company, for example --company ${unexpected}.`);
+    process.exit(1);
+  }
   // --rediscover-404: when a tracked company's URL 404/410s, search for the
   // moved role and re-verify before marking it expired. Opt-in; rides on --verify.
   const rediscover = args.includes('--rediscover-404');

@@ -28,6 +28,17 @@ const com = await personio.fetch({ name: 'Acme', careers_url: 'https://acme.jobs
 check('payload, .com: the same tenant label (the domain is the row\'s, not the identity\'s)', com[0]?.listingIdentity, idOf('acme.jobs.personio.com', '42'));
 const pinned = await personio.fetch({ name: 'Acme', personio: 'acme', careers_url: 'https://www.acme.example/careers' }, ctxOf({ 'https://acme.jobs.personio.de/': flightPage(posting(7, 'Analyst')) }));
 check('a pinned tenant on a branded page: the tenant, on .de', pinned[0]?.listingIdentity, idOf('acme.jobs.personio.de', '7'));
+const pinnedMixedCalls = [];
+const pinnedMixed = await personio.fetch(
+  { name: 'N26', personio: 'N26', careers_url: 'https://n26.com/en/careers' },
+  { fetchText: async (url) => { pinnedMixedCalls.push(url); return flightPage(posting(11, 'Engineer')); } },
+);
+check('a mixed-case pinned tenant lowercases the host and keeps listingIdentity', [pinnedMixedCalls, pinnedMixed[0]?.listingIdentity, pinnedMixed[0]?.url], [['https://n26.jobs.personio.de/'], idOf('n26.jobs.personio.de', '11'), 'https://n26.jobs.personio.de/job/11?language=en']);
+const pinnedXml = await personio.fetch(
+  { name: 'AcmeCorp', personio: 'AcmeCorp', careers_url: 'https://www.acme.example/careers' },
+  { fetchText: async (url) => (url.endsWith('/xml') ? '<workzag-jobs><position><id>88</id><office>Berlin</office><name>PM</name></position></workzag-jobs>' : '<html></html>') },
+);
+check('a mixed-case pinned tenant keeps listingIdentity on the XML fallback too', [pinnedXml[0]?.listingIdentity, pinnedXml[0]?.url], [idOf('acmecorp.jobs.personio.de', '88'), 'https://acmecorp.jobs.personio.de/job/88']);
 
 // A language in the careers URL changes the URL, never the identity.
 const lang = await personio.fetch({ name: 'Acme', careers_url: 'https://acme.jobs.personio.de/?language=de' }, ctxOf({ 'https://acme.jobs.personio.de/?language=de': flightPage(posting(9, 'Ingenieur', ['de'], 'de')) }));
