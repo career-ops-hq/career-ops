@@ -1,8 +1,8 @@
 {
-  "id": "2026-11-20-santifer.75",
+  "id": "2026-11-20-santifer.87",
   "contributor": "santifer",
   "signed_by": "career-ops maintainers",
-  "rows": 113,
+  "rows": 112,
   "source": "ats-directory",
   "origin": "Board addresses from the ats-scrapers company lists (MIT, https://github.com/kalil0321/ats-scrapers), each checked live; the employer's name is the one each board gives itself; checked on 2026-11-19 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
   "no_conflicting_contract": true,
