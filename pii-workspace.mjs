@@ -68,12 +68,12 @@ function scrub(text, guard, map) {
   for (const token of Object.keys(map)) {
     const match = token.match(/PRIVACY_VALUE_(\d+)/);
     if (match) {
-      const n = parseInt(match[1], 10);
+      const n = Number(match[1]);
       if (n > maxIndex) maxIndex = n;
     }
   }
   for (const match of text.matchAll(/\bPRIVACY_VALUE_(\d+)\b/g)) {
-    const n = parseInt(match[1], 10);
+    const n = Number(match[1]);
     if (n > maxIndex) maxIndex = n;
   }
   let index = maxIndex;
@@ -113,6 +113,9 @@ function scrub(text, guard, map) {
       if (existing) {
         token = existing[0];
       } else {
+        if (!Number.isSafeInteger(index + 1)) {
+          throw new RangeError(`Cannot allocate token ID: token index ${index + 1} exceeds Number.MAX_SAFE_INTEGER`);
+        }
         // Use an identifier valid as an unquoted YAML scalar (no braces).
         token = `PRIVACY_VALUE_${++index}`;
         map[token] = matched;

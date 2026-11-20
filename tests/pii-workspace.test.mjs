@@ -564,28 +564,25 @@ test('restore preserves completed progress across retries when a later file writ
     // Targeted EACCES injection in child process for writes to profile.yml
     const scriptUrl = pathToFileURL(scriptPath).href;
     const preload = `
-      import { mock } from 'node:test';
-      import * as fs from 'fs';
-      mock.module('fs', {
-        namedExports: {
-          ...fs,
-          accessSync(p, ...args) {
-            if (typeof p === 'string' && p.includes('profile.yml')) {
-              const err = new Error('EACCES: permission denied');
-              err.code = 'EACCES';
-              throw err;
-            }
-            return fs.accessSync(p, ...args);
-          },
-        },
-      });
+      import fs from 'node:fs';
+      import { syncBuiltinESMExports } from 'node:module';
+      const origAccess = fs.accessSync;
+      fs.accessSync = function accessSync(p, ...args) {
+        if (typeof p === 'string' && p.includes('profile.yml')) {
+          const err = new Error('EACCES: permission denied');
+          err.code = 'EACCES';
+          throw err;
+        }
+        return origAccess.call(this, p, ...args);
+      };
+      syncBuiltinESMExports();
       process.argv = [process.argv[0], ${JSON.stringify(scriptPath)}, 'restore'];
       await import(${JSON.stringify(scriptUrl)});
     `;
 
     const resFail = spawnSync(
       process.execPath,
-      ['--experimental-test-module-mocks', '--input-type=module', '-e', preload],
+      ['--input-type=module', '-e', preload],
       {
         encoding: 'utf8',
         env: { ...process.env, CAREER_OPS_ROOT: dir },
@@ -741,6 +738,39 @@ test('status detects legacy tokens in map present in user files', () => {
     });
     assert.equal(res.status, 0);
     assert.match(res.stdout, /cv\.md: contains tokens/);
+  });
+});
+
+test('scrub throws RangeError when allocating a token index that is not a safe integer', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+    const configDir = path.join(dir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    const privacyPath = path.join(configDir, 'privacy.yml');
+
+    fs.writeFileSync(
+      privacyPath,
+      'protected:\n  names:\n    - Alice Smith\n',
+      'utf8'
+    );
+    // Token map already holds MAX_SAFE_INTEGER so next index cannot be safely incremented
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        [`PRIVACY_VALUE_${Number.MAX_SAFE_INTEGER}`]: 'Existing Value',
+      }),
+      'utf8'
+    );
+    fs.writeFileSync(cvFile, 'Candidate: Alice Smith', 'utf8');
+
+    const res = spawnSync(process.execPath, [scriptPath, 'scrub'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir },
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /Cannot allocate token ID.*exceeds Number\.MAX_SAFE_INTEGER/);
   });
 });
 
