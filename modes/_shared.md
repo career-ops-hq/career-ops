@@ -208,7 +208,7 @@ override the defaults in this file. If `_profile.md` is missing, has no
 is the target set: classify against it, and a match there counts as targeted.
 
 The table below is a default, not a closed set. It reflects one particular
-search (see AGENTS.md → Origin) and will not describe every user's field: a
+search (see AGENTS.md → Personalization) and will not describe every user's field: a
 silicon design-verification engineer, a quant, a clinician have no archetype
 here at all.
 

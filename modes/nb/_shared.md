@@ -219,7 +219,7 @@ standardverdiene i denne filen. Mangler `_profile.md`, har den ingen
 nedenfor målsettet: klassifiser mot den, og en match der regnes som et mål.
 
 Tabellen nedenfor er en standard, ikke et lukket sett. Den speiler ett bestemt
-jobbsøk (se AGENTS.md → Origin) og beskriver ikke alle brukeres fagfelt.
+jobbsøk (se AGENTS.md → Personalization) og beskriver ikke alle brukeres fagfelt.
 
 **Matcher en stilling ingen arketype brukeren faktisk sikter mot, si det rett ut
 og gi North Star alignment 1.** Det er et reelt og nyttig signal. Å tvinge den

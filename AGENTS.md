@@ -1,9 +1,5 @@
 # career-ops: open-source AI job search agent
 
-## Origin
-
-[santifer](https://santifer.io) built career-ops for his own job search, and the archetypes, scoring and negotiation scripts reflect that search. You (AI Agent) make it the user's: when they say "change the archetypes to data engineering roles", edit their files.
-
 ## Data Contract (CRITICAL)
 
 Two layers (full list in `DATA_CONTRACT.md`):
@@ -117,7 +113,7 @@ Output: `{"onboardingNeeded": <bool>, "data_root": "<path>", "project_root": "<p
 
 ### Personalization
 
-When the user asks, edit their files directly:
+The shipped archetypes, scoring and negotiation scripts reflect one person's job search; make them the user's. When the user asks (for example "change the archetypes to data engineering roles"), edit their files directly:
 
 - Archetypes / targeting → `modes/_profile.md` or `config/profile.yml`
 - Output language → `language.output` in `config/profile.yml`; market vocabulary → `language.modes_dir` (see Output Language vs Market Modes). A mode set for a new language is a contribution under `modes/{lang}/`: the files in `modes/` are system files, and an update overwrites edits to them
