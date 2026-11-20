@@ -313,5 +313,34 @@ tracked_companies:
   }
 }
 
+// 10. An entry whose positive list holds only empty/blank strings falls back to global positives.
+{
+  const portals = `title_filter:
+  positive:
+    - "Software"
+tracked_companies:
+  - name: Blank Positives Board
+    careers_url: https://example.invalid/jobs
+    title_filter:
+      positive:
+        - ""
+        - "   "
+      negative:
+        - "Contract"
+    parser:
+      command: node
+      script: tests/fixtures/title-filter-board.mjs
+`;
+  const { urls } = runScan(portals);
+  // Keeps job 2 ("Software Engineer") by falling back to global positive "Software".
+  // Drops job 4 ("Librarian") because global positives are kept.
+  if (JSON.stringify(kept(urls)) === '[2]') {
+    pass('an entry with blank-string positives falls back to global positives');
+  } else {
+    fail(`expected only job 2, got ${JSON.stringify(urls)}`);
+  }
+}
+
+
 
 

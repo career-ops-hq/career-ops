@@ -4952,8 +4952,10 @@ async function main() {
 
     let raw = entryFilter;
     // An entry with negatives but no positives keeps the global positives (#7244)
-    const hasEntryPositives = Array.isArray(raw.positive) && raw.positive.length > 0;
-    const hasEntryNegatives = Array.isArray(raw.negative) && raw.negative.length > 0;
+    const hasEntryPositives = Array.isArray(raw.positive)
+      && raw.positive.some(k => typeof k === 'string' && k.trim().length > 0);
+    const hasEntryNegatives = Array.isArray(raw.negative)
+      && raw.negative.some(k => typeof k === 'string' && k.trim().length > 0);
     if (!hasEntryPositives && hasEntryNegatives && config.title_filter?.positive) {
       raw = { ...raw, positive: config.title_filter.positive };
     }
