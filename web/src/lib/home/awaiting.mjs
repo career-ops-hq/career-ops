@@ -9,7 +9,7 @@ const baseStatus = (s) => String(s ?? "").replace(/\s+\d{4}-\d{2}-\d{2}\s*$/, ""
 
 // Same calendar day as lib/local-today.mjs. today-dashboard.tsx is a client
 // component and imports this file, so this copy stays free of the checkout module.
-function localDay(now = new Date()) {
+export function localDay(now = new Date()) {
   const p = (n) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
 }
