@@ -268,7 +268,7 @@ export function postingUrlRelation(rawA, rawB) {
   return a.language && b.language ? "distinct" : "one-sided-language";
 }
 
-const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com)$/;
+const PATH_FOLD_HOSTS = /^(?:jobs\.(?:eu\.)?lever\.co|jobs\.ashbyhq\.com|apply\.workable\.com|[\w-]+\.wd[\w-]*\.myworkdayjobs\.com|wd[\w-]*\.myworkdaysite\.com)$/;
 
 /**
  * Two normalizeUrl() keys that canonicalJobKey() reads as one posting: an
@@ -424,6 +424,9 @@ export function canonicalJobKey(raw) {
   }
   if (/^[\w-]+\.wd[\w-]*\.myworkdayjobs\.com$/.test(out.hostname)) {
     out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/[^/]+\/job\/)/, "");
+  }
+  if (/^wd[\w-]*\.myworkdaysite\.com$/.test(out.hostname)) {
+    out.pathname = out.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/recruiting\/[^/]+\/[^/]+\/job\/)/, "");
   }
   return out.toString();
 }
