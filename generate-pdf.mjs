@@ -508,6 +508,41 @@ const SECTION_ALIASES = new Map([
   ['conocimientos técnicos', 'skills'],
   ['herramientas e idiomas', 'skills'],
   ['intereses', 'interests'],
+  // Italian (modes/it) — the same failure as the blocks around it: no Italian
+  // title resolved here, so cv.sections matched no section of an Italian CV and
+  // the order guard compared raw titles. A bare "Competenze" is the key-skills
+  // block and "Competenze tecniche" the skills list, as the Spanish block reads
+  // its own words.
+  ['profilo', 'summary'],
+  ['profilo professionale', 'summary'],
+  ['sommario', 'summary'],
+  ['riepilogo', 'summary'],
+  ['chi sono', 'summary'],
+  ['competenze', 'competencies'],
+  ['competenze chiave', 'competencies'],
+  ['competenze principali', 'competencies'],
+  ['esperienza', 'experience'],
+  ['esperienza professionale', 'experience'],
+  ['esperienze professionali', 'experience'],
+  ['esperienza lavorativa', 'experience'],
+  ['esperienze lavorative', 'experience'],
+  ['percorso professionale', 'experience'],
+  ['progetti', 'projects'],
+  ['progetti selezionati', 'projects'],
+  ['progetti personali', 'projects'],
+  ['formazione', 'education'],
+  ['istruzione', 'education'],
+  ['istruzione e formazione', 'education'],
+  ['titoli di studio', 'education'],
+  ['certificazioni', 'certifications'],
+  ['certificati', 'certifications'],
+  ['premi', 'awards'],
+  ['riconoscimenti', 'awards'],
+  ['premi e riconoscimenti', 'awards'],
+  ['competenze tecniche', 'skills'],
+  ['conoscenze tecniche', 'skills'],
+  ['capacità tecniche', 'skills'],
+  ['interessi', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
