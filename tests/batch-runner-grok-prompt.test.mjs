@@ -3,18 +3,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { getBash, rmSync, ROOT } from './helpers.mjs';
-import { POSIX_ARG_LIMIT } from '../web/src/lib/oversized-prompt.mjs';
 
 const bash = getBash();
+// The cap lives in web/. A checkout without web/ skips this test.
+const capModule = join(ROOT, 'web', 'src', 'lib', 'oversized-prompt.mjs');
+const POSIX_ARG_LIMIT = existsSync(capModule)
+  ? (await import(pathToFileURL(capModule).href)).POSIX_ARG_LIMIT
+  : null;
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf8').replace(/\r\n/g, '\n');
 const dispatchBlock = SRC.match(/  local full_prompt=""\n  local -a model_args=\(\)\n[\s\S]*?\n    esac\n/)?.[0];
 const runWorker = SRC.match(/^run_worker\(\) \{\n[\s\S]*?\n\}\n/m)?.[0];
 
-test('grok batch -p stays under the dashboard argument cap', { skip: !bash && 'bash is required' }, () => {
+test('grok batch -p stays under the dashboard argument cap', { skip: (!bash && 'bash is required') || (POSIX_ARG_LIMIT == null && 'web/ is not in this checkout') }, () => {
   assert.ok(dispatchBlock, 'dispatch block missing');
   assert.ok(runWorker, 'run_worker() missing');
   const dir = mkdtempSync(join(tmpdir(), 'batch-grok-prompt-'));
