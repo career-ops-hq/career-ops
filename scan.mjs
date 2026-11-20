@@ -2779,6 +2779,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'canada',
   'chicago',
   'copenhagen',
+  'distributed',
   'dublin',
   'emea',
   'eu',
@@ -2789,6 +2790,7 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'germany',
   'hamburg',
   'helsinki',
+  'hybrid',
   'india',
   'ireland',
   'italy',
@@ -2828,10 +2830,14 @@ const ROLE_LOCATION_SUFFIXES = new Set([
   'united kingdom',
   'united states',
   'us',
+  'u s',
   'usa',
+  'u s a',
   'vancouver',
   'vienna',
   'warsaw',
+  'wfh',
+  'work from home',
   'zurich',
 ]);
 
@@ -2943,6 +2949,16 @@ export function normalizeRoleForDedup(role) {
     const piped = title.match(/\s*\|\s*([^|]+?)\s*$/);
     if (piped && isRoleLocationSuffix(piped[1])) {
       title = title.slice(0, piped.index).trimEnd();
+      continue;
+    }
+    // "Engineer - Remote", "Engineer, Remote", and
+    // "Engineer - Platform - Remote". The last separated dash or comma is
+    // the delimiter, so a team tag in front of Remote stays. A hyphen inside
+    // the suffix stays too ("On-site", "Work-from-home"). "Engineer - Platform"
+    // is not a workplace tag.
+    const trailed = title.match(/^(.*)\s*[-–—,]\s+([^,|–—]+)\s*$/);
+    if (trailed && isRoleLocationSuffix(trailed[2])) {
+      title = trailed[1].trimEnd();
       continue;
     }
     break;
