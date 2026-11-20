@@ -712,6 +712,10 @@ read_spend_tier() {
       \"*\") raw="${raw#\"}"; raw="${raw%\"}" ;;
       \'*\') raw="${raw#\'}"; raw="${raw%\'}" ;;
     esac
+    # Trim again inside the quotes: YAML keeps ' Premium ' as " Premium ", which
+    # validate-profile.mjs and the web (spend-tier-model.mjs) read as premium.
+    raw="${raw#"${raw%%[![:space:]]*}"}"
+    raw="${raw%"${raw##*[![:space:]]}"}"
     raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
   fi
 

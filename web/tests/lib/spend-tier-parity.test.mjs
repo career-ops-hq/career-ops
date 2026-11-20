@@ -39,13 +39,24 @@ test("each tier names the same Claude model in the web and in batch-runner.sh", 
   }
 });
 
-test("absent and unknown tiers resolve to standard on both sides", { skip }, () => {
+test("every profile value resolves to the same tier on both sides", { skip }, () => {
   const source = readFileSync(runner, "utf8");
   const script = `${shellFunction(source, "read_spend_tier")}\n${shellFunction(source, "spend_tier_to_model")}\nspend_tier_to_model "$(read_spend_tier 2>/dev/null)"`;
   const dir = mkdtempSync(join(tmpdir(), "spend-tier-parity-"));
   try {
     const profile = join(dir, "profile.yml");
-    for (const text of ["candidate:\n  full_name: A\n", "spend_tier: turbo\n", "spend_tier: Premium\n", "spend_tier: economy\n"]) {
+    const profiles = [
+      "candidate:\n  full_name: A\n",
+      "spend_tier: turbo\n",
+      "spend_tier: Premium\n",
+      "spend_tier: economy\n",
+      "spend_tier: ' Premium '\n",
+      'spend_tier: " economy "\n',
+      "spend_tier: 'premium'\n",
+      "spend_tier: premium   # most capable\n",
+      "spend_tier: ' turbo '\n",
+    ];
+    for (const text of profiles) {
       writeFileSync(profile, text);
       assert.equal(bash(script, { PROFILE_FILE: profile, DATA_ROOT: dir }), CLAUDE_TIER_MODELS[spendTierFrom(text)], JSON.stringify(text));
     }
