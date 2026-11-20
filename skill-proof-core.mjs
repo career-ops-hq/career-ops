@@ -285,6 +285,25 @@ const parseJson = (s) => {
   try { return JSON.parse(s); } catch { return null; }
 };
 
+// Drops the comments a line filter cannot see: XML comments in a pom and block
+// comments in a Gradle script. Quoted strings are kept whole, so a glob such as
+// "**/*.jar" does not open a comment.
+function stripBlockComments(file, text) {
+  if (file === 'pom.xml') {
+    // Repeat until nothing changes: removing one comment can leave a new
+    // `<!--` behind (`<!<!-- -->-- x -->`).
+    for (let prev = null; prev !== text;) {
+      prev = text;
+      text = text.replace(/<!--[\s\S]*?-->/g, '');
+    }
+    return text;
+  }
+  if (file === 'build.gradle' || file === 'build.gradle.kts') {
+    return text.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|\/\*[\s\S]*?\*\//g, (m, quoted) => quoted ?? '');
+  }
+  return text;
+}
+
 /**
  * Signals from one dependency manifest. Every one is declaration-level:
  * declaring a package is not using it.
@@ -294,17 +313,6 @@ const parseJson = (s) => {
  * @param {string} text
  * @returns {Signal[]}
  */
-// Drops the comments a line filter cannot see: XML comments in a pom and block
-// comments in a Gradle script. Quoted strings are kept whole, so a glob such as
-// "**/*.jar" does not open a comment.
-function stripBlockComments(file, text) {
-  if (file === 'pom.xml') return text.replace(/<!--[\s\S]*?-->/g, '');
-  if (file === 'build.gradle' || file === 'build.gradle.kts') {
-    return text.replace(/("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*')|\/\*[\s\S]*?\*\//g, (m, quoted) => quoted ?? '');
-  }
-  return text;
-}
-
 export function manifestSignals(repo, path, text) {
   const file = basename(path).toLowerCase();
   const out = [];
