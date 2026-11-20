@@ -261,15 +261,20 @@ export function parseAppliedDate(notes, options = {}) {
 
   const matches = [];
   for (const m of text.matchAll(APPLIED_DATE_RE)) {
-    if (!validateCalendar || isRealCalendarDate(m[1])) matches.push({ date: m[1], index: m.index });
+    if (!validateCalendar || isRealCalendarDate(m[1])) {
+      matches.push({ date: m[1], index: m.index, end: m.index + m[0].length });
+    }
   }
   if (matches.length === 0) return null;
 
   // Drop dates that belong to a DIFFERENT row before choosing. Notes routinely
   // cite a sibling requisition's timeline for context — "#154 is already live
   // in the same ATS (applied 2026-08-04)" — and that citation reads exactly
-  // like this row's own apply date to a positional scan (#2607).
-  const own = matches.filter(m => !isCrossReferencedMention(text, m.index));
+  // like this row's own apply date to a positional scan (#2607). The citation
+  // is as often written in prose ("...(row 51, 4.6/5)") and as often placed
+  // AFTER the date it owns, which is why the guard scans both directions
+  // (#4953).
+  const own = matches.filter(m => !isCrossReferencedMention(text, m.index, m.end));
 
   // First-wins is preserved among a row's OWN dates: a later status date must
   // not displace the submission date (see the fixture in test-all.mjs).
@@ -305,14 +310,78 @@ const CROSS_REF_LOOKBACK = 120;
 // Notes column.
 const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|posting|ref(?:erence)?|r_)[\s:_-]*$/i;
 
+// The two spellings of a row pointer. `#NNN` was the only one the guard knew,
+// and notes name a sibling in prose at least as often -- "(row 51, 4.6/5)" --
+// which read straight through as this row's own date (#4953). Both spellings
+// appear in the same Notes column, so the guard has to know both.
+//
+// The WORD is the discriminator, and that is the whole reason this is safe to
+// add. A bare number following a bare word is NOT a row pointer: "Req 1311",
+// "job 88214" and "posting 4001" are this row's own ATS identifier, and
+// treating them as pointers would discard the row's own date -- the expensive
+// failure direction (see the asymmetry note on isCrossReferencedMention).
+// Requiring the literal word "row"/"entry" keeps those out without needing a
+// label exemption of the kind `#NNN` needs.
+//
+// `\b` before the word, so "arrow 51" and "narrow 51" cannot match. The digit
+// run is bounded to 4: a tracker `#` is 1-4 digits, and the bound keeps the
+// pattern off a long identifier that happens to follow the word.
+const ROW_WORD_REF = String.raw`\b(?:rows?|entr(?:y|ies))[\s:]*#?\s*\d{1,4}\b`;
+
+// Either spelling, for the backward scan. The `#NNN` branch keeps its own
+// lookbehind (an external tag like "job-search#7" is not a row pointer); the
+// word branch needs none, since the word itself is the discriminator.
+const CROSS_REF_TOKEN_RE = new RegExp(String.raw`(?<![\w-])#\d+\b|${ROW_WORD_REF}`, 'gi');
+
+// How far PAST a date the guard will look for a citation that the date belongs
+// to. The shape that motivated this puts the pointer after the date, inside a
+// parenthetical: "applied 2026-09-20 to their other Staff req (row 51, 4.6/5)".
+// No lookback length can reach that -- the text before the date is a couple of
+// words -- so a forward window is not an optional extra here, it is the half of
+// the bug the backward scan cannot express.
+//
+// Deliberately much tighter than the backward scan, and in three ways, because
+// forward attribution is the easier direction to get wrong:
+//
+//   1. BRACKETED ONLY. The pointer must sit inside a `(...)` or `[...]` group,
+//      which is an appositive attached to the clause just read, and whose
+//      brackets give a hard scope delimiter instead of a guess about where the
+//      clause ended. "Applied 2026-11-20 and row 51 applied 2026-09-20" is
+//      genuinely ambiguous prose, and it stays OWN rather than being guessed
+//      foreign, because the pointer is not bracketed.
+//   2. WORD SPELLING ONLY. `#NNN` is not accepted forward: "applied 2026-08-06
+//      (Req #1311)" is a row stating its own date and its own posting id, and
+//      reading that parenthetical as a pointer would discard a real date. The
+//      backward scan needs REQ_LABELLED_HASH_RE to tell those apart; forward,
+//      restricting to the word avoids the whole class.
+//   3. SHORT, AND CLAUSE-BOUNDED. The bracket must open within
+//      CROSS_REF_FORWARD chars of the date with no sentence or clause boundary
+//      in between, so "Applied 2026-11-20; (row 51 is the other one)" does not
+//      reach across the separator.
+const CROSS_REF_FORWARD = 60;
+const FORWARD_ROW_REF_RE = new RegExp(
+  String.raw`^[^.;|!?\r\n\u2028\u2029(\[]{0,${CROSS_REF_FORWARD}}[(\[][^)\]]*?${ROW_WORD_REF}`,
+  'i',
+);
+
 /**
  * Whether the apply-date at `index` is being cited ABOUT ANOTHER ROW.
  *
- * Heuristic, and deliberately a narrow one: a `#NNN` row reference shortly
- * before the date, with no sentence boundary between them, means the date is
- * inside that reference's clause. A sentence break ends the reference's scope,
- * so "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this
- * row's own date.
+ * Heuristic, and deliberately a narrow one: a row pointer shortly before the
+ * date, with no sentence boundary between them, means the date is inside that
+ * reference's clause. A sentence break ends the reference's scope, so
+ * "Sibling #140 was slow. Applied 2026-08-06." is correctly read as this row's
+ * own date.
+ *
+ * A pointer is either `#NNN` or the word form ("row 51", "row #51", "tracker
+ * row 51", "entry 51"). Prose is the more natural spelling and was the one the
+ * guard missed (#4953).
+ *
+ * The scan runs in BOTH directions, because a citation is as often placed after
+ * the date it owns as before it: "applied 2026-09-20 to their other Staff req
+ * (row 51, 4.6/5)" has only a word or two in front of the date. The forward test
+ * is much stricter than the backward one — bracketed, word-spelled and
+ * clause-bounded — for the reasons set out at CROSS_REF_FORWARD.
  *
  * A SEMICOLON OR PIPE IS A BOUNDARY ONLY ONCE THE REFERENCE HAS ITS OWN DATE.
  * These are the separators this Notes column actually uses, and they do two
@@ -343,9 +412,16 @@ const REQ_LABELLED_HASH_RE = /\b(?:job\s*id|posting\s*id|requisition|req|jr|job|
  *
  * @param {string} text
  * @param {number} index - offset of the "applied" match within `text`
+ * @param {number} [endIndex] - offset just past the matched date, for the
+ *   forward scan. Defaults to `index`, which only disables the forward test.
  * @returns {boolean}
  */
-function isCrossReferencedMention(text, index) {
+function isCrossReferencedMention(text, index, endIndex = index) {
+  // The date may be cited by a pointer that FOLLOWS it, which the backward scan
+  // below cannot see at any window length. Checked first because it is the
+  // cheaper and stricter of the two tests; see CROSS_REF_FORWARD.
+  if (FORWARD_ROW_REF_RE.test(text.slice(endIndex, endIndex + CROSS_REF_FORWARD + 64))) return true;
+
   const windowStart = Math.max(0, index - CROSS_REF_LOOKBACK);
   const window = text.slice(windowStart, index);
   let refEnd = -1;
@@ -353,18 +429,26 @@ function isCrossReferencedMention(text, index) {
   // ("job-search#7", "gh#12"), not a pointer at a tracker row. Reading it as a
   // row reference discarded the row's own date: "job-search#7; Applied
   // 2026-09-21" attributed the date to row #7.
-  for (const m of window.matchAll(/(?<![\w-])#\d+\b/g)) {
+  for (const m of window.matchAll(CROSS_REF_TOKEN_RE)) {
     // The lookbehind cannot see past the slice, so a tag whose `#` lands exactly
     // on the window's first character is checked against the original text.
+    // Applies to the word spelling too: a window starting mid-word would let
+    // `\b` assert at offset 0 and read "arrow 51" as "row 51".
     if (m.index === 0 && /[\w-]/.test(text[windowStart - 1] ?? '')) continue;
-    // A `#NNN` tagged as a req/job/posting/reference id is not a row reference:
-    // "Req #1311 - applied 2026-08-06" is this row's own posting id followed by
-    // this row's own date, and reading it as a cross-reference would discard a
-    // genuine date. The label vocabulary is the one merge-tracker.mjs already
-    // recognises in this same Notes column (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by
-    // being written the same way rather than imported — merge-tracker's regex
-    // also captures the id itself, which is not wanted here.
-    if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
+    // Only the `#NNN` spelling can be an ATS identifier for this row; the word
+    // spelling is a row pointer by construction, so the label exemption below
+    // does not apply to it.
+    if (m[0].startsWith('#')) {
+      // A `#NNN` tagged as a req/job/posting/reference id is not a row
+      // reference: "Req #1311 - applied 2026-08-06" is this row's own posting
+      // id followed by this row's own date, and reading it as a cross-reference
+      // would discard a genuine date. The label vocabulary is the one
+      // merge-tracker.mjs already recognises in this same Notes column
+      // (tracker-parse.mjs REQ_NUMBER_RE), kept in sync by being written the
+      // same way rather than imported — merge-tracker's regex also captures the
+      // id itself, which is not wanted here.
+      if (REQ_LABELLED_HASH_RE.test(window.slice(0, m.index))) continue;
+    }
     refEnd = m.index + m[0].length;
   }
   if (refEnd === -1) return false;
@@ -399,11 +483,36 @@ function isCrossReferencedMention(text, index) {
   // stop needs one to avoid firing on "3.5" or "e.g.", but `;` and `|` do not
   // appear inside numbers or abbreviations, and a hand-typed note writes
   // ";applied 2026-06-15" as readily as "; applied 2026-06-15".
-  const lastSeparator = [...sinceRef.matchAll(/[;|]/g)].pop();
+  const separators = [...sinceRef.matchAll(/[;|]/g)];
+  const lastSeparator = separators[separators.length - 1];
   if (lastSeparator) {
     const beforeSeparator = sinceRef.slice(0, lastSeparator.index);
     if (APPLIED_DATE_HAS_DATE_RE.test(beforeSeparator)) return false;
   }
+
+  // ...and the subject carries across ONE semicolon-joined clause, not across a
+  // chain of them. The rule above reasons about a single separator joining two
+  // independent clauses; that reasoning does not survive four, where the
+  // clauses in between are plainly about other things.
+  //
+  // Found by replaying this guard over a populated tracker (#4953), on a row
+  // shaped like "...not row 39 (a different employer); no prior application
+  // there; one-active-application policy unverified; posted: 2026-10-29;
+  // Applied 2026-10-30 via Greenhouse" -- the pointer is ~110 chars and four
+  // clauses away from a date that is unmistakably this row's own, and none of
+  // the existing scope rules ended it: there is no sentence break, and the
+  // "citation already dated" test does not fire because "application" is not
+  // "applied". That is the EXPENSIVE failure direction -- a false positive
+  // discards a real measured submission date and silently degrades a live
+  // follow-up -- so it earns a rule rather than being left to the fallback.
+  //
+  // One separator, not zero, because the existing dateless-citation fixture
+  // ("#154 is already live;applied 2026-08-04") is exactly the shape the
+  // single-semicolon reasoning was written for. Over that tracker the two
+  // populations did not overlap at all: every genuine cross-reference sat 0
+  // separators and <=37 chars from its date, the lone false positive at 4.
+  if (separators.length > 1) return false;
+
   return true;
 }
 
