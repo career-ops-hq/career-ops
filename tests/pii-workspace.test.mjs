@@ -561,13 +561,36 @@ test('restore preserves completed progress across retries when a later file writ
       'utf8'
     );
 
-    // Make profile.yml read-only so write fails with permission error
-    fs.chmodSync(profileFile, 0o444);
+    // Targeted EACCES injection in child process for writes to profile.yml
+    const scriptUrl = pathToFileURL(scriptPath).href;
+    const preload = `
+      import { mock } from 'node:test';
+      import * as fs from 'fs';
+      mock.module('fs', {
+        namedExports: {
+          ...fs,
+          accessSync(p, ...args) {
+            if (typeof p === 'string' && p.includes('profile.yml')) {
+              const err = new Error('EACCES: permission denied');
+              err.code = 'EACCES';
+              throw err;
+            }
+            return fs.accessSync(p, ...args);
+          },
+        },
+      });
+      process.argv = [process.argv[0], ${JSON.stringify(scriptPath)}, 'restore'];
+      await import(${JSON.stringify(scriptUrl)});
+    `;
 
-    const resFail = spawnSync(process.execPath, [scriptPath, 'restore'], {
-      encoding: 'utf8',
-      env: { ...process.env, CAREER_OPS_ROOT: dir },
-    });
+    const resFail = spawnSync(
+      process.execPath,
+      ['--experimental-test-module-mocks', '--input-type=module', '-e', preload],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CAREER_OPS_ROOT: dir },
+      }
+    );
 
     // First attempt failed on profile.yml
     assert.equal(resFail.status, 1);
@@ -579,9 +602,7 @@ test('restore preserves completed progress across retries when a later file writ
     assert.equal(midMap.PRIVACY_VALUE_1, 'Alice Smith');
     assert.equal(midMap.PRIVACY_VALUE_2, 'Secret Name');
 
-    // Make profile.yml writable again and retry restore
-    fs.chmodSync(profileFile, 0o666);
-
+    // Second attempt (retry) without the failure hook
     const resRetry = spawnSync(process.execPath, [scriptPath, 'restore'], {
       encoding: 'utf8',
       env: { ...process.env, CAREER_OPS_ROOT: dir },
@@ -591,6 +612,47 @@ test('restore preserves completed progress across retries when a later file writ
     assert.equal(fs.readFileSync(profileFile, 'utf8'), 'name: Secret Name');
     // Token map is cleanly removed after retry finishes restoring remaining file
     assert.equal(fs.existsSync(tokenMap), false);
+  });
+});
+
+test('scrub removes re-scrubbed tokens from map.__restored__ before saving map', () => {
+  withTempDir((dir) => {
+    const scriptPath = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'pii-workspace.mjs');
+    const tokenMap = path.join(dir, '.pii-token-map.json');
+    const cvFile = path.join(dir, 'cv.md');
+    const configDir = path.join(dir, 'config');
+    fs.mkdirSync(configDir, { recursive: true });
+    const privacyPath = path.join(configDir, 'privacy.yml');
+
+    fs.writeFileSync(
+      privacyPath,
+      'protected:\n  names:\n    - Jane Doe\n',
+      'utf8'
+    );
+    // cv.md has real value
+    fs.writeFileSync(cvFile, 'Candidate: Jane Doe', 'utf8');
+
+    // Token map claims PRIVACY_VALUE_1 was restored
+    fs.writeFileSync(
+      tokenMap,
+      JSON.stringify({
+        __files__: ['cv.md'],
+        __restored__: ['PRIVACY_VALUE_1', 'OTHER_TOKEN'],
+        PRIVACY_VALUE_1: 'Jane Doe',
+      }),
+      'utf8'
+    );
+
+    // Run scrub
+    const resScrub = spawnSync(process.execPath, [scriptPath, 'scrub'], {
+      encoding: 'utf8',
+      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PRIVACY: privacyPath },
+    });
+    assert.equal(resScrub.status, 0);
+
+    const savedMap = JSON.parse(fs.readFileSync(tokenMap, 'utf8'));
+    // PRIVACY_VALUE_1 was written back into cv.md, so it must be removed from __restored__
+    assert.deepEqual(savedMap.__restored__, ['OTHER_TOKEN']);
   });
 });
 

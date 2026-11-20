@@ -223,6 +223,9 @@ async function main() {
         if (scrubbed !== content) {
           if (!map.__files__) map.__files__ = [];
           if (!map.__files__.includes(file)) map.__files__.push(file);
+          if (Array.isArray(map.__restored__)) {
+            map.__restored__ = map.__restored__.filter((t) => !scrubbed.includes(t));
+          }
           // Persist the token map immediately before each rewritten file loses its real values.
           saveTokenMap(map);
           replaceUserFile(filePath, scrubbed);
