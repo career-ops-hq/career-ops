@@ -219,7 +219,9 @@ function captureFilename(company, role, url) {
   return reportNum ? `${reportPrefix(reportNum)}-${base}` : base;
 }
 
-const ROLE_KEYWORDS = /engineer|manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect/i;
+// Whole words only (plural allowed), so a company like "Headway" is not read as a
+// role for containing "head".
+const ROLE_KEYWORDS = /\b(?:engineer|manager|director|analyst|scientist|designer|developer|lead|head|vp|president|officer|specialist|architect)s?\b/i;
 
 /**
  * Try to extract company/role from the rendered page title.
@@ -238,9 +240,10 @@ const ROLE_KEYWORDS = /engineer|manager|director|analyst|scientist|designer|deve
 export function parsePageTitle(title) {
   if (!title) return { company: null, role: null };
 
-  // Strip common ATS platform suffixes
+  // Strip common ATS platform suffixes after any separator the split below
+  // recognises, so "Engineer — Greenhouse" does not name Greenhouse the company.
   const cleaned = title
-    .replace(/\s*[|–-]\s*(greenhouse|lever|ashby|workday|linkedin|indeed|wellfound|angellist)\s*$/i, '')
+    .replace(/\s*[|–—-]\s*(greenhouse|lever|ashby|workday|linkedin|indeed|wellfound|angellist)\s*$/i, '')
     .trim();
 
   // "Role at Company"

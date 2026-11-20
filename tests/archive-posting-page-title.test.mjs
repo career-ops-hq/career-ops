@@ -27,7 +27,15 @@ const cases = [
   ['Platform Engineer | Recruiting Partner', 'Recruiting Partner', 'Platform Engineer'],
   ['CNC Operator - Acme', 'Acme', 'CNC Operator'],
   ['Senior AI Engineer - Anthropic - Greenhouse', 'Anthropic', 'Senior AI Engineer'],
+  ['Senior AI Engineer — Anthropic — Greenhouse', 'Anthropic', 'Senior AI Engineer'],
+  // A role keyword inside a company name is not a role: "Headway" contains "head".
+  ['Customer Success - Headway', 'Headway', 'Customer Success'],
+  ['Headway | Operations', 'Headway', 'Operations'],
 ];
+
+test('an em-dash ATS suffix is stripped, not taken as the company', () => {
+  assert.deepEqual(parsePageTitle('Engineer — Greenhouse'), { company: null, role: 'Engineer' });
+});
 
 for (const [title, company, role] of cases) {
   test(`"${title}" → company "${company}", role "${role}"`, () => {
