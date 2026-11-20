@@ -287,7 +287,7 @@ because the row is no longer `Evaluated` (it already moved on, e.g. to `Applied`
 another `--expect-status` or with `--force`.
 
 Write the addition to `{DATA_ROOT}/batch/tracker-additions/{num}-{company-slug}.tsv`
-in the format AGENTS.md gives under "TSV Format for Tracker Additions": a header
+in the format `modes/_tracker-tsv.md` gives: a header
 row of column labels, then exactly one data row, in the same order:
 
 ```tsv

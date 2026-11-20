@@ -1,6 +1,6 @@
 # Batch Processing
 
-Process multiple job offers via headless workers. By default (`--mode full`) each worker runs the full evaluation pipeline (A-G report + PDF + tracker line) autonomously. With `--mode match` it runs a single-pass CV match instead: a condensed report and a tracker line, no PDF (the tracker PDF column gets ❌). Workers are `claude -p` by default; `--cli NAME` selects `opencode`, `gemini`, `qwen` or `grok` instead (`--model NAME` picks that CLI's model). Only `claude` workers run in parallel; the other CLIs run one offer at a time. The **Headless / Batch Mode** table in `AGENTS.md` is not the runner's `--cli` list: it includes CLIs the runner does not launch, and it has no Gemini row because Gemini CLI is now a legacy wrapper (see `docs/SUPPORTED_CLIS.md`).
+Process multiple job offers via headless workers. By default (`--mode full`) each worker runs the full evaluation pipeline (A-G report + PDF + tracker line) autonomously. With `--mode match` it runs a single-pass CV match instead: a condensed report and a tracker line, no PDF (the tracker PDF column gets ❌). Workers are `claude -p` by default; `--cli NAME` selects `opencode`, `gemini`, `qwen` or `grok` instead (`--model NAME` picks that CLI's model). Only `claude` workers run in parallel; the other CLIs run one offer at a time. The headless command table in `modes/_headless.md` is not the runner's `--cli` list: it includes CLIs the runner does not launch. Gemini CLI is now a legacy wrapper (see `docs/SUPPORTED_CLIS.md`).
 
 ## Quick Start
 
@@ -138,6 +138,6 @@ A PID-based lock file (`batch-runner.pid`) prevents concurrent batch runs. If a 
 
 ## Prerequisites
 
-- Your CLI in PATH (see **Headless / Batch Mode** table in `AGENTS.md`)
+- Your CLI in PATH (see the headless command table in `modes/_headless.md`)
 - Node.js >= 22.13, Playwright chromium installed (`npm run doctor` to verify)
 - `batch-input.tsv` with at least one offer
