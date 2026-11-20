@@ -426,6 +426,17 @@ test("Grok thought is dropped — reasoning must not read as an answer", () => {
   assert.equal(parseGrokEvent(JSON.stringify({ type: "thought", data: "let me think" })), null);
 });
 
+test("a Grok error event is the error, not a tool or an answer", () => {
+  assert.deepEqual(
+    parseGrokEvent(JSON.stringify({ type: "error", message: "rate limit reached for this account" })),
+    { error: "rate limit reached for this account" },
+  );
+  assert.deepEqual(
+    parseGrokEvent(JSON.stringify({ type: "error" })),
+    { error: "Grok failed before finishing" },
+  );
+});
+
 test("Grok available_commands (a multi-KB manifest, every turn) is dropped", () => {
   assert.equal(parseGrokEvent(JSON.stringify({ type: "available_commands", commands: ["a", "b"] })), null);
 });
@@ -638,26 +649,46 @@ test("a clean exit with no output now carries the CLI's own stderr reason", () =
     cleanExit: true,
     stderrSnippet: AGY_PERMISSION_LINE.slice(0, 200),
   });
-  assert.match(msg, /^The CLI produced no output — is it installed and authenticated\? \(jetski: no output produced/);
+  assert.match(msg, /^The CLI returned nothing\. \(jetski: no output produced/);
   assert.match(msg, /headless mode cannot prompt for/);
-  assert.ok(msg.endsWith("(career-ops is best on Claude Code.)"), "the Claude Code tip stays last");
+  assert.doesNotMatch(msg, /authenticated/);
 });
 
-test("with no stderr snippet the messages are exactly what they were before", () => {
+test("an empty reply and a plain crash are not a sign-in problem", () => {
   assert.equal(
     noOutputError({ emittedText: false, sawError: false, cleanExit: true, stderrSnippet: null }),
-    "The CLI produced no output — is it installed and authenticated? (career-ops is best on Claude Code.)",
+    "The CLI returned nothing.",
   );
   assert.equal(
     noOutputError({ emittedText: false, sawError: false, cleanExit: false }),
-    "The CLI exited with an error — is it installed and authenticated?",
+    "The CLI exited with an error.",
   );
+});
+
+test("a rate limit says to wait, and a real sign-in failure still says so", () => {
+  const limited = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "429 rate limit exceeded, try again later",
+  });
+  assert.match(limited, /^Rate limit\. Wait and try again\./);
+  assert.match(limited, /429 rate limit exceeded/);
+  assert.doesNotMatch(limited, /authenticated/);
+  const signedOut = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Error: not authenticated",
+  });
+  assert.match(signedOut, /is it installed and authenticated/);
+  assert.match(signedOut, /not authenticated/);
 });
 
 test("a non-clean exit still appends the snippet", () => {
   assert.equal(
     noOutputError({ emittedText: false, sawError: false, cleanExit: false, stderrSnippet: "Error: connection refused" }),
-    "The CLI exited with an error — is it installed and authenticated? (Error: connection refused)",
+    "The CLI exited with an error. (Error: connection refused)",
   );
 });
 

@@ -43,6 +43,12 @@ test("'no output' canned message -> auth hint", () => {
   assert.equal(hint?.kind, "auth");
 });
 
+test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", () => {
+  assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit exceeded, try again later)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing.")), null);
+  assert.equal(jobErrorHint(errorJob("rate limit reached for this account")), null);
+});
+
 test("a raw 401 unauthorized label -> auth hint", () => {
   assert.equal(jobErrorHint(errorJob("401 unauthorized"))?.kind, "auth");
 });

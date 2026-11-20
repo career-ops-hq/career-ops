@@ -343,6 +343,13 @@ export function parseGrokEvent(line) {
     return { tool: typeof name === "string" && name ? name : "Working" };
   }
 
+  if (ev.type === "error") {
+    const message = typeof ev.message === "string" && ev.message
+      ? ev.message
+      : (typeof ev.error === "string" && ev.error ? ev.error : "Grok failed before finishing");
+    return { error: message };
+  }
+
   if (ev.type === "usage" || ev.type === "end") {
     const usage = ev.usage;
     // No usage block means nothing to report — null rather than {tokens: 0}, so
@@ -454,16 +461,29 @@ export function killMsForKind(kind) {
  * prompt for" to stderr, exits cleanly and writes nothing to stdout, and that
  * line used to be dropped, leaving only "is it installed and authenticated?".
  *
- * With no snippet the text is exactly what it was before this existed.
+ * A rate limit, an empty reply, and any other non-login failure say what they
+ * are. The sign-in sentence is only for a stderr line that is actually about
+ * signing in, so the worker hint does not tell you to sign in for those.
  *
  * @param {{emittedText: boolean, sawError: boolean, cleanExit: boolean, stderrSnippet?: string | null}} state
  * @returns {string | null}
  */
+const RATE_LIMIT_RE = /\b429\b|rate limit|too many requests/i;
+const SIGN_IN_RE = /authenticat\w*|please log in|sign[ -]?in|credential|api[ -]?key|unauthorized/i;
+
 export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet }) {
   if (emittedText || sawError) return null;
   const detail = stderrSnippet ? ` (${stderrSnippet})` : "";
-  if (!cleanExit) return `The CLI exited with an error — is it installed and authenticated?${detail}`;
-  return `The CLI produced no output — is it installed and authenticated?${detail} (career-ops is best on Claude Code.)`;
+  if (stderrSnippet && RATE_LIMIT_RE.test(stderrSnippet)) {
+    return `Rate limit. Wait and try again.${detail}`;
+  }
+  if (!cleanExit) {
+    if (stderrSnippet && SIGN_IN_RE.test(stderrSnippet)) {
+      return `The CLI exited with an error — is it installed and authenticated?${detail}`;
+    }
+    return `The CLI exited with an error.${detail}`;
+  }
+  return `The CLI returned nothing.${detail}`;
 }
 
 // Message for a run the route stopped at its own time limit. It names the limit,
