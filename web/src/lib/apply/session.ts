@@ -16,6 +16,7 @@ import { fencingReport } from "../cli-fencing.mjs";
 import { CAPS } from "../worker-capabilities.mjs";
 import { assertSafeApplyUrl, installApplyEgressGuard, isUnsafeApplyUrlError, isBlockedNavigation, UnsafeApplyUrlError } from "./url-guard.mjs";
 import { unsupportedAtsMessage, unsupportedInAppAts } from "./unsupported-ats.mjs";
+import { readHandoffHosts } from "./handoff-hosts.mjs";
 
 type ApplyLaunch = { headless?: boolean; channel?: string; args?: string[] };
 
@@ -244,7 +245,12 @@ type UnsupportedApplySession = { unsupported: { vendor: string; label: string; p
 
 export async function openSession(url: string, cliId?: string, forceAgent?: boolean, noApplyBtn?: boolean): Promise<OpenedApplySession | UnsupportedApplySession> {
   // Workday, iCIMS, and UKG have no in-app fill. Refuse before Chrome starts.
-  const blockedAts = await unsupportedInAppAts(url);
+  // apply.handoff_hosts is read once, before any window opens: a broken profile
+  // throws here with nothing to clean up, and every later check in this session
+  // (landed URL, Apply trigger, empty-page diagnosis) reuses the same list
+  // instead of re-reading a file that could fail after the context exists.
+  const handoffHosts = readHandoffHosts();
+  const blockedAts = await unsupportedInAppAts(url, { handoffHosts });
   if (blockedAts) return { unsupported: blockedAts, message: unsupportedAtsMessage(blockedAts) };
   // Refuse before launching any navigation, so an obviously-internal target
   // never reaches Playwright at all.
@@ -284,7 +290,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   }
   // A career page can redirect onto a blocked portal. Close before scroll,
   // screenshots, or the Apply click that opens a second window.
-  const landedAts = await unsupportedInAppAts(page.url());
+  const landedAts = await unsupportedInAppAts(page.url(), { handoffHosts });
   if (landedAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
@@ -303,7 +309,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   await Promise.race(page.frames().map((f) => f.waitForSelector(formSel, { timeout: 12_000 }).catch(() => null))).catch(() => {});
   await page.waitForTimeout(1200);
   await dropNewTabs(page); // make any "Apply" link/popup navigate in OUR tab
-  const settledAts = await unsupportedInAppAts(page.url());
+  const settledAts = await unsupportedInAppAts(page.url(), { handoffHosts });
   if (settledAts) {
     await context.close().catch(() => {});
     if (SESSIONS.size === 0) scheduleIdleClose();
@@ -327,11 +333,11 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     if (formHasPassword(form)) return abort(LOGIN_WALL_MESSAGE);
   }
   if (!noApplyBtn && !looksLikeApplicationForm(form)) {
-    const trigger = await tryApplyTrigger(page);
+    const trigger = await tryApplyTrigger(page, handoffHosts);
     // The Apply control points at Workday, iCIMS, or UKG. Close this window
     // instead of following it or handing the page to the drive agent.
     if (trigger && typeof trigger === "object" && "blocked" in trigger) {
-      const hit = await unsupportedInAppAts(trigger.blocked);
+      const hit = await unsupportedInAppAts(trigger.blocked, { handoffHosts });
       await context.close().catch(() => {});
       if (SESSIONS.size === 0) scheduleIdleClose();
       if (hit) return { unsupported: hit, message: unsupportedAtsMessage(hit, true) };
@@ -340,8 +346,8 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
       await page.waitForTimeout(800);
       await dropNewTabs(page);
       await waitForBlankPopup(page, trigger.followed);
-      const lateUrl = await blockedAfterAction(page, trigger.followed, false);
-      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl) : null;
+      const lateUrl = await blockedAfterAction(page, trigger.followed, false, handoffHosts);
+      const lateAts = lateUrl ? await unsupportedInAppAts(lateUrl, { handoffHosts }) : null;
       if (lateAts) {
         await context.close().catch(() => {});
         if (SESSIONS.size === 0) scheduleIdleClose();
@@ -385,7 +391,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   //    A challenge/login/listing/expired/Workday page has no form to interpret,
   //    so we abort directly with the right message (no wasted AI run).
   if (!aiInterpreted && !looksLikeApplicationForm(form)) {
-    const why = await classifyEmpty(page, url);
+    const why = await classifyEmpty(page, url, handoffHosts);
     // Driveable (controls present, not a hard block) + we have an agent → KEEP the
     // session open and hand off to the STREAMED drive route, so the user watches
     // the agent reach the form live (/api/apply/drive). Otherwise abort.

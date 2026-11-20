@@ -188,3 +188,77 @@ describe("apply.handoff_hosts through the real Apply entry points", { concurrenc
     assert.deepEqual(clicks, []);
   });
 });
+
+// A fake career page for openSession: navigating to it runs `onGoto` (here,
+// breaking profile.yml mid-session) and lands on `landsOn`. `closed` records
+// whether the Apply window (the Playwright context) was closed.
+function careerPageLandingOn(landsOn, closed, onGoto) {
+  let current = "about:blank";
+  const frame = {
+    url: () => current,
+    evaluate: async () => {
+      throw new Error("document is not defined");
+    },
+    waitForSelector: async () => null,
+  };
+  const none = { count: async () => 0, isVisible: async () => false, getAttribute: async () => null, click: async () => {}, first() { return this; }, or() { return this; } };
+  const context = {
+    route: async () => {},
+    routeWebSocket: async () => {},
+    setDefaultTimeout() {},
+    pages: () => [],
+    newPage: async () => page,
+    close: async () => {
+      closed.push(true);
+    },
+  };
+  const page = {
+    url: () => current,
+    context: () => context,
+    goto: async () => {
+      onGoto();
+      current = landsOn;
+      return { status: () => 200, headers: () => ({}) };
+    },
+    waitForLoadState: async () => {},
+    waitForTimeout: async () => {},
+    screenshot: async () => Buffer.from("career"),
+    title: async () => "Acme role",
+    evaluate: async () => {
+      throw new Error("document is not defined");
+    },
+    frames: () => [frame],
+    mainFrame: () => frame,
+    locator: () => ({ first: () => none, evaluateAll: async () => [] }),
+    getByRole: () => none,
+  };
+  return { isConnected: () => false, newContext: async () => context };
+}
+
+describe("the host list is read once per Apply session", { concurrency: 1 }, () => {
+  let restore;
+  before(() => {
+    restore = setHostResolver(async () => ["93.184.216.34"]);
+  });
+  after(() => {
+    restore?.();
+    clearTimeout(globalThis.__coIdleTimer);
+    globalThis.__coIdleTimer = undefined;
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = undefined;
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io", "linkedin.com."]\n');
+  });
+
+  test("a profile that breaks after the window opens cannot leave it open", async () => {
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io"]\n');
+    const closed = [];
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () =>
+      careerPageLandingOn(LISTED, closed, () => writeProfile('apply:\n  handoff_hosts: ["gupy.io"\n'));
+    const result = await openSession("https://careers.acme.test/jobs/1");
+    assert.deepEqual(closed, [true], "the Apply window was closed");
+    assert.equal(result.unsupported?.vendor, "handoff", "the redirect onto a listed host is still refused");
+    assert.equal(result.unsupported?.postingUrl, LISTED);
+  });
+});
+
