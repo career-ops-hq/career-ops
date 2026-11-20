@@ -683,6 +683,21 @@ test("a rate limit says to wait, and a real sign-in failure still says so", () =
   });
   assert.match(signedOut, /is it installed and authenticated/);
   assert.match(signedOut, /not authenticated/);
+  const loaded = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "credentials loaded successfully; network connection failed",
+  });
+  assert.equal(loaded, "The CLI exited with an error. (credentials loaded successfully; network connection failed)");
+  const authWithRequestId = noOutputError({
+    emittedText: false,
+    sawError: false,
+    cleanExit: false,
+    stderrSnippet: "Authentication failed: invalid credentials (request ID req-429-abc)",
+  });
+  assert.match(authWithRequestId, /is it installed and authenticated/);
+  assert.doesNotMatch(authWithRequestId, /^Rate limit/);
 });
 
 test("a non-clean exit still appends the snippet", () => {

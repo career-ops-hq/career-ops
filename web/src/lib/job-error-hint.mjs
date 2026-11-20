@@ -33,14 +33,15 @@
 const AUTH_PATTERN =
   /authenticat\w*|login|sign[ -]?in|credential|api[ -]?key|unauthorized|no cli configured/i;
 
-// Same rate-limit words noOutputError uses. Structured error events skip that
-// helper and arrive as the raw CLI line, so the hint has to recognize them too.
-const RATE_LIMIT_PATTERN = /\b429\b|rate limit|too many requests/i;
+// Same rate-limit words noOutputError uses. A hyphen is a word boundary, so
+// \b429\b matches the 429 inside a request id such as req-429-abc.
+const RATE_LIMIT_PATTERN = /(?<![\w-])429(?![\w-])|rate limit|too many requests/i;
 
 // A status line can name a key without asking anyone to sign in.
 // "please login" is still a request when the same line says the key is configured.
 const SIGN_IN_SUCCESS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|configured)\b/i;
-const SIGN_IN_FAILURE_RE = /\b(?:invalid|missing|expired|rejected|fail(?:ed|ure)?|unauthorized|revoked|denied|not)\b/i;
+// The key itself failed. "network connection failed" does not count.
+const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:is\s+|was\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)/i;
 const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 
 /** The stderr quote on a canned message that did not already say to sign in. */
@@ -54,7 +55,7 @@ function quoteIsSignIn(detail) {
   if (!detail || RATE_LIMIT_PATTERN.test(detail)) return false;
   if (SIGN_IN_REQUEST_RE.test(detail)) return true;
   if (!AUTH_PATTERN.test(detail)) return false;
-  if (SIGN_IN_SUCCESS_RE.test(detail) && !SIGN_IN_FAILURE_RE.test(detail)) return false;
+  if (SIGN_IN_SUCCESS_RE.test(detail) && !KEY_FAILURE_RE.test(detail)) return false;
   return true;
 }
 

@@ -48,6 +48,14 @@ test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", ()
   assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit exceeded for API key)")), null);
   assert.equal(jobErrorHint(errorJob("Rate limit. Wait and try again. (429 rate limit on login endpoint)")), null);
   assert.equal(jobErrorHint(errorJob("429 rate limit exceeded for API key")), null);
+  assert.equal(
+    jobErrorHint(errorJob("Authentication failed: invalid credentials (request ID req-429-abc)"))?.kind,
+    "auth",
+  );
+  assert.equal(
+    jobErrorHint(errorJob("The CLI exited with an error. (credentials loaded successfully; network connection failed)")),
+    null,
+  );
   assert.equal(jobErrorHint(errorJob("429 rate limit on login endpoint")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing.")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key loaded successfully)")), null);
