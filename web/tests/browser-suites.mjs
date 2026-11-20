@@ -49,6 +49,7 @@ const SUITES = {
   "apply-field-accessibility": { url: "APPLY_FIELDS_TEST_URL", fixture: "blank" },
   "assistant-confirmation-accessibility": { url: "ASSISTANT_CONFIRM_TEST_URL", fixture: "blank" },
   "assistant-focus": { url: "ASSISTANT_FOCUS_TEST_URL", fixture: "blank" },
+  "assistant-conversation-focus": { url: "ASSISTANT_CONVERSATION_FOCUS_TEST_URL", fixture: "blank" },
   "assistant-markdown-lazy": { url: "ASSISTANT_MARKDOWN_LAZY_TEST_URL", fixture: "blank" },
   "assistant-request-feedback": { url: "ASSISTANT_FEEDBACK_TEST_URL", fixture: "blank" },
   "assistant-status-recovery": { url: "ASSISTANT_STATUS_TEST_URL", fixture: "blank" },
