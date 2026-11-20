@@ -3055,10 +3055,23 @@ export function companyRoleDedupKey(company, role, canonicalize = defaultCompany
 
 /**
  * Marker for a seeded company+role row whose requisition is unknown (in the
- * language sets: whose language is unknown). A single such row keeps the key a
- * plain duplicate, exactly as if neither signal were read at all.
+ * language sets: whose language is unknown). It means this row named none, not
+ * that every id was seen. A later posting that names an id is a different
+ * opening. A later posting that also names none stays a duplicate.
  */
 export const ANY_REQUISITION = '*';
+
+/**
+ * Marker for a seeded pipeline row whose posting scan-history never recorded.
+ * The scanner writes pipeline.md first and scan-history second, and the
+ * requisition id lives only in scan-history. When only the pipeline write
+ * landed, the row's id is lost, not absent: it may have been a provider-only
+ * id such as `JR100`. Such a row keeps the duplicate, as an unknown row did
+ * before, so a new URL for the same requisition cannot come back through it.
+ * A row whose scan-history entry exists but names no id is still
+ * {@link ANY_REQUISITION}.
+ */
+export const UNRECORDED_REQUISITION = '?';
 
 /**
  * Canonical requisition IDs for company+role dedupe — every form the source
@@ -3124,7 +3137,10 @@ export const ANY_REQUISITION = '*';
  * @returns {string[]} Canonical requisition IDs, as-labelled form first.
  */
 export function requisitionIdsForDedup({ url, text, requisitionId } = {}) {
-  const suppliedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  const trimmedId = typeof requisitionId === 'string' ? requisitionId.trim() : '';
+  // `*` and `?` are the seed markers (ANY_REQUISITION, UNRECORDED_REQUISITION),
+  // not requisition IDs.
+  const suppliedId = trimmedId === ANY_REQUISITION || trimmedId === UNRECORDED_REQUISITION ? '' : trimmedId;
   const workdayKey = !suppliedId && typeof url === 'string' ? workdayDedupKey({ url }) : null;
   if (suppliedId) return [normalizeScanScalar(suppliedId).toUpperCase()];
   // Google Careers has no requisition field: the job id in the URL path is the
@@ -3177,19 +3193,28 @@ export function requisitionIdForDedup(source) {
  * Whether a candidate that matched a seen company+role key is nevertheless a
  * different requisition.
  *
- * True only when every seeded row for the key named its requisition and none of
- * the candidate's forms was seen. Any unknown on either side keeps the
- * historical answer — a duplicate — so the check can only let through postings
- * the company itself labelled as distinct. An ambiguous source contributes
- * every form it could mean (see {@link requisitionIdsForDedup}), and one hit
- * on any of them is a duplicate.
+ * True when the candidate names an id and no seeded row named that id. A seed
+ * that named none does not count as a match, so the labelled posting comes
+ * back, including when the seed is an Applied row. False when the candidate
+ * names no id, when a seeded row named one of its forms, when a seeded
+ * pipeline row lost its id ({@link UNRECORDED_REQUISITION}), or when there is
+ * no seed. An ambiguous source contributes every form it could mean (see
+ * {@link requisitionIdsForDedup}), and one hit on any of them is a duplicate.
  *
  * @param {Set<string>|undefined} seededRequisitions - Requisitions seen for matching keys.
  * @param {string[]|string|null} candidateRequisitions - From {@link requisitionIdsForDedup}.
  * @returns {boolean}
  */
 export function isDistinctRequisition(seededRequisitions, candidateRequisitions) {
-  return unseenOnEveryRow(seededRequisitions, candidateRequisitions);
+  const forms = toRequisitionForms(candidateRequisitions);
+  // A row that names no requisition is still the same opening. A row that
+  // names one is a different opening when the seed named none: the `*` marker
+  // means "unknown", not "every id".
+  if (!(seededRequisitions instanceof Set) || seededRequisitions.size === 0 || forms.length === 0) return false;
+  if (seededRequisitions.has(UNRECORDED_REQUISITION)) return false;
+  const named = [...seededRequisitions].filter((form) => form !== ANY_REQUISITION);
+  if (named.length === 0) return true;
+  return forms.every((form) => !seededRequisitions.has(form));
 }
 
 /**
@@ -3286,7 +3311,9 @@ function recordForms(formsByKey, key, forms) {
 function recordLanguages(languagesByKey, key, requisitions, languages) {
   let byRequisition = languagesByKey.get(key);
   if (!byRequisition) languagesByKey.set(key, (byRequisition = new Map()));
-  const list = toRequisitionForms(requisitions);
+  // A row that lost its requisition is filed with the unknown ones here; only
+  // the requisition check reads UNRECORDED_REQUISITION.
+  const list = toRequisitionForms(requisitions).filter((form) => form !== UNRECORDED_REQUISITION);
   for (const requisition of list.length > 0 ? list : [ANY_REQUISITION]) {
     recordForms(byRequisition, requisition, languages);
   }
@@ -3343,7 +3370,10 @@ function recordLanguages(languagesByKey, key, requisitions, languages) {
  * Requisition id and language are recorded per posting URL in scan-history
  * (`requisition_id`, `language`). A tracker or pipeline row carries neither, so
  * it inherits them from the scan-history row with the same URL; a row whose URL
- * scan-history never recorded them for stays unknown.
+ * scan-history never recorded them for stays unknown. A pipeline row whose URL
+ * scan-history has no row for at all, and whose URL names no id itself, is
+ * seeded as {@link UNRECORDED_REQUISITION}: its history write never landed, so
+ * the id it may have had is missing rather than absent.
  * @returns {Set<string>} Existing company+role dedupe keys.
  */
 export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize = defaultCompanyNormalizer, { includeLocation = false, locatedBases = null, requisitionsByBase = null, locatedRequisitionsByBase = null, languagesByBase = null, locatedLanguagesByBase = null } = {}) {
@@ -3421,6 +3451,21 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       languageFormsForDedup(row.language));
   }
 
+  // An `added` row is the history write for the posting that entered the
+  // pipeline. A skipped or other observational row for the same URL is an
+  // earlier sighting, not proof that this write landed. Counting it left the
+  // pipeline row with no marker, so a later URL for the same id looked new.
+  let recordedUrls = null;
+  const recordedInHistory = (url) => {
+    if (!recordedUrls) {
+      recordedUrls = new Set();
+      for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
+        if (row.url && (row.status || 'added') === 'added') recordedUrls.add(seenJobKey(row.url.trim()));
+      }
+    }
+    return recordedUrls.has(seenJobKey(url.trim()));
+  };
+
   // pipeline.md — company/title are the two cells after the URL cell, plus
   // optional trailing columns (location, compensation, posted:/trust:/note:
   // segments). The URL is not always first, and expired/pre-screen shapes
@@ -3431,8 +3476,11 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
     const pair = extractPipelineCompanyRole(line);
     if (!pair) continue;
     const attributes = attributesFor(pair.url);
-    add(pair.company, pair.role, pair.location,
-      requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId }),
+    let requisition = requisitionIdsForDedup({ url: pair.url, requisitionId: attributes.requisitionId });
+    if (requisition.length === 0 && typeof pair.url === 'string' && pair.url && !recordedInHistory(pair.url)) {
+      requisition = [UNRECORDED_REQUISITION];
+    }
+    add(pair.company, pair.role, pair.location, requisition,
       languageFormsForDedup(attributes.language));
   }
 
