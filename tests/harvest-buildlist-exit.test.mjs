@@ -3,7 +3,10 @@
 // (nodejs/node#56645, the crash in #3788; discover-ats.mjs avoids it the same
 // way). The entry point ended every run, failed or not, with process.exit().
 // The preload stubs fetch with a one-company BuildList and turns any
-// process.exit() call into exit 99, which fails on every platform.
+// process.exit() call into exit 99, which fails on every platform. robotsAllows
+// looks up the robots.txt host before it asks for the file, and refuses when
+// the lookup fails, so the preload answers that lookup too: the test needs no
+// network.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -22,6 +25,11 @@ function runHarvest(args, { sitemapStatus = 200 } = {}) {
   try {
     const preload = join(dir, 'preload.mjs');
     writeFileSync(preload, `import { writeSync } from 'node:fs';
+import dnsPromises from 'node:dns/promises';
+import { syncBuiltinESMExports } from 'node:module';
+const answer = { address: '93.184.215.14', family: 4 };
+dnsPromises.lookup = async (_host, options) => (options?.all ? [answer] : answer);
+syncBuiltinESMExports();
 const exit = process.exit;
 process.exit = (code) => { writeSync(2, 'process.exit called with ' + code + '\\n'); exit(99); };
 let requests = 0;
