@@ -33,7 +33,7 @@ test('sectionKey resolves the Dutch spellings CVs use', () => {
     ['Certificaten', 'certifications'], ['Certificeringen', 'certifications'],
     ['Prijzen', 'awards'], ['Onderscheidingen', 'awards'],
     ['Vaardigheden', 'skills'], ['Technische vaardigheden', 'skills'], ['Kennis en vaardigheden', 'skills'],
-    ['Interesses', 'interests'], ["Hobby's", 'interests'],
+    ['Interesses', 'interests'], ["Hobby's", 'interests'], ['Hobby’s', 'interests'],
   ];
   const missed = cases.filter(([title, key]) => sectionKey(title) !== key)
     .map(([title, key]) => `${title} => ${sectionKey(title)} (expected ${key})`);
@@ -64,4 +64,16 @@ test('cv.sections reorders a Dutch CV', () => {
   ]);
   const out = reorderCvSections(input, ['summary', 'skills', 'experience', 'education']);
   assert.deepEqual(renderedTitles(out), ['Profiel', 'Vaardigheden', 'Werkervaring', 'Opleiding']);
+});
+
+test('cv.sections moves "Hobby’s" with either apostrophe', () => {
+  for (const hobbies of ["Hobby's", 'Hobby’s']) {
+    const input = sections([
+      ['PROFESSIONAL SUMMARY', 'Profiel'],
+      ['SKILLS', 'Vaardigheden'],
+      ['INTERESTS', hobbies],
+    ]);
+    const out = reorderCvSections(input, ['summary', 'interests', 'skills']);
+    assert.deepEqual(renderedTitles(out), ['Profiel', hobbies, 'Vaardigheden'], hobbies);
+  }
 });

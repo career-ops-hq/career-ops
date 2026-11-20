@@ -601,6 +601,8 @@ const SECTION_ALIASES = new Map([
   ['technische vaardigheden', 'skills'],
   ['kennis en vaardigheden', 'skills'],
   ["hobby's", 'interests'],
+  // With the typographic apostrophe (U+2019), which foldDiacritics keeps.
+  ['hobby’s', 'interests'],
   // Portuguese (pt-BR / pt-PT) — the same failure as Spanish above: modes/pt/
   // ships a Portuguese market set, but no Portuguese title resolved here, so
   // cv.sections matched no section of a Portuguese CV and the order guard fell
