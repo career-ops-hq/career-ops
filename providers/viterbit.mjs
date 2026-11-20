@@ -76,7 +76,7 @@ function hasCardMarkup(page) {
 
 /** @param {string} html */
 function text(html) {
-  return decodeEntities(html.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(html.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 const HOUR_MS = 3_600_000;
