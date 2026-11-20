@@ -455,9 +455,41 @@ test("Grok usage without a usage block is skipped, not reported as zero", () => 
   assert.equal(parseGrokEvent(JSON.stringify({ type: "end" })), null);
 });
 
-test("Grok malformed usage cannot report negative tokens", () => {
-  const line = JSON.stringify({ type: "end", usage: { input_tokens: 5, cached_input_tokens: 9000 } });
-  assert.deepEqual(parseGrokEvent(line), { tokens: 0, tokensAreTotal: true, costUsd: null });
+test("Grok usage with cache larger than input is dropped", () => {
+  // Reporting this as {tokens: 0} would replace a total the earlier frames
+  // already counted, because Grok frames are running totals.
+  const line = JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 5, cached_input_tokens: 9000, output_tokens: 10 },
+  });
+  assert.equal(parseGrokEvent(line), null);
+});
+
+test("a later Grok frame with cache larger than input keeps the last total", () => {
+  let total = 0;
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "usage",
+    usage: { input_tokens: 1000, cached_input_tokens: 0, output_tokens: 40 },
+  })));
+  assert.equal(total, 1040);
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 100, cached_input_tokens: 500, output_tokens: 10 },
+  })));
+  assert.equal(total, 1040);
+});
+
+test("a later Grok total still replaces when cache is inside the input", () => {
+  let total = accumulateTokens(0, parseGrokEvent(JSON.stringify({
+    type: "usage",
+    usage: { input_tokens: 1000, cached_input_tokens: 0, output_tokens: 40 },
+  })));
+  total = accumulateTokens(total, parseGrokEvent(JSON.stringify({
+    type: "end",
+    usage: { input_tokens: 1000, cached_input_tokens: 900, output_tokens: 40 },
+  })));
+  // 140 is the billed total. Cache inside the input is a real shrink, not a clamp.
+  assert.equal(total, 140);
 });
 
 test("Grok survives its own JSON.parse successes (null, bare scalars) and garbage", () => {
