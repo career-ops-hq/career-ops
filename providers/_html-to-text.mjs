@@ -132,6 +132,64 @@ function firstAtOrAfter(spans, pos) {
   return spans[lo];
 }
 
+/**
+ * `text.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, replacement)` (or, with
+ * `wordBoundary`, the same pattern with `\b` after the name) in linear time,
+ * with the same result on every input. Some providers strip their blocks with
+ * exactly these rules, which are not stripMediaBlocks()'s: the opener ends at
+ * its first `>` whatever the quotes say, and the closer allows no whitespace.
+ *
+ * At an opener the pattern reads up to the first `>` after the name, then up
+ * to the first closer of the same kind (any case); if either is missing it
+ * moves on one character. Each part has one way to match, so the outcome at an
+ * opener is the next `>` and a closer lookup. The regex rescans the rest of
+ * the text from every opener that has no `>` or no closer, which was
+ * quadratic; here no `>` after an opener means none after any later one, and
+ * closers are looked up by binary search.
+ *
+ * @param {string} text
+ * @param {string} replacement
+ * @param {{ wordBoundary?: boolean }} [options]
+ * @returns {string}
+ */
+export function replaceScriptStyleBlocks(text, replacement, { wordBoundary = false } = {}) {
+  const closers = { script: exactCloserSpans(text, 'script'), style: exactCloserSpans(text, 'style') };
+  const opener = new RegExp(`<(script|style)${wordBoundary ? '\\b' : ''}`, 'gi');
+  let out = '';
+  let from = 0;
+  // The first `>` at or after the last opener's name. Openers only move
+  // forward, so each stretch of text is searched for `>` once.
+  let gt = -2;
+  for (let m = opener.exec(text); m; m = opener.exec(text)) {
+    const afterName = m.index + m[0].length;
+    if (gt === -2 || (gt !== -1 && gt < afterName)) gt = text.indexOf('>', afterName);
+    if (gt === -1) break;
+    const close = firstAtOrAfter(closers[m[1].toLowerCase()], gt + 1);
+    if (!close) {
+      opener.lastIndex = m.index + 1;
+      continue;
+    }
+    out += text.slice(from, m.index) + replacement;
+    from = close.end;
+    opener.lastIndex = close.end;
+  }
+  return from === 0 ? text : out + text.slice(from);
+}
+
+/**
+ * Every `</kind>` (any case, no whitespace) in the text, as start and end offsets.
+ * @param {string} text
+ * @param {string} kind - `script` or `style`
+ * @returns {Array<{start: number, end: number}>}
+ */
+function exactCloserSpans(text, kind) {
+  const spans = [];
+  for (const m of text.matchAll(new RegExp(`</${kind}>`, 'gi'))) {
+    spans.push({ start: m.index, end: m.index + m[0].length });
+  }
+  return spans;
+}
+
 /** @param {string} content */
 function stripMarkup(content) {
   return stripMediaBlocks(stripHtmlComments(content)).replace(HTML_TAG_RE, ' ');
@@ -181,10 +239,13 @@ export function htmlToText(content, { cap = DESCRIPTION_CAP } = {}) {
  * @returns {string}
  */
 export function visibleText(fragment) {
+  // stripHtmlComments, not /<!--[\s\S]*?-->/: the lazy regex rescans the rest
+  // of the text from every `<!--` that has no `-->`. A tag that never closes
+  // is consumed once and kept as it was, which is what /<[^>]+>/ left behind,
+  // without rescanning the rest of the text from every later `<`.
   return decodeEntities(
-    String(fragment ?? '')
-      .replace(/<!--[\s\S]*?-->/g, ' ')
-      .replace(/<[^>]+>/g, ' '),
+    stripHtmlComments(String(fragment ?? ''))
+      .replace(/<([^>]*)(>?)/g, (tag, body, close) => (close && body ? ' ' : tag)),
   )
     .replace(/\s+/g, ' ')
     .trim();

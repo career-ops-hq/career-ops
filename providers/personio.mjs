@@ -410,7 +410,7 @@ function stripTags(s) {
   let prev;
   do {
     prev = s;
-    s = s.replace(/<[^>]*>/g, '');
+    s = s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? '' : tag));
   } while (s !== prev);
   return s;
 }

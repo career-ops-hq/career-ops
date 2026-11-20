@@ -28,7 +28,7 @@ const MAX_JOBS = 1000; // cap postings taken from one widget page
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /** Resolve the widget URL: explicit /widgets/jobs URLs pass through, any other
