@@ -319,7 +319,10 @@ export function chooseSplitFacet(facets, { exclude = [], locationHints } = {}) {
       .filter(({ values }) => values.length > 0);
     if (locationCandidates.length > 0) {
       locationCandidates.sort((a, b) => b.values.length - a.values.length);
-      return locationCandidates[0];
+      // locationScoped: the slices deliberately cover only the configured
+      // locations, so postings outside them are out of scope by config, not
+      // unread. The split's coverage check must not count them as missing.
+      return { ...locationCandidates[0], locationScoped: true };
     }
   }
 
@@ -1107,7 +1110,12 @@ export default {
         // would inflate the bar to exactly the gap it should be judged against.
         const chosenCoverage = facet.values.reduce((sum, v) => sum + v.count, 0);
         const trueTotal = trueTotalFromFacets(result.facets, { exclude: Object.keys(applied) });
-        if (trueTotal !== null) {
+        // A location-scoped split covers less than the board on purpose (Citi:
+        // the US slice is 1,461 of ~4,200 worldwide postings). Judging it
+        // against the whole board flagged every such tenant "still incomplete"
+        // although every in-scope posting was read. Each slice's own clamp is
+        // still checked recursively below, so a truly short slice is caught.
+        if (trueTotal !== null && !facet.locationScoped) {
           const others = [];
           for (const f of Array.isArray(result.facets) ? result.facets : []) {
             if (f?.facetParameter === facet.facetParameter) continue;
