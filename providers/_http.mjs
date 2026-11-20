@@ -11,6 +11,7 @@ import {
 import { providerFetchContext, isBlockedAddress, blockedAddressError } from './_ip-guard.mjs';
 import { currentConnectionScope, currentAbortSignal } from './_connection-scope.mjs';
 import { cachedText } from './_http-cache.mjs';
+import { paceHost } from './_host-pacing.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 
 /** @typedef {import('./_types.js').Context} Context */
@@ -133,8 +134,25 @@ async function fetchWithTimeout(url, opts = {}, consume, allowManualRedirectResp
   // starts it: the DNS lookup happens inside connect, well after the
   // synchronous part of fetch() has returned, and the context has to still be
   // entered when it does.
-  return providerFetchContext.run({ url: String(url), targetHost, proxyHost },
-    () => fetchInContext(url, opts, consume, dispatcher, allowManualRedirectResponse, fetchImpl));
+  //
+  // A host in a paced family (providers/_host-pacing.mjs — every Workday
+  // tenant shares one Cloudflare edge) waits for the family's next slot
+  // first, BEFORE the request timer is armed, so queueing never counts as a
+  // timeout. Only real network requests get here: an http-cache hit never
+  // reaches fetchWithTimeout, so it costs no slot. The outcome feeds the
+  // family's adaptive interval.
+  const pacer = await paceHost(targetHost);
+  try {
+    const result = await providerFetchContext.run({ url: String(url), targetHost, proxyHost },
+      () => fetchInContext(url, opts, consume, dispatcher, allowManualRedirectResponse, fetchImpl));
+    pacer?.onSuccess();
+    return result;
+  } catch (err) {
+    if (pacer && (err?.status === 429 || isCloudflareChallenge(err))) {
+      pacer.onRateLimited(parseRetryAfterMs(err?.retryAfter));
+    }
+    throw err;
+  }
 }
 
 // redirect defaults to 'error': a provider fetch must never follow a 3xx, or a
