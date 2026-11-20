@@ -3412,14 +3412,16 @@ export function collectSeenCompanyRoles(sources = {}, policy = {}, canonicalize 
       languageFormsForDedup(row.language));
   }
 
-  // Every URL scan-history has a row for, whatever its status. A scanner writes
-  // the pipeline row first; one with no history row lost its requisition id.
+  // An `added` row is the history write for the posting that entered the
+  // pipeline. A skipped or other observational row for the same URL is an
+  // earlier sighting, not proof that this write landed. Counting it left the
+  // pipeline row with no marker, so a later URL for the same id looked new.
   let recordedUrls = null;
   const recordedInHistory = (url) => {
     if (!recordedUrls) {
       recordedUrls = new Set();
       for (const row of scanHistoryRows(scanHistoryText, historyRows)) {
-        if (row.url) recordedUrls.add(seenJobKey(row.url.trim()));
+        if (row.url && (row.status || 'added') === 'added') recordedUrls.add(seenJobKey(row.url.trim()));
       }
     }
     return recordedUrls.has(seenJobKey(url.trim()));

@@ -521,6 +521,19 @@ ${workday.replace('London', 'New-York')}_JR200\t2026-09-22\tAcme\tEngineer\tAcme
 
   const pipelineOnly = await run(null);
   eq('pipeline-only write: a new URL for JR100 stays a duplicate', candidate(pipelineOnly, ['JR100']), true);
+
+  const skippedOnlyDir = mkdtempSync(join(tmpdir(), 'scan-reqdedup-skipped-only-'));
+  try {
+    const pipelinePath = join(skippedOnlyDir, 'pipeline.md');
+    const scanHistoryPath = join(skippedOnlyDir, 'scan-history.tsv');
+    const applicationsPath = join(skippedOnlyDir, 'applications.md');
+    await appendToScanHistory([offer(seenOpening)], '2026-11-01', 'skipped_title', { historyPath: scanHistoryPath, historyPolicy: {} });
+    await appendToPipeline([offer(seenOpening, 'JR100')], { pipelinePath, scanHistoryPath, historyPolicy: {} });
+    const skippedOnly = loadDedupSnapshot({}, undefined, { pipelinePath, scanHistoryPath, applicationsPath });
+    eq('an older skipped row is not the accepted write: JR100 stays a duplicate', candidate(skippedOnly, ['JR100']), true);
+  } finally {
+    rmSync(skippedOnlyDir, { recursive: true, force: true });
+  }
   eq('pipeline-only write: a new URL with no id stays a duplicate', candidate(pipelineOnly, []), true);
 
   const both = await run(offer(seenOpening, 'JR100'));
