@@ -36,3 +36,7 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-20 `2026-11-20-santifer.2` (471 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
 - 2026-11-20 `2026-11-20-santifer.3` (98 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
 - 2026-11-20 `2026-11-20-santifer.4` (124 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-20 `2026-11-20-santifer.5` (398 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-20 `2026-11-20-santifer.6` (357 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-20 `2026-11-20-santifer.7` (59 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
+- 2026-11-20 `2026-11-20-santifer.8` (72 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
