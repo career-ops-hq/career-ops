@@ -6,6 +6,14 @@
 // specified.
 import { isReservedReportFile } from "./report-files.mjs";
 import { claudeUsageTokens } from "./claude-usage.mjs";
+import {
+  AUTH_FAILURE_RE,
+  CLAUDE_CODE_TIP,
+  KEY_FAILURE_RE,
+  KEY_STATUS_RE,
+  RATE_LIMIT_RE,
+  SIGN_IN_REQUEST_RE,
+} from "./cli-failure-patterns.mjs";
 
 /**
  * Dashboard-friendly shape both `parseCodexEvent` and `parseClaudeEvent` return.
@@ -468,14 +476,8 @@ export function killMsForKind(kind) {
  * @param {{emittedText: boolean, sawError: boolean, cleanExit: boolean, stderrSnippet?: string | null}} state
  * @returns {string | null}
  */
-// A hyphen is a word boundary, so \b429\b matches the 429 inside req-429-abc.
-const RATE_LIMIT_RE = /(?<![\w-])429(?![\w-])|rate limit|too many requests/i;
 const SIGN_IN_CORE_RE = /authenticat\w*|please log ?in|sign[ -]?in|unauthorized/i;
 const KEY_MENTION_RE = /(?:credentials?|api[ -]?key)/i;
-const KEY_STATUS_RE = /\b(?:succeed(?:ed)?|success(?:ful(?:ly)?)?|loaded|configured)\b/i;
-const KEY_FAILURE_RE = /(?:invalid|missing|expired|rejected|revoked|denied)\s+(?:\w+\s+){0,3}(?:credentials?|api[ -]?key)|(?:not|no)\s+(?:valid\s+)?(?:credentials?|api[ -]?key)|(?:credentials?|api[ -]?key)\s+(?:(?:is|was|has|have|had)\s+)?(?:invalid|missing|expired|rejected|revoked|denied|not\b)/i;
-const AUTH_FAILURE_RE = /\bauthentication\s+failed\b|\bnot\s+authenticated\b|\bunauthenticated\b|\bunauthorized\b/i;
-const SIGN_IN_REQUEST_RE = /please (?:log ?in|sign[ -]?in)/i;
 
 /** A stderr line asks for sign-in when sign-in failed, not when a key merely loaded. */
 function stderrIsSignIn(line) {
@@ -501,7 +503,7 @@ export function noOutputError({ emittedText, sawError, cleanExit, stderrSnippet 
     }
     return `The CLI exited with an error.${detail}`;
   }
-  return `The CLI returned nothing.${detail}`;
+  return `The CLI returned nothing.${detail}${CLAUDE_CODE_TIP}`;
 }
 
 // Message for a run the route stopped at its own time limit. It names the limit,

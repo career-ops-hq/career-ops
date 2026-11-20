@@ -86,6 +86,6 @@ test("a clean exit with no stdout and no stderr keeps the generic message", asyn
   assert.ok(error, `expected an error event, got ${JSON.stringify(events)}`);
   assert.equal(
     error.msg,
-    "The CLI returned nothing.",
+    "The CLI returned nothing. (career-ops is best on Claude Code.)",
   );
 });

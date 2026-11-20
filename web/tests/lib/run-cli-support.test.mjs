@@ -655,12 +655,13 @@ test("a clean exit with no output now carries the CLI's own stderr reason", () =
   assert.match(msg, /^The CLI returned nothing\. \(jetski: no output produced/);
   assert.match(msg, /headless mode cannot prompt for/);
   assert.doesNotMatch(msg, /authenticated/);
+  assert.ok(msg.endsWith("(career-ops is best on Claude Code.)"), "the Claude Code tip stays last");
 });
 
 test("an empty reply and a plain crash are not a sign-in problem", () => {
   assert.equal(
     noOutputError({ emittedText: false, sawError: false, cleanExit: true, stderrSnippet: null }),
-    "The CLI returned nothing.",
+    "The CLI returned nothing. (career-ops is best on Claude Code.)",
   );
   assert.equal(
     noOutputError({ emittedText: false, sawError: false, cleanExit: false }),

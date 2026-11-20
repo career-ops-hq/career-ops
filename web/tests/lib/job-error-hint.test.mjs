@@ -59,6 +59,8 @@ test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", ()
   assert.equal(jobErrorHint(errorJob("429 rate limit on login endpoint")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing.")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key loaded successfully)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key loaded successfully) (career-ops is best on Claude Code.)")), null);
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (career-ops is best on Claude Code.)")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured)")), null);
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; report not found)")), null);
   assert.equal(
@@ -75,6 +77,7 @@ test("a rate limit, an empty reply, and a Grok error are not a sign-in hint", ()
 
 test("a real sign-in line still asks you to sign in", () => {
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (please login)"))?.kind, "auth");
+  assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (please login) (career-ops is best on Claude Code.)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (No CLI configured; login required)"))?.kind, "auth");
   assert.equal(jobErrorHint(errorJob("The CLI returned nothing. (API key configured; authentication failed)"))?.kind, "auth");
   assert.equal(
