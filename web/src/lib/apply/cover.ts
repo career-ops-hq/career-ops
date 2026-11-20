@@ -3,6 +3,7 @@ import path from "node:path";
 import { careerOpsRoot, findApplication, isRegularContainedFile, pdfPathStatusForReport, readReport } from "@/lib/career-ops";
 import { reportNumberFor } from "@/lib/apply-checklist.mjs";
 import { companySlug } from "@/lib/company-slug.mjs";
+import { reportNumberFromCell } from "./cv-selection.mjs";
 import { hasToken, isStandardName, matchesCompanyKeys, matchesTailoredCover, sortNewestFirst, standardKind } from "./cv-match.mjs";
 
 /** The length generate-cover-letter.mjs truncates a role slug to when it builds
@@ -46,6 +47,7 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
 
   // Resolved once: the index lookup and the standard-name filter below must
   // agree on which report this row is, including the report-file fallback.
+  const linkedReport = app ? reportNumberFromCell(app.report) != null : false;
   const reportNumber = n && app ? reportNumberFor(n, app, readReport(n)?.file ?? null) : null;
   if (n && app) {
     if (reportNumber != null) {
@@ -64,11 +66,14 @@ export async function resolveTailoredCover(company?: string, applicationNumber?:
     files = fs
       .readdirSync(dir)
       .filter((f) => f.toLowerCase().endsWith(".pdf"))
-      // With an application row a standard name is selected by report number
-      // below, not by company: its company segment is the report's slug, which
-      // can carry the role (031-acme-engineer-cover-...) and so differ from the
-      // tracker company's slug.
-      .filter((f) => (app && isStandardName(f.toLowerCase())) || matchesCompanyKeys(matchesTailoredCover, f.toLowerCase(), key.keys))
+      // When the row's own Report cell links its report, a standard name is
+      // selected by that report number below, not by company: its company
+      // segment is the report's slug, which can carry the role
+      // (031-acme-engineer-cover-...) and so differ from the tracker company's
+      // slug. A number found only through readReport's numeric fallback is not
+      // proof the report belongs to this row, so those names keep the company
+      // filter.
+      .filter((f) => (linkedReport && isStandardName(f.toLowerCase())) || matchesCompanyKeys(matchesTailoredCover, f.toLowerCase(), key.keys))
       // sortNewestFirst drops directories and files that vanish under it, but
       // not a symlink PLACED in output/ that resolves elsewhere: that one stats
       // as a regular file. Same realpath guard /api/cv-pdf applies, here rather
