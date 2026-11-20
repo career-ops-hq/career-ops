@@ -180,7 +180,9 @@ async function enrichFromAts(url: string, fields: ApplyField[]): Promise<void> {
   }
 }
 
-type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string> };
+// handoffHosts: the apply.handoff_hosts list read when the session opened, kept
+// so the streamed drive refuses those hosts with the same list (refusedDestination).
+type Session = { id: string; url: string; title: string; fields: ApplyField[]; context: BrowserContext; page: Page; frame: Frame; createdAt: number; formShot?: string; written?: Map<string, string>; handoffHosts?: string[] };
 
 declare global {
   // eslint-disable-next-line no-var
@@ -432,7 +434,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
     if (cliId && why.code === "no-form") {
       const id = `apply-${crypto.randomUUID()}`;
       const title = form.title || (await page.title().catch(() => "")) || "Application";
-      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+      SESSIONS.set(id, { id, url, title, fields: [], context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], handoffHosts });
       return { id, title, fields: [], shots, issues: [], needsDrive: true };
     }
     return abort(why.message);
@@ -461,7 +463,7 @@ export async function openSession(url: string, cliId?: string, forceAgent?: bool
   if (unlabeled > 0) issues.push({ level: "warn", code: "unlabeled-fields", message: `${unlabeled} field${unlabeled > 1 ? "s" : ""} couldn't be labelled cleanly — double-check ${unlabeled > 1 ? "them" : "it"} before submitting.` });
 
   const id = `apply-${crypto.randomUUID()}`;
-  SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1] });
+  SESSIONS.set(id, { id, url, title: form.title, fields: form.fields, context, page, frame, createdAt: Date.now(), formShot: shots[shots.length - 1], handoffHosts });
   return { id, title: form.title, fields: form.fields, shots, issues };
 }
 
@@ -504,7 +506,27 @@ export function isApplicationFormFn(form: ExtractedForm): boolean {
 /** After the streamed drive loop reaches a form, extract+enrich it (Tier-3
  *  interpret as a last resort), UPDATE the open session, and return the fields +
  *  issues. Returns null if no real application form materialised. */
-export async function finalizeDrivenSession(id: string, cliId?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | null> {
+/** Whether an open session's page has moved onto a refused host (Workday,
+ *  iCIMS, UKG or the apply.handoff_hosts read when it opened): the page itself,
+ *  or the frame its form would be read from. A hit closes the session's window,
+ *  as the checks in openSession do. The streamed drive calls this before its
+ *  first step and between steps, so a listed site is never driven. */
+export async function refusedDestination(id: string): Promise<UnsupportedApplySession["unsupported"] | null> {
+  const s = SESSIONS.get(id);
+  if (!s) return null;
+  let hit = await unsupportedInAppAts(s.page.url(), { handoffHosts: s.handoffHosts });
+  if (!hit) {
+    const { frame } = await pickFormFrame(s.page);
+    hit = await unsupportedInAppAts(frame.url(), { handoffHosts: s.handoffHosts });
+  }
+  if (hit) await closeSession(id);
+  return hit;
+}
+
+export async function finalizeDrivenSession(id: string, cliId?: string): Promise<{ title: string; fields: ApplyField[]; issues: ApplyIssue[] } | { unsupported: UnsupportedApplySession["unsupported"] } | null> {
+  // A drive that ended on a refused host must not leave a form to fill there.
+  const refused = await refusedDestination(id);
+  if (refused) return { unsupported: refused };
   const s = SESSIONS.get(id);
   if (!s) return null;
   let { frame, form } = await pickFormFrame(s.page);
@@ -515,6 +537,11 @@ export async function finalizeDrivenSession(id: string, cliId?: string): Promise
   let agentRefused: string | undefined;
   if (!looksLikeApplicationForm(form) && cliId) {
     const aiFrame = await richestControlFrame(s.page);
+    const aiHit = await unsupportedInAppAts(aiFrame.url(), { handoffHosts: s.handoffHosts });
+    if (aiHit) {
+      await closeSession(id);
+      return { unsupported: aiHit };
+    }
     const ai: AgentInterpretation = await interpretFormWithAgent(aiFrame, cliId, form.title || s.title).catch(() => ({ fields: [] as ApplyField[], spawned: false }));
     agentSpawned = ai.spawned;
     agentRefused = ai.refused;

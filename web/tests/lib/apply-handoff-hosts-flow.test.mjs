@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import "../helpers/web-ts-alias-loader.mjs";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync as writeSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync as writeSync } from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const stubUrl = pathToFileURL(join(here, "../fixtures/playwright-launch-stub.mjs")).href;
@@ -54,7 +54,8 @@ after(() => {
 });
 
 const { setHostResolver } = await import(pathToFileURL(join(root, "liveness-browser.mjs")).href);
-const { openSession } = await import("../../src/lib/apply/session.ts");
+const { openSession, refusedDestination, finalizeDrivenSession, getSession } = await import("../../src/lib/apply/session.ts");
+const { POST: drivePost } = await import("../../src/app/api/apply/drive/route.ts");
 const { classifyEmpty, tryApplyTrigger } = await import("../../src/lib/apply/diagnose.ts");
 const { POST } = await import("../../src/app/api/apply/session/route.ts");
 
@@ -274,8 +275,13 @@ const SIGN_IN_FIELDS = [
 
 // A career page with no form at first; scrolling it (nudgeScroll) moves it to
 // `movesTo`, where `fields` are shown (a usable application form by default).
-function careerPageMovingOnScroll(movesTo, closed, fields = APPLICATION_FIELDS) {
+// `control.moveTo(href)` moves it again later, as a drive step would.
+function careerPageMovingOnScroll(movesTo, closed, fields = APPLICATION_FIELDS, control = {}) {
   let current = "about:blank";
+  control.moveTo = (href) => {
+    current = href;
+    movesTo = href;
+  };
   const formHere = () => current === movesTo;
   const frame = {
     url: () => current,
@@ -500,3 +506,98 @@ describe("a form embedded from another host", { concurrency: 1 }, () => {
   });
 });
 
+
+// The streamed drive (/api/apply/drive) works on a session that is already
+// open. It reads the session's host list, so a step that lands on a listed host
+// ends the drive with the refusal panel and closes the window.
+describe("the streamed drive refuses a listed host", { concurrency: 1 }, () => {
+  let restore;
+  let fakeBin;
+  let previousPath;
+  before(() => {
+    restore = setHostResolver(async () => ["93.184.216.34"]);
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io"]\n');
+    // A stand-in claude first on PATH: if a refusal is missed and the drive
+    // starts, this runs instead of the real CLI and leaves a mark.
+    fakeBin = mkdtempSync(join(tmpdir(), "handoff-drive-bin-"));
+    writeSync(join(fakeBin, "claude"), `#!/bin/sh\ntouch "${join(fakeBin, "ran")}"\necho '{"action":"stuck","reason":"fake"}'\n`, { mode: 0o755 });
+    previousPath = process.env.PATH;
+    process.env.PATH = `${fakeBin}:${previousPath}`;
+  });
+  after(() => {
+    restore?.();
+    process.env.PATH = previousPath;
+    rmSync(fakeBin, { recursive: true, force: true });
+    clearTimeout(globalThis.__coIdleTimer);
+    globalThis.__coIdleTimer = undefined;
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = undefined;
+    writeProfile('apply:\n  handoff_hosts: ["gupy.io", "linkedin.com."]\n');
+  });
+
+  const openUnlisted = async (closed, control) => {
+    globalThis.__coHeadedBrowser = undefined;
+    globalThis.__applyCareerPage = () => careerPageMovingOnScroll("https://apply.acme-careers.test/form", closed, APPLICATION_FIELDS, control);
+    const opened = await openSession("https://careers.acme.test/jobs/1");
+    assert.ok(opened.id, JSON.stringify(opened).slice(0, 300));
+    return opened.id;
+  };
+
+  test("a session whose page moved to a listed host is refused and closed", async () => {
+    const closed = [];
+    const control = {};
+    const id = await openUnlisted(closed, control);
+    assert.equal(await refusedDestination(id), null, "an unlisted page is left alone");
+    assert.deepEqual(closed, []);
+    control.moveTo(LISTED);
+    const hit = await refusedDestination(id);
+    assert.equal(hit?.vendor, "handoff");
+    assert.equal(hit?.postingUrl, LISTED);
+    assert.deepEqual(closed, [true], "the window was closed");
+    assert.equal(getSession(id), undefined, "the session is gone");
+  });
+
+  test("finalizing a drive that ended on a listed host gives the refusal, not a form", async () => {
+    const closed = [];
+    const control = {};
+    const id = await openUnlisted(closed, control);
+    control.moveTo(LISTED);
+    const fin = await finalizeDrivenSession(id);
+    assert.equal(fin?.unsupported?.vendor, "handoff");
+    assert.equal(fin?.fields, undefined, "no form is handed back");
+    assert.deepEqual(closed, [true]);
+  });
+
+  test("POST /api/apply/drive streams the refusal panel and never starts the drive", async () => {
+    const closed = [];
+    const control = {};
+    const id = await openUnlisted(closed, control);
+    control.moveTo(LISTED);
+    const res = await drivePost(
+      new Request("http://fixture.invalid/api/apply/drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: id, cliId: "claude", goal: "reach", application: "42" }),
+      }),
+    );
+    const events = (await res.text()).trim().split("\n").map((line) => JSON.parse(line));
+    const last = events.at(-1);
+    assert.equal(last.t, "unsupported", JSON.stringify(events).slice(0, 400));
+    assert.equal(last.unsupported, true);
+    assert.equal(last.postingUrl, LISTED);
+    assert.match(last.checklistHref ?? "", /42/);
+    assert.equal(events.filter((e) => e.t === "step").length, 0, "no drive step ran");
+    assert.equal(existsSync(join(fakeBin, "ran")), false, "the CLI was never started");
+    assert.deepEqual(closed, [true]);
+  });
+});
+
+// The Apply page is React, so its handling is pinned on the source, as
+// apply-handoff-wiring.test.mjs does: a refusal from either drive stream must
+// reach the same panel the session open shows.
+test("the Apply page shows the refusal panel for a refusal from either drive stream", () => {
+  const provider = readFileSync(join(here, "../../src/components/apply/apply-provider.tsx"), "utf8");
+  assert.match(provider, /ev\.t === "unsupported"[\s\S]{0,200}showRefusal\(followUp\)/, "the reach drive (goal reach)");
+  assert.match(provider, /result\.status === "unsupported"\) \{\s*showRefusal\(result\)/, "the full fill (goal full)");
+  assert.match(provider, /followUp\.kind === "unsupported"\) \{\s*showRefusal\(followUp\)/, "the session open");
+});
