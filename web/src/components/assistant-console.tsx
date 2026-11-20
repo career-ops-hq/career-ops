@@ -3,7 +3,7 @@
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2, ChevronDown, Check, Trash2 } from "lucide-react";
+import { Send, X, Loader2, Settings, RotateCcw, ArrowUpRight, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { CoMark } from "@/components/co-mark";
 import { useJobs } from "@/components/jobs/job-store";
 import { usePipeline } from "@/components/pipeline/pipeline-provider";
@@ -12,7 +12,6 @@ import { useExplore } from "@/components/explore/explore-provider";
 import { workerBatchSummary, workerDetailsLabel } from "@/lib/worker-feedback.mjs";
 import { WorkerCard } from "@/components/jobs/worker-card";
 import { Button } from "@/components/ui/button";
-import { Modal } from "@/components/ui/modal";
 import { dispatch, type ActionCtx, type DoneInfo } from "@/app/actions/registry";
 import { estimateRunCost } from "@/lib/run-cost-estimate.mjs";
 import { scoreNum } from "@/lib/format";
@@ -35,7 +34,6 @@ type Part =
   | StatusConfirmationPart;
 type Msg = { role: "user" | "assistant"; parts: Part[] };
 type RequestFeedback = { id: number; phase: "working" | "ready" | "error"; announce: boolean };
-class ChatHistoryRefreshError extends Error {}
 
 const loadMarkdown = () => import("@/components/assistant-markdown");
 const AssistantMarkdown = lazy(loadMarkdown);
@@ -151,14 +149,6 @@ export function AssistantConsole() {
   const [chatPending, setChatPending] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [chatWarnings, setChatWarnings] = useState<{ id: string; error: string }[]>([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [titleDraft, setTitleDraft] = useState("");
-  const historyRef = useRef<HTMLDivElement>(null);
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const titleEditorActive = useRef(false);
-  const historyListId = useId();
   const activeChat = useRef<{ id: string; revision: number; title?: string }>({ id: "", revision: 0 });
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -306,24 +296,6 @@ export function AssistantConsole() {
     return subscribeConfig(window, read);
   }, []);
 
-  useEffect(() => {
-    if (!historyOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (historyRef.current && !historyRef.current.contains(e.target as Node)) {
-        setHistoryOpen(false);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [historyOpen]);
-
-  useEffect(() => {
-    if (isEditingTitle) {
-      titleInputRef.current?.focus();
-      titleInputRef.current?.select();
-    }
-  }, [isEditingTitle]);
-
   async function chatRequest(url: string, init?: RequestInit) {
     const response = await fetch(url, init);
     const data = await response.json();
@@ -357,11 +329,7 @@ export function AssistantConsole() {
         current.title = chat.title;
         savedSnapshot.current = encoded;
         setSaveError("");
-        try {
-          await refreshChats();
-        } catch (e) {
-          throw new ChatHistoryRefreshError(e instanceof Error ? e.message : "Conversation history could not be refreshed");
-        }
+        await refreshChats();
       } catch (e) {
         setSaveError(e instanceof Error ? e.message : "Conversation was not saved");
         throw e;
@@ -476,44 +444,15 @@ export function AssistantConsole() {
       setSaveError("");
     } finally { setChatPending(false); }
   }
-  function startRename() {
-    const current = activeChat.current.title || chats.find(c => c.id === activeChat.current.id)?.title || "";
-    titleEditorActive.current = true;
-    setTitleDraft(current);
-    setIsEditingTitle(true);
-    setHistoryOpen(false);
-  }
-  function commitRename(nextTitle: string) {
-    titleEditorActive.current = false;
-    setIsEditingTitle(false);
-    const currentId = activeChat.current.id;
-    const prevTitle = activeChat.current.title || "";
-    const clean = nextTitle.trim();
-    if (!clean || clean === prevTitle) return;
-
-    // Optimistic UI update: instant local reflect
-    activeChat.current.title = clean;
-    setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: clean } : c));
+  async function renameChat() {
+    const title = window.prompt("Conversation name", activeChat.current.title || "");
+    if (!title?.trim()) return;
     setChatPending(true);
-
-    void flushChat(clean)
-      .catch((error) => {
-        if (!(error instanceof ChatHistoryRefreshError)) {
-          activeChat.current.title = prevTitle;
-          setChats(prev => prev.map(c => c.id === currentId ? { ...c, title: prevTitle } : c));
-        }
-      })
-      .finally(() => setChatPending(false));
+    try { await flushChat(title.trim()); } catch { /* shown by flushChat */ }
+    finally { setChatPending(false); }
   }
-  function renameChat() {
-    startRename();
-  }
-  function removeChat() {
-    if (busy || chatPending || !activeChat.current.revision) return;
-    setDeleteModalOpen(true);
-  }
-  async function confirmDeleteChat() {
-    setDeleteModalOpen(false);
+  async function removeChat() {
+    if (!window.confirm("Delete this conversation?")) return;
     setChatPending(true);
     try {
       await flushChat();
@@ -902,14 +841,8 @@ export function AssistantConsole() {
           role="region"
           aria-labelledby={panelTitleId}
           onKeyDown={(e) => {
-            if (e.key === "Escape" && historyOpen) {
-              e.preventDefault();
-              e.stopPropagation();
-              setHistoryOpen(false);
-              return;
-            }
             // Let composition and native select popups handle Escape first.
-            if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || e.keyCode === 229 || (e.target instanceof HTMLElement && (e.target.closest("select") || e.target.closest('[role="combobox"]')))) return;
+            if (e.key !== "Escape" || e.defaultPrevented || e.nativeEvent.isComposing || e.keyCode === 229 || (e.target instanceof HTMLElement && e.target.closest("select"))) return;
             e.preventDefault();
             e.stopPropagation();
             closeAssistant();
@@ -933,157 +866,13 @@ export function AssistantConsole() {
             </Button>
           </header>
 
-          <div className="flex items-center gap-2 border-b border-border px-4 py-2">
-            {isEditingTitle ? (
-              <div
-                className="flex min-w-0 flex-1 items-center gap-1.5"
-                onBlur={(e) => {
-                  if (titleEditorActive.current && !e.currentTarget.contains(e.relatedTarget as Node | null)) commitRename(titleDraft);
-                }}
-              >
-                <input
-                  ref={titleInputRef}
-                  type="text"
-                  value={titleDraft}
-                  onChange={(e) => setTitleDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing && e.keyCode !== 229) {
-                      e.preventDefault();
-                      commitRename(titleDraft);
-                    } else if (e.key === "Escape") {
-                      e.preventDefault();
-                      titleEditorActive.current = false;
-                      setIsEditingTitle(false);
-                    }
-                  }}
-                  className="min-w-0 flex-1 rounded-md border border-brand/50 bg-surface px-2.5 py-1 text-sm text-foreground focus:outline-none"
-                  placeholder="Conversation name"
-                  aria-label="Conversation name"
-                />
-                <button
-                  type="button"
-                  onClick={() => commitRename(titleDraft)}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
-                  aria-label="Save name"
-                  title="Save name"
-                >
-                  <Check className="size-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    titleEditorActive.current = false;
-                    setIsEditingTitle(false);
-                  }}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted transition-colors hover:text-foreground"
-                  aria-label="Cancel"
-                  title="Cancel"
-                >
-                  <X className="size-3.5" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className="relative min-w-0 flex-1" ref={historyRef}>
-                  <button
-                    type="button"
-                    role="combobox"
-                    aria-label="Conversation history"
-                    aria-expanded={historyOpen}
-                    aria-haspopup="listbox"
-                    aria-controls={historyOpen ? historyListId : undefined}
-                    disabled={busy || chatPending || !chatReady}
-                    onClick={() => setHistoryOpen(!historyOpen)}
-                    onKeyDown={(e) => {
-                      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                        e.preventDefault();
-                        setHistoryOpen(true);
-                        queueMicrotask(() => {
-                          const options = historyRef.current?.querySelectorAll<HTMLElement>('[role="option"]');
-                          if (!options?.length) return;
-                          const target = e.key === "ArrowUp" ? options[options.length - 1] : options[0];
-                          target.focus();
-                        });
-                      } else if (e.key === "Escape" && historyOpen) {
-                        e.preventDefault();
-                        setHistoryOpen(false);
-                      }
-                    }}
-                    className="flex w-full items-center justify-between gap-1.5 rounded-md border border-border bg-surface px-2.5 py-1 text-left text-sm text-foreground transition-colors hover:border-brand/40 focus:border-brand/50 focus:outline-none disabled:opacity-40"
-                  >
-                    <span className="truncate">{chats.find(c => c.id === (chats.some(x => x.id === activeChat.current.id) ? activeChat.current.id : ""))?.title || "New chat"}</span>
-                    <ChevronDown className={cn("size-3.5 shrink-0 text-muted transition-transform", historyOpen && "rotate-180")} />
-                  </button>
-                  {historyOpen && (
-                    <div
-                      id={historyListId}
-                      role="listbox"
-                      onKeyDown={(e) => {
-                        const options = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
-                        const index = options.indexOf(document.activeElement as HTMLElement);
-                        if (e.key === "Escape") {
-                          e.preventDefault();
-                          setHistoryOpen(false);
-                          historyRef.current?.querySelector<HTMLElement>('[role="combobox"]')?.focus();
-                        } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                          e.preventDefault();
-                          const next = e.key === "ArrowDown"
-                            ? (index + 1) % options.length
-                            : (index - 1 + options.length) % options.length;
-                          options[next]?.focus();
-                        } else if (e.key === "Home") {
-                          e.preventDefault();
-                          options[0]?.focus();
-                        } else if (e.key === "End") {
-                          e.preventDefault();
-                          options[options.length - 1]?.focus();
-                        }
-                      }}
-                      className="absolute left-0 top-full z-50 mt-1 max-h-60 w-full space-y-0.5 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-xl"
-                    >
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={!chats.some(c => c.id === activeChat.current.id)}
-                        onClick={() => {
-                          void selectChat(undefined);
-                          setHistoryOpen(false);
-                        }}
-                        className={cn(
-                          "flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover",
-                          !chats.some(c => c.id === activeChat.current.id) ? "bg-surface-hover/60 font-medium text-brand-text" : "text-foreground"
-                        )}
-                      >
-                        New chat
-                      </button>
-                      {chats.map(c => {
-                        const isSelected = c.id === activeChat.current.id;
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            role="option"
-                            aria-selected={isSelected}
-                            onClick={() => {
-                              void selectChat(c.id);
-                              setHistoryOpen(false);
-                            }}
-                            className={cn(
-                              "flex w-full items-center truncate rounded-md px-2.5 py-1.5 text-left text-sm transition-colors hover:bg-surface-hover",
-                              isSelected ? "bg-surface-hover/60 font-medium text-brand-text" : "text-foreground"
-                            )}
-                          >
-                            <span className="truncate">{c.title}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <button className="text-xs text-muted transition-colors hover:text-foreground disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={startRename}>Rename</button>
-                <button className="text-xs text-muted transition-colors hover:text-foreground disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Delete</button>
-              </>
-            )}
+          <div className="flex gap-2 border-b border-border px-4 py-2">
+            <select aria-label="Conversation history" className="min-w-0 flex-1 bg-surface text-sm" value={chats.some(c => c.id === activeChat.current.id) ? activeChat.current.id : ""} disabled={busy || chatPending || !chatReady} onChange={e => void selectChat(e.target.value || undefined)}>
+              <option value="">New chat</option>
+              {chats.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
+            </select>
+            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void renameChat()}>Rename</button>
+            <button className="text-xs text-muted disabled:opacity-40" disabled={busy || chatPending || !activeChat.current.revision} onClick={() => void removeChat()}>Delete</button>
           </div>
           {chatWarnings.map(warning => <div key={warning.id} role="alert" className="px-4 py-2 text-sm text-amber-800 dark:text-amber-400">{warning.error}. Other conversations are still available.</div>)}
           {saveError && <div role="alert" className="space-y-2 px-4 py-2 text-sm text-amber-800 dark:text-amber-400">
@@ -1211,43 +1000,6 @@ export function AssistantConsole() {
           </div>
         </div>
       )}
-
-      <Modal
-        isOpen={deleteModalOpen}
-        onClose={() => setDeleteModalOpen(false)}
-        labelledBy="delete-chat-title"
-        overlayClassName="z-[60]"
-        panelClassName="max-w-md p-5"
-      >
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-red-500 dark:text-red-400">
-            <Trash2 className="size-4 shrink-0" />
-            <h3 id="delete-chat-title" className="text-sm font-semibold text-foreground">
-              Delete conversation?
-            </h3>
-          </div>
-          <p className="text-xs text-muted">
-            This will permanently remove <span className="font-medium text-foreground">&ldquo;{activeChat.current.title || chats.find(c => c.id === activeChat.current.id)?.title || "this conversation"}&rdquo;</span> from disk. This cannot be undone.
-          </p>
-          <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setDeleteModalOpen(false)}
-              className="rounded-md border border-border px-3 py-1.5 text-xs text-muted transition-colors hover:bg-surface-hover hover:text-foreground"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => void confirmDeleteChat()}
-              disabled={chatPending}
-              className="inline-flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50"
-            >
-              <Trash2 className="size-3.5" /> Delete
-            </button>
-          </div>
-        </div>
-      </Modal>
     </>
   );
 }
