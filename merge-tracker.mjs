@@ -28,7 +28,7 @@ import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'child_process';
 import { normalizeReportLink as normalizeLink } from './tracker-links.mjs';
-import { getCareerOpsRoot, resolveBatchStatePaths } from './path-resolver.mjs';
+import { getCareerOpsRoot, resolveBatchStatePaths, resolveTrackerPathForWrite, canonicalizeTrackerPath } from './path-resolver.mjs';
 import { roleFuzzyMatch } from './role-matcher.mjs';
 import { parsePdfIndex, livePdfIndex, normNum } from './find.mjs';
 import { LEGACY_COLMAP, TSV_REQUIRED_FIELDS, detectColumns, isHeaderRow, isUnsetUrlCell, resolveScoreStatus, looksLikeTsvHeaderRow, resolveTsvColumns, looksLikeScoreCell, parseScore, normalizeVia, normalizeTextKey, SEPARATOR_ROW_RE, extractReqNumber, extractCellUrl, parseMarkdownLinks } from './tracker-parse.mjs';
@@ -1459,13 +1459,45 @@ export async function mergeTracker(options = {}) {
 
   // ---- Main ----
 
-  async function mergeUnderLock() {
-    // Read applications.md
-    if (!existsSync(APPS_FILE)) {
-      console.log('No applications.md found. Nothing to merge into.');
-      return 0;
+  /**
+   * First-run tracker: the header from AGENTS.md onboarding step 4, plus the URL
+   * column so posting-URL dedup is active from the first merge. Returns the new
+   * content (written unless --dry-run), or null when nothing is pending.
+   */
+  function createMissingTracker() {
+    const pending = existsSync(ADDITIONS_DIR)
+      ? readdirSync(ADDITIONS_DIR).filter(f => f.endsWith('.tsv')).length
+      : 0;
+    if (pending === 0) {
+      console.log('No applications.md found and no pending additions. Nothing to merge.');
+      return null;
     }
-    const appContent = readFileSync(APPS_FILE, 'utf-8');
+    const content = [
+      '# Applications Tracker',
+      '',
+      '| # | Date | Company | Role | Score | Status | PDF | Report | Notes | URL |',
+      '|---|------|---------|------|-------|--------|-----|--------|-------|-----|',
+      '',
+    ].join('\n');
+    if (DRY_RUN) {
+      console.log(`🔎 Dry-run: no tracker yet; would create ${APPS_FILE} for ${pending} pending addition(s).`);
+      return content;
+    }
+    mkdirSync(dirname(APPS_FILE), { recursive: true });
+    writeFileAtomic(APPS_FILE, content);
+    console.log(`🆕 Created ${APPS_FILE} (no tracker existed; ${pending} pending addition(s)).`);
+    return content;
+  }
+
+  async function mergeUnderLock() {
+    // Read applications.md, creating it on the first merge. A missing tracker
+    // with pending additions used to exit 0 having merged nothing, which callers
+    // such as the web evaluate flow read as success: the score showed and the
+    // Pipeline tab stayed empty. With nothing pending, no file is created.
+    const appContent = existsSync(APPS_FILE)
+      ? readFileSync(APPS_FILE, 'utf-8')
+      : createMissingTracker();
+    if (appContent === null) return 0;
     // Test-only synchronization hook: the concurrent merge test waits for the
     // first worker to read the tracker while still holding the lock, then starts a
     // second worker to prove the lock prevents the old lost-update race.
@@ -2661,7 +2693,14 @@ if (isMainModule(import.meta.url)) {
   // (original). CAREER_OPS_TRACKER overrides the path (used by tests and
   // non-standard layouts). Resolution lives in tracker-utils.mjs so every tracker
   // writer agrees on the same canonical path (and therefore the same lock).
-  const appsFile = resolveTrackerPath(DATA_ROOT);
+  // When no tracker exists yet, the read path falls back to the legacy
+  // root-level applications.md; a first merge creates the tracker, so it must
+  // target the canonical write path instead (AGENTS.md: first-run creation
+  // goes to {DATA_ROOT}/data/applications.md).
+  const readPath = resolveTrackerPath(DATA_ROOT);
+  const appsFile = existsSync(readPath)
+    ? readPath
+    : canonicalizeTrackerPath(resolveTrackerPathForWrite(DATA_ROOT));
   const code = await mergeTracker({
     appsFile,
     dataRoot: DATA_ROOT,
