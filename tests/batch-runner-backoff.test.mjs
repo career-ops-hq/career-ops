@@ -88,7 +88,10 @@ test('ceiling validation normalizes decimal zeros and rejects unsafe or overflow
 function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429', successAfter = 99, cli = 'claude', secondLog = log } = {}) {
   writeFileSync(join(dir, 'first.log'), log);
   writeFileSync(join(dir, 'second.log'), secondLog);
+  const quarantineAt = source.indexOf('quarantine_attempt_artifacts() {');
+  const quarantine = source.slice(quarantineAt, source.indexOf('\n# Retry wrapper', quarantineAt));
   return invoke(`${functions}
+    ${quarantine}
     RATE_LIMIT_SLEEP=${cap}
     MAX_RETRIES=${max}
     CLI=${cli}
@@ -211,4 +214,36 @@ test('full runner resumes persisted retries and schedules paused rows only with 
     assert.equal(final[2], 'failed');
     assert.equal(final[8], '2');
   }
+}));
+
+test('the rate-limit retry quarantines before it sleeps', () => {
+  const rate = loop.slice(loop.indexOf('if is_rate_limit_log'));
+  const retry = rate.slice(rate.indexOf('retries=$((retries + 1))'));
+  const beforeSleep = retry.slice(0, retry.indexOf('sleep "$retry_delay"'));
+  assert.match(beforeSleep, /quarantine_attempt_artifacts rate-retry/);
+  assert.match(loop, /quarantine_attempt_artifacts match-retry/);
+});
+
+test('a rate-limit retry moves the failed report aside and leaves the reservation', () => fixture(({ dir, invoke }) => {
+  const fnStart = source.indexOf('quarantine_attempt_artifacts() {');
+  const fnEnd = source.indexOf('\n# Retry wrapper', fnStart);
+  const fn = source.slice(fnStart, fnEnd);
+  mkdirSync(join(dir, 'reports'));
+  mkdirSync(join(dir, 'tracker'));
+  mkdirSync(join(dir, 'logs'));
+  writeFileSync(join(dir, 'reports', '001-role.md'), 'report\n');
+  writeFileSync(join(dir, 'reports', '001-RESERVED.md'), 'reserved\n');
+  writeFileSync(join(dir, 'tracker', '7.tsv'), 'row\n');
+  invoke(`${fn}
+REPORTS_DIR='${dir}/reports'
+TRACKER_DIR='${dir}/tracker'
+LOGS_DIR='${dir}/logs'
+report_num=001
+id=7
+quarantine_attempt_artifacts rate-retry`);
+  assert.equal(existsSync(join(dir, 'reports', '001-role.md')), false);
+  assert.equal(readFileSync(join(dir, 'reports', '001-RESERVED.md'), 'utf8'), 'reserved\n');
+  assert.equal(existsSync(join(dir, 'tracker', '7.tsv')), false);
+  assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-001-role.md'), 'utf8'), 'report\n');
+  assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-7.tsv'), 'utf8'), 'row\n');
 }));

@@ -1193,6 +1193,26 @@ has_report_file() {
   return 1
 }
 
+# Move this attempt's report and tracker files aside before a retry reuses the
+# report number. A retry that writes nothing would pass the report-file check
+# on the stale report, and a retry with another slug would leave two reports
+# on one number. The reservation sentinel stays. report_num and id come from
+# the worker that calls this.
+quarantine_attempt_artifacts() {
+  local reason="$1"
+  local retry_quarantine="${LOGS_DIR:-}/quarantine" retry_artifact
+  shopt -s nullglob
+  # The tracker path is not a glob, so a missing file would still be a loop
+  # item. A rate-limit failure often has no report yet. Move only what exists.
+  for retry_artifact in "${REPORTS_DIR:-}/$report_num-"*.md "${TRACKER_DIR:-}/$id.tsv"; do
+    [[ -e "$retry_artifact" ]] || continue
+    [[ "$retry_artifact" == *-RESERVED.md ]] && continue
+    mkdir -p "$retry_quarantine"
+    mv "$retry_artifact" "$retry_quarantine/$id-${reason}-${retry_artifact##*/}"
+  done
+  shopt -u nullglob
+}
+
 # Retry wrapper — same rationale as update_state_retrying above. A bare
 # `x=$(reserve_report_num ...)` under `set -e` kills the worker subshell
 # silently on a single lock-timeout; this retries and logs instead.
@@ -1741,14 +1761,7 @@ process_offer() {
           # a retry with another slug leaves two reports on one number, and a
           # retry that writes no report would pass the report-file check on the
           # stale one. Same quarantine as the confirmation-hold path below.
-          local retry_quarantine="$LOGS_DIR/quarantine" retry_artifact
-          shopt -s nullglob
-          for retry_artifact in "$REPORTS_DIR/$report_num-"*.md "$TRACKER_DIR/$id.tsv"; do
-            [[ "$retry_artifact" == *-RESERVED.md ]] && continue
-            mkdir -p "$retry_quarantine"
-            mv "$retry_artifact" "$retry_quarantine/$id-match-retry-${retry_artifact##*/}"
-          done
-          shopt -u nullglob
+          quarantine_attempt_artifacts match-retry
           echo "    ⚠️  Malformed or missing match mode JSON summary (attempt $retries/$MAX_RETRIES); retrying once..."
           sleep 2
           continue
@@ -1803,6 +1816,7 @@ process_offer() {
       retry_completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
       update_state_retrying "$id" "$url" "rate_limited" "$started_at" "$retry_completed_at" "$report_num" "-" "rate-limit; retrying after ${retry_delay}s" "$retries" || true
       echo "    ⏳ Rate limited (attempt $retries/$MAX_RETRIES). Waiting ${retry_delay}s before retry..."
+      quarantine_attempt_artifacts rate-retry
       sleep "$retry_delay"
       continue
     fi
