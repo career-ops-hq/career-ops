@@ -4941,17 +4941,27 @@ async function main() {
   // which replaces the global filter for that entry only.
   const entryTitleGates = new WeakMap();
   const resolveEntryTitleGate = (entry) => {
-    const raw = (entry?.title_filter && typeof entry.title_filter === 'object' && !Array.isArray(entry.title_filter))
+    const entryFilter = (entry?.title_filter && typeof entry.title_filter === 'object' && !Array.isArray(entry.title_filter))
       ? entry.title_filter
-      : config.title_filter;
-    if (raw && typeof raw === 'object') {
-      const cached = entryTitleGates.get(raw);
-      if (cached) return cached;
+      : null;
+    if (!entryFilter) {
+      return { titleFilter, titleGate, rawFilter: config.title_filter };
     }
-    const tf = raw === config.title_filter ? titleFilter : buildTitleFilter(raw);
-    const tg = raw === config.title_filter ? titleGate : buildTitleGate(raw, contentFilter, tf);
+    const cached = entryTitleGates.get(entryFilter);
+    if (cached) return cached;
+
+    let raw = entryFilter;
+    // An entry with negatives but no positives keeps the global positives (#7244)
+    const hasEntryPositives = Array.isArray(raw.positive) && raw.positive.length > 0;
+    const hasEntryNegatives = Array.isArray(raw.negative) && raw.negative.length > 0;
+    if (!hasEntryPositives && hasEntryNegatives && config.title_filter?.positive) {
+      raw = { ...raw, positive: config.title_filter.positive };
+    }
+
+    const tf = buildTitleFilter(raw);
+    const tg = buildTitleGate(raw, contentFilter, tf);
     const compiled = { titleFilter: tf, titleGate: tg, rawFilter: raw };
-    if (raw && typeof raw === 'object') entryTitleGates.set(raw, compiled);
+    entryTitleGates.set(entryFilter, compiled);
     return compiled;
   };
   const candidateCountry = loadCandidateCountry();

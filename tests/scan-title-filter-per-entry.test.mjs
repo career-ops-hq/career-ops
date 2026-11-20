@@ -19,18 +19,26 @@ function runScan(portalsContent) {
 | # | Date | Company | Role | Score | Status | PDF | Report | Notes |
 |---|------|---------|------|-------|--------|-----|--------|-------|
 `);
-    writeFileSync(join(dir, 'data', 'pipeline.md'), '# Pipeline\n\n');
+    const pipeline = join(dir, 'data', 'pipeline.md');
+    const scanHistory = join(dir, 'data', 'scan-history.tsv');
+    writeFileSync(pipeline, '# Pipeline\n\n');
     const portals = join(dir, 'portals.yml');
     writeFileSync(portals, portalsContent);
     const stdout = execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
       cwd: dir,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals },
+      env: {
+        ...process.env,
+        CAREER_OPS_ROOT: dir,
+        CAREER_OPS_DATA_DIR: '',
+        CAREER_OPS_PORTALS: portals,
+        CAREER_OPS_PIPELINE: pipeline,
+        CAREER_OPS_SCAN_HISTORY: scanHistory,
+      },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const p = join(dir, 'data', 'pipeline.md');
-    const urls = existsSync(p)
-      ? readFileSync(p, 'utf-8').split('\n').filter(l => /^- \[[ x]\]\s+https?:\/\//.test(l))
+    const urls = existsSync(pipeline)
+      ? readFileSync(pipeline, 'utf-8').split('\n').filter(l => /^- \[[ x]\]\s+https?:\/\//.test(l))
       : [];
     return { stdout, urls };
   } finally {
@@ -255,5 +263,55 @@ tracked_companies:
     fail(`expected job 3 to be dropped by by_title_keyword scoped to entry keyword "Developer", got: ${JSON.stringify(urls)}`);
   }
 }
+
+// 8. An entry with negatives but no positives keeps the global positives (#7244).
+{
+  const portals = `title_filter:
+  positive:
+    - "Software"
+tracked_companies:
+  - name: Negative Only Board
+    careers_url: https://example.invalid/jobs
+    title_filter:
+      negative:
+        - "Contract"
+    parser:
+      command: node
+      script: tests/fixtures/title-filter-board.mjs
+`;
+  const { urls } = runScan(portals);
+  // Keeps job 2 ("Software Engineer") matching global positive.
+  // Does NOT keep job 4 ("Librarian") or job 1 ("Contract Compliance Specialist"),
+  // proving it did not match every title and preserved global positives.
+  if (JSON.stringify(kept(urls)) === '[2]') {
+    pass('an entry with negatives but no positives keeps the global positives');
+  } else {
+    fail(`expected only job 2, got ${JSON.stringify(urls)}`);
+  }
+}
+
+// 9. An entry with negatives only drops matching titles while keeping global positives.
+{
+  const portals = `title_filter:
+  positive:
+    - "Software"
+tracked_companies:
+  - name: Negative Drop Board
+    careers_url: https://example.invalid/jobs
+    title_filter:
+      negative:
+        - "Engineer"
+    parser:
+      command: node
+      script: tests/fixtures/title-filter-board.mjs
+`;
+  const { urls } = runScan(portals);
+  if (urls.length === 0) {
+    pass('an entry with negatives only drops matching titles while keeping global positives');
+  } else {
+    fail(`expected 0 jobs kept, got ${JSON.stringify(urls)}`);
+  }
+}
+
 
 
