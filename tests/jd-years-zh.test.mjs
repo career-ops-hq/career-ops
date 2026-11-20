@@ -55,8 +55,8 @@ const CASES = [
   ['有3年以上工作经验者优先', 'preferred-only', null, null, false, 'pref 3+'],
   ['有3年以上工作经验的，优先考虑', 'preferred-only', null, null, false, 'pref 3+'],
   ['加分项：5年以上大厂经验', 'preferred-only', null, null, false, 'pref 5+'],
-  // Years instead of a degree bind only candidates without it
-  ['本科学历或5年以上工作经验', 'none', null, null, false, 'none stated'],
+  // Years instead of a degree bind only candidates without it: shown, never a gate
+  ['本科学历或5年以上工作经验', 'substitute-only', null, null, false, 'degree or 5+'],
   ['本科及以上学历，5年以上工作经验', 'stated', 5, null, true, '5+'],
   // Degree-conditional bars: the lowest gates
   ['本科5年以上工作经验，硕士3年以上', 'stated', 3, null, true, '3/5+ by degree'],

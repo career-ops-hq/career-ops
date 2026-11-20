@@ -134,10 +134,17 @@ are defined:
   degree-conditional bars; `2/5+` lists several required bars (the lowest decides);
   `5+ or equivalent` is a bar the JD lets you meet another way (never drops);
   `pref 5+` and `skill 3+` are preferred-only or skill-specific figures that do not
-  gate; `none stated` means the JD names no figure; `unread` means it could not be
+  gate (a supervisory bar such as "3 years' supervisory experience" never counts as
+  the overall bar, and shows as `skill 3+` when it is the only figure);
+  `degree or 4+` is a figure that only stands in for a degree ("a degree or 4 years
+  of equivalent experience") and does not gate; `none stated` means the JD names no
+  figure at all; `none stated (listing only)`
+  means the full JD could not be read and the board's listing excerpt, which often
+  leaves the qualifications out, names none; `unread` means it could not be
   fetched. `… above band` marks a row above your band; the default `action: label`
   keeps it, `action: drop` would have removed it.
-  Check `unread` and `none stated` rows yourself: the filter never drops them.
+  Check `unread` and `none stated` rows (with or without `(listing only)`) yourself:
+  the filter never drops them.
 - `| note: {text}` — a free-text ranking signal an importer attached to the offer
   (`- [ ] {url} | {company} | {title} | note: curated shortlist` is valid). The
   deterministic scanner never sets it.

@@ -54,8 +54,9 @@ const PARSE_CASES = [
   ['Bachelor degree with 7 years of experience, or a Master degree with 5 years of experience.', 'stated', 5, true, '5/7+ by degree'],
   ['10 or more years with a Bachelor’s Degree, or at least 8 years with an Advanced Degree, or 2 years with a PhD', 'stated', 2, true, '2/8/10+ by degree'],
   ['BS in Computer Science + 7 years of experience / MS + 5 years', 'stated', 5, true, '5/7+ by degree'],
-  // Years instead of a degree bind only candidates without it
-  ['Bachelor’s degree or 4 years of equivalent experience.', 'none', null, false, 'none stated'],
+  // Years instead of a degree bind only candidates without it: shown, never a
+  // gate, and never `none stated`, which is kept for a JD that names no figure
+  ['Bachelor’s degree or 4 years of equivalent experience.', 'substitute-only', null, false, 'degree or 4+'],
   ['Bachelor\'s degree and 5+ years of experience, or equivalent', 'stated', 5, true, '5+'],
   // Required vs preferred
   ['Ideally 4+ years in a strategy role', 'preferred-only', null, false, 'pref 4+'],
@@ -117,6 +118,44 @@ const PARSE_CASES = [
   ['5+ years of experience, or an equivalent combination of education and experience', 'stated', 5, false, '5+ or equivalent'],
   ['- 5+ years of relevant experience\n- Or an equivalent combination of education and experience', 'stated', 5, false, '5+ or equivalent'],
   ['A year of experience in customer support', 'stated', 1, true, '1+'],
+  // 2026-11-20 audit of 58 `none stated` rows whose full JD was read: the real
+  // sentences behind each miss. "in business" read as company history
+  // ("been in business for 30 years") hid every "experience in business ..." bar
+  ['- 3+ years of experience in business operations, strategy & operations, management consulting', 'stated', 3, true, '3+'],
+  ["- 4+ years of experience and a bachelor's degree in Business, Economics, Statistics, or a related field.", 'stated', 4, true, '4+'],
+  ['- Minimum 3 years of relevant experience in business operations, controls, governance, strategy', 'stated', 3, true, '3+'],
+  ['10+ years of professional experience, including significant experience in business strategy consulting', 'stated', 10, true, '10+'],
+  ['5+ years of diverse problem solving experience in business, finance or strategy', 'stated', 5, true, '5+'],
+  ['We have been in business for 30 years.', 'none', null, false, 'none stated'],
+  // Spelled-out numbers, "approximately", "X-Y+" ranges, spaced dashes
+  ['- At least three years of relevant experience in business management, finance, investment banking', 'stated', 3, true, '3+'],
+  ['Approximately 1–3+ years of experience in strategy', 'stated', 1, true, '1-3'],
+  ['3-5+ years of overall experience', 'stated', 3, true, '3-5'],
+  ['1 – 3 years of work experience', 'stated', 1, true, '1-3'],
+  ['4+ years of professional work experience', 'stated', 4, true, '4+'],
+  ['7+ years experience in business planning and analysis', 'stated', 7, true, '7+'],
+  // A field list between the figure and "experience"
+  ['8+ years finance, consulting, or strategy experience required', 'stated', 8, true, '8+'],
+  ["- Bachelor's Degree in Business, Marketing, or related field AND 5+ years integrated marketing (e.g., digital, relationship, social media, campaign), event management, or related work experience OR equivalent experience.", 'stated', 5, true, '5+'],
+  ['This is envisioned as a two- to three-year role. Success will position you for growth, building experience.', 'none', null, false, 'none stated'],
+  // A bare figure that is its own item under a required heading
+  ['Requirements:\n- 5+ years', 'stated', 5, true, '5+'],
+  // Degree-conditional bars joined by OR (Walmart, Google): the lowest gates
+  ["Minimum Qualifications: Bachelor's degree in Business, Statistics, or related field and 7 years' experience in retail merchandising, operations management, or related area OR 9 years' experience in retail merchandising, operations management, or related area. 3 years' supervisory experience.", 'stated', 7, true, '7/9+ by degree'],
+  ['- 4 years of experience in business development, partnerships, management consulting, or investment banking, or 2 years with advanced degree.', 'stated', 2, true, '2/4+ by degree'],
+  // "Option 1: ... Option 2: ..." (Walmart): each option is one way in
+  ["Option 1: Bachelor's degree in Business, Engineering, or related field and 4 years' experience in data analysis. Option 2: Master's degree in Business or related field and 2 years' experience in data analysis. Option 3: 6 years' experience in data analysis.", 'stated', 2, true, '2/4/6+ by degree'],
+  ["• Option 1: Bachelor's degree in computer science or related area and 8 years' experience in engineering program management.\n• Option 2: 10 years' experience in engineering program management.", 'stated', 8, true, '8/10+ by degree'],
+  // The same bar wrapped onto a second line, and an OR item continuing the one above
+  ["Minimum Qualifications...\nBachelor's degree in Business, Marketing, Communications, or related field and 3 years' experience in marketing or related field OR 7 years'\nexperience in marketing or related field.", 'stated', 3, true, '3/7+ by degree'],
+  ["- Master's Degree in Business Administration or related field AND 3+ years strategy, business planning, consulting, or finance experience\n- OR Bachelor's Degree in Business, Finance, or related field AND 4+ years strategy, business planning, consulting, or finance experience\n- OR equivalent experience", 'stated', 3, true, '3/4+ by degree'],
+  // Apostrophe shapes
+  ["1 yearʼs experience in marketing", 'stated', 1, true, '1+'],
+  ['5 years´ experience in finance', 'stated', 5, true, '5+'],
+  // Supervisory years are part of the overall bar, never the bar itself
+  ["Bachelor's degree and 4 years' experience in operations. 2 years' supervisory experience.", 'stated', 4, true, '4+'],
+  ['- 10+ years of relevant experience across strategy and operations\n- 6+ years of people leadership experience', 'stated', 10, true, '10+'],
+  ["3 years' supervisory experience.", 'skill-only', null, false, 'skill 3+'],
 ];
 
 await ok(`parser reads ${PARSE_CASES.length} real phrasings`, () => {
@@ -366,6 +405,19 @@ await ok('a reading from the listing alone is shown but never drops', async () =
   }
 });
 
+await ok('a listing excerpt that names no figure is labelled as listing-only, not as the JD', async () => {
+  const { kept } = await applyExperienceFilter([offer(9, { description: 'Join our strategy team. Apply today.' })], filter, {
+    fetchJd: async () => null,
+  });
+  assert.strictEqual(kept[0].years.source, 'listing');
+  assert.strictEqual(kept[0].years.label, 'none stated (listing only)');
+  // The full JD saying nothing is still plain `none stated`.
+  const full = await applyExperienceFilter([offer(10)], filter, { fetchJd: async () => 'Join our strategy team.' });
+  assert.strictEqual(full.kept[0].years.label, 'none stated');
+  assert.strictEqual(formatYearsSegment(parseYearsRequirement('Apply today.'), 'unknown', 'listing'), 'yrs: none stated (listing only)');
+  assert.strictEqual(formatYearsSegment(parseYearsRequirement('Apply today.'), 'unknown'), 'yrs: none stated');
+});
+
 await ok('progress is reported once per offer', async () => {
   const seen = [];
   await applyExperienceFilter([offer(1), offer(4)], filter, {
@@ -386,7 +438,7 @@ const stubCtx = (answers) => {
       fetchJson: async (url) => {
         calls.push(url);
         const a = answers[url];
-        if (a instanceof Error) throw Object.assign(a, { status: 404 });
+        if (a instanceof Error) throw Object.assign(a, { status: /** @type {any} */ (a).status ?? 404 });
         if (a === undefined) throw Object.assign(new Error(`unexpected ${url}`), { status: 404 });
         return a;
       },
@@ -418,7 +470,9 @@ await ok('Ashby reads the board once for every posting on it, and does not re-re
   assert.match(String(b), /6\+ years/);
 
   const failing = new Map();
-  const bad = stubCtx({ [api]: new Error('gone') });
+  // A board that is down (a 503 after the retries), not one that 404s: that
+  // falls through to the posting page (the next test).
+  const bad = stubCtx({ [api]: Object.assign(new Error('down'), { status: 503 }) });
   await assert.rejects(fetchJdText('https://jobs.ashbyhq.com/acme/aaaaaaaa-0000-0000-0000-000000000001', { ctx: bad.ctx, boardCache: failing }));
   const afterFirst = bad.calls.length;
   // A board that failed after its retries stays failed for the run: every
@@ -427,10 +481,52 @@ await ok('Ashby reads the board once for every posting on it, and does not re-re
   assert.strictEqual(bad.calls.length, afterFirst, 'a failed board is not requested again');
 });
 
-await ok('a host with no public JD API makes no request', async () => {
+await ok('an embed-only Ashby board whose API 404s is read from the posting page, not left unread', async () => {
+  // Whatnot (2026-11-20): api.ashbyhq.com/posting-api/job-board/whatnot answers
+  // 404 while jobs.ashbyhq.com/whatnot/{id} carries the full JobPosting JSON-LD.
+  const api = 'https://api.ashbyhq.com/posting-api/job-board/whatnot';
+  const url = 'https://jobs.ashbyhq.com/whatnot/3a0e0253-554f-4735-a8ea-9e3cae87044c';
+  const { ctx, calls } = stubCtx({ [api]: Object.assign(new Error('HTTP 404'), { status: 404 }) });
+  const pages = [];
+  const fetchPage = async (u) => { pages.push(u); return { text: 'Strategy lead. 5+ years of experience in strategy.' }; };
+  const boardCache = new Map();
+  const text = await fetchJdText(url, { ctx, boardCache, fetchPage });
+  assert.deepStrictEqual(calls, [api]);
+  assert.deepStrictEqual(pages, [url]);
+  assert.strictEqual(parseYearsRequirement(String(text)).display, '5+');
+  // The second posting on the board reuses the cached 404 and goes straight to its page.
+  await fetchJdText('https://jobs.ashbyhq.com/whatnot/54868b38-559e-44be-a0c9-c6adb073f385', { ctx, boardCache, fetchPage });
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(pages.length, 2);
+  // A page with no posting stays null (unread), and a closed page still throws.
+  assert.strictEqual(await fetchJdText(url, { ctx, fetchPage: async () => null }), null);
+  await assert.rejects(fetchJdText(url, { ctx, fetchPage: async () => ({ closed: true, evidence: 'validThrough' }) }), /closed/);
+  // An authoritative 404 (Greenhouse) is still a failed read, never a page read.
+  const gh = stubCtx({ 'https://boards-api.greenhouse.io/v1/boards/acme/jobs/9?content=true': Object.assign(new Error('HTTP 404'), { status: 404 }) });
+  await assert.rejects(fetchJdText('https://boards.greenhouse.io/acme/jobs/9', { ctx: gh.ctx, fetchPage: async () => { throw new Error('page reader must not run'); } }), /404/);
+});
+
+await ok('a host with no JD API or host reader falls to the page reader, and makes no API request', async () => {
   const { ctx, calls } = stubCtx({});
-  assert.strictEqual(await fetchJdText('https://careers.example.com/jobs/42', { ctx }), null);
+  const pages = [];
+  const fetchPage = async (url) => { pages.push(url); return null; };
+  assert.strictEqual(await fetchJdText('https://careers.example.com/jobs/42', { ctx, fetchPage }), null);
   assert.strictEqual(calls.length, 0);
+  assert.deepStrictEqual(pages, ['https://careers.example.com/jobs/42']);
+  // The page's own JobPosting is the JD when there is one.
+  const text = await fetchJdText('https://careers.example.com/jobs/43', { ctx, fetchPage: async () => ({ text: '5+ years of experience' }) });
+  assert.strictEqual(text, '5+ years of experience');
+  // A page that calls itself closed is a failed read (unread), never a JD.
+  await assert.rejects(fetchJdText('https://careers.example.com/jobs/44', { ctx, fetchPage: async () => ({ closed: true, evidence: 'validThrough' }) }), /closed/);
+});
+
+await ok('a host reader serves the JD before the page reader is asked', async () => {
+  const api = 'https://acme.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitionDetails?expand=all&onlyData=true&finder=ById;Id=%2242%22,siteNumber=CX_1';
+  const { ctx, calls } = stubCtx({ [api]: { items: [{ Id: '42', Title: 'Analyst', ExternalDescriptionStr: '<p>About</p>', ExternalQualificationsStr: '<ul><li>4+ years of experience</li></ul>' }] } });
+  const fetchPage = async () => { throw new Error('page reader must not run'); };
+  const text = await fetchJdText('https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/job/42', { ctx, fetchPage });
+  assert.deepStrictEqual(calls, [api]);
+  assert.match(String(text), /4\+ years of experience/);
 });
 
 await ok('action: label keeps an out-of-band offer and marks it', async () => {
