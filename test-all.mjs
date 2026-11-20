@@ -333,12 +333,19 @@ async function runDiscovered(filter = null, tools = null) {
       continue;
     }
     if (kind === 'node-test') {
-      const out = run(NODE, ['--test', f]);
+      // node:test suites get the same FACTOR-scaled budget the parallel loop
+      // gives each spawned suite: they spawn child processes per test, which
+      // a bare 30s script budget cannot cover on slow-spawn platforms
+      // (Windows). Derived from the helpers constant so sandbox runs that
+      // shrink the default shrink this budget with it.
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
-      // run()'s timeout is DEFAULT_SCRIPT_TIMEOUT_MS. Said the way the parallel
-      // loop says it, since a killed suite has no exit status to print.
+      // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
+      // Said the way the parallel loop says it, since a killed suite has no
+      // exit status to print — and the line reports the budget actually given.
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
-        ? `killed after ${DEFAULT_SCRIPT_TIMEOUT_MS / 1000}s`
+        ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
       reportNodeTestSuite(rel, out !== null, out ?? '', failure, how);
       continue;
@@ -977,7 +984,7 @@ const scripts = [
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
   { name: 'validate-profile.mjs --self-test', expectExit: 0 },
-  { name: 'updater-migration-tests.mjs', expectExit: 0 },
+  { name: 'updater-migration-tests.mjs', expectExit: 0, timeoutMs: 300_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
