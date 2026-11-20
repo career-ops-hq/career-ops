@@ -445,6 +445,47 @@ const SECTION_ALIASES = new Map([
   ['skills', 'skills'],
   ['technical skills', 'skills'],
   ['interests', 'interests'],
+  // German (modes/de, modes/at) — the same failure as the blocks below: no
+  // German title resolved here, so cv.sections matched no section of a German
+  // CV and the order guard compared raw titles. "Berufserfahrung" and
+  // "Werdegang" are the career-history terms in modes/de/README.md; the rest are
+  // each section's everyday headings. Umlauts fold through foldDiacritics.
+  ['zusammenfassung', 'summary'],
+  ['profil', 'summary'],
+  ['kurzprofil', 'summary'],
+  ['berufsprofil', 'summary'],
+  ['berufliches profil', 'summary'],
+  ['über mich', 'summary'],
+  ['kernkompetenzen', 'competencies'],
+  ['kompetenzen', 'competencies'],
+  ['schlüsselkompetenzen', 'competencies'],
+  ['berufserfahrung', 'experience'],
+  ['berufliche erfahrung', 'experience'],
+  ['beruflicher werdegang', 'experience'],
+  ['werdegang', 'experience'],
+  ['berufspraxis', 'experience'],
+  ['projekte', 'projects'],
+  ['ausgewählte projekte', 'projects'],
+  ['projekterfahrung', 'projects'],
+  ['ausbildung', 'education'],
+  ['bildung', 'education'],
+  ['bildungsweg', 'education'],
+  ['akademischer werdegang', 'education'],
+  ['studium', 'education'],
+  ['zertifikate', 'certifications'],
+  ['zertifizierungen', 'certifications'],
+  ['weiterbildung', 'certifications'],
+  ['weiterbildungen', 'certifications'],
+  ['auszeichnungen', 'awards'],
+  ['preise und auszeichnungen', 'awards'],
+  ['kenntnisse', 'skills'],
+  ['fähigkeiten', 'skills'],
+  ['fachkenntnisse', 'skills'],
+  ['technische kenntnisse', 'skills'],
+  ['technische fähigkeiten', 'skills'],
+  ['it-kenntnisse', 'skills'],
+  ['interessen', 'interests'],
+  ['hobbys', 'interests'],
   // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
   // variants that turn up in practice (both "Kompetencje kluczowe" and
   // "Kluczowe kompetencje" are used for the same section).
