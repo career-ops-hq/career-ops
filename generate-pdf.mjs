@@ -543,6 +543,45 @@ const SECTION_ALIASES = new Map([
   ['conoscenze tecniche', 'skills'],
   ['capacità tecniche', 'skills'],
   ['interessi', 'interests'],
+  // Danish (modes/da) and Norwegian Bokmål (modes/nb) — the same failure as the
+  // blocks around them: no title in either resolved here, so cv.sections matched
+  // no section of such a CV and the order guard compared raw titles. The skills
+  // and career-history terms are the ones in the two READMEs (Kompetencer,
+  // Karriereforløb, Erhvervserfaring; Kompetanse, Arbeidserfaring, Yrkeserfaring);
+  // the rest are each section's everyday headings, listed once where the two
+  // languages share a spelling (Erfaring, Priser, Interesser).
+  ['sammenfatning', 'summary'],
+  ['om mig', 'summary'],
+  ['sammendrag', 'summary'],
+  ['om meg', 'summary'],
+  ['kernekompetencer', 'competencies'],
+  ['kjernekompetanse', 'competencies'],
+  ['erhvervserfaring', 'experience'],
+  ['karriereforløb', 'experience'],
+  ['arbejdserfaring', 'experience'],
+  ['arbeidserfaring', 'experience'],
+  ['yrkeserfaring', 'experience'],
+  ['erfaring', 'experience'],
+  ['projekter', 'projects'],
+  ['prosjekter', 'projects'],
+  ['uddannelse', 'education'],
+  ['utdanning', 'education'],
+  ['utdannelse', 'education'],
+  ['certificeringer', 'certifications'],
+  ['certifikater', 'certifications'],
+  ['sertifiseringer', 'certifications'],
+  ['sertifikater', 'certifications'],
+  ['priser', 'awards'],
+  ['udmærkelser', 'awards'],
+  ['utmerkelser', 'awards'],
+  ['kompetencer', 'skills'],
+  ['kompetanse', 'skills'],
+  ['færdigheder', 'skills'],
+  ['tekniske færdigheder', 'skills'],
+  ['ferdigheter', 'skills'],
+  ['tekniske ferdigheter', 'skills'],
+  ['interesser', 'interests'],
+  ['fritidsinteresser', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
