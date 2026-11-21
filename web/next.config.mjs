@@ -17,6 +17,12 @@ const nextConfig = {
   // Allow a throwaway build dir (e.g. BUILD_DIST=.next-prod) so a production
   // `next build` can run without clobbering a live `next dev` .next.
   ...(process.env.BUILD_DIST ? { distDir: process.env.BUILD_DIST } : {}),
+  experimental: {
+    // Only surface upgrade reminders for published security advisories, never
+    // for newer minor or major releases. The app is self-hosted and pinned, so
+    // a security advisory is the only reason worth interrupting a build.
+    agentUpgrade: "security",
+  },
 };
 
 export default nextConfig;
