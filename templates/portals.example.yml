@@ -2298,6 +2298,7 @@ search_queries:
 #   # Division path is required; one of:
 #   # it, engineering, marketing, sales, hr, logistics, finances, other
 #   careers_url: https://solid.jobs/public-api/offers/engineering
+#   # workplace: [remote]   # optional: keep only these work modes (remote, hybrid, office)
 #   enabled: true
 #
 # - name: Example WP Job Manager Board   # any WordPress board on the WP Job Manager plugin

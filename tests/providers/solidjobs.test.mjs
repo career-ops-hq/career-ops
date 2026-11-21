@@ -213,6 +213,40 @@ try {
   } else {
     fail(`solidjobs.fetch() malformed members handling failed: ${JSON.stringify(safeParsed)}`);
   }
+  // workplace filter — SolidJobs marks offers with isRemote / isHybrid booleans
+  const wpOffers = {
+    jobs: [
+      { title: 'Remote', url: 'https://solid.jobs/o/r/career-ops', company: 'A', locations: ['Warszawa'], isRemote: true, isHybrid: false },
+      { title: 'Both', url: 'https://solid.jobs/o/b/career-ops', company: 'A', locations: ['Warszawa'], isRemote: true, isHybrid: true },
+      { title: 'Hybrid', url: 'https://solid.jobs/o/h/career-ops', company: 'A', locations: ['Kraków'], isRemote: false, isHybrid: true },
+      { title: 'Office', url: 'https://solid.jobs/o/o/career-ops', company: 'A', locations: ['Gdańsk'], isRemote: false, isHybrid: false },
+    ],
+  };
+  const wpUrl = 'https://solid.jobs/public-api/offers/it?campaign=career-ops';
+  const wpFetch = (workplace) => sj.fetch(
+    { name: 'SolidJobs IT', careers_url: wpUrl, ...(workplace ? { workplace } : {}) },
+    { transport: 'http', fetchJson: async () => wpOffers, fetchText: async () => '' },
+  );
+  const titles = (list) => list.map(j => j.title).join(',');
+
+  const wpOff = await wpFetch(undefined);
+  if (wpOff.length === 4) pass('solidjobs workplace filter is off by default');
+  else fail(`solidjobs workplace filter should be off by default, got ${titles(wpOff)}`);
+
+  const wpRemote = await wpFetch(['Remote']);
+  if (titles(wpRemote) === 'Remote,Both') pass('solidjobs workplace: [remote] keeps only remote offers (case-insensitive)');
+  else fail(`solidjobs workplace: [remote] kept ${titles(wpRemote)}`);
+
+  const wpMulti = await wpFetch(['hybrid', 'office']);
+  if (titles(wpMulti) === 'Both,Hybrid,Office') pass('solidjobs workplace accepts hybrid and office');
+  else fail(`solidjobs workplace: [hybrid, office] kept ${titles(wpMulti)}`);
+
+  const wpScalar = await wpFetch('remote');
+  if (wpScalar.length === 2) pass('solidjobs workplace accepts a single string');
+  else fail(`solidjobs workplace: remote kept ${titles(wpScalar)}`);
+
+  if (wpOff.length === 4) pass('solidjobs keeps every offer when workplace is not set');
+  else fail(`solidjobs unfiltered kept ${wpOff.length} offers`);
 } catch (e) {
   fail(`solidjobs provider tests crashed: ${e.message}`);
 }
