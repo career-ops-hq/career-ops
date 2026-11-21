@@ -6,6 +6,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { cleanChips } from "../../src/lib/clean-chips.mjs";
 import { commitsOnPaste, commitsOnType, joinChipParam, splitChipParam, splitChipText } from "../../src/lib/chip-text.mjs";
 
@@ -102,4 +103,14 @@ test("a link written before quoting existed reads as it always did", async () =>
 
   assert.deepEqual(back.positive, ["staff engineer", "platform"]);
   assert.deepEqual(back.allow, ["Toronto", "Remote"]);
+});
+
+test("the quoting the Explore form shows under its location boxes is the rule the boxes follow", () => {
+  const source = readFileSync(new URL("../../src/components/explore/filter-builder.tsx", import.meta.url), "utf8");
+  const hint = source.match(/function QuoteHint\(\)[\s\S]*?<p[^>]*>([^<]+)<\/p>/);
+  assert.ok(hint, "QuoteHint renders one line of text");
+  const example = hint[1].replaceAll("&quot;", '"').match(/"[^"]*,[^"]*"/);
+  assert.ok(example, `the hint shows a quoted entry with a comma: ${hint[1]}`);
+  assert.deepEqual(chips(example[0]), [example[0].slice(1, -1)]);
+  assert.ok((source.match(/<QuoteHint \/>/g) || []).length >= 2, "the hint sits under the City box and under the advanced location boxes");
 });

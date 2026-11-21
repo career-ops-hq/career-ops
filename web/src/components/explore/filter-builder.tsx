@@ -96,6 +96,12 @@ function KeywordField({
   );
 }
 
+// A comma ends an entry unless the entry is quoted (#7424). The placeholder shows
+// that only while a box is empty, so the rule is also stated under the boxes.
+function QuoteHint() {
+  return <p className="mt-1 text-[11px] text-faint">An entry with a comma goes in double quotes: &quot;Portland, OR&quot;.</p>;
+}
+
 function Label({ children, hint }: { children: React.ReactNode; hint?: string }) {
   return (
     <div className="mb-1.5 flex items-baseline justify-between gap-4">
@@ -170,6 +176,7 @@ export function FilterBuilder({
           ariaLabel="City or location"
           onChange={(v) => set({ allow: v })}
         />
+        <QuoteHint />
       </div>
 
       {!employer && <div className="flex flex-wrap items-end gap-x-8 gap-y-4">
@@ -244,6 +251,7 @@ export function FilterBuilder({
           <div>
             <Label hint="hard reject — overrides Always include">Never include</Label>
             <KeywordField ariaLabel="Never include" values={filters.blockHard} tone="exc" placeholder="USA, Brazil…" onChange={(v) => set({ blockHard: v })} />
+            <QuoteHint />
           </div>
           <div>
             <Label hint={`${filters.limitPerAts} companies / source`}>Scan depth</Label>
