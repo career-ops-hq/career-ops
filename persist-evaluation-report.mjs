@@ -14,6 +14,7 @@
  * exits 1. A failed write removes only files this call created.
  */
 import fs from "node:fs";
+import { tryAcquireDirLockSync, releaseOrWarn } from "./lib/dir-lock.mjs";
 import path from "node:path";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { isPostingUrl, trackerTsvLine } from "./lib/tracker-addition.mjs";
@@ -38,7 +39,7 @@ function textProblem(name, value) {
 /**
  * @param {string} root
  * @param {object} payload
- * @param {Pick<typeof fs, "mkdirSync"|"existsSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
+ * @param {Pick<typeof fs, "mkdirSync"|"openSync"|"closeSync"|"fstatSync"|"lstatSync"|"writeFileSync"|"unlinkSync">} [fsImpl]
  * @returns {{ok: true} | {ok: false, error: string}}
  */
 export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
@@ -91,30 +92,52 @@ export function writeEvaluationArtifacts(root, payload, fsImpl = fs) {
 
   const tsv = trackerTsvLine({ num, today, company, role, score, reportFile, notes, via, url });
   const attempted = [];
+  let lock;
   try {
     fsImpl.mkdirSync(reportsDir, { recursive: true });
     fsImpl.mkdirSync(additionsDir, { recursive: true });
+    lock = tryAcquireDirLockSync(`${reportPath}.lock`, { staleMs: 30_000, createParent: true });
+    if (!lock) throw new Error(`report is busy: ${reportPath}; retry the save`);
     writeNew(fsImpl, reportPath, markdown, attempted);
     writeNew(fsImpl, tsvPath, tsv, attempted);
   } catch (err) {
     const cleanupError = cleanupNew(fsImpl, attempted);
     const message = `Could not save the evaluation report: ${err.message}`;
     return fail(cleanupError ? `${message} ${cleanupError}` : message);
+  } finally {
+    if (lock) releaseOrWarn(lock);
   }
   return { ok: true };
 }
 
 function writeNew(fsImpl, filePath, content, attempted) {
-  const existed = fsImpl.existsSync(filePath);
-  attempted.push({ filePath, existed });
-  fsImpl.writeFileSync(filePath, content, "utf8");
+  const fd = fsImpl.openSync(filePath, "wx");
+  const created = { filePath, identity: null };
+  attempted.push(created);
+  try {
+    try {
+      fsImpl.writeFileSync(fd, content, "utf8");
+    } finally {
+      // On filesystems without birth times, writing can change the fallback.
+      created.identity = fsImpl.fstatSync(fd, { bigint: true });
+    }
+  } finally {
+    fsImpl.closeSync(fd);
+  }
 }
 
 function cleanupNew(fsImpl, attempted) {
   const problems = [];
-  for (const { filePath, existed } of attempted) {
-    if (existed) continue;
+  for (const { filePath, identity } of attempted) {
+    if (!identity) {
+      problems.push(`Retained ${filePath}: file ownership could not be verified; inspect it before retrying.`);
+      continue;
+    }
     try {
+      // A concurrent atomic save owns the replacement, even at the same path.
+      const current = fsImpl.lstatSync(filePath, { bigint: true });
+      if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino
+          || current.birthtimeNs !== identity.birthtimeNs) continue;
       fsImpl.unlinkSync(filePath);
     } catch (err) {
       if (err?.code !== "ENOENT") problems.push(err.message);
