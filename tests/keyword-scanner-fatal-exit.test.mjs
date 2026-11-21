@@ -61,13 +61,15 @@ function run(script, setup, preloads) {
     }
     const env = { ...process.env, CAREER_OPS_ROOT: dir };
     // Every path override the scanners read wins over CAREER_OPS_ROOT, so an
-    // inherited one would point this run at the developer's real files.
-    for (const name of [
+    // inherited one would point this run at the developer's real files. With
+    // trusted proxy egress, the request would go through undici, past the stub.
+    // Env names are case-insensitive on Windows, so every spelling is dropped.
+    const inherited = new Set([
       'CAREER_OPS_DATA_DIR', 'CAREER_OPS_PORTALS', 'CAREER_OPS_TRACKER', 'CAREER_OPS_PIPELINE',
       'CAREER_OPS_SCAN_HISTORY', 'CAREER_OPS_PROFILE', 'GEMINI_API_KEY', 'GEMINI_MODEL',
-    ]) delete env[name];
-    // With trusted proxy egress, the request would go through undici, past the stub.
-    delete env.CAREER_OPS_TRUST_PROXY_EGRESS;
+      'CAREER_OPS_TRUST_PROXY_EGRESS',
+    ]);
+    for (const key of Object.keys(env)) if (inherited.has(key.toUpperCase())) delete env[key];
     return spawnSync(process.execPath, [...args, join(ROOT, script)], { cwd: dir, encoding: 'utf8', timeout: 60_000, env });
   } finally { rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); }
 }
