@@ -7,12 +7,13 @@ import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import { evaluationGateForJob } from "@/lib/job-gate.mjs";
+import { daysSince } from "@/lib/inbox";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
 
 function freshness(postedAt: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt)) return "";
-  const days = Math.max(0, Math.round((Date.now() - new Date(postedAt + "T00:00:00Z").getTime()) / 86_400_000));
+  const days = daysSince(postedAt, Date.now());
+  if (days == null) return "";
   return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
 }
 
