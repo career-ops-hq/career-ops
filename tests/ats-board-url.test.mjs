@@ -58,11 +58,14 @@ import teamtailor from '../providers/teamtailor.mjs';
 import trakstar from '../providers/trakstar.mjs';
 import turbohire from '../providers/turbohire.mjs';
 import zohoRecruit from '../providers/zoho-recruit.mjs';
+import avature from '../providers/avature.mjs';
+import clearcompany from '../providers/clearcompany.mjs';
+import jobvite from '../providers/jobvite.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, workday,
 };
 
 // The slug vendors discover-ats.mjs probes. The registry admits more: a board
@@ -110,6 +113,9 @@ const FORMS = [
   [{ ats: 'zoho-recruit', region: 'in', board: 'acme' }, 'https://acme.zohorecruit.in/jobs/Careers'],
   [{ ats: 'zoho-recruit', region: 'jp', board: 'acme' }, 'https://acme.zohorecruit.jp/jobs/Careers'],
   [{ ats: 'zoho-recruit', region: 'sa', board: 'acme' }, 'https://acme.zohorecruit.sa/jobs/Careers'],
+  [{ ats: 'avature', board: 'acme' }, 'https://acme.avature.net/careers/SearchJobs'],
+  [{ ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' }, 'https://careers-api.clearcompany.com/v1/0f8fad5b-d9cb-469f-a165-70867728950e'],
+  [{ ats: 'jobvite', board: 'acme' }, 'https://jobs.jobvite.com/acme'],
   [{ ats: 'workday', workday_host: 'jobs', board: 'acme/wd5/External_Careers' }, 'https://acme.wd5.myworkdayjobs.com/External_Careers'],
   [{ ats: 'workday', workday_host: 'site', board: 'acme/wd1/AcmeCareers' }, 'https://wd1.myworkdaysite.com/recruiting/acme/AcmeCareers'],
 ];
@@ -118,7 +124,8 @@ test('the closed ATS list, each with the provider that reads its boards', () => 
   assert.deepEqual([...BOARD_ATS], [
     'greenhouse', 'ashby', 'lever', 'workable', 'smartrecruiters', 'rippling', 'join',
     'recruitee', 'breezy', 'bamboohr', 'pinpoint', 'applicantpro', 'hibob', 'hirehive', 'homerun', 'jazzhr', 'keka',
-    'personio', 'prevueaps', 'schoolspring', 'taleez', 'teamtailor', 'trakstar', 'turbohire', 'zoho-recruit', 'workday',
+    'personio', 'prevueaps', 'schoolspring', 'taleez', 'teamtailor', 'trakstar', 'turbohire', 'zoho-recruit',
+    'avature', 'clearcompany', 'jobvite', 'workday',
   ]);
   assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
   for (const [ats, provider] of Object.entries(PROVIDERS)) assert.equal(provider.id, ats);

@@ -99,6 +99,9 @@ test('every ATS, region and Workday host form round-trips through its builder', 
     { ats: 'zoho-recruit', region: 'in', board: 'acme' },
     { ats: 'zoho-recruit', region: 'jp', board: 'acme' },
     { ats: 'zoho-recruit', region: 'sa', board: 'acme' },
+    { ats: 'avature', board: 'acme' },
+    { ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' },
+    { ats: 'jobvite', board: 'acme' },
     { ats: 'workday', board: 'acme/wd5/External_Careers', workday_host: 'jobs' },
     { ats: 'workday', board: 'acme/wd103/Careers', workday_host: 'site' },
   ];
@@ -159,6 +162,12 @@ const VARIANTS = [
   ['https://acme.zohorecruit.eu/jobs/Emplois', { ats: 'zoho-recruit', region: 'eu', board: 'acme' }],
   ['https://Acme.ZohoRecruit.com.au/recruit/Portal.na', { ats: 'zoho-recruit', region: 'au', board: 'acme' }],
   ['acme.zohorecruit.in', { ats: 'zoho-recruit', region: 'in', board: 'acme' }],
+  // Avature, ClearCompany and Jobvite
+  ['https://acme.avature.net/en_US/careers/JobDetail/Backend-Engineer/1234', { ats: 'avature', board: 'acme' }],
+  ['https://Acme.Avature.net/careers', { ats: 'avature', board: 'acme' }],
+  ['https://careers-api.clearcompany.com/v1/0F8FAD5B-D9CB-469F-A165-70867728950E', { ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' }],
+  ['https://careers-content.clearcompany.com/js/v1/career-site.js?SiteId=0f8fad5b-d9cb-469f-a165-70867728950e', { ats: 'clearcompany', board: '0f8fad5b-d9cb-469f-a165-70867728950e' }],
+  ['https://jobs.jobvite.com/acme/job/oAbC123', { ats: 'jobvite', board: 'acme' }],
 ];
 
 for (const [url, coords] of VARIANTS) {
@@ -211,6 +220,12 @@ const REJECTS = [
   ['https://acme.zohorecruit.de/jobs/Careers', /not a board host/],
   ['https://acme.portal.zohorecruit.eu/', /the board is <company>\.zohorecruit\.eu/],
   ['https://12345.teamtailor.com/', /numeric-only/],
+  ['https://www.avature.net/', /"www" is a placeholder/],
+  ['https://acme.eu.avature.net/careers', /the board is <company>\.avature\.net/],
+  ['https://careers-api.clearcompany.com/v1/acme', /lowercase GUID/],
+  ['https://careers-api.clearcompany.com/', /careers-api\.clearcompany\.com\/v1\/<siteId>/],
+  ['https://careers-content.clearcompany.com/js/v1/career-site.js', /siteId/],
+  ['https://jobs.jobvite.com/api/jobs', /placeholder/],
 ];
 
 for (const [url, why] of REJECTS) {
@@ -302,7 +317,7 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     [3, 'the same board as line 2'],
     [5, 'name contains an email address'],
     [6, 'website "not a domain" is not a domain name'],
-    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, workday)'],
+    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, workday)'],
   ]);
   assert.equal(r.derivedNames, 1);
   assert.equal(r.rewritten, 2);
@@ -405,7 +420,7 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
     assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 2);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
       + `${known.length + 4},https://nope.example/jobs,`
-      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, workday)"\n');
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);

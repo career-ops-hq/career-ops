@@ -44,6 +44,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BOARD_ATS,
+  CLEARCOMPANY_SITE_RE,
   DNS_LABEL_ATS,
   OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
@@ -222,6 +223,7 @@ function slugProblem(ats, slug, label) {
   }
   if (ats === 'rippling' && !/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(slug)) return `rippling ${label}s are letters, digits and hyphens`;
   if (ats === 'workable' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `workable ${label}s are letters, digits, "_" and "-"`;
+  if (ats === 'clearcompany' && !CLEARCOMPANY_SITE_RE.test(slug)) return `clearcompany ${label}s are the career site's id, a lowercase GUID`;
   return null;
 }
 
