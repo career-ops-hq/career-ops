@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-21-santifer",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 11,
+  "source": "web-index:investor-portfolio@2026-11-21",
+  "origin": "Board addresses linked from employers' own websites, the websites listed on a public investor portfolio page, each checked live; the employer's name is the one each board gives itself; checked on 2026-11-21 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Employer websites from a public investor portfolio page",
+  "date": "2026-11-21"
+}
