@@ -407,29 +407,37 @@ function unclosedGroupStart(text, from, to) {
   return stack.length > 0 ? stack[0] : -1;
 }
 
-// Where the OUTERMOST closed bracket group containing `at` ends within
-// [from, to), or -1 when `at` is not inside one. The offset just past the
-// closing bracket, so it can be compared with a date's offset directly.
+// Where the bracket group that `at` sits in ends within [from, to), or -1 when
+// `at` is not inside one. The offset just past the closing bracket, so it can
+// be compared with a date's offset directly.
 //
-// Outermost, and the group rather than the pointer, because direction is a
-// property of the whole aside: "(row 51, row 52) applied 2026-09-20" has two
-// pointers in one group, and measuring from each pointer gave them opposite
-// directions -- "row 51" read the comma before "row 52" as the end of an
-// appositive while "row 52" sat against the verb. One group, one reading.
+// The group rather than the pointer, because direction is a property of the
+// whole aside: "(row 51, row 52) applied 2026-09-20" has two pointers in one
+// group, and measuring from each pointer gave them opposite directions --
+// "row 51" read the comma before "row 52" as the end of an appositive while
+// "row 52" sat against the verb. One group, one reading.
+//
+// The INNERMOST group containing it, which is that same group: an enclosing
+// one is somebody else's punctuation, and reading from it let any wrapper
+// change the answer -- parenthesising a whole note turned
+// "(Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here)" into a
+// forward read, so the sibling's September came back as this row's date while
+// the bare note answered November. Pointers that share a group still share
+// their innermost one, so one direction per group survives.
 function bracketGroupEnd(text, from, to, at) {
-  let openedAt = -1;
   let depth = 0;
+  let depthAt = -1;
   for (let i = from; i < to; i += 1) {
     const ch = text[i];
     if (ch === '(' || ch === '[') {
       depth += 1;
     } else if ((ch === ')' || ch === ']') && depth > 0) {
+      if (depth === depthAt) return i + 1;
       depth -= 1;
-      if (depth === 0 && openedAt !== -1) return i + 1;
     }
     if (i === at) {
       if (depth === 0) return -1;
-      openedAt = i;
+      depthAt = depth;
     }
   }
   return -1;

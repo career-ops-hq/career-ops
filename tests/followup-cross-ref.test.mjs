@@ -181,6 +181,22 @@ const OWN = [
     '2026-11-20',
     'two pointers in one bracket, after a nested group',
   ],
+  // An ENCLOSING bracket is somebody else's punctuation, so direction comes
+  // from the innermost group holding the pointer. Reading it from the outermost
+  // let a wrapper decide the answer: parenthesising the whole note made the
+  // first of these read forward, returning the sibling's September, while the
+  // bare note answered November. Both directions asserted wrapped, since a
+  // wrapper must not change either.
+  [
+    '(Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here)',
+    '2026-11-20',
+    'a wrapped note still attaches backward',
+  ],
+  [
+    '(Applied 2026-11-20 and (row 51) applied 2026-09-20)',
+    '2026-11-20',
+    'a wrapped note still attaches forward',
+  ],
   // A TRAILING pointer cites the date before it only when it is bracketed. Both
   // of these put a pointer after a date with nothing after it, so position
   // alone cannot separate an appositive citation from prose that merely
