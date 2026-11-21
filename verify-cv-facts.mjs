@@ -3412,9 +3412,14 @@ function sourceSpellsFact(sourceText, value) {
 export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
   // keepLines puts back the line breaks a removed span held, so the result
   // has the same line numbers as the input (claimEvidence cites lines).
-  const lineBreaks = (span) => span.replace(/[^\n]/g, '');
-  // The line breaks of a replaced span that its kept label does not carry.
-  const breaks = (span, label) => (keepLines ? lineBreaks(span).slice(lineBreaks(label).length) : '');
+  // A link kept as its label, with keepLines the line breaks around the label
+  // in place: those before it, then those after it.
+  const keep = (link, label) => {
+    if (!keepLines) return label;
+    const start = /^\[\s*/.exec(link)[0].length;
+    const lineBreaks = (span) => span.replace(/[^\n]/g, '');
+    return lineBreaks(link.slice(0, start)) + label + lineBreaks(link.slice(start + label.length));
+  };
   let out = '';
   let i = 0;
   const opener = /\[\s*([^\][]*?)\s*\]\(/y;
@@ -3432,7 +3437,7 @@ export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
           j++;
         }
         if (depth === 0) {
-          out += m[1] + breaks(text.slice(i, j), m[1]);
+          out += keep(text.slice(i, j), m[1]);
           i = j;
           continue;
         }
@@ -3440,7 +3445,7 @@ export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
     }
     out += text[i++];
   }
-  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, (link, label) => label + breaks(link, label));
+  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, (link, label) => keep(link, label));
   // A definition is dropped whole. Anything that is not one, as CommonMark
   // reads it, is text a reader sees and stays:
   //   - it starts its line, after at most three spaces, and cannot interrupt a
@@ -3949,6 +3954,8 @@ function runSelfTest() {
   }]]);
   equal('links keep their line numbers for evidence',
     collapseMarkdownLinks('[Profile\nlink](https://example.invalid)\n[a\nb][ref]\n\n[ref]:\nhttps://x.invalid\nKafka', { keepLines: true }).split('\n').length, 8);
+  equal('a line break before a link label stays before it',
+    collapseMarkdownLinks('[\nKafka](https://example.invalid) [\nSpark][r]', { keepLines: true }), '\nKafka \nSpark');
   equal('no evidence unless asked',
     'evidence' in verifyFacts('- Reduced model deployment time to 4 hours.', { sourcePaths: [exampleCv], configPath: '/nonexistent' }), false);
   equal('two plan horizons do not trigger a coverage warning',
