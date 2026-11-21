@@ -197,6 +197,26 @@ const OWN = [
     '2026-11-20',
     'a wrapped note still attaches forward',
   ],
+  // Climbing out of an enclosing group is not punctuation this aside chose, so
+  // the gap may hold the closing brackets of groups around it -- "((row 51))"
+  // leaves a `)` before the verb. Both directions pinned at depth, since the
+  // comma has to keep winning there, and the last case guards the other half of
+  // that rule: a group OPENING in the gap is an intervening aside, not a climb.
+  [
+    'Applied 2026-11-20 and ((row 51)) applied 2026-09-20',
+    '2026-11-20',
+    'a double-bracketed subject still attaches forward',
+  ],
+  [
+    'Applied 2026-09-20 elsewhere ((row 51)), applied 2026-11-20 here',
+    '2026-11-20',
+    'a double-bracketed appositive still attaches backward',
+  ],
+  [
+    'Applied 2026-09-20 elsewhere (row 51) (via Ashby) applied 2026-11-20',
+    '2026-11-20',
+    'a second group in the gap is not a climb out of an enclosing one',
+  ],
   // A TRAILING pointer cites the date before it only when it is bracketed. Both
   // of these put a pointer after a date with nothing after it, so position
   // alone cannot separate an appositive citation from prose that merely

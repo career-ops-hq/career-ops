@@ -529,9 +529,15 @@ function pointerOwner(text, pointer, dates) {
     // Measured from the end of the GROUP, so every pointer inside one bracket
     // reads the same way. A date inside the group is the group's own, which is
     // the subject reading too: "(row 51 applied 2026-09-20)".
+    //
+    // The gap may contain the closing brackets of ENCLOSING groups, since those
+    // are not punctuation this aside chose: "((row 51)) applied 2026-09-20"
+    // leaves a `)` to climb out of before reaching the verb. Nothing else
+    // passes -- a comma, prose, or a further group opening in the gap all mean
+    // the pointer is not sitting against that verb.
     const subjectOfFollowing = following !== null
       && (following.index < pointer.groupEnd
-        || /^\s*$/.test(text.slice(pointer.groupEnd, following.index)));
+        || /^[)\]\s]*$/.test(text.slice(pointer.groupEnd, following.index)));
     if (!subjectOfFollowing) {
       const preceding = dates.filter(d => d.index < pointer.index).pop();
       if (preceding) return preceding;
