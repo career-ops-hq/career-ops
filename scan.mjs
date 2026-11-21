@@ -1408,22 +1408,90 @@ export const DEFAULT_VISA_NEGATIVE = [
   // (Relocation wording is deliberately excluded: relocation != sponsorship.)
   'citizens and permanent residents only',
   'permanent residents only',
-];
+  ...visaRefusalPhrases(),
+].filter((k, i, all) => all.indexOf(k) === i);
+
+// Refusals that contain a positive keyword. Negatives are checked first and
+// matching is a plain substring test, so a refusal has to be listed here or
+// the positive inside it ("visa sponsorship", "eligible for sponsorship")
+// wins: strict mode keeps a posting that says it will NOT sponsor, and
+// default mode keeps it too. Measured on 7,168 public Greenhouse, Ashby and
+// Lever postings (2026-11-19): strict mode kept 939, and in 93 of them every
+// mention of sponsorship was a refusal, most often "visa sponsorship is not
+// offered for this role" and "we are unable to offer visa sponsorship".
+// Curly apostrophes are folded to straight ones before matching, so "n't"
+// covers "can’t" and "won’t" as well.
+function visaRefusalPhrases() {
+  const sponsorship = ['sponsorship', 'visa sponsorship', 'work visa sponsorship'];
+  const anySponsorship = [...sponsorship, 'company sponsorship', 'employer sponsorship'];
+  const cross = (prefixes, objects) => prefixes.flatMap(p => objects.map(o => `${p} ${o}`));
+  return [
+    // "we are unable to offer visa sponsorship", "this role does not support
+    // visa sponsorship", "we can't provide sponsorship"
+    ...cross(
+      ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
+        .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
+      sponsorship,
+    ),
+    // "work authorization that does not require sponsorship", "applicants
+    // must not require visa sponsorship now or in the future". Only in these
+    // framings: "we sponsor visas and welcome those who do not require
+    // sponsorship" offers sponsorship, so a bare "not require sponsorship"
+    // would drop it.
+    ...cross(
+      [
+        ...['authorization', 'authorisation']
+          .flatMap(a => [`${a} that does not require`, `${a} that doesn't require`]),
+        'must not require',
+        'must not now or in the future require',
+      ],
+      anySponsorship,
+    ),
+    // "you must be able to work without requiring visa sponsorship"
+    ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
+    'without visa sponsorship',
+    // "this position is not eligible for visa sponsorship"
+    'not eligible for sponsorship',
+    'not eligible for visa sponsorship',
+    'ineligible for sponsorship',
+    'ineligible for visa sponsorship',
+    // "visa sponsorship is not offered for this role"
+    'sponsorship is not offered',
+    'sponsorship not offered',
+    'sponsorship is not provided',
+    'sponsorship not provided',
+    'sponsorship will not be offered',
+    'sponsorship will not be provided',
+    'sponsorship cannot be offered',
+    'sponsorship cannot be provided',
+    // "we won't sponsor visas", "we are not currently able to sponsor visas"
+    "n't sponsor",
+    'will not sponsor',
+    'not currently sponsor',
+    'not currently able to sponsor',
+    'not in a position to sponsor',
+  ];
+}
+
+// Fold curly apostrophes so "can’t" and "can't" match the same keyword.
+function foldApostrophes(text) {
+  return text.replace(/[\u2018\u2019\u02bc]/g, "'");
+}
 
 export function buildVisaFilter(visaFilter) {
   if (!visaFilter || visaFilter.enabled === false) return () => true;
-  const positive = visaFilter.positive != null
+  const positive = (visaFilter.positive != null
     ? normalizeKeywordList(visaFilter.positive)
-    : DEFAULT_VISA_POSITIVE.slice();
-  const negative = visaFilter.negative != null
+    : DEFAULT_VISA_POSITIVE.slice()).map(foldApostrophes);
+  const negative = (visaFilter.negative != null
     ? normalizeKeywordList(visaFilter.negative)
-    : DEFAULT_VISA_NEGATIVE.slice();
+    : DEFAULT_VISA_NEGATIVE.slice()).map(foldApostrophes);
   const requireMention = visaFilter.require_mention === true;
 
   return (description) => {
     const hasText = typeof description === 'string' && description.trim() !== '';
     if (!hasText) return !requireMention;
-    const lower = description.toLowerCase();
+    const lower = foldApostrophes(description.toLowerCase());
     if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
     if (!requireMention) return true;
     if (positive.length === 0) return true;
