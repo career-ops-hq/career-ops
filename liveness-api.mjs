@@ -38,10 +38,12 @@
 
 import { DEFAULT_USER_AGENT } from './user-agent.mjs';
 import { parseWwrFeed } from './providers/weworkremotely.mjs';
+import { hireHiveTenantOf } from './providers/hirehive.mjs';
 import { ZOHO_HOST_RE, isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
 import { HOST_RE as ULTIPRO_HOST_RE, extractCandidateOpportunityDetail } from './providers/ultipro.mjs';
 import { VEJ_KEY_MONITOR } from './providers/vdab.mjs';
 import { PATH_BREAKING_CHAR, PATH_BREAKING_CHAR_ENCODED_ONCE } from './providers/arbeitsagentur.mjs';
+import { resolveHibobTenant } from './providers/hibob.mjs';
 import { atsVendorOf } from './ats-vendor.mjs';
 import { linkedInJobId, linkedInGuestUrl } from './lib/linkedin-url.mjs';
 
@@ -76,12 +78,16 @@ function isSafeValue(v) {
 //   `timeoutMs`  — override the default fetch timeout (slow/rate-limited APIs).
 //   `throttleMs` — minimum interval between our requests to this provider.
 //   `accept`     — override the Accept header (providers that answer in HTML).
+//   `headers`    — extra request headers, or a function of the extracted
+//                  params that returns them (see the `hibob` entry).
 //   `method`     — HTTP method of the API request; defaults to GET.
 //   `body`       — builds the request body from the extracted params, for an
 //                  endpoint that only answers a POST (see the `meituan` entry).
 //   `interpret`  — read the response body to decide liveness (org-level APIs
 //                  where a 200 alone doesn't prove THIS posting is live, and
-//                  per-job APIs that answer 200 for a closed posting).
+//                  per-job APIs that answer 200 for a closed posting). The third
+//                  argument is the request's abort signal, for a provider that
+//                  needs a second request to decide (see the `hibob` entry).
 //   `interpretStatuses` — the statuses whose body `interpret` reads; defaults
 //                  to [200]. A provider that answers a closed posting with an
 //                  error status carrying a recognisable body lists that status
@@ -313,6 +319,33 @@ const ATS_PROVIDERS = [
     },
   },
   {
+    id: 'hirehive',
+    // <tenant>.hirehive.com/<title-slug>-<shortid> reads the tenant's per-posting
+    // v2 API (`job_<shortid>`); /job/<number>[/<title-slug>] reads the v1 API by
+    // that number. Both answer 200 with the posting and 404 with a JSON
+    // `message`. The posting page says "This job is no longer available." for
+    // an unpublished posting, which is the API's "Job is not published"; the
+    // other messages ("Job not found", "Company not found", "Job does not match
+    // company") do not prove a posting closed, so they stay inconclusive.
+    match(u) {
+      const tenant = hireHiveTenantOf(u.hostname);
+      if (!tenant) return null;
+      const host = `${tenant}.hirehive.com`;
+      const byNumber = u.pathname.match(/^\/job\/(\d+)(?:\/[^/]*)?\/?$/);
+      if (byNumber) return { host, version: 'v1', id: byNumber[1] };
+      const bySlug = u.pathname.match(/^\/[^/]*-([A-Za-z0-9]+)\/?$/);
+      return bySlug ? { host, version: 'v2', id: `job_${bySlug[1]}` } : null;
+    },
+    api: ({ host, version, id }) => `https://${host}/api/${version}/jobs/${id}`,
+    interpretStatuses: [200, 404],
+    api404Authoritative: false,
+    async interpret(res, { id }) {
+      let json;
+      try { json = await res.json(); } catch { return null; }
+      return classifyHireHivePosting(json, id, res.status);
+    },
+  },
+  {
     id: 'ultipro',
     // {host}/{tenant}/JobBoard/{boardId}/OpportunityDetail?opportunityId={id}, the
     // URL providers/ultipro.mjs writes. Like Zoho Recruit, UKG has no per-posting
@@ -340,6 +373,39 @@ const ATS_PROVIDERS = [
       let html;
       try { html = await res.text(); } catch { return null; }
       return classifyUltiproDetailPage(html, id);
+    },
+  },
+  {
+    id: 'hibob',
+    // {tenant}.careers.hibob.com/jobs/{uuid}[/apply], the URL providers/hibob.mjs
+    // writes. The posting page reads only this per-posting endpoint and, when
+    // it answers 404, shows "No job openings match this URL" in place of the
+    // posting, and a 200 is a live posting. A label with no careers site answers
+    // 404 with the same body on its board endpoint too, so a 404 closes the
+    // posting only when the tenant's board answers 200; otherwise it stays
+    // inconclusive. The `companyidentifier` header names the tenant; without it,
+    // or for a label that is not a tenant, the answer is 401, also inconclusive.
+    match(u) {
+      const tenant = resolveHibobTenant(u.href);
+      if (!tenant) return null;
+      const m = u.pathname.match(/^\/jobs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/apply)?\/?$/i);
+      return m ? { tenant, jobId: m[1] } : null;
+    },
+    api: ({ tenant, jobId }) => `https://${tenant}.careers.hibob.com/api/job-ad/${jobId}/application-form`,
+    headers: ({ tenant }) => ({ companyidentifier: tenant }),
+    interpretStatuses: [404],
+    api404Authoritative: false,
+    async interpret(res, { tenant }, signal) {
+      await res.body?.cancel().catch(() => {});
+      const board = await fetch(`https://${tenant}.careers.hibob.com/api/job-ad`, {
+        headers: { 'user-agent': DEFAULT_USER_AGENT, accept: 'application/json', companyidentifier: tenant },
+        redirect: 'error',
+        signal,
+      });
+      await board.body?.cancel().catch(() => {});
+      return board.status === 200
+        ? { result: 'expired', code: 'hibob_api_gone', reason: 'HiBob answers 404 for the posting while the tenant board answers 200' }
+        : null;
     },
   },
   {
@@ -893,6 +959,23 @@ export function classifyVdabVacancy(json, id, httpStatus = 200) {
 }
 
 /**
+ * Classify one HireHive per-posting API answer (see the `hirehive` entry).
+ * A 200 counts only when the body is the posting the URL names.
+ * @param {any} json
+ * @param {string} id - `job_<shortid>` (v2) or the posting number (v1)
+ * @param {number} httpStatus
+ */
+export function classifyHireHivePosting(json, id, httpStatus = 200) {
+  if (httpStatus === 404) {
+    return json?.message === 'Job is not published'
+      ? { result: 'expired', code: 'hirehive_unpublished', reason: 'HireHive API: "Job is not published" (the posting page says the job is no longer available)' }
+      : null;
+  }
+  if (httpStatus !== 200 || !json || String(json.id) !== String(id) || typeof json.title !== 'string' || !json.title.trim()) return null;
+  return { result: 'active', code: 'hirehive_api_ok', reason: 'HireHive API returns the published posting (live)' };
+}
+
+/**
  * Decide liveness for one Zoho Recruit posting from its own page.
  * Pure + deterministic (no I/O), mirroring classifyAshbyBoard.
  *
@@ -986,7 +1069,7 @@ export function classifyWorkday403(json) {
  * Map a posting URL to its ATS API URL, or null if it isn't a known ATS posting
  * (or any extracted segment fails the strict charset). Pure + deterministic.
  * @param {string} rawUrl
- * @returns {{ ats: string, apiUrl: string, method: string, body?: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, interpretStatuses?: number[], api404Authoritative: boolean } | null}
+ * @returns {{ ats: string, apiUrl: string, method: string, body?: string, parts: Record<string, string>, timeoutMs?: number, throttleMs?: number, accept?: string, interpret?: (res: Response, parts: Record<string, string>, signal: AbortSignal) => Promise<{ result: 'active' | 'expired' | 'uncertain', code: string, reason: string } | null>, interpretStatuses?: number[], api404Authoritative: boolean } | null}
  */
 export function resolveAtsApi(rawUrl) {
   let u;
@@ -1016,7 +1099,7 @@ export function resolveAtsApi(rawUrl) {
       timeoutMs: provider.timeoutMs,
       throttleMs: provider.throttleMs,
       accept: provider.accept,
-      headers: provider.headers,
+      headers: typeof provider.headers === 'function' ? provider.headers(parts) : provider.headers,
       followEmbed: provider.followEmbed,
       interpret: provider.interpret,
       interpretStatuses: provider.interpretStatuses,
@@ -1042,14 +1125,32 @@ export function isAtsPosting(url) {
 // Zoho Recruit has no JSON API; the posting page resolveAtsApi() points at
 // embeds the record with its HTML `Job_Description`. UltiPro is the same: its
 // detail page embeds the `CandidateOpportunityDetail` record with its HTML
-// `Description`.
+// `Description`. HiBob's per-posting endpoint carries the posting's HTML
+// description, responsibilities, requirements and benefits.
 // Workable canonical and share links expose description, requirements and benefits
 // on the per-posting v2 API, after the existing guarded account-resolution hop.
+// HireHive's per-posting API carries the description HTML.
 // Microsoft and LinkedIn are on ATS_PROVIDERS
 // for liveness only — their public endpoints answer search/status, never body
 // text — so they are deliberately excluded here; see fetch-jd.mjs / the
 // fetch*Jd() family in browser-extract.mjs for the per-provider fetchers.
-export const JD_TEXT_API_ATS = new Set(['greenhouse', 'greenhouse-embedded', 'lever', 'ashby', 'workday', 'smartrecruiters', 'zoho-recruit', 'workable', 'workable-short', 'ultipro']);
+//
+// One ATS per line, in alphabetical order: PRs that add different ATSes then
+// touch different lines, which reduces merge conflicts.
+export const JD_TEXT_API_ATS = new Set([
+  'ashby',
+  'greenhouse',
+  'greenhouse-embedded',
+  'hibob',
+  'hirehive',
+  'lever',
+  'smartrecruiters',
+  'ultipro',
+  'workable',
+  'workable-short',
+  'workday',
+  'zoho-recruit',
+]);
 
 /**
  * Zero-token liveness check via the posting's ATS API.
@@ -1125,7 +1226,7 @@ export async function checkLivenessViaApi(url, { boardCache } = {}) {
       if (verdict) boardCache.set(apiUrl, json);
       return verdict;
     }
-    if (interpret && (interpretStatuses || [200]).includes(res.status)) return await interpret(res, parts);
+    if (interpret && (interpretStatuses || [200]).includes(res.status)) return await interpret(res, parts, controller.signal);
     if (res.status === 200) {
       return { result: 'active', code: `${ats}_api_ok`, reason: 'ATS API returns the posting (live)' };
     }

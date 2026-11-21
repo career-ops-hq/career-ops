@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
+import { fetchTextWithRetry, sleep } from './_http.mjs';
 
 // Google provider — Google Careers is server-rendered, so the results page HTML
 // contains every job link:
@@ -17,31 +18,30 @@ import { htmlToText } from './_html-to-text.mjs';
 // A card without that markup falls back to the entry name, the link's
 // aria-label or slug for the title, and a blank location.
 //
-// FIRST PAGE ONLY, and that is a robots.txt constraint, not an oversight.
-// google.com/robots.txt disallows the paginated results URLs for every crawler:
-//
-//   Disallow: /about/careers/applications/jobs/results?page=
-//   Disallow: /about/careers/applications/jobs/results/?page=
-//   Disallow: /about/careers/applications/jobs/results?*&page=
-//   Disallow: /about/careers/applications/jobs/results/?*&page=
-//
-// with no Allow under /about/careers that could take precedence (RFC 9309 §2.2.2
-// longest-match). career-ops declines Lagou for the same reason — see
-// docs/SUPPORTED_JOB_BOARDS.md: "The project does not route around that stated
-// restriction." So this provider never sends `page`, which leaves one results
-// page per query (~20 postings). `sort_by=date` makes that page the NEWEST
-// postings, which is what a scanner run on a schedule wants; pages beyond the
-// first are unreachable without the disallowed parameter, so `max_pages` does
-// not apply to this provider.
+// PAGINATION. The results are paged with a 1-based `page` query parameter
+// (omitted on page 1), 20 cards per full page, newest first under
+// `sort_by=date`. Until 2026-11-08 this provider read only the first page,
+// because `google.com/robots.txt` disallows the `page=` results URLs; rule 6 of
+// the Source Indexing Policy stopped treating robots.txt as a gate (#6691,
+// #6694), so the walk now continues page by page. A query ends on the first
+// empty page, a page that repeats one already seen in the same walk, or a short
+// page (fewer than a full page of cards), and is otherwise bounded by
+// `max_pages` per query (default DEFAULT_MAX_PAGES, hard ceiling MAX_PAGES_CAP).
 //
 // Config (portals.yml):
 //   provider: google
 //   google:
 //     location: "United States"      # optional
 //     queries: ["business strategy", "business operations", ...]
+//   max_pages: 10                     # optional, per query
 
 const BASE = 'https://www.google.com/about/careers/applications/jobs/results/';
-// One request per query: no `page` parameter exists in any URL this provider builds.
+// A full results page carries 20 cards; a shorter page is the last one for that
+// query. Observed live 2026-11-08.
+const PAGE_SIZE = 20;
+const DEFAULT_MAX_PAGES = 10; // 200 postings per query
+const MAX_PAGES_CAP = 50; // hard ceiling even for a max_pages override
+const INTER_PAGE_DELAY_MS = 400;
 // The anchor that closes each card; the markup since the previous anchor is that
 // card. Google serves the href relative ("jobs/results/…"); a path prefix is
 // tolerated, and the URL is rebuilt from BASE either way.
@@ -60,6 +60,13 @@ function getConfig(entry) {
   const c = entry.google || {};
   const queries = Array.isArray(c.queries) && c.queries.length ? c.queries : DEFAULT_QUERIES;
   return { location: c.location || 'United States', queries };
+}
+
+/** @param {any} entry @returns {number} */
+export function resolveMaxPages(entry) {
+  const v = entry?.max_pages;
+  if (Number.isInteger(v) && v > 0) return Math.min(v, MAX_PAGES_CAP);
+  return DEFAULT_MAX_PAGES;
 }
 
 function titleFromSlug(slug) {
@@ -121,24 +128,67 @@ export default {
 
   async fetch(entry, ctx) {
     const { location, queries } = getConfig(entry);
-    // A probe only needs to know the board answers, so it spends one query.
-    const probing = Number(/** @type {any} */ (ctx)?.maxPages) > 0;
+    // `ctx.maxPages` means verify-portals is probing, not scanning: walk one
+    // query and one page, so a liveness check costs one request instead of
+    // queries x pages (providers/ADDING_A_PROVIDER.md).
+    const ctxMaxPages = Number(/** @type {any} */ (ctx)?.maxPages);
+    const probing = ctxMaxPages > 0;
+    const entryMaxPages = resolveMaxPages(entry);
+    const maxPages = probing ? Math.min(entryMaxPages, ctxMaxPages) : entryMaxPages;
+    const queriesToRun = probing ? queries.slice(0, 1) : queries;
+
     const byId = new Map();
-    for (const q of (probing ? queries.slice(0, 1) : queries)) {
-      // URLSearchParams, not hand-built encodeURIComponent: q and location come from
-      // portals.yml, and URLSearchParams never throws on a malformed string.
-      const url = `${BASE}?${new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' })}`;
-      const html = await ctx.fetchText(url, { redirect: 'error' });
-      for (const { id, slug, title, employer, locations } of parseResultsPage(html)) {
-        if (byId.has(id)) continue;
-        byId.set(id, {
-          title,
-          url: `${BASE}${id}-${slug}`,
-          company: employer || entry.name,
-          location: locations.join('; '),
-          ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
-        });
+    let requestsMade = 0;
+    let truncated = false;
+
+    for (const q of queriesToRun) {
+      // IDs seen in THIS query's walk: a page that adds none is Google
+      // re-serving an earlier page past the end, so the walk for this query
+      // stops — but a later query whose first page overlaps an earlier query
+      // still walks its own deeper pages (ADDING_A_PROVIDER.md).
+      const seenThisQuery = new Set();
+      for (let page = 1; page <= maxPages; page++) {
+        // URLSearchParams, not hand-built encodeURIComponent: q and location come from
+        // portals.yml, and URLSearchParams never throws on a malformed string.
+        const params = new URLSearchParams({ q: String(q), location: String(location), sort_by: 'date' });
+        if (page > 1) params.set('page', String(page));
+        const url = `${BASE}?${params}`;
+        if (requestsMade > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
+        let html;
+        try {
+          html = await fetchTextWithRetry(ctx, url, { redirect: 'error' });
+        } catch (err) {
+          // The first request failing means the board is broken, not empty, and
+          // a probe needs the rejection unwrapped so its request-budget sentinel
+          // keeps its identity. Otherwise keep the queries already collected
+          // rather than lose them to one bad search, and move to the next query.
+          if (probing || requestsMade === 0) throw err;
+          const cause = err instanceof Error ? err.message : String(err);
+          console.error(`⚠️  google: ${entry.name} stopped "${q}" at page ${page} (${byId.size} jobs so far): ${cause}`);
+          break;
+        }
+        requestsMade += 1;
+        const cards = parseResultsPage(html);
+        let newThisQuery = 0;
+        for (const { id, slug, title, employer, locations } of cards) {
+          if (!seenThisQuery.has(id)) { seenThisQuery.add(id); newThisQuery += 1; }
+          if (byId.has(id)) continue;
+          byId.set(id, {
+            title,
+            url: `${BASE}${id}-${slug}`,
+            company: employer || entry.name,
+            location: locations.join('; '),
+            ...(coerceId(id) ? { externalId: /** @type {string} */ (coerceId(id)) } : {}),
+          });
+        }
+        // Stop at this query's last page: empty, re-served (no new ids), or
+        // short (a full page is PAGE_SIZE cards).
+        if (cards.length === 0 || newThisQuery === 0 || cards.length < PAGE_SIZE) break;
+        if (page === maxPages && !probing) truncated = true;
       }
+    }
+    if (truncated) {
+      console.error(`⚠️  google: ${entry.name} hit the ${maxPages}-page cap on at least one query — raise max_pages on this entry for more`);
     }
     return [...byId.values()];
   },

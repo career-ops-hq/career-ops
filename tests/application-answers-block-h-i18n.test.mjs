@@ -42,6 +42,7 @@ const LOCALIZED = [
   ['modes/id/lowongan.md', 'Draft jawaban untuk lamaran'],
   ['modes/it/annuncio.md', 'Bozze di risposta per la candidatura'],
   ['modes/ko/gonggo.md', '지원서 답변 초안'],
+  ['modes/nb/stilling.md', 'Utkast til svar i søknadsskjemaet'],
   ['modes/nl/vacature.md', 'Conceptantwoorden voor de sollicitatie'],
   ['modes/pl/oferta.md', 'Szkice odpowiedzi do aplikacji'],
   ['modes/pt/oferta.md', 'Rascunhos de Respostas para Candidatura'],

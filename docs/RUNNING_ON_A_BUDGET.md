@@ -313,7 +313,7 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint. Use it only if you choose to share that data with the provider.
 >
-> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` sends a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
+> OpenCode Go (`https://opencode.ai/zen/go/v1`) is an OpenAI-compatible gateway that works the same way. Its docs ask clients to identify themselves and send a session id, so `openai-eval.mjs` and `openai-tailor.mjs` send a `User-Agent` (`career-ops/<version>`) and one `x-opencode-session` id per run automatically, for `opencode.ai` only. Per its [docs](https://opencode.ai/v2/docs/console/go/#where-can-i-use-it), Go is designed for coding-agent traffic and is monitored for abuse, so check its terms before pointing batch evaluations at it.
 >
 > Runcrate (`https://api.runcrate.ai/v1`) is another OpenAI-compatible endpoint that works the same way. Model ids carry the vendor prefix, such as `deepseek-ai/DeepSeek-V4.1-Flash`:
 > ```bash
@@ -342,9 +342,29 @@ When choosing a budget-friendly model, you need strong reasoning capabilities to
 > ```
 > As with other hosted providers, this sends your CV and job description to the configured endpoint.
 >
+> UberLLM (`https://api.uberllm.dev/v1`) is another OpenAI-compatible endpoint that works the same way, for example with `deepseek/deepseek-v4-flash`. It is prepaid pay-as-you-go, with no free tier:
+> ```bash
+> OPENAI_BASE_URL=https://api.uberllm.dev/v1 \
+> OPENAI_MODEL=deepseek/deepseek-v4-flash \
+> OPENAI_API_KEY=your_uberllm_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
+> Standard Compute (`https://api.stdcmpt.com/v1`) is another OpenAI-compatible endpoint that works the same way. The `StandardCompute` model id sends each request to the cheapest enabled model that can handle it, with automatic fallback; pinned model ids are listed at `https://api.stdcmpt.com/v1/models`:
+> ```bash
+> OPENAI_BASE_URL=https://api.stdcmpt.com/v1 \
+> OPENAI_MODEL=StandardCompute \
+> OPENAI_API_KEY=your_standardcompute_key \
+> node openai-eval.mjs --file ./jds/job.txt
+> ```
+> As with other hosted providers, this sends your CV and job description to the configured endpoint.
+>
 > Run `node openai-eval.mjs --help` for per-provider examples. For 100% local/private use, point `--url` at a local server (LM Studio / llama.cpp / vLLM) or use `node ollama-eval.mjs`.
 
 > NVIDIA NIM also works (hosted `https://integrate.api.nvidia.com/v1` or a self-hosted container's `/v1`), e.g. `--model meta/llama-3.3-70b-instruct`. The hosted free tier can queue for minutes, so raise `OPENAI_TIMEOUT_MS` above the 300s default.
+
+> **Output cap (`CAREER_OPS_MAX_TOKENS`, default `32768`).** `openai-eval.mjs` and `openai-tailor.mjs` send this as `max_tokens` (as `max_completion_tokens` to `api.openai.com`, whose reasoning models reject `max_tokens`). Without a cap, OpenRouter reserves credit for the model's whole output window before generating anything and answers **HTTP 402** when your balance cannot cover that reservation, even when the report itself costs cents. The default holds a full A-G report (about 9K tokens) plus the reasoning a thinking model spends first. If you see a 402 on a low balance, lower it (`CAREER_OPS_MAX_TOKENS=16384`); if the script warns that the reply stopped at the cap, raise it. `openai-tailor.mjs` saves nothing in that case, since a CV cut off at the cap is missing its last sections.
 
 ## 5. Local LLM Tradeoffs (Ollama / Llama.cpp)
 

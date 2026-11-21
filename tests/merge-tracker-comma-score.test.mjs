@@ -21,7 +21,7 @@ ok('merge reads a decimal-comma tracker score as 4.2, not 4', () => {
       '| 7 | 2026-02-01 | ExampleCorp | Payments PM | 4,2/5 | Evaluated | ✅ | [7](../reports/7-examplecorp-2026-02-01.md) | original eval |', ''].join('\n'));
     writeFileSync(join(adds, '11-examplecorp.tsv'),
       '11\t2026-03-03\tExampleCorp\tPayments PM\tEvaluated\t4.1/5\t✅\t[11](reports/11-examplecorp-2026-03-03.md)\tre-scored\n');
-    const output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs')], {
+    const output = execFileSync(NODE, [join(ROOT, 'merge-tracker.mjs'), '--allow-headerless'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, CAREER_OPS_TRACKER: tracker, CAREER_OPS_ADDITIONS: adds, CAREER_OPS_BATCH_STATE: isolatedBatchStatePath(adds) },

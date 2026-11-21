@@ -69,6 +69,8 @@ copyFileSync(join(ROOT, 'lib', 'browser-launch.mjs'), join(sandbox, 'lib', 'brow
 // pipeline-lock.mjs runs the shared lock protocol from lib/dir-lock.mjs (#5358).
 copyFileSync(join(ROOT, 'lib', 'dir-lock.mjs'), join(sandbox, 'lib', 'dir-lock.mjs'));
 copyFileSync(join(ROOT, 'lib', 'yaml-document.mjs'), join(sandbox, 'lib', 'yaml-document.mjs'));
+// generate-pdf.mjs dates its PDF index row with lib/local-today.mjs.
+copyFileSync(join(ROOT, 'lib', 'local-today.mjs'), join(sandbox, 'lib', 'local-today.mjs'));
 
 // theme-style.mjs and tracker-utils.mjs both `import * as yaml from 'js-yaml'`,
 // which resolves by walking up into the repo's node_modules -- from the
@@ -346,6 +348,32 @@ await renderHtmlToPdf(${JSON.stringify(htmlDoc('Solo CV'))}, outputPath, {
     pass('a batch CV entry takes the profile page budget and a cover letter keeps the default');
   } else {
     fail(`profile page budget did not reach the batch path as expected: status=${budgetBatch.status}\n${budgetBatch.output.trim()}`);
+  }
+
+  // --- Test 3b' (#6377): a warn-only overflow in a batch is still ok, but the
+  // entry's PDF is the sibling draft and nothing lands at its output path.
+  const warnProfile = join(sandbox, 'warn-profile.yml');
+  writeFileSync(warnProfile, 'name: Test Candidate\ncv:\n  max_pages: 1\n', 'utf-8');
+  const warnManifest = join(sandbox, 'warn-batch.json');
+  writeFileSync(warnManifest, JSON.stringify([
+    { input: 'a.html', output: 'out/warn-cv.pdf', kind: 'cv' },
+  ]), 'utf-8');
+  const warnBatch = run([`--batch=${warnManifest}`], { env: { CAREER_OPS_PROFILE: warnProfile } });
+  let warnResults = null;
+  try { warnResults = JSON.parse(readFileSync(`${warnManifest}.results.json`, 'utf-8')); } catch { /* asserted below */ }
+  const warnDraft = join(sandbox, 'out', 'warn-cv.overflow.pdf');
+  if (
+    warnBatch.status === 0 &&
+    Array.isArray(warnResults) && warnResults.length === 1 &&
+    warnResults[0].ok === true &&
+    warnResults[0].draftPath === warnDraft &&
+    !existsSync(join(sandbox, 'out', 'warn-cv.pdf')) &&
+    existsSync(warnDraft) &&
+    warnBatch.output.includes('1 ok, 0 failed')
+  ) {
+    pass('a batch CV entry over a warn-only budget is ok with its PDF at the draft, never at the output path');
+  } else {
+    fail(`a warn-only batch overflow did not stay off the output path: status=${warnBatch.status}\n${JSON.stringify(warnResults)}\n${warnBatch.output.trim()}`);
   }
 
   // --- Test 3c (#6325): an unusable profile budget fails only the CV entries;

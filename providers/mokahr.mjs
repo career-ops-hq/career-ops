@@ -105,12 +105,6 @@ const INTER_PAGE_DELAY_MS = 400;
 // tenants). Only orgId + siteId are load-bearing for the API; the prefix is
 // cosmetic and ignored here.
 const TENANT_PATH_RE = /^\/(?:social-recruitment|campus-recruitment|apply)\/([^/]+)\/(\d+)\/?$/;
-// Exact paths excluded by app.mokahr.com/robots.txt (checked 2026-08-26).
-// Keep this pathname-scoped: robots.txt does not exclude other routes.
-const ROBOTS_EXCLUDED_PATHS = new Set([
-  '/social-recruitment/lingjuninvest/46355',
-  '/social-recruitment/shopee/74378',
-]);
 
 /**
  * @param {string} url
@@ -125,7 +119,6 @@ function parseTenantUrl(url) {
   const siteId = Number(m[2]);
   if (!Number.isSafeInteger(siteId) || siteId <= 0) return null;
   const pathname = u.pathname.replace(/\/$/, '');
-  if (ROBOTS_EXCLUDED_PATHS.has(pathname)) return null;
   return { orgId: m[1], siteId, baseUrl: `${u.origin}${pathname}`, apiUrl: `${u.origin}${API_PATH}` };
 }
 

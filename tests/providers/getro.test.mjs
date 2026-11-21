@@ -313,6 +313,94 @@ try {
     fail(`getro.fetch() featured pin: ${pinnedCalls} pages, kept ${pinnedTitles}`);
   }
 
+  // The page cap warns only when it is what ended the walk with postings left.
+  // Undated rows, so the age cutoff never applies unless a case dates them.
+  // `count: undefined` leaves the board's count out of the response; `lastPageRows`
+  // shortens the last page; `failPage` makes that page throw.
+  const capRun = async (entryExtra, { count, pages, maxPages, lastPageCreatedAt, lastPageRows = 20, failPage } = {}) => {
+    const warnings = [];
+    const origError = console.error;
+    console.error = (m) => warnings.push(String(m));
+    let calls = 0;
+    let jobsOut = [];
+    try {
+      jobsOut = await getro.fetch({ ...okEntry, ...entryExtra }, {
+        ...(maxPages ? { maxPages } : {}),
+        sleep: async () => {},
+        fetchJson: async (_url, opts) => {
+          calls++;
+          // The page index from the request body, not the call count, so a retry
+          // of a failed page asks for that page again.
+          const p = JSON.parse(opts.body).page;
+          if (p === failPage) throw new Error(`page ${p} blew up`);
+          const withCount = (jobs) => ({ results: { ...(count === undefined ? {} : { count }), jobs } });
+          if (p >= pages) return withCount([]);
+          const rows = p === pages - 1 ? lastPageRows : 20;
+          return withCount(Array.from({ length: rows }, (_, i) => ({
+            title: `t${p}-${i}`, url: `https://jobs.examplevc.example/cap-${p}-${i}`, organization: { name: 'Acme' },
+            ...(p === pages - 1 && lastPageCreatedAt ? { created_at: lastPageCreatedAt } : {}),
+          })));
+        },
+      });
+    } finally {
+      console.error = origError;
+    }
+    return { calls, jobs: jobsOut.length, warnings, capWarnings: warnings.filter((w) => w.includes('getro_max_pages')) };
+  };
+
+  const capHit = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5 });
+  if (capHit.calls === 2 && capHit.capWarnings.length === 1
+      && capHit.capWarnings[0].includes('ExampleVC truncated at getro_max_pages=2 (40 of 100 jobs)')) {
+    pass('getro.fetch() warns, naming the entry, when getro_max_pages ends the walk with postings left');
+  } else {
+    fail(`getro.fetch() cap warning: ${capHit.calls} pages, warnings ${JSON.stringify(capHit.capWarnings)}`);
+  }
+
+  // At the hard cap, raising getro_max_pages reads nothing more, so the warning
+  // must not tell the user to; below it, it does.
+  const capHard = await capRun({ getro_max_pages: 5000 }, { count: 40000, pages: 1600 });
+  if (capHard.calls === 1500 && capHard.capWarnings.length === 1
+      && capHard.capWarnings[0].includes('truncated at getro_max_pages=1500 (30000 of 40000 jobs) — the 1500-page hard cap')
+      && !capHard.capWarnings[0].includes('raise getro_max_pages on this entry')
+      && capHit.capWarnings[0]?.includes('— raise getro_max_pages on this entry for more')) {
+    pass('getro.fetch() names the hard cap instead of advising a higher getro_max_pages when it is the 1500-page ceiling');
+  } else {
+    fail(`getro.fetch() hard-cap warning: ${capHard.calls} pages, ${JSON.stringify(capHard.capWarnings)}`);
+  }
+
+  const capExact = await capRun({ getro_max_pages: 2 }, { count: 40, pages: 2 });
+  const capProbe = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, maxPages: 1 });
+  const capAged = await capRun({ getro_max_pages: 2, getro_max_age_days: 90 }, { count: 100, pages: 2, lastPageCreatedAt: staleCreatedAt });
+  if (capExact.capWarnings.length === 0 && capProbe.capWarnings.length === 0 && capAged.capWarnings.length === 0) {
+    pass('getro.fetch() does not warn when the board ends at the cap, a ctx.maxPages probe cuts it, or the age cutoff ends the last page');
+  } else {
+    fail(`getro.fetch() cap warning misfired: exact ${capExact.capWarnings.length}, probe ${capProbe.capWarnings.length}, aged ${capAged.capWarnings.length}`);
+  }
+
+  // A short last page means the board ended there, even when the count is
+  // missing or claims more.
+  const capShortNoCount = await capRun({ getro_max_pages: 2 }, { count: undefined, pages: 2, lastPageRows: 15 });
+  const capShortOverCount = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 2, lastPageRows: 15 });
+  const capFullNoCount = await capRun({ getro_max_pages: 2 }, { count: undefined, pages: 5 });
+  if (capShortNoCount.capWarnings.length === 0 && capShortOverCount.capWarnings.length === 0
+      && capFullNoCount.capWarnings.length === 1 && capFullNoCount.capWarnings[0].includes('(40 jobs)')) {
+    pass('getro.fetch() treats a short last page as the board ending, with or without a count, and still warns on a full one with no count');
+  } else {
+    fail(`getro.fetch() short last page: no count ${capShortNoCount.capWarnings.length}, count 100 ${capShortOverCount.capWarnings.length}, full with no count ${JSON.stringify(capFullNoCount.capWarnings)}`);
+  }
+
+  // A probe cap equal to the entry's cap is still the probe's cut.
+  const capProbeEqual = await capRun({ getro_max_pages: 1 }, { count: 100, pages: 5, maxPages: 1 });
+  // The last allowed page failing ends the walk on the error, not the cap.
+  const capFailLast = await capRun({ getro_max_pages: 2 }, { count: 100, pages: 5, failPage: 1 });
+  if (capProbeEqual.capWarnings.length === 0 && capProbeEqual.calls === 1
+      && capFailLast.capWarnings.length === 0 && capFailLast.jobs === 20
+      && capFailLast.warnings.some((w) => w.includes('truncated at page 2 of 2'))) {
+    pass('getro.fetch() does not warn on the cap when a probe cap equals it, or when the last allowed page fails');
+  } else {
+    fail(`getro.fetch() cap warning: probe=cap ${capProbeEqual.capWarnings.length} (${capProbeEqual.calls} calls), failed last page ${capFailLast.capWarnings.length} (${capFailLast.jobs} jobs, ${JSON.stringify(capFailLast.warnings)})`);
+  }
+
   // A transient failure (timeout/abort — no .status set, matching a real AbortError)
   // is retried and recovers transparently instead of truncating the board (#2506).
   let getroRetryAttempts = 0;

@@ -66,6 +66,18 @@ export function parseAmount(raw) {
   // from the JD's own inputs before treating them as annual gross.
   const stripAnnual = (value) => value.replace(/\s*(?:\/\s*(?:year|yr)|per\s+(?:year|annum)|annual(?:ly)?|yearly)\s*$/i, '').trim();
   s = stripAnnual(s);
+  // Nordic spellings (#6620): a "kr"/"kr." marker or an upper-case ISO code in
+  // front of a bound ("kr 1.100.000 – 1.400.000", "NOK 2 000 000-2 600 000"),
+  // a trailing "kr" ("650 000 kr"), the ",-" that ends a whole-kroner amount
+  // ("650 000,-"), and a space as the thousands separator. Only a single space
+  // (or a no-break / thin space) followed by exactly three digits and no fourth
+  // is grouping, so "80 - 90k" and other spaced ranges keep their meaning.
+  s = s
+    .replace(/(^|[\s–—-])(?:[Kk][Rr]\.?|[A-Z]{3})\s*(?=\d)/g, '$1')
+    .replace(/\s*[Kk][Rr]\.?$/, '')
+    .replace(/,-(?=\s|$|[–—-])/g, '')
+    .replace(/(\d)[    ](?=\d{3}(?!\d))/g, '$1')
+    .trim();
   // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
   // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
   // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly

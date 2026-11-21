@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import * as yaml from 'js-yaml';
 import { replaceNextPin } from '../followup-seed.mjs';
-import { ROOT, pass, fail } from './helpers.mjs';
+import { ROOT, pass, fail, warn } from './helpers.mjs';
 import { describeSpawn, exitedNonZero } from './helpers/describe-spawn.mjs';
 
 const SCRIPT = join(ROOT, 'debrief-sync.mjs');
@@ -224,7 +224,11 @@ function refuses(label, args, mutate = {}) {
 refuses('a weekday --next writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--next', 'Thursday']);
 refuses('an impossible --next writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--next', '2026-02-31']);
 refuses('an unknown flag writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--bogus']);
+refuses('a repeated --dealbreaker writes nothing', ['--app', '7', '--dealbreaker', SENTENCE, '--dealbreaker', 'No equity-only compensation']);
 refuses('a dealbreaker with a semicolon writes nothing', ['--app', '7', '--dealbreaker', 'No on-site; relocation']);
+refuses('a dealbreaker with a tab writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\trelocation']);
+refuses('a dealbreaker with a newline writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\nrelocation']);
+refuses('a dealbreaker with a carriage return writes nothing', ['--app', '7', '--dealbreaker', 'No on-site\r\nrelocation']);
 refuses('a Machine Summary holding only comments writes nothing', ['--app', '7', '--dealbreaker', SENTENCE], {
   report: reportText('4.2', 'Apply', '[]').replace(/```yaml\n[\s\S]*?```/, '```yaml\n# summary pending\n```'),
 });
@@ -370,8 +374,214 @@ check('Step 10 tells the agent how to record the call', () => {
     'node followup-cadence.mjs --summary',
     'set-status.mjs',
     'Do not change status unless the user names a new status',
-    'A second run of the same command is safe',
+    'one command per confirmed sentence',
+    'on the first command only',
+    'Drop every sentence the user declines',
+    'run the list again from the first command',
+    'Run the commands one at a time and check each exit status',
+    "In PowerShell, write it as `''`, and double a curly quote",
+    'A second run of the same commands is safe',
+    'a semicolon (`;`), a tab or a line break',
+    'ask for a one-line version without it that keeps the meaning',
+    'Do not remove the character or reword the sentence yourself',
+    "the user's one-line version",
   ]) {
     assert.ok(section.includes(phrase), `missing ${phrase}`);
+  }
+});
+
+// The Step 10 example is the documented multi-dealbreaker flow (#6542). Run it
+// as written: every line must be a call the CLI accepts, together they must
+// record each confirmed sentence, and running them again must change nothing.
+const MODE_DIR = join(ROOT, 'modes');
+
+// Translations localize the Step 10 heading, so find the example by content:
+// the bash fence whose commands call debrief-sync.mjs.
+function stepTenBlock(text) {
+  const fence = [...text.matchAll(/```bash\n([\s\S]*?)```/g)].find((m) => m[1].includes('node debrief-sync.mjs'));
+  return fence ? fence[1] : null;
+}
+
+function debriefModes() {
+  const out = [['modes/interview/debrief.md', join(MODE_DIR, 'interview', 'debrief.md')]];
+  for (const lang of readdirSync(MODE_DIR, { withFileTypes: true })) {
+    const path = join(MODE_DIR, lang.name, 'interview', 'debrief.md');
+    if (lang.isDirectory() && existsSync(path)) out.push([`modes/${lang.name}/interview/debrief.md`, path]);
+  }
+  return out;
+}
+
+// Split a documented command the way a POSIX shell would for the forms Step 10
+// uses: single-quoted segments, the '\\'' escape, and bare words.
+function shellWords(line) {
+  const words = [];
+  for (const token of line.match(/(?:'[^']*'|\\.|[^\s'\\])+/g) || []) {
+    words.push([...token.matchAll(/'([^']*)'|\\(.)|([^'\\]+)/g)].map((m) => m[1] ?? m[2] ?? m[3]).join(''));
+  }
+  return words;
+}
+
+function shellQuoteValue(value) {
+  return value.replaceAll("'", "'\\''");
+}
+
+const englishBlock = stepTenBlock(readFileSync(join(MODE_DIR, 'interview', 'debrief.md'), 'utf8'));
+
+check('Step 10 shows one debrief-sync command per confirmed dealbreaker', () => {
+  assert.ok(englishBlock, 'Step 10 has no bash example');
+  const commands = englishBlock.trim().split('\n');
+  assert.ok(commands.length >= 2, 'the example needs at least two dealbreakers');
+  for (const [i, line] of commands.entries()) {
+    const words = shellWords(line);
+    assert.deepEqual(words.slice(0, 2), ['node', 'debrief-sync.mjs']);
+    const flags = words.filter((w) => w.startsWith('--'));
+    assert.equal(flags.filter((f) => f === '--dealbreaker').length, 1, `line ${i + 1} must pass exactly one --dealbreaker`);
+    if (i > 0) assert.deepEqual(flags, ['--app', '--dealbreaker'], `line ${i + 1} must pass only --app and --dealbreaker`);
+  }
+});
+
+check('every translated Step 10 carries the same multi-dealbreaker example', () => {
+  for (const [rel, path] of debriefModes()) {
+    const text = readFileSync(path, 'utf8');
+    assert.ok(stepTenBlock(text), `${rel} has no Step 10 debrief-sync example`);
+    assert.equal(stepTenBlock(text), englishBlock, `${rel} Step 10 example differs from the English one`);
+  }
+});
+
+check('no debrief mode passes a debrief-sync flag twice in one command', () => {
+  for (const [rel, path] of debriefModes()) {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (!/^node debrief-sync\.mjs /.test(line.trim())) continue;
+      const flags = shellWords(line).filter((w) => w.startsWith('--') && !/^--contact-/.test(w));
+      assert.equal(new Set(flags).size, flags.length, `${rel}: ${line}`);
+    }
+  }
+});
+
+// Run the Step 10 example as written, once per shell Step 10 names, with values
+// that shell would mangle if the documented quoting were wrong.
+function exerciseExample(shell, { quote, spawnLine, second, name }) {
+  const root = freshRoot();
+  const FIRST = SENTENCE;
+  const DECLINED = 'No travel above 25 percent';
+  const lines = englishBlock.trim().split('\n').map((line) => line
+    .replaceAll('<tracker#>', '7')
+    .replaceAll('<sentence 1>', quote(FIRST))
+    .replaceAll('<sentence 2>', quote(second))
+    .replaceAll('<name>', quote(name))
+    .replaceAll('YYYY-MM-DD', FUTURE));
+  const runLine = (line) => spawnLine(root, line);
+  const count = (text, needle) => text.split(needle).length - 1;
+  try {
+    writeFixture(root);
+    const results = lines.map(runLine);
+    check(`${shell}: the Step 10 example records both confirmed dealbreakers, the contact, and the pin`, () => {
+      for (const result of results) assert.equal(result.status, 0, describeSpawn(result));
+      const report = machineSummary(readRoot(root, REPORT_REL));
+      assert.equal(report.final_decision, 'Skip');
+      assert.deepEqual(report.hard_stops, [FIRST, second]);
+      const tracker = readRoot(root, 'data/applications.md');
+      assert.equal(count(tracker, `Dealbreaker: ${FIRST}`), 1);
+      assert.equal(count(tracker, `Dealbreaker: ${second}`), 1);
+      assert.match(tracker, /\| Interview \|/);
+      assert.ok(!tracker.includes(DECLINED) && !readRoot(root, REPORT_REL).includes(DECLINED));
+      assert.equal(count(readRoot(root, 'data/contacts.tsv'), name), 1);
+      const pins = readRoot(root, 'data/follow-ups.md');
+      assert.equal((pins.match(/^- next #7 /gm) || []).length, 1);
+      assert.ok(pins.includes(`- next #7 ${FUTURE} `));
+    });
+
+    const before = snapshot(root);
+    const again = lines.map(runLine);
+    check(`${shell}: running the Step 10 example again writes nothing`, () => {
+      for (const result of again) {
+        assert.equal(result.status, 0, describeSpawn(result));
+        assert.equal(JSON.parse(result.stdout).wrote, false);
+      }
+      assert.deepEqual(snapshot(root), before);
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const shellEnv = (root) => ({
+  ...childEnv(root),
+  PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ''}`,
+});
+
+if (englishBlock) {
+  // A POSIX shell expands $ and runs backticks inside double quotes. The
+  // example single-quotes each value, so these reach the CLI unchanged. On
+  // Windows there is no /bin/sh: split the line the same way and spawn directly.
+  exerciseExample('POSIX shell', {
+    quote: shellQuoteValue,
+    second: "No recruiter's pay below $120,000 or `whoami` pitch",
+    name: "Avery O'Quinn",
+    spawnLine: (root, line) => (process.platform === 'win32'
+      ? run(root, shellWords(line).slice(2))
+      : spawnSync('/bin/sh', ['-c', line], { cwd: ROOT, encoding: 'utf8', env: shellEnv(root) })),
+  });
+
+  // PowerShell reads ' and the curly quotes ‘ ’ ‚ ‛ as single quotes, and Step
+  // 10 says to double each one inside a value. GitHub's runners ship pwsh on
+  // every OS in the matrix; a machine without it warns instead of passing.
+  const pwsh = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' });
+  if (pwsh.status === 0) {
+    exerciseExample('PowerShell', {
+      quote: (value) => value.replace(/['‘’‚‛]/g, (c) => c + c),
+      second: "No recruiter’s pay below $120,000, ‚net‛ or 'gross' `n",
+      name: "Avery O’Quinn-D'Arcy",
+      spawnLine: (root, line) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', line], {
+        cwd: ROOT, encoding: 'utf8', env: shellEnv(root),
+      }),
+    });
+  } else {
+    warn('PowerShell run of the Step 10 example skipped: pwsh is not installed');
+  }
+}
+
+// #6541: debrief-sync.mjs refuses a --dealbreaker value with a semicolon, tab
+// or line break, so every Step 10 that passes the profile sentence must check
+// it first, ask the user for a safe one-line value, and check that value
+// again, all before the [y/N] confirmation. Each file names the three
+// characters, the one-line request and the re-check in its own language; a
+// new translation that passes --dealbreaker has to be added here.
+const DELIMITER_GUARD = {
+  'modes/interview/debrief.md': ['a tab', 'a line break', 'one-line version', 'ask again until it has none'],
+  'modes/de/interview/debrief.md': ['Tabulator', 'Zeilenumbruch', 'einzeilige Fassung', 'frag erneut'],
+  'modes/fr/interview/debrief.md': ['une tabulation', 'un saut de ligne', 'une seule ligne', 'redemandez-la'],
+  'modes/id/interview/debrief.md': ['tab', 'baris baru', 'versi satu baris', 'minta lagi'],
+  'modes/es/interview/debrief.md': ['tabulador', 'salto de línea', 'una sola línea', 'vuelve a pedirla'],
+  'modes/it/interview/debrief.md': ['tabulazione', 'a capo', 'una sola riga', "chiedine un'altra"],
+  'modes/ja/interview/debrief.md': ['タブ', '改行', '1行の文', '改めて求める'],
+  'modes/ko/interview/debrief.md': ['탭', '줄바꿈', '한 줄짜리', '다시 요청합니다'],
+  'modes/pl/interview/debrief.md': ['tabulator', 'nowej linii', 'jednowierszową', 'proś ponownie'],
+  'modes/pt/interview/debrief.md': ['tabulação', 'quebra de linha', 'uma única linha', 'peça de novo'],
+  'modes/ru/interview/debrief.md': ['табуляцией', 'переводом строки', 'однострочный', 'проси снова'],
+  'modes/ua/interview/debrief.md': ['табуляцією', 'новий рядок', 'однорядковий', 'просіть знову'],
+  'modes/zh/interview/debrief.md': ['制表符', '换行', '单行版本', '再次请用户修改'],
+};
+
+check('every Step 10 that passes --dealbreaker checks the delimiters before the prompt', () => {
+  const modesDir = join(ROOT, 'modes');
+  const files = ['modes/interview/debrief.md', ...readdirSync(modesDir, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => `modes/${d.name}/interview/debrief.md`)
+    .filter((rel) => existsSync(join(ROOT, rel)))];
+  const affected = files.filter((rel) => readFileSync(join(ROOT, rel), 'utf8').includes('--dealbreaker'));
+  assert.deepEqual([...affected].sort(), Object.keys(DELIMITER_GUARD).sort(),
+    'every debrief that passes --dealbreaker needs an entry in DELIMITER_GUARD');
+  for (const rel of affected) {
+    const paragraph = readFileSync(join(ROOT, rel), 'utf8')
+      .split(/\n\s*\n/)
+      .find((p) => p.includes('`--dealbreaker`') && p.includes('[y/N]'));
+    assert.ok(paragraph, `${rel}: no dealbreaker paragraph with a [y/N] prompt`);
+    const prompt = paragraph.indexOf('[y/N]');
+    for (const phrase of ['debrief-sync.mjs', '`;`', ...DELIMITER_GUARD[rel]]) {
+      const at = paragraph.indexOf(phrase);
+      assert.ok(at >= 0, `${rel}: the dealbreaker paragraph is missing ${phrase}`);
+      assert.ok(at < prompt, `${rel}: ${phrase} comes after the [y/N] prompt`);
+    }
   }
 });

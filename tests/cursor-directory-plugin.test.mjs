@@ -22,6 +22,7 @@ import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listTree } from '../lib/walk-tree.mjs';
+import {load as loadYaml } from 'js-yaml';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const DIR = join(ROOT, 'cursor-directory');
@@ -100,11 +101,42 @@ test('the skill and the license are byte-identical copies of the canonical ones'
   assert.equal(read('cursor-directory/skills/career-ops/SKILL.md'), read('.agents/skills/career-ops/SKILL.md'),
     'cursor-directory/skills/career-ops/SKILL.md diverged: copy .agents/skills/career-ops/SKILL.md over it');
   assert.equal(read('cursor-directory/LICENSE'), read('LICENSE'), 'cursor-directory/LICENSE diverged: copy LICENSE over it');
-  for (const { path, rel } of files.filter(({ rel }) => rel.endsWith('/SKILL.md'))) {
-    assert.match(rel, /^skills\/[a-z0-9-]+\/SKILL\.md$/, `${rel}: skills live at skills/<name>/SKILL.md`);
+});
+
+test('the Cursor plugin contains exactly the expected skill with valid frontmatter', () => {
+  const skillFiles = files.filter(({rel}) => rel.endsWith('/SKILL.md'));
+  assert.deepEqual(
+    skillFiles.map(({rel}) => rel),
+    ['skills/career-ops/SKILL.md'],
+    `Cursor plugin must contain exactly skills/career-ops/SKILL.md`
+  );
+
+  for (const { path, rel } of skillFiles) {
     const front = readFileSync(path, 'utf8').match(/^---\n([\s\S]*?)\n---\n/)?.[1] ?? '';
-    assert.equal(front.match(/^name:\s*(.+)$/m)?.[1]?.trim(), rel.split('/')[1], `${rel}: frontmatter name must match its folder`);
-    assert.match(front, /^description:\s*\S/m, `${rel}: frontmatter needs a description`);
+    const parsed = loadYaml(front) ?? {};
+
+    assert.equal(
+      typeof parsed.name === 'string' ? parsed.name.trim() : parsed.name,
+      rel.split('/')[1],
+      `${rel}: frontmatter name must match its folder`
+    );
+
+    // non empty string after yaml parsing(catches '', "", comment-only, null)
+    assert.ok(
+      typeof parsed.description === 'string' && parsed.description.trim().length > 0,
+      `${rel}: frontmatter needs a description`);
+
+    //checks if its single line
+    const lines = front.split(/\r?\n/);
+    const descIdx = lines.findIndex((line) => line.startsWith('description:'));
+    const nextNonEmptyLine = lines.slice(descIdx + 1).find((line) => line.trim() !== '');
+
+    assert.ok(
+      /^description:[ \t]*[^\s|>]/.test(lines[descIdx]) &&
+      !/[\r\n]/.test(parsed.description) &&
+      !(nextNonEmptyLine !== undefined && /^[ \t]/.test(nextNonEmptyLine)),
+      `${rel}: frontmatter description must be a single line`
+    );
   }
 });
 

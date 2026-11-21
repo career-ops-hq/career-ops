@@ -33,7 +33,7 @@
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
-import { matchedTitleKeywords, normalizeUrlForDedup, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
+import { matchedTitleKeywords, seenJobKey, PORTALS_PATH, SCAN_HISTORY_PATH } from './scan.mjs';
 import { foldTitle } from './title-keywords.mjs';
 import { parseScanHistoryLine } from './lib/scan-history-columns.mjs';
 import { parseScore, unwrapReportUrlToken } from './tracker-parse.mjs';
@@ -66,10 +66,10 @@ by definition they match no positive keyword.`;
  * was decided after the title cut. A posting can carry several rows (one per
  * status), so rows are deduped on the scanner's own URL key.
  *
- * Pre-v1.18 rows carry three cells, url / date / title, with no header, and an
- * upgrade keeps them byte-identical. Read by the current column order their
- * title lands in `portal`, so a three-cell row takes its title from there and
- * has no company or status.
+ * A three-cell row (url / date / title, no header) is still read. No release is
+ * known to have written that layout (#6707), but read by the current column
+ * order its title would land in `portal`, so a three-cell row takes its title
+ * from there and has no company or status.
  */
 export function readHistory(tsv) {
   const lines = String(tsv ?? '').split('\n');
@@ -85,7 +85,7 @@ export function readHistory(tsv) {
     const company = legacy ? '' : parsed.company;
     const status = legacy ? '' : parsed.status;
     if (!title || status === 'skipped_title') continue;
-    const key = url ? normalizeUrlForDedup(url) : `title:${title}`;
+    const key = url ? seenJobKey(url) : `title:${title}`;
     if (seen.has(key)) continue;
     seen.add(key);
     rows.push({ url, title, company });
@@ -117,7 +117,7 @@ export function readScoresByUrl(reports) {
     const s = text.match(/\*\*Score:\*\*[ \t]*([^\n]+)/);
     if (!u || !s) continue;
     const score = parseScore(s[1]);
-    if (score > 0) map.set(normalizeUrlForDedup(unwrapReportUrlToken(u[1])), score);
+    if (score > 0) map.set(seenJobKey(unwrapReportUrlToken(u[1])), score);
   }
   return map;
 }
@@ -150,7 +150,7 @@ export function audit(titleFilter, history, scoresByUrl) {
       unmatched++;
       continue;
     }
-    const score = row.url ? scoresByUrl.get(normalizeUrlForDedup(row.url)) : undefined;
+    const score = row.url ? scoresByUrl.get(seenJobKey(row.url)) : undefined;
     for (const k of hit) {
       const s = stats.get(k);
       if (!s) continue;

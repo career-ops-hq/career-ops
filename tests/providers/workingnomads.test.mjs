@@ -110,6 +110,21 @@ try {
   else fail(`workingnomads.fetch() empty feed = ${JSON.stringify(empty)}`);
 
   // Malformed (non-array) response → throws.
+  // description: every posting in the feed carries its HTML. Dropped, it left
+  // content_filter, country_eligibility_filter and visa_filter nothing to read
+  // for any Working Nomads posting, and the scan-history fingerprint empty.
+  const row = (slug, description) => ({ title: 'Data Engineer', company_name: 'Acme', url: `https://www.workingnomads.com/jobs/${slug}`, description });
+  const described = await workingnomads.fetch({ provider: 'workingnomads' }, { fetchJson: async () => [
+    row('d1', '<p>You will write <strong>Python</strong> &amp; dbt.</p>\n<h3>Benefits</h3>'),
+    row('d2'), row('d3', ''), row('d4', '   '), row('d5', null), row('d6', 42), row('d7', '<p></p>'),
+  ] });
+  if (described[0]?.description === 'You will write Python & dbt. Benefits')
+    pass('workingnomads.fetch() passes the description through as plain text');
+  else fail(`workingnomads.fetch() description = ${JSON.stringify(described[0]?.description)}`);
+  if (described.length === 7 && described.slice(1).every((j) => !('description' in j)))
+    pass('workingnomads.fetch() omits description when it is absent, empty, whitespace, non-string or markup-only');
+  else fail(`workingnomads.fetch() description presence = ${JSON.stringify(described.map((j) => j.description))}`);
+
   let badResponseThrew = false;
   try {
     await workingnomads.fetch(

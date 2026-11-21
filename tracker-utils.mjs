@@ -290,13 +290,16 @@ export const MIN_STEM_CHARS = 3;
  *
  * @param {string} a - Company cell from one side of the comparison.
  * @param {string} b - Company cell from the other side.
+ * @param {Set<string>} [formWords] - Tokens that may differ. Defaults to legal
+ *   suffixes plus generic descriptors. A caller that must not treat "Canada"
+ *   as optional passes the legal-suffix set alone.
  * @returns {boolean} True when the two cells name the same employer under a
  *   different corporate form.
  */
-export function companiesMatchIgnoringCorporateForm(a, b) {
+export function companiesMatchIgnoringCorporateForm(a, b, formWords = CORPORATE_FORM_WORDS) {
   const ta = normalizeTextKey(a, ' ').split(' ').filter(Boolean);
   const tb = normalizeTextKey(b, ' ').split(' ').filter(Boolean);
-  return corporateFormTokensMatch(ta, tb);
+  return corporateFormTokensMatch(ta, tb, formWords);
 }
 
 /**
@@ -311,14 +314,15 @@ export function companiesMatchIgnoringCorporateForm(a, b) {
  *
  * @param {string[]} ta - Tokens of one company cell.
  * @param {string[]} tb - Tokens of the other company cell.
+ * @param {Set<string>} [formWords] - Same override as companiesMatchIgnoringCorporateForm.
  * @returns {boolean}
  */
-export function corporateFormTokensMatch(ta, tb) {
+export function corporateFormTokensMatch(ta, tb, formWords = CORPORATE_FORM_WORDS) {
   const [stem, full] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
   if (stem.length === 0 || stem.length === full.length) return false;
   if (stem.join('').length < MIN_STEM_CHARS) return false;
   if (stem.some((token, i) => token !== full[i])) return false;
-  return full.slice(stem.length).every(token => CORPORATE_FORM_WORDS.has(token));
+  return full.slice(stem.length).every(token => formWords.has(token));
 }
 
 /**

@@ -245,24 +245,31 @@ stated_priorities:        # 트랜스크립트 입력에만. 밝힌 우선순위
 - **답변마다 태그를 답니다.** 각 `**Candidate:**` 줄 바로 윗줄에 `<!-- competency: tag[, tag...] -->`를 씁니다 — 소문자 kebab-case, 여러 역량에 걸친 답변은 쉼표로 구분합니다(예: `system-design`, `people-leadership`, `incident-response`). Step 2에서 이미 각 답변을 평가했으므로, 다시 읽지 말고 그 평가를 기준으로 태그를 답니다. 태그는 자유 형식이며, 질문이 실제로 검증한 역량을 고릅니다.
 - **후보자의 턴은 충실하게 재구성합니다.** 이상적인 답변이 아니라 Step 1에서 후보자가 말했다고 한 내용을 사용합니다. Step 2의 "correct/complete answer"는 디브리프 파일에만 들어가고 트랜스크립트에는 절대 들어가지 않습니다 — 트랜스크립트는 실제로 일어난 일을 기록합니다.
 - **`source: debrief`.**
-- **`stated_priorities`는 front matter에 넣습니다** (Step 1c). 스크립트와 `interview/plan`이 본문을 파싱하지 않고 읽을 수 있도록 `speaker` + `quote` 항목의 YAML 리스트로 씁니다. front matter가 유효한 YAML로 남도록 모든 `quote`를 큰따옴표로 감싸고 안쪽 큰따옴표는 이스케이프합니다. 각 항목의 라운드와 날짜는 파일 자체의 `round`와 `date`입니다. 밝힌 것이 없을 때와 `input_source: recall`일 때는 항상 이 필드를 생략합니다. 연습 세션 파일에는 실제 면접관이 없으므로 우선순위를 절대 넣지 않습니다.
+- **`stated_priorities`는 front matter에 넣습니다** (Step 1c). 스크립트와 `interview/plan`이 본문을 파싱하지 않고 읽을 수 있도록 `speaker` + `quote` 항목의 YAML 리스트로 씁니다. front matter가 유효한 YAML로 남도록 모든 `quote`를 큰따옴표로 감싸고, 파싱 후에도 발언 그대로 복원되도록 합니다. 수동으로 이스케이프할 때는 안쪽 큰따옴표보다 역슬래시를 먼저 이스케이프합니다. 그래야 인용 안의 리터럴 `\n`이 두 글자 그대로 남고 개행 문자로 바뀌지 않습니다. 각 항목의 라운드와 날짜는 파일 자체의 `round`와 `date`입니다. 밝힌 것이 없을 때와 `input_source: recall`일 때는 항상 이 필드를 생략합니다. 연습 세션 파일에는 실제 면접관이 없으므로 우선순위를 절대 넣지 않습니다.
 - 세션 파일은 gitignore된 디렉터리에 저장되므로(실명이나 회사명이 버전 관리에 들어가지 않음), 가리지 않고 그대로 씁니다.
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-디브리프를 저장한 뒤, 확인된 사실을 지원 건에 기록합니다. 새로운 사실을 사용자가 이미 `modes/_profile.md`나 `config/profile.yml`에 적어 둔 dealbreaker와 대조합니다. 그 사실과 프로필 문장을 보여줍니다. `Record this dealbreaker on the report and the tracker? [y/N]`라고 묻습니다. yes라면 그 문장을 `--dealbreaker`로 넘깁니다. no라면 생략합니다.
+디브리프를 저장한 뒤, 확인된 사실을 지원 건에 기록합니다. 새로운 사실을 하나씩, 사용자가 이미 `modes/_profile.md`나 `config/profile.yml`에 적어 둔 dealbreaker와 대조합니다. 일치하는 항목은 하나씩 따로 묻고, 그 사실과 프로필 문장을 보여줍니다. `debrief-sync.mjs`는 세미콜론(`;`), 탭, 줄바꿈이 들어 있는 `--dealbreaker` 값을 거부하며, 그러면 호출 전체가 중단됩니다. 문장에 이런 문자가 있으면 어떤 문자인지 사용자에게 알리고, 그 문자 없이 같은 뜻을 담은 한 줄짜리 문장을 요청합니다. 문자를 직접 지우거나 문장을 직접 고쳐 쓰지 않습니다. 사용자가 준 문장도 세 문자 모두에 대해 확인하고, 하나도 남지 않을 때까지 다시 요청합니다. 그다음 `Record this dealbreaker on the report and the tracker? [y/N]`라고 묻습니다. 사용자가 확인한 문장(또는 사용자가 준 한 줄 문장)은 모두 남기고, 거절한 문장은 모두 뺍니다.
 
-이름이 나온 사람마다 `Save this contact to data/contacts.tsv? [y/N]`라고 묻습니다. yes라면 이름, 이메일(주어졌다면), 사용자가 유형을 말했다면 그 유형을 넘깁니다.
+이름이 나온 사람마다 `Save this contact to data/contacts.tsv? [y/N]`라고 묻습니다. yes라면 이름, 이메일(주어졌다면), 사용자가 유형을 말했다면 그 유형을 넘깁니다. `--contact-type`은 소문자 `recruiter`, `hiring-manager`, `peer`, `interviewer`, `internal-referral`, `other`만 받습니다. 사용자가 쓴 말은 어떤 언어든 그 뜻에 맞는 값으로 옮깁니다("탤런트 파트너"는 `recruiter`, "앞으로의 상사"는 `hiring-manager`). 어느 값에도 분명히 맞지 않으면 `--contact-type`은 빼고 연락처는 그대로 저장합니다. `debrief-sync.mjs`는 다른 값을 거부하며, 그러면 dealbreaker와 `--next`를 포함한 호출 전체가 중단됩니다.
 
 다음 단계가 분명한 날짜 하루를 가리키면, 두 번째 질문 없이 `--next YYYY-MM-DD`를 넘깁니다. 요일은 로컬 달력 기준 날짜로 계산하며, 오늘도 포함합니다. 표현에 날짜가 없으면 `--next`를 생략합니다. 모호하다면(`next week`, 날짜가 두 개) 날짜 하나를 물어본 뒤 넘깁니다.
 
-그 플래그들로 `node debrief-sync.mjs`를 실행합니다. 그다음 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.
+그 플래그들로 `node debrief-sync.mjs --app <tracker#>`를 실행합니다. `<tracker#>`는 트래커에서 그 지원 건의 `#`입니다(보고서 번호가 아님). `--dealbreaker`는 문장 하나만 받으며 호출마다 한 번만 쓸 수 있으므로, 확인된 문장마다 명령을 하나씩 실행합니다. 두 문장을 하나의 값으로 합치지 않습니다: 스크립트는 세미콜론을 거부합니다. 연락처 플래그와 `--next`는 첫 번째 명령에만 넣습니다. 그 뒤의 명령에는 `--app <tracker#>`와 `--dealbreaker` 하나만 넘기고 다른 것은 넣지 않습니다. 셸이 `$`와 백틱을 그대로 넘기도록 각 값을 작은따옴표로 감쌉니다. 값 안의 작은따옴표는 Git Bash 같은 POSIX 셸에서는 `'\''`로 씁니다. PowerShell에서는 `''`로 쓰고, PowerShell은 둥근 따옴표(`‘`, `’`, `‚`, `‛`)도 따옴표로 읽으므로 그것도 같은 방식으로 두 번 씁니다:
 
-사용자가 새 상태를 말하지 않는 한 상태는 바꾸지 않습니다. 상태 변경은 이 명령보다 먼저 실행하는 별도의 `set-status.mjs` 호출입니다.
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-같은 명령을 두 번 실행해도 안전합니다.
+명령은 하나씩 실행하고 매번 종료 상태를 확인합니다. 명령이 실패하면 멈추고 고친 뒤, 첫 번째 명령부터 목록을 다시 실행합니다. 넘길 dealbreaker, 연락처, `--next` 날짜가 하나도 없으면 명령을 건너뜁니다: 기록할 것이 없는 호출은 스크립트가 거부합니다. 마지막 명령 뒤, 연락처를 저장했다면 `node contacts.mjs --summary`를 실행합니다. 날짜를 정했다면 `node followup-cadence.mjs --summary`를 실행합니다.
+
+사용자가 새 상태를 말하지 않는 한 상태는 바꾸지 않습니다. 상태 변경은 이 명령들보다 먼저 실행하는 별도의 `set-status.mjs` 호출입니다.
+
+같은 명령들을 두 번 실행해도 안전합니다: 이미 기록된 문장, 연락처, 날짜는 다시 쓰이지 않습니다.
 
 ---
 

@@ -154,7 +154,10 @@ language:
 
 # (Optional) Rename the session after the posting it handles, e.g.
 # "VP Infrastructure, Acme Health", in hosts that let the agent set its own
-# session title. Single-posting modes only; a no-op elsewhere. Default: auto.
+# session title. Scans and single evaluations also show their progress, e.g.
+# "Career-ops scan (checking, 5/15)" or "VP Infrastructure, Acme Health (CV)".
+# Skipped in batch and ofertas, in headless runs, and in hosts with no rename
+# tool. Default: auto.
 # Set to off to keep your own titles.
 # session_title: auto
 
@@ -162,12 +165,32 @@ language:
 # (`node github-evidence.mjs`, needs a logged-in `gh`) may use as evidence.
 # Empty by default: a private repo appears only by name and PR and commit counts,
 # never with PR titles or commit dates, until you add it here yourself as
-# "owner/repo". Only PR and commit metadata is read by default, never source
-# code or commit messages. README content is read only when you separately set
-# read_readmes: true. Nothing reaches cv.md without your confirmation.
+# "owner/repo". Only PR and commit metadata and document file names are read by
+# default, never source code or commit messages. README content is read only when
+# you separately set read_readmes: true. Nothing reaches cv.md without your
+# confirmation.
 # github_evidence:
 #   private_allowlist: []            # e.g. ["acme-corp/billing-service"]
 #   read_readmes: false               # opt in to reading allowlisted READMEs
+# The same step lists document file names (docs/ and top-level documents) for
+# your public repos and allowlisted ones; your other private repos show document
+# counts only.
+# Add `skip_document_listing: true` under `github_evidence` to skip document
+# names and tree queries while keeping PR and commit evidence enabled.
+
+# Optional, off by default. The stale GitHub evidence check
+# (`node evidence-freshness.mjs`) that `oferta` and `auto-pipeline` run before
+# Block A, and the batch runner runs once per batch run. It compares the newest
+# output/github-evidence-*.json from `expand` with the PRs you authored and
+# merged since then in repos you do not own, through one `gh search prs` call
+# with your logged-in `gh`. Stale at min_new_merged_prs PRs or once the scan is
+# older than max_age_days; with no scan on record, as soon as there is a merged
+# PR to find. It adds one line to the reply and the report, and never changes a
+# score. Set enabled to true to turn it on.
+# evidence_freshness:
+#   enabled: false
+#   min_new_merged_prs: 5
+#   max_age_days: 30
 
 # Controls which model tier evaluates your offers. Valid values:
 #   economy  -- cheapest/fastest model, no extended thinking. Best for high-volume scanning.
@@ -238,15 +261,18 @@ cv:
   #
   # This exists so the order can live in your profile instead of in
   # templates/cv-template.html, which update-system.mjs restores on every update.
-  # cv.md stays the source of truth: the section-order guard still compares the
-  # rendered CV against it, and still fails if they disagree.
+  # cv.md stays the baseline: the section-order guard validates that the rendered
+  # CV matches either cv.md's section order or the canonical tailored order
+  # (modes/pdf.md), and fails if it diverges from both (unless --allow-reorder is set).
   # sections: [skills, education, certifications, awards]
   #
   # (Optional) Page budget for every rendered CV PDF (#6325). Without it a CV
-  # may run to 2 pages, with a warning past that. Students, new graduates and
-  # early-career candidates usually want 1. strict_pages: true turns an
-  # overflow into a failed render instead of a warning. A --max-pages or
-  # --strict-pages flag on generate-pdf.mjs still wins for a single render.
+  # may run to 2 pages. Past the budget the render is kept as a sibling
+  # {name}.overflow.pdf draft and the real PDF path is left untouched (#6377):
+  # with a warning by default, or as a failed render with strict_pages: true.
+  # Students, new graduates and early-career candidates usually want 1. A
+  # --max-pages or --strict-pages flag on generate-pdf.mjs still wins for a
+  # single render.
   # A value that is set but unusable (max_pages: 0, strict_pages: "yes") stops
   # a CV render with a message naming it, rather than falling back to 2 pages,
   # unless a flag passed for that render overrides the key.

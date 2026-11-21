@@ -316,6 +316,7 @@ try {
       // handshake to degrade gracefully — the POST is still attempted.
       let redirectDegradedPostCalled = false;
       await consider.fetch(okEntry, {
+        sleep: async () => {},
         fetchResponse: async () => { throw new TypeError('fetch failed'); },
         fetchJson: async () => { redirectDegradedPostCalled = true; return { jobs: [] }; },
       });
@@ -429,6 +430,195 @@ try {
       fail(`consider POST context host = ${JSON.stringify(guardedHosts['/api-boards/search-jobs'])}`);
     }
   }
+
+  // ── Retry ──────────────────────────────────────────────────────────────────
+  const httpError = (status) => Object.assign(new Error(`HTTP ${status}`), { status });
+  const oneJob = { jobs: [{ title: 'T', url: 'https://jobs.acmevc.example/r', companyName: 'Acme' }] };
+
+  let postAttempts = 0;
+  const retriedPost = await consider.fetch(okEntry, {
+    _acquireHandshake: noHandshake,
+    sleep: async () => {},
+    fetchJson: async () => {
+      postAttempts++;
+      if (postAttempts === 1) throw httpError(500);
+      return oneJob;
+    },
+  });
+  if (postAttempts === 2 && retriedPost.length === 1) pass('consider.fetch() retries a POST that answers 500 and keeps the board');
+  else fail(`consider.fetch() POST retry: ${postAttempts} attempts, ${retriedPost.length} jobs`);
+
+  let refusedAttempts = 0;
+  let refusedStatus = null;
+  try {
+    await consider.fetch(okEntry, {
+      _acquireHandshake: noHandshake,
+      sleep: async () => {},
+      fetchJson: async () => { refusedAttempts++; throw httpError(412); },
+    });
+  } catch (e) { refusedStatus = e.status; }
+  if (refusedAttempts === 1 && refusedStatus === 412) pass('consider.fetch() does not retry a 412 and still throws it');
+  else fail(`consider.fetch() 412: ${refusedAttempts} attempts, status ${refusedStatus}`);
+
+  let handshakeAttempts = 0;
+  let retriedHandshakeHeaders = null;
+  await consider.fetch(okEntry, {
+    sleep: async () => {},
+    fetchResponse: async () => {
+      handshakeAttempts++;
+      if (handshakeAttempts === 1) throw httpError(503);
+      return new Response('<script>\n  window.serverInitialData = {"csrfToken":"token-after-retry"};\n</script>', { status: 200 });
+    },
+    fetchJson: async (_url, opts) => { retriedHandshakeHeaders = opts.headers; return { jobs: [] }; },
+  });
+  if (handshakeAttempts === 2 && retriedHandshakeHeaders?.['x-csrf-token'] === 'token-after-retry') {
+    pass('consider.fetch() retries the board page GET and uses its token');
+  } else {
+    fail(`consider.fetch() handshake retry: ${handshakeAttempts} attempts, headers ${JSON.stringify(retriedHandshakeHeaders)}`);
+  }
+
+  let probeGets = 0;
+  let probePosts = 0;
+  let probeThrew = false;
+  try {
+    await consider.fetch(okEntry, {
+      maxPages: 1,
+      sleep: async () => {},
+      fetchResponse: async () => { probeGets++; throw httpError(503); },
+      fetchJson: async () => { probePosts++; throw httpError(500); },
+    });
+  } catch { probeThrew = true; }
+  if (probeGets === 1 && probePosts === 1 && probeThrew) pass('consider.fetch() does not retry under a ctx.maxPages probe');
+  else fail(`consider.fetch() probe: ${probeGets} GETs, ${probePosts} POSTs, threw ${probeThrew}`);
+
+  // ── consider_size ──────────────────────────────────────────────────────────
+  // Runs one fetch with `rows` rows and the board's `total`, and returns the size
+  // the POST asked for and the warnings printed.
+  const sizeRun = async (consider_size, { rows, total, maxPages } = {}) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    let requested = null;
+    try {
+      await consider.fetch({ ...okEntry, ...(consider_size ? { consider_size } : {}) }, {
+        _acquireHandshake: noHandshake,
+        ...(maxPages ? { maxPages } : {}),
+        fetchJson: async (_url, opts) => {
+          requested = JSON.parse(opts.body).meta.size;
+          const jobs = Array.from({ length: rows }, (_, i) => ({ title: `T${i}`, url: `https://jobs.acmevc.example/j${i}`, companyName: 'Acme' }));
+          return { jobs, ...(total === undefined ? {} : { total }) };
+        },
+      });
+    } finally {
+      console.error = realConsoleError;
+    }
+    return { requested, warnings };
+  };
+
+  const clamped = await sizeRun(5000, { rows: 1, total: 1 });
+  const atMaximum = await sizeRun(1000, { rows: 1, total: 1 });
+  const byDefault = await sizeRun(undefined, { rows: 1, total: 1 });
+  if (clamped.requested === 1000 && atMaximum.requested === 1000 && byDefault.requested === 500) {
+    pass('consider.fetch() clamps consider_size to 1000 and defaults to 500');
+  } else {
+    fail(`consider.fetch() size: clamped ${clamped.requested}, at maximum ${atMaximum.requested}, default ${byDefault.requested}`);
+  }
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
+  // Walks a board of `pages` full pages of two rows, each answering the cursor
+  // `s{page}`. `shape(page)` overrides a page's response; a thrown value fails it.
+  const walkRun = async (entryExtra, { pages = 3, total = 6, maxPages, shape } = {}) => {
+    const warnings = [];
+    const realConsoleError = console.error;
+    console.error = (...args) => { warnings.push(args.join(' ')); };
+    const metas = [];
+    const delays = [];
+    let jobs = null;
+    let thrown = null;
+    try {
+      jobs = await consider.fetch({ ...okEntry, consider_size: 2, ...entryExtra }, {
+        _acquireHandshake: noHandshake,
+        ...(maxPages ? { maxPages } : {}),
+        sleep: async (ms) => { delays.push(ms); },
+        fetchJson: async (_url, opts) => {
+          const { meta } = JSON.parse(opts.body);
+          const page = meta.sequence ? Number(meta.sequence.slice(1)) : 0;
+          metas.push(meta);
+          const row = (i) => ({ title: `T${page}-${i}`, url: `https://jobs.acmevc.example/j${page}-${i}`, companyName: 'Acme' });
+          const response = { jobs: [row(0), row(1)], total, meta: page + 1 < pages ? { sequence: `s${page + 1}` } : {} };
+          return shape ? shape(page, response, row) : response;
+        },
+      });
+    } catch (e) {
+      thrown = e;
+    } finally {
+      console.error = realConsoleError;
+    }
+    return { jobs, thrown, metas, delays, warnings };
+  };
+
+  const fullWalk = await walkRun({});
+  if (fullWalk.jobs?.length === 6 && fullWalk.warnings.length === 0
+      && JSON.stringify(fullWalk.metas) === JSON.stringify([{ size: 2 }, { size: 2, sequence: 's1' }, { size: 2, sequence: 's2' }])) {
+    pass('consider.fetch() follows meta.sequence to the end of the board without a warning');
+  } else {
+    fail(`consider.fetch() walk: ${JSON.stringify({ rows: fullWalk.jobs?.length, metas: fullWalk.metas, warnings: fullWalk.warnings })}`);
+  }
+  if (JSON.stringify(fullWalk.delays) === JSON.stringify([250, 250])) pass('consider.fetch() waits 250 ms between pages and not before the first one');
+  else fail(`consider.fetch() page delays: ${JSON.stringify(fullWalk.delays)}`);
+
+  const shortPage = await walkRun({}, { shape: (page, response, row) => ({ ...response, jobs: [row(0)], meta: { sequence: `s${page + 1}` } }) });
+  if (shortPage.metas.length === 1 && shortPage.warnings.length === 0) pass('consider.fetch() stops at a short page even when it carries a cursor');
+  else fail(`consider.fetch() short page: ${shortPage.metas.length} requests, ${JSON.stringify(shortPage.warnings)}`);
+
+  const stuckCursor = await walkRun({}, { shape: (_page, response) => ({ ...response, meta: { sequence: 's1' } }) });
+  if (stuckCursor.metas.length === 2 && stuckCursor.warnings.length === 0) pass('consider.fetch() stops when the cursor does not move');
+  else fail(`consider.fetch() stuck cursor: ${stuckCursor.metas.length} requests, ${JSON.stringify(stuckCursor.warnings)}`);
+
+  const capped = await walkRun({ max_pages: 2 }, { pages: 5, total: 10 });
+  if (capped.metas.length === 2 && capped.jobs?.length === 4 && capped.warnings.length === 1
+      && capped.warnings[0].includes('Acme Ventures truncated at max_pages=2 (4 of 10 jobs) — raise max_pages on this entry for more')) {
+    pass('consider.fetch() warns when max_pages ends the walk with a cursor left');
+  } else {
+    fail(`consider.fetch() max_pages: ${JSON.stringify({ requests: capped.metas.length, warnings: capped.warnings })}`);
+  }
+
+  const endsAtCap = await walkRun({ max_pages: 2 }, { pages: 2, total: 4 });
+  if (endsAtCap.metas.length === 2 && endsAtCap.warnings.length === 0) pass('consider.fetch() does not warn when the board ends exactly at max_pages');
+  else fail(`consider.fetch() board ending at max_pages: ${JSON.stringify(endsAtCap.warnings)}`);
+
+  const hardCap = await walkRun({ max_pages: 5000 }, { pages: 200, total: 400 });
+  if (hardCap.metas.length === 100 && hardCap.warnings.length === 1
+      && hardCap.warnings[0].includes('truncated at max_pages=100 (200 of 400 jobs) — the 100-page hard cap')
+      && !hardCap.warnings[0].includes('raise max_pages')) {
+    pass('consider.fetch() clamps max_pages to the hard cap and does not advise raising it there');
+  } else {
+    fail(`consider.fetch() hard cap: ${JSON.stringify({ requests: hardCap.metas.length, warnings: hardCap.warnings })}`);
+  }
+
+  const failing = (rejection) => (page, response) => { if (page === 1) throw rejection; return response; };
+  const laterFailure = await walkRun({}, { shape: failing(httpError(429)) });
+  if (laterFailure.jobs?.length === 2 && laterFailure.metas.length === 4 && laterFailure.warnings.length === 1
+      && laterFailure.warnings[0].includes('Acme Ventures truncated at page 2 of 10 after 3 attempts (2 jobs): HTTP 429')) {
+    pass('consider.fetch() keeps the rows read and warns when a later page fails after its retries');
+  } else {
+    fail(`consider.fetch() later page failure: ${JSON.stringify({ rows: laterFailure.jobs?.length, requests: laterFailure.metas.length, warnings: laterFailure.warnings })}`);
+  }
+
+  const notObject = await walkRun({}, { shape: failing('plain string rejection') });
+  if (notObject.warnings[0]?.includes('truncated at page 2 of 10 after an unknown number of attempts (2 jobs): plain string rejection')) {
+    pass('consider.fetch() says the attempts are unknown when a later page rejects with a non-object');
+  } else {
+    fail(`consider.fetch() non-object rejection: ${JSON.stringify(notObject.warnings)}`);
+  }
+
+  const probeWalk = await walkRun({}, { maxPages: 1 });
+  if (probeWalk.metas.length === 1 && probeWalk.warnings.length === 0) pass('consider.fetch() sends one list request under a ctx.maxPages probe, without a warning');
+  else fail(`consider.fetch() probe walk: ${probeWalk.metas.length} requests, ${JSON.stringify(probeWalk.warnings)}`);
+
+  const probeLaterFailure = await walkRun({}, { maxPages: 2, shape: failing(httpError(500)) });
+  if (probeLaterFailure.thrown?.status === 500 && probeLaterFailure.metas.length === 2) pass('consider.fetch() passes a later page rejection to a probe unchanged');
+  else fail(`consider.fetch() probe later failure: ${JSON.stringify({ thrown: probeLaterFailure.thrown?.message, requests: probeLaterFailure.metas.length })}`);
 } catch (e) {
   fail(`consider provider tests crashed: ${e.message}`);
 }

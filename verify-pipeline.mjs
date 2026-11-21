@@ -37,7 +37,7 @@ import {
   normalizeTextKey, normalizeVia, unwrapReportUrlToken, parseMarkdownLinks,
   extractReqNumber,
 } from './tracker-parse.mjs';
-import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor } from './tracker-utils.mjs';
+import { CONTROL_CHARS, findDeadReportLink, trackerLinkDirsFor, corporateFormTokensMatch, MIN_STEM_CHARS } from './tracker-utils.mjs';
 import { normalizeUrl } from './url-key.mjs';
 import { checkTrackerSync } from './tracker-sync-check.mjs';
 import { normalizeStatus } from './followup-cadence.mjs';
@@ -109,9 +109,18 @@ function warn(msg, hint) { console.log(`⚠️  ${msg}`); printHint(hint); warni
 function ok(msg) { console.log(`✅ ${msg}`); }
 
 // --- Read applications.md ---
+// Check 15 runs first. A fresh checkout has no tracker, and returning here used
+// to skip an unknown provider in portals.yml.
 if (!existsSync(APPS_FILE)) {
+  await checkPortalsCoverage();
   console.log('\n📊 No applications.md found. This is normal for a fresh setup.');
   console.log('   The file will be created when you evaluate your first offer.\n');
+  if (errors > 0) {
+    console.log('\n' + '='.repeat(50));
+    console.log(`📊 Pipeline Health: ${errors} errors, ${warnings} warnings`);
+    console.log('🔴 Pipeline has errors — fix before proceeding');
+    process.exit(1);
+  }
   process.exit(0);
 }
 const content = readFileSync(APPS_FILE, 'utf-8');
@@ -186,6 +195,7 @@ if (badStatuses === 0) ok('All statuses are canonical');
 
 // --- Check 2: Duplicates ---
 const companyRoleMap = new Map();
+const roleMap = new Map();
 let dupes = 0;
 for (const e of entries) {
   // Unicode-aware (#2393): an [a-z0-9] strip erases non-Latin scripts outright,
@@ -199,6 +209,16 @@ for (const e of entries) {
     : normalizeTextKey(e.company) + '::' + normalizeTextKey(e.role);
   if (!companyRoleMap.has(key)) companyRoleMap.set(key, []);
   companyRoleMap.get(key).push(e);
+  if (String(e.company || '').trim() !== '?') {
+    const roleKey = normalizeTextKey(e.role);
+    const companyKey = normalizeTextKey(e.company);
+    const tokens = normalizeTextKey(e.company, ' ').split(' ').filter(Boolean);
+    if (!roleMap.has(roleKey)) roleMap.set(roleKey, new Map());
+    const buckets = roleMap.get(roleKey);
+    const bucketKey = companyKey.slice(0, MIN_STEM_CHARS);
+    if (!buckets.has(bucketKey)) buckets.set(bucketKey, []);
+    buckets.get(bucketKey).push({ entry: e, companyKey, tokens });
+  }
 }
 for (const [key, group] of companyRoleMap) {
   if (group.length > 1) {
@@ -220,6 +240,30 @@ for (const [key, group] of companyRoleMap) {
 
     if (hasPossibleDuplicate) {
       warn(`Possible duplicates: ${group.map(e => `#${e.num}`).join(', ')} (${group[0].company} — ${group[0].role})`,
+        "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
+      dupes++;
+    }
+  }
+}
+// Exact groups above retain their existing warnings. Compare different company
+// keys pairwise as well: corporate-form twins otherwise never meet (#4421).
+// Do not cluster these matches: "Acme" matches both "Acme Solutions" and
+// "Acme Technologies", but the latter two must never be reported as one group.
+// The matcher guarantees matching names share this normalized prefix.
+// Cache keys and tokens once per row, then compare only within that bucket.
+for (const group of [...roleMap.values()].flatMap(buckets => [...buckets.values()])) {
+  for (let i = 0; i < group.length; i++) {
+    for (let j = i + 1; j < group.length; j++) {
+      const left = group[i];
+      const right = group[j];
+      if (left.companyKey === right.companyKey
+          || !corporateFormTokensMatch(left.tokens, right.tokens)) continue;
+      const a = left.entry;
+      const b = right.entry;
+      const reqA = extractReqNumber(a.notes);
+      const reqB = extractReqNumber(b.notes);
+      if (reqA && reqB && reqA !== reqB) continue;
+      warn(`Possible duplicates: #${a.num}, #${b.num} (${a.company} — ${a.role})`,
         "run node dedup-tracker.mjs --dry-run to preview a merge; if they are genuinely different openings, put each req/job ID in the notes column so they stay distinct");
       dupes++;
     }
@@ -387,6 +431,31 @@ function extractReportUrlKey(reportContent) {
   return normalizeUrl(unwrapReportUrlToken(m[1]));
 }
 
+// Report numbers a tracker row's Report cell links: the [NNN] link text(s) and
+// the NNN- prefix of the linked filename(s). Shared with Check 10.
+function linkedReportNums(cell) {
+  const nums = [];
+  for (const link of parseMarkdownLinks(cell)) {
+    if (/^\d+$/.test(link.label)) nums.push(parseInt(link.label, 10));
+    const m = link.target.split(/[\\/]/).pop().match(/^(\d+)-/);
+    if (m) nums.push(parseInt(m[1], 10));
+  }
+  return nums;
+}
+
+// A re-evaluation keeps the earlier report on the same row (#5780): both links
+// in the Report cell, or merge-tracker's `Superseded report [N]` marker in
+// Notes. Map each report number to the rows that keep it on record.
+const SUPERSEDED_RE = /Superseded report \[(\d+)\]/gi;
+const rowsByReport = new Map();
+entries.forEach((e, row) => {
+  const superseded = [...e.notes.matchAll(SUPERSEDED_RE)].map(m => parseInt(m[1], 10));
+  for (const n of [...linkedReportNums(e.report), ...superseded]) {
+    if (!rowsByReport.has(n)) rowsByReport.set(n, new Set());
+    rowsByReport.get(n).add(row);
+  }
+});
+
 const reportFiles = existsSync(REPORTS_DIR)
   ? readdirSync(REPORTS_DIR).filter(f => REPORT_FILE_RE.test(f))
   : [];
@@ -394,7 +463,7 @@ const reportFiles = existsSync(REPORTS_DIR)
 let dupReports = 0;
 const reportsByRole = new Map();
 for (const name of reportFiles) {
-  const companySlug = name.match(REPORT_FILE_RE)[2];
+  const [, num, companySlug] = name.match(REPORT_FILE_RE);
   let role = null;
   let urlKey = '';
   try {
@@ -407,7 +476,7 @@ for (const name of reportFiles) {
   if (!role) continue;
   const key = normalizeKey(companySlug) + '::' + normalizeKey(role);
   if (!reportsByRole.has(key)) reportsByRole.set(key, []);
-  reportsByRole.get(key).push({ name, urlKey });
+  reportsByRole.get(key).push({ name, urlKey, num: parseInt(num, 10) });
 }
 for (const group of reportsByRole.values()) {
   if (group.length < 2) continue;
@@ -418,8 +487,14 @@ for (const group of reportsByRole.values()) {
   // a key and no two share one.
   const keys = group.map(r => r.urlKey);
   if (keys.every(Boolean) && new Set(keys).size === keys.length) continue;
+  // One tracker row keeping every report on record is a re-evaluation, not a
+  // concurrent-worker race. An unreferenced report, reports split across rows,
+  // or two files sharing one number still warn.
+  const nums = group.map(r => r.num);
+  const rows = new Set(nums.flatMap(n => [...(rowsByReport.get(n) ?? [])]));
+  if (new Set(nums).size === nums.length && nums.every(n => rowsByReport.has(n)) && rows.size === 1) continue;
   warn(`Duplicate reports for same company+role: ${group.map(r => r.name).join(', ')}`,
-       "open both reports and delete or archive the stale one if it is a concurrent-worker duplicate; keep both if the JD changed (re-evaluation) or the openings differ (add the posting URL)");
+       "open both reports and delete or archive the stale one if it is a concurrent-worker duplicate; for a re-evaluation, keep both on one row (link both in its Report cell); if the openings differ, add each posting URL");
   dupReports++;
 }
 if (dupReports === 0) ok('No duplicate reports for the same company+role');
@@ -445,17 +520,12 @@ if (dupReports === 0) ok('No duplicate reports for the same company+role');
 // in the cell false-positives as an orphan.
 const referencedNums = new Set();
 for (const e of entries) {
-  const linkTexts = [...e.report.matchAll(/\[(\d+)\]/g)];
-  const linkTargets = parseMarkdownLinks(e.report).map(link => link.target);
-  if (linkTexts.length === 0 && linkTargets.length === 0) {
+  const nums = linkedReportNums(e.report);
+  if (nums.length === 0 && parseMarkdownLinks(e.report).length === 0) {
     referencedNums.add(e.num);
     continue;
   }
-  for (const lt of linkTexts) referencedNums.add(parseInt(lt[1], 10));
-  for (const lt of linkTargets) {
-    const m = lt.split(/[\\/]/).pop().match(/^(\d+)-/);
-    if (m) referencedNums.add(parseInt(m[1], 10));
-  }
+  for (const n of nums) referencedNums.add(n);
 }
 
 let orphanReports = 0;
@@ -663,65 +733,72 @@ if (!existsSync(FOLLOWUPS_FILE)) {
 // jobs?) needs 170 fetches and stays a separate command: `node audit-portals.mjs`.
 //
 // portals.yml is user-layer and gitignored, so its absence is not a finding.
-const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
-if (!existsSync(PORTALS_FILE)) {
-  ok('No portals.yml yet — nothing to coverage-check');
-} else {
-  try {
-    const { findUnclaimedEntries } = await import('./audit-portals.mjs');
-    const { loadProviders } = await import('./providers/_registry.mjs');
-    const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
-    const { loadYaml } = await import('./lib/yaml-document.mjs');
+// Also called before the fresh-setup return, so a tracker-less checkout still
+// hears about an unknown provider. The body stays here so a tracker that exists
+// keeps this check in its original place.
+async function checkPortalsCoverage() {
+  const PORTALS_FILE = process.env.CAREER_OPS_PORTALS || join(CAREER_OPS, 'portals.yml');
+  if (!existsSync(PORTALS_FILE)) {
+    ok('No portals.yml yet — nothing to coverage-check');
+  } else {
+    try {
+      const { findUnclaimedEntries } = await import('./audit-portals.mjs');
+      const { loadProviders } = await import('./providers/_registry.mjs');
+      const { mergeProviderPlugins } = await import('./plugins/_engine.mjs');
+      const { loadYaml } = await import('./lib/yaml-document.mjs');
 
-    const cfg = loadYaml(readFileSync(PORTALS_FILE, 'utf-8')) || {};
-    // Both sections, because scan.mjs resolves both through the same registry:
-    // an unclaimed aggregator board is exactly as dead as an unclaimed company.
-    const entries = [
-      ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
-      ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
-    ];
-    // providers/ and plugins/ both ship in the code layer — resolve them from
-    // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
-    // health check sees only providers/*.mjs and reports every enabled
-    // plugin-provider entry as an unknown provider that "never scans", while
-    // the scanner resolves and scans it (#4026). No-op for a plugin-free
-    // install: mergeProviderPlugins returns before any work when
-    // config/plugins.yml is absent.
-    const providers = await loadProviders(join(CODE_ROOT, 'providers'));
-    await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: CAREER_OPS });
-    const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
+      const cfg = loadYaml(readFileSync(PORTALS_FILE, 'utf-8')) || {};
+      // Both sections, because scan.mjs resolves both through the same registry:
+      // an unclaimed aggregator board is exactly as dead as an unclaimed company.
+      const entries = [
+        ...(Array.isArray(cfg.tracked_companies) ? cfg.tracked_companies : []),
+        ...(Array.isArray(cfg.job_boards) ? cfg.job_boards : []),
+      ];
+      // providers/ and plugins/ both ship in the code layer — resolve them from
+      // CODE_ROOT (scan.mjs does the same). Without mergeProviderPlugins() the
+      // health check sees only providers/*.mjs and reports every enabled
+      // plugin-provider entry as an unknown provider that "never scans", while
+      // the scanner resolves and scans it (#4026). No-op for a plugin-free
+      // install: mergeProviderPlugins returns before any work when
+      // config/plugins.yml is absent.
+      const providers = await loadProviders(join(CODE_ROOT, 'providers'));
+      await mergeProviderPlugins(providers, { root: CODE_ROOT, dataRoot: CAREER_OPS });
+      const { silent, handoff, unknownProvider } = findUnclaimedEntries(entries, providers);
 
-    // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
-    // it can't report what it can't label. Without this, that entry vanishes
-    // from silent/handoff/unknownProvider entirely, and the enabled count
-    // below (which doesn't share the same eligibility rule) would still
-    // include it — so a malformed entry never gets a provider check AND the
-    // "All N entries resolve" success line claims it as resolved anyway.
-    const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
-    for (const e of malformed) {
-      warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`,
-           "add a name: field to that portals.yml entry, or set enabled: false");
-    }
+      // findUnclaimedEntries silently skips an entry with no (or blank) `name` —
+      // it can't report what it can't label. Without this, that entry vanishes
+      // from silent/handoff/unknownProvider entirely, and the enabled count
+      // below (which doesn't share the same eligibility rule) would still
+      // include it — so a malformed entry never gets a provider check AND the
+      // "All N entries resolve" success line claims it as resolved anyway.
+      const malformed = entries.filter(e => e && e.enabled !== false && (typeof e.name !== 'string' || !e.name.trim()));
+      for (const e of malformed) {
+        warn(`portals.yml: an enabled entry has no name (careers_url: ${e.careers_url || 'none'}) — it cannot be provider-checked; give it a name`,
+             "add a name: field to that portals.yml entry, or set enabled: false");
+      }
 
-    for (const e of unknownProvider) {
-      error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`,
-            "correct the provider: value in portals.yml to an id from providers/, or remove the field to auto-detect");
+      for (const e of unknownProvider) {
+        error(`portals.yml: "${e.name}" sets an unknown provider — ${e.error}. The entry never scans (see providers/ for valid ids)`,
+              "correct the provider: value in portals.yml to an id from providers/, or remove the field to auto-detect");
+      }
+      for (const e of silent) {
+        warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`,
+           "run node audit-portals.mjs for the per-entry diagnosis; fix the careers_url or set enabled: false");
+      }
+      if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
+        const enabled = entries.filter(e => e && e.enabled !== false).length;
+        ok(handoff.length > 0
+          ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
+          : `All ${enabled} enabled portals.yml entries resolve to a provider`);
+      }
+    } catch (err) {
+      warn(`Portal coverage check could not run: ${err.message}`,
+           "check portals.yml parses as YAML and run node audit-portals.mjs for the underlying error");
     }
-    for (const e of silent) {
-      warn(`portals.yml: "${e.name}" is enabled but no provider claims ${e.careers_url || 'its careers_url'} — scan.mjs skips it on every run without naming it (run node audit-portals.mjs)`,
-         "run node audit-portals.mjs for the per-entry diagnosis; fix the careers_url or set enabled: false");
-    }
-    if (silent.length === 0 && unknownProvider.length === 0 && malformed.length === 0) {
-      const enabled = entries.filter(e => e && e.enabled !== false).length;
-      ok(handoff.length > 0
-        ? `All ${enabled - handoff.length} scannable portals.yml entries resolve to a provider (${handoff.length} on websearch handoff)`
-        : `All ${enabled} enabled portals.yml entries resolve to a provider`);
-    }
-  } catch (err) {
-    warn(`Portal coverage check could not run: ${err.message}`,
-         "check portals.yml parses as YAML and run node audit-portals.mjs for the underlying error");
   }
 }
+
+await checkPortalsCoverage();
 
 // --- Check 16: invisible control bytes already in tracker cells (#3892) ---
 // cell() in tracker-utils.mjs strips these on the way in, which stops new ones

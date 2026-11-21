@@ -1,5 +1,6 @@
 // Atomic replacement alone must not lose another confirmed source.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -93,5 +94,13 @@ try {
   });
   check('a stale ingested scan records no source after waiting for a newer writer', () => {
     assert.match(staleResult.stdout, /Recorded 0 source/);
+  });
+  // The snapshot is written in the same guarded branch as the ledger entry, so
+  // the stale writer that recorded nothing must not have replaced the newer
+  // text either: --diff trusts a snapshot only while it hashes to the ledger.
+  check('a stale scan leaves the newer snapshot in step with the ledger', () => {
+    const snap = readFileSync(join(root, 'data', 'intake-snapshots', `${createHash('sha256').update(sources[0]).digest('hex')}.txt`), 'utf8');
+    assert.equal(snap, '# Newly confirmed fictional source\n');
+    assert.equal(createHash('sha256').update(snap).digest('hex'), newer[sources[0]].hash);
   });
 } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10 }); }

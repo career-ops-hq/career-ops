@@ -107,23 +107,66 @@ export async function fetchLatestRelease(repoUrl, { fetchImpl = fetch } = {}) {
   return { tag: rel.tag_name, sha: commit.sha };
 }
 
+/** The four compare statuses GitHub documents (schema `commit-comparison`). */
+const PIN_POSITIONS = new Set(['ahead', 'behind', 'diverged', 'identical']);
+
+/**
+ * Where a pin sits relative to the release commit, from GitHub's compare of
+ * release...pin: `status` is `ahead`, `behind`, `diverged` or `identical`,
+ * `aheadBy` the number of pin commits the release lacks.
+ *
+ * A SHA that differs from the release does not say which way it moved. A pin
+ * on a tag its author never published a release for sits AFTER the latest
+ * release, and only the commit graph tells that apart from a pin that trails.
+ * The release lookup has already reached the repo, so a 404 here means the
+ * pinned commit is not in it, which is an error rather than a position.
+ *
+ * Any other answer than those four statuses, or an `ahead` without a count,
+ * is malformed and throws. The caller reads every status it does not know as
+ * `stale`, so an unexpected value would otherwise turn into "pin trails"
+ * advice that nothing measured.
+ */
+export async function fetchPinPosition(repoUrl, releaseSha, pinSha, { fetchImpl = fetch } = {}) {
+  const slug = repoSlug(repoUrl);
+  const cmp = await ghJson(`${GITHUB_API}/repos/${slug}/compare/${releaseSha}...${pinSha}`, fetchImpl);
+  if (!cmp) throw new Error(`pinned commit ${String(pinSha).slice(0, 10)} not found in ${slug}`);
+  if (!cmp.status) throw new Error(`malformed compare response for ${slug}: no status`);
+  if (!PIN_POSITIONS.has(cmp.status)) {
+    throw new Error(`malformed compare response for ${slug}: unknown status ${JSON.stringify(cmp.status)}`);
+  }
+  if (cmp.status === 'ahead' && !Number.isInteger(cmp.ahead_by)) {
+    throw new Error(`malformed compare response for ${slug}: ahead with no ahead_by count`);
+  }
+  return { status: cmp.status, aheadBy: cmp.ahead_by };
+}
+
 /**
  * Compare every registry pin against its plugin's latest published release.
  *
- * Statuses are deliberately four, not two: `no-release` (the author never cut
- * one) is a legitimate resting state and must not read as drift, and `error`
- * must never collapse into `fresh` — a lookup that failed is the one outcome
- * that looks identical to a clean result while proving nothing.
+ * Statuses are deliberately five, not two: `no-release` (the author never cut
+ * one) is a legitimate resting state and must not read as drift; `ahead` (the
+ * pin is a commit after the latest release, usually a tag with no release
+ * published for it) is not drift either, since bumping it would move the pin
+ * backwards; and `error` must never collapse into `fresh` — a lookup that
+ * failed is the one outcome that looks identical to a clean result while
+ * proving nothing.
  *
- * @returns {Promise<Array<{id, name, repo, pinnedSha, pinnedVersion, status, releaseTag, releaseSha, detail}>>}
+ * The compare request is made only when the SHAs differ, so a fresh pin costs
+ * nothing extra.
+ *
+ * `position` is where the pin sits against the release (`identical`, `ahead`,
+ * `behind` or `diverged`), or null when there was no release to compare with
+ * or the lookup failed.
+ *
+ * @returns {Promise<Array<{id, name, repo, pinnedSha, pinnedVersion, status, position, releaseTag, releaseSha, detail}>>}
  */
-export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestRelease } = {}) {
+export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestRelease, comparePin = fetchPinPosition } = {}) {
   const out = [];
   for (const e of loadRegistry(root).plugins) {
     const row = {
       id: e.id, name: e.name, repo: e.repo,
       pinnedSha: e.sha, pinnedVersion: e.version,
-      status: 'error', releaseTag: null, releaseSha: null, detail: '',
+      status: 'error', position: null, releaseTag: null, releaseSha: null, detail: '',
     };
     try {
       const rel = await fetchRelease(e.repo);
@@ -131,8 +174,20 @@ export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestR
       else {
         row.releaseTag = rel.tag; row.releaseSha = rel.sha;
         const same = String(rel.sha).toLowerCase() === String(e.sha).toLowerCase();
-        row.status = same ? 'fresh' : 'stale';
-        row.detail = same ? `pinned at ${rel.tag}` : `pin trails ${rel.tag}`;
+        if (same) { row.status = 'fresh'; row.position = 'identical'; row.detail = `pinned at ${rel.tag}`; }
+        else {
+          const pos = await comparePin(e.repo, rel.sha, e.sha);
+          row.position = pos.status;
+          if (pos.status === 'ahead') {
+            row.status = 'ahead';
+            row.detail = `pin is ${pos.aheadBy} commit${pos.aheadBy === 1 ? '' : 's'} after ${rel.tag}, the latest published release`;
+          } else if (pos.status === 'identical') {
+            row.status = 'fresh'; row.detail = `pinned at ${rel.tag}`;
+          } else {
+            row.status = 'stale';
+            row.detail = pos.status === 'diverged' ? `pin diverged from ${rel.tag}` : `pin trails ${rel.tag}`;
+          }
+        }
       }
     } catch (err) {
       row.status = 'error';
@@ -162,16 +217,21 @@ if (isMainModule(import.meta.url)) {
   // PR-triggered check would never once fire.
   if (process.argv.includes('--check-stale') && problems.length === 0) {
     const rows = await checkRegistryFreshness(root);
-    const mark = { fresh: '✓', stale: '✗', 'no-release': '–', error: '!' };
+    const mark = { fresh: '✓', ahead: '↑', stale: '✗', 'no-release': '–', error: '!' };
     for (const r of rows) {
       console.log(`${mark[r.status] || '?'} ${(r.id || '?').padEnd(20)} ${r.status.padEnd(11)} pin=${String(r.pinnedSha).slice(0, 10)} ${r.detail}`);
     }
     const stale = rows.filter(r => r.status === 'stale');
     const errored = rows.filter(r => r.status === 'error');
-    for (const r of stale) problems.push(`${r.name || r.id}: pin ${String(r.pinnedSha).slice(0, 10)} trails release ${r.releaseTag} (${String(r.releaseSha).slice(0, 10)}) — bump plugins-registry/${r.id}.json`);
+    for (const r of stale) problems.push(`${r.name || r.id}: pin ${String(r.pinnedSha).slice(0, 10)} ${r.position === 'diverged' ? 'diverged from' : 'trails'} release ${r.releaseTag} (${String(r.releaseSha).slice(0, 10)}) — bump plugins-registry/${r.id}.json`);
     // An unreachable repo fails the run rather than passing quietly. A check
     // that cannot see is not a check that found nothing.
-    for (const r of errored) problems.push(`${r.name || r.id}: could not resolve latest release — ${r.detail}`);
+    // releaseTag is set only once the release lookup succeeded, so an error with
+    // one came from comparing the pin against that release.
+    for (const r of errored) {
+      const what = r.releaseTag ? `could not compare the pin with release ${r.releaseTag}` : 'could not resolve latest release';
+      problems.push(`${r.name || r.id}: ${what} — ${r.detail}`);
+    }
   }
   if (problems.length) { for (const p of problems) console.error(`✗ ${p}`); process.exit(1); }
   console.log(`✓ plugin registry is valid${deep ? ' (deep: all entries cloned + audited)' : ''}`); process.exit(0);

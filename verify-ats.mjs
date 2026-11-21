@@ -95,10 +95,12 @@ function collapse(text) {
 }
 
 // The named entities a generated CV actually carries: the Latin-1 letters an
-// accented heading is written with, plus the five markup ones. Anything else
-// arrives numeric, which is handled generically below.
+// accented heading is written with, plus the five markup ones, plus the curly
+// quotes a CV written by hand or exported from an editor spells by name.
+// Anything else arrives numeric, which is handled generically below.
 const NAMED_ENTITIES = {
   nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'",
+  lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”',
   agrave: 'à', aacute: 'á', acirc: 'â', atilde: 'ã', auml: 'ä', aring: 'å', aelig: 'æ',
   ccedil: 'ç', egrave: 'è', eacute: 'é', ecirc: 'ê', euml: 'ë',
   igrave: 'ì', iacute: 'í', icirc: 'î', iuml: 'ï', ntilde: 'ñ',
@@ -247,16 +249,10 @@ function stripNonContentRegions(html) {
  * @returns {string}
  */
 function extractVisibleText(html) {
-  return collapse(
-    stripNonContentRegions(html)
-      .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      // &amp; is decoded LAST: doing it earlier could turn "&amp;lt;" into "&lt;"
-      // and then into "<", double-unescaping text that was never an entity.
-      .replace(/&amp;/gi, '&')
-  );
+  // decodeEntities is one pass, so "&amp;lt;" stays the text "&lt;". All of them
+  // matter here: build-cv-html writes every apostrophe as &#39;, so a keyword
+  // like "Master's degree" read as missing from a CV that says it.
+  return collapse(decodeEntities(stripNonContentRegions(html).replace(/<\/?[a-zA-Z][^>]*>/g, ' ')));
 }
 
 /**
@@ -575,7 +571,7 @@ function auditAts(html, opts = {}) {
   // genuinely different words need their own alternative.
   //
   // career-ops ships evaluation modes for ar, da, de, es, fr, hi, id, it, ja,
-  // ko, nl, pl, pt, ru, tr, ua, zh and zh-TW, and before this every one of
+  // ko, nb, nl, pl, pt, ru, tr, ua, vi, zh and zh-TW, and before this every one of
   // them failed the gate on a structurally perfect CV. The Skills and
   // experience terms are taken from the `| Skills |` and `| Career history |`
   // rows of each modes/<lang>/README.md rather than invented here; the
@@ -584,8 +580,8 @@ function auditAts(html, opts = {}) {
   // Each term must START a word: `formation` must not be found inside
   // `Information`, nor `formacion` inside `Informacion`. `\b` is ASCII-only, so
   // the boundary is "not preceded by a letter or digit" in any script. Terms
-  // stay open on the right (`experien`, `competen`) and the German, Dutch and
-  // Danish compounds that put the key word LAST are listed whole.
+  // stay open on the right (`experien`, `competen`) and the German, Dutch,
+  // Danish and Norwegian compounds that put the key word LAST are listed whole.
   const startsWord = (terms) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${terms.join('|')})`, 'u');
   const required = [
     { name: 'Experience', re: startsWord([
@@ -596,6 +592,7 @@ function auditAts(html, opts = {}) {
       'doswiadczenie', 'przebieg kariery',                 // pl
       'deneyim',                                           // tr
       'erhvervserfaring', 'karriereforlob',                // da
+      'erfaring', 'arbeidserfaring', 'yrkeserfaring',      // nb: compounds put it last
       'riwayat karier', 'pengalaman',                      // id
       'parcours professionnel',                            // fr
       'trayectoria', 'trajetoria',                         // es pt
@@ -607,6 +604,7 @@ function auditAts(html, opts = {}) {
       'الخبرات', 'التاريخ المهني',                        // ar
       'करियर',                                              // hi
       '工作经历', '工作經歷',                                  // zh zh-TW
+      'kinh nghiem', 'lich su nghe nghiep',                // vi (folded: the fold maps đ to d)
     ]) },
     { name: 'Education', re: startsWord([
       'education', 'academic',                             // en
@@ -617,6 +615,7 @@ function auditAts(html, opts = {}) {
       'wyksztalcenie',                                     // pl
       'egitim',                                            // tr
       'uddannelse',                                        // da
+      'utdanning',                                         // nb
       'pendidikan',                                        // id
       '学歴',                                                // ja
       '학력',                                                // ko
@@ -625,6 +624,7 @@ function auditAts(html, opts = {}) {
       'التعليم', 'المؤهلات',                            // ar
       'शिक्षा',                                             // hi
       '教育背景', '學歷',                                    // zh zh-TW
+      'hoc van',                                           // vi (folded)
     ]) },
     { name: 'Skills', re: startsWord([
       'skills', 'competen', 'proficienc',                  // en, + es pt fr folded; 'competen' also covers it 'Competenze'
@@ -634,6 +634,7 @@ function auditAts(html, opts = {}) {
       'umiejetnosci',                                      // pl
       'beceri',                                            // tr
       'kompetenc', 'kernkompetenc',                        // da + pl/pt variants
+      'kompetanse', 'kjernekompetanse', 'ferdigheter',     // nb
       'keahlian',                                          // id
       'スキル',                                              // ja
       '역량', '기술',                                          // ko
@@ -642,6 +643,7 @@ function auditAts(html, opts = {}) {
       'مهارات',                                             // ar
       'कौशल',                                               // hi
       '技能', '专业技能', '專業技能',                           // zh zh-TW: 專業技能 does not start with 技能
+      'ky nang',                                           // vi (folded)
     ]) },
   ];
   const missing = [];
@@ -907,6 +909,7 @@ function runSelfTest() {
       pl: ['Doświadczenie zawodowe', 'Wykształcenie', 'Umiejętności'],
       tr: ['İş deneyimi', 'Eğitim', 'Beceriler'],
       da: ['Erhvervserfaring', 'Uddannelse', 'Kompetencer'],
+      nb: ['Arbeidserfaring', 'Utdanning', 'Kompetanse'],
       id: ['Pengalaman kerja', 'Pendidikan', 'Keahlian'],
       ja: ['職務経歴', '学歴', 'スキル'],
       ko: ['경력', '학력', '역량'],
@@ -916,6 +919,7 @@ function runSelfTest() {
       hi: ['करियर इतिहास', 'शिक्षा', 'कौशल'],
       zh: ['工作经历', '教育背景', '技能'],
       'zh-TW': ['工作經歷', '學歷', '專業技能'],
+      vi: ['Kinh nghiệm làm việc', 'Học vấn', 'Kỹ năng'],
     };
     const failing = Object.entries(localized)
       .filter(([, [exp, edu, skl]]) => {
@@ -948,7 +952,7 @@ function runSelfTest() {
     check(`"${heading}" does not pass for Education`, hasIssue(noEdu.issues, 'missing standard section'));
   }
   // ...while the compounds that put the key word last are still recognized.
-  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring']) {
+  for (const heading of ['Berufserfahrung', 'Werkervaring', 'Erhvervserfaring', 'Arbeidserfaring', 'Yrkeserfaring']) {
     const compound = auditAts(buildCleanHtml({ experience: `<div class="section"><div class="section-title">${heading}</div><p>Senior Engineer, Acme, 2019 - 2024.</p></div>` }));
     check(`compound heading "${heading}" is recognized for Experience`, !hasIssue(compound.issues, 'missing standard section'));
   }

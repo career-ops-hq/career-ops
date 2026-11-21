@@ -155,8 +155,11 @@ function sentSystemPrompt(base, dataRoot, args) {
   const r = spawnSync(process.execPath, ['--import', pathToFileURL(stub).href, join(ROOT, 'openrouter-runner.mjs'), ...args], {
     cwd, encoding: 'utf8', timeout: 60_000, stdio: ['ignore', 'pipe', 'pipe'],
     // A pinned model skips the free-model listing, the runner's other request.
+    // The batch state is the fixture's: the allocator reads the checkout's by
+    // default, and a failed row there would move the report number.
     env: splitEnv({
       CAREER_OPS_ROOT: dataRoot,
+      CAREER_OPS_BATCH_STATE: join(dataRoot, 'batch', 'batch-state.tsv'),
       OPENROUTER_API_KEY: 'split-root-fixture-key',
       CAREER_OPS_MODEL: 'fixture/model',
       SPLIT_ROOT_CAPTURE: capture,

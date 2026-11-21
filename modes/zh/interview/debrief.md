@@ -245,24 +245,31 @@ stated_priorities:        # transcript input only; omit if none were stated or f
 - **给每次作答打标签。** 在每行 `**Candidate:**` 正上方输出 `<!-- competency: tag[, tag...] -->` — lowercase-kebab-case，多能力用逗号分隔（例如 `system-design`、`people-leadership`、`incident-response`）。你在 Step 2 已评估过每次作答，按那次评估打标签，而不是重读。标签是自由形式；选该题实际考察的能力。
 - **忠实重建候选人回合。** 用候选人在 Step 1 报告说过的内容，而不是理想化答案。Step 2 的"correct/complete answer"属于复盘文件，绝不要进记录——记录记的是发生了什么。
 - **`source: debrief`。**
-- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，并转义内部的双引号，保证 front matter 仍是合法 YAML。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
+- **`stated_priorities` 写在 front matter 里**（Step 1c），作为由 `speaker` + `quote` 条目组成的 YAML 列表，让脚本与 `interview/plan` 不必解析正文就能读取。每个 `quote` 都用双引号包裹，保证 front matter 仍是合法 YAML，且回读到的值与原话逐字一致：手工转义时先转义反斜杠、再转义内部双引号，这样引语中的字面 `\n` 保持两个字符，而不会变成换行。条目的轮次与日期即文件自身的 `round` 与 `date`。没有表态时、以及只要是 `input_source: recall`，就省略该字段。绝不把优先事项写进练习场次文件，因为那里没有真实面试官。
 - 场次文件落在 gitignore 目录（真实姓名/公司永不进版本库）；写入时不要脱敏。
 
 ---
 
 ## Step 10 — Record the call on the tracker
 
-复盘保存后，把已确认的事实记录到这条申请上。把新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。展示该事实与画像中的那句话。询问 `Record this dealbreaker on the report and the tracker? [y/N]`。若回答是，把那句话作为 `--dealbreaker` 传入。若回答否，就省略。
+复盘保存后，把已确认的事实记录到这条申请上。把每个新事实与用户已在 `modes/_profile.md` 或 `config/profile.yml` 中写下的某条 dealbreaker 对应起来。每一处对应都单独询问，并展示该事实与画像中的那句话。`debrief-sync.mjs` 会拒绝含有分号（`;`）、制表符或换行的 `--dealbreaker` 值，整次调用随之中止。若那句话含有这类字符，告诉用户是哪个字符，并请用户给出不含该字符、意思不变的单行版本。不要自行删除字符或改写句子。用户给出的版本也要检查这三种字符，只要还含有其中任何一个，就再次请用户修改。然后询问 `Record this dealbreaker on the report and the tracker? [y/N]`。保留用户确认的每一句（或用户给出的单行版本），舍弃用户拒绝的每一句。
 
-对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。
+对每位点到名的人，询问 `Save this contact to data/contacts.tsv? [y/N]`。若回答是，传入姓名、给出的邮箱（如有），以及用户点明的类型（如有）。`--contact-type` 只接受小写的 `recruiter`、`hiring-manager`、`peer`、`interviewer`、`internal-referral` 或 `other`。无论用户用哪种语言，都把对方的说法对应到它所指的值（"talent partner" 是 `recruiter`，"我未来的上司" 是 `hiring-manager`）。如果这个词明显对不上任何一个值，就不传 `--contact-type`，但仍然保存联系人。`debrief-sync.mjs` 会拒绝其他任何值，那会让整次调用停下，dealbreaker 和 `--next` 也一并失败。
 
 若下一步指明了唯一明确的日历日，直接传 `--next YYYY-MM-DD`，不再追问。星期几按本地日历日换算，今天也算。若说法里没有具体日期，省略 `--next`。若有歧义（`next week`、两个日期），先请用户给出一个日期，再传入。
 
-带着这些参数运行 `node debrief-sync.mjs`。之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+带着这些参数运行 `node debrief-sync.mjs --app <tracker#>`，其中 `<tracker#>` 是该申请在 tracker 中的 `#`（不是报告编号）。`--dealbreaker` 只接受一句话，且每次调用只能出现一次，所以每条已确认的句子各运行一条命令。不要把两句话合并成一个值：脚本会拒绝分号。联系人参数和 `--next` 只放在第一条命令里。之后的每条命令只传 `--app <tracker#>` 和一个 `--dealbreaker`，别的都不传。每个值都用单引号括起来，这样 shell 会原样传递 `$` 和反引号。值里的单引号在 Git Bash 等 POSIX shell 中写成 `'\''`。在 PowerShell 中写成 `''`；PowerShell 也把弯引号（`‘`、`’`、`‚` 或 `‛`）当作引号，所以弯引号同样要写两次：
 
-除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在本命令之前执行。
+```bash
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 1>' --contact-name '<name>' --next YYYY-MM-DD
+node debrief-sync.mjs --app <tracker#> --dealbreaker '<sentence 2>'
+```
 
-同一命令再跑一次是安全的。
+逐条运行这些命令，每条都检查退出状态。若某条命令失败，先停下修正，再从第一条命令起重新运行整个列表。若没有要传的 dealbreaker、联系人或 `--next` 日期，就不运行命令：脚本会拒绝没有内容可记录的调用。最后一条命令之后，若保存了联系人，运行 `node contacts.mjs --summary`。若钉住了日期，运行 `node followup-cadence.mjs --summary`。
+
+除非用户点明新状态，否则不要改状态。那是另一次 `set-status.mjs` 调用，在这些命令之前执行。
+
+同样的命令再跑一次是安全的：已经记录的句子、联系人或日期不会重复写入。
 
 ---
 

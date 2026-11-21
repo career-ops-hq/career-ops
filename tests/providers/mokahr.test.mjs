@@ -84,13 +84,13 @@ try {
   }
 
   if (
-    mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/social-recruitment/lingjuninvest/46355' }) === null &&
-    mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/social-recruitment/shopee/74378' }) === null &&
+    mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/social-recruitment/lingjuninvest/46355' }) !== null &&
+    mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/social-recruitment/shopee/74378' }) !== null &&
     mokahr.detect({ name: 'X', careers_url: 'https://app.mokahr.com/apply/shopee/74378' }) !== null
   ) {
-    pass('mokahr.detect() rejects only the exact tenant paths disallowed by app.mokahr.com/robots.txt');
+    pass('mokahr.detect() accepts tenant paths that only robots.txt excluded');
   } else {
-    fail('mokahr.detect() should apply Moka robots exclusions at exact-path scope');
+    fail('mokahr.detect() should accept tenant paths that only robots.txt excluded');
   }
 
   if (mokahr.detect({ name: 'X', careers_url: 12345 }) === null) {

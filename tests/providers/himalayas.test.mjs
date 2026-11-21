@@ -88,6 +88,28 @@ try {
     fail(`row 0 location = ${JSON.stringify(jobs[0]?.location)}`);
   }
 
+  const locationCases = [
+    ['explicit empty array', [], 'Remote (worldwide)'],
+    ['missing field', undefined, ''],
+    ['null field', null, ''],
+    ['non-array string', 'Worldwide', ''],
+    ['non-array object', {}, ''],
+    ['invalid nonempty array', [null, 42, {}], ''],
+    ['blank nonempty array', ['', '  '], ''],
+    ['valid country list', [' United States ', 'Canada'], 'United States, Canada'],
+    ['mixed valid and invalid entries', [' Bangladesh ', null, ''], 'Bangladesh'],
+  ];
+  for (const [name, restriction, expected] of locationCases) {
+    const item = {
+      title: 'Location fixture',
+      applicationLink: 'https://himalayas.app/companies/fixture/jobs/location',
+      ...(restriction === undefined ? {} : { locationRestrictions: restriction }),
+    };
+    const actual = parseHimalayasResponse({ jobs: [item] })[0]?.location;
+    if (actual === expected) pass(`parseHimalayasResponse location: ${name}`);
+    else fail(`location ${name}: ${JSON.stringify(actual)} (expected ${JSON.stringify(expected)})`);
+  }
+
   if (jobs[0]?.url === 'https://himalayas.app/companies/acme-labs/jobs/staff-ai-engineer') {
     pass('parseHimalayasResponse maps applicationLink to url');
   } else {

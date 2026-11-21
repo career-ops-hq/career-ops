@@ -2097,6 +2097,35 @@
         "doc",
         "example"
       ]
+    },
+    {
+      "login": "tharun-37",
+      "name": "Tharun R",
+      "avatar_url": "https://avatars.githubusercontent.com/u/71493019?v=4",
+      "profile": "https://github.com/tharun-37",
+      "contributions": [
+        "code"
+      ]
+    },
+    {
+      "login": "bvs2",
+      "name": "Bas",
+      "avatar_url": "https://avatars.githubusercontent.com/u/125697484?v=4",
+      "profile": "https://github.com/bvs2",
+      "contributions": [
+        "code",
+        "test"
+      ]
+    },
+    {
+      "login": "AnkitParekh007",
+      "name": "Ankit Parekh",
+      "avatar_url": "https://avatars.githubusercontent.com/u/155077196?v=4",
+      "profile": "https://github.com/AnkitParekh007",
+      "contributions": [
+        "code",
+        "test"
+      ]
     }
   ]
 }
