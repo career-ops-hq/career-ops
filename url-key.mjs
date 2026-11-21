@@ -41,6 +41,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { linkedInCanonicalKey, linkedInPathJobId } from './lib/linkedin-url.mjs';
+import { naukriPostingId } from './lib/naukri-url.mjs';
 import { resolveHimalayasPosting } from './himalayas-posting.mjs';
 
 // Query params that identify a click/campaign, never the posting itself. Keep
@@ -80,6 +81,7 @@ const AGGREGATOR_SUPPLEMENT = [
   'ziprecruiter.com', // primary board; employers post directly
   'dice.com',        // primary board for tech; employers post directly
   'wellfound.com',   // primary board for startups; employers post directly; providers/wellfound.mjs
+  'naukri.com',      // primary board in India; employers post directly (#NAUKRI)
   // Boards this repository's own scanner reads (#3652). Each host is emitted by
   // the provider named beside it, so a row arriving through scan, pipeline and
   // evaluate carries one of these URLs rather than an employer-controlled one.
@@ -233,6 +235,11 @@ const AGGREGATOR_POSTING_ID = {
   // answers a redirect to /jobs/{id}-{slug} and is never a posting URL
   // itself, so it is not read here.
   'wellfound.com': (u) => /^\/jobs\/(\d+)-[^/]+\/?$/.exec(u.pathname)?.[1] ?? null,
+  // naukri.com/job-listings-{slug}-{id}: the trailing number is the posting id,
+  // and the slug in front of it is SEO text the poster rewrites when the title
+  // or city changes, so two spellings of one posting must reduce to that id.
+  // The id alone is also a working URL (`/job-listings/{id}` answers 200).
+  'naukri.com': (u) => naukriPostingId(u.href),
 };
 
 /**

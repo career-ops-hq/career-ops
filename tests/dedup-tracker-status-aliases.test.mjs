@@ -171,6 +171,8 @@ const SANDBOX_FILES = [
   'himalayas-posting.mjs', 'lib/is-main-module.mjs',
   // himalayas-posting.mjs strips markup with lib/jd-parse.mjs.
   'lib/jd-parse.mjs',
+  // url-key.mjs reads Naukri posting ids through lib/naukri-url.mjs.
+  'lib/naukri-url.mjs',
 ];
 const DUPLICATE_ROWS = [
   '| 1 | 2026-09-01 | Acme | Backend Engineer | 4.5/5 | Evaluated | ❌ | — | first |',

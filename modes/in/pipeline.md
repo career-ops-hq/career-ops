@@ -28,6 +28,12 @@ move to Processed → summary table. The notes below are India-specific.
   evaluating (AGENTS.md → "Aggregator Listings -- Confirm at the Employer").
   Listings posted by a consultancy, or that hide the employer, go through the
   agency-confirmation guardrail.
+  **Naukri pages are not readable at all** (client-rendered shell, and its own
+  JSON endpoint answers `406 recaptcha required`): do not spend Playwright or
+  WebFetch attempts on one. Use `node naukri-import.mjs` for a job-alert email,
+  `node confirm-at-employer.mjs --input posting.json --json` for a link, and ask
+  the candidate to paste the JD when the employer has no careers page. Details:
+  `docs/NAUKRI.md`.
 - **LinkedIn, Indeed:** aggregator-style listings; same rule. A LinkedIn page
   that hides the description behind a login is marked `- [!]` so the candidate
   can paste the text.
