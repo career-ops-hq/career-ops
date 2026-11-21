@@ -225,7 +225,7 @@ export function parseDate(dateStr) {
 //     matched even with the gap itself excluding line terminators -- the
 //     separator character is the one place a line break could still sneak
 //     through.
-const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
+const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!|\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
 const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
 const APPLIED_DATE_HAS_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'i');
 
@@ -258,11 +258,17 @@ export function parseAppliedDate(notes, options = {}) {
   const validateCalendar = options.requireValidCalendarDate === true;
   const text = String(notes);
 
+  // Every SYNTACTIC match, impossible days included. Attribution runs over all
+  // of them and `validateCalendar` applies only to what may be returned, below.
+  // Filtering here instead hid an impossible date from the clause model, which
+  // then read the clause citing it as undated -- so "row 51 applied 2026-02-30;
+  // Applied 2026-06-17" carried row 51's scope into the next clause and
+  // discarded a valid own date, reporting the note as stating no date at all.
+  // A typo in a citation is still the citation's; it must not cost this row its
+  // own measured date.
   const matches = [];
   for (const m of text.matchAll(APPLIED_DATE_RE)) {
-    if (!validateCalendar || isRealCalendarDate(m[1])) {
-      matches.push({ date: m[1], index: m.index, end: m.index + m[0].length });
-    }
+    matches.push({ date: m[1], index: m.index, end: m.index + m[0].length });
   }
   if (matches.length === 0) return null;
 
@@ -274,7 +280,8 @@ export function parseAppliedDate(notes, options = {}) {
   // inside or after the match it belongs to, so attribution is decided by the
   // clause model below rather than by scanning outward from each date (#4953).
   const cited = citedDateOffsets(text, matches);
-  const own = matches.filter(m => !cited.has(m.index));
+  const own = matches.filter(m => !cited.has(m.index)
+    && (!validateCalendar || isRealCalendarDate(m.date)));
 
   // First-wins is preserved among a row's OWN dates: a later status date must
   // not displace the submission date (see the fixture in test-all.mjs).
@@ -439,36 +446,57 @@ function pointersIn(text, from, to) {
 
 // Which date in this clause a pointer is citing, or null if it cites none.
 //
-// A pointer BEFORE a date is that date's subject, whatever its punctuation:
+// An UNBRACKETED pointer is the subject of the "applied" that follows it:
 // "row 51 (other Staff req, applied 2026-09-20)", "#154 Sr PM (applied
-// 2026-08-04)", "Applied to their other req (row 51) on 2026-09-20". That also
-// settles a pointer sitting between two dates, which is the reading a comma
-// cannot separate: in "Applied 2026-11-20 and row 51 applied 2026-09-20" the
-// pointer is the subject of the "applied" that follows it, so November stays
-// this row's.
-//
-// A TRAILING pointer -- one with a date before it and none after it -- cites
-// that date only when it is BRACKETED. This is the distinction that has to be
-// drawn, and brackets are what the two readings differ by:
-//
-//   "applied 2026-09-20 to their other Staff req (row 51, 4.6/5)"
-//        an appositive attached to the clause just read. The date is row 51's,
-//        and missing this is the bug the whole guard exists for.
+// 2026-08-04)". That also settles a pointer sitting between two dates, which is
+// the reading a comma cannot separate: in "Applied 2026-11-20 and row 51
+// applied 2026-09-20" the pointer is the subject of the second "applied", so
+// November stays this row's. With no date after it, it cites nothing --
 //
 //   "APPLIED 2026-11-13 via the Ashby form (...), same day as #267"
 //        prose commentary COMPARING this submission with a sibling's. The date
 //        is this row's own, and citing it discards a real measured date. Found
 //        on a real tracker row by replaying the model over it.
 //
-// Both put an unbracketed-or-bracketed pointer after a date with nothing after
-// it, so position alone cannot tell them apart; a reader tells them apart by
-// the aside being parenthetical. An unbracketed trailing pointer therefore
-// cites nothing, which is the cheaper way to be wrong here.
+// A BRACKETED pointer is an appositive, so it attaches BACKWARD: it cites the
+// segment it sits in or just after, and only a pointer with no segment before
+// it reaches forward ("Applied to their other req (row 51) on 2026-09-20" is
+// inside September's own segment, so backward and forward agree there).
+//
+//   "applied 2026-09-20 to their other Staff req (row 51, 4.6/5)"
+//        the shape the guard exists for: an aside on the clause just read.
+//
+//   "Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here"
+//        the same aside with a second application after it. Letting the
+//        following date claim the pointer cited November and returned the
+//        sibling's September as this row's measured date.
+//
+// Direction, not distance, is what the two differ by, so the rule is which way
+// a bracket faces rather than how far a scan may run.
+//
+// KNOWN LIMIT: a bracketed pointer that is the subject of a FOLLOWING date in
+// the same clause -- "Applied 2026-11-20 and (row 51) applied 2026-09-20" --
+// now cites November and returns September. The two are structurally identical
+// (bracketed pointer, a segment before it, a segment after it), so nothing
+// short of reading the prose separates them; the appositive wins because it is
+// the shape real notes are written in, while a parenthesised subject taking a
+// verb outside its own brackets is not attested on any row.
 function pointerOwner(pointer, dates) {
-  const following = dates.find(d => d.index > pointer.index);
-  if (following) return following;
-  if (!pointer.bracketed) return null;
-  return dates.filter(d => d.index <= pointer.index).pop() ?? null;
+  // Inside an "applied ... date" span, the pointer names what that application
+  // was for, so it owns that date whatever its form or punctuation.
+  const containing = dates.find(d => pointer.index >= d.index && pointer.index < d.end);
+  if (containing) return containing;
+
+  // Past the end of a span, a bracketed appositive attaches backward -- in the
+  // WORD form only. Nobody writes "row 51" for a requisition, but a bare
+  // "(#1311)" after a date routinely IS this row's own posting id, and citing
+  // it discards a real measured date.
+  if (pointer.bracketed && !pointer.text.startsWith('#')) {
+    const preceding = dates.filter(d => d.index < pointer.index).pop();
+    if (preceding) return preceding;
+  }
+
+  return dates.find(d => d.index > pointer.index) ?? null;
 }
 
 // The apply-dates in `text` that are being cited about ANOTHER row, as a Set of

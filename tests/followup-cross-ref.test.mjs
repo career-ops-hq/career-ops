@@ -54,15 +54,16 @@ const FOREIGN = [
   // Depth-matched brackets: searching for the first `)` read this group as
   // closing after "US" and missed the pointer entirely.
   ['Applied 2026-09-20 elsewhere (via Ashby (US), row 51)', 'pointer after a NESTED bracket group'],
-  // A bare `#NNN` is the tracker-row spelling in this column wherever it sits;
-  // the label is what marks a req id. Asserted on both sides of the date so the
-  // two directions cannot drift apart.
-  ['Applied 2026-08-06 (#1311)', 'bare #id parenthetical after the date'],
 
   // #4953: and it can sit INSIDE the matched span, between "applied" and the
   // date it governs, where neither window reaches.
   ['Applied to their other req (row 51) on 2026-09-20', 'pointer between "applied" and its date'],
 
+  // `|` is a clause boundary for the scope model, so an "applied ... date" match
+  // must not span one either: reaching across it paired "Not applied" with a
+  // sibling's date and reported it as this row's. A literal `|` does reach this
+  // column -- a populated tracker had one inside a Notes cell.
+  ['Not applied | row 51 applied 2026-09-20', 'a match cannot cross a pipe'],
 ];
 
 // Dates that are THIS row's own. Several of these are deliberate exclusions
@@ -130,6 +131,14 @@ const OWN = [
   // the second note were thrown away.
   ['Applied 2026-11-20 and row 51 applied 2026-09-20', '2026-11-20', 'unbracketed pointer belongs to the NEXT date'],
   ['Applied 2026-11-20 here, applied 2026-09-20 elsewhere (row 51)', '2026-11-20', 'bracketed pointer belongs to the PRECEDING date'],
+  // The same appositive with the citation FIRST. Letting the following date
+  // claim the bracket cited November and returned the sibling's September as
+  // this row's measured date, so both orders are pinned.
+  [
+    'Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here',
+    '2026-11-20',
+    'bracketed pointer attaches backward even with a date after it',
+  ],
   // A TRAILING pointer cites the date before it only when it is bracketed. Both
   // of these put a pointer after a date with nothing after it, so position
   // alone cannot separate an appositive citation from prose that merely
@@ -142,6 +151,11 @@ const OWN = [
     'an unbracketed trailing pointer is a comparison, not a citation',
   ],
   ['Applied 2026-08-06 (Req #1311)', '2026-08-06', 'labelled-hash parenthetical after the date'],
+  // Unlabelled too: inside brackets right after the date, the brackets do the
+  // labelling, and this is how a posting id gets written by hand. "row 51" is
+  // never a requisition, so only the word form attaches backward -- treating a
+  // bare id as a citation here threw away a genuine measured date.
+  ['Applied 2026-08-06 (#1311)', '2026-08-06', 'bare-hash parenthetical after the date'],
   ['Applied 2026-11-20 (via Greenhouse, see notes)', '2026-11-20', 'bracket naming no row'],
   ['Applied 2026-11-20; (row 51 is the other one)', '2026-11-20', 'a separator blocks the forward scan'],
   [
@@ -206,6 +220,26 @@ test('a malformed date is rejected, never truncated', () => {
   );
 });
 
+// A typo in a CITATION is still the citation's. Validating dates before
+// attributing them hid the impossible one from the clause model, which then
+// read row 51's clause as undated, carried its scope into the next clause and
+// discarded a valid own date -- so the note was reported as stating no date at
+// all. Both callers must agree here: the cadence report validates, and
+// followup-seed.mjs does not (it throws INVALID_DATE on a date it is asked to
+// pin), and before the fix they disagreed on this note.
+test('an impossible date in a citation does not cost this row its own date', () => {
+  const notes = 'row 51 applied 2026-02-30; Applied 2026-06-17';
+
+  assert.equal(parseAppliedDate(notes, { requireValidCalendarDate: true }), '2026-06-17');
+  assert.equal(parseAppliedDate(notes), '2026-06-17');
+
+  // Unchanged: when the IMPOSSIBLE date is the one this row claims, the
+  // validating caller still gets null and degrades to a labelled fallback,
+  // while the seeding caller still sees the raw value and can refuse it.
+  assert.equal(parseAppliedDate('Applied 2026-02-30 via Ashby', { requireValidCalendarDate: true }), null);
+  assert.equal(parseAppliedDate('Applied 2026-02-30 via Ashby'), '2026-02-30');
+});
+
 test('"reapplied" is not "applied"', () => {
   assert.equal(parseAppliedDate('reapplied 2026-06-09 after rejection'), null);
   assert.equal(parseAppliedDate('reapplied ~2026-06-09 after rejection'), null);
@@ -268,4 +302,28 @@ test('known limit: a pointer that is referred back to in words is not followed',
   // One clause closer and it does carry, which is what keeps the common
   // two-roles-at-one-employer note correct.
   assert.equal(parseAppliedDate('Sibling #154 is live; applied 2026-08-04 to that sibling'), null);
+});
+
+// The two shapes the bracket rules cannot read, for the same reason: the note
+// is structurally identical to one that means the opposite, so a reader uses
+// the prose and this model cannot. Each is asserted in the direction that keeps
+// a real measured date rather than the one that discards it.
+test('known limit: a bracket can be read the other way round', () => {
+  // A parenthesised SUBJECT taking its verb outside its own brackets is
+  // indistinguishable from an appositive on the clause before it, and the
+  // appositive is the shape real notes use. A reader would keep November here.
+  assert.equal(
+    parseAppliedDate('Applied 2026-11-20 and (row 51) applied 2026-09-20'),
+    '2026-09-20',
+    'a bracketed pointer is read as an appositive, never as the next date\'s subject',
+  );
+
+  // Past the end of a span a bare id is taken for this row's posting id, so a
+  // genuine citation written that way is not followed. The word form is.
+  assert.equal(
+    parseAppliedDate('applied 2026-09-20 to their other req (#51)'),
+    '2026-09-20',
+    'a bare-hash citation after the date is read as a posting id',
+  );
+  assert.equal(parseAppliedDate('applied 2026-09-20 to their other req (row 51)'), null);
 });
