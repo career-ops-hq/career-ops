@@ -7,7 +7,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { atomicWrite, captureJd, captureName, commitCapture, deriveLabels, appendPendingRow, urlAlreadyPresent, today } from '../capture-jd.mjs';
 import { captureIdentity, findCaptureForUrl } from '../jd-capture.mjs';
-import { ensureToken, createServer, startEvaluation } from '../capture-server.mjs';
+import { ensureToken, createServer, startEvaluation, isLoopbackHost } from '../capture-server.mjs';
 
 // Isolate every Git subprocess, including production calls inheriting process.env.
 for (const key of Object.keys(process.env)) {
@@ -842,4 +842,29 @@ test('captureJd resolves a relative data root before committing', async () => {
   } finally {
     process.chdir(cwd);
   }
+});
+
+test('the server answers 400 to a request target new URL() cannot parse, and keeps serving', async () => {
+  const http = await import('node:http');
+  const root = scratch();
+  const server = createServer({ dataRoot: root, token: ensureToken(root), evalEnabled: false });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    const status = await new Promise((resolve, reject) => {
+      const req = http.request({ host: '127.0.0.1', port, path: '//', method: 'GET' }, (res) => { res.resume(); resolve(res.statusCode); });
+      req.on('error', reject);
+      req.setTimeout(3000, () => req.destroy(new Error('no response: the handler threw')));
+      req.end();
+    });
+    assert.equal(status, 400);
+    assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('isLoopbackHost accepts only complete loopback hosts', () => {
+  for (const host of ['127.0.0.1', '127.1.2.3', 'localhost', 'LOCALHOST', '::1', '[::1]']) assert.equal(isLoopbackHost(host), true, host);
+  for (const host of ['localhost.example', '127.example', '127.0.0.1.example', '::1abc', '::', '0.0.0.0', '192.168.1.2', '']) assert.equal(isLoopbackHost(host), false, host);
 });

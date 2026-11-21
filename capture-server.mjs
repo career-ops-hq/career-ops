@@ -36,6 +36,7 @@
 
 import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
+import { isIPv4 } from 'node:net';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -226,10 +227,25 @@ async function handleCapture(req, res, ctx) {
   return send(res, 200, { ...result, evaluation }, corsHeaders(req));
 }
 
+/**
+ * Whether a bind host is loopback: the whole value, never a prefix, so
+ * `localhost.example` or `127.example` is not mistaken for it.
+ */
+export function isLoopbackHost(host) {
+  const h = String(host || '').toLowerCase();
+  if (h === 'localhost' || h === '::1' || h === '[::1]') return true;
+  return isIPv4(h) && h.startsWith('127.');
+}
+
 export function createServer({ dataRoot, token, evalEnabled = true }) {
   return http.createServer((req, res) => {
-    const url = new URL(req.url || '/', 'http://127.0.0.1');
     const cors = corsHeaders(req);
+    let url;
+    try {
+      url = new URL(req.url || '/', 'http://127.0.0.1');
+    } catch {
+      return send(res, 400, { ok: false, error: 'invalid request target' }, cors);
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204, cors);
@@ -271,7 +287,7 @@ into the extension's options page.`);
     return 0;
   }
 
-  if (process.env.CAREER_OPS_CAPTURE_ALLOW_NETWORK !== '1' && !/^(127\.|localhost|::1|\[::1\])/.test(flags.host)) {
+  if (process.env.CAREER_OPS_CAPTURE_ALLOW_NETWORK !== '1' && !isLoopbackHost(flags.host)) {
     console.error(`capture-server: refusing to bind ${flags.host}. A capture endpoint is a write primitive;`);
     console.error('bind 127.0.0.1, or set CAREER_OPS_CAPTURE_ALLOW_NETWORK=1 if you really mean it.');
     return 2;
