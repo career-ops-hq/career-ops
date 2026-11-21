@@ -2,7 +2,7 @@ import path from "node:path";
 import { careerOpsRoot } from "@/lib/career-ops";
 import { atomicWrite } from "@/lib/core/safe-write";
 import { readJsonObject } from "@/lib/json-body";
-import { normalizeProgress } from "@/lib/prep.mjs";
+import { hasOversizedTask, MAX_TASK_TEXT, normalizeProgress } from "@/lib/prep.mjs";
 import { readJsonFile } from "@/lib/json-file.mjs";
 
 export const runtime = "nodejs";
@@ -28,6 +28,9 @@ export async function GET() {
 export async function PUT(req: Request) {
   const body = await readJsonObject(req);
   if (!body) return Response.json({ error: "Expected a JSON object." }, { status: 400 });
+  if (hasOversizedTask(body)) {
+    return Response.json({ error: `A task is longer than ${MAX_TASK_TEXT} characters. Shorten it.` }, { status: 400 });
+  }
   try {
     atomicWrite(file(), JSON.stringify(normalizeProgress(body), null, 2));
     return Response.json({ ok: true });

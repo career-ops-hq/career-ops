@@ -3,7 +3,7 @@
 import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { parseTaskItems, tickKey, countDone, pickForCompany } from "@/lib/prep.mjs";
+import { parseTaskItems, tickKey, countDone, pickForCompany, MAX_TASK_TEXT } from "@/lib/prep.mjs";
 import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { ChevronRight, Folder, FolderOpen, FileText, FileCode, FileType, Download, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react";
 
@@ -182,7 +182,7 @@ export function OutputViewer() {
           ))}
           {!!myTasks.length && <p className="mt-1 text-xs text-faint">{myTasks.filter((t) => t.done).length}/{myTasks.length} done</p>}
           <form className="mt-1 flex gap-1" onSubmit={(e) => { e.preventDefault(); if (newTask.trim()) { setTasks([...myTasks, { id: String(Date.now()), text: newTask.trim(), done: false }]); setNewTask(""); } }}>
-            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task"
+            <input value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task…" aria-label="New prep task" maxLength={MAX_TASK_TEXT}
               className="min-w-0 flex-1 rounded border border-border bg-transparent px-2 py-1 text-xs" />
             <button type="submit" className="rounded border border-border px-1.5 text-muted hover:text-foreground" title="Add" aria-label="Add task"><Plus className="size-3.5" /></button>
           </form>

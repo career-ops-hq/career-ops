@@ -2,7 +2,7 @@
 // Run:  node --test tests/lib/prep.test.mjs
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTaskItems, tickKey, countDone, normalizeProgress, matchesCompany, pickForCompany } from "../../src/lib/prep.mjs";
+import { parseTaskItems, tickKey, countDone, normalizeProgress, hasOversizedTask, MAX_TASK_TEXT, matchesCompany, pickForCompany } from "../../src/lib/prep.mjs";
 
 test("parseTaskItems reads checked and unchecked items only", () => {
   const md = "# T\n- [ ] one\n  * [x] two\n- plain bullet\n+ [X] three\r\n- [ ]no space\n";
@@ -57,4 +57,13 @@ test("pickForCompany prefers interview prep, then evaluation, then anything", ()
   assert.equal(pickForCompany(paths.filter((p) => !p.endsWith("/interview-prep.md")), "acme"), "interview-prep/acme-swe.md");
   assert.equal(pickForCompany(["output/acme/swe/cv.pdf", "output/acme/swe/evaluation.md"], "acme"), "output/acme/swe/evaluation.md");
   assert.equal(pickForCompany(["output/zed/x.md"], "acme"), null);
+});
+
+test("hasOversizedTask flags text over the limit so the API can refuse it instead of cutting it", () => {
+  const ok = { tasks: { acme: [{ id: "1", text: "x".repeat(MAX_TASK_TEXT), done: false }] } };
+  const long = { tasks: { acme: [{ id: "1", text: "x".repeat(MAX_TASK_TEXT + 1), done: false }] } };
+  assert.equal(hasOversizedTask(ok), false);
+  assert.equal(hasOversizedTask(long), true);
+  assert.equal(hasOversizedTask(null), false);
+  assert.equal(hasOversizedTask({ tasks: "nope" }), false);
 });

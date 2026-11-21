@@ -22,6 +22,15 @@ export function countDone(file, items, ticks) {
   return items.filter((i) => ticks[tickKey(file, i.text)] ?? i.done).length;
 }
 
+export const MAX_TASK_TEXT = 300;
+
+/** True when a saved task is longer than the limit. The API refuses such input
+ *  instead of shortening it, so a save never loses part of what the user typed. */
+export function hasOversizedTask(raw) {
+  const tasks = raw && typeof raw === "object" && raw.tasks && typeof raw.tasks === "object" ? Object.values(raw.tasks) : [];
+  return tasks.some((list) => Array.isArray(list) && list.some((t) => t && typeof t.text === "string" && t.text.length > MAX_TASK_TEXT));
+}
+
 /** Coerce untrusted JSON into { ticks, tasks }. Never throws. */
 export function normalizeProgress(raw) {
   const out = { ticks: {}, tasks: {} };
@@ -35,7 +44,7 @@ export function normalizeProgress(raw) {
       out.tasks[company] = list
         .filter((t) => t && typeof t.id === "string" && typeof t.text === "string")
         .slice(0, 200)
-        .map((t) => ({ id: t.id.slice(0, 40), text: t.text.slice(0, 300), done: t.done === true }));
+        .map((t) => ({ id: t.id.slice(0, 40), text: t.text.slice(0, MAX_TASK_TEXT), done: t.done === true }));
     }
   }
   return out;
