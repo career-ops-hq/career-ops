@@ -84,3 +84,5 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-21 `2026-11-21-santifer.2` (3 boards, source `web-index:wikidata@2026-11-21`): Employer websites from Wikidata, CC0
 - 2026-11-21 `2026-11-21-santifer.3` (17 boards, source `web-index:wikidata@2026-11-21`): Employer websites from Wikidata, CC0
 - 2026-11-21 `2026-11-21-santifer.4` (13 boards, source `web-index:wikidata@2026-11-21`): Employer websites from Wikidata, CC0
+- 2026-11-21 `2026-11-21-santifer.5` (49 boards, source `web-index:wikidata@2026-11-21`): Employer websites from Wikidata, CC0
+- 2026-11-21 `2026-11-21-santifer.6` (21 boards, source `web-index:wikidata@2026-11-21`): Employer websites from Wikidata, CC0
