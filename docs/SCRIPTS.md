@@ -94,6 +94,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `node community-asks.mjs next` | `community-asks.mjs` | The one-time community asks (star, then manifesto): prints at most one line, never in CI or headless runs; `off` turns them off |
 | `node upgrade-tests.mjs --pr-gate` | `upgrade-tests.mjs` | Upgrade an install seeded from the newest old release to this commit and prove user data survived (CI gate; `--canary` proves the gate can fail) |
 | `node linkedin-join.mjs` | `linkedin-join.mjs` | Warm-intro finder — join a LinkedIn `Connections.csv` export against tracker + `portals.yml` companies to answer "do I know anyone here?" (offline, zero-token, read-only; see [LINKEDIN_JOIN.md](LINKEDIN_JOIN.md)) |
+| `node overview.mjs [--summary]` | `overview.mjs` | Read-only smart job search overview (command center): pipeline status, urgent/overdue follow-ups, stale applications, interviews, weekly activity, prioritized next actions |
 
 ---
 
@@ -2321,3 +2322,24 @@ node community-asks.mjs off             # never ask again; CAREER_OPS_NO_ASKS=1 
 * `filtered_country_eligibility` — dropped by `country_eligibility_filter` (#2093)
 
 As the project is in continuous development, to parse for a stat we recommend doing it by column header instead of position. A file created by an older release keeps its old header while new rows carry the current columns; `node migrate-scan-runs.mjs` reports the mismatch, and `node migrate-scan-runs.mjs --apply` rewrites the file onto the current header after saving `<file>.bak`.
+
+---
+
+## overview.mjs
+
+Consolidated, read-only command center overview across the entire job search pipeline. Reuses existing parsers (`stats.mjs`, `followup-cadence.mjs`, `close-stale.mjs`, `process-quality.mjs`, `weekly-digest.mjs`) without duplicating business logic, database tables, or network calls.
+
+Features:
+- Application metrics and status tallies
+- Urgent and overdue follow-up counts and contacts
+- Stale `Applied` applications eligible for closing
+- Active and upcoming interview rounds
+- Weekly activity movements for the current ISO week
+- Prioritized next actions queue (P0 to P4)
+
+```bash
+node overview.mjs             # full JSON contract to stdout
+node overview.mjs --summary   # human-readable terminal dashboard
+node overview.mjs --today 2026-10-24  # evaluate as of a fixed date
+node overview.mjs --days 45   # customize stale cutoff (default 60)
+```
