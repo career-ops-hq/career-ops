@@ -402,7 +402,7 @@ function normalizeTextForATS(html) {
  *
  * Only used for alias lookup — display titles keep their diacritics.
  */
-function foldDiacritics(text) {
+export function foldDiacritics(text) {
   return text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -419,8 +419,10 @@ function foldDiacritics(text) {
  * every CV rendered in those modes, and cv.sections resolves no block at all.
  *
  * Keys are folded on construction so authored diacritics match stripped input.
+ * Exported, with foldDiacritics(), for tests/section-aliases-unique.test.mjs,
+ * which checks that no two entries fold to the same key.
  */
-const SECTION_ALIASES = new Map([
+export const SECTION_ALIAS_ENTRIES = [
   // Japanese (modes/ja) and Korean (modes/ko) — the same failure as the blocks
   // below: no title in either resolved here, so cv.sections matched no section of
   // such a CV and the order guard compared raw titles. The skills and
@@ -582,7 +584,7 @@ const SECTION_ALIASES = new Map([
   // to the English keys and already resolve, so they are not repeated.
   ['résumé', 'summary'],
   ['résumé professionnel', 'summary'],
-  ['profil', 'summary'],
+  // "Profil" is in the German block above.
   ['profil professionnel', 'summary'],
   ['à propos', 'summary'],
   ['à propos de moi', 'summary'],
@@ -658,7 +660,7 @@ const SECTION_ALIASES = new Map([
   // section's everyday headings. Lower-casing turns "İ" into "i" plus a dot that
   // foldDiacritics drops, so "İş" folds to "is"; the dotless "ı" stays as written.
   ['özet', 'summary'],
-  ['profil', 'summary'],
+  // "Profil" is in the German block above.
   ['profesyonel özet', 'summary'],
   ['kariyer özeti', 'summary'],
   ['hakkımda', 'summary'],
@@ -722,8 +724,7 @@ const SECTION_ALIASES = new Map([
   // Karriereforløb, Erhvervserfaring; Kompetanse, Arbeidserfaring, Yrkeserfaring);
   // the rest are each section's everyday headings, listed once where the two
   // languages share a spelling (Erfaring, Priser, Interesser).
-  ['profil', 'summary'],
-  ['resumé', 'summary'],
+  // "Profil" is in the German block and "Resumé" folds to the French "résumé", both above.
   ['sammenfatning', 'summary'],
   ['om mig', 'summary'],
   ['sammendrag', 'summary'],
@@ -872,7 +873,7 @@ const SECTION_ALIASES = new Map([
   ['projetos selecionados', 'projects'],
   ['formação', 'education'],
   ['formação acadêmica', 'education'],
-  ['formação académica', 'education'],
+  // "Formação académica" (pt-PT) folds to the key above.
   ['educação', 'education'],
   ['escolaridade', 'education'],
   ['certificações', 'certifications'],
@@ -921,7 +922,8 @@ const SECTION_ALIASES = new Map([
   ['хобби', 'interests'],
   ['інтереси', 'interests'],
   ['хобі', 'interests'],
-].map(([alias, key]) => [foldDiacritics(alias), key]));
+];
+const SECTION_ALIASES = new Map(SECTION_ALIAS_ENTRIES.map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
   return text
