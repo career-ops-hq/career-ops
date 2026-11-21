@@ -194,3 +194,106 @@ const expect = (label, got, want) => {
   expect('lever: categories.commitment normalized; Permanent and missing leave it off',
     types(jobs), ['full_time', 'internship', 'temporary', 'contract', '<absent>', '<absent>']);
 }
+
+// ── Workable (widget API) ───────────────────────────────────────────
+{
+  const { parseWorkableWidget } = await load('workable.mjs');
+  const row = (shortcode, employment_type) => ({
+    title: `Role ${shortcode}`,
+    shortcode,
+    shortlink: `https://apply.workable.com/j/${shortcode}`,
+    url: `https://apply.workable.com/fixture-labs/j/${shortcode}/`,
+    country: 'Spain',
+    city: 'Madrid',
+    telecommuting: false,
+    department: 'Engineering',
+    ...(employment_type === undefined ? {} : { employment_type }),
+    published_on: '2026-11-10',
+  });
+  const jobs = parseWorkableWidget(
+    { name: 'Fixture Labs', jobs: [row('AAA111', 'Full-time'), row('BBB222', 'Contract'), row('CCC333')] },
+    'Fixture Labs',
+    'fixture-labs',
+  );
+  expect('workable: employment_type normalized; a missing field leaves it off',
+    types(jobs), ['full_time', 'contract', '<absent>']);
+}
+
+// ── SmartRecruiters (/v1/companies/<slug>/postings) ─────────────────
+{
+  const { parseSmartRecruitersResponse } = await load('smartrecruiters.mjs');
+  const item = (id, type) => ({
+    id,
+    name: `Role ${id}`,
+    ref: `https://api.smartrecruiters.com/v1/companies/fixturelabs/postings/${id}`,
+    releasedDate: '2026-11-10T09:00:00.000Z',
+    location: { city: 'Madrid', country: 'es', remote: false, fullLocation: 'Madrid, Spain' },
+    ...(type === undefined ? {} : { typeOfEmployment: type }),
+  });
+  const jobs = parseSmartRecruitersResponse(
+    // the live pairs: the id names the term ("permanent"), only the label names the type
+    {
+      content: [
+        item('744000000000001', { id: 'permanent', label: 'Full-time' }),
+        item('744000000000002', { id: 'intern', label: 'Intern' }),
+        item('744000000000003'),
+      ],
+    },
+    'Fixture Labs',
+    'fixturelabs',
+  );
+  expect('smartrecruiters: typeOfEmployment.label normalized; a missing field leaves it off',
+    types(jobs), ['full_time', 'internship', '<absent>']);
+}
+
+// ── Recruitee (/api/offers) ─────────────────────────────────────────
+{
+  const { parseRecruiteeResponse } = await load('recruitee.mjs');
+  const offer = (id, employment_type_code) => ({
+    id,
+    title: `Role ${id}`,
+    careers_url: `https://fixturelabs.recruitee.com/o/role-${id}`,
+    location: 'Madrid, Spain',
+    published_at: '2026-11-10 09:00:00 UTC',
+    ...(employment_type_code === undefined ? {} : { employment_type_code }),
+  });
+  const jobs = parseRecruiteeResponse(
+    { offers: [offer(1, 'fulltime_permanent'), offer(2, 'parttime_fixed_term'), offer(3)] },
+    'Fixture Labs',
+  );
+  expect('recruitee: employment_type_code normalized (a fixed term is temporary); a missing field leaves it off',
+    types(jobs), ['full_time', 'temporary', '<absent>']);
+}
+
+// ── Personio (/xml) ─────────────────────────────────────────────────
+{
+  const { parsePersonioXml } = await load('personio.mjs');
+  const position = (id, employmentType, schedule) =>
+    `<position><id>${id}</id><office>Madrid</office><name>Role ${id}</name>` +
+    (employmentType ? `<employmentType>${employmentType}</employmentType>` : '') +
+    (schedule ? `<schedule>${schedule}</schedule>` : '') +
+    `<createdAt>2026-11-10T09:00:00+00:00</createdAt></position>`;
+  const jobs = parsePersonioXml(
+    `<workzag-jobs>${position(1, 'permanent', 'full-time')}${position(2, 'intern', 'full-time')}${position(3)}</workzag-jobs>`,
+    'Fixture Labs',
+    'fixturelabs.jobs.personio.de',
+  );
+  expect('personio: <employmentType> and <schedule> normalized ("permanent" says nothing, the schedule does)',
+    types(jobs), ['full_time', 'internship', '<absent>']);
+}
+
+// ── Welcome to the Jungle (Algolia hit) ─────────────────────────────
+{
+  const { normalizeWttjHit } = await load('wttj.mjs');
+  const hit = (slug, contract_type) => ({
+    name: `Role ${slug}`,
+    slug,
+    organization: { name: 'Fixture Labs', slug: 'fixture-labs' },
+    offices: [{ city: 'Paris', country: 'France' }],
+    published_at_timestamp: 1794316578,
+    ...(contract_type === undefined ? {} : { contract_type }),
+  });
+  expect('wttj: contract_type normalized; an unknown one (apprenticeship) or a missing field leaves it off',
+    types([hit('a', 'full_time'), hit('b', 'internship'), hit('c', 'apprenticeship'), hit('d')].map(normalizeWttjHit)),
+    ['full_time', 'internship', '<absent>', '<absent>']);
+}

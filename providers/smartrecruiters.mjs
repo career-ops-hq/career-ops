@@ -26,6 +26,7 @@
 //   max_pages: 60        # a 6,000-posting walk
 
 import { intInRange } from './_config-utils.mjs';
+import { employmentTypeField } from './_employment-type.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { coerceId } from './_ids.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
@@ -351,6 +352,8 @@ export function parseSmartRecruitersResponse(json, companyName, companySlug) {
       ...(requisitionId ? { requisitionId } : {}),
       ...(language ? { language } : {}),
       ...(postedAt !== undefined ? { postedAt } : {}),
+      // typeOfEmployment.label: "Full-time", "Part-time", "Contract", "Intern"
+      ...employmentTypeField(j.typeOfEmployment?.label),
     }];
   });
 }

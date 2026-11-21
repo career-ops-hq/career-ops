@@ -1,5 +1,6 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
+/** @typedef {import('./_types.js').Job} Job */
 
 // Workable provider — public, no-auth account widget API:
 //   GET https://apply.workable.com/api/v1/widget/accounts/<slug>?details=true
@@ -38,6 +39,7 @@
 // carries every tenant's postings at once (loadWorkableFeed). scan.mjs never
 // uses it; scan-ats-full.mjs does, as its Workable source.
 
+import { employmentTypeField } from './_employment-type.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { replaceScriptStyleBlocks } from './_html-to-text.mjs';
 import { BROWSER_LIKE_USER_AGENT, fetchTextStream, isRetryableError, parseRetryAfterMs, sleep } from './_http.mjs';
@@ -322,7 +324,7 @@ export function workableListingIdentity(slug, shortcode) {
  * @param {string} companyName — value to write into job.company
  * @param {string} [boardSlug] Account slug the board was already resolved at.
  *   Callers with no namespace (the public XML feed) omit it and get no identity.
- * @returns {Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>}
+ * @returns {Job[]}
  */
 export function parseWorkableWidget(payload, companyName, boardSlug) {
   if (!payload || !Array.isArray(payload.jobs)) return [];
@@ -353,8 +355,9 @@ export function parseWorkableWidget(payload, companyName, boardSlug) {
       continue;
     }
 
+    // employment_type: "Full-time", "Part-time", "Contract", "Temporary", "Internship"
     /** @type {any} */
-    const job = { title, url, location, company: companyName };
+    const job = { title, url, location, company: companyName, ...employmentTypeField(raw?.employment_type) };
 
     const description = toPlainText(raw?.description);
     if (description) job.description = description;

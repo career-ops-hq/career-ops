@@ -1,7 +1,9 @@
 // @ts-check
+import { employmentTypeField } from './_employment-type.mjs';
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
 /** @typedef {import('./_types.js').Provider} Provider */
+/** @typedef {import('./_types.js').Job} Job */
 
 // Personio provider for public, no-auth `<slug>.jobs.personio.(de|com)` career
 // sites (common across DACH/EU companies), auto-detected from that careers
@@ -436,11 +438,12 @@ function tagText(block, tag) {
  * - location: every `<office>` in the block (primary + additionalOffices),
  *   de-duplicated, joined with ", ".
  * - postedAt: `<createdAt>` → epoch ms (omitted when unparseable/absent).
+ * - employmentType: `<employmentType>` and `<schedule>`, normalized (_employment-type.mjs); absent when unknown.
  *
  * @param {string} xml — raw XML feed body
  * @param {string} companyName — value written into job.company
  * @param {string} host — validated tenant host, e.g. `acme.jobs.personio.de`
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Job[]}
  */
 export function parsePersonioXml(xml, companyName, host) {
   if (typeof xml !== 'string') return [];
@@ -477,6 +480,9 @@ export function parsePersonioXml(xml, companyName, host) {
       location: offices.join(', '),
       company: companyName,
       postedAt: toEpochMs(tagText(scalar, 'createdAt')),
+      // <employmentType> ("permanent", "intern", "trainee", "freelance") and <schedule> ("full-time", "part-time"):
+      // "permanent" names no type, so the schedule decides it
+      ...employmentTypeField([tagText(scalar, 'employmentType'), tagText(scalar, 'schedule')]),
     });
   }
   return jobs;
