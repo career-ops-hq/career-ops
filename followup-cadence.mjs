@@ -251,7 +251,7 @@ const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
 //     row must not fail a whole report.
 //
 // @param {string} notes
-// @param {{requireValidCalendarDate?: boolean}} [options]
+// @param {{requireValidCalendarDate?: boolean, requireExactDate?: boolean}} [options]
 export function parseAppliedDate(notes, options = {}) {
   if (!notes) return null;
   const validateCalendar = options.requireValidCalendarDate === true;
@@ -267,7 +267,7 @@ export function parseAppliedDate(notes, options = {}) {
   // own measured date.
   const matches = [];
   for (const m of text.matchAll(APPLIED_DATE_RE)) {
-    matches.push({ date: m[1], index: m.index, end: m.index + m[0].length });
+    matches.push({ date: m[1], index: m.index, end: m.index + m[0].length, approximate: m[0].endsWith(`~${m[1]}`) });
   }
   if (matches.length === 0) return null;
 
@@ -285,7 +285,9 @@ export function parseAppliedDate(notes, options = {}) {
   // First-wins is preserved among a row's OWN dates: a later status date must
   // not displace the submission date (see the fixture in test-all.mjs).
   // Cross-reference filtering is orthogonal to that ordering rule.
-  if (own.length > 0) return own[0].date;
+  // Certainty belongs to the selected own mention, not another date in the
+  // note. An estimated first date must not fall through to a later exact one.
+  if (own.length > 0) return options.requireExactDate && own[0].approximate ? null : own[0].date;
 
   // Every apply-date in the note belongs to another row, so this note does not
   // state when THIS row was submitted. Returning null is the honest answer —
