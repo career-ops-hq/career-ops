@@ -79,6 +79,7 @@ All scripts live in the project root as `.mjs` modules. Most are exposed via
 | `node audit-portals.mjs` | `audit-portals.mjs` | Audit what each portals.yml board actually serves — provider, posting count, sample titles — not just whether it answers (network; `--baseline` diffs against an earlier `--json` run) |
 | `npm run reposts` | `detect-reposts.mjs` | Flag re-listed (ghost) postings from scan history |
 | `npm run filter-audit` | `filter-audit.mjs` | Show which `title_filter.positive` keywords never match, add nothing, or bring mostly low-scored offers, replayed over scan history (read-only) |
+| `npm run interview-jd-terms` | `interview-jd-terms.mjs` | Suggest `content_filter.positive` terms that appear more in the JDs of postings that reached an interview than in applied-but-no-interview ones (read-only, advisory) |
 | `node coverage-check.mjs <url> --company <name> --title <title>` | `coverage-check.mjs` | Explain why the scanners missed a posting you found by hand, and propose the `portals.yml` change that would have caught it (read-only, zero-network) |
 | `node rank-pipeline.mjs` | `rank-pipeline.mjs` | Opt-in LLM relevance re-ranker — annotates pending pipeline rows with a score + reason (off by default) |
 | `npm run gemini:eval` | `gemini-eval.mjs` | Evaluate a JD with Google Gemini (free-tier alternative) |
@@ -1689,6 +1690,31 @@ count. Duplicate entries are audited once and listed. Read-only, zero-LLM.
 ```bash
 npm run filter-audit            # human-readable summary
 node filter-audit.mjs           # JSON
+```
+
+---
+
+## interview-jd-terms
+
+Suggests `content_filter.positive` terms from the job descriptions of postings
+that reached an interview. Rows that ever reached Interview or higher (stage
+recovery from `data/status-log.tsv`, as `stats.mjs` does) are compared with rows
+that reached Applied, Responded or Assessment but never Interview. The JD is the
+report's `## Job Description (archived verbatim)` section, else a text capture
+in `jds/` found by report number; rows with no readable JD are counted and
+reported. Single words, word pairs and `skill-extract.mjs` skills are counted
+once per JD and ranked by smoothed log2 lift (Laplace smoothing). Terms already
+in `content_filter.positive` are left out, and the commonest terms overall are
+listed so boilerplate is visible.
+
+Below 8 interview and 20 baseline JDs it prints counts only, no ratios. Small
+samples and selection bias are real: treat the output as a prompt to re-read
+the JDs. Read-only and zero-LLM; it never edits `portals.yml`.
+
+```bash
+npm run interview-jd-terms          # markdown report
+node interview-jd-terms.mjs --json  # JSON
+node interview-jd-terms.mjs --self-test
 ```
 
 ---

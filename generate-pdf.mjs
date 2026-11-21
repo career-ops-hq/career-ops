@@ -421,6 +421,68 @@ function foldDiacritics(text) {
  * Keys are folded on construction so authored diacritics match stripped input.
  */
 const SECTION_ALIASES = new Map([
+  // Japanese (modes/ja) and Korean (modes/ko) — the same failure as the blocks
+  // below: no title in either resolved here, so cv.sections matched no section of
+  // such a CV and the order guard compared raw titles. The skills and
+  // career-history terms are the ones in the two READMEs (スキル, 職務経歴; 역량,
+  // 기술 역량, 경력); the rest are each section's everyday headings. Japanese kanji
+  // differ from the Chinese block's code points (学歴 is not 學歷), so nothing
+  // here collides with it.
+  ['職務要約', 'summary'],
+  ['要約', 'summary'],
+  ['プロフィール', 'summary'],
+  ['自己紹介', 'summary'],
+  ['自己pr', 'summary'],
+  ['コアスキル', 'competencies'],
+  ['主要スキル', 'competencies'],
+  ['職務経歴', 'experience'],
+  ['職歴', 'experience'],
+  ['経歴', 'experience'],
+  ['職務経験', 'experience'],
+  ['プロジェクト', 'projects'],
+  ['主なプロジェクト', 'projects'],
+  ['プロジェクト経験', 'projects'],
+  ['学歴', 'education'],
+  ['資格', 'certifications'],
+  ['保有資格', 'certifications'],
+  ['資格・免許', 'certifications'],
+  ['免許・資格', 'certifications'],
+  ['受賞歴', 'awards'],
+  ['受賞', 'awards'],
+  ['スキル', 'skills'],
+  ['技術スキル', 'skills'],
+  ['テクニカルスキル', 'skills'],
+  ['活かせる経験・知識・技術', 'skills'],
+  ['趣味', 'interests'],
+  ['興味・関心', 'interests'],
+  ['요약', 'summary'],
+  ['자기소개', 'summary'],
+  ['프로필', 'summary'],
+  ['경력 요약', 'summary'],
+  ['핵심 역량', 'competencies'],
+  ['핵심역량', 'competencies'],
+  ['경력', 'experience'],
+  ['경력 사항', 'experience'],
+  ['경력사항', 'experience'],
+  ['업무 경력', 'experience'],
+  ['프로젝트', 'projects'],
+  ['주요 프로젝트', 'projects'],
+  ['프로젝트 경험', 'projects'],
+  ['학력', 'education'],
+  ['학력 사항', 'education'],
+  ['학력사항', 'education'],
+  ['자격증', 'certifications'],
+  ['자격 사항', 'certifications'],
+  ['자격사항', 'certifications'],
+  ['수상', 'awards'],
+  ['수상 경력', 'awards'],
+  ['수상 내역', 'awards'],
+  ['역량', 'skills'],
+  ['기술 역량', 'skills'],
+  ['보유 기술', 'skills'],
+  ['기술 스택', 'skills'],
+  ['관심사', 'interests'],
+  ['취미', 'interests'],
   // English — cv.md is the source of truth and is written in English.
   ['summary', 'summary'],
   ['professional summary', 'summary'],
@@ -445,6 +507,47 @@ const SECTION_ALIASES = new Map([
   ['skills', 'skills'],
   ['technical skills', 'skills'],
   ['interests', 'interests'],
+  // German (modes/de, modes/at) — the same failure as the blocks below: no
+  // German title resolved here, so cv.sections matched no section of a German
+  // CV and the order guard compared raw titles. "Berufserfahrung" and
+  // "Werdegang" are the career-history terms in modes/de/README.md; the rest are
+  // each section's everyday headings. Umlauts fold through foldDiacritics.
+  ['zusammenfassung', 'summary'],
+  ['profil', 'summary'],
+  ['kurzprofil', 'summary'],
+  ['berufsprofil', 'summary'],
+  ['berufliches profil', 'summary'],
+  ['über mich', 'summary'],
+  ['kernkompetenzen', 'competencies'],
+  ['kompetenzen', 'competencies'],
+  ['schlüsselkompetenzen', 'competencies'],
+  ['berufserfahrung', 'experience'],
+  ['berufliche erfahrung', 'experience'],
+  ['beruflicher werdegang', 'experience'],
+  ['werdegang', 'experience'],
+  ['berufspraxis', 'experience'],
+  ['projekte', 'projects'],
+  ['ausgewählte projekte', 'projects'],
+  ['projekterfahrung', 'projects'],
+  ['ausbildung', 'education'],
+  ['bildung', 'education'],
+  ['bildungsweg', 'education'],
+  ['akademischer werdegang', 'education'],
+  ['studium', 'education'],
+  ['zertifikate', 'certifications'],
+  ['zertifizierungen', 'certifications'],
+  ['weiterbildung', 'certifications'],
+  ['weiterbildungen', 'certifications'],
+  ['auszeichnungen', 'awards'],
+  ['preise und auszeichnungen', 'awards'],
+  ['kenntnisse', 'skills'],
+  ['fähigkeiten', 'skills'],
+  ['fachkenntnisse', 'skills'],
+  ['technische kenntnisse', 'skills'],
+  ['technische fähigkeiten', 'skills'],
+  ['it-kenntnisse', 'skills'],
+  ['interessen', 'interests'],
+  ['hobbys', 'interests'],
   // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
   // variants that turn up in practice (both "Kompetencje kluczowe" and
   // "Kluczowe kompetencje" are used for the same section).
@@ -471,6 +574,46 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // French (modes/fr) — the same failure as the blocks around it: no French
+  // title resolved here, so cv.sections matched no section of a French CV and
+  // the order guard compared raw titles. A bare "Compétences" is the key-skills
+  // block and "Compétences techniques" the skills list, as the Spanish and
+  // Portuguese blocks read their own words. "Expérience" and "Éducation" fold
+  // to the English keys and already resolve, so they are not repeated.
+  ['résumé', 'summary'],
+  ['résumé professionnel', 'summary'],
+  ['profil', 'summary'],
+  ['profil professionnel', 'summary'],
+  ['à propos', 'summary'],
+  ['à propos de moi', 'summary'],
+  ['compétences', 'competencies'],
+  ['compétences clés', 'competencies'],
+  ['compétences principales', 'competencies'],
+  ['expérience professionnelle', 'experience'],
+  ['expériences professionnelles', 'experience'],
+  ['parcours professionnel', 'experience'],
+  ['projets', 'projects'],
+  ['projets sélectionnés', 'projects'],
+  ['projets personnels', 'projects'],
+  ['formation', 'education'],
+  ['formations', 'education'],
+  ['études', 'education'],
+  ['parcours académique', 'education'],
+  ['diplômes', 'education'],
+  ['certificats', 'certifications'],
+  ['distinctions', 'awards'],
+  ['prix', 'awards'],
+  ['prix et distinctions', 'awards'],
+  ['compétences techniques', 'skills'],
+  ['connaissances techniques', 'skills'],
+  ["centres d'intérêt", 'interests'],
+  ["centres d'intérêts", 'interests'],
+  // The same heading with the typographic apostrophe (U+2019), which word
+  // processors and generated CVs write; foldDiacritics keeps it as is.
+  ['centres d’intérêt', 'interests'],
+  ['centres d’intérêts', 'interests'],
+  ['intérêts', 'interests'],
+  ['loisirs', 'interests'],
   // Spanish — the same failure again: with no entries here, a Spanish CV
   // rendered in the documented modes/pdf.md order (Experiencia before Formación)
   // was rejected against a cv.md listing Formación first, and --allow-reorder was
@@ -508,6 +651,35 @@ const SECTION_ALIASES = new Map([
   ['conocimientos técnicos', 'skills'],
   ['herramientas e idiomas', 'skills'],
   ['intereses', 'interests'],
+  // Turkish (modes/tr) — the same failure as the blocks around it: no Turkish
+  // title resolved here, so cv.sections matched no section of a Turkish CV and
+  // the order guard compared raw titles. "Beceriler" and "İş deneyimi" are the
+  // skills and career-history terms in modes/tr/README.md; the rest are each
+  // section's everyday headings. Lower-casing turns "İ" into "i" plus a dot that
+  // foldDiacritics drops, so "İş" folds to "is"; the dotless "ı" stays as written.
+  ['özet', 'summary'],
+  ['profil', 'summary'],
+  ['profesyonel özet', 'summary'],
+  ['kariyer özeti', 'summary'],
+  ['hakkımda', 'summary'],
+  ['temel yetkinlikler', 'competencies'],
+  ['yetkinlikler', 'competencies'],
+  ['iş deneyimi', 'experience'],
+  ['iş deneyimleri', 'experience'],
+  ['deneyim', 'experience'],
+  ['profesyonel deneyim', 'experience'],
+  ['projeler', 'projects'],
+  ['öne çıkan projeler', 'projects'],
+  ['eğitim', 'education'],
+  ['eğitim bilgileri', 'education'],
+  ['sertifikalar', 'certifications'],
+  ['ödüller', 'awards'],
+  ['ödüller ve başarılar', 'awards'],
+  ['beceriler', 'skills'],
+  ['teknik beceriler', 'skills'],
+  ['yetenekler', 'skills'],
+  ['ilgi alanları', 'interests'],
+  ['hobiler', 'interests'],
   // Italian (modes/it) — the same failure as the blocks around it: no Italian
   // title resolved here, so cv.sections matched no section of an Italian CV and
   // the order guard compared raw titles. A bare "Competenze" is the key-skills
@@ -543,6 +715,47 @@ const SECTION_ALIASES = new Map([
   ['conoscenze tecniche', 'skills'],
   ['capacità tecniche', 'skills'],
   ['interessi', 'interests'],
+  // Danish (modes/da) and Norwegian Bokmål (modes/nb) — the same failure as the
+  // blocks around them: no title in either resolved here, so cv.sections matched
+  // no section of such a CV and the order guard compared raw titles. The skills
+  // and career-history terms are the ones in the two READMEs (Kompetencer,
+  // Karriereforløb, Erhvervserfaring; Kompetanse, Arbeidserfaring, Yrkeserfaring);
+  // the rest are each section's everyday headings, listed once where the two
+  // languages share a spelling (Erfaring, Priser, Interesser).
+  ['profil', 'summary'],
+  ['resumé', 'summary'],
+  ['sammenfatning', 'summary'],
+  ['om mig', 'summary'],
+  ['sammendrag', 'summary'],
+  ['om meg', 'summary'],
+  ['kernekompetencer', 'competencies'],
+  ['kjernekompetanse', 'competencies'],
+  ['erhvervserfaring', 'experience'],
+  ['karriereforløb', 'experience'],
+  ['arbejdserfaring', 'experience'],
+  ['arbeidserfaring', 'experience'],
+  ['yrkeserfaring', 'experience'],
+  ['erfaring', 'experience'],
+  ['projekter', 'projects'],
+  ['prosjekter', 'projects'],
+  ['uddannelse', 'education'],
+  ['utdanning', 'education'],
+  ['utdannelse', 'education'],
+  ['certificeringer', 'certifications'],
+  ['certifikater', 'certifications'],
+  ['sertifiseringer', 'certifications'],
+  ['sertifikater', 'certifications'],
+  ['priser', 'awards'],
+  ['udmærkelser', 'awards'],
+  ['utmerkelser', 'awards'],
+  ['kompetencer', 'skills'],
+  ['kompetanse', 'skills'],
+  ['færdigheder', 'skills'],
+  ['tekniske færdigheder', 'skills'],
+  ['ferdigheter', 'skills'],
+  ['tekniske ferdigheter', 'skills'],
+  ['interesser', 'interests'],
+  ['fritidsinteresser', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -609,6 +822,35 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Dutch (modes/nl) — the same failure as the blocks around it: no Dutch title
+  // resolved here, so cv.sections matched no section of a Dutch CV and the
+  // order guard compared raw titles. "Interesses" folds to the Portuguese key
+  // below and already resolves, so it is not repeated.
+  ['profiel', 'summary'],
+  ['persoonlijk profiel', 'summary'],
+  ['samenvatting', 'summary'],
+  ['over mij', 'summary'],
+  ['kerncompetenties', 'competencies'],
+  ['competenties', 'competencies'],
+  ['werkervaring', 'experience'],
+  ['professionele ervaring', 'experience'],
+  ['ervaring', 'experience'],
+  ['loopbaan', 'experience'],
+  ['projecten', 'projects'],
+  ['geselecteerde projecten', 'projects'],
+  ['opleiding', 'education'],
+  ['opleidingen', 'education'],
+  ['onderwijs', 'education'],
+  ['certificaten', 'certifications'],
+  ['certificeringen', 'certifications'],
+  ['prijzen', 'awards'],
+  ['onderscheidingen', 'awards'],
+  ['vaardigheden', 'skills'],
+  ['technische vaardigheden', 'skills'],
+  ['kennis en vaardigheden', 'skills'],
+  ["hobby's", 'interests'],
+  // With the typographic apostrophe (U+2019), which foldDiacritics keeps.
+  ['hobby’s', 'interests'],
   // Portuguese (pt-BR / pt-PT) — the same failure as Spanish above: modes/pt/
   // ships a Portuguese market set, but no Portuguese title resolved here, so
   // cv.sections matched no section of a Portuguese CV and the order guard fell
@@ -639,6 +881,46 @@ const SECTION_ALIASES = new Map([
   ['competências técnicas', 'skills'],
   ['conhecimentos técnicos', 'skills'],
   ['interesses', 'interests'],
+  // Russian (modes/ru) and Ukrainian (modes/ua) — the same failure as the blocks
+  // above: no title in either resolved here, so cv.sections matched no section
+  // of such a CV and the order guard compared raw titles. The skills and
+  // career-history terms are the ones in the two READMEs (Навыки, Опыт работы;
+  // Навички, Досвід роботи); the rest are each section's everyday headings.
+  // foldDiacritics turns й into и and ї into і on both sides of the lookup.
+  ['о себе', 'summary'],
+  ['обо мне', 'summary'],
+  ['профиль', 'summary'],
+  ['про себе', 'summary'],
+  ['профіль', 'summary'],
+  ['ключевые навыки', 'competencies'],
+  ['ключевые компетенции', 'competencies'],
+  ['компетенции', 'competencies'],
+  ['ключові навички', 'competencies'],
+  ['ключові компетенції', 'competencies'],
+  ['компетенції', 'competencies'],
+  ['опыт работы', 'experience'],
+  ['опыт', 'experience'],
+  ['профессиональный опыт', 'experience'],
+  ['досвід роботи', 'experience'],
+  ['досвід', 'experience'],
+  ['професійний досвід', 'experience'],
+  ['проекты', 'projects'],
+  ['проєкти', 'projects'],
+  ['проекти', 'projects'],
+  ['образование', 'education'],
+  ['освіта', 'education'],
+  ['сертификаты', 'certifications'],
+  ['сертифікати', 'certifications'],
+  ['награды', 'awards'],
+  ['нагороди', 'awards'],
+  ['навыки', 'skills'],
+  ['технические навыки', 'skills'],
+  ['навички', 'skills'],
+  ['технічні навички', 'skills'],
+  ['интересы', 'interests'],
+  ['хобби', 'interests'],
+  ['інтереси', 'interests'],
+  ['хобі', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
@@ -1667,7 +1949,9 @@ export const ARTIFACT_KINDS = ['cv', 'cover'];
  *
  * Precedence, most specific first:
  *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
- *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *   2. A standard name from lib/output-names.mjs (`{NNN}-{company}-{kind}-...`),
+ *      which carries its kind as a token after the report number and company.
+ *   2b. A `cv-` prefix, the CV convention every generator writes. It wins over
  *      the cover check so a company whose own name starts with "Cover" keeps
  *      its CV filed as a CV.
  *   3. `cover` as the leading or trailing token: both real conventions, the
@@ -1694,6 +1978,25 @@ export function resolveArtifactKind(explicit, outputPath) {
   }
 
   const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  // Standard names from lib/output-names.mjs (#6667) lead with the report
+  // number, so neither the prefix nor the suffix rules below see their kind
+  // token. A renderer-owned `.overflow` / `.overflow-2` draft keeps its kind.
+  // Read inline rather than imported: isolated generate-pdf fixtures copy a
+  // fixed list of this script's imports. tests/pdf-index-kind.test.mjs keeps it
+  // in step with parseOutputName(). Exactly one kind token, else it falls
+  // through (a name carrying two is ambiguous without the report's company).
+  const stdName = name.replace(/\.overflow(-\d+)?$/, '');
+  // Count only the kind words between two dashes in the name's head
+  // (`{company}-{kind}-{candidate}`), as parseOutputName() does: a company that
+  // starts with "Cover" or a candidate that ends with it carries no second
+  // kind, while adjacent tokens ("-cover-cv-") are both seen. Read inline
+  // rather than imported (fixtures copy a fixed list of imports);
+  // tests/pdf-index-kind.test.mjs keeps it in step with the builder.
+  const stdHead = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?$/.exec(stdName);
+  const stdKinds = stdHead
+    ? stdHead[1].split('-').slice(1, -1).filter((part) => part === 'cv' || part === 'cover')
+    : [];
+  if (stdKinds.length === 1) return { kind: stdKinds[0], source: 'name' };
   if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
   if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
     return { kind: 'cover', source: 'name' };
