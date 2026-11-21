@@ -11,6 +11,10 @@ import { localToday } from '../lib/local-today.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
 import { describeDrift, diffSnapshots, snapshotDataRoot } from './data-root-guard.mjs';
 import { REQUIRED_TOOL_ENV, toolRequired } from './required-tools.mjs';
+import { formatManifest, looseManifest } from '../seeds/employers-fold.mjs';
+import { chunkInbox } from '../seeds/employers-import.mjs';
+import { INBOX_DIR } from '../seeds/employers-inbox.mjs';
+import { loadOwnDomainContributors } from '../seeds/employers-validate.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const ROOT = join(__dirname, '..');   // repo root (tests/ lives one level down)
@@ -1976,6 +1980,22 @@ export function copyEmployerRegistry(destDir) {
   const src = join(ROOT, 'employers');
   const inbox = join(src, 'inbox');
   cpSync(src, join(destDir, 'employers'), { recursive: true, filter: (p) => p !== inbox && !p.startsWith(inbox + sep) });
+}
+
+/** Write the own-domain rows as a separate contribution beside the imported files. */
+export function writeOwnDomainInbox(root, rows, date) {
+  if (rows.length === 0) return [];
+  const [login] = loadOwnDomainContributors(root);
+  if (!login) throw new Error('expected an authorized own-domain contributor');
+  const id = `${date}-${login}`;
+  const inbox = join(root, INBOX_DIR);
+  const lines = rows.map(({ ats, board, name, own_domain_mark }) => ({ ats, board, name, own_domain_mark }));
+  const chunks = chunkInbox(lines, id);
+  for (const chunk of chunks) {
+    writeFileSync(join(inbox, chunk.name), `${chunk.lines.map((line) => JSON.stringify(line)).join('\n')}\n`, { flag: 'wx' });
+  }
+  writeFileSync(join(inbox, `${id}.json`), formatManifest(looseManifest({ id, login, date, rows: lines.length })), { flag: 'wx' });
+  return chunks.map(({ name }) => name);
 }
 
 /** Every row of the committed employer registry, parsed. */

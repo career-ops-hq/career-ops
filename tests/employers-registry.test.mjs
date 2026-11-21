@@ -17,11 +17,12 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
+import { resolveProvider } from '../providers/_registry.mjs';
 
 import {
   BOARD_ATS, DNS_LABEL_ATS, OWN_DOMAIN_ATS, OPTIONAL_REGION_BOARD_URL_BUILDERS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, SUBDOMAIN_LABEL_RE,
@@ -194,8 +195,17 @@ test('every admitted ATS has the provider that reads it, and that provider reads
 
 test('every committed row is read by its own provider', () => {
   const rows = rowsOf(REGISTRY);
+  const providers = new Map(Object.entries(PROVIDERS));
   assert.ok(rows.length >= 40, `expected the first hand-picked boards, found ${rows.length}`);
   for (const { file, row } of rows) {
+    if (OWN_DOMAIN_ATS.includes(row.ats)) {
+      assert.equal(buildBoardUrl({ ats: row.ats, board: row.board }), row.careers_url, file);
+      const entry = { name: row.name, careers_url: row.careers_url, provider: row.ats };
+      const resolved = resolveProvider(entry, providers);
+      assert.ok(resolved?.provider, file);
+      assert.equal(resolved.provider, PROVIDERS[row.ats], file);
+      continue;
+    }
     const detected = PROVIDERS[row.ats].detect({ name: row.name, careers_url: row.careers_url });
     assert.ok(detected, `${file}: ${row.ats}.detect() rejects ${row.careers_url}`);
   }
@@ -771,7 +781,7 @@ test('the step summary lists the first findings only, errors first, and makes re
 
 const MARK = { mark: 'phenompeople-assets', checked_on: NEW_DAY };
 const ownRow = (over = {}) => ({ ats: 'phenom', board: 'careers.fixture-own.example', own_domain_mark: MARK, ...over });
-const allowNewcomer = (head) => writeFileSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'), '# test\nnewcomer\n');
+const allowNewcomer = (head) => appendFileSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'), '\nnewcomer\n');
 
 test('own domain: rows from a contributor in OWN_DOMAIN_CONTRIBUTORS pass, for each of the three systems', () => {
   const r = pr((head) => {

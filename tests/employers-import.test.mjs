@@ -3,11 +3,11 @@
 // employers/inbox/ files.
 //
 // The core is parseBoardUrl(), the reverse of the builders in
-// lib/ats-board-url.mjs: every committed row's careers_url must read back to
-// that row's coordinates, each ATS's other URL shapes (job links, legacy hosts,
-// locale prefixes) must read back to their board, and anything else must be
-// rejected with a reason. Then the list reader, the 5,000-line split, and the
-// command from a list to an inbox the validator accepts.
+// lib/ats-board-url.mjs: URLs that name a board must read back to its coordinates.
+// Own-domain rows are checked against the builder. Job links, legacy hosts,
+// and locale prefixes must read back to their board. Unsupported URLs must be
+// rejected with a reason. The CLI tests cover the list reader, the 5,000-line
+// split, and validation of the resulting inbox.
 //
 // Run:  node --test tests/employers-import.test.mjs
 
@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { ROOT, copyEmployerRegistry, unlistedEmployerBoard } from './helpers.mjs';
+import { ROOT, copyEmployerRegistry, unlistedEmployerBoard, writeOwnDomainInbox } from './helpers.mjs';
 
 import { BOARD_ATS, OWN_DOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
@@ -54,10 +54,14 @@ const coordsOf = (row) => {
 
 // ── parseBoardUrl ────────────────────────────────────────────────────────
 
-test('every committed careers_url reads back to its row, unchanged', () => {
+test('every committed careers_url matches its row', () => {
   const rows = committedRows();
   assert.ok(rows.length >= 50, `expected the committed boards, found ${rows.length}`);
   for (const row of rows) {
+    if (OWN_DOMAIN_ATS.includes(row.ats)) {
+      assert.equal(buildBoardUrl({ ats: row.ats, board: row.board }), row.careers_url, row.careers_url);
+      continue;
+    }
     assert.deepEqual(parseBoardUrl(row.careers_url), { ...coordsOf(row), careers_url: row.careers_url }, row.careers_url);
   }
 });
@@ -425,7 +429,10 @@ function checkout() {
 test('CLI: the committed boards and new ones become an inbox the validator accepts, known boards as a warning', () => {
   const dir = checkout();
   try {
-    const known = committedRows().map(({ careers_url, name }) => `${careers_url},"${name.replaceAll('"', '""')}"`);
+    const rows = committedRows();
+    const ownDomain = rows.filter((row) => OWN_DOMAIN_ATS.includes(row.ats));
+    const known = rows.filter((row) => !OWN_DOMAIN_ATS.includes(row.ats))
+      .map(({ careers_url, name }) => `${careers_url},"${name.replaceAll('"', '""')}"`);
     const list = join(dir, 'list.csv');
     // newco-one has an empty name cell; newco-two is a bare URL line with no comma, the shape of a plain list of addresses.
     writeFileSync(list, ['url,name', ...known, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-one')},`, `https://jobs.lever.co/${unlistedEmployerBoard('lever', 'newco-two')}`, 'https://nope.example/jobs,', ''].join('\n'));
@@ -445,18 +452,23 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
       + `${known.length + 4},https://nope.example/jobs,`
       + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)"\n');
 
+    const ownFiles = writeOwnDomainInbox(dir, ownDomain, '2026-11-10');
+    const fileCount = parts + ownFiles.length + Number(ownFiles.length > 0); // includes the manifest
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);
-    // One warning for each part, at its first line, and together they count every known board.
+    assert.ok(v.stdout.includes(`inbox: ${rows.length + 2} board(s) in ${fileCount} file(s), ${rows.length} already in the registry`), v.stdout);
+    // Each file with known boards warns at its first line.
+    const warningFiles = [...files.slice(0, Math.ceil(known.length / INBOX_MAX_LINES)), ...ownFiles].sort();
     const warned = v.stderr.trim().split('\n');
-    assert.equal(warned.length, parts, 'one warning for each part, nothing else');
+    assert.equal(warned.length, warningFiles.length, 'one warning for each file with known boards');
     let already = 0;
     warned.forEach((line, i) => {
-      const m = new RegExp(`^warning: employers/inbox/${files[i]}:1: (\\d+) boards? (?:is|are) already in the registry`).exec(line);
+      const m = /^warning: employers\/inbox\/([^:]+):1: (\d+) boards? (?:is|are) already in the registry/.exec(line);
       assert.ok(m, line);
-      already += Number(m[1]);
+      assert.equal(m[1], warningFiles[i]);
+      already += Number(m[2]);
     });
-    assert.equal(already, known.length);
+    assert.equal(already, rows.length);
 
     // A second run for the same contribution does not overwrite it.
     const again = node(IMPORTER, [list, '--login', 'octocat', '--date', '2026-11-10'], dir);
