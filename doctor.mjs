@@ -1512,8 +1512,8 @@ function pluginState(manifest, cfg) {
   return { ...s, missingEnv, enabled: s.configured && missingEnv.length === 0 };
 }
 
-function activePlugins(root) {
-  return discoverPlugins(pluginRoots(root), resolveSuccessorIds(root));
+function activePlugins(root, dataRoot = root) {
+  return discoverPlugins(pluginRoots(root, dataRoot), resolveSuccessorIds(root, dataRoot));
 }
 
 function checkPlugins(root) {
@@ -1522,7 +1522,7 @@ function checkPlugins(root) {
   // data root. Reading plugins from the data root reports "none installed"
   // while `node plugins.mjs list` on the same install lists them. --target
   // sets codeRoot to the directory it was given.
-  try { manifests = activePlugins(codeRoot); } catch { return { pass: true, label: 'Plugins: none' }; }
+  try { manifests = activePlugins(codeRoot, root); } catch { return { pass: true, label: 'Plugins: none' }; }
   if (manifests.length === 0) return { pass: true, label: 'Plugins: none installed' };
   const { cfg, error: cfgError } = readPluginConfigSync(root);
   // Reported before the per-plugin lines, because when the config did not parse
@@ -2014,7 +2014,7 @@ function onboardingState(root) {
     // Travels in the JSON so a consumer can tell "nothing enabled" from "the
     // config did not parse" — the two used to be the same empty list.
     pluginConfigError = error;
-    plugins = activePlugins(codeRoot).map((m) => {
+    plugins = activePlugins(codeRoot, root).map((m) => {
       const s = pluginState(m, cfg);
       return { id: m.id, hooks: m.hooks, enabled: s.enabled, missingEnv: s.missingEnv };
     });

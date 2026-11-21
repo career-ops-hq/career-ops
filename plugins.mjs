@@ -27,7 +27,7 @@ import { validateFlags, flagValue } from './lib/cli-flags.mjs';
 import {
   discoverPlugins, pluginRoots, loadPluginConfig, pluginStatus,
   runHook, filterResultsForId, loadDotenvOnce, HOOK_KINDS, loadSkill, resolveSuccessorIds,
-  warnConfigLeftInCodeRoot, ID_RE,
+  warnConfigLeftInCodeRoot, ID_RE, pluginSource,
 } from './plugins/_engine.mjs';
 import { loadRegistry, findInRegistry, classifySource, sourceBadge, successorFor } from './plugins/_registry.mjs';
 import { readLock, readLockForUpdate, writeLockEntry, removeLockEntry, hashPluginTree, consentSurface } from './plugins/_lock.mjs';
@@ -199,8 +199,8 @@ async function cmdList() {
   warnConfigLeftInCodeRoot(ROOT, DATA_ROOT);
   const cfg = await loadPluginConfig(DATA_ROOT);
   await loadDotenvOnce(DATA_ROOT);
-  const overridden = resolveSuccessorIds(ROOT); // ids where an installed successor is active
-  const manifests = discoverPlugins(pluginRoots(ROOT), overridden);
+  const overridden = resolveSuccessorIds(ROOT, DATA_ROOT); // ids where an installed successor is active
+  const manifests = discoverPlugins(pluginRoots(ROOT, DATA_ROOT), overridden);
   if (manifests.length === 0) {
     console.log('No plugins discovered. Bundled plugins live in plugins/; your own in plugins.local/.');
     return;
@@ -212,7 +212,7 @@ async function cmdList() {
       : !configured ? '○ disabled (config/plugins.yml)'
         : `⚠️  missing env: ${missingEnv.join(', ')}`;
     // Annotate the seed/successor relationship.
-    const isLocal = !m.dir.startsWith(path.join(ROOT, 'plugins') + path.sep);
+    const isLocal = pluginSource(m, ROOT) === 'local';
     const succ = successorFor(ROOT, m.id);
     const tag = overridden.has(m.id) && isLocal ? '  🔁 maintained successor (overriding the bundled reference)'
       : succ ? `  🔁 reference seed — maintained version available: ${succ.name}`
@@ -353,7 +353,7 @@ function exitIfPluginDidNotRun(results, id, hook) {
 }
 
 function findManifest(id) {
-  return discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).find(m => m.id === id) || null;
+  return discoverPlugins(pluginRoots(ROOT, DATA_ROOT), resolveSuccessorIds(ROOT, DATA_ROOT)).find(m => m.id === id) || null;
 }
 
 // The registry lists `career-ops-plugin-<id>`, and `plugins.mjs available`
@@ -673,7 +673,7 @@ async function cmdAvailable() {
 function cmdSkill(args) {
   const id = args[0];
   if (!id) {
-    const withSkill = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT)).filter(m => m.skill);
+    const withSkill = discoverPlugins(pluginRoots(ROOT, DATA_ROOT), resolveSuccessorIds(ROOT, DATA_ROOT)).filter(m => m.skill);
     console.log(withSkill.length ? 'Plugins that ship a skill:\n' + withSkill.map(m => `  ${m.id}`).join('\n') + '\n\nRead one: node plugins.mjs skill <id>' : 'No installed plugin ships a skill.');
     return;
   }
@@ -695,7 +695,7 @@ function cmdEnable(args) {
   if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
   const m = resolved.manifest;
   const id = m.id;
-  const lock = readLock(ROOT);
+  const lock = readLock(DATA_ROOT, ROOT);
   const entry = lock.plugins?.[id];
   const source = classifySource(m, ROOT, entry);
   if (!confirm) {
@@ -705,12 +705,12 @@ function cmdEnable(args) {
     return;
   }
   const tree = hashPluginTree(m.dir);
-  writeLockEntry(ROOT, id, {
+  writeLockEntry(DATA_ROOT, id, {
     source: source === 'bundled' ? 'bundled' : 'local',
     repo: entry?.repo || null, sha: entry?.sha || null,
     version: m.version || '0.0.0', integrity: tree.integrity, files: tree.files,
     consent: { ...consentSurface(m), acceptedAt: new Date().toISOString() },
-  });
+  }, ROOT);
   setEnabled(id, true);
   console.log(`✅ Enabled ${id}.${m.requiredEnv.length ? ' Add its keys to .env: ' + m.requiredEnv.join(', ') : ''}`);
 }
@@ -721,8 +721,8 @@ function cmdTrust(args) {
   const m = resolved.manifest;
   const id = m.id;
   const tree = hashPluginTree(m.dir);
-  const entry = readLock(ROOT).plugins?.[id] || {};
-  writeLockEntry(ROOT, id, { ...entry, source: classifySource(m, ROOT, entry) === 'bundled' ? 'bundled' : 'local', version: m.version || '0.0.0', integrity: tree.integrity, files: tree.files, consent: { ...consentSurface(m), acceptedAt: new Date().toISOString() } });
+  const entry = readLock(DATA_ROOT, ROOT).plugins?.[id] || {};
+  writeLockEntry(DATA_ROOT, id, { ...entry, source: classifySource(m, ROOT, entry) === 'bundled' ? 'bundled' : 'local', version: m.version || '0.0.0', integrity: tree.integrity, files: tree.files, consent: { ...consentSurface(m), acceptedAt: new Date().toISOString() } }, ROOT);
   console.log(`✓ Re-pinned ${id} to its current files — it will load again.`);
 }
 
@@ -736,21 +736,62 @@ function cmdRemove(args) {
   // path segment and passes; the lookup below turns it into the manifest id.
   if (!ID_RE.test(token)) { console.error(`✗ Invalid plugin id ${JSON.stringify(token)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
   const resolved = resolvePluginArg(token);
-  if (!resolved.manifest) { console.error(resolved.message); process.exit(1); }
-  const id = resolved.manifest.id;
+  // A partial folder delete can take manifest.json before failing on another
+  // child. The leftover then has no manifest to resolve, so a remove retry
+  // exited "Unknown plugin" while the folder stayed, and add refused the
+  // existing destination. The token already passed ID_RE, so it is one name
+  // segment: a surviving directory at plugins.local/<token> is a validated
+  // data-root local-plugin leftover that remove may finish cleaning up.
+  let id = resolved.manifest?.id;
+  if (!id) {
+    const leftover = path.join(DATA_ROOT, 'plugins.local', token);
+    if (existsSync(leftover) && statSync(leftover).isDirectory()) {
+      id = token;
+    } else {
+      console.error(resolved.message);
+      process.exit(1);
+    }
+  }
   if (!ID_RE.test(id)) { console.error(`✗ Invalid plugin id ${JSON.stringify(id)} (need ^[a-z0-9][a-z0-9-]*$)`); process.exit(1); }
-  // A torn lock throws from removeLockEntry. Checking it after the directory
-  // is gone skips the disable step and reports failure for a plugin that is
-  // already deleted.
+  // The lock entry goes before the folder. With the folder deleted first, a
+  // torn lock or a failed lock save left a pin for a plugin whose manifest was
+  // already gone, and a second remove could no longer find it to finish the
+  // job. Nothing has changed when this fails, and removeLockEntry is a no-op
+  // for a missing entry, so remove can always be run again. The pin is kept
+  // at hand so the reverse failure — the folder refusing to go once the pin
+  // is already gone — can put it back.
+  const previousPin = readLock(DATA_ROOT, ROOT).plugins?.[id];
   try {
-    readLockForUpdate(ROOT);
+    removeLockEntry(DATA_ROOT, id, ROOT);
   } catch (err) {
     console.error(`✗ ${err.message}`);
     process.exit(1);
   }
-  const dir = path.join(ROOT, 'plugins.local', id);
-  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
-  removeLockEntry(ROOT, id);
+  const dir = path.join(DATA_ROOT, 'plugins.local', id);
+  try {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    // The pin is gone but the files are not. Left like this, the still-enabled
+    // plugin would pin whatever survived on its next run and load that. Put
+    // the pin back so the leftover files stay checked against it; with no pin
+    // to restore, disable the plugin so it cannot load unpinned files.
+    if (previousPin) {
+      try {
+        writeLockEntry(DATA_ROOT, id, previousPin, ROOT);
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  The pin was put back; fix the folder and run remove again.`);
+      } catch (restoreErr) {
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  Putting the pin back failed too: ${restoreErr.message}`);
+      }
+    } else {
+      try {
+        setEnabled(id, false);
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  There was no pin to put back, so ${id} was disabled; fix the folder and run remove again.`);
+      } catch (disableErr) {
+        console.error(`✗ could not delete ${dir}: ${err.message}\n  There was no pin to put back, and disabling ${id} failed too: ${disableErr.message}`);
+      }
+    }
+    process.exit(1);
+  }
   // The files and the lock entry are already gone, so a config problem must not
   // fail the command — but it must not be invisible either. This catch used to
   // swallow nothing worth seeing; now it can catch a real, actionable one, and
@@ -770,7 +811,7 @@ function cmdNew(args) {
   const name = args[0];
   if (!name) { console.error('Usage: node plugins.mjs new <name>'); process.exit(1); }
   let dest;
-  try { dest = scaffoldNew(ROOT, name); } catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+  try { dest = scaffoldNew(DATA_ROOT, name, ROOT); } catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
   console.log(`✓ Scaffolded plugins.local/${name}/`);
   console.log('  Next: edit manifest.json + index.mjs, then either');
   console.log(`    A) develop locally:  node plugins.mjs enable ${name}`);
@@ -795,16 +836,33 @@ async function cmdAdd(args) {
     console.log("⚠️  Not in the career-ops registry — you are installing this author's code with your privileges.");
   }
 
+  // A torn lock throws from writeLockEntry after the clone. Checking it first
+  // keeps a refused install from leaving a half-installed plugin directory.
+  try {
+    readLockForUpdate(DATA_ROOT, ROOT);
+  } catch (err) {
+    console.error(`✗ ${err.message}`);
+    process.exit(1);
+  }
   console.log(`Cloning ${url} @ ${String(useSha).slice(0, 10)} …`);
   let installed;
-  try { installed = installFromRepo(ROOT, { url, sha: useSha }); }
+  try { installed = installFromRepo(DATA_ROOT, { url, sha: useSha }); }
   catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
 
-  writeLockEntry(ROOT, installed.id, {
-    source: 'local', repo: installed.repo, sha: installed.sha,
-    version: installed.manifest.version || '0.0.0', integrity: installed.integrity, files: installed.files,
-    consent: consentSurface(installed.manifest),
-  });
+  // installFromRepo refuses an existing plugins.local/<id>, so this folder is
+  // the clone made just now. Without its pin it cannot load, and it would stop
+  // the next add at "already exists": take it back out so add can run again.
+  try {
+    writeLockEntry(DATA_ROOT, installed.id, {
+      source: 'local', repo: installed.repo, sha: installed.sha,
+      version: installed.manifest.version || '0.0.0', integrity: installed.integrity, files: installed.files,
+      consent: consentSurface(installed.manifest),
+    }, ROOT);
+  } catch (err) {
+    rmSync(installed.manifest.dir, { recursive: true, force: true });
+    console.error(`✗ ${installed.id} was not installed: its pin could not be written (${err.message})`);
+    process.exit(1);
+  }
   console.log(`✓ Installed plugins.local/${installed.id}  (${approved ? '✓ approved' : '❓ unverified'}, pinned ${String(useSha).slice(0, 7)})`);
   for (const w of installed.warnings) console.log(`⚠ ${w}`);
   console.log(capabilityCard(installed.manifest, approved ? 'approved' : 'unverified'));

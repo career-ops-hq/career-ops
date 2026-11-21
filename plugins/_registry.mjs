@@ -90,8 +90,23 @@ export function findInRegistry(root, nameOrId) {
  * @returns {'bundled'|'approved'|'off-registry'|'unverified'}
  */
 export function classifySource(manifest, root, lockEntry) {
-  if (manifest.dir.startsWith(path.join(root, 'plugins') + path.sep) ||
-      manifest.dir.startsWith(path.join(CODEBASE_ROOT, 'plugins') + path.sep)) return 'bundled';
+  if (!manifest?.dir) return 'unverified';
+  const normDir = path.resolve(manifest.dir);
+  const normBundled = path.resolve(root, 'plugins');
+  const normCodebase = path.resolve(CODEBASE_ROOT, 'plugins');
+  // Same rule as pluginSource(): a plugins.local/ segment counts only at or
+  // below a plugin root, never as an ancestor of the checkout itself — a
+  // checkout named plugins.local must not reclassify its bundled plugins
+  // (#7177 review).
+  const underBase = (base) => {
+    const rel = path.relative(path.resolve(base), normDir);
+    return rel === '' || rel.startsWith('..') ? null : rel.split(path.sep);
+  };
+  const underRoot = underBase(root) || underBase(CODEBASE_ROOT);
+  const inLocal = underRoot ? underRoot.includes('plugins.local') : true;
+  if (!inLocal && (normDir.startsWith(normBundled + path.sep) || normDir.startsWith(normCodebase + path.sep))) {
+    return 'bundled';
+  }
   const reg = findInRegistry(root, manifest.id);
   if (!reg) return 'unverified';
   if (lockEntry && lockEntry.sha && reg.sha && lockEntry.sha !== reg.sha) return 'off-registry';

@@ -30,7 +30,7 @@ import { pathToFileURL } from 'url';
 import { resolveAndValidate } from './_net.mjs';
 import { normalizeUrl, aggregatorPostingId } from '../url-key.mjs';
 import { getCareerOpsRoot } from '../path-resolver.mjs';
-import { readLock, readLockForUpdate, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface } from './_lock.mjs';
+import { readLock, readLockForUpdate, writeLockEntry, diffPlugin, describeDrift, hashPluginTree, consentSurface, migrateLegacyLock } from './_lock.mjs';
 import { loadRegistry } from './_registry.mjs';
 
 /** The complete, closed set of hook kinds. Anything else (apply/submit/…) is rejected. */
@@ -208,6 +208,18 @@ export function warnConfigLeftInCodeRoot(root, dataRoot) {
     const target = path.join(dataRoot, name);
     if (existsSync(left) && !existsSync(target)) {
       console.warn(`⚠️  ${name} is in the code folder, not the data folder, so plugins do not read it: ${hint(left, target)}`);
+    }
+  }
+  const legacyLocal = path.join(root, 'plugins.local');
+  if (existsSync(legacyLocal)) {
+    let hasPlugins = false;
+    try {
+      const entries = readdirSync(legacyLocal, { withFileTypes: true });
+      hasPlugins = entries.some(e => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith('.') && !e.name.startsWith('_'));
+    } catch {}
+    if (hasPlugins) {
+      const targetLocal = path.join(dataRoot, 'plugins.local');
+      console.warn(`⚠️  plugins.local is in the code folder, not the data folder, so plugins do not read it: move each plugin folder inside ${legacyLocal} into ${targetLocal} (if ${targetLocal} already exists, move the folders themselves, not the whole plugins.local folder, and do not overwrite a plugin of the same name)`);
     }
   }
 }
@@ -408,14 +420,14 @@ export function discoverPlugins(roots, overrideIds = new Set()) {
  * @param {string} root
  * @returns {Set<string>}
  */
-export function resolveSuccessorIds(root) {
+export function resolveSuccessorIds(root, dataRoot = root) {
   const ids = new Set();
   try {
     const reg = loadRegistry(root);
-    const lock = readLock(root);
+    const lock = readLock(dataRoot, root);
     for (const e of reg.plugins) {
       if (e.supersedesBundled !== true || typeof e.id !== 'string') continue;
-      const localManifest = path.join(root, 'plugins.local', e.id, 'manifest.json');
+      const localManifest = path.join(dataRoot, 'plugins.local', e.id, 'manifest.json');
       const installedSha = lock?.plugins?.[e.id]?.sha;
       if (existsSync(localManifest) && installedSha && installedSha === e.sha) ids.add(e.id);
     }
@@ -429,9 +441,10 @@ export function resolveSuccessorIds(root) {
  * The standard pair of roots for a project: bundled plugins/ then user
  * plugins.local/ (the latter only matters when it exists).
  * @param {string} root
+ * @param {string} [dataRoot]
  */
-export function pluginRoots(root) {
-  return [path.join(root, 'plugins'), path.join(root, 'plugins.local')];
+export function pluginRoots(root, dataRoot = root) {
+  return [path.join(root, 'plugins'), path.join(dataRoot, 'plugins.local')];
 }
 
 /**
@@ -675,10 +688,25 @@ export function loadSkill(manifest, root) {
  * Derive a plugin's trust source from the FILESYSTEM, never from plugins.lock
  * (a USER-writable file that could spoof `source: "bundled"` to dodge the
  * rug-pull gate). A dir under plugins/ is bundled; anything else is local.
+ * A plugin loaded from plugins.local/ can NEVER claim bundled trust.
  */
-function pluginSource(manifest, root) {
-  return manifest.dir.startsWith(path.join(root, 'plugins') + path.sep) ? 'bundled' : 'local';
+export function pluginSource(manifest, root) {
+  if (!manifest?.dir) return 'local';
+  const normDir = path.resolve(manifest.dir);
+  const normBundled = path.resolve(root, 'plugins');
+  // A plugins.local/ directory marks a local plugin wherever it sits at or
+  // below the checkout — including inside plugins/ itself, so nothing under a
+  // plugins.local name can claim bundled trust. Segments ABOVE root are not
+  // the plugin's own path: a checkout whose directory is itself named
+  // plugins.local must not have its bundled plugins reclassified (#7177
+  // review).
+  const belowRoot = path.relative(path.resolve(root), normDir).split(path.sep);
+  if (belowRoot.includes('plugins.local')) return 'local';
+  if (normDir === normBundled || normDir.startsWith(normBundled + path.sep)) return 'bundled';
+  return 'local';
 }
+
+const legacyLockWarned = new Set();
 
 /**
  * Integrity gate run on an ENABLED plugin before importing it (the rug-pull
@@ -686,11 +714,24 @@ function pluginSource(manifest, root) {
  * An absent lock is a first pin. A damaged lock is not an empty one: loading
  * would skip the drift check, so the plugin stays unloaded until the file is repaired.
  */
-export function lockGate(manifest, root) {
+export function lockGate(manifest, root, dataRoot = root, io = {}) {
   const source = pluginSource(manifest, root);
+  // Persist a legacy code-root lock into the data root before relying on
+  // readLock's fallback, so the pins and consent it holds survive the code
+  // checkout being replaced (#7177 review). Best-effort on the WRITE only: a
+  // failed migration leaves the legacy lock in place and the read below still
+  // falls back to it, so the drift check runs against the same pins as when
+  // no migration existed.
+  try { migrateLegacyLock(dataRoot, root, io); } catch { /* best-effort write; the fallback read still applies */ }
+  // The migration did not land and the gate is about to read the legacy lock
+  // out of the replaceable code folder. Say so once, so the user keeps a copy.
+  if (path.resolve(root) !== path.resolve(dataRoot) && !existsSync(path.join(dataRoot, 'plugins.lock')) && existsSync(path.join(root, 'plugins.lock')) && !legacyLockWarned.has(root)) {
+    legacyLockWarned.add(root);
+    console.warn(`⚠️  plugins.lock could not be copied to ${dataRoot}, so the pins are still read from ${root}. Keep a copy of ${path.join(root, 'plugins.lock')} before updating the code folder.`);
+  }
   let lock;
   try {
-    lock = readLockForUpdate(root);
+    lock = readLockForUpdate(dataRoot, root);
   } catch (err) {
     warnSkip(manifest.id, `plugins.lock is damaged, so this plugin will not load until it is repaired — ${err.message}`);
     return { load: false };
@@ -703,10 +744,10 @@ export function lockGate(manifest, root) {
   const repin = () => {
     try {
       const tree = hashPluginTree(manifest.dir);
-      writeLockEntry(root, manifest.id, {
+      writeLockEntry(dataRoot, manifest.id, {
         source, version: manifest.version || '0.0.0',
         integrity: tree.integrity, files: tree.files, consent: consentSurface(manifest),
-      });
+      }, root);
     } catch { /* best-effort; never block load on a write failure */ }
   };
 
@@ -727,12 +768,12 @@ export function lockGate(manifest, root) {
 
 export async function loadPlugins(kind, { root, dataRoot = root, dryRun = false, pluginId = null }) {
   const cfg = await loadPluginConfig(dataRoot);
-  let manifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes(kind));
+  let manifests = discoverPlugins(pluginRoots(root, dataRoot), resolveSuccessorIds(root, dataRoot)).filter(m => m.hooks.includes(kind));
   if (pluginId) manifests = manifests.filter(m => m.id === pluginId);
   const out = [];
   for (const manifest of manifests) {
     if (!pluginStatus(manifest, cfg).enabled) continue;
-    if (!lockGate(manifest, root).load) continue;
+    if (!lockGate(manifest, root, dataRoot).load) continue;
     const hook = await importHook(manifest, kind);
     if (!hook) continue;
     out.push({ id: manifest.id, manifest, hook, ctx: buildCtx(manifest, { dryRun, dataRoot, settings: pluginSettings(manifest.id, cfg) }) });
@@ -845,7 +886,7 @@ export async function mergeProviderPlugins(providersMap, { root, dataRoot = root
   // untouched — fail-open is enforced structurally here, not just emergently.
   try {
     const cfg = await loadPluginConfig(dataRoot);
-    const providerManifests = discoverPlugins(pluginRoots(root), resolveSuccessorIds(root)).filter(m => m.hooks.includes('provider'));
+    const providerManifests = discoverPlugins(pluginRoots(root, dataRoot), resolveSuccessorIds(root, dataRoot)).filter(m => m.hooks.includes('provider'));
     if (providerManifests.length === 0) return;
 
     // Only the plugins the user actually switched on in plugins.yml matter.
@@ -865,7 +906,7 @@ export async function mergeProviderPlugins(providersMap, { root, dataRoot = root
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, reason)); // (5)
         continue;
       }
-      if (!lockGate(manifest, root).load) {
+      if (!lockGate(manifest, root, dataRoot).load) {
         providersMap.set(manifest.id, inactiveProviderStub(manifest.id, 'integrity/consent check failed — see ⚠️ above; run `node plugins.mjs trust ' + manifest.id + '` or `enable ' + manifest.id + '`'));
         continue;
       }

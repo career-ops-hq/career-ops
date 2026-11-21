@@ -187,7 +187,8 @@ async function loadProviderIds() {
   // inactive-provider stub). Keep validation aligned with that contract.
   try {
     const { discoverPlugins, pluginRoots, resolveSuccessorIds } = await import('./plugins/_engine.mjs');
-    const manifests = discoverPlugins(pluginRoots(ROOT), resolveSuccessorIds(ROOT));
+    const dataRoot = getCareerOpsRoot();
+    const manifests = discoverPlugins(pluginRoots(ROOT, dataRoot), resolveSuccessorIds(ROOT, dataRoot));
     for (const manifest of manifests) {
       if (manifest.hooks.includes('provider')) ids.add(manifest.id);
     }
