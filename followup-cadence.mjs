@@ -227,7 +227,6 @@ export function parseDate(dateStr) {
 //     through.
 const APPLIED_DATE_SOURCE = String.raw`\bapplied\b[^.;?!|\r\n\u2028\u2029]{0,39}?[^\S\r\n\u2028\u2029]~?(\d{4}-\d{2}-\d{2})(?![\w-])`;
 const APPLIED_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'gi');
-const APPLIED_DATE_HAS_DATE_RE = new RegExp(APPLIED_DATE_SOURCE, 'i');
 
 // The trailing (?![\w-]) is the mirror of that leading \b: without it a
 // malformed value ("2026-06-091", "2026-06-09-2026-06-10") is truncated to a
