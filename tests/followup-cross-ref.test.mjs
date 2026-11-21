@@ -139,6 +139,26 @@ const OWN = [
     '2026-11-20',
     'bracketed pointer attaches backward even with a date after it',
   ],
+  // The mirror image of that one, and the reason the rule is about punctuation
+  // rather than position: the bracket sits against the verb that follows it, so
+  // it is that application's subject and November stays this row's. Attributing
+  // it backward lost November AND reported the sibling's September as measured,
+  // outranking a real ledger date.
+  [
+    'Applied 2026-11-20 and (row 51) applied 2026-09-20',
+    '2026-11-20',
+    'a bracketed pointer against the next verb is its subject, not an appositive',
+  ],
+  // And the shape where the whole citation lives inside the bracket: the
+  // pointer is still against the verb that follows it, just inside the group
+  // rather than outside. Both of these resolved to September on this branch
+  // before the punctuation rule, while `main` answered November by not reading
+  // the pointer at all.
+  [
+    'Applied 2026-11-20 (row 51 applied 2026-09-20)',
+    '2026-11-20',
+    'a citation complete inside its own bracket does not take the date before it',
+  ],
   // A TRAILING pointer cites the date before it only when it is bracketed. Both
   // of these put a pointer after a date with nothing after it, so position
   // alone cannot separate an appositive citation from prose that merely
@@ -309,13 +329,15 @@ test('known limit: a pointer that is referred back to in words is not followed',
 // the prose and this model cannot. Each is asserted in the direction that keeps
 // a real measured date rather than the one that discards it.
 test('known limit: a bracket can be read the other way round', () => {
-  // A parenthesised SUBJECT taking its verb outside its own brackets is
-  // indistinguishable from an appositive on the clause before it, and the
-  // appositive is the shape real notes use. A reader would keep November here.
+  // With nothing but its own bracket between the pointer and the next
+  // application, the subject reading wins; with a comma there, the appositive
+  // reading does. Strip BOTH and the note is genuinely ambiguous -- only the
+  // prose ("elsewhere", "here") separates the readings, so whichever way this
+  // is attributed, some note of this shape is read the wrong way round.
   assert.equal(
-    parseAppliedDate('Applied 2026-11-20 and (row 51) applied 2026-09-20'),
+    parseAppliedDate('Applied 2026-09-20 elsewhere (row 51) applied 2026-11-20 here'),
     '2026-09-20',
-    'a bracketed pointer is read as an appositive, never as the next date\'s subject',
+    'with no punctuation after the bracket, the pointer is the next date\'s subject',
   );
 
   // Past the end of a span a bare id is taken for this row's posting id, so a

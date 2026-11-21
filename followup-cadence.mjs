@@ -481,22 +481,37 @@ function pointersIn(text, from, to) {
 // short of reading the prose separates them; the appositive wins because it is
 // the shape real notes are written in, while a parenthesised subject taking a
 // verb outside its own brackets is not attested on any row.
-function pointerOwner(pointer, dates) {
+function pointerOwner(text, pointer, dates) {
   // Inside an "applied ... date" span, the pointer names what that application
   // was for, so it owns that date whatever its form or punctuation.
   const containing = dates.find(d => pointer.index >= d.index && pointer.index < d.end);
   if (containing) return containing;
+
+  const following = dates.find(d => d.index > pointer.index) ?? null;
 
   // Past the end of a span, a bracketed appositive attaches backward -- in the
   // WORD form only. Nobody writes "row 51" for a requisition, but a bare
   // "(#1311)" after a date routinely IS this row's own posting id, and citing
   // it discards a real measured date.
   if (pointer.bracketed && !pointer.text.startsWith('#')) {
-    const preceding = dates.filter(d => d.index < pointer.index).pop();
-    if (preceding) return preceding;
+    // Unless its own closing bracket is all that stands between it and the next
+    // application, in which case it is that application's SUBJECT rather than
+    // an aside on the one before: an appositive is closed off by punctuation,
+    // a subject sits against its verb. That is the whole difference between
+    //   "Applied 2026-09-20 elsewhere (row 51), applied 2026-11-20 here"
+    //   "Applied 2026-11-20 and (row 51) applied 2026-09-20"
+    // which read the opposite ways round and are otherwise identical: a
+    // bracketed pointer with a segment on either side of it.
+    const gap = following === null
+      ? null
+      : text.slice(pointer.index + pointer.text.length, following.index);
+    if (gap === null || !/^[)\]\s]*$/.test(gap)) {
+      const preceding = dates.filter(d => d.index < pointer.index).pop();
+      if (preceding) return preceding;
+    }
   }
 
-  return dates.find(d => d.index > pointer.index) ?? null;
+  return following;
 }
 
 // The apply-dates in `text` that are being cited about ANOTHER row, as a Set of
@@ -513,7 +528,7 @@ function citedDateOffsets(text, matches) {
     const clause = clauses[i];
 
     for (const pointer of clause.pointers) {
-      const owner = pointerOwner(pointer, clause.dates);
+      const owner = pointerOwner(text, pointer, clause.dates);
       if (owner) cited.add(owner.index);
     }
 
