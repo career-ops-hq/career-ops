@@ -1,0 +1,8 @@
+#!/bin/sh
+# Opt-in pre-commit hook (#6535). Enable it for this clone with
+# `npm run hooks:install`; the checks live in pre-commit.mjs beside this file.
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node is not on PATH, so the career-ops checks did not run." >&2
+  exit 0
+fi
+exec node "$(dirname "$0")/pre-commit.mjs" "$@"
