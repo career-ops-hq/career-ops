@@ -20,6 +20,7 @@ table in `AGENTS.md` (mirrored in `CLAUDE.md`).
 | `pipeline.md` | `pipeline` | Process the URL inbox (`data/pipeline.md`) |
 | `scan.md` | `scan` | Portal scanner (job discovery) |
 | `discover.md` | `discover` | Resolve company names to scannable ATS boards for `portals.yml` |
+| `cv-ingest.md` | (web onboarding) | Convert a pasted or uploaded CV into a proposed `cv.md` (proposer only, never writes); read headless by the web's CV import |
 | `triage.md` | `triage` | Fast first-pass quick score before full evaluation |
 | `batch.md` | `batch` | Mass processing with headless workers |
 | `apply.md` | `apply` | Live application assistant (form filling; never submits) |
