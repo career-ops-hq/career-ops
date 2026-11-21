@@ -92,6 +92,39 @@ tracked_companies:
   const listsOut = validate(lists);
   if (listsOut !== null && listsOut.includes('0 errors, 0 warnings')) pass('list-valued title_filter keys stay clean');
   else fail(`list-valued title_filter keys were flagged:\n${listsOut}`);
+
+  const entryTitleFilterValid = writeYml('entry-title-filter-valid.yml', `
+title_filter:
+  positive: ["Engineer"]
+tracked_companies:
+  - name: "Acme"
+    careers_url: "https://jobs.lever.co/acme"
+    title_filter:
+      positive: ["Librarian"]
+      negative: ["Page"]
+`);
+  const entryValidOut = validate(entryTitleFilterValid);
+  if (entryValidOut !== null && entryValidOut.includes('0 errors, 0 warnings')) {
+    pass('a valid per-entry title_filter passes validation');
+  } else {
+    fail(`valid per-entry title_filter was rejected:\n${entryValidOut}`);
+  }
+
+  const entryTitleFilterTypo = writeYml('entry-title-filter-typo.yml', `
+title_filter:
+  positive: ["Engineer"]
+tracked_companies:
+  - name: "Acme"
+    careers_url: "https://jobs.lever.co/acme"
+    title_filter:
+      positve: ["Librarian"]
+`);
+  const entryTypoRes = validateWithOutput(entryTitleFilterTypo);
+  if (entryTypoRes.status === 1 && entryTypoRes.output.includes('tracked_companies[0].title_filter.positve') && entryTypoRes.output.includes('did you mean "positive"?')) {
+    pass('an unknown key in an entry title_filter is rejected with a typo suggestion');
+  } else {
+    fail(`unknown key typo was not rejected as expected (exit ${entryTypoRes.status}):\n${entryTypoRes.output}`);
+  }
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
