@@ -8370,6 +8370,24 @@ try {
     } else {
       fail(`scan.mjs --since accepted or misreported: ${badCases.map((c) => c.why).join(', ')}`);
     }
+
+    // A lower bound past --posted-before is an empty window. Without the check
+    // the scan runs and drops every dated posting under an ordinary count.
+    const windowCases = [
+      { argv: ['--posted-after', '2026-08-01', '--posted-before', '2026-07-01'], want: '--posted-after 2026-08-01 is later than --posted-before 2026-07-01', why: 'swapped dates' },
+      { argv: ['--posted-after=2026-08-01', '--posted-before=2026-07-01'], want: 'is later than --posted-before 2026-07-01', why: 'swapped dates, =value form' },
+      // --since resolves to a date relative to today, so any past --posted-before is behind it.
+      { argv: ['--since', '7', '--posted-before', '2000-01-01'], want: '--since 7 (from ', why: '--since past --posted-before' },
+    ];
+    const badWindows = windowCases.filter(({ argv, want }) => {
+      const r = sinceCli(...argv);
+      return r.status !== 1 || !String(r.stderr).includes(want);
+    });
+    if (badWindows.length === 0) {
+      pass('scan.mjs rejects a posted-date window whose lower bound is after --posted-before');
+    } else {
+      fail(`scan.mjs accepted an empty posted-date window: ${badWindows.map((c) => c.why).join(', ')}`);
+    }
   }
 
   const filter = buildLocationFilter({
