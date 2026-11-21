@@ -19,7 +19,7 @@
   "skill": true,
   "license": "MIT",
   "version": "1.2.0",
-  "sha": "d98b0af47ceff1222946ef0c36b3b5b2c5fa993a",
+  "sha": "cf4f76784f42edc638d1b96bcbcc64d0641673ec",
   "supersedesBundled": true,
   "registrationIssue": "https://github.com/career-ops-hq/career-ops/issues/1583"
 }
