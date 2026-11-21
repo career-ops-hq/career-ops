@@ -223,6 +223,8 @@ export function extractPanelists(text, table) {
       const title = trimTitle(line.slice(c.titleStart, end));
       if (!title || /^\d/.test(title)) return;
       if (c.form === 'comma' && !hasKeyword(title, table)) return;
+      // A signature line "Talent Acquisition Partner | Acme Corp" is a title, then the company.
+      if (hasKeyword(c.name, table) && !hasKeyword(title, table)) return;
       add(c.name, title, c.form === 'dash' ? 'name-dash-title' : 'name-comma-title');
     });
 
