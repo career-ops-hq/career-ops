@@ -279,9 +279,8 @@ function appendPendingRowUnlocked(pipelinePath, row, url, beforeAppend = () => {
     const tail = text.slice(insertAt).replace(/^\s+/, '');
     next = `${head}\n\n## Pending\n\n${row}\n\n${tail}`;
   } else {
-    const afterMarker = pending.index + pending[0].length;
-    const nextSection = text.indexOf('\n## ', afterMarker);
-    const insertAt = nextSection === -1 ? text.length : nextSection;
+    const nextHeading = headings.find((h) => h.index > pending.index);
+    const insertAt = nextHeading ? nextHeading.index : text.length;
     // Normalise the whitespace on both sides of the insert point so repeated
     // captures produce one row per line, and exactly one blank line under the
     // `## Pending` heading, matching the format modes/pipeline.md documents.
@@ -298,9 +297,15 @@ function appendPendingRowUnlocked(pipelinePath, row, url, beforeAppend = () => {
   return { appended: true, duplicate: false };
 }
 
+/** Drop trailing slashes from the path only; the query and fragment are kept verbatim. */
+function trimPathSlash(value) {
+  const [, base, rest] = /^([^?#]*)(.*)$/s.exec(String(value).trim());
+  return base.replace(/\/+$/, '') + rest;
+}
+
 /** Is this URL already a row (Pending or Processed) in the pipeline text? */
 export function urlAlreadyPresent(text, url) {
-  const needle = String(url).trim().replace(/\/+$/, '');
+  const needle = trimPathSlash(url);
   return text
     .split(/\r?\n/)
     .filter((line) => /^\s*-\s*\[[ xX!]\]/.test(line))
@@ -310,7 +315,7 @@ export function urlAlreadyPresent(text, url) {
       // rows wrap the URL and labels in strikethrough (modes/pipeline.md).
       const index = /^#\d+$/.test(cells[0].trim()) ? 1 : 0;
       const cell = (cells[index] || '').trim().replace(/^~~/, '').replace(/~~$/, '');
-      return cell.replace(/\/+$/, '') === needle;
+      return trimPathSlash(cell) === needle;
     });
 }
 
@@ -396,7 +401,9 @@ export async function captureJd(input = {}) {
     return { ok: false, error: error.message };
   }
 
-  const dataRoot = input.dataRoot || getCareerOpsRoot();
+  // Resolved once: commitCapture runs git with cwd: dataRoot and passes paths
+  // joined from it, so a relative root would be applied twice.
+  const dataRoot = path.resolve(input.dataRoot || getCareerOpsRoot());
   const date = input.date || today();
   const text = String(input.text ?? '');
 
@@ -532,6 +539,13 @@ async function main(argv) {
     console.error('capture-jd: --url is required. See --help.');
     return 2;
   }
+  let url;
+  try {
+    url = validateCaptureUrl(flags.url);
+  } catch (error) {
+    console.error(`capture-jd: ${error.message}`);
+    return 2;
+  }
 
   let text = '';
   if (flags['text-file'] && flags['text-file'] !== '-') {
@@ -546,7 +560,7 @@ async function main(argv) {
   }
 
   const result = await captureJd({
-    url: flags.url,
+    url,
     text,
     title: typeof flags.title === 'string' ? flags.title : '',
     company: typeof flags.company === 'string' ? flags.company : '',
@@ -560,8 +574,17 @@ async function main(argv) {
     return 2;
   }
 
+  // A push the user asked for that did not happen is a failure, even though the
+  // capture and the local commit are saved. A local-only commit is not.
+  const pushFailed = result.committed && flags.push === true && !result.pushed;
+  const reportPushFailure = () => {
+    console.error(`capture-jd: ${result.gitReason || 'push-failed'}`);
+    console.error(`capture-jd: the capture and local commit ${result.sha} are saved; push them yourself.`);
+  };
+
   if (flags.json) {
     console.log(JSON.stringify(result, null, 2));
+    if (pushFailed) { reportPushFailure(); return 1; }
     return 0;
   }
 
@@ -575,6 +598,7 @@ async function main(argv) {
   console.log(`  row     ${result.pipeline}`);
   if (result.committed) console.log(`  commit  ${result.sha}${result.pushed ? ' (pushed)' : ''}`);
   else if (result.gitReason) console.log(`  commit  skipped: ${result.gitReason}`);
+  if (pushFailed) { reportPushFailure(); return 1; }
   return 0;
 }
 

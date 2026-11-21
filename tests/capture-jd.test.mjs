@@ -776,3 +776,70 @@ test('startEvaluation keeps the server alive when the spawned child emits error'
   assert.doesNotThrow(() => child.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })));
   assert.match(readFileSync(path.join(root, 'data', 'capture-evals.log'), 'utf-8'), /ENOENT/);
 });
+
+// --- R4 review follow-ups ---------------------------------------------------
+
+const captureCli = (root, args, extra = {}) => spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'capture-jd.mjs'), ...args], {
+  cwd: root, encoding: 'utf-8', input: '', env: { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '' }, ...extra,
+});
+
+test('URL dedup trims trailing slashes from the path only, never from the query or fragment', () => {
+  assert.equal(urlAlreadyPresent('- [ ] https://acme.test/jobs/4/ | Acme | Eng\n', 'https://acme.test/jobs/4'), true);
+  assert.equal(urlAlreadyPresent('- [ ] https://acme.test/jobs/4 | Acme | Eng\n', 'https://acme.test/jobs/4/'), true);
+  assert.equal(urlAlreadyPresent('- [ ] https://acme.test/jobs?id=alpha/ | Acme | Eng\n', 'https://acme.test/jobs?id=alpha'), false);
+  assert.equal(urlAlreadyPresent('- [ ] https://acme.test/jobs#a/ | Acme | Eng\n', 'https://acme.test/jobs#a'), false);
+});
+
+test('a Pending row lands before the next heading even when it uses a tab after ##', async () => {
+  const root = scratch({ pipeline: '# Pipeline\n\n## Pending\n\n##\tProcessed\n\n- [x] https://acme.test/jobs/old | Acme | Old\n' });
+  await captureJd({ url: 'https://acme.test/jobs/tab', dataRoot: root, commit: false });
+  const lines = readPipeline(root).split('\n');
+  const row = lines.findIndex((l) => l.includes('https://acme.test/jobs/tab'));
+  const processed = lines.indexOf('##\tProcessed');
+  assert.ok(row !== -1 && row < processed, readPipeline(root));
+});
+
+test('the CLI validates --url before reading --text-file', () => {
+  const root = scratch();
+  const run = captureCli(root, ['--url', 'ftp://acme.test/x', '--text-file', path.join(root, 'missing.txt')]);
+  assert.equal(run.status, 2);
+  assert.doesNotMatch(run.stderr, /cannot read --text-file/);
+  assert.match(run.stderr, /url|http/i);
+});
+
+test('the CLI reports a failed push and exits non-zero, keeping the capture and the commit', () => {
+  const root = scratch();
+  const git = initRepo(root);
+  git('add', '--', 'data/pipeline.md');
+  assert.equal(git('commit', '-qm', 'init').status, 0);
+  git('remote', 'add', 'origin', path.join(sandbox, 'no-such-remote'));
+  const branch = git('rev-parse', '--abbrev-ref', 'HEAD').stdout.trim();
+  git('config', `branch.${branch}.remote`, 'origin');
+  git('config', `branch.${branch}.merge`, `refs/heads/${branch}`);
+
+  const run = captureCli(root, ['--url', 'https://acme.test/jobs/push-fails', '--commit', '--push']);
+  assert.notEqual(run.status, 0, run.stdout);
+  assert.match(run.stderr, /push-failed/);
+  assert.match(run.stderr, /saved/i);
+  assert.ok(rowLines(root).some((l) => l.includes('https://acme.test/jobs/push-fails')));
+  assert.match(git('log', '-1', '--format=%s').stdout, /chore\(capture\)/);
+
+  const localOnly = captureCli(root, ['--url', 'https://acme.test/jobs/local-only', '--commit']);
+  assert.equal(localOnly.status, 0, localOnly.stderr);
+});
+
+test('captureJd resolves a relative data root before committing', async () => {
+  const root = scratch();
+  const git = initRepo(root);
+  git('add', '--', 'data/pipeline.md');
+  assert.equal(git('commit', '-qm', 'init').status, 0);
+  const cwd = process.cwd();
+  process.chdir(path.dirname(root));
+  try {
+    const result = await captureJd({ url: 'https://acme.test/jobs/relative', text: 'JD', dataRoot: path.basename(root), commit: true });
+    assert.equal(result.committed, true, JSON.stringify(result));
+    assert.ok(path.isAbsolute(result.pipeline));
+  } finally {
+    process.chdir(cwd);
+  }
+});
