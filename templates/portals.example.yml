@@ -4008,12 +4008,16 @@ job_boards:
   - name: JustJoin.it
     careers_url: https://justjoin.it/job-offers/all-locations
     provider: justjoin
+    # workplace: [remote]          # optional: keep only these work modes (remote, hybrid, office)
+    # open_to_ukrainians: true     # optional: keep only offers whose employer ticked "open to hire Ukrainians"
+    # max_polish_level: B1         # optional: drop offers asking for Polish above this CEFR level (A1..C2)
     enabled: false
     notes: "Polish tech job board — newest public offers"
 
   - name: NoFluffJobs
     careers_url: https://nofluffjobs.com/pl
     provider: nofluffjobs
+    # workplace: [remote]          # optional: keep only these work modes (remote; hybrid and office both mean "not fully remote")
     enabled: false
     notes: "Polish tech job board — newest public postings"
 

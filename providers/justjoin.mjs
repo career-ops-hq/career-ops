@@ -4,6 +4,15 @@
 // JustJoin.it provider — hits the current candidate offers API.
 // Browser URLs under https://justjoin.it/job-offers/... are accepted for
 // detection, but fetches use https://justjoin.it/api/candidate-api/offers.
+//
+// Optional entry settings, both off by default:
+//   workplace: [remote]        keep only these workplaceType values
+//                              (remote, hybrid, office)
+//   open_to_ukrainians: true   keep only offers whose employer set
+//                              isOpenToHireUkrainians
+//   max_polish_level: B1       drop offers that ask for Polish above this CEFR
+//                              level (A1..C2). Offers that list no language, or
+//                              no Polish, are kept: the field is often empty.
 
 const ALLOWED_HOSTS = new Set(['justjoin.it']);
 const API_BASE = 'https://justjoin.it/api/candidate-api/offers';
@@ -77,12 +86,58 @@ function buildApiUrl(entry, from) {
   return parsed.href;
 }
 
-export function parseJustJoinResponse(json) {
+/**
+ * Read the optional offer filters from a portals.yml entry.
+ * @param {any} entry
+ * @returns {{workplace: Set<string>|null, openToUkrainians: boolean, maxPolishLevel: number}}
+ */
+const CEFR = ['a1', 'a2', 'b1', 'b2', 'c1', 'c2'];
+
+/** @param {any} offer */
+function requiredPolishLevel(offer) {
+  const langs = Array.isArray(offer?.languages) ? offer.languages : [];
+  let highest = -1;
+  for (const lang of langs) {
+    const code = String(lang?.code || '').trim().toLowerCase();
+    if (code !== 'pl' && code !== 'polish') continue;
+    // An unrecognised level on a Polish entry counts as the top level, so it is
+    // dropped rather than slipping through a strict limit.
+    const idx = CEFR.indexOf(String(lang?.level || '').trim().toLowerCase());
+    highest = Math.max(highest, idx === -1 ? CEFR.length - 1 : idx);
+  }
+  return highest;
+}
+
+export function offerFilters(entry) {
+  const raw = entry?.workplace;
+  const list = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .map(v => String(v).trim().toLowerCase())
+    .filter(Boolean);
+  return {
+    workplace: list.length ? new Set(list) : null,
+    openToUkrainians: entry?.open_to_ukrainians === true,
+    // CEFR index of the highest Polish level allowed; Infinity disables the filter.
+    maxPolishLevel: CEFR.includes(String(entry?.max_polish_level || '').trim().toLowerCase())
+      ? CEFR.indexOf(String(entry.max_polish_level).trim().toLowerCase())
+      : Infinity,
+  };
+}
+
+/**
+ * @param {any} json
+ * @param {{workplace: Set<string>|null, openToUkrainians: boolean, maxPolishLevel: number}} [filters]
+ */
+export function parseJustJoinResponse(json, filters = { workplace: null, openToUkrainians: false, maxPolishLevel: Infinity }) {
   if (!json || !Array.isArray(json.data)) {
     throw new Error(`justjoin: unexpected API response — expected { data: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
   return json.data
     .filter(offer => offer && typeof offer === 'object')
+    .filter(offer => {
+      if (filters.workplace && !filters.workplace.has(String(offer.workplaceType || '').toLowerCase())) return false;
+      if (filters.openToUkrainians && offer.isOpenToHireUkrainians !== true) return false;
+      return requiredPolishLevel(offer) <= filters.maxPolishLevel;
+    })
     .map(offer => {
       const slug = String(offer.slug || '').trim();
       const title = String(offer.title || '').trim();
@@ -113,17 +168,20 @@ export default {
   async fetch(entry, ctx) {
     if (!detectUrl(entry)) throw new Error('justjoin: careers_url or api must be a trusted justjoin.it URL');
 
+    const filters = offerFilters(entry);
     const jobs = [];
     let from = 0;
     const maxPages = Number(entry.max_pages || MAX_PAGES);
     for (let page = 0; page < maxPages; page++) {
       const url = buildApiUrl(entry, from);
       const json = await ctx.fetchJson(url, { redirect: 'error' });
-      const parsed = parseJustJoinResponse(json);
+      const parsed = parseJustJoinResponse(json, filters);
       jobs.push(...parsed);
 
       const next = json?.meta?.next?.cursor;
-      if (next == null || parsed.length === 0) break;
+      // Stop on an empty raw page, not an empty filtered one: a page can be
+      // filtered down to nothing while later pages still hold matches.
+      if (next == null || !json.data.length) break;
       from = Number(next);
       if (!Number.isFinite(from)) break;
     }

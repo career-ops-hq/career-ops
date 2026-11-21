@@ -4,6 +4,12 @@
 // NoFluffJobs provider — hits the public search posting API.
 // It intentionally returns only the core scanner job fields; richer skill and
 // salary metadata can be added later if the provider contract is expanded.
+//
+// Optional entry setting, off by default:
+//   workplace: [remote]   keep only fully remote postings. The list API marks
+//                         remote vs not (fullyRemote) but does not separate
+//                         hybrid from office, so [hybrid] or [office] keeps
+//                         every posting that is not fully remote.
 
 const ALLOWED_HOSTS = new Set(['nofluffjobs.com']);
 const API_URL = 'https://nofluffjobs.com/api/search/posting';
@@ -104,12 +110,38 @@ function buildRequest(entry, pageTo) {
   return { url: apiUrl.href, body };
 }
 
-export function parseNoFluffJobsResponse(json) {
+/**
+ * Read the optional workplace filter from a portals.yml entry.
+ * @param {any} entry
+ * @returns {{remote: boolean, nonRemote: boolean}|null} null keeps everything.
+ */
+export function workplaceFilter(entry) {
+  const raw = entry?.workplace;
+  const list = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+    .map(v => String(v).trim().toLowerCase())
+    .filter(Boolean);
+  if (!list.length) return null;
+  return {
+    remote: list.includes('remote'),
+    nonRemote: list.includes('hybrid') || list.includes('office'),
+  };
+}
+
+/**
+ * @param {any} json
+ * @param {{remote: boolean, nonRemote: boolean}|null} [workplace]
+ */
+export function parseNoFluffJobsResponse(json, workplace = null) {
   if (!json || !Array.isArray(json.postings)) {
     throw new Error(`nofluffjobs: unexpected API response — expected { postings: [...] }, got keys: [${json ? Object.keys(json).join(', ') : 'null'}]`);
   }
   return json.postings
     .filter(posting => posting && typeof posting === 'object')
+    .filter(posting => {
+      if (!workplace) return true;
+      const isRemote = Boolean(posting.fullyRemote || posting.location?.fullyRemote);
+      return isRemote ? workplace.remote : workplace.nonRemote;
+    })
     .map(posting => {
       const title = String(posting.title || '').trim();
       const company = String(posting.name || '').trim();
@@ -137,6 +169,7 @@ export default {
   async fetch(entry, ctx) {
     if (!detectUrl(entry)) throw new Error('nofluffjobs: careers_url or api must be a trusted nofluffjobs.com URL');
 
+    const workplace = workplaceFilter(entry);
     const maxPages = Number(entry.max_pages || MAX_PAGES);
     const jobs = [];
     const seen = new Set();
@@ -152,7 +185,7 @@ export default {
         },
         redirect: 'error',
       });
-      for (const job of parseNoFluffJobsResponse(json)) {
+      for (const job of parseNoFluffJobsResponse(json, workplace)) {
         if (seen.has(job.url)) continue;
         seen.add(job.url);
         jobs.push(job);

@@ -103,6 +103,71 @@ try {
   if (capturedOpts && capturedOpts.redirect === 'error') pass('justjoin.fetch() passes redirect:"error"');
   else fail(`justjoin.fetch() should pass redirect:"error", got ${JSON.stringify(capturedOpts)}`);
 
+  // Optional workplace / open_to_ukrainians filters.
+  const { offerFilters } = justjoinModule;
+  const mixed = {
+    data: [
+      { slug: 'a-remote-ua', title: 'A', companyName: 'A', workplaceType: 'remote', isOpenToHireUkrainians: true },
+      { slug: 'b-remote-no', title: 'B', companyName: 'B', workplaceType: 'remote', isOpenToHireUkrainians: false },
+      { slug: 'c-hybrid-ua', title: 'C', companyName: 'C', workplaceType: 'hybrid', isOpenToHireUkrainians: true },
+      { slug: 'd-office-no', title: 'D', companyName: 'D', workplaceType: 'office' },
+    ],
+    meta: { next: { cursor: null } },
+  };
+  const slugs = (rows) => rows.map(r => r.url.split('/').pop()).join(',');
+
+  const unfiltered = parseJustJoinResponse(mixed, offerFilters({}));
+  if (unfiltered.length === 4) pass('justjoin filters are off by default');
+  else fail(`justjoin default should keep all 4 offers, got ${unfiltered.length}`);
+
+  const remoteOnly = parseJustJoinResponse(mixed, offerFilters({ workplace: ['Remote'] }));
+  if (slugs(remoteOnly) === 'a-remote-ua,b-remote-no') pass('justjoin workplace filter keeps remote only (case-insensitive)');
+  else fail(`justjoin workplace filter returned ${slugs(remoteOnly)}`);
+
+  const ukrOnly = parseJustJoinResponse(mixed, offerFilters({ open_to_ukrainians: true }));
+  if (slugs(ukrOnly) === 'a-remote-ua,c-hybrid-ua') pass('justjoin open_to_ukrainians keeps flagged offers only');
+  else fail(`justjoin open_to_ukrainians returned ${slugs(ukrOnly)}`);
+
+  const both = parseJustJoinResponse(mixed, offerFilters({ workplace: ['remote'], open_to_ukrainians: true }));
+  if (slugs(both) === 'a-remote-ua') pass('justjoin workplace + open_to_ukrainians combine');
+  else fail(`justjoin combined filters returned ${slugs(both)}`);
+
+  // max_polish_level filter.
+  const langs = {
+    data: [
+      { slug: 'no-lang', title: 'N', companyName: 'N', languages: [] },
+      { slug: 'en-only', title: 'E', companyName: 'E', languages: [{ code: 'en', level: 'C1' }] },
+      { slug: 'pl-b1', title: 'B1', companyName: 'B', languages: [{ code: 'en', level: 'B2' }, { code: 'pl', level: 'B1' }] },
+      { slug: 'pl-c1', title: 'C1', companyName: 'C', languages: [{ code: 'pl', level: 'C1' }, { code: 'en', level: 'B2' }] },
+      { slug: 'polish-c2', title: 'C2', companyName: 'D', languages: [{ code: 'polish', level: 'C2' }] },
+      { slug: 'pl-odd-level', title: 'O', companyName: 'O', languages: [{ code: 'pl', level: 'native' }] },
+    ],
+    meta: { next: { cursor: null } },
+  };
+  const b1 = slugs(parseJustJoinResponse(langs, offerFilters({ max_polish_level: 'B1' })));
+  if (b1 === 'no-lang,en-only,pl-b1') pass('justjoin max_polish_level: B1 drops Polish above B1, keeps unspecified');
+  else fail(`justjoin max_polish_level B1 returned ${b1}`);
+  const none = slugs(parseJustJoinResponse(langs, offerFilters({ max_polish_level: 'a1' })));
+  if (none === 'no-lang,en-only') pass('justjoin max_polish_level: A1 keeps only offers without Polish');
+  else fail(`justjoin max_polish_level A1 returned ${none}`);
+  if (parseJustJoinResponse(langs, offerFilters({ max_polish_level: 'bogus' })).length === 6) pass('justjoin ignores an invalid max_polish_level');
+  else fail('justjoin invalid max_polish_level should disable the filter');
+
+  // A page filtered down to nothing must not stop pagination.
+  const pagesServed = [];
+  const pageOne = { data: [{ slug: 'x-office', title: 'X', companyName: 'X', workplaceType: 'office' }], meta: { next: { cursor: 100 } } };
+  const pageTwo = { data: [{ slug: 'y-remote', title: 'Y', companyName: 'Y', workplaceType: 'remote' }], meta: { next: { cursor: null } } };
+  const paged = await jj.fetch(
+    { name: 'JustJoin', careers_url: 'https://justjoin.it/job-offers/all-locations', workplace: ['remote'] },
+    {
+      transport: 'http',
+      fetchJson: async (url) => { pagesServed.push(url); return pagesServed.length === 1 ? pageOne : pageTwo; },
+      fetchText: async () => '',
+    },
+  );
+  if (paged.length === 1 && pagesServed.length === 2) pass('justjoin keeps paging past a fully filtered page');
+  else fail(`justjoin paging stopped early: ${pagesServed.length} pages, ${paged.length} jobs`);
+
   let ssrfRejected = false;
   try {
     await jj.fetch(

@@ -8,7 +8,7 @@ console.log('\nProvider — nofluffjobs');
 try {
   const nofluffjobsModule = await import(pathToFileURL(join(ROOT, 'providers/nofluffjobs.mjs')).href);
   const nfj = nofluffjobsModule.default;
-  const { parseNoFluffJobsResponse } = nofluffjobsModule;
+  const { parseNoFluffJobsResponse, workplaceFilter } = nofluffjobsModule;
 
   if (nfj.id === 'nofluffjobs') pass('nofluffjobs.id is "nofluffjobs"');
   else fail(`nofluffjobs.id is ${JSON.stringify(nfj.id)}`);
@@ -82,6 +82,25 @@ try {
   } else {
     fail(`nofluffjobs.fetch() should use POST and redirect:"error", got ${JSON.stringify(capturedOpts)}`);
   }
+
+  // Optional workplace filter.
+  const mixed = {
+    postings: [
+      { title: 'A', name: 'A', url: 'a-remote', fullyRemote: true },
+      { title: 'B', name: 'B', url: 'b-office', fullyRemote: false, location: { places: [{ city: 'Kraków' }] } },
+      { title: 'C', name: 'C', url: 'c-remote-nested', location: { fullyRemote: true } },
+    ],
+    totalPages: 1,
+  };
+  const urls = (rows) => rows.map(r => r.url.split('/').pop()).join(',');
+  if (workplaceFilter({}) === null && parseNoFluffJobsResponse(mixed, workplaceFilter({})).length === 3) pass('nofluffjobs workplace filter is off by default');
+  else fail('nofluffjobs default should keep all postings');
+  const remoteOnly = urls(parseNoFluffJobsResponse(mixed, workplaceFilter({ workplace: ['Remote'] })));
+  if (remoteOnly === 'a-remote,c-remote-nested') pass('nofluffjobs workplace: [remote] keeps fully remote postings only');
+  else fail(`nofluffjobs remote filter returned ${remoteOnly}`);
+  const nonRemote = urls(parseNoFluffJobsResponse(mixed, workplaceFilter({ workplace: ['hybrid', 'office'] })));
+  if (nonRemote === 'b-office') pass('nofluffjobs workplace: [hybrid, office] keeps non-remote postings');
+  else fail(`nofluffjobs non-remote filter returned ${nonRemote}`);
 
   let ssrfRejected = false;
   try {
