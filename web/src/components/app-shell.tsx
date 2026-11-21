@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { PanelLeftClose, PanelLeftOpen, MoveHorizontal } from "lucide-react";
-import { applyAppearance, loadAppearance, saveAppearance } from "@/lib/appearance";
+import { updateAppearance } from "@/lib/appearance";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
@@ -42,13 +42,10 @@ export function AppShell({ children, followupsEnabled }: { children: React.React
       /* ignore */
     }
   };
+  // Same store as the Config page; ignored until the saved settings have loaded.
   const cycleWidth = () => {
-    const a = loadAppearance();
     const order = ["small", "medium", "full"] as const;
-    const next = { ...a, width: order[(order.indexOf(a.width) + 1) % 3] };
-    applyAppearance(next);
-    window.dispatchEvent(new Event("appearancechange")); // keep the Config page in step
-    void saveAppearance(next);
+    updateAppearance((cur) => ({ ...cur, width: order[(order.indexOf(cur.width) + 1) % 3] }));
   };
   return (
     <JobsProvider>

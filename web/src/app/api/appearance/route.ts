@@ -12,12 +12,15 @@ export const dynamic = "force-dynamic";
 // the user across browsers instead of being tied to one browser's localStorage.
 const file = () => path.join(careerOpsRoot(), "config", "ui-appearance.json");
 
-// Missing file -> null (defaults). A damaged file is an error the user can act
-// on, never an empty default that the next save would overwrite.
+// Missing file -> null (defaults). A damaged file (unreadable, broken JSON, or a root that
+// is not an object) is an error the user can act on, never an empty default that the
+// next save would overwrite.
 export async function GET() {
   try {
-    const raw = readJsonFile(file(), null);
-    return Response.json(raw === null ? null : normalizeAppearance(raw));
+    const raw = readJsonFile(file(), undefined);
+    if (raw === undefined) return Response.json(null);
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("not an object");
+    return Response.json(normalizeAppearance(raw));
   } catch {
     return Response.json(
       { error: "config/ui-appearance.json could not be read. Fix or delete it, then reload." },

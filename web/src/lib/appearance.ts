@@ -1,8 +1,13 @@
 // Appearance settings: a font per role, plus sizes and page width.
 // A font is either installed on this machine ("system") or uploaded by the user
 // ("upload", kept as a data URL). Applied by overriding CSS variables on <html>.
-// The source of truth is config/ui-appearance.json (via /api/appearance);
-// localStorage is only a cache so the page does not flash before the server answers.
+//
+// One shared store (below) holds the current settings for every control, so the
+// Config page, the sidebar width button and a pending save can never overwrite
+// one another. The source of truth is config/ui-appearance.json (via
+// /api/appearance); localStorage is only a cache so the first paint does not flash.
+// Edits are blocked until the server copy has loaded, and while it cannot be read,
+// so a damaged or unreachable file is never replaced by defaults.
 import { normalizeAppearance } from "@/lib/appearance-schema.mjs";
 
 const KEY = "career-ops:appearance";
@@ -26,52 +31,6 @@ export type Appearance = {
 };
 
 export const DEFAULTS: Appearance = { fonts: {}, uiSize: 100, previewSize: 100, width: "small" };
-
-export function loadAppearance(): Appearance {
-  try {
-    return normalizeAppearance(JSON.parse(localStorage.getItem(KEY) ?? "null")) as Appearance;
-  } catch {
-    return DEFAULTS;
-  }
-}
-
-function cacheAppearance(a: Appearance) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(a));
-  } catch {
-    /* cache only; a large uploaded font may not fit — the server copy still works */
-  }
-}
-
-/** Save to the server (and the local cache). Resolves false when the server did not accept it. */
-export async function saveAppearance(a: Appearance): Promise<boolean> {
-  cacheAppearance(a);
-  try {
-    const res = await fetch("/api/appearance", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(a),
-    });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-/** The saved settings, or null when there are none yet (or the server could not be reached). */
-export async function loadAppearanceFromServer(): Promise<Appearance | null> {
-  try {
-    const res = await fetch("/api/appearance");
-    if (!res.ok) return null;
-    const raw = await res.json();
-    if (!raw) return null;
-    const a = normalizeAppearance(raw) as Appearance;
-    cacheAppearance(a);
-    return a;
-  } catch {
-    return null;
-  }
-}
 
 export function applyAppearance(a: Appearance) {
   const root = document.documentElement;
@@ -99,4 +58,109 @@ export function applyAppearance(a: Appearance) {
   root.style.fontSize = a.uiSize === 100 ? "" : `${a.uiSize}%`;
   root.dataset.width = a.width;
   root.style.setProperty("--preview-scale", String(a.previewSize / 100));
+}
+
+// ── shared store ────────────────────────────────────────────────────────────
+
+export type AppearanceSnapshot = {
+  settings: Appearance;
+  /** loading: server copy not read yet · ready: edits allowed · error: file unreadable, edits blocked */
+  status: "loading" | "ready" | "error";
+  /** What to tell the user for status "error", or when the last save failed. */
+  message: string;
+};
+
+const INITIAL: AppearanceSnapshot = { settings: DEFAULTS, status: "loading", message: "" };
+let snap: AppearanceSnapshot = INITIAL;
+const listeners = new Set<() => void>();
+let started: Promise<void> | null = null;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function set(next: Partial<AppearanceSnapshot>) {
+  snap = { ...snap, ...next };
+  listeners.forEach((l) => l());
+}
+
+export const subscribe = (l: () => void) => {
+  listeners.add(l);
+  return () => {
+    listeners.delete(l);
+  };
+};
+export const getSnapshot = () => snap;
+export const getServerSnapshot = () => INITIAL;
+
+function readCache(): Appearance {
+  try {
+    return normalizeAppearance(JSON.parse(localStorage.getItem(KEY) ?? "null")) as Appearance;
+  } catch {
+    return DEFAULTS;
+  }
+}
+
+function writeCache(a: Appearance | null) {
+  try {
+    if (a) localStorage.setItem(KEY, JSON.stringify(a));
+    else localStorage.removeItem(KEY);
+  } catch {
+    /* cache only; a large uploaded font may not fit — the server copy is the truth */
+  }
+}
+
+/** Load once per page: paint from the cache, then adopt the server copy. */
+export function initAppearance(): Promise<void> {
+  if (started) return started;
+  const cached = readCache();
+  applyAppearance(cached);
+  set({ settings: cached });
+  started = (async () => {
+    try {
+      const res = await fetch("/api/appearance");
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        set({ status: "error", message: body.error || "Your saved appearance settings could not be read." });
+        return;
+      }
+      const raw = await res.json();
+      if (raw === null) {
+        // The file is confirmed missing (never saved, or deleted to reset): defaults, and drop the stale cache.
+        writeCache(null);
+        applyAppearance(DEFAULTS);
+        set({ settings: DEFAULTS, status: "ready", message: "" });
+        return;
+      }
+      const a = normalizeAppearance(raw) as Appearance;
+      writeCache(a);
+      applyAppearance(a);
+      set({ settings: a, status: "ready", message: "" });
+    } catch {
+      set({ status: "error", message: "Could not reach the app to load your appearance settings." });
+    }
+  })();
+  return started;
+}
+
+/** Change the settings: applied at once, saved after a short pause (sliders fire on every step).
+ *  Returns false when edits are blocked (not loaded yet, or the saved file is unreadable). */
+export function updateAppearance(change: (current: Appearance) => Appearance): boolean {
+  if (snap.status !== "ready") return false;
+  const next = normalizeAppearance(change(snap.settings)) as Appearance;
+  applyAppearance(next);
+  writeCache(next);
+  set({ settings: next, message: "" });
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    saveTimer = null;
+    try {
+      const res = await fetch("/api/appearance", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(snap.settings), // always the latest, whichever control made the last change
+      });
+      if (!res.ok) throw new Error("rejected");
+    } catch {
+      set({ message: "Could not save to your data folder. The setting applies now but will be lost on reload (font file too large?)." });
+    }
+  }, 400);
+  return true;
 }
