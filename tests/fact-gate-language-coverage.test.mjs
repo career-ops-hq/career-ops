@@ -20,7 +20,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { verifyFacts, diagnoseCoverage } from '../verify-cv-facts.mjs';
@@ -193,6 +193,41 @@ test('a French document checks against an English cv.md', () => {
   const inflated = verifyFacts('Encadré 60 collaborateurs sur 3 sites.', opts);
   assert.equal(inflated.verdict, 'block');
   assert.deepEqual([...inflated.invented], ['60 employees']);
+});
+
+test('the remaining German and French count nouns read now (#5125)', () => {
+  // Main already carried the core forms. These are the ones it did not. The
+  // gap review asked about is "45 Berater" beside a listed noun: before this,
+  // only the schools count was read and the consultant count stayed invisible.
+  const r = verifyFacts('Betreute 45 Berater an 10 Schulen.', BARE);
+  assert.equal(r.verdict, 'block');
+  assert.deepEqual([...r.invented].sort(), ['10 schools', '45 consultants']);
+  assert.equal(r.coverage, null);
+
+  assert.deepEqual([...verifyFacts('Betreute 45 Bewerber.', BARE).invented], ['45 candidates']);
+  assert.deepEqual([...verifyFacts('12 Kandidaten.', BARE).invented], ['12 candidates']);
+  assert.deepEqual([...verifyFacts('Encadré 45 candidats.', BARE).invented], ['45 candidates']);
+  assert.deepEqual([...verifyFacts('Verwaltete 12 Büros.', BARE).invented], ['12 facilities']);
+  assert.deepEqual([...verifyFacts('Encadré 8 bureaux.', BARE).invented], ['8 facilities']);
+});
+
+test('the new nouns compare against an English source through the shared canonical', () => {
+  // The point of folding both languages onto the English canonical: cv.md does
+  // not have to share the generated document's language. Same facts pass.
+  const dir = mkdtempSync(join(tmpdir(), 'fact-de-fr-rest-'));
+  try {
+    const source = join(dir, 'cv.md');
+    writeFileSync(source, 'Trained 45 candidates across 10 schools and advised 30 consultants.');
+    const opts = { ...BARE, sourcePaths: [source] };
+
+    const de = verifyFacts('Betreute 45 Bewerber an 10 Schulen und beriet 30 Berater.', opts);
+    assert.deepEqual([...de.invented], [], `invented: ${JSON.stringify([...de.invented])}`);
+
+    const fr = verifyFacts('Encadré 45 candidats dans 10 écoles et conseillé 30 consultants.', opts);
+    assert.deepEqual([...fr.invented], [], `invented: ${JSON.stringify([...fr.invented])}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('CJK is NOT covered by this detector, and that is recorded', () => {

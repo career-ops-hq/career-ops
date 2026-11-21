@@ -143,6 +143,7 @@ const METRIC_NOUNS = [
   // 20 passed the gate silently, which is the exact fabrication class this
   // script exists to catch.
   'staff', 'personnel', 'people', 'technicians', 'operators', 'contractors',
+  'consultants',
   'vendors', 'scientists', 'researchers', 'volunteers', 'students', 'patients',
   'crew',
   // People a candidate mentored or hired: "Mentored 12 interns" against a
@@ -178,6 +179,17 @@ const METRIC_NOUNS = [
   'mitarbeitern', 'mitarbeiterinnen', 'teammitglieder', 'teammitgliedern',
   'nutzer', 'nutzern', 'entwickler', 'entwicklern', 'entwicklerinnen',
   'ingenieure', 'ingenieuren', 'ingenieurinnen',
+  // Remaining German count nouns (#5125). Each form is listed explicitly and
+  // folded to the English canonical noun in NOUN_SYNONYMS, the same rule the
+  // block above follows. "Berater" was the gap review called out: a German CV
+  // wrote "45 Berater" beside "10 Schulen" and only the schools count was read.
+  // "Benutzer" is the other common spelling of "Nutzer"; both fold to users.
+  'berater', 'beratern', 'beraterinnen',
+  'bewerber', 'bewerbern', 'bewerbungen', 'kandidaten',
+  'studenten', 'schüler', 'schülern', 'azubis', 'schulen',
+  'standort', 'niederlassungen',
+  'benutzer', 'benutzern', 'leute', 'leuten', 'personen',
+  'ingenieur', 'büros', 'bürogebäude',
   // French (language.output: fr / modes/fr), on the same terms as German above:
   // plural forms listed explicitly and folded to the English canonical noun in
   // NOUN_SYNONYMS, so "Encadré 45 collaborateurs" checks against a cv.md that
@@ -195,6 +207,10 @@ const METRIC_NOUNS = [
   'projets', 'chantiers', 'usines', 'bâtiments', 'agences', 'magasins',
   'outils', 'serveurs', 'rapports', 'déploiements', 'formations',
   'clientes', 'recrutements', 'interventions',
+  // Remaining French count nouns (#5125). "candidates" already reads because
+  // French spells it like English; "membres" stays out deliberately, since
+  // "membres du jury" or "membres actifs" is not a headcount.
+  'candidats', 'écoles', 'bureaux',
 ];
 // How many words may sit between a number and the noun it counts. The same
 // regex parses the generated CV and the sources, so the window is symmetric by
@@ -311,6 +327,28 @@ const NOUN_SYNONYMS = new Map([
   ['ingenieure', 'engineers'],
   ['ingenieuren', 'engineers'],
   ['ingenieurinnen', 'engineers'],
+  ['berater', 'consultants'],
+  ['beratern', 'consultants'],
+  ['beraterinnen', 'consultants'],
+  ['bewerber', 'candidates'],
+  ['bewerbern', 'candidates'],
+  ['bewerbungen', 'applications'],
+  ['kandidaten', 'candidates'],
+  ['studenten', 'students'],
+  ['schüler', 'students'],
+  ['schülern', 'students'],
+  ['azubis', 'trainees'],
+  ['schulen', 'schools'],
+  ['standort', 'locations'],
+  ['niederlassungen', 'locations'],
+  ['benutzer', 'users'],
+  ['benutzern', 'users'],
+  ['leute', 'people'],
+  ['leuten', 'people'],
+  ['personen', 'people'],
+  ['ingenieur', 'engineers'],
+  ['büros', 'facilities'],
+  ['bürogebäude', 'facilities'],
   ['projekte', 'projects'],
   ['projekten', 'projects'],
   ['standorte', 'locations'],
@@ -372,6 +410,9 @@ const NOUN_SYNONYMS = new Map([
   ['formations', 'courses'],
   ['clientes', 'clients'],
   ['recrutements', 'hires'],
+  ['candidats', 'candidates'],
+  ['écoles', 'schools'],
+  ['bureaux', 'facilities'],
 ]);
 // One claim, however it is spelled (#5348). Each pattern below is a spelling of
 // a percentage, an amount of money or a multiplier, and canonicalMetric() folds
@@ -2109,8 +2150,12 @@ function countShapedSpans(text) {
  *
  * TWO KNOWN BLIND SPOTS, stated rather than implied:
  *
- *   - Coincidental coverage. One listed noun ("3 sites") silences the warning
- *     for a document whose other counts use nouns outside the lexicon.
+ *   - Partial lexicon. A listed noun ("3 sites") silences the warning for a
+ *     document whose other counts use nouns outside the lexicon. The German and
+ *     French blocks cover the core forms, not every noun; "45 Spezialisten
+ *     beside 10 Schulen" stays under-reported until that noun joins
+ *     METRIC_NOUNS. The pinned tests assert this so a later widening is
+ *     deliberate.
  *   - CJK. This detector needs whitespace: it locates a count by a digit run
  *     that is not preceded by a letter and is followed by one. Japanese and
  *     Chinese put digits flush against the surrounding text ("3拠点で45名"),
@@ -2141,7 +2186,8 @@ export function diagnoseCoverage(targetText) {
     reason: 'no-count-claims-recognized',
     message:
       `${spans.length} count-like claims are present but none matched the metric extractor, whose noun ` +
-      'list covers English, German and French only — so no count in this document was checked against your sources. ' +
+      'list is not exhaustive: it reads English, German and French counts, but not every count noun in ' +
+      'those languages, so no count in this document was checked against your sources. ' +
       'Percentages, currency and multipliers were still checked. Verify the counts by hand, or add ' +
       'them to allow_metrics in config/cv-facts.json once confirmed.',
     spans,
