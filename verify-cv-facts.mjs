@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
+import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { findExperienceSections, headingText, boldLineText, toPlainText, normalizePandocLine } from './lib/cv-markdown.mjs';
@@ -3463,6 +3464,7 @@ export function verifyFacts(targetText, {
   planTexts = [],
   configPath = DEFAULT_CONFIG,
   cwd = process.cwd(),
+  evidence = false,
 } = {}) {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
@@ -3494,10 +3496,13 @@ export function verifyFacts(targetText, {
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const skillClaims = skillToolClaims(targetText);
-  const namedFacts = [
+  const namedCandidates = [
     ...factClaims(targetText, sourceLookup),
     ...skillClaims.filter(claim => claim.blocking),
     ...delegatedAuthorshipClaims(targetText, sourceText),
+  ];
+  const namedFacts = [
+    ...namedCandidates,
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);
   // Scope and adoption claims resolve their own source evidence — a verb-tier
@@ -3555,6 +3560,18 @@ export function verifyFacts(targetText, {
       message: [priorCoverage?.message, ...associations.warnings].filter(Boolean).join(' ') }
     : priorCoverage;
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
+  // Only on request: the PDF generators and the text report never read it.
+  const sourceMetrics = evidence ? sourceMetricClaims(sourceText) : null;
+  const evidenceFields = evidence ? {
+    evidence: claimEvidence(
+      [
+        ...[...targetClaims].filter(claim => sourceMetrics.has(claim)).map(value => ({ kind: 'metric', value })),
+        ...[...namedCandidates, ...structuredFieldClaims(targetText), ...skillClaims.filter(claim => !claim.blocking)]
+          .filter(({ value }) => sourceContainsFact(sourceLookup, value)),
+      ],
+      sourcePaths.map(path => ({ path, text: readIfExists(resolveInputPath(path, cwd)) })),
+    ),
+  } : {};
   return {
     verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',
     invented,
@@ -3567,7 +3584,54 @@ export function verifyFacts(targetText, {
     // finding. It rides along so a caller can say the phrase lists were never
     // loaded instead of printing a clean result the reader takes for "checked".
     configMissing,
+    ...evidenceFields,
   };
+}
+
+/**
+ * The source line behind each claim the gate passed (#1033). A claim is listed
+ * with the first line of a source file that supports it on its own; a claim the
+ * sources support only across a wrapped line is listed with `source: null`.
+ * Claims passed only by allow_metrics, allow_facts or a cover letter's answers
+ * have no source line and are not listed. Nothing here changes the verdict.
+ *
+ * @param {{kind: string, value: string}[]} claims claims the gate found in the sources
+ * @param {{path: string, text: string}[]} files the raw source files, in order
+ * @returns {{kind: string, value: string, source: string|null, line: number|null, text: string|null}[]}
+ */
+function claimEvidence(claims, files) {
+  const lines = files.flatMap(({ path, text }) => sourceFileLines(path, text));
+  for (const entry of lines) {
+    entry.metrics = sourceMetricClaims(entry.text);
+    entry.lookup = normalizeFact(collapseMarkdownLinks(stripMarkup(entry.text)));
+  }
+  const seen = new Set();
+  const found = [];
+  for (const { kind, value } of claims) {
+    const key = `${kind}\n${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const hit = lines.find(entry => (kind === 'metric' ? entry.metrics.has(value) : sourceContainsFact(entry.lookup, value)));
+    found.push({ kind, value, source: hit?.path ?? null, line: hit?.number ?? null, text: hit?.text.trim() ?? null });
+  }
+  return found;
+}
+
+/** Numbered lines of one source file; for a LaTeX document, only its body without comments. */
+function sourceFileLines(path, text) {
+  const raw = String(text);
+  const latex = LATEX_DOCUMENT_RE.test(raw);
+  let inBody = !latex || !/\\begin\{document\}/.test(raw);
+  const lines = [];
+  raw.split(/\r?\n/).forEach((line, index) => {
+    if (latex) {
+      if (/\\begin\{document\}/.test(line)) { inBody = true; return; }
+      if (/\\end\{document\}/.test(line)) { inBody = false; return; }
+      line = line.replace(LATEX_COMMENT_RE, '');
+    }
+    if (inBody && line.trim()) lines.push({ path, number: index + 1, text: line });
+  });
+  return lines;
 }
 
 /**
@@ -3737,7 +3801,8 @@ source bullet they restate) absent from source files.
 Default sources: cv.md and article-digest.md.
 A cover letter also reads the answers supplied for that letter, which support
 only a number the letter states as a plan. The rendered letter is not a source.
-Default config:  config/cv-facts.json (optional)`;
+Default config:  config/cv-facts.json (optional)
+--json also lists, under "evidence", the source line behind each claim that passed.`;
 }
 
 /** Exercise the metric extraction regressions that the shared gate depends on. */
@@ -3845,6 +3910,16 @@ function runSelfTest() {
     const r = verifyFacts(t, { sourcePaths: [], configPath: '/nonexistent' });
     return `${r.verdict}${r.coverage ? ' +' + r.coverage.reason : ''}`;
   };
+  // --json names the source line behind a claim that passed (#1033), and only
+  // when asked: the text report and the PDF generators get the same result.
+  const exampleCv = fileURLToPath(new URL('./examples/cv-example.md', import.meta.url));
+  const backed = verifyFacts('- Reduced model deployment time to 4 hours.', { sourcePaths: [exampleCv], configPath: '/nonexistent', evidence: true });
+  equal('a passing claim names the source line behind it', [backed.verdict, backed.evidence], ['pass', [{
+    kind: 'metric', value: '4 hours', source: exampleCv, line: 23,
+    text: '- Reduced model deployment time from 2 weeks to 4 hours with CI/CD pipeline (GitHub Actions + SageMaker)',
+  }]]);
+  equal('no evidence unless asked',
+    'evidence' in verifyFacts('- Reduced model deployment time to 4 hours.', { sourcePaths: [exampleCv], configPath: '/nonexistent' }), false);
   equal('two plan horizons do not trigger a coverage warning',
     verdictOf("I'd approach the first 90 days by listening, and the first 30 days by shipping."), 'pass');
   equal(
@@ -4466,6 +4541,7 @@ export function runCli(args = process.argv.slice(2)) {
     const result = verifyFacts(readFileSync(targetPath, 'utf-8'), {
       sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
       configPath: parsed.configPath,
+      evidence: parsed.json,
     });
     // On stderr, before any verdict line and regardless of it: with no config
     // the phrase lists are empty, so "passed" below means the phrase check never
@@ -4512,7 +4588,7 @@ export function runCli(args = process.argv.slice(2)) {
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], advisoryFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], advisoryFacts: [], forbidden: [], warnings: [], coverage: null, evidence: [], errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);
