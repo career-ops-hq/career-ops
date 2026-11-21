@@ -49,6 +49,8 @@ import {
   DNS_LABEL_ATS,
   OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
+  ORACLECLOUD_HOST_RE,
+  ORACLECLOUD_SITE_RE,
   REGIONS,
   SF_CLASSIC_COMPANY_RE,
   SF_CLASSIC_DOMAINS,
@@ -187,6 +189,7 @@ export function boardProblem(ats, board) {
   if (typeof board !== 'string' || board === '') return 'board must be a non-empty string';
   if (ats === 'workday') return workdayBoardProblem(board);
   if (ats === 'successfactors-classic') return sfClassicBoardProblem(board);
+  if (ats === 'oraclecloud') return oraclecloudBoardProblem(board);
   return slugProblem(ats, board, 'board');
 }
 
@@ -231,6 +234,17 @@ function slugProblem(ats, slug, label) {
   if (ats === 'clearcompany' && !CLEARCOMPANY_SITE_RE.test(slug)) return `clearcompany ${label}s are the career site's id, a lowercase GUID`;
   if (ats === 'adp-myjobs' && ADP_MYJOBS_RESERVED.includes(slug.toLowerCase())) return `${label} ${show(slug)} is one of myjobs.adp.com's own routes, not a career site`;
   if (ats === 'adp-myjobs' && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(slug)) return `adp-myjobs ${label}s are letters, digits, "_" and "-"`;
+  return null;
+}
+
+/** @param {string} board */
+function oraclecloudBoardProblem(board) {
+  const cut = board.indexOf('/');
+  if (cut < 0 || board.indexOf('/', cut + 1) >= 0) return `oraclecloud board is "host/siteNumber", got ${show(board)}`;
+  const host = board.slice(0, cut);
+  const site = board.slice(cut + 1);
+  if (!ORACLECLOUD_HOST_RE.test(host)) return `oraclecloud host ${show(host)} must be a tenant host on Oracle's cloud, in lowercase (<tenant>.fa.[region.][ocs.]oraclecloud[N].com)`;
+  if (!ORACLECLOUD_SITE_RE.test(site)) return `oraclecloud site ${show(site)} must be 1 to 64 letters, digits, "_" or "-"`;
   return null;
 }
 
