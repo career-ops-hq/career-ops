@@ -1794,7 +1794,7 @@ const PERSONALIZATION_FILES = [
     path: 'modes/_profile.md',
     template: 'modes/_profile.template.md',
     impact: 'evaluations score against the template author\'s targeting, not yours',
-    emptyImpact: 'evaluations have none of your archetypes or targeting',
+    emptyImpact: 'evaluations have no archetypes or targeting from your modes/_profile.md',
   },
   {
     path: 'modes/_brief.md',

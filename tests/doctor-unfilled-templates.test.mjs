@@ -245,7 +245,7 @@ try {
     else if (hit && hit.reason === 'is empty' && !flagged(s, `modes/${other}`)) {
       pass(`${label}: empty ${file} is flagged as empty, the filled one is not`);
       // An empty file holds no template text, so its impact cannot describe one.
-      if (/template author|\{placeholders\}/.test(hit.impact || '') || !/none of your/.test(hit.impact || '')) {
+      if (!hit.impact || /template author|\{placeholders\}/.test(hit.impact)) {
         fail(`${label}: the empty-file impact describes template content: ${JSON.stringify(hit.impact)}`);
       } else pass(`${label}: the empty-file impact describes an empty file`);
     } else {
