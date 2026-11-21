@@ -63,6 +63,13 @@ export function daysSince(iso: string | undefined, now: number): number | null {
   return days < 0 ? 0 : days;
 }
 
+/** An Explore card's age label for a job-board postedAt, or "" when it is not a date. */
+export function postedAgo(postedAt: string, now: number): string {
+  const days = daysSince(postedAt, now);
+  if (days == null) return "";
+  return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
+}
+
 // Freshness windows mirror the Explore "posted within" segmented control so the two
 // surfaces feel like one system. A posting passes a window if its age ≤ the window.
 export const FRESHNESS_WINDOWS = [
