@@ -89,6 +89,12 @@
  *                               usable date. scan.mjs ignores it; consumers
  *                               like scan-ats-full.mjs use it for recency
  *                               filtering.
+ * @property {number} [minAgeDays] A lower bound on the posting's age in days,
+ *                               set only when postedAt is absent but the
+ *                               source states one (Workday "Posted 30+ Days
+ *                               Ago" → 30). scan.mjs's age and posted-date
+ *                               filters drop the posting when the bound puts
+ *                               it outside their window (#7514).
  * @property {{min?: number, max?: number, currency?: string, period?: string, posted?: {min?: number, max?: number}}} [salary]
  *                               Annualized compensation, attached ONLY when the
  *                               source exposes real figures — never inferred
