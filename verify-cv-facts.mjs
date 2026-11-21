@@ -3568,6 +3568,11 @@ export function verifyFacts(targetText, {
         ...[...targetClaims].filter(claim => sourceMetrics.has(claim)).map(value => ({ kind: 'metric', value })),
         ...[...namedCandidates, ...structuredFieldClaims(targetText), ...skillClaims.filter(claim => !claim.blocking)]
           .filter(({ value }) => sourceContainsFact(sourceLookup, value)),
+        // factClaims leaves out the Chinese-list tools the sources name, which
+        // are exactly the ones with a source line.
+        ...zhToolClaims(stripMarkup(targetText))
+          .filter(value => sourceNamesZhTool(sourceLookup, value))
+          .map(value => ({ kind: 'tool', value })),
       ],
       sourcePaths.map(path => ({ path, text: readIfExists(resolveInputPath(path, cwd)) })),
     ),
@@ -3611,25 +3616,38 @@ function claimEvidence(claims, files) {
     const key = `${kind}\n${value}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const hit = lines.find(entry => (kind === 'metric' ? entry.metrics.has(value) : sourceContainsFact(entry.lookup, value)));
-    found.push({ kind, value, source: hit?.path ?? null, line: hit?.number ?? null, text: hit?.text.trim() ?? null });
+    const hit = lines.find(entry => (kind === 'metric' ? entry.metrics.has(value) : sourceNamesZhTool(entry.lookup, value)));
+    found.push({ kind, value, source: hit?.path ?? null, line: hit?.number ?? null, text: hit?.raw.trim() ?? null });
   }
   return found;
 }
 
-/** Numbered lines of one source file; for a LaTeX document, only its body without comments. */
+/** Blank a span of text and keep its line breaks, so line numbers stay put. */
+function blankSpan(span) {
+  return span.replace(/[^\n]/g, ' ');
+}
+
+/**
+ * Numbered lines of one source file, holding only the text the gate reads: for
+ * a LaTeX document the body without comments, and never a script or style
+ * block. A delimiter line keeps the text beside the delimiter.
+ */
 function sourceFileLines(path, text) {
-  const raw = String(text);
-  const latex = LATEX_DOCUMENT_RE.test(raw);
-  let inBody = !latex || !/\\begin\{document\}/.test(raw);
-  const lines = [];
-  raw.split(/\r?\n/).forEach((line, index) => {
-    if (latex) {
-      if (/\\begin\{document\}/.test(line)) { inBody = true; return; }
-      if (/\\end\{document\}/.test(line)) { inBody = false; return; }
-      line = line.replace(LATEX_COMMENT_RE, '');
+  let visible = String(text);
+  if (LATEX_DOCUMENT_RE.test(visible)) {
+    visible = visible.replace(LATEX_COMMENT_RE, '');
+    const body = LATEX_BODY_RE.exec(visible);
+    if (body) {
+      const start = body.index + body[0].indexOf('{document}') + '{document}'.length;
+      const end = start + body[1].length;
+      visible = blankSpan(visible.slice(0, start)) + visible.slice(start, end) + blankSpan(visible.slice(end));
     }
-    if (inBody && line.trim()) lines.push({ path, number: index + 1, text: line });
+  }
+  visible = visible.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, blankSpan);
+  const raw = String(text).split(/\r?\n/);
+  const lines = [];
+  visible.split(/\r?\n/).forEach((line, index) => {
+    if (line.trim()) lines.push({ path, number: index + 1, text: line, raw: raw[index] });
   });
   return lines;
 }
