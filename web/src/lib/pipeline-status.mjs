@@ -16,19 +16,29 @@ export function applySavedStatus(rows, saved) {
   return rows.map((row) => applicationKey(row) === saved.key ? { ...row, status: saved.status } : row);
 }
 
+/** @typedef {{ recorded: boolean, company?: string, until?: string, scope?: string, reason?: string, error?: string }} CooldownOutcome */
+
 /** The existing status endpoint is the only writer. A 200 alone is not a save.
+ * `cooldown` asks the endpoint to record a re-apply cooldown with a Rejected
+ * save; its outcome goes to `onCooldown`, since a cooldown that did not land
+ * never un-saves the status.
  * @param {string} n
  * @param {string} current
  * @param {string} next
  * @param {typeof fetch} [request]
+ * @param {{ days: number, scope?: "role" | "company", onCooldown?: (outcome: CooldownOutcome | null) => void } | null} [cooldown]
  * @returns {Promise<string | null>}
  */
-export async function saveStatus(n, current, next, request = fetch) {
+export async function saveStatus(n, current, next, request = fetch, cooldown = null) {
   if (next === current) return null;
   const response = await request("/api/status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ n, status: next }),
+    body: JSON.stringify({
+      n,
+      status: next,
+      ...(cooldown ? { cooldownDays: cooldown.days, ...(cooldown.scope ? { cooldownScope: cooldown.scope } : {}) } : {}),
+    }),
   });
   const result = await response.json().catch(() => null);
   if (!response.ok) {
@@ -38,7 +48,23 @@ export async function saveStatus(n, current, next, request = fetch) {
   if (result?.ok !== true || result.status !== next) {
     throw new Error("Could not confirm the saved status. Refresh before trying again.");
   }
+  if (cooldown?.onCooldown) {
+    cooldown.onCooldown(result.cooldown && typeof result.cooldown === "object" ? result.cooldown : null);
+  }
   return result.status;
+}
+
+/** One line for the outcome of a requested cooldown, for the status editor.
+ * @param {CooldownOutcome | null} outcome
+ * @returns {{ ok: boolean, text: string } | null}
+ */
+export function cooldownMessage(outcome) {
+  if (!outcome) return { ok: false, text: "Cooldown not confirmed. Check re_apply_windows in config/profile.yml." };
+  if (outcome.recorded && outcome.until) {
+    return { ok: true, text: `Cooldown recorded: eligible again ${outcome.until}${outcome.scope === "company" ? " (all roles)" : ""}` };
+  }
+  if (outcome.reason === "no-cooldown") return null;
+  return { ok: false, text: `Cooldown not recorded${outcome.error ? `: ${outcome.error}` : outcome.reason ? ` (${outcome.reason})` : ""}` };
 }
 
 /** Take back the row's last logged status change. Resolves to the restored status.

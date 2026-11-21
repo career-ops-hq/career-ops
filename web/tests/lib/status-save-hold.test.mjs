@@ -71,3 +71,15 @@ test("a bulk save clears earlier failures for the rows it saved", () => {
   assert.equal(after.has(other), true);
   assert.equal(clearHeldSaves(holds, ["missing"]), holds);
 });
+
+test("a notice holds a landed save's message apart from failures", async () => {
+  const { offscreenStatusNotices } = await import("../../src/lib/status-save-hold.mjs");
+  let holds = reduceHeldSave(new Map(), { type: "notice", key: "a", n: "7", text: "Cooldown not recorded" });
+  assert.deepEqual(holds.get("a"), { phase: "notice", text: "Cooldown not recorded", n: "7" });
+  assert.equal(reduceHeldSave(holds, { type: "notice", key: "a", n: "7", text: "Cooldown not recorded" }), holds, "same notice is a no-op");
+  assert.deepEqual(offscreenStatusFailures(holds, []), [], "a notice is not a failed save");
+  assert.deepEqual(offscreenStatusNotices(holds, []), [{ key: "a", n: "7", text: "Cooldown not recorded" }]);
+  assert.deepEqual(offscreenStatusNotices(holds, ["a"]), [], "the mounted row shows its own notice");
+  holds = reduceHeldSave(holds, { type: "clear", key: "a" });
+  assert.equal(holds.has("a"), false);
+});

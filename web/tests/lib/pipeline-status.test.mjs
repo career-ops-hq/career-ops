@@ -93,3 +93,29 @@ test("undo failures carry the endpoint's message", async () => {
   await assert.rejects(undoStatus("11", async () => Response.json({ error: "#11 has no logged status change to undo", code: "nothing-to-undo" }, { status: 404 })), /no logged status change/);
   await assert.rejects(undoStatus("11", async () => Response.json({ ok: true })), /Could not confirm/);
 });
+
+test("saveStatus sends a requested cooldown and reports its outcome", async () => {
+  const { cooldownMessage } = await import("../../src/lib/pipeline-status.mjs");
+  let sent;
+  let outcome = "unset";
+  const status = await saveStatus("11", "Interview", "Rejected", async (_url, options) => {
+    sent = JSON.parse(options.body);
+    return Response.json({ ok: true, status: "Rejected", cooldown: { recorded: true, until: "2027-05-09", scope: "company" } });
+  }, { days: 180, scope: "company", onCooldown: (o) => { outcome = o; } });
+  assert.equal(status, "Rejected");
+  assert.deepEqual(sent, { n: "11", status: "Rejected", cooldownDays: 180, cooldownScope: "company" });
+  assert.equal(outcome.until, "2027-05-09");
+  assert.deepEqual(cooldownMessage(outcome), { ok: true, text: "Cooldown recorded: eligible again 2027-05-09 (all roles)" });
+  assert.equal(cooldownMessage({ recorded: false, reason: "no-cooldown" }), null);
+  assert.equal(cooldownMessage(null).ok, false);
+  assert.match(cooldownMessage({ recorded: false, reason: "unplaceable", error: "add it by hand" }).text, /add it by hand/);
+});
+
+test("saveStatus without a cooldown sends only n and status", async () => {
+  let sent;
+  await saveStatus("11", "Interview", "Rejected", async (_url, options) => {
+    sent = JSON.parse(options.body);
+    return Response.json({ ok: true, status: "Rejected" });
+  });
+  assert.deepEqual(sent, { n: "11", status: "Rejected" });
+});

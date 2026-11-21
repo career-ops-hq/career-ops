@@ -50,7 +50,7 @@ const CLIENT_ERROR_CODES = new Set(["usage", "invalid-state", "undo-unknown-prio
 // the document from the end rather than from the first `{`.
 
 export async function POST(req: Request) {
-  const body = await readJsonObject<{ n?: string; status?: string; undo?: boolean }>(req);
+  const body = await readJsonObject<{ n?: string; status?: string; undo?: boolean; cooldownDays?: unknown; cooldownScope?: unknown }>(req);
   if (!body) return Response.json({ error: "bad json" }, { status: 400 });
   const { n, status } = body;
   // {n, undo: true} takes back the row's last logged change (set-status.mjs
@@ -73,10 +73,32 @@ export async function POST(req: Request) {
   if (!canon) {
     return Response.json({ error: `not a canonical status: ${status}` }, { status: 400 });
   }
-  return writeStatus(n, canon);
+  // Optional re-apply cooldown, recorded by set-status.mjs in profile.yml's
+  // re_apply_windows. Checked here for the same reason as the status: a cheap,
+  // specific 400 before a spawn. The CLI validates again.
+  const cooldown = cooldownArgs(body.cooldownDays, body.cooldownScope, canon);
+  if (typeof cooldown === "string") return Response.json({ error: cooldown }, { status: 400 });
+  return writeStatus(n, canon, cooldown);
 }
 
-async function writeStatus(n: unknown, canon: string | null) {
+const MAX_COOLDOWN_DAYS = 3650;
+
+/** CLI flags for a requested cooldown, [] for none, or an error message. */
+function cooldownArgs(days: unknown, scope: unknown, canon: string): string[] | string {
+  if (days === undefined || days === null) {
+    return scope === undefined || scope === null ? [] : "cooldownScope needs cooldownDays";
+  }
+  if (typeof days !== "number" || !Number.isInteger(days) || days < 0 || days > MAX_COOLDOWN_DAYS) {
+    return `cooldownDays must be a whole number from 0 to ${MAX_COOLDOWN_DAYS}`;
+  }
+  if (canon !== "Rejected") return "a cooldown applies to Rejected only";
+  if (scope !== undefined && scope !== null && scope !== "role" && scope !== "company") {
+    return "cooldownScope must be role or company";
+  }
+  return ["--cooldown-days", String(days), ...(scope ? ["--cooldown-scope", String(scope)] : [])];
+}
+
+async function writeStatus(n: unknown, canon: string | null, cooldown: string[] = []) {
   // Same reason the status is checked above: answer a bad request before paying
   // for a process spawn and a tracker lock. `n` is typed as a string but arrives
   // from untrusted JSON, so it can be an array or an object, and `String(n)`
@@ -115,6 +137,7 @@ async function writeStatus(n: unknown, canon: string | null) {
     "--source",
     "web",
     "--detach-jd-archive",
+    ...cooldown,
     "--json",
   ]);
   const parsed = parseCliJson(stdout);
@@ -170,5 +193,8 @@ async function writeStatus(n: unknown, canon: string | null) {
     status: canon ?? parsed.newStatus,
     changed: parsed.changed === true,
     statusLogged: parsed.statusLogged === true,
+    // Present only when a cooldown was requested: the CLI's outcome, so the UI
+    // can say whether the window landed (a failure never fails the status).
+    ...(parsed.cooldownRecorded && typeof parsed.cooldownRecorded === "object" ? { cooldown: parsed.cooldownRecorded } : {}),
   });
 }
