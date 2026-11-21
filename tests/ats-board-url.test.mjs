@@ -16,6 +16,7 @@ import assert from 'node:assert/strict';
 import {
   BOARD_ATS,
   BOARD_URL_BUILDERS,
+  OWN_DOMAIN_ATS,
   OPTIONAL_REGION_BOARD_URL_BUILDERS,
   REGIONAL_BOARD_URL_BUILDERS,
   REGIONS,
@@ -65,11 +66,14 @@ import eightfold from '../providers/eightfold.mjs';
 import adpMyjobs from '../providers/adp-myjobs.mjs';
 import successfactorsClassic from '../providers/successfactors-classic.mjs';
 import oraclecloud from '../providers/oraclecloud.mjs';
+import phenom from '../providers/phenom.mjs';
+import successfactors from '../providers/successfactors.mjs';
+import peoplesoft from '../providers/peoplesoft.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, phenom, successfactors, peoplesoft, workday,
 };
 
 // The slug vendors discover-ats.mjs probes. The registry admits more: a board
@@ -126,6 +130,10 @@ const FORMS = [
   [{ ats: 'successfactors-classic', board: 'career8/com/acmecorpP' }, 'https://career8.successfactors.com/career?company=acmecorpP'],
   [{ ats: 'oraclecloud', board: 'acme.fa.us2.oraclecloud.com/CX_1001' }, 'https://acme.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/jobs'],
   [{ ats: 'oraclecloud', board: 'fa-acme-saasfaprod1.fa.ocs.oraclecloud.com/CX_1' }, 'https://fa-acme-saasfaprod1.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1/jobs'],
+  [{ ats: 'phenom', board: 'careers.acme.example' }, 'https://careers.acme.example'],
+  [{ ats: 'successfactors', board: 'jobs.acme.example' }, 'https://jobs.acme.example'],
+  [{ ats: 'successfactors', board: 'jobs.acme.example/Brand' }, 'https://jobs.acme.example/Brand'],
+  [{ ats: 'peoplesoft', board: 'recruit.acme.example/acme1' }, 'https://recruit.acme.example/psc/acme1/EMPLOYEE/HRMS/c/HRS_HRAM_FL.HRS_CG_SEARCH_FL.GBL'],
   [{ ats: 'workday', workday_host: 'jobs', board: 'acme/wd5/External_Careers' }, 'https://acme.wd5.myworkdayjobs.com/External_Careers'],
   [{ ats: 'workday', workday_host: 'site', board: 'acme/wd1/AcmeCareers' }, 'https://wd1.myworkdaysite.com/recruiting/acme/AcmeCareers'],
 ];
@@ -135,7 +143,7 @@ test('the closed ATS list, each with the provider that reads its boards', () => 
     'greenhouse', 'ashby', 'lever', 'workable', 'smartrecruiters', 'rippling', 'join',
     'recruitee', 'breezy', 'bamboohr', 'pinpoint', 'applicantpro', 'hibob', 'hirehive', 'homerun', 'jazzhr', 'keka',
     'personio', 'prevueaps', 'schoolspring', 'taleez', 'teamtailor', 'trakstar', 'turbohire', 'zoho-recruit',
-    'avature', 'clearcompany', 'jobvite', 'eightfold', 'adp-myjobs', 'successfactors-classic', 'oraclecloud', 'workday',
+    'avature', 'clearcompany', 'jobvite', 'eightfold', 'adp-myjobs', 'successfactors-classic', 'oraclecloud', 'phenom', 'successfactors', 'peoplesoft', 'workday',
   ]);
   assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
   for (const [ats, provider] of Object.entries(PROVIDERS)) assert.equal(provider.id, ats);
@@ -158,6 +166,9 @@ for (const [form, expected] of FORMS) {
   test(`${label}: builds ${expected}, and the ${form.ats} provider's detect() accepts it`, () => {
     const url = buildBoardUrl(form);
     assert.equal(url, expected);
+    // A careers site on a company's own domain is read with `provider:` set (Phenom has no detect(), SuccessFactors'
+    // claims only its own hosts): no URL names the system, which is why these rows carry own_domain_mark.
+    if (OWN_DOMAIN_ATS.includes(form.ats)) return;
     const detected = PROVIDERS[form.ats].detect({ name: 'Acme', careers_url: url });
     assert.ok(detected && typeof detected.url === 'string', `${form.ats}.detect() rejected ${url}`);
   });

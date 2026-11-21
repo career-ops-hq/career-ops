@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, copyEmployerRegistry, unlistedEmployerBoard } from './helpers.mjs';
 
-import { BOARD_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
+import { BOARD_ATS, OWN_DOMAIN_ATS, buildBoardUrl } from '../lib/ats-board-url.mjs';
 import {
   chunkInbox, importList, nameFromBoard, normalizeWebsite, parseBoardUrl, parseCsv, readList,
 } from '../seeds/employers-import.mjs';
@@ -111,7 +111,9 @@ test('every ATS, region and Workday host form round-trips through its builder', 
     { ats: 'workday', board: 'acme/wd5/External_Careers', workday_host: 'jobs' },
     { ats: 'workday', board: 'acme/wd103/Careers', workday_host: 'site' },
   ];
-  assert.deepEqual([...new Set(samples.map((s) => s.ats))].sort(), [...BOARD_ATS].sort(), 'one sample per ATS at least');
+  // A careers site on a company's own domain is never read from a URL: no URL names its system, so those rows are
+  // added as inbox lines by the project's own contributions (OWN_DOMAIN_CONTRIBUTORS), not through the importer.
+  assert.deepEqual([...new Set(samples.map((s) => s.ats))].sort(), BOARD_ATS.filter((a) => !OWN_DOMAIN_ATS.includes(a)).sort(), 'one sample per ATS at least');
   for (const c of samples) {
     const url = buildBoardUrl(c);
     assert.deepEqual(parseBoardUrl(url), { ...c, careers_url: url }, url);
@@ -338,7 +340,7 @@ test('importList: canonical inbox lines, every default written out; duplicates a
     [3, 'the same board as line 2'],
     [5, 'name contains an email address'],
     [6, 'website "not a domain" is not a domain name'],
-    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, workday)'],
+    [8, 'indeed.com is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)'],
   ]);
   assert.equal(r.derivedNames, 1);
   assert.equal(r.rewritten, 2);
@@ -441,7 +443,7 @@ test('CLI: the committed boards and new ones become an inbox the validator accep
     assert.equal(written.reduce((sum, n) => sum + n, 0), known.length + 2);
     assert.equal(readFileSync(`${list}.rejected.csv`, 'utf8'), 'line,input,reason\n'
       + `${known.length + 4},https://nope.example/jobs,`
-      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, workday)"\n');
+      + '"nope.example is not a board host of a supported ATS (greenhouse, ashby, lever, workable, smartrecruiters, rippling, join, recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio, prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, zoho-recruit, avature, clearcompany, jobvite, eightfold, adp-myjobs, successfactors-classic, oraclecloud, phenom, successfactors, peoplesoft, workday)"\n');
 
     const v = node(VALIDATOR, [], dir);
     assert.equal(v.status, 0, v.stderr);

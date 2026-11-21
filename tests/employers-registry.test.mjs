@@ -24,7 +24,7 @@ import { spawnSync } from 'node:child_process';
 import { ROOT, unlistedEmployerBoard, unusedEmployerContributionDay } from './helpers.mjs';
 
 import {
-  BOARD_ATS, DNS_LABEL_ATS, OPTIONAL_REGION_BOARD_URL_BUILDERS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, SUBDOMAIN_LABEL_RE,
+  BOARD_ATS, DNS_LABEL_ATS, OWN_DOMAIN_ATS, OPTIONAL_REGION_BOARD_URL_BUILDERS, REGIONAL_BOARD_URL_BUILDERS, REGIONS, SUBDOMAIN_LABEL_RE,
   SUBDOMAIN_RESERVED_LABELS, WORKDAY_HOSTS, buildBoardUrl, regionsOf,
 } from '../lib/ats-board-url.mjs';
 import { parseBoardUrl } from '../seeds/employers-import.mjs';
@@ -68,11 +68,14 @@ import eightfold from '../providers/eightfold.mjs';
 import adpMyjobs from '../providers/adp-myjobs.mjs';
 import successfactorsClassic from '../providers/successfactors-classic.mjs';
 import oraclecloud from '../providers/oraclecloud.mjs';
+import phenom from '../providers/phenom.mjs';
+import successfactors from '../providers/successfactors.mjs';
+import peoplesoft from '../providers/peoplesoft.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, oraclecloud, phenom, successfactors, peoplesoft, workday,
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
@@ -177,11 +180,13 @@ test('every admitted ATS has the provider that reads it, and that provider reads
   for (const ats of BOARD_ATS) {
     assert.equal(PROVIDERS[ats].id, ats);
     // A ClearCompany board is its career site's GUID, not a slug.
-    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : ats === 'oraclecloud' ? 'acme.fa.us2.oraclecloud.com/CX_1001' : 'acme';
+    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : ats === 'oraclecloud' ? 'acme.fa.us2.oraclecloud.com/CX_1001' : ats === 'peoplesoft' ? 'recruit.acme.example/acme1' : OWN_DOMAIN_ATS.includes(ats) ? 'careers.acme.example' : 'acme';
     const regions = Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, ats) ? regionsOf(ats) : [undefined, ...regionsOf(ats)];
     for (const region of regions) {
       const url = buildBoardUrl({ ats, region, board, workday_host: ats === 'workday' ? 'jobs' : undefined });
       assert.ok(url, `${ats} ${region ?? ''}`);
+      // A careers site on a company's own domain is read with `provider:` set: no URL names its system.
+      if (OWN_DOMAIN_ATS.includes(ats)) continue;
       assert.ok(PROVIDERS[ats].detect({ name: 'Acme', careers_url: url }), `${ats}.detect() rejects ${url}`);
     }
   }
@@ -701,7 +706,7 @@ test('in GitHub Actions, the garbage fixture fails with one ::error per finding 
     assert.equal(errorCommands.length, EXPECTED.length, r.stdout);
     assert.equal(warningCommands.length, 1, r.stdout);
     assert.ok(errorCommands.includes('::error file=employers/boards/greenhouse/a.ndjson,line=2::duplicate careers_url, already at employers/boards/greenhouse/a.ndjson:1'), r.stdout);
-    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox'), r.stdout);
+    assert.ok(errorCommands.includes('::error file=employers/notes.txt::unexpected entry; the registry holds only README.md, LICENSE, THIRD_PARTY_NOTICES.md, CHANGELOG.md, schema.json, contributions, boards, inbox, OWN_DOMAIN_CONTRIBUTORS'), r.stdout);
     assert.match(warningCommands[0], /^::warning file=employers\/boards\/lever\/e\.ndjson,line=2::website "euco\.example" is also on /);
     // The plain per-finding lines are not repeated; the closing count stays.
     assert.ok(!r.stderr.split('\n').some((l) => l.startsWith('employers/') || l.startsWith('warning: ')), r.stderr);
@@ -760,4 +765,57 @@ test('the step summary lists the first findings only, errors first, and makes re
   const row = one.split('\n').find((l) => l.startsWith('| warning |'));
   assert.equal(row, '| warning | employers/boards/ashby/b.ndjson | 1 | a \\| pipe, \\<b\\>html\\</b\\> and \\`code\\` second line |');
   assert.ok(one.includes('**Valid**: 1 row in 1 file, 1 contribution; 0 errors, 1 warning.'), one);
+});
+
+// ── Careers sites on a company's own domain (phenom, successfactors, peoplesoft) ──
+
+const MARK = { mark: 'phenompeople-assets', checked_on: NEW_DAY };
+const ownRow = (over = {}) => ({ ats: 'phenom', board: 'careers.fixture-own.example', own_domain_mark: MARK, ...over });
+const allowNewcomer = (head) => writeFileSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'), '# test\nnewcomer\n');
+
+test('own domain: rows from a contributor in OWN_DOMAIN_CONTRIBUTORS pass, for each of the three systems', () => {
+  const r = pr((head) => {
+    allowNewcomer(head);
+    addRows(head, [
+      ownRow(),
+      { ats: 'successfactors', board: 'jobs.fixture-own.example/Brand', own_domain_mark: { mark: 'rmkcdn-assets', checked_on: NEW_DAY } },
+      { ats: 'peoplesoft', board: 'recruit.fixture-own.example/own1', own_domain_mark: { mark: 'hrs-cg-search', checked_on: NEW_DAY } },
+    ]);
+  });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('own domain: the contributor, the mark, the host and the board are checked', () => {
+  const cases = [
+    [(head) => addRows(head, [ownRow()]), 'comes only from a contribution of OWN_DOMAIN_CONTRIBUTORS'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ own_domain_mark: undefined })]); }, 'own_domain_mark is required on phenom rows'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ own_domain_mark: { mark: 'jobs2web', checked_on: NEW_DAY } })]); }, 'own_domain_mark.mark "jobs2web" is not one of: phenompeople-assets'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ own_domain_mark: { mark: 'phenompeople-assets', checked_on: '2999-01-01' } })]); }, 'is in the future'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow(), { ats: 'successfactors', board: 'careers.fixture-own.example', own_domain_mark: { mark: 'jobs2web', checked_on: NEW_DAY } }]); }, 'a company\'s own domain is on one row'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ board: 'careers.phenompeople.com' })]); }, 'not on a vendor\'s domain'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ board: 'jobs.fixture-own.local' })]); }, 'not local'],
+    [(head) => { allowNewcomer(head); addRows(head, [ownRow({ board: 'careers.fixture-own.example/Brand' })]); }, 'must be the site\'s host'],
+    [(head) => { allowNewcomer(head); addRows(head, [{ ats: 'peoplesoft', board: 'recruit.fixture-own.example', own_domain_mark: { mark: 'hrs-cg-search', checked_on: NEW_DAY } }]); }, 'must be host/site'],
+    [(head) => addRows(head, [{ ats: 'teamtailor', board: unlistedEmployerBoard('teamtailor', 'fixture-co'), own_domain_mark: MARK }]), 'own_domain_mark is only used on phenom, successfactors, peoplesoft rows'],
+  ];
+  for (const [change, message] of cases) {
+    const head = checkout();
+    try {
+      change(head);
+      const { errors } = validateRegistry({ root: head });
+      assert.ok(errors.some((x) => x.message.includes(message)), `${message}\n${JSON.stringify(errors)}`);
+    } finally { rmSync(head, { recursive: true, force: true }); }
+  }
+});
+
+test('own domain: OWN_DOMAIN_CONTRIBUTORS is a file, and the committed one names only the maintainer', () => {
+  const lines = readFileSync(reg(ROOT, 'OWN_DOMAIN_CONTRIBUTORS'), 'utf8').split('\n').map((l) => l.split('#')[0].trim()).filter(Boolean);
+  assert.deepEqual(lines, ['santifer']);
+  const head = checkout();
+  try {
+    rmSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'), { force: true });
+    mkdirSync(reg(head, 'OWN_DOMAIN_CONTRIBUTORS'));
+    const { errors } = validateRegistry({ root: head });
+    assert.ok(errors.some((x) => x.file === 'employers/OWN_DOMAIN_CONTRIBUTORS' && x.message === 'must be a file'), JSON.stringify(errors));
+  } finally { rmSync(head, { recursive: true, force: true }); }
 });
