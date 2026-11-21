@@ -1997,6 +1997,11 @@ search_queries:
 #                                         # 2 requests per locale, since the API returns pages cumulatively
 #   enabled: true
 #
+# - name: Bolt                           # single-company; Next.js careers page, every position in one HTML response
+#   careers_url: https://bolt.eu/en/careers/positions/   # a branded domain: never auto-detected
+#   provider: bolt                        # required; always reads the English positions page, one request
+#   enabled: true                         # the whole worldwide board (~190 postings, one request); location is left to location_filter
+#
 # - name: Dassault Systèmes              # single-company; Exalead card_search_api
 #   careers_url: https://www.3ds.com/careers/jobs   # auto-detects on *.3ds.com
 #   provider: dassault                    # optional — 3ds.com host also auto-detects
@@ -3321,9 +3326,8 @@ tracked_companies:
 
   - name: Bolt
     careers_url: https://bolt.eu/en/careers/positions/
-    scan_method: websearch
-    scan_query: 'site:bolt.eu/en/careers/positions'
-    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which no provider reads; the Ashby board named Bolt has no postings."
+    provider: bolt
+    notes: "Tallinn. Ride-hailing/mobility. Lists its roles on its own site, which the scanner reads directly (every position is in one page); the Ashby board named Bolt has no postings."
     enabled: true
 
   - name: Bosch
