@@ -24,8 +24,15 @@
  * Coverage is JD_TEXT_API_ATS (liveness-api.mjs), including company careers
  * pages that carry only a Greenhouse `?gh_jid=`, and canonical/share-link
  * Workable postings (description, requirements and benefits).
- * When no API covers the host, the page's own schema.org JobPosting (JSON-LD)
- * is read next (lib/jd-page-fetch.mjs, behind the same egress guard). Phenom and
+ * Next come the host readers in lib/jd-host-readers.mjs (Oracle Recruiting
+ * Cloud, Eightfold, Google, Apple, Amazon, Walmart, Goldman, ServiceNow,
+ * Rippling, Avature).
+ * When nothing covers the host, the page itself is read next
+ * (lib/jd-page-fetch.mjs, behind the same egress guard): its schema.org
+ * JobPosting (JSON-LD), an embedded description payload, or, when the page names
+ * the requested job id, the posting's own markup (microdata on SuccessFactors
+ * RMK sites, an RMK "Job Description" layout, Radancy's ats-description).
+ * canonicalPageUrl() first points iCIMS at its framed document (?in_iframe=1). Phenom and
  * bespoke career sites render the JD from script data, so their visible HTML is
  * a shell that any text conversion, WebFetch included, reports as empty.
  * Every API fetch runs through fetchJdViaKnownApi() in browser-extract.mjs
@@ -36,6 +43,7 @@
 import { fetchJdViaKnownApi } from './browser-extract.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { fetchJdFromPage, markCappedAtsText } from './lib/jd-page-fetch.mjs';
+import { fetchJdViaHostReader, canonicalPageUrl } from './lib/jd-host-readers.mjs';
 
 const TEXT_CAP = 20_000; // a batch report reads the whole JD; no token-budget reason to cap tighter
 const TIMEOUT_MS = 15_000;
@@ -59,11 +67,17 @@ Options:
     process.exit(1);
   }
 
-  // Tier 1: the ATS's public API. Tier 2: the page's own JSON-LD JobPosting, for
-  // template-driven boards no API covers (Phenom, bespoke sites) whose visible
-  // HTML carries no JD at all.
+  // Tier 1: the ATS's public API. Tier 2: a host reader for career sites with a
+  // public JD endpoint no ATS entry covers (Oracle Recruiting Cloud, Eightfold,
+  // Google, Apple, Amazon, Walmart, Goldman, ServiceNow, Rippling, Avature;
+  // lib/jd-host-readers.mjs).
+  // A failed host read is a miss here, not an error, so tier 3 still runs.
+  // Tier 3: the page itself (JSON-LD JobPosting, embedded payload, or the
+  // posting's own markup), for boards no API covers (Phenom, iCIMS, Jibe,
+  // SuccessFactors RMK, Radancy, bespoke sites).
   const result = (await fetchJdViaKnownApi(url, TEXT_CAP, TIMEOUT_MS))
-    ?? (await fetchJdFromPage(url, TEXT_CAP, TIMEOUT_MS));
+    ?? (await fetchJdViaHostReader(url, { textCap: TEXT_CAP, timeoutMs: TIMEOUT_MS }).catch(() => null))
+    ?? (await fetchJdFromPage(canonicalPageUrl(url), TEXT_CAP, TIMEOUT_MS));
   // No stderr, by design: the caller's browser/WebFetch fallback is the
   // intended next step, and warning on every non-covered host would make the
   // normal path look broken.
