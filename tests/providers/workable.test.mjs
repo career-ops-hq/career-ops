@@ -676,6 +676,7 @@ try {
       [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' }, 'acme-widgets'],
       [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/accounts/acme-widgets/jobs/801183DB79' }, 'acme-widgets'],
       [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v3/accounts/acme-widgets/jobs' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets/' }, 'acme-widgets'],
       [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/acme-widgets' }, 'acme-widgets'],
       [{ name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' }, 'acme-widgets'],
       [{ name: 'Acme', careers_url: 'https://apply.workable.com/API/v3/accounts/AcmeWidgets/jobs' }, 'AcmeWidgets'],
@@ -697,6 +698,8 @@ try {
       { name: 'Acme', careers_url: 'https://apply.workable.com/api/' },
       { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/' },
       { name: 'Acme', careers_url: 'https://apply.workable.com/api/v3/accounts' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v3/accounts//jobs' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts//jobs' },
       { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/bad.slug' },
       { name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: 'https://boards-api.greenhouse.io/v1/boards/acme/jobs' },
     ];

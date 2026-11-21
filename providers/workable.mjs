@@ -120,7 +120,7 @@ function assertWorkableUrl(url) {
   return url;
 }
 
-const API_ACCOUNT_RE = /^api\/v\d+\/(?:widget\/)?accounts\/([^/]+)/i;
+const API_ACCOUNT_RE = /^\/api\/v\d+\/(?:widget\/)?accounts\/([^/]+)/i;
 
 /**
  * Extract the account slug from a tracked_companies entry's api or careers_url.
@@ -142,7 +142,7 @@ export function resolveWorkableSlug(entry) {
   const segs = parsed.pathname.split('/').filter(Boolean);
   const first = segs[0]?.toLowerCase();
   if (!first || first === 'j') return null;
-  const slug = first === 'api' ? segs.join('/').match(API_ACCOUNT_RE)?.[1] : segs[0];
+  const slug = first === 'api' ? parsed.pathname.match(API_ACCOUNT_RE)?.[1] : segs[0];
   if (!slug || !SLUG_RE.test(slug)) return null;
   return slug;
 }
