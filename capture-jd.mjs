@@ -29,8 +29,9 @@
  *   --company <name>     Overrides the company derived from --title/URL host.
  *   --role <name>        Overrides the role derived from --title.
  *   --title <text>       Page title, used to derive company and role.
- *   --commit             Stage ONLY this capture and data/pipeline.md, commit, push.
- *   --no-push            With --commit, commit without pushing.
+ *   --commit             Stage ONLY this capture and data/pipeline.md and commit.
+ *   --push               With --commit, also push. Never implied: a push sends
+ *                        the JD and the inbox to the remote, so it is opt-in.
  *   --json               Machine-readable result on stdout.
  *
  * Without JD text the capture file is skipped and only the pipeline row is
@@ -327,7 +328,7 @@ function sameDirectory(a, b) {
 }
 
 /**
- * Stage only this capture's files, commit them, and optionally push.
+ * Stage only this capture's files, commit them, and push only when asked.
  *
  * `git commit -- <paths>` commits those paths' working-tree content and ignores
  * everything else in the index, which is what keeps the user's other pending
@@ -341,7 +342,7 @@ function sameDirectory(a, b) {
  *
  * @returns {{committed: boolean, pushed: boolean, sha?: string, reason?: string}}
  */
-export function commitCapture({ dataRoot, files, message, push = true }) {
+export function commitCapture({ dataRoot, files, message, push = false }) {
   const git = (args) => spawnSync('git', args, { cwd: dataRoot, encoding: 'utf-8' });
 
   const top = git(['rev-parse', '--show-toplevel']);
@@ -384,7 +385,7 @@ export function commitCapture({ dataRoot, files, message, push = true }) {
  * @param {string} [input.dataRoot]          Defaults to getCareerOpsRoot().
  * @param {string} [input.date]              Defaults to today().
  * @param {boolean} [input.commit=false]
- * @param {boolean} [input.push=true]
+ * @param {boolean} [input.push=false]
  * @returns {Promise<object>}
  */
 export async function captureJd(input = {}) {
@@ -443,7 +444,7 @@ export async function captureJd(input = {}) {
 
   if (input.commit && appended.appended && files.length > 0) {
     const message = `chore(capture): ${company || 'unknown'} — ${role || 'posting'}`;
-    const git = commitCapture({ dataRoot, files, message, push: input.push !== false });
+    const git = commitCapture({ dataRoot, files, message, push: input.push === true });
     Object.assign(result, { committed: git.committed, pushed: git.pushed, sha: git.sha, gitReason: git.reason });
   }
 
@@ -487,8 +488,8 @@ Flags:
   --company <name>   Override the derived company.
   --role <name>      Override the derived role.
   --title <text>     Page title, used to derive company and role.
-  --commit           Stage only this capture and data/pipeline.md, commit, push.
-  --no-push          With --commit, commit without pushing.
+  --commit           Stage only this capture and data/pipeline.md and commit.
+  --push             With --commit, also push (never implied).
   --find <url>       Print the capture already stored for this URL, if any.
   --json             Machine-readable result on stdout.
 
@@ -551,7 +552,7 @@ async function main(argv) {
     company: typeof flags.company === 'string' ? flags.company : '',
     role: typeof flags.role === 'string' ? flags.role : '',
     commit: Boolean(flags.commit),
-    push: !flags['no-push'],
+    push: flags.push === true,
   });
 
   if (!result.ok) {

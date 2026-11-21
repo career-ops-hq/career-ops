@@ -36,6 +36,10 @@ If the user pastes a URL or a JD with no such qualifier, the router's
 
    **Quote untrusted values for the shell.** The URL, page title, company, role and file path come from outside: wrap each one in single quotes, replacing every embedded `'` with `'\''`, and never place them inside double quotes, where `$(...)`, backticks and `$VAR` still expand. The page title is the one value with no file or stdin alternative, so it gets the same single-quote escaping.
 
+   `--commit` makes one local commit and never pushes. Add `--push` only when the
+   user explicitly asks for the capture to be pushed in this request: a push sends
+   the JD text and the inbox to the configured remote.
+
    `--title` lets the script derive company and role. When the user states either
    explicitly, pass `--company` / `--role` — an explicit label always beats a
    derived one.
@@ -75,5 +79,5 @@ third mode: it captures here, then starts one evaluation session.
 - If the data root is not a git repository root, the capture still succeeds and
   the commit is skipped with a reason. Report that reason rather than fixing it
   by broadening the staging.
-- If `git push` fails, the capture and the local commit both stand. Report the
+- If `git push` fails (only possible with `--push`), the capture and the local commit both stand. Report the
   push failure; do not retry in a loop and do not force-push.

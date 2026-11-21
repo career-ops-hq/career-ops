@@ -22,7 +22,10 @@
  *
  * Routes:
  *   GET  /health    → { ok, version }
- *   POST /capture   → { url, title?, text?, evaluate? }  + X-Capture-Token
+ *   POST /capture   → { url, title?, text?, evaluate?, commit?, push? }  + X-Capture-Token
+ *
+ * A capture is committed unless `commit: false`; it is pushed only when the
+ * request sets `push: true`.
  *
  * `evaluate: true` captures first, then starts ONE detached evaluation session
  * and returns immediately. The evaluation is logged to `data/capture-evals.log`;
@@ -196,7 +199,8 @@ async function handleCapture(req, res, ctx) {
     role: typeof body.role === 'string' ? body.role : '',
     dataRoot: ctx.dataRoot,
     commit: body.commit !== false,
-    push: body.push !== false,
+    // Pushing sends the JD and the inbox to the remote: only on an explicit request.
+    push: body.push === true,
   });
 
   if (!result.ok) return send(res, 400, result, corsHeaders(req));

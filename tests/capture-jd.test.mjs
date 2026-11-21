@@ -696,3 +696,72 @@ test('startEvaluation off win32 spawns without a shell and passes the URL unquot
   assert.ok(calls[0].args[1].split(/\s+/).some((token) => token === url), 'the URL reaches the spawned CLI as a whole token');
   assert.ok(!/\n/.test(calls[0].args[1]));
 });
+
+// --- R3 maintainer follow-ups ----------------------------------------------
+
+function initRepoWithRemote() {
+  const root = scratch();
+  const git = initRepo(root);
+  const remote = mkdtempSync(path.join(sandbox, 'remote-'));
+  assert.equal(spawnSync('git', ['init', '-q', '--bare', remote], { encoding: 'utf-8' }).status, 0, 'bare remote');
+  git('add', '--', 'data/pipeline.md');
+  assert.equal(git('commit', '-qm', 'init').status, 0, 'initial commit');
+  git('remote', 'add', 'origin', remote);
+  assert.equal(git('push', '-q', '-u', 'origin', 'HEAD').status, 0, 'initial push');
+  const remoteHead = () => spawnSync('git', ['rev-parse', 'HEAD'], { cwd: remote, encoding: 'utf-8' }).stdout.trim();
+  return { root, git, remoteHead };
+}
+
+test('captureJd commits without pushing unless push is requested', async () => {
+  const { root, remoteHead } = initRepoWithRemote();
+  const before = remoteHead();
+  const result = await captureJd({ url: 'https://acme.test/jobs/no-push', dataRoot: root, commit: true });
+  assert.equal(result.committed, true, JSON.stringify(result));
+  assert.equal(result.pushed, false);
+  assert.equal(result.gitReason, 'push-skipped');
+  assert.equal(remoteHead(), before, 'the remote did not move');
+});
+
+test('the capture endpoint commits without pushing unless the request asks for it', async () => {
+  const { root, git, remoteHead } = initRepoWithRemote();
+  const token = ensureToken(root);
+  const server = createServer({ dataRoot: root, token, evalEnabled: false });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  const post = (payload) => fetch(`http://127.0.0.1:${port}/capture`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Capture-Token': token },
+    body: JSON.stringify(payload),
+  }).then((res) => res.json());
+
+  try {
+    const before = remoteHead();
+    const quiet = await post({ url: 'https://acme.test/jobs/server-no-push', evaluate: false });
+    assert.equal(quiet.committed, true, JSON.stringify(quiet));
+    assert.equal(quiet.pushed, false);
+    assert.equal(remoteHead(), before, 'no push without an explicit request');
+
+    const pushed = await post({ url: 'https://acme.test/jobs/server-push', push: true, evaluate: false });
+    assert.equal(pushed.pushed, true, JSON.stringify(pushed));
+    assert.equal(remoteHead(), git('rev-parse', 'HEAD').stdout.trim());
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('the CLI pushes only with --push', () => {
+  const { root, git, remoteHead } = initRepoWithRemote();
+  const env = { ...process.env, CAREER_OPS_ROOT: root, CAREER_OPS_DATA_DIR: '' };
+  const run = (...args) => spawnSync(process.execPath, [path.join(import.meta.dirname, '..', 'capture-jd.mjs'), ...args, '--json'], { cwd: root, encoding: 'utf-8', env, input: '' });
+
+  const before = remoteHead();
+  const quiet = run('--url', 'https://acme.test/jobs/cli-no-push', '--commit');
+  assert.equal(quiet.status, 0, quiet.stderr);
+  assert.equal(JSON.parse(quiet.stdout).pushed, false);
+  assert.equal(remoteHead(), before);
+
+  const pushed = run('--url', 'https://acme.test/jobs/cli-push', '--commit', '--push');
+  assert.equal(pushed.status, 0, pushed.stderr);
+  assert.equal(JSON.parse(pushed.stdout).pushed, true);
+  assert.equal(remoteHead(), git('rev-parse', 'HEAD').stdout.trim());
+});
