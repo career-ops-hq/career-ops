@@ -302,12 +302,47 @@ function sourceBlocks(text) {
   return blocks.filter((block) => !block.heading).map((block) => block.text);
 }
 
-/** The full source bullet a drift's anchor sentence belongs to, or null. */
+function companyKey(cvMarkdown, name) {
+  return cvMarkdown.toPlainText(String(name ?? "")).toLowerCase().trim();
+}
+
+/**
+ * cv.md's experience blocks grouped by role, keyed by company. The roles come
+ * from the core's cv-markdown, the same reader parseBaseCv uses. Each role's
+ * lines then go through sourceBlocks rather than parseBaseCv, because
+ * parseBaseCv keeps only the first line of a bullet: a bullet soft-wrapped in
+ * cv.md (Pandoc wraps at 72 columns by default) would be restored cut short.
+ */
+function cvBlocksByRole(cvMarkdown, cvMd) {
+  const roles = new Map();
+  for (const lines of cvMarkdown.findExperienceSections(cvMd)) {
+    let current = null;
+    for (const line of lines) {
+      const heading = cvMarkdown.parseCompanyHeading(line)
+        ?? (cvMarkdown.headingText(line, 3) !== null ? { company: cvMarkdown.headingText(line, 3) } : null);
+      if (heading) {
+        const key = companyKey(cvMarkdown, heading.company);
+        current = roles.get(key) ?? [];
+        roles.set(key, current);
+        continue;
+      }
+      if (current) current.push(line);
+    }
+  }
+  return new Map([...roles].map(([key, lines]) => [key, sourceBlocks(lines.join("\n"))]));
+}
+
+/**
+ * The full cv.md bullet of this role that a drift's anchor sentence belongs
+ * to, or null. Only one role is searched, so a sentence two roles share with
+ * different figures never carries one role's figure into the other. Two
+ * different blocks matching inside the role is ambiguous: null, the gate decides.
+ */
 function fullSourceBullet(check, blocks, sourceLine) {
   const key = bulletKey(check, sourceLine);
-  if (!key) return null;
-  const match = blocks.find((block) => bulletKey(check, block).includes(key));
-  return match ? check.stripMarkup(match) : null;
+  if (!key || !blocks) return null;
+  const matches = new Set(blocks.filter((block) => bulletKey(check, block).includes(key)).map((block) => check.stripMarkup(block)));
+  return matches.size === 1 ? [...matches][0] : null;
 }
 
 function clip(text, max = 160) {
@@ -327,30 +362,32 @@ async function restoreDriftedBullets({ coreRoot, dataRoot, payload, html }) {
   const warnings = [];
   try {
     const check = await loadCore(coreRoot, "verify-cv-facts.mjs");
-    const sourcePaths = [path.join(dataRoot, "cv.md"), path.join(dataRoot, "article-digest.md")];
+    const cvMarkdown = await loadCore(coreRoot, "lib/cv-markdown.mjs");
+    const cvPath = path.join(dataRoot, "cv.md");
+    // Detection reads both files, as the gate does; replacement text comes from cv.md only.
     const result = check.verifyFacts(html, {
-      sourcePaths,
+      sourcePaths: [cvPath, path.join(dataRoot, "article-digest.md")],
       configPath: path.join(dataRoot, "config", "cv-facts.json"),
     });
     const drifts = (result?.unsupportedFacts ?? []).filter((fact) => fact.kind === "drift" && fact.blocking === true);
     if (!drifts.length) return { warnings };
-    const blocks = sourcePaths
-      .filter((file) => fs.existsSync(/* turbopackIgnore: true */ file))
-      .flatMap((file) => sourceBlocks(fs.readFileSync(/* turbopackIgnore: true */ file, "utf8")));
+    const rolesBlocks = cvBlocksByRole(cvMarkdown, fs.readFileSync(/* turbopackIgnore: true */ cvPath, "utf8"));
     const entries = Array.isArray(payload.experience) ? payload.experience : [];
     const restored = new Set();
     for (const drift of drifts) {
       if (typeof drift.line !== "string" || typeof drift.sourceLine !== "string") continue;
       const claim = bulletKey(check, drift.line);
       if (!claim) continue;
-      // Without the whole source bullet, leave it: writing the one anchor
-      // sentence would drop the bullet's other sentences. The gate decides.
-      const source = fullSourceBullet(check, blocks, drift.sourceLine);
-      if (!source) continue;
       const added = Array.isArray(drift.added) && drift.added.length ? ` (not in cv.md: "${drift.added.join('", "')}")` : "";
-      // verifyFacts reports identical bullets once, so every copy in every role is restored.
+      // verifyFacts reports identical bullets once, so every copy in every role is
+      // checked, each against its own role in cv.md.
       entries.forEach((entry, entryIndex) => {
         if (!Array.isArray(entry?.bullets)) return;
+        // Without the whole bullet from this role, leave it: writing the one
+        // anchor sentence would drop its other sentences, and another role's
+        // bullet could carry another figure. The gate decides.
+        const source = fullSourceBullet(check, rolesBlocks.get(companyKey(cvMarkdown, entry.company)), drift.sourceLine);
+        if (!source) return;
         entry.bullets.forEach((bullet, index) => {
           const slot = `${entryIndex}:${index}`;
           if (restored.has(slot) || typeof bullet !== "string" || !bulletKey(check, bullet).includes(claim)) return;

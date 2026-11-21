@@ -310,7 +310,7 @@ const DRIFT_CV_MD = `## Experience
 - Shipped the weekly report
 `;
 
-async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD, experience = null } = {}) {
+async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD, experience = null, files = {} } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "cv-drift-"));
   const saved = {
     root: process.env.CAREER_OPS_ROOT,
@@ -324,6 +324,7 @@ async function buildWithBullets(bullets, { cvMd = DRIFT_CV_MD, experience = null
     mkdirSync(path.join(dir, "config"), { recursive: true });
     writeFileSync(path.join(dir, "config", "profile.yml"), "name: Jane Doe\n");
     writeFileSync(path.join(dir, "cv.md"), cvMd);
+    for (const [name, text] of Object.entries(files)) writeFileSync(path.join(dir, name), text);
     const body = payload();
     body.experience = experience ?? [{
       company: "Globex",
@@ -409,6 +410,58 @@ test("every bullet matching a drift is restored, in every role", async () => {
   assert.equal(result.ok, true, result.error);
   assert.ok(!result.html.includes(DRIFTED), "no drifted copy is left");
   assert.equal(result.warnings.filter((w) => /Restored the cv\.md wording/.test(w)).length, 3);
+});
+
+test("two roles sharing a drifted sentence each get their own cv.md figure back", async () => {
+  const cvMd = `## Experience
+
+### Globex -- Remote
+
+**Analyst**
+2020 - 2024
+
+- Worked with a third-party NLP engine to classify support tickets. Cut triage time by 40%.
+
+### Initech -- Remote
+
+**Associate**
+2016 - 2019
+
+- Worked with a third-party NLP engine to classify support tickets. Cut triage time by 15%.
+`;
+  const experience = [
+    { company: "Globex", role: "Analyst", location: "Remote", dates: "2020 - 2024", bullets: [`${DRIFTED}. Cut triage time by 40%.`] },
+    { company: "Initech", role: "Associate", location: "Remote", dates: "2016 - 2019", bullets: [`${DRIFTED}. Cut triage time by 15%.`] },
+  ];
+  const { result } = await buildWithBullets(null, { cvMd, experience });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "no drifted copy is left");
+  const globex = result.html.indexOf("Cut triage time by 40%");
+  const initech = result.html.indexOf("Cut triage time by 15%");
+  assert.ok(globex !== -1, "Globex keeps its own 40%");
+  assert.ok(initech !== -1, "Initech keeps its own 15%, not Globex's");
+  assert.ok(globex < initech, "each figure stays in its own role");
+});
+
+test("a drift whose wording exists only in article-digest.md is left for the gate", async () => {
+  const cvMd = DRIFT_CV_MD.replace("- Worked with a third-party NLP engine to classify support tickets\n", "");
+  const files = { "article-digest.md": `- ${SOURCE_WORDING}. Cut triage time by 40%.\n` };
+  const { result } = await buildWithBullets([DRIFTED, "Shipped the weekly report"], { cvMd, files });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.warnings.some((w) => /Restored the cv\.md wording/.test(w)), "no bullet is replaced from article-digest.md");
+  assert.ok(!result.html.includes("Cut triage time by 40%"), "digest text is not written into the CV");
+});
+
+test("a cv.md bullet soft-wrapped over two lines is restored whole", async () => {
+  const cvMd = DRIFT_CV_MD.replace(
+    "- Worked with a third-party NLP engine to classify support tickets\n",
+    "- Worked with a third-party NLP engine to classify support tickets.\n  Cut triage time by 40%.\n",
+  );
+  const { result } = await buildWithBullets([DRIFTED, "Shipped the weekly report"], { cvMd });
+  assert.equal(result.ok, true, result.error);
+  assert.ok(!result.html.includes(DRIFTED), "drifted wording is gone");
+  assert.ok(result.html.includes(SOURCE_WORDING), "the first line is restored");
+  assert.ok(result.html.includes("Cut triage time by 40%"), "the wrapped second line is kept");
 });
 
 test("a trademark sign in a tailored bullet does not stop it matching its drift line", async () => {
