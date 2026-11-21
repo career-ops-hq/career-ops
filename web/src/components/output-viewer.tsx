@@ -4,6 +4,7 @@ import { Children, isValidElement, useEffect, useMemo, useRef, useState } from "
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { parseTaskItems, tickKey, countDone, pickForCompany } from "@/lib/prep.mjs";
+import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { ChevronRight, Folder, FolderOpen, FileText, FileCode, FileType, Download, PanelLeftClose, PanelLeftOpen, Plus, Trash2 } from "lucide-react";
 
 type Task = { id: string; text: string; done: boolean };
@@ -215,6 +216,7 @@ export function OutputViewer() {
             <div className="report-prose p-6">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
+                {...noMarkdownImages}
                 components={{
                   li: ({ node, className, children, ...rest }) => {
                     void node;
