@@ -37,6 +37,8 @@
     "update": "node update-system.mjs apply --confirm",
     "rollback": "node update-system.mjs rollback",
     "liveness": "node check-liveness.mjs",
+    "capture": "node capture-jd.mjs",
+    "capture:server": "node capture-server.mjs",
     "extract": "node browser-extract.mjs",
     "scan:hn": "node scan-hn.mjs",
     "scan": "node scan.mjs",
