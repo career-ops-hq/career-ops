@@ -503,17 +503,18 @@ try {
   // entry for it, so a CV rendered with titles outside that table produces
   // blocks that are real and movable but can never match a configured name.
   // Without a warning that is indistinguishable, from the user's side, from a
-  // setting that does nothing — the failure this feature exists to remove.
+  // setting that does nothing — the failure this feature exists to remove. The
+  // titles are Finnish: no Finnish market set ships, so none is in the table.
   const unknownTitles = `<html><body><div class="cv">
   <!-- EDUCATION -->
-  <div class="section"><div class="section-title">Ausbildung</div><div>Uni</div></div>
+  <div class="section"><div class="section-title">Koulutus</div><div>Uni</div></div>
 
   <!-- SKILLS -->
-  <div class="section"><div class="section-title">Kenntnisse</div><div>Node.js</div></div>
+  <div class="section"><div class="section-title">Taidot</div><div>Node.js</div></div>
 </div></body></html>`;
   const unknownRun = captureWarnings(() => reorderCvSections(unknownTitles, ['skills', 'education']));
   if (unknownRun.value === unknownTitles
-      && unknownRun.warnings.some(w => w.includes('Ausbildung') && w.includes('Kenntnisse'))) {
+      && unknownRun.warnings.some(w => w.includes('Koulutus') && w.includes('Taidot'))) {
     pass('a CV whose titles are outside the alias table says so, instead of quietly doing nothing');
   } else {
     fail(`unrecognized rendered titles went unreported: ${JSON.stringify(unknownRun.warnings)}`);
@@ -529,11 +530,11 @@ try {
   <!-- EDUCATION -->
   <div class="section"><div class="section-title">Education</div><div>E</div></div>
   <!-- SKILLS -->
-  <div class="section"><div class="section-title">Kenntnisse</div><div>K</div></div>
+  <div class="section"><div class="section-title">Taidot</div><div>K</div></div>
 </div></body></html>`;
   const partialRun = captureWarnings(() => reorderCvSections(partial, ['skills', 'projects', 'education']));
   if (partialRun.value === partial
-      && partialRun.warnings.some(w => w.includes('"skills"') && w.includes('Kenntnisse'))) {
+      && partialRun.warnings.some(w => w.includes('"skills"') && w.includes('Taidot'))) {
     pass('a partly-resolving order that changes nothing still names what it could not resolve');
   } else {
     fail(`partial resolution went unreported: ${JSON.stringify(partialRun.warnings)}`);
@@ -544,8 +545,8 @@ try {
   // and an unbounded title would bury the warning it belongs to.
   const ESC = String.fromCharCode(27);
   const hostileTitle = unknownTitles
-    .replace('Ausbildung', `${ESC}[31mFAKE ERROR${ESC}[0m`)
-    .replace('Kenntnisse', 'X'.repeat(500));
+    .replace('Koulutus', `${ESC}[31mFAKE ERROR${ESC}[0m`)
+    .replace('Taidot', 'X'.repeat(500));
   const hostileRun = captureWarnings(() => reorderCvSections(hostileTitle, ['skills', 'education']));
   const emitted = hostileRun.warnings.join('\n');
   if (emitted.includes(ESC)) {
@@ -562,8 +563,8 @@ try {
   // half, emitting a lone surrogate into the log.
   const RTL_OVERRIDE = '‮';
   const bidiAndAstral = unknownTitles
-    .replace('Ausbildung', `${RTL_OVERRIDE}gnudlibsuA`)
-    .replace('Kenntnisse', '😀'.repeat(80));
+    .replace('Koulutus', `${RTL_OVERRIDE}sutuluoK`)
+    .replace('Taidot', '😀'.repeat(80));
   const bidiRun = captureWarnings(() => reorderCvSections(bidiAndAstral, ['skills', 'education']));
   const bidiText = bidiRun.warnings.join('\n');
   const hasLoneSurrogate = [...bidiText].some(ch => {
@@ -619,10 +620,10 @@ try {
   // Nor when the reorder worked. A custom heading elsewhere in the CV is the
   // user's business; the warning is about the setting failing, not about the
   // alias table being incomplete in the abstract.
-  const mixed = FIXTURE.replace('>Certifications<', '>Auszeichnungen<');
+  const mixed = FIXTURE.replace('>Certifications<', '>Sertifikaatit<');
   const mixedRun = captureWarnings(() => reorderCvSections(mixed, ['skills', 'education']));
   if (JSON.stringify(renderedTitles(mixedRun.value)) === JSON.stringify(
-        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Auszeichnungen', 'Education'])
+        ['Professional Summary', 'Work Experience', 'Projects', 'Skills', 'Sertifikaatit', 'Education'])
       && mixedRun.warnings.length === 0) {
     pass('an unrecognized title elsewhere is silent when the configured sections did resolve');
   } else {

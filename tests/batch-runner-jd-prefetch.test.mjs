@@ -22,7 +22,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, existsSync, mkdtempSync as _mdt } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = readFileSync(join(ROOT, 'batch/batch-runner.sh'), 'utf-8').replace(/\r\n/g, '\n');
@@ -174,14 +174,15 @@ if (
   fail('curl is missing --proto or --proto-redir — a request could follow a non-http protocol to an internal target');
 }
 
-// The destination guard must be present — blocks loopback, link-local, and private-network IPs
-// before curl connects (--proto/--proto-redir restrict schemes, not destination addresses).
+// The destination guard must be present — blocks loopback, link-local, and private-network
+// addresses before curl connects (--proto/--proto-redir restrict schemes, not destination
+// addresses). lib/egress-pin.mjs checks every hop, DNS answers included, and curl is pinned
+// with --resolve to the addresses it checked, so a rebinding name cannot swap them.
 if (
-  /169.254/.test(curlPrefetchBlock) &&
-  /127./.test(curlPrefetchBlock) &&
-  /_url_safe/.test(curlPrefetchBlock)
+  /node "\$PROJECT_DIR\/lib\/egress-pin\.mjs" "\$current_url"/.test(curlPrefetchBlock) &&
+  /\$\{_egress_pin:\+--resolve "\$_egress_pin"\}/.test(curlPrefetchBlock)
 ) {
-  pass('SSRF destination guard is present (loopback and cloud-metadata IPs blocked before curl)');
+  pass('SSRF destination guard is present (every hop checked by lib/egress-pin.mjs, curl pinned with --resolve)');
 } else {
   fail('SSRF destination guard is missing — a malicious offer URL could reach 169.254.169.254 or 127.x through curl');
 }
@@ -442,6 +443,31 @@ if (!wordCountMatch) {
 // that substitutes curl with a function so no network is needed.
 {
   const work = mkdtempSync(join(tmpdir(), 'cops-jdprefetch-e2e-'));
+  // The guard (lib/egress-pin.mjs) resolves names. Answer from a fixed table
+  // instead of the network: a preload swaps dns.promises.lookup in every node
+  // the block starts, so the suite stays offline and deterministic. Names not
+  // in the table fail as ENOTFOUND, which the guard refuses.
+  const dnsStub = join(work, 'dns-stub.mjs');
+  writeFileSync(dnsStub, [
+    "import dns from 'node:dns';",
+    'const table = {',
+    "  'example.com': ['93.184.215.14'],",
+    "  'jobs.example.com': ['93.184.215.14', '2606:2800:21f:cb07:6820:80da:af6b:8b2c'],",
+    "  'mybox.local': ['192.168.1.20'],",
+    "  'rebind.example': ['10.0.0.7'],",
+    "  'mixed.example': ['93.184.215.14', '169.254.169.254'],",
+    '};',
+    'dns.promises.lookup = async (host, opts = {}) => {',
+    '  const hit = table[String(host).toLowerCase()];',
+    "  if (!hit) { const err = new Error(`stub: no answer for ${host}`); err.code = 'ENOTFOUND'; throw err; }",
+    "  const answers = hit.map((address) => ({ address, family: address.includes(':') ? 6 : 4 }));",
+    '  return opts.all ? answers : answers[0];',
+    '};',
+    '',
+  ].join('\n'));
+  const savedEnv = { PROJECT_DIR: process.env.PROJECT_DIR, NODE_OPTIONS: process.env.NODE_OPTIONS };
+  process.env.PROJECT_DIR = ROOT;
+  process.env.NODE_OPTIONS = `--import=${pathToFileURL(dnsStub).href}`;
   try {
     // Extract the curl block and word-count block from SRC.
     // We look for the block between mktemp and the echo "--- Processing offer" line.
@@ -737,6 +763,12 @@ if (!wordCountMatch) {
         { label: 'RFC-1918-192',   url: 'http://192.168.1.1/job'                 },
         { label: 'localhost',      url: 'http://localhost/job'                    },
         { label: 'dot-local',      url: 'http://mybox.local/job'                 },
+        // Names and spellings the old literal-only check let through (GHSA-wwfx).
+        { label: 'ipv6-loopback',  url: 'http://[::1]/job'                       },
+        { label: 'cgnat-metadata', url: 'http://100.100.100.200/latest/meta-data' },
+        { label: 'dns-private',    url: 'https://rebind.example/job'             },
+        { label: 'dns-mixed',      url: 'https://mixed.example/job'              },
+        { label: 'dns-unresolved', url: 'https://nowhere.example/job'            },
       ];
       for (const { label, url: badUrl } of ssrfCases) {
         const jdSsrfPath = join(work, `jd-ssrf-${label}.html`);
@@ -793,8 +825,79 @@ if (!wordCountMatch) {
       } else {
         fail(`SSRF guard (safe public URL): curl_was_called=${safeGuardCurlCalled} — guard is over-blocking public URLs`);
       }
+
+      // The addresses the guard checked are the ones curl dials: --resolve pins
+      // the name, IPv4 first, so a second lookup by curl cannot swap in a
+      // private answer (DNS rebinding).
+      const pinArgsPath = join(work, 'pin-args.txt');
+      const pinScript = join(work, 'case-pin.sh');
+      writeFileSync(pinScript, [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(join(work, 'jd-pin.html'))}`,
+        '> "$jd_file"',
+        `args_file=${JSON.stringify(pinArgsPath)}`,
+        'curl() { printf "%s\\n" "$@" > "$args_file"; return 1; }',
+        'prefetch_min_words=80',
+        'jd_prefetch_words=0',
+        'url="https://jobs.example.com/eng-42"',
+        'runPrefetch() {',
+        curlPrefetchBlock,
+        '}',
+        'runPrefetch',
+      ].join('\n'));
+      execFileSync(bash, [pinScript], { encoding: 'utf-8', timeout: 30000 });
+      const pinArgs = existsSync(pinArgsPath) ? readFileSync(pinArgsPath, 'utf-8').split('\n') : [];
+      const resolveAt = pinArgs.indexOf('--resolve');
+      const pinValue = resolveAt === -1 ? null : pinArgs[resolveAt + 1];
+      if (pinValue === 'jobs.example.com:443:93.184.215.14,[2606:2800:21f:cb07:6820:80da:af6b:8b2c]') {
+        pass('SSRF guard pins curl to the checked addresses with --resolve (IPv4 first)');
+      } else {
+        fail(`SSRF guard must pin curl with --resolve to the checked addresses, got ${JSON.stringify(pinValue)}`);
+      }
+
+      // A redirect hop to a NAME that resolves privately is refused before the
+      // second request, not only a literal private address.
+      const nameHopTrace = join(work, 'name-hop-trace.txt');
+      const nameHopScript = join(work, 'case-redirect-name.sh');
+      writeFileSync(nameHopScript, [
+        '#!/usr/bin/env bash',
+        `jd_file=${JSON.stringify(join(work, 'name-hop.html'))}`,
+        '> "$jd_file"',
+        `trace_file=${JSON.stringify(nameHopTrace)}`,
+        ': > "$trace_file"',
+        'curl() {',
+        '  local header_arg="" request_url=""',
+        '  while [[ $# -gt 0 ]]; do',
+        '    case "$1" in',
+        '      --dump-header) header_arg="$2"; shift 2 ;;',
+        '      --) request_url="$2"; shift 2 ;;',
+        '      *) shift ;;',
+        '    esac',
+        '  done',
+        '  printf "%s\\n" "$request_url" >> "$trace_file"',
+        '  printf "HTTP/1.1 302 Found\\nLocation: https://rebind.example/internal\\n\\n" > "$header_arg"; return 47',
+        '}',
+        'prefetch_min_words=80',
+        'jd_prefetch_words=0',
+        'url="https://example.com/job"',
+        'runPrefetch() {',
+        curlPrefetchBlock,
+        '}',
+        'runPrefetch',
+      ].join('\n'));
+      execFileSync(bash, [nameHopScript], { encoding: 'utf-8', timeout: 30000 });
+      const nameHopCalls = readFileSync(nameHopTrace, 'utf-8').split('\n').filter(Boolean);
+      if (nameHopCalls.length === 1 && nameHopCalls[0] === 'https://example.com/job') {
+        pass('redirect to a name that resolves privately: second hop refused before curl');
+      } else {
+        fail(`redirect to a name that resolves privately: expected one request, got ${JSON.stringify(nameHopCalls)}`);
+      }
     }
   } finally {
+    for (const [name, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
     rmSync(work, { recursive: true, force: true });
   }
 }

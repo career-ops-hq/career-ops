@@ -140,6 +140,32 @@ const run = (argv, { release, local = '1.33.0', marker = null }) => {
   }
 }
 
+// ── 8b. --channel main reads only a career-ops release tag as a release (#7329) ──
+// A sibling component's release (`web-v*`) or a malformed `career-ops-v…` tag
+// must not become the remote version, whatever main's VERSION says.
+{
+  const asked = async (tag, mainVersion = '1.33.0') => {
+    const curl = async (url) => {
+      if (url.endsWith('/main/VERSION')) return `${mainVersion}\n`;
+      return url.includes('/releases/latest') ? RELEASE(tag) : null;
+    };
+    return checkStatus(['check', '--channel', 'main'], {}, {
+      curlGet: curl,
+      localVersion: () => '1.33.0',
+      readMarker: () => null,
+      gitRemoteVersion: () => ({ status: 'ok', version: '1.33.0', commit: '' }),
+    });
+  };
+  for (const tag of ['web-v2.0.0', 'career-ops-vpreview-v9.0.0', 'v7.7.7']) {
+    const res = await asked(tag);
+    if (res.remote === '1.33.0') pass(`--channel main ignores the release tag ${tag}, remote stays main's VERSION`);
+    else fail(`--channel main took ${tag} as the version: ${JSON.stringify(res)}`);
+  }
+  const res = await asked('career-ops-v1.34.0', '1.33.0');
+  if (res.status === 'update-available' && res.remote === '1.34.0') pass('--channel main still offers a newer career-ops release tag');
+  else fail(`--channel main with career-ops-v1.34.0 → ${JSON.stringify(res)}`);
+}
+
 // ── 9. The marker parser and the coverage rule, directly ──
 {
   const m = parseDismissMarker('{"version":"1.34.0","at":"2026-09-30T13:00:00Z"}\n');

@@ -85,16 +85,38 @@ test('ceiling validation normalizes decimal zeros and rejects unsafe or overflow
   }
 }));
 
-function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429', successAfter = 99, cli = 'claude', secondLog = log } = {}) {
+function runLoop({ invoke, dir }, {
+  cap = 300,
+  retries = 0,
+  max = 2,
+  log = '429',
+  successAfter = 99,
+  cli = 'claude',
+  secondLog = log,
+  // An omitted path would search /001-*.md, and an inherited REPORTS_DIR
+  // would quarantine the developer's files. Every run stays in the fixture.
+  reports = join(dir, 'reports'),
+  tracker = join(dir, 'tracker'),
+  logs = join(dir, 'logs'),
+} = {}) {
   writeFileSync(join(dir, 'first.log'), log);
   writeFileSync(join(dir, 'second.log'), secondLog);
+  mkdirSync(reports, { recursive: true });
+  mkdirSync(tracker, { recursive: true });
+  mkdirSync(logs, { recursive: true });
+  const quarantineAt = source.indexOf('quarantine_attempt_artifacts() {');
+  const quarantine = source.slice(quarantineAt, source.indexOf('\n# Retry wrapper', quarantineAt));
   return invoke(`${functions}
+    ${quarantine}
     RATE_LIMIT_SLEEP=${cap}
     MAX_RETRIES=${max}
     CLI=${cli}
     PAUSE_FILE=pause.tsv
     THROTTLE_FILE=throttle.marker
     BATCH_PAUSED=false
+    REPORTS_DIR='${reports}'
+    TRACKER_DIR='${tracker}'
+    LOGS_DIR='${logs}'
     calls=0
     claude() {
       calls=$((calls + 1))
@@ -103,6 +125,7 @@ function runLoop({ invoke, dir }, { cap = 300, retries = 0, max = 2, log = '429'
       return 1
     }
     qwen() { claude; }
+    grok() { claude; }
     run_worker() { "$@"; }
     sleep() { printf 'SLEEP:%s\n' "$1"; }
     update_state_retrying() { printf 'STATE:%s:%s:%s\n' "$3" "$8" "$9"; }
@@ -146,6 +169,20 @@ test('successful, non-rate-limit and non-Claude workers do not back off', () => 
     assert.doesNotMatch(out, /SLEEP:|STATE:/);
     assert.match(out, /END:1:0:false:/);
   }
+}));
+
+test('a grok 429 pauses and retries the same way claude does', () => fixture(ctx => {
+  const paused = runLoop(ctx, { cli: 'grok', cap: 0, log: '429 rate limit exceeded' });
+  assert.doesNotMatch(paused, /SLEEP:/);
+  assert.match(paused, /STATE:paused_rate_limit/);
+  assert.match(paused, /END:1:0:true:1/);
+  assert.match(readFileSync(join(ctx.dir, 'pause.tsv'), 'utf8'), /^1\t001\t/);
+
+  const retried = runLoop(ctx, { cli: 'grok', log: '429 rate limit exceeded' });
+  const sleeps = [...retried.matchAll(/SLEEP:(\d+)/g)].map(match => Number(match[1]));
+  assert.equal(sleeps.length, 2);
+  assert.match(retried, /STATE:rate_limited:rate-limit; retrying after/);
+  assert.match(retried, /END:3:2:false:1/);
 }));
 
 test('full runner resumes persisted retries and schedules paused rows only with --resume-paused', () => fixture(({ dir, invoke }) => {
@@ -196,4 +233,72 @@ test('full runner resumes persisted retries and schedules paused rows only with 
     assert.equal(final[2], 'failed');
     assert.equal(final[8], '2');
   }
+}));
+
+test('a pause moves the attempt aside before the batch can merge it', () => fixture(ctx => {
+  const seed = (label) => {
+    const reports = join(ctx.dir, `${label}-reports`);
+    const tracker = join(ctx.dir, `${label}-tracker`);
+    const logs = join(ctx.dir, `${label}-logs`);
+    mkdirSync(reports);
+    mkdirSync(tracker);
+    mkdirSync(logs);
+    writeFileSync(join(reports, '001-role.md'), 'report\n');
+    writeFileSync(join(reports, '001-RESERVED.md'), 'reserved\n');
+    writeFileSync(join(tracker, '1.tsv'), 'row\n');
+    writeFileSync(join(tracker, '002-other.tsv'), 'other\n');
+    return { reports, tracker, logs };
+  };
+  for (const [label, options, reason] of [
+    ['session', { log: 'session limit' }, 'session-pause'],
+    ['zero', { cap: 0, log: '429 rate limit exceeded' }, 'rate-pause'],
+    ['over', { log: '429\nRetry-After: 301' }, 'rate-pause'],
+  ]) {
+    const dirs = seed(label);
+    const out = runLoop(ctx, { cli: 'grok', ...options, ...dirs });
+    assert.match(out, /STATE:paused_rate_limit/);
+    assert.equal(existsSync(join(dirs.reports, '001-role.md')), false, label);
+    assert.equal(readFileSync(join(dirs.reports, '001-RESERVED.md'), 'utf8'), 'reserved\n');
+    assert.equal(existsSync(join(dirs.tracker, '1.tsv')), false, label);
+    assert.equal(readFileSync(join(dirs.tracker, '002-other.tsv'), 'utf8'), 'other\n');
+    assert.equal(readFileSync(join(dirs.logs, 'quarantine', `1-${reason}-001-role.md`), 'utf8'), 'report\n');
+    assert.equal(readFileSync(join(dirs.logs, 'quarantine', `1-${reason}-1.tsv`), 'utf8'), 'row\n');
+  }
+}));
+
+test('the rate-limit retry quarantines before it sleeps', () => {
+  const rate = loop.slice(loop.indexOf('if is_rate_limit_log'));
+  const retry = rate.slice(rate.indexOf('retries=$((retries + 1))'));
+  const beforeSleep = retry.slice(0, retry.indexOf('sleep "$retry_delay"'));
+  assert.match(beforeSleep, /quarantine_attempt_artifacts rate-retry/);
+  assert.match(loop, /quarantine_attempt_artifacts match-retry/);
+});
+
+test('a rate-limit retry moves the failed report aside and leaves the reservation', () => fixture(({ dir, invoke }) => {
+  const fnStart = source.indexOf('quarantine_attempt_artifacts() {');
+  const fnEnd = source.indexOf('\n# Retry wrapper', fnStart);
+  const fn = source.slice(fnStart, fnEnd);
+  mkdirSync(join(dir, 'reports'));
+  mkdirSync(join(dir, 'tracker'));
+  mkdirSync(join(dir, 'logs'));
+  writeFileSync(join(dir, 'reports', '001-role.md'), 'report\n');
+  writeFileSync(join(dir, 'reports', '001-RESERVED.md'), 'reserved\n');
+  writeFileSync(join(dir, 'tracker', '7.tsv'), 'row\n');
+  writeFileSync(join(dir, 'tracker', '001-acme.tsv'), 'match\n');
+  writeFileSync(join(dir, 'tracker', '002-other.tsv'), 'other\n');
+  invoke(`${fn}
+REPORTS_DIR='${dir}/reports'
+TRACKER_DIR='${dir}/tracker'
+LOGS_DIR='${dir}/logs'
+report_num=001
+id=7
+quarantine_attempt_artifacts rate-retry`);
+  assert.equal(existsSync(join(dir, 'reports', '001-role.md')), false);
+  assert.equal(readFileSync(join(dir, 'reports', '001-RESERVED.md'), 'utf8'), 'reserved\n');
+  assert.equal(existsSync(join(dir, 'tracker', '7.tsv')), false);
+  assert.equal(existsSync(join(dir, 'tracker', '001-acme.tsv')), false);
+  assert.equal(readFileSync(join(dir, 'tracker', '002-other.tsv'), 'utf8'), 'other\n');
+  assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-001-role.md'), 'utf8'), 'report\n');
+  assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-7.tsv'), 'utf8'), 'row\n');
+  assert.equal(readFileSync(join(dir, 'logs', 'quarantine', '7-rate-retry-001-acme.tsv'), 'utf8'), 'match\n');
 }));

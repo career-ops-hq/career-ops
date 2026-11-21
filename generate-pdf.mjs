@@ -67,6 +67,7 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { randomUUID } from 'node:crypto';
 import { getCareerOpsRoot, getProfilePath, hasProfileOverride } from './path-resolver.mjs';
 import { readStyleTokens, injectThemeStyle, readCvSectionOrder, readLockedSections, readCvPageBudget } from './theme-style.mjs';
+import { loadYaml } from './lib/yaml-document.mjs';
 import { validateCvExperienceOrder } from './cv-experience-order.mjs';
 import { resolvePdfIndexPath, resolveTrackerPath, resolveWorkspaceRootFor, writeFileAtomic } from './tracker-utils.mjs';
 import { withPipelineLock } from './pipeline-lock.mjs';
@@ -420,6 +421,68 @@ function foldDiacritics(text) {
  * Keys are folded on construction so authored diacritics match stripped input.
  */
 const SECTION_ALIASES = new Map([
+  // Japanese (modes/ja) and Korean (modes/ko) — the same failure as the blocks
+  // below: no title in either resolved here, so cv.sections matched no section of
+  // such a CV and the order guard compared raw titles. The skills and
+  // career-history terms are the ones in the two READMEs (スキル, 職務経歴; 역량,
+  // 기술 역량, 경력); the rest are each section's everyday headings. Japanese kanji
+  // differ from the Chinese block's code points (学歴 is not 學歷), so nothing
+  // here collides with it.
+  ['職務要約', 'summary'],
+  ['要約', 'summary'],
+  ['プロフィール', 'summary'],
+  ['自己紹介', 'summary'],
+  ['自己pr', 'summary'],
+  ['コアスキル', 'competencies'],
+  ['主要スキル', 'competencies'],
+  ['職務経歴', 'experience'],
+  ['職歴', 'experience'],
+  ['経歴', 'experience'],
+  ['職務経験', 'experience'],
+  ['プロジェクト', 'projects'],
+  ['主なプロジェクト', 'projects'],
+  ['プロジェクト経験', 'projects'],
+  ['学歴', 'education'],
+  ['資格', 'certifications'],
+  ['保有資格', 'certifications'],
+  ['資格・免許', 'certifications'],
+  ['免許・資格', 'certifications'],
+  ['受賞歴', 'awards'],
+  ['受賞', 'awards'],
+  ['スキル', 'skills'],
+  ['技術スキル', 'skills'],
+  ['テクニカルスキル', 'skills'],
+  ['活かせる経験・知識・技術', 'skills'],
+  ['趣味', 'interests'],
+  ['興味・関心', 'interests'],
+  ['요약', 'summary'],
+  ['자기소개', 'summary'],
+  ['프로필', 'summary'],
+  ['경력 요약', 'summary'],
+  ['핵심 역량', 'competencies'],
+  ['핵심역량', 'competencies'],
+  ['경력', 'experience'],
+  ['경력 사항', 'experience'],
+  ['경력사항', 'experience'],
+  ['업무 경력', 'experience'],
+  ['프로젝트', 'projects'],
+  ['주요 프로젝트', 'projects'],
+  ['프로젝트 경험', 'projects'],
+  ['학력', 'education'],
+  ['학력 사항', 'education'],
+  ['학력사항', 'education'],
+  ['자격증', 'certifications'],
+  ['자격 사항', 'certifications'],
+  ['자격사항', 'certifications'],
+  ['수상', 'awards'],
+  ['수상 경력', 'awards'],
+  ['수상 내역', 'awards'],
+  ['역량', 'skills'],
+  ['기술 역량', 'skills'],
+  ['보유 기술', 'skills'],
+  ['기술 스택', 'skills'],
+  ['관심사', 'interests'],
+  ['취미', 'interests'],
   // English — cv.md is the source of truth and is written in English.
   ['summary', 'summary'],
   ['professional summary', 'summary'],
@@ -444,6 +507,47 @@ const SECTION_ALIASES = new Map([
   ['skills', 'skills'],
   ['technical skills', 'skills'],
   ['interests', 'interests'],
+  // German (modes/de, modes/at) — the same failure as the blocks below: no
+  // German title resolved here, so cv.sections matched no section of a German
+  // CV and the order guard compared raw titles. "Berufserfahrung" and
+  // "Werdegang" are the career-history terms in modes/de/README.md; the rest are
+  // each section's everyday headings. Umlauts fold through foldDiacritics.
+  ['zusammenfassung', 'summary'],
+  ['profil', 'summary'],
+  ['kurzprofil', 'summary'],
+  ['berufsprofil', 'summary'],
+  ['berufliches profil', 'summary'],
+  ['über mich', 'summary'],
+  ['kernkompetenzen', 'competencies'],
+  ['kompetenzen', 'competencies'],
+  ['schlüsselkompetenzen', 'competencies'],
+  ['berufserfahrung', 'experience'],
+  ['berufliche erfahrung', 'experience'],
+  ['beruflicher werdegang', 'experience'],
+  ['werdegang', 'experience'],
+  ['berufspraxis', 'experience'],
+  ['projekte', 'projects'],
+  ['ausgewählte projekte', 'projects'],
+  ['projekterfahrung', 'projects'],
+  ['ausbildung', 'education'],
+  ['bildung', 'education'],
+  ['bildungsweg', 'education'],
+  ['akademischer werdegang', 'education'],
+  ['studium', 'education'],
+  ['zertifikate', 'certifications'],
+  ['zertifizierungen', 'certifications'],
+  ['weiterbildung', 'certifications'],
+  ['weiterbildungen', 'certifications'],
+  ['auszeichnungen', 'awards'],
+  ['preise und auszeichnungen', 'awards'],
+  ['kenntnisse', 'skills'],
+  ['fähigkeiten', 'skills'],
+  ['fachkenntnisse', 'skills'],
+  ['technische kenntnisse', 'skills'],
+  ['technische fähigkeiten', 'skills'],
+  ['it-kenntnisse', 'skills'],
+  ['interessen', 'interests'],
+  ['hobbys', 'interests'],
   // Polish — the vocabulary documented in modes/pl/README.md, plus the word-order
   // variants that turn up in practice (both "Kompetencje kluczowe" and
   // "Kluczowe kompetencje" are used for the same section).
@@ -470,6 +574,46 @@ const SECTION_ALIASES = new Map([
   ['nagrody i wyróżnienia', 'awards'],
   ['umiejętności', 'skills'],
   ['umiejętności techniczne', 'skills'],
+  // French (modes/fr) — the same failure as the blocks around it: no French
+  // title resolved here, so cv.sections matched no section of a French CV and
+  // the order guard compared raw titles. A bare "Compétences" is the key-skills
+  // block and "Compétences techniques" the skills list, as the Spanish and
+  // Portuguese blocks read their own words. "Expérience" and "Éducation" fold
+  // to the English keys and already resolve, so they are not repeated.
+  ['résumé', 'summary'],
+  ['résumé professionnel', 'summary'],
+  ['profil', 'summary'],
+  ['profil professionnel', 'summary'],
+  ['à propos', 'summary'],
+  ['à propos de moi', 'summary'],
+  ['compétences', 'competencies'],
+  ['compétences clés', 'competencies'],
+  ['compétences principales', 'competencies'],
+  ['expérience professionnelle', 'experience'],
+  ['expériences professionnelles', 'experience'],
+  ['parcours professionnel', 'experience'],
+  ['projets', 'projects'],
+  ['projets sélectionnés', 'projects'],
+  ['projets personnels', 'projects'],
+  ['formation', 'education'],
+  ['formations', 'education'],
+  ['études', 'education'],
+  ['parcours académique', 'education'],
+  ['diplômes', 'education'],
+  ['certificats', 'certifications'],
+  ['distinctions', 'awards'],
+  ['prix', 'awards'],
+  ['prix et distinctions', 'awards'],
+  ['compétences techniques', 'skills'],
+  ['connaissances techniques', 'skills'],
+  ["centres d'intérêt", 'interests'],
+  ["centres d'intérêts", 'interests'],
+  // The same heading with the typographic apostrophe (U+2019), which word
+  // processors and generated CVs write; foldDiacritics keeps it as is.
+  ['centres d’intérêt', 'interests'],
+  ['centres d’intérêts', 'interests'],
+  ['intérêts', 'interests'],
+  ['loisirs', 'interests'],
   // Spanish — the same failure again: with no entries here, a Spanish CV
   // rendered in the documented modes/pdf.md order (Experiencia before Formación)
   // was rejected against a cv.md listing Formación first, and --allow-reorder was
@@ -507,6 +651,111 @@ const SECTION_ALIASES = new Map([
   ['conocimientos técnicos', 'skills'],
   ['herramientas e idiomas', 'skills'],
   ['intereses', 'interests'],
+  // Turkish (modes/tr) — the same failure as the blocks around it: no Turkish
+  // title resolved here, so cv.sections matched no section of a Turkish CV and
+  // the order guard compared raw titles. "Beceriler" and "İş deneyimi" are the
+  // skills and career-history terms in modes/tr/README.md; the rest are each
+  // section's everyday headings. Lower-casing turns "İ" into "i" plus a dot that
+  // foldDiacritics drops, so "İş" folds to "is"; the dotless "ı" stays as written.
+  ['özet', 'summary'],
+  ['profil', 'summary'],
+  ['profesyonel özet', 'summary'],
+  ['kariyer özeti', 'summary'],
+  ['hakkımda', 'summary'],
+  ['temel yetkinlikler', 'competencies'],
+  ['yetkinlikler', 'competencies'],
+  ['iş deneyimi', 'experience'],
+  ['iş deneyimleri', 'experience'],
+  ['deneyim', 'experience'],
+  ['profesyonel deneyim', 'experience'],
+  ['projeler', 'projects'],
+  ['öne çıkan projeler', 'projects'],
+  ['eğitim', 'education'],
+  ['eğitim bilgileri', 'education'],
+  ['sertifikalar', 'certifications'],
+  ['ödüller', 'awards'],
+  ['ödüller ve başarılar', 'awards'],
+  ['beceriler', 'skills'],
+  ['teknik beceriler', 'skills'],
+  ['yetenekler', 'skills'],
+  ['ilgi alanları', 'interests'],
+  ['hobiler', 'interests'],
+  // Italian (modes/it) — the same failure as the blocks around it: no Italian
+  // title resolved here, so cv.sections matched no section of an Italian CV and
+  // the order guard compared raw titles. A bare "Competenze" is the key-skills
+  // block and "Competenze tecniche" the skills list, as the Spanish block reads
+  // its own words.
+  ['profilo', 'summary'],
+  ['profilo professionale', 'summary'],
+  ['sommario', 'summary'],
+  ['riepilogo', 'summary'],
+  ['chi sono', 'summary'],
+  ['competenze', 'competencies'],
+  ['competenze chiave', 'competencies'],
+  ['competenze principali', 'competencies'],
+  ['esperienza', 'experience'],
+  ['esperienza professionale', 'experience'],
+  ['esperienze professionali', 'experience'],
+  ['esperienza lavorativa', 'experience'],
+  ['esperienze lavorative', 'experience'],
+  ['percorso professionale', 'experience'],
+  ['progetti', 'projects'],
+  ['progetti selezionati', 'projects'],
+  ['progetti personali', 'projects'],
+  ['formazione', 'education'],
+  ['istruzione', 'education'],
+  ['istruzione e formazione', 'education'],
+  ['titoli di studio', 'education'],
+  ['certificazioni', 'certifications'],
+  ['certificati', 'certifications'],
+  ['premi', 'awards'],
+  ['riconoscimenti', 'awards'],
+  ['premi e riconoscimenti', 'awards'],
+  ['competenze tecniche', 'skills'],
+  ['conoscenze tecniche', 'skills'],
+  ['capacità tecniche', 'skills'],
+  ['interessi', 'interests'],
+  // Danish (modes/da) and Norwegian Bokmål (modes/nb) — the same failure as the
+  // blocks around them: no title in either resolved here, so cv.sections matched
+  // no section of such a CV and the order guard compared raw titles. The skills
+  // and career-history terms are the ones in the two READMEs (Kompetencer,
+  // Karriereforløb, Erhvervserfaring; Kompetanse, Arbeidserfaring, Yrkeserfaring);
+  // the rest are each section's everyday headings, listed once where the two
+  // languages share a spelling (Erfaring, Priser, Interesser).
+  ['profil', 'summary'],
+  ['resumé', 'summary'],
+  ['sammenfatning', 'summary'],
+  ['om mig', 'summary'],
+  ['sammendrag', 'summary'],
+  ['om meg', 'summary'],
+  ['kernekompetencer', 'competencies'],
+  ['kjernekompetanse', 'competencies'],
+  ['erhvervserfaring', 'experience'],
+  ['karriereforløb', 'experience'],
+  ['arbejdserfaring', 'experience'],
+  ['arbeidserfaring', 'experience'],
+  ['yrkeserfaring', 'experience'],
+  ['erfaring', 'experience'],
+  ['projekter', 'projects'],
+  ['prosjekter', 'projects'],
+  ['uddannelse', 'education'],
+  ['utdanning', 'education'],
+  ['utdannelse', 'education'],
+  ['certificeringer', 'certifications'],
+  ['certifikater', 'certifications'],
+  ['sertifiseringer', 'certifications'],
+  ['sertifikater', 'certifications'],
+  ['priser', 'awards'],
+  ['udmærkelser', 'awards'],
+  ['utmerkelser', 'awards'],
+  ['kompetencer', 'skills'],
+  ['kompetanse', 'skills'],
+  ['færdigheder', 'skills'],
+  ['tekniske færdigheder', 'skills'],
+  ['ferdigheter', 'skills'],
+  ['tekniske ferdigheter', 'skills'],
+  ['interesser', 'interests'],
+  ['fritidsinteresser', 'interests'],
   // Chinese — the same failure the Polish block above fixes, for the two Chinese
   // markets this repo ships modes for: Traditional (modes/zh-TW) and Simplified
   // (modes/zh), rendered through templates/cv-template.zh-minimal.html. Both
@@ -573,6 +822,105 @@ const SECTION_ALIASES = new Map([
   ['技术栈', 'skills'],
   ['興趣', 'interests'],
   ['兴趣', 'interests'],
+  // Dutch (modes/nl) — the same failure as the blocks around it: no Dutch title
+  // resolved here, so cv.sections matched no section of a Dutch CV and the
+  // order guard compared raw titles. "Interesses" folds to the Portuguese key
+  // below and already resolves, so it is not repeated.
+  ['profiel', 'summary'],
+  ['persoonlijk profiel', 'summary'],
+  ['samenvatting', 'summary'],
+  ['over mij', 'summary'],
+  ['kerncompetenties', 'competencies'],
+  ['competenties', 'competencies'],
+  ['werkervaring', 'experience'],
+  ['professionele ervaring', 'experience'],
+  ['ervaring', 'experience'],
+  ['loopbaan', 'experience'],
+  ['projecten', 'projects'],
+  ['geselecteerde projecten', 'projects'],
+  ['opleiding', 'education'],
+  ['opleidingen', 'education'],
+  ['onderwijs', 'education'],
+  ['certificaten', 'certifications'],
+  ['certificeringen', 'certifications'],
+  ['prijzen', 'awards'],
+  ['onderscheidingen', 'awards'],
+  ['vaardigheden', 'skills'],
+  ['technische vaardigheden', 'skills'],
+  ['kennis en vaardigheden', 'skills'],
+  ["hobby's", 'interests'],
+  // With the typographic apostrophe (U+2019), which foldDiacritics keeps.
+  ['hobby’s', 'interests'],
+  // Portuguese (pt-BR / pt-PT) — the same failure as Spanish above: modes/pt/
+  // ships a Portuguese market set, but no Portuguese title resolved here, so
+  // cv.sections matched no section of a Portuguese CV and the order guard fell
+  // back to comparing raw titles. Titles that fold to a Spanish spelling
+  // (competências, experiência, habilidades, perfil, certificados, prêmios)
+  // already resolve through the Spanish block and are not repeated.
+  ['resumo', 'summary'],
+  ['resumo profissional', 'summary'],
+  ['perfil profissional', 'summary'],
+  ['sobre mim', 'summary'],
+  ['competências principais', 'competencies'],
+  ['competências-chave', 'competencies'],
+  ['principais competências', 'competencies'],
+  ['experiência profissional', 'experience'],
+  ['experiências profissionais', 'experience'],
+  ['histórico profissional', 'experience'],
+  ['projetos', 'projects'],
+  ['projetos pessoais', 'projects'],
+  ['projetos selecionados', 'projects'],
+  ['formação', 'education'],
+  ['formação acadêmica', 'education'],
+  ['formação académica', 'education'],
+  ['educação', 'education'],
+  ['escolaridade', 'education'],
+  ['certificações', 'certifications'],
+  ['cursos e certificações', 'certifications'],
+  ['prêmios e reconhecimentos', 'awards'],
+  ['competências técnicas', 'skills'],
+  ['conhecimentos técnicos', 'skills'],
+  ['interesses', 'interests'],
+  // Russian (modes/ru) and Ukrainian (modes/ua) — the same failure as the blocks
+  // above: no title in either resolved here, so cv.sections matched no section
+  // of such a CV and the order guard compared raw titles. The skills and
+  // career-history terms are the ones in the two READMEs (Навыки, Опыт работы;
+  // Навички, Досвід роботи); the rest are each section's everyday headings.
+  // foldDiacritics turns й into и and ї into і on both sides of the lookup.
+  ['о себе', 'summary'],
+  ['обо мне', 'summary'],
+  ['профиль', 'summary'],
+  ['про себе', 'summary'],
+  ['профіль', 'summary'],
+  ['ключевые навыки', 'competencies'],
+  ['ключевые компетенции', 'competencies'],
+  ['компетенции', 'competencies'],
+  ['ключові навички', 'competencies'],
+  ['ключові компетенції', 'competencies'],
+  ['компетенції', 'competencies'],
+  ['опыт работы', 'experience'],
+  ['опыт', 'experience'],
+  ['профессиональный опыт', 'experience'],
+  ['досвід роботи', 'experience'],
+  ['досвід', 'experience'],
+  ['професійний досвід', 'experience'],
+  ['проекты', 'projects'],
+  ['проєкти', 'projects'],
+  ['проекти', 'projects'],
+  ['образование', 'education'],
+  ['освіта', 'education'],
+  ['сертификаты', 'certifications'],
+  ['сертифікати', 'certifications'],
+  ['награды', 'awards'],
+  ['нагороди', 'awards'],
+  ['навыки', 'skills'],
+  ['технические навыки', 'skills'],
+  ['навички', 'skills'],
+  ['технічні навички', 'skills'],
+  ['интересы', 'interests'],
+  ['хобби', 'interests'],
+  ['інтереси', 'interests'],
+  ['хобі', 'interests'],
 ].map(([alias, key]) => [foldDiacritics(alias), key]));
 
 function normalizeSectionTitle(text) {
@@ -1601,7 +1949,9 @@ export const ARTIFACT_KINDS = ['cv', 'cover'];
  *
  * Precedence, most specific first:
  *   1. An explicit kind (the --kind flag, a batch entry's `kind`, opts.kind).
- *   2. A `cv-` prefix, the CV convention every generator writes. It wins over
+ *   2. A standard name from lib/output-names.mjs (`{NNN}-{company}-{kind}-...`),
+ *      which carries its kind as a token after the report number and company.
+ *   2b. A `cv-` prefix, the CV convention every generator writes. It wins over
  *      the cover check so a company whose own name starts with "Cover" keeps
  *      its CV filed as a CV.
  *   3. `cover` as the leading or trailing token: both real conventions, the
@@ -1628,6 +1978,25 @@ export function resolveArtifactKind(explicit, outputPath) {
   }
 
   const name = basename(outputPath || '').toLowerCase().replace(/\.[^.]*$/, '');
+  // Standard names from lib/output-names.mjs (#6667) lead with the report
+  // number, so neither the prefix nor the suffix rules below see their kind
+  // token. A renderer-owned `.overflow` / `.overflow-2` draft keeps its kind.
+  // Read inline rather than imported: isolated generate-pdf fixtures copy a
+  // fixed list of this script's imports. tests/pdf-index-kind.test.mjs keeps it
+  // in step with parseOutputName(). Exactly one kind token, else it falls
+  // through (a name carrying two is ambiguous without the report's company).
+  const stdName = name.replace(/\.overflow(-\d+)?$/, '');
+  // Count only the kind words between two dashes in the name's head
+  // (`{company}-{kind}-{candidate}`), as parseOutputName() does: a company that
+  // starts with "Cover" or a candidate that ends with it carries no second
+  // kind, while adjacent tokens ("-cover-cv-") are both seen. Read inline
+  // rather than imported (fixtures copy a fixed list of imports);
+  // tests/pdf-index-kind.test.mjs keeps it in step with the builder.
+  const stdHead = /^\d{3,}-(.+)-\d{4}-\d{2}-\d{2}(?:-(?:ats|canva))?$/.exec(stdName);
+  const stdKinds = stdHead
+    ? stdHead[1].split('-').slice(1, -1).filter((part) => part === 'cv' || part === 'cover')
+    : [];
+  if (stdKinds.length === 1) return { kind: stdKinds[0], source: 'name' };
   if (name.startsWith('cv-')) return { kind: 'cv', source: 'name' };
   if (/^cover([-_]|$)/.test(name) || /[-_]cover$/.test(name)) {
     return { kind: 'cover', source: 'name' };
@@ -2450,7 +2819,7 @@ export async function inlineLocalFonts(html) {
 export async function launchChromium(options = {}) {
   const { chromium } = await import('playwright');
   const { projectRoot, ...launchOptions } = options;
-  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot }));
+  return chromium.launch(browserLaunchOptions(launchOptions, { projectRoot, localContentOnly: true }));
 }
 
 /**
@@ -2537,6 +2906,88 @@ export async function renderHtmlToPdf(html, outputPath, opts = {}) {
   }
 }
 
+// What the CV page may load while it renders (GHSA-m426).
+//
+// The page is written to a temporary file and loaded from file://, so that a
+// template can load an image next to the CV by a relative path. But markup
+// that needs no JavaScript (<iframe>, <embed>, <object>, <img>, <link
+// rel=stylesheet>) loads any file: URL the HTML names, and page.pdf() paints
+// it. The route used to let every file: request through, so HTML influenced by
+// a job posting could put ~/.env or config/profile.yml into the PDF the user
+// sends to an employer.
+//
+// Now a file: request loads only when it is:
+//   - the document itself, in the main frame, or
+//   - an image, font or stylesheet under the CV's own directory (symlinks
+//     resolved, so a link cannot point out of it), or
+//   - the image the user set as candidate.photo in config/profile.yml, which
+//     modes/pdf.md lets the agent reference by path.
+// An image, font or stylesheet cannot paint a text file's contents, and a
+// frame or plugin object never loads. data: stays allowed (inlineLocalFonts
+// turns template fonts into data: URLs), and anything else is aborted, as before.
+const LOCAL_ASSET_TYPES = new Set(['image', 'font', 'stylesheet']);
+
+/**
+ * Whether the PDF page may load one request.
+ *
+ * @param {{ url: string, resourceType?: string, isMainDocument?: boolean }} request
+ * @param {{ mainDocUrl: string, baseDir: string, photoPath?: string | null }} scope
+ *   `baseDir` and `photoPath` are real paths (realpathSync).
+ * @returns {boolean}
+ */
+export function pdfRequestAllowed({ url, resourceType = '', isMainDocument = true }, { mainDocUrl, baseDir, photoPath = null }) {
+  if (url.startsWith('data:')) return true;
+  if (!url.startsWith('file:')) return false;
+  if (url === mainDocUrl) return isMainDocument;
+  if (!LOCAL_ASSET_TYPES.has(resourceType)) return false;
+  let real;
+  try {
+    real = realpathSync(fileURLToPath(url));
+  } catch {
+    return false;
+  }
+  if (resourceType === 'image' && photoPath && real === photoPath) return true;
+  const rel = relative(baseDir, real);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+}
+
+// The same rule as a second layer the page enforces itself, should the route
+// ever be bypassed: no frames, no plugin objects, local or inline assets only.
+export const RENDER_CSP = "default-src 'none'; img-src file: data:; font-src file: data:; "
+  + "style-src 'unsafe-inline' file: data:; frame-src 'none'; child-src 'none'; object-src 'none'; "
+  + "base-uri 'none'; form-action 'none'";
+
+/** Put RENDER_CSP first in <head>, so it governs everything after it. */
+export function injectRenderCsp(html) {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${RENDER_CSP}">`;
+  if (/<head\b[^>]*>/i.test(html)) return html.replace(/<head\b[^>]*>/i, (tag) => `${tag}${meta}`);
+  if (/<html\b[^>]*>/i.test(html)) return html.replace(/<html\b[^>]*>/i, (tag) => `${tag}<head>${meta}</head>`);
+  return `${meta}${html}`;
+}
+
+// The real path of candidate.photo when it names a local file: the one local
+// image outside the CV's directory that a render may load. A relative value
+// resolves from the data root, then the checkout, as in build-cv-html.mjs.
+function configuredPhotoPath(profilePath) {
+  let value = '';
+  try {
+    const doc = loadYaml(readFileSync(profilePath, 'utf-8'));
+    value = typeof doc?.candidate?.photo === 'string' ? doc.candidate.photo.trim() : '';
+  } catch {
+    return null;
+  }
+  if (!value || /^[a-z][a-z0-9+.-]+:/i.test(value)) return null;
+  const candidates = isAbsolute(value) ? [value] : [resolve(getCareerOpsRoot(), value), resolve(__dirname, value)];
+  for (const candidate of candidates) {
+    try {
+      return realpathSync(candidate);
+    } catch {
+      // try the next location
+    }
+  }
+  return null;
+}
+
 /**
  * Render one already-normalized HTML document to a PDF on an already-launched
  * browser. This is the page-level half of the render — it owns the per-document
@@ -2614,6 +3065,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
 
   html = injectPrintPageCss(html, format, opts.country);
   html = await inlineLocalFonts(html);
+  html = injectRenderCsp(html);
 
   // Write HTML to a temp file in baseDir so page.goto() gives a file://
   // origin that can load local images, fonts, and other resources.
@@ -2629,7 +3081,7 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
     // cv.md, the job posting and the evaluation report, and postings are untrusted
     // input (AGENTS.md). With JS off an injected <script> cannot run; with
     // non-local requests aborted an injected <img src="https://…"> cannot beacon
-    // out. file:/data: subresources still load, which is all a template needs.
+    // out. Local requests are narrowed by pdfRequestAllowed (GHSA-m426).
     //
     // newContext(), not newPage(): javaScriptEnabled is a Playwright context
     // option with no per-page equivalent, and a fresh context per document also
@@ -2640,17 +3092,30 @@ async function renderInPage(browser, html, outputPath, opts = {}) {
       ? await browser.newContext({ javaScriptEnabled: false })
       : null;
     page = context ? await context.newPage() : await browser.newPage();
+    const mainDocUrl = pathToFileURL(tmpHtmlPath).href;
     if (page.route) {
+      const scope = {
+        mainDocUrl,
+        baseDir: realpathSync(baseDir),
+        photoPath: configuredPhotoPath(workspaceProfilePath(opts.workspaceRoot)),
+      };
       await page.route('**/*', (route) => {
-        const url = route.request().url();
-        return url.startsWith('file:') || url.startsWith('data:')
+        const request = route.request();
+        // A test double may implement only url(); then the only file: request
+        // it can describe is the document itself.
+        const isMainDocument = typeof request.isNavigationRequest === 'function'
+          && typeof request.frame === 'function' && typeof page.mainFrame === 'function'
+          ? request.isNavigationRequest() && request.frame() === page.mainFrame()
+          : true;
+        const resourceType = typeof request.resourceType === 'function' ? request.resourceType() : '';
+        return pdfRequestAllowed({ url: request.url(), resourceType, isMainDocument }, scope)
           ? route.continue()
           : route.abort();
       });
     }
 
-    // Load from file:// so the page origin allows local subresources
-    await page.goto(pathToFileURL(tmpHtmlPath).href, {
+    // Load from file:// so the page origin allows the CV's local images
+    await page.goto(mainDocUrl, {
       waitUntil: 'load',
     });
 

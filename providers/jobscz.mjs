@@ -88,7 +88,7 @@ export function parsePostedAt(text, nowMs = Date.now()) {
 
 /** @param {string|undefined} html */
 function cleanText(html) {
-  return decodeEntities((html ?? '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities((html ?? '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -114,7 +114,7 @@ export function parseJobsCzPage(html, nowMs = Date.now()) {
     });
   }
 
-  const text = decodeEntities(html.replace(/<[^>]*>/g, ' '));
+  const text = decodeEntities(html.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag)));
   if (!cards.length) {
     if (text.includes('Nenašli jsme žádné nabídky')) return { total: 0, jobs: [] };
     throw new Error('jobscz: no result cards and no empty-result notice — page markup changed?');

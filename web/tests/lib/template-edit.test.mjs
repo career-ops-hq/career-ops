@@ -126,11 +126,35 @@ function linkedSetup() {
   return { userDir, target };
 }
 
+// Windows refuses a symlink to an account without SeCreateSymbolicLinkPrivilege
+// (EPERM). A folder link then falls back to a junction, which lstat reports as a
+// symbolic link and realpath resolves, so the folder cases still run. A junction
+// cannot point at a file, so a file case skips with the reason instead.
+function linkFolder(target, link) {
+  try {
+    fs.symlinkSync(target, link, "dir");
+  } catch (err) {
+    if (process.platform !== "win32" || err.code !== "EPERM") throw err;
+    fs.symlinkSync(target, link, "junction");
+  }
+}
+
+function linkFileOrSkip(t, target, link) {
+  try {
+    fs.symlinkSync(target, link);
+    return true;
+  } catch (err) {
+    if (process.platform !== "win32" || err.code !== "EPERM") throw err;
+    t.skip(`needs a file symlink, which this account cannot create (${err.code})`);
+    return false;
+  }
+}
+
 test("an edit to a template in a symlinked pack folder is refused, though reading it works", async () => {
   const { userDir, target } = linkedSetup();
   const file = path.join(target, "cv-template.linked.html");
   fs.copyFileSync(path.join(CORE, "templates", "cv-template.modern.html"), file);
-  fs.symlinkSync(target, path.join(userDir, "linked"), "dir");
+  linkFolder(target, path.join(userDir, "linked"));
   const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "linked", userDir });
   const before = fs.readFileSync(file, "utf8");
 
@@ -141,11 +165,11 @@ test("an edit to a template in a symlinked pack folder is refused, though readin
   assert.equal(fs.readFileSync(file, "utf8"), before);
 });
 
-test("an edit to a template file that is itself a symlink to outside is refused", async () => {
+test("an edit to a template file that is itself a symlink to outside is refused", async (t) => {
   const { userDir, target } = linkedSetup();
   const file = path.join(target, "real.html");
   fs.copyFileSync(path.join(CORE, "templates", "cv-template.modern.html"), file);
-  fs.symlinkSync(file, path.join(userDir, "cv-template.filelink.html"));
+  if (!linkFileOrSkip(t, file, path.join(userDir, "cv-template.filelink.html"))) return;
   const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "filelink", userDir });
 
   const err = await checkTemplateEdit(CORE, { kind: "cv", name: "filelink", text, version, userDir }).then(() => null, (e) => e);
@@ -157,11 +181,11 @@ test("an edit to a template file that is itself a symlink to outside is refused"
 // swaps a symlink for a regular file even when the link points inside the user's
 // own directory: the target never receives the edit and the alias stops following
 // it. Refuse, as for a link that points outside, rather than write through it.
-test("an edit to a template file that is a symlink to another file in the user's directory is refused and leaves link and target alone", async () => {
+test("an edit to a template file that is a symlink to another file in the user's directory is refused and leaves link and target alone", async (t) => {
   const userDir = await withCopy("modern", "realone");
   const real = path.join(userDir, "cv-template.realone.html");
   const link = path.join(userDir, "cv-template.alias.html");
-  fs.symlinkSync(real, link);
+  if (!linkFileOrSkip(t, real, link)) return;
   const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "alias", userDir });
   const before = fs.readFileSync(real, "utf8");
 
@@ -173,9 +197,9 @@ test("an edit to a template file that is a symlink to another file in the user's
   assert.equal(fs.readFileSync(real, "utf8"), before, "the target is unchanged");
 });
 
-test("the real file a link points at can still be edited directly", async () => {
+test("the real file a link points at can still be edited directly", async (t) => {
   const userDir = await withCopy("modern", "realone");
-  fs.symlinkSync(path.join(userDir, "cv-template.realone.html"), path.join(userDir, "cv-template.alias.html"));
+  if (!linkFileOrSkip(t, path.join(userDir, "cv-template.realone.html"), path.join(userDir, "cv-template.alias.html"))) return;
   const { text, version } = await readUserTemplate(CORE, { kind: "cv", name: "realone", userDir });
 
   const out = await checkTemplateEdit(CORE, { kind: "cv", name: "realone", text: `${text}\n<!-- edit -->\n`, version, userDir });

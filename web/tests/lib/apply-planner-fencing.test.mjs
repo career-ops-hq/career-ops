@@ -140,8 +140,35 @@ test("the Claude planner argv carries the derived deny list, not a hand-written 
     for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "WebFetch", "WebSearch", "Task"]) {
       assert.ok(disallowed.split(",").includes(tool), `${tool} is denied, got ${disallowed}`);
     }
+    // The planner reads a live form, so a hostile label can ask for .env; the
+    // deny list keeps those reads out even if the prompt fencing is ignored.
+    for (const rule of ["Read(**/.env)", "Read(**/.env.*)", "Read(**/*.env)"]) {
+      assert.ok(disallowed.split(",").includes(rule), `${rule} is denied, got ${disallowed}`);
+    }
     // Claude is fully fenceable: no notice.
     assert.equal(lines.some((l) => l.includes("permission-restricted")), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a caller can narrow the Claude scope; the deny list is still derived and still blocks .env", { skip: skip || (process.platform === "win32" && "sh fixture") }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-planner-argv-"));
+  const bin = path.join(dir, "echo-argv");
+  fs.writeFileSync(bin, '#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a"; done\n');
+  fs.chmodSync(bin, 0o755);
+  try {
+    const spec = { id: "claude", name: "Claude Code", args: () => ["-p", "WRONG"] };
+    const run = await runPlanner({ cliId: "claude", spec, binPath: bin, prompt: "p", fieldCount: 0, cwd: dir, t0: Date.now(), log: () => {}, allowed: "Read" });
+    const argv = run.buf.split("\n").filter(Boolean);
+    assert.equal(argv[argv.indexOf("--allowedTools") + 1], "Read");
+    const disallowed = argv[argv.indexOf("--disallowedTools") + 1].split(",");
+    // Glob and Grep are not in the narrowed scope, but they are read tools, so
+    // scopeFrom leaves them unmentioned rather than denied; writes and network
+    // are what it must deny.
+    for (const tool of ["Write", "Edit", "MultiEdit", "Bash", "WebFetch", "WebSearch", "Read(**/.env)", "Read(**/.env.*)", "Read(**/*.env)"]) {
+      assert.ok(disallowed.includes(tool), `${tool} is denied, got ${disallowed}`);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

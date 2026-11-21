@@ -176,8 +176,10 @@ export default {
       if (!lastPageFull) break;
     }
     // Only a full page at the entry's own cap is a truncation. A short last
-    // page ended the board on its own, and the probe's cap is not the entry's.
-    if (stopReason === 'complete' && lastPageFull && page === maxPages) stopReason = 'cap';
+    // page ended the board on its own, and a probe never reports a cap: with
+    // max_pages: 1 on the entry, the probe's one page is also the entry's last,
+    // so the page count alone cannot tell the two apart (#7180).
+    if (stopReason === 'complete' && lastPageFull && page === maxPages && ctxCap === Infinity) stopReason = 'cap';
     if (stopReason === 'cap') {
       console.error(`⚠️  ibm: ${entry.name} truncated at max_pages=${maxPages} (${out.length} jobs) — raise max_pages on this entry for more`);
     }

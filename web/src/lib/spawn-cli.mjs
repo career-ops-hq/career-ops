@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fenceArgs } from "./cli-fencing.mjs";
 import { assertPiVersionSupported } from "./cli-fencing-probe.mjs";
 import { prepareCliLaunch } from "./cli-launch.mjs";
+import { withSpendTierModel } from "./spend-tier-model.mjs";
 
 // Plain .mjs (same pattern as tracker-table.mjs/clean-chips.mjs) so
 // tests/lib/spawn-cli.test.mjs can import it directly under Node. Import it with the
@@ -80,9 +81,11 @@ export function spawnHeadlessCli(binPath, args, options, fencing) {
   const detached = process.platform !== "win32";
   // windowsHide stays in this call. The launch census reads the argument
   // text, and a variable would look like the child can inherit the console.
-  const child = spawn(launch.command, launch.args, { ...options, windowsHide: true, detached });
+  // The model for the user's spend_tier (spend-tier-model.mjs); Claude Code only.
+  const spawnOptions = withSpendTierModel(fencing.cliId, options);
+  const child = spawn(launch.command, launch.args, { ...spawnOptions, windowsHide: true, detached });
   child.stdin?.end();
-  armCliStop(child, { ...options, windowsHide: true, detached });
+  armCliStop(child, { ...spawnOptions, windowsHide: true, detached });
   return child;
 }
 

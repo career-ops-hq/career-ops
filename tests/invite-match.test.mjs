@@ -509,6 +509,15 @@ eq('returns null when nothing plausible is found', extractCompany('no company si
 eq('extracts ISO date', extractDate('Interview scheduled for 2026-07-09 at 4pm'), '2026-07-09');
 eq('extracts named-month date', extractDate('See you on July 9, 2026'), '2026-07-09');
 eq('returns null when no date is present', extractDate('no date mentioned'), null);
+// A day the calendar does not have is never reported as the interview date.
+eq('skips an impossible named-month date', extractDate('Interview on February 31, 2026'), null);
+eq('skips a 31st in a 30-day month', extractDate('See you June 31, 2026'), null);
+eq('skips an impossible ISO date', extractDate('Ref 2026-13-45'), null);
+eq('skips Feb 29 off a leap year', extractDate('Interview on 2027-02-29'), null);
+eq('keeps Feb 29 in a leap year', extractDate('Interview on February 29, 2028'), '2028-02-29');
+eq('a bad ISO date does not hide a real one after it', extractDate('Ref 2026-02-30. Interview on 2026-07-09'), '2026-07-09');
+eq('a bad ISO date does not hide a real named date', extractDate('Ref 2026-02-30. See you on July 9, 2026'), '2026-07-09');
+eq('reads a lower-case month name', extractDate('see you on july 9, 2026'), '2026-07-09');
 
 // extractReqId: labels, separator guards, and ReDoS probe
 eq('extracts "Req ID:" token', extractReqId('Req ID: R260013984'), 'R260013984');

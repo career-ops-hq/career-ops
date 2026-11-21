@@ -104,6 +104,99 @@ function resolveMaxPages(entry) {
 }
 
 /**
+ * The posting's ATS-native identity: the configured board slug and the
+ * posting's own `id` from the payload, never parsed out of a URL. Rippling
+ * ids are opaque strings (UUIDs on live boards), kept exactly as the payload
+ * typed them; identity ids are never coerced (docs/listing-fingerprint.md), so
+ * a non-string id gets none. Returns undefined for an empty, padded or
+ * control-character slug or id, so that row falls back to URL dedup.
+ * Exported for unit tests.
+ *
+ * @param {string | null | undefined} slug
+ * @param {unknown} id
+ * @returns {{ats_provider: 'rippling', board_slug: string, posting_id: string} | undefined}
+ */
+export function ripplingListingIdentity(slug, id) {
+  const clean = (v) => typeof v === 'string' && v !== '' && v === v.trim() && !/[\u0000-\u001f\u007f]/u.test(v);
+  if (!clean(slug) || !clean(id)) return undefined;
+  return { ats_provider: 'rippling', board_slug: /** @type {string} */ (slug), posting_id: /** @type {string} */ (id) };
+}
+
+function containsWholeWord(text, word) {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
+}
+
+function formatLocation(l) {
+  if (!l || typeof l !== 'object') return '';
+  const name = typeof l.name === 'string' ? l.name.trim() : '';
+  const country = typeof l.country === 'string' ? l.country.trim() : '';
+  const assembled = [l.city, l.state, country]
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean)
+    .join(', ');
+  const base = name
+    ? (country && !containsWholeWord(name, country) ? `${name}, ${country}` : name)
+    : assembled;
+  const remote = typeof l.workplaceType === 'string' && l.workplaceType.trim().toUpperCase() === 'REMOTE';
+  return remote && !containsWholeWord(base, 'remote') ? (base ? `${base}, Remote` : 'Remote') : base;
+}
+
+function parseRipplingPageInto(json, companyName, slug, byUrl) {
+  if (!json || typeof json !== 'object' || !Array.isArray(json.items)) {
+    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : typeof json;
+    throw new Error(`rippling: unexpected response — expected items[], got: [${got}]`);
+  }
+  for (const j of json.items) {
+    const title = typeof j?.name === 'string' ? j.name.trim() : '';
+    if (!title) continue;
+
+    let url = '';
+    const rawUrl = typeof j?.url === 'string' ? j.url.trim() : '';
+    if (rawUrl) {
+      try {
+        const parsed = new URL(rawUrl);
+        if (parsed.protocol === 'https:' && parsed.hostname === CAREERS_HOST) url = parsed.href;
+      } catch {
+        // malformed URL → leave url = '' → dropped below
+      }
+    }
+    if (!url) continue;
+
+    const locs = Array.isArray(j?.locations) ? j.locations.map(formatLocation).filter(Boolean) : [];
+    const listingIdentity = ripplingListingIdentity(slug, j?.id);
+    let entry = byUrl.get(url);
+    if (!entry) {
+      entry = {
+        job: { title, url, location: '', company: companyName, ...(listingIdentity ? { listingIdentity } : {}) },
+        locs: [],
+        seenLocs: new Set(),
+      };
+      byUrl.set(url, entry);
+    } else if (!entry.job.listingIdentity && listingIdentity) {
+      entry.job.listingIdentity = listingIdentity;
+    }
+    for (const loc of locs) {
+      const key = loc.toLowerCase();
+      if (!entry.seenLocs.has(key)) {
+        entry.seenLocs.add(key);
+        entry.locs.push(loc);
+      }
+    }
+  }
+  return json.items.length;
+}
+
+function finalizeRipplingJobs(byUrl) {
+  const jobs = [];
+  for (const { job, locs } of byUrl.values()) {
+    job.location = locs.join(' · ');
+    jobs.push(job);
+  }
+  return jobs;
+}
+
+/**
  * Parse one page of the Rippling v2 board API response. Exported for unit
  * tests.
  *
@@ -116,49 +209,21 @@ function resolveMaxPages(entry) {
  *               the pipeline/history, never server-fetched here).
  *   - company:  the portal entry name (the feed is per-tenant and carries no
  *               company field, same as recruitee).
- *   - location: every `locations[].name`, joined with ` · ` (a posting can
- *               list more than one place); "" when the array is empty/absent.
+ *   - location: every `locations[]` entry across sibling items sharing a
+ *               posting URL, formatted with country/remote and joined with
+ *               ` · `; "" when the array is empty/absent.
+ *   - listingIdentity: `rippling` / `slug` / the posting's string `id`, when
+ *               the caller passes the board slug (see ripplingListingIdentity).
  *
  * @param {any} json
  * @param {string} companyName
- * @returns {{jobs: Array<{title: string, url: string, company: string, location: string}>, rawCount: number}}
+ * @param {string} [slug]  the board slug the page was fetched at
+ * @returns {{jobs: Array<{title: string, url: string, company: string, location: string, listingIdentity?: {ats_provider: string, board_slug: string, posting_id: string}}>, rawCount: number}}
  */
-export function parseRipplingPage(json, companyName) {
-  if (!json || typeof json !== 'object' || !Array.isArray(json.items)) {
-    const got = json && typeof json === 'object' ? Object.keys(json).join(', ') : typeof json;
-    throw new Error(`rippling: unexpected response — expected items[], got: [${got}]`);
-  }
-  const rawCount = json.items.length;
-  const jobs = json.items
-    .map((j) => {
-      const title = typeof j?.name === 'string' ? j.name.trim() : '';
-      if (!title) return null;
-
-      // url must be an absolute https posting link on ats.rippling.com — Rippling
-      // always serves postings there (no custom-domain case), so an off-host URL
-      // is untrusted and dropped. url is the dedup key.
-      let url = '';
-      const rawUrl = typeof j?.url === 'string' ? j.url.trim() : '';
-      if (rawUrl) {
-        try {
-          const parsed = new URL(rawUrl);
-          if (parsed.protocol === 'https:' && parsed.hostname === CAREERS_HOST) url = parsed.href;
-        } catch {
-          // malformed URL → leave url = '' → dropped below
-        }
-      }
-      if (!url) return null;
-
-      const locs = Array.isArray(j?.locations) ? j.locations : [];
-      const location = locs
-        .map((l) => (l && typeof l.name === 'string' ? l.name.trim() : ''))
-        .filter(Boolean)
-        .join(' · ');
-
-      return { title, url, location, company: companyName };
-    })
-    .filter(Boolean);
-  return { jobs, rawCount };
+export function parseRipplingPage(json, companyName, slug) {
+  const byUrl = new Map();
+  const rawCount = parseRipplingPageInto(json, companyName, slug, byUrl);
+  return { jobs: finalizeRipplingJobs(byUrl), rawCount };
 }
 
 /** @type {Provider} */
@@ -186,7 +251,7 @@ export default {
     // swallow its ProbePageBudgetReached rejection, propagate it unwrapped.
     const probing = ctxCap !== Infinity;
 
-    const jobs = [];
+    const byUrl = new Map();
     let stopReason = STOP_REASON.COMPLETE;
     let page = 0;
     for (; page < pagesToFetch; page++) {
@@ -202,13 +267,12 @@ export default {
         // surface the failure so scan/portal-health do not record an empty board.
         if (probing || page === 0) throw err;
         const attempts = err?.attempts ?? RETRY_POLICY.retries + 1;
-        console.error(`⚠️  rippling: ${entry.name} truncated at page ${page + 1} of ${pagesToFetch} after ${attempts} attempts (${jobs.length} jobs): ${err.message}`);
+        console.error(`⚠️  rippling: ${entry.name} truncated at page ${page + 1} of ${pagesToFetch} after ${attempts} attempts (${byUrl.size} jobs): ${err.message}`);
         stopReason = STOP_REASON.FETCH_ERROR;
         break;
       }
 
-      const { jobs: pageJobs, rawCount } = parseRipplingPage(json, entry.name);
-      jobs.push(...pageJobs);
+      const rawCount = parseRipplingPageInto(json, entry.name, slug, byUrl);
 
       // Natural end: the source's own raw row count for this page (before
       // malformed-row filtering) is short of PAGE_SIZE. Break WITHOUT
@@ -218,11 +282,16 @@ export default {
       if (rawCount < PAGE_SIZE) break;
     }
 
+    const jobs = finalizeRipplingJobs(byUrl);
+
     // Only a healthy walk that ran out of its OWN entry.max_pages /
     // DEFAULT_MAX_PAGES budget counts as capped — never a probe's ctx.maxPages
     // cap and never a fetch-error stop: this warning means the ceiling
     // truncated a healthy board, not that the board broke.
-    if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages) {
+    // Never during a probe: on a max_pages: 1 entry the probe's one page is also
+    // the entry's last, so pagesToFetch === maxPages alone cannot tell them
+    // apart (#7180).
+    if (stopReason === STOP_REASON.COMPLETE && page === pagesToFetch && pagesToFetch === maxPages && !probing) {
       stopReason = STOP_REASON.CAP;
       console.error(`⚠️  rippling: ${entry.name} truncated at max_pages=${maxPages} (${jobs.length} jobs) — raise max_pages on this entry for more`);
     }

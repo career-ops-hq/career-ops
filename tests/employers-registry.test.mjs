@@ -61,11 +61,17 @@ import teamtailor from '../providers/teamtailor.mjs';
 import trakstar from '../providers/trakstar.mjs';
 import turbohire from '../providers/turbohire.mjs';
 import zohoRecruit from '../providers/zoho-recruit.mjs';
+import avature from '../providers/avature.mjs';
+import clearcompany from '../providers/clearcompany.mjs';
+import jobvite from '../providers/jobvite.mjs';
+import eightfold from '../providers/eightfold.mjs';
+import adpMyjobs from '../providers/adp-myjobs.mjs';
+import successfactorsClassic from '../providers/successfactors-classic.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, 'successfactors-classic': successfactorsClassic, workday,
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
@@ -169,7 +175,8 @@ test('every admitted ATS has the provider that reads it, and that provider reads
   assert.deepEqual(Object.keys(PROVIDERS).sort(), [...BOARD_ATS].sort());
   for (const ats of BOARD_ATS) {
     assert.equal(PROVIDERS[ats].id, ats);
-    const board = ats === 'workday' ? 'acme/wd5/External' : 'acme';
+    // A ClearCompany board is its career site's GUID, not a slug.
+    const board = ats === 'workday' ? 'acme/wd5/External' : ats === 'clearcompany' ? '0f8fad5b-d9cb-469f-a165-70867728950e' : ats === 'successfactors-classic' ? 'career5/eu/ACME001' : 'acme';
     const regions = Object.hasOwn(REGIONAL_BOARD_URL_BUILDERS, ats) ? regionsOf(ats) : [undefined, ...regionsOf(ats)];
     for (const region of regions) {
       const url = buildBoardUrl({ ats, region, board, workday_host: ats === 'workday' ? 'jobs' : undefined });
@@ -329,10 +336,14 @@ test('sourceProblem: web-index:<name>@<date> needs a lowercase name and a real d
 
 test('schema.json: the manifest id pattern accepts and rejects what the validator does', () => {
   const idPatterns = [manifestSchema.properties.id.pattern, rowSchema.properties.contribution.pattern].map((p) => new RegExp(p));
-  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co'];
+  const samples = ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-Acme', '2026-11-20-', '2026-11-20-acme-', '26-11-20-acme', '2026-11-20-acme_co',
+    '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3',
+    '2026-11-20-acme.1', '2026-11-20-acme.0', '2026-11-20-acme.02', '2026-11-20-acme.100', '2026-11-20-acme.', '2026-11-20-acme.2.3', '2026-11-20-acme.2-2', '2026-11-20-.2'];
   for (const s of samples) {
     for (const re of idPatterns) assert.equal(re.test(s), MANIFEST_ID_RE.test(s), s);
   }
+  const accepted = samples.filter((s) => MANIFEST_ID_RE.test(s));
+  assert.deepEqual(accepted, ['2026-11-08-santifer', '2026-11-20-acme', '2026-11-20-a', '2026-11-20-acme.2', '2026-11-20-acme.9', '2026-11-20-acme.10', '2026-11-20-acme.99', '2026-11-20-acme-2.3']);
 });
 
 // ── 4. Pull-request rules (--base), the size limit, the CHANGELOG ─────────
@@ -389,8 +400,18 @@ test('--base: a base with no registry (the bootstrap PR) counts every row as new
   // have some: the copy it is checked from drops those marks.
   const head = checkout();
   try {
-    for (const { row } of rowsOf(reg(head)).filter((r) => r.row.retired === true)) {
-      editRow(head, row.careers_url, ({ retired, retired_reason, ...rest }) => rest);
+    // One pass per file. Looking each retired row up with editRow() read the whole registry once per
+    // retired row, so this test grew with the registry times its retired rows.
+    for (const ats of readdirSync(reg(head, 'boards'))) {
+      for (const f of readdirSync(reg(head, 'boards', ats))) {
+        const path = reg(head, 'boards', ats, f);
+        const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+        const next = lines.map((l) => {
+          const { retired, retired_reason, ...rest } = JSON.parse(l);
+          return retired === true ? JSON.stringify(rest) : l;
+        });
+        if (next.some((l, i) => l !== lines[i])) writeFileSync(path, `${next.join('\n')}\n`);
+      }
     }
     const r = run(head, ['--base', empty]);
     assert.equal(r.status, 0, r.stderr);
@@ -612,7 +633,7 @@ test('boards/ has no hard size limit: above 25 MB it is a warning, never an erro
     mkdirSync(reg(head, 'boards', 'breezy'), { recursive: true });
     writeFileSync(reg(head, 'boards', 'breezy', 'f.ndjson'), `${JSON.stringify({ ...NEW_ROW, name: 'x'.repeat(BOARDS_WARN_BYTES) })}\n`);
     const { errors, warnings } = validateRegistry({ root: head });
-    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+\.\d+ MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
+    assert.ok(warnings.some((w) => w.file === 'employers/boards' && /^boards\/ is \d+(?:\.\d+)? MB, above 25 MB/.test(w.message)), JSON.stringify(warnings));
     assert.deepEqual(errors.filter((e) => e.file === 'employers/boards'), [], 'the size is never an error');
   } finally { rmSync(head, { recursive: true, force: true }); }
 });
