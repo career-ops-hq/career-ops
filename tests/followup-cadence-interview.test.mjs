@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const script = new URL('../followup-cadence.mjs', import.meta.url);
 const tracker = `| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
@@ -52,7 +53,7 @@ for (const [label, value, enabled] of [
         : [{ urgency: 'waiting', date: null }, { urgency: 'waiting', date: null }]);
       // /api/followups invokes this same CLI; home consumes its due entries.
       for (const flags of [['--json'], ['--json', '--overdue-only']]) {
-        const result = run([script.pathname, ...flags]);
+        const result = run([fileURLToPath(script), ...flags]);
         assert.equal(result.cadenceConfig.interview_followups, enabled);
         assert.deepEqual(result.entries.map(e => e.num).sort(), enabled ? [1, 2, 3, 4, 5] : [3, 4, 5]);
         assert.equal(result.metadata.totalTracked, 5);
