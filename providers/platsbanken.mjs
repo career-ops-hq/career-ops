@@ -334,6 +334,10 @@ export default {
           if (page === 1) {
             keywordFailed = true;
             errors.push(`"${keyword}": ${(err && /** @type {Error} */ (err).message) || err}`);
+            // This keyword's share of the board was never read. When another
+            // keyword answered, the board is partial (#6820); when none did,
+            // the outage check below throws before this is used.
+            truncatedReason ??= 'fetch-error';
           } else {
             // A later page failing keeps the pages already collected: recall-first,
             // the same trade arbeitsagentur.mjs and jobbankca.mjs make. The board
@@ -370,6 +374,12 @@ export default {
     // arbeitsagentur.mjs.
     if (succeeded === 0 && errors.length) {
       throw new Error(`platsbanken: all ${keywords.length} keyword request(s) failed — ${errors[0]}`);
+    }
+    // Some keywords answered and some did not. The fetch-error marker below only
+    // reaches scan.mjs, so name the unread keywords for the person scanning too,
+    // as arbeitsagentur.mjs does.
+    if (errors.length) {
+      console.error(`⚠️  platsbanken: "${entryName}" returned partial results — ${errors.join('; ')}`);
     }
 
     const jobs = [...byUrl.values()];

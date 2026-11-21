@@ -92,6 +92,11 @@ html {
   scrollbar-gutter: stable;
 }
 
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]):not(:disabled) {
+  cursor: pointer;
+}
+
 @layer utilities {
   .font-serif-italic {
     font-family: var(--font-instrument-serif-italic), var(--font-serif);

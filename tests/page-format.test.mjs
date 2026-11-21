@@ -131,15 +131,17 @@ test('the owner pins its own values', () => {
 });
 
 test('the web agrees with the CLI about the sheet', async (t) => {
-  // web/src/lib/page-formats.mjs keeps its own copy of these two constants, and
+  // web/src/lib/page-formats.mjs keeps its own copy of these constants, and
   // wiring it to this module means loading it at runtime, so it stays out of
   // scope here. The two agree today and nothing says they still will, which is
-  // the drift this file exists to stop, one boundary out. It costs two lines.
+  // the drift this file exists to stop, one boundary out. It costs three lines.
   const webOwner = join(ROOT, 'web', 'src', 'lib', 'page-formats.mjs');
   if (!existsSync(webOwner)) return t.skip('this checkout carries no web/');
   const web = await import(pathToFileURL(webOwner).href);
   assert.equal(web.DEFAULT_PAGE_FORMAT, DEFAULT_PAGE_FORMAT);
   assert.deepEqual([...web.PAGE_FORMATS].sort(), [...PAGE_FORMATS].sort());
+  // The width the web's pdf prompt tells its agent to lay the body out at.
+  assert.deepEqual(web.PAGE_WIDTHS, PAGE_WIDTHS);
 });
 
 // --- the four consumers -------------------------------------------------
@@ -275,6 +277,7 @@ function coverSandbox() {
   // assertion below and not on a missing module. Resolving early is the quiet
   // form of this bug: it reads no profile path, so every letter gets the
   // project default while its CV keeps the user's configured size.
+  copyFileSync(join(ROOT, 'lib', 'output-names.mjs'), join(dir, 'lib', 'output-names.mjs'));
   copyFileSync(join(ROOT, 'lib', 'page-format.mjs'), join(dir, 'lib', 'page-format.mjs'));
   copyFileSync(
     join(ROOT, 'templates', 'cover-letter-template.html'),

@@ -40,6 +40,7 @@ import { installPiiInterceptor } from './lib/pii-interceptor.mjs';
 import {
   isPostingUrl, normalizedTrackerScore, parseScoreSummary, slugifyCompany, tsvSafe,
 } from './lib/tracker-addition.mjs';
+import { NO_INVENTED_PAY_RULE, normalizeEvaluationText } from './lib/eval-evidence.mjs';
 
 // Ambient guard over global fetch (idempotent); the explicit gate below is the
 // primary layer.
@@ -237,6 +238,27 @@ function readFile(path, label) {
 }
 
 // ---------------------------------------------------------------------------
+// Ending a run after a request
+// ---------------------------------------------------------------------------
+// Once a request has been made, the run ends by setting the exit code and
+// letting the event loop drain, not with process.exit(). On Windows, Node 23,
+// 25, and 24.x and 26.x before 24.20.0 and 26.7.0 can abort in process.exit()
+// after a request (nodejs/node#56645), and the run ends with exit code
+// 3221226505 instead of 1. Measured 2026-11-14 on Node 24.14.1: a stream record
+// over the size cap aborted 8 runs out of 8.
+//
+// This is top-level code, so the caller awaits the promise returned here. It
+// never settles, so nothing after the await runs, and Node exits with
+// process.exitCode once nothing else is pending: an exit code that is already
+// set wins over the unsettled-await code 13. The unref'd timer still ends a run
+// that something holds open, without holding the process open itself.
+function exitWhenDrained(code) {
+  process.exitCode = code;
+  setTimeout(() => process.exit(code), 5_000).unref();
+  return new Promise(() => {});
+}
+
+// ---------------------------------------------------------------------------
 // Check Ollama is reachable before burning time on prompt assembly
 // ---------------------------------------------------------------------------
 try {
@@ -250,7 +272,7 @@ try {
    2. Start server:   ollama serve
    3. Pull a model:   ollama pull ${modelName}
 `);
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +327,7 @@ ${contextBody}
 IMPORTANT OPERATING RULES FOR THIS SESSION
 ═══════════════════════════════════════════════════════
 1. You do NOT have access to WebSearch, Playwright, or file writing tools.
-   - Block D (Comp research): use training-data salary estimates; note them as estimates.
+   - ${NO_INVENTED_PAY_RULE}
    - Block G (Legitimacy): analyze JD text only; skip URL/page freshness checks.
    - Post-evaluation file saving is handled by the script, not by you.
 2. ${languageInstruction}
@@ -329,6 +351,7 @@ const endpoint = `${baseUrl}/api/chat`;
 console.log(`🤖  Calling Ollama (${modelName})... this may take a minute.\n`);
 
 let evaluationText;
+let evaluationUsage = null;
 try {
   // Privacy gate: inspect the complete serialized request before the network
   // call. Ollama may be local, but it may equally be a remote host set via
@@ -364,63 +387,55 @@ try {
     const body = await res.text();
     console.error(`❌  Ollama API error: HTTP ${res.status}`);
     console.error(`    ${body.slice(0, 300)}`);
-    process.exit(1);
+    await exitWhenDrained(1);
   }
 
   // Streamed /api/chat is newline-delimited JSON: one object per token, the last carrying
   // done:true and the token counts.
-  let acc = '', buf = '', promptCount = 0, evalCount = 0;
-  const decoder = new TextDecoder();
+  let acc = '', buf = '';
+  let completed = false;
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  // Cap each decoded NDJSON record at 1 Mi UTF-16 code units, not the whole
+  // transport chunk or reply, which may contain many small records.
+  const recordLimit = 1024 * 1024;
+  const consumeLine = line => {
+    if (line.length > recordLimit) throw new Error('Stream record exceeds the 1 Mi code-unit limit');
+    if (!line.trim()) return;
+    const obj = JSON.parse(line);
+    if (obj.error) throw new Error(String(obj.error).slice(0, 300));
+    if (completed) throw new Error('Unexpected data after completed evaluation');
+    if (obj.message?.tool_calls?.length) throw new Error('Ollama returned an unsupported tool call instead of an evaluation.');
+    if (obj.message?.content) acc += obj.message.content;
+    if (obj.done === true) {
+      if (obj.done_reason && obj.done_reason !== 'stop') {
+        throw new Error(`Incomplete evaluation: done_reason=${obj.done_reason}`);
+      }
+      completed = true;
+      if (Number.isFinite(obj.prompt_eval_count) && obj.prompt_eval_count >= 0
+          && Number.isFinite(obj.eval_count) && obj.eval_count >= 0) {
+        evaluationUsage = normalizeOpenAIUsage({
+          prompt_tokens: obj.prompt_eval_count,
+          completion_tokens: obj.eval_count,
+          total_tokens: obj.prompt_eval_count + obj.eval_count,
+        });
+      }
+    }
+  };
   for await (const chunk of res.body) {
     buf += decoder.decode(chunk, { stream: true });
     let nl;
     while ((nl = buf.indexOf('\n')) !== -1) {
-      const line = buf.slice(0, nl).trim();
+      const line = buf.slice(0, nl);
       buf = buf.slice(nl + 1);
-      if (!line) continue;
-      let obj;
-      try { obj = JSON.parse(line); } catch { continue; }
-      if (obj.error) {
-        console.error(`❌  Ollama error: ${obj.error}`);
-        process.exit(1);
-      }
-      if (obj.message?.content) acc += obj.message.content;
-      if (obj.done) {
-        promptCount = obj.prompt_eval_count ?? 0;
-        evalCount = obj.eval_count ?? 0;
-      }
+      consumeLine(line);
     }
+    if (buf.length > recordLimit) throw new Error('Stream record exceeds the 1 Mi code-unit limit');
   }
-  // Flush a final line that arrived without a trailing newline. Ollama terminates every
-  // chunk with one, but a body that ends mid-line would otherwise be dropped silently.
-  const tail = buf.trim();
-  if (tail) {
-    try {
-      const obj = JSON.parse(tail);
-      if (obj.error) {
-        console.error(`❌  Ollama error: ${obj.error}`);
-        process.exit(1);
-      }
-      if (obj.message?.content) acc += obj.message.content;
-      if (obj.done) {
-        promptCount = obj.prompt_eval_count ?? promptCount;
-        evalCount = obj.eval_count ?? evalCount;
-      }
-    } catch { /* a truncated final line is not recoverable; the empty-response check below reports it */ }
-  }
+  consumeLine(buf + decoder.decode());
+  if (!completed) throw new Error('Incomplete evaluation: stream ended before done:true');
   evaluationText = acc.trim();
-  // Native /api/chat reports tokens as prompt_eval_count / eval_count, not an
-  // OpenAI-shaped `usage` object; map them through the shared normalizer.
-  const usage = normalizeOpenAIUsage({
-    prompt_tokens: promptCount,
-    completion_tokens: evalCount,
-    total_tokens: promptCount + evalCount,
-  });
-  tracker.record('evaluation', usage);
-  if (!evaluationText) {
-    console.error('❌  Ollama returned an empty response.');
-    process.exit(1);
-  }
+  if (!evaluationText) throw new Error('Ollama returned an empty response.');
+  if (evaluationUsage) tracker.record('evaluation', evaluationUsage);
 } catch (err) {
   if (err.name === 'TimeoutError') {
     console.error(`❌  Request timed out after ${Math.round(timeoutMs / 1000)}s.`);
@@ -428,12 +443,14 @@ try {
   } else {
     console.error(`❌  Ollama API call failed: ${err.message}`);
   }
-  process.exit(1);
+  await exitWhenDrained(1);
 }
 
 // ---------------------------------------------------------------------------
 // Display evaluation
 // ---------------------------------------------------------------------------
+evaluationText = normalizeEvaluationText(evaluationText, jdText);
+
 console.log('\n' + '═'.repeat(66));
 console.log('  CAREER-OPS EVALUATION — powered by Ollama (' + modelName + ')');
 console.log('═'.repeat(66) + '\n');
@@ -556,4 +573,6 @@ console.log('\n' + '─'.repeat(66));
 console.log(`  Score: ${score}/5  |  Archetype: ${archetype}  |  Legitimacy: ${legitimacy}`);
 console.log('─'.repeat(66) + '\n');
 
-console.log(formatBreakdown(tracker, modelName, 'ollama'));
+console.log(evaluationUsage
+  ? formatBreakdown(tracker, modelName, 'ollama')
+  : `Token breakdown:\n  evaluation:    usage unavailable (endpoint did not report token counts)\n  (metadata: model=${modelName}, provider=ollama)`);

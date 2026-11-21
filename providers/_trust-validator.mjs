@@ -51,6 +51,10 @@ const DEFAULT_ATS_ALLOWLIST = [
   'careers.hibob.com',
   'join.com',
   'hirehive.com',
+  'recruitmentplatform.com',
+  'taleez.com',
+  'kula.ai',
+  'wellfound.com',
 ];
 
 /** @type {Record<string, number>} */

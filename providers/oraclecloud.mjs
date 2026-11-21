@@ -19,6 +19,12 @@
 // PIN the host before every fetch, so it enumerates a finite apex family and
 // never degrades into `oraclecloud<anything>.com`.
 //
+// Branded hosts: an employer that serves ORC only on its own domain (Dell:
+// enterpriseplatform.dell.com, behind a CDN, with no *.oraclecloud.com pod host
+// discoverable) is reached by naming that ONE host in `oracle_host:` on the
+// entry. It is compared exactly, never as a pattern, like eightfold_host in
+// providers/eightfold.mjs.
+//
 // Career page URL:
 //   https://<host>/hcmUI/CandidateExperience/<lang>/sites/<siteNumber>/jobs
 //   siteNumber is the segment after `sites/` (usually CX_1, CX_1002, …; default CX_1).
@@ -50,7 +56,7 @@ import { BROWSER_LIKE_USER_AGENT, fetchJsonWithRetry, sleep } from './_http.mjs'
 const ORACLE_HOST_RE = /^[a-z0-9-]+\.fa\.(?:[a-z0-9-]+\.)?(?:ocs\.)?oraclecloud(?:[1-9][0-9]?)?\.com$/i;
 
 const PAGE_SIZE = 200;
-const MAX_PAGES = 25;             // default cap (~5000 jobs) when the entry sets no max_pages
+const MAX_PAGES = 25;             // default cap (~5000 jobs) when the entry sets no max_pages and the tenant reports no total
 // Upper bound an entry may opt in to with `max_pages` (~20000 jobs, 100 requests
 // of 200 rows at 250ms spacing). JPMorgan Chase alone has 7000+ postings, which
 // the default cannot cover; the bound stays finite so a typo can't walk a board
@@ -62,8 +68,36 @@ const INTER_PAGE_DELAY_MS = 250;  // WAF-aware spacing between same-host pages
 // facetsList is a fixed constant on the finder; %3B is the encoded ';' separator.
 const FACETS_LIST = 'LOCATIONS%3BWORK_LOCATIONS%3BWORKPLACE_TYPES%3BTITLES%3BCATEGORIES%3BORGANIZATIONS%3BPOSTING_DATES%3BFLEX_FIELDS';
 
-/** @param {string} url */
-function assertOracleUrl(url) {
+// A bare DNS name, same shape as providers/eightfold.mjs's BRANDED_HOST_RE.
+const BRANDED_HOST_RE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+
+/**
+ * The entry's opt-in branded ORC host (`oracle_host`), lowercased, or null.
+ *
+ * Some employers serve Oracle Recruiting Cloud only on their own domain behind
+ * a CDN, with the *.oraclecloud.com pod host undiscoverable (Dell: jobs.dell.com
+ * -> enterpriseplatform.dell.com, Akamai DNS, a *.dell.com-only certificate, no
+ * pod host in the page). The CE REST API answers there unchanged. Mirrors
+ * upstream's `eightfold_host` (providers/eightfold.mjs): the pin stays exact —
+ * only the one host the entry names is trusted, never a pattern.
+ *
+ * @param {any} entry
+ * @returns {string|null}
+ */
+export function brandedOracleHost(entry) {
+  const raw = entry?.oracle_host;
+  if (typeof raw !== 'string') return null;
+  const host = raw.trim().toLowerCase();
+  return host.length <= 253 && BRANDED_HOST_RE.test(host) ? host : null;
+}
+
+/** @param {string} hostname @param {string|null} branded */
+function isTrustedOracleHost(hostname, branded) {
+  return ORACLE_HOST_RE.test(hostname) || (branded !== null && hostname.toLowerCase() === branded);
+}
+
+/** @param {string} url @param {string|null} [branded] */
+function assertOracleUrl(url, branded = null) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -71,8 +105,8 @@ function assertOracleUrl(url) {
     throw new Error(`oraclecloud: invalid URL: ${url}`);
   }
   if (parsed.protocol !== 'https:') throw new Error(`oraclecloud: URL must use HTTPS: ${url}`);
-  if (!ORACLE_HOST_RE.test(parsed.hostname)) {
-    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud[1-99].com`);
+  if (!isTrustedOracleHost(parsed.hostname, branded)) {
+    throw new Error(`oraclecloud: untrusted hostname "${parsed.hostname}" — must match *.fa[.<region>][.ocs].oraclecloud[1-99].com or the entry's oracle_host`);
   }
   return url;
 }
@@ -95,6 +129,7 @@ function toEpochMs(value) {
  * @returns {{host:string, lang:string, siteNumber:string, locationId:(string|null)}|null}
  */
 export function resolveSite(entry) {
+  const branded = brandedOracleHost(entry);
   for (const raw of [entry.api, entry.careers_url]) {
     if (typeof raw !== 'string' || !raw) continue;
     let parsed;
@@ -104,7 +139,7 @@ export function resolveSite(entry) {
       continue;
     }
     if (parsed.protocol !== 'https:') continue;
-    if (!ORACLE_HOST_RE.test(parsed.hostname)) continue;
+    if (!isTrustedOracleHost(parsed.hostname, branded)) continue;
 
     const segs = parsed.pathname.split('/').filter(Boolean);
     // Path shape: /hcmUI/CandidateExperience/<lang>/sites/<siteNumber>/...
@@ -244,11 +279,17 @@ export default {
     const site = resolveSite(entry);
     if (!site) throw new Error(`oraclecloud: cannot derive API URL for ${entry.name}`);
 
-    const entryMaxPages = resolveMaxPages(entry);
+    let entryMaxPages = resolveMaxPages(entry);
+    // An entry's own max_pages is the user's choice and is kept as set. Without
+    // one, a tenant that reports TotalJobsCount already bounds the walk, so the
+    // default rises to cover that total, up to HARD_MAX_PAGES: a fixed 25 pages
+    // read 5000 of JPMorgan's 7118 postings. MAX_PAGES stays the cap only for a
+    // tenant that reports no total, where nothing else ends the walk.
+    const autoRaise = !(Number.isInteger(entry?.max_pages) && entry.max_pages > 0);
     // Health probes / audits pass ctx.maxPages (1) to ask for a single page;
-    // honour it, and don't call that deliberate stop a truncation.
+    // honour it as the upper bound, and don't call that deliberate stop a truncation.
     const ctxCap = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0 ? ctx.maxPages : Infinity;
-    const maxPages = Math.min(entryMaxPages, ctxCap);
+    let maxPages = Math.min(entryMaxPages, ctxCap);
 
     const all = [];
     let total = null;
@@ -256,7 +297,7 @@ export default {
     for (let page = 0; page < maxPages; page++) {
       const offset = page * PAGE_SIZE;
       const apiUrl = buildApiUrl(site, offset, PAGE_SIZE);
-      assertOracleUrl(apiUrl); // SSRF guard before every fetch
+      assertOracleUrl(apiUrl, brandedOracleHost(entry)); // SSRF guard before every fetch
       if (page > 0) await sleep(INTER_PAGE_DELAY_MS, ctx);
 
       const json = await fetchJsonWithRetry(ctx, apiUrl, {
@@ -268,7 +309,13 @@ export default {
       all.push(...parsed);
 
       const item = Array.isArray(json?.items) ? json.items[0] : null;
-      if (total === null && item && typeof item.TotalJobsCount === 'number') total = item.TotalJobsCount;
+      if (total === null && item && typeof item.TotalJobsCount === 'number') {
+        total = item.TotalJobsCount;
+        if (autoRaise) {
+          entryMaxPages = Math.max(entryMaxPages, Math.min(Math.ceil(total / PAGE_SIZE), HARD_MAX_PAGES));
+          maxPages = Math.min(entryMaxPages, ctxCap);
+        }
+      }
       const listLen = item && Array.isArray(item.requisitionList) ? item.requisitionList.length : 0;
 
       // Stop conditions. NOTE: `hasMore` is unreliable on some tenants (e.g.

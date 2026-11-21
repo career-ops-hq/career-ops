@@ -235,7 +235,7 @@ I nomi dei campi dell'intestazione (`Date`, `URL`, `Archetype`, `Score`, `Legiti
 ## Score Evidence
 (cinque dimensioni, stato dell'evidenza, domande aperte, Evidence confidence, priorità)
 
-## H) Bozze di risposta per la candidatura
+## H) Bozze di risposta per la candidatura (draft)
 (solo se punteggio >= 4.5 -- risposte pronte per i moduli del portale aziendale)
 
 ---

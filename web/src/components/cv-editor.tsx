@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState }
 import ReactMarkdown from "react-markdown";
 import { SkillGaps } from "@/components/skill-gaps";
 import remarkGfm from "remark-gfm";
+import { noMarkdownImages } from "@/lib/markdown-options.mjs";
 import { Check, Loader2, Upload } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { CvIngest } from "@/components/cv/cv-ingest";
@@ -245,7 +246,7 @@ export function CvEditor() {
           />
           <article className="report-prose min-h-[60vh] [&_p]:whitespace-pre-line overflow-auto rounded-2xl border border-border bg-surface/30 p-5">
             {state.content.trim() ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{state.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} {...noMarkdownImages}>{state.content}</ReactMarkdown>
             ) : (
               <p className="text-muted">Preview appears here.</p>
             )}

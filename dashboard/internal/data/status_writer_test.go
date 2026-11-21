@@ -92,27 +92,41 @@ func TestDashboardStatusLifecycleMatchesCLIAndWeb(t *testing.T) {
 }
 
 func TestDashboardStatusReportsLifecycleFailure(t *testing.T) {
-	for _, sidecar := range []string{"status-log.tsv", "follow-ups.md"} {
-		t.Run(sidecar, func(t *testing.T) {
-			t.Setenv("CAREER_OPS_TRACKER", "")
-			before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
-			root, tracker := writeTracker(t, before)
-			if err := os.Mkdir(filepath.Join(filepath.Dir(tracker), sidecar), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied")
-			if err == nil || !strings.Contains(err.Error(), "status saved, but") {
-				t.Fatalf("missing partial success warning: %v", err)
-			}
-			apps := mustParseApplications(t, root)
-			if len(apps) != 1 || apps[0].Status != "Applied" {
-				t.Fatalf("saved status must stay visible: %+v", apps)
-			}
-		})
-	}
+	t.Run("status-log.tsv", func(t *testing.T) {
+		t.Setenv("CAREER_OPS_TRACKER", "")
+		before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
+		root, tracker := writeTracker(t, before)
+		if err := os.Mkdir(filepath.Join(filepath.Dir(tracker), "status-log.tsv"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied")
+		if err == nil || !strings.Contains(err.Error(), "Could not write the status log") || !strings.Contains(err.Error(), "stays Evaluated") {
+			t.Fatalf("missing ledger refusal: %v", err)
+		}
+		apps := mustParseApplications(t, root)
+		if len(apps) != 1 || apps[0].Status != "Evaluated" {
+			t.Fatalf("refused log must leave the tracker unchanged: %+v", apps)
+		}
+	})
+	t.Run("follow-ups.md", func(t *testing.T) {
+		t.Setenv("CAREER_OPS_TRACKER", "")
+		before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
+		root, tracker := writeTracker(t, before)
+		if err := os.Mkdir(filepath.Join(filepath.Dir(tracker), "follow-ups.md"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied")
+		if err == nil || !strings.Contains(err.Error(), "status saved, but") {
+			t.Fatalf("missing partial success warning: %v", err)
+		}
+		apps := mustParseApplications(t, root)
+		if len(apps) != 1 || apps[0].Status != "Applied" {
+			t.Fatalf("saved status must stay visible: %+v", apps)
+		}
+	})
 }
 
-func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
+func TestDashboardStatusRetriesAfterTheLedgerCanBeWritten(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER", "")
 	before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
 	root, tracker := writeTracker(t, before)
@@ -120,8 +134,9 @@ func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
 	if err := os.Mkdir(logPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied"); err == nil {
-		t.Fatal("initial partial save must report the missing ledger")
+	err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied")
+	if err == nil || !strings.Contains(err.Error(), "stays Evaluated") {
+		t.Fatalf("blocked ledger must refuse the change: %v", err)
 	}
 	if err := os.Remove(logPath); err != nil {
 		t.Fatal(err)
@@ -129,15 +144,18 @@ func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
 	if err := os.WriteFile(logPath, []byte("42\t2026-09-01\t-\tEvaluated\timport\t\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
-		t.Fatalf("same-status retry should repair the ledger: %v", err)
+	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied"); err != nil {
+		t.Fatalf("retry after the ledger exists should record the transition: %v", err)
 	}
 	ledger, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Count(string(ledger), "\t-\tApplied\tcorrection\t"); got != 1 {
-		t.Fatalf("want one Applied correction, got %d: %s", got, ledger)
+	if got := strings.Count(string(ledger), "\tEvaluated\tApplied\tset-status\t"); got != 1 {
+		t.Fatalf("want one Applied transition, got %d: %s", got, ledger)
+	}
+	if strings.Contains(string(ledger), "\tcorrection\t") {
+		t.Fatalf("a rolled-back change is not a ledger repair: %s", ledger)
 	}
 	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied"); err != nil {
 		t.Fatal(err)
@@ -147,11 +165,11 @@ func TestDashboardStatusRepairsMissingAppliedLedger(t *testing.T) {
 		t.Fatal(err)
 	}
 	if string(ledgerAgain) != string(ledger) {
-		t.Fatalf("repair retry appended duplicate correction:\nfirst: %s\nretry: %s", ledger, ledgerAgain)
+		t.Fatalf("repeat Applied appends another row:\nfirst: %s\nretry: %s", ledger, ledgerAgain)
 	}
 }
 
-func TestDashboardStatusPropagatesAppliedLedgerRepairFailure(t *testing.T) {
+func TestDashboardStatusRepeatsTheLedgerRefusal(t *testing.T) {
 	t.Setenv("CAREER_OPS_TRACKER", "")
 	before := statusTargetHeader + strings.Replace(statusTargetRow, "| Applied |", "| Evaluated |", 1)
 	root, tracker := writeTracker(t, before)
@@ -159,12 +177,17 @@ func TestDashboardStatusPropagatesAppliedLedgerRepairFailure(t *testing.T) {
 	if err := os.Mkdir(logPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied"); err == nil {
-		t.Fatal("initial partial save must report the missing ledger")
+	first := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7"}, "Applied")
+	if first == nil || !strings.Contains(first.Error(), "stays Evaluated") {
+		t.Fatalf("blocked ledger must refuse the change: %v", first)
 	}
-	err := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied")
-	if err == nil || !strings.Contains(err.Error(), "status-log repair failed") {
-		t.Fatalf("same-status retry must propagate ledger inspection failure: %v", err)
+	second := UpdateApplicationStatus(root, model.CareerApplication{ReportNumber: "7", Status: "Applied"}, "Applied")
+	if second == nil || !strings.Contains(second.Error(), "stays Evaluated") || strings.Contains(second.Error(), "status-log repair failed") {
+		t.Fatalf("second attempt must refuse the same way: %v", second)
+	}
+	apps := mustParseApplications(t, root)
+	if len(apps) != 1 || apps[0].Status != "Evaluated" {
+		t.Fatalf("refused log must leave the tracker unchanged: %+v", apps)
 	}
 }
 

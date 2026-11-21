@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 
 import { htmlToText } from './_html-to-text.mjs';
+import { normalizeEmploymentType } from './_employment-type.mjs';
 
 // Remotive provider — board-wide aggregator feed
 // (https://remotive.com/api/remote-jobs). Returns { jobs: [...] }. The full
@@ -36,7 +37,7 @@ export default {
    * Fetches and normalizes postings from the Remotive public feed.
    * @param {{ name?: string }} entry - The job_boards entry being processed.
    * @param {{ fetchJson: (url: string, opts?: { redirect?: 'error'|'follow'|'manual' }) => Promise<any> }} ctx - HTTP context.
-   * @returns {Promise<Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number}>>}
+   * @returns {Promise<Array<{title: string, url: string, company: string, location: string, description?: string, postedAt?: number, employmentType?: string}>>}
    */
   async fetch(entry, ctx) {
     // redirect:'error' prevents SSRF via server-side redirects
@@ -66,6 +67,10 @@ export default {
           const description = htmlToText(j.description);
           if (description) job.description = description;
         }
+        // `job_type`: full_time | part_time | contract | freelance |
+        // internship | other. Freelance reads as contract; other sets nothing.
+        const employmentType = normalizeEmploymentType(j.job_type);
+        if (employmentType) job.employmentType = employmentType;
         return job;
       });
   },

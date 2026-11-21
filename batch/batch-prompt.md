@@ -278,7 +278,7 @@ Cover:
 
 #### Block D — Compensation and Demand
 
-Use WebSearch for salary bands, company compensation reputation, funding/hiring signals, and market demand. Cite sources when available. If data is missing, say so.
+Use WebSearch for salary bands, company compensation reputation, funding/hiring signals, and market demand. Cite sources when available. If the posting states no figure and search finds none, mark compensation unknown. Do not invent a salary. Unknown compensation does not move the score.
 
 Before interpreting any salary, classify the **company type / hiring entity**. A public salary figure is a signal, not a contractual promise.
 
@@ -545,7 +545,7 @@ risk_summary:
 Rules:
 - Populate `confidence_gaps` with up to three non-empty strings naming the verification priorities; the examples show the empty form, `confidence_gaps: []`.
 - Use `[]` for `hard_stops`, `soft_gaps`, `top_strengths`, `discard_reasons`, `requirement_importance`, or `confidence_gaps` when empty.
-- `discard_reasons` items are canonical ids from `templates/discard-reasons.yml`: `salary_too_low`, `hybrid_required`, `tech_stack_mismatch`, `seniority_mismatch`, `geo_restriction`, `size_mismatch`, `company_culture`. Read that file for when each applies. When no id fits, write a short free-text reason instead of forcing the nearest id: `analyze-patterns.mjs` lists it as `other`, apart from the canonical shares, and a reason that keeps recurring there is how the vocabulary grows.
+- `discard_reasons` items are canonical ids from `templates/discard-reasons.yml`: `salary_too_low`, `hybrid_required`, `tech_stack_mismatch`, `seniority_mismatch`, `geo_restriction`, `size_mismatch`, `company_culture`. Read that file for when each applies. Write the id alone, with no explanation after it (`geo_restriction`, not `geo_restriction: relocation required`); the explanation belongs in `hard_stops` or `soft_gaps`. When no id fits, write a short free-text reason instead of forcing the nearest id: `analyze-patterns.mjs` lists it as `other`, apart from the canonical shares, and a reason that keeps recurring there is how the vocabulary grows.
 - `score` is numeric only, without `/5`.
 - `final_decision` must reflect the full evaluation, not only the CV match.
 - `advertised_comp` is the JD's **own** figure, verbatim; `null` when the JD states nothing — never estimate it and never substitute researched market data (Block D research stays in Block D). Batch workers never write `data/salary-observations.tsv` — the report itself is the advertised observation (`salary-gap.mjs` reads it).
@@ -752,7 +752,7 @@ Translate these human-facing headings according to `language.output` when it is 
 
 ### Step 4 — Generate PDF (configurable)
 
-Read `config/profile.yml` and resolve `auto_pdf_score_threshold`. If absent, default to `3.0`.
+Read `config/profile.yml` and resolve `auto_pdf_score_threshold`. If absent, default to `3.0` (`PDF_GATE_DEFAULT` in `lib/score-action.mjs`, the floor of the Maybe band).
 
 Only generate the PDF when the score from Step 2 is greater than or equal to the threshold. If the score is below the threshold:
 
@@ -842,7 +842,7 @@ Headerless files in the legacy 9-column order (`num date company role status sco
 
 **Optional fields:** if the offer came through an agency/recruiter (#1596), add a `via` column to the header and put the agency name (for example `Hays`) in it. In a headerless file the same value travels as a labeled trailing field `via={Agency}` — never positional; the label is mandatory. One extra unlabeled field is interpreted as the legacy location column. If the end employer is unknown, use `?` as company and add the descriptor in notes (for example `fintech, Leeds`). `merge-tracker.mjs` rejects ambiguous extras (two unlabeled extras, or two `via=` fields).
 
-Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`.
+Valid canonical statuses are defined in `templates/states.yml`: `Evaluated`, `Speculative`, `Applied`, `Responded`, `Assessment`, `Interview`, `Offer`, `Hired`, `Rejected`, `Discarded`, `SKIP`.
 
 Use `{{REPORT_NUM}}` as the tracker `num`. The batch coordinator reserves this number before launching the worker, so do not calculate a local `max+1`.
 

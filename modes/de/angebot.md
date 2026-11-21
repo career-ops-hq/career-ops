@@ -234,7 +234,7 @@ Die Feldnamen im Kopf (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`)
 ## Score Evidence
 (fünf Dimensionen, Evidenzstatus, offene Fragen, Evidence confidence, Prioritäten)
 
-## H) Draft-Antworten für die Bewerbung
+## H) Draft-Antworten für die Bewerbung (draft)
 (nur bei Score >= 4.5 — Entwürfe für die Antwortfelder im Bewerbungsformular)
 
 ---

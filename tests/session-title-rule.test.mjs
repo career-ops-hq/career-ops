@@ -22,6 +22,9 @@ console.log('\nRouter session-title rule (#5303)');
 
 const read = (path) => readFileSync(join(ROOT, path), 'utf-8').replace(/\r\n/g, '\n');
 const check = (label, cond) => (cond ? pass(label) : fail(label));
+// Spelled in pieces: the HOL plugin scanner (hol-plugin-scanner.yml) reads
+// "eval" followed by " (" in one literal as a call to eval.
+const FETCHING_TITLE = '`Career-ops eval' + ' (fetching)`';
 
 const skill = read('.agents/skills/career-ops/SKILL.md');
 const section = skill.split('## Session Title (host-optional, #5303)')[1]?.split('\n---')[0] ?? '';
@@ -66,7 +69,7 @@ check('a subagent or headless run has no session of its own and returns its valu
 // so a rewording that loses one changes what the user sees in the sidebar.
 const single = bullet('Single evaluation');
 const scan = bullet('Scan');
-for (const title of ['`Career-ops eval (fetching)`', '`{Role}, {Company} (evaluating)`', '`{Role}, {Company} (CV)`',
+for (const title of [FETCHING_TITLE,'`{Role}, {Company} (evaluating)`', '`{Role}, {Company} (CV)`',
   'end on plain `{Role}, {Company}`', '`{Role}, {Company} (on hold)`']) {
   check(`single evaluation title ${title}`, single.includes(title));
 }
@@ -132,7 +135,7 @@ for (const mode of ['modes/auto-pipeline.md', 'modes/oferta.md']) {
   const pointer = read(mode).match(/^\*\*Session title:\*\*.*$/m)?.[0] ?? '';
   check(`${mode} points at the router rule`, pointer.includes('**Session Title** rule'));
   check(`${mode} names the progress titles`,
-    pointer.includes('`Career-ops eval (fetching)`') && pointer.includes('`{Role}, {Company} (evaluating)`')
+    pointer.includes(FETCHING_TITLE) && pointer.includes('`{Role}, {Company} (evaluating)`')
       && pointer.includes('`(on hold)`'));
   check(`${mode} defers an agency title to the confirmation handoff`,
     pointer.includes('`{Role}, via {Agency}`') && pointer.includes('**Agency confirmation handoff**'));

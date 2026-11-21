@@ -745,3 +745,260 @@ test("a non-object scheduled-job patch is rejected by input validation", () => {
     assert.throws(() => assertScheduledJobBody(value), /object/);
   }
 });
+
+const JOB_ID = "11111111-1111-4111-8111-111111111111";
+
+function writePortals(dir) {
+  fs.writeFileSync(path.join(dir, "portals.yml"), "title_filter:\n  positive: [engineer]\nlocation_filter: {}\n", "utf8");
+}
+
+function writeCheckpoint(dir, body) {
+  const cache = path.join(dir, "data", "cache");
+  fs.mkdirSync(cache, { recursive: true });
+  fs.writeFileSync(path.join(cache, "ats-full-checkpoint.json"), JSON.stringify(body), "utf8");
+}
+
+test("a full scan continues a matching checkpoint and leaves the portals command alone", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-resume-"));
+  writePortals(temp);
+  const job = { id: JOB_ID, engine: "full", filters: {}, timezone: "UTC" };
+  const matching = {
+    version: 1,
+    current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 },
+    ats: ["greenhouse", "lever", "ashby", "workday"],
+    limit: 150,
+    includeUndated: false,
+  };
+  try {
+    let args = [];
+    const fresh = executeJob(temp, job, {
+      spawnFn: (_node, command) => {
+        args = command;
+        return { status: 0, stdout: JSON.stringify({ postingsKept: 0 }), stderr: "" };
+      },
+    });
+    assert.equal(fresh.state, "success");
+    assert.equal(fresh.message, "Scan finished with 0 matching roles.");
+    assert.equal(args.includes("--resume"), false);
+
+    writeCheckpoint(temp, matching);
+    const resumed = executeJob(temp, job, {
+      spawnFn: (_node, command) => {
+        args = command;
+        return { status: 0, stdout: JSON.stringify({ postingsKept: 1, stoppedEarly: false }), stderr: "" };
+      },
+    });
+    assert.equal(resumed.state, "success");
+    assert.equal(args[0], "scan-ats-full.mjs");
+    assert.equal(args.includes("--resume-if-compatible"), true);
+    assert.equal(args.includes("--resume"), false);
+
+    writeCheckpoint(temp, { version: 1, current: { name: "greenhouse" } });
+    executeJob(temp, job, {
+      spawnFn: (_node, command) => {
+        args = command;
+        return { status: 0, stdout: JSON.stringify({ postingsKept: 0 }), stderr: "" };
+      },
+    });
+    assert.equal(args.includes("--resume"), false);
+
+    writeCheckpoint(temp, matching);
+    const portals = executeJob(temp, { ...job, engine: "portals" }, {
+      spawnFn: (_node, command) => {
+        args = command;
+        return { status: 0, stdout: "New offers added: 0\n", stderr: "" };
+      },
+    });
+    assert.equal(portals.state, "success");
+    assert.equal(args[0], "scan.mjs");
+    assert.equal(args.includes("--resume"), false);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("a full scan that exits 0 at the time limit is not a finished empty run", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-stop-"));
+  writePortals(temp);
+  const job = { id: JOB_ID, engine: "full", filters: {}, timezone: "UTC" };
+  // spawnSync's timeout keeps status 0 when the child handles SIGTERM and
+  // exits 0, and it drops the JSON that handler writes. The checkpoint is
+  // the record the runner can still read.
+  const timedOut = Object.assign(new Error("spawnSync node ETIMEDOUT"), { code: "ETIMEDOUT" });
+  try {
+    let attempts = 0;
+    const saved = executeJob(temp, job, {
+      spawnFn: (_node, _command, opts) => {
+        attempts += 1;
+        // The fallback write keeps an older savedAt. The run id is what
+        // makes this count belong to this attempt.
+        writeCheckpoint(temp, {
+          version: 1,
+          current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 },
+          savedAt: "2020-01-01T00:00:00.000Z",
+          partialSave: { saved: true, postingsKept: 2, runId: opts.env.CAREER_OPS_SCAN_RUN },
+        });
+        return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(saved.state, "failed");
+    assert.equal(saved.rolesFound, 2);
+    assert.equal(saved.message, "Sweep stopped before it finished. Saved 2 matching roles. The next run continues this sweep.");
+
+    writeCheckpoint(temp, {
+      version: 1,
+      current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 },
+      savedAt: new Date().toISOString(),
+      partialSave: { saved: true, postingsKept: 9, runId: "1999-1-00000000-0000-4000-8000-000000000000" },
+    });
+    attempts = 0;
+    const stale = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(stale.state, "failed");
+    assert.equal(stale.rolesFound, 0);
+    assert.equal(stale.message, "Sweep stopped before it finished. The next run continues this sweep.");
+
+    writeCheckpoint(temp, { version: 1, current: { name: "greenhouse", resumeAt: 40, datasetLen: 100 } });
+    attempts = 0;
+    const unfinished = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(unfinished.state, "failed");
+    assert.equal(unfinished.rolesFound, 0);
+    assert.equal(unfinished.message, "Sweep stopped before it finished. The next run continues this sweep.");
+
+    attempts = 0;
+    const unsaved = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 0, stdout: JSON.stringify({ stoppedEarly: true, saved: false, postingsKept: 3 }), stderr: "" };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(unsaved.state, "failed");
+    assert.equal(unsaved.rolesFound, 0);
+    assert.equal(unsaved.message, "Sweep stopped before it finished. 3 matching roles were not saved.");
+
+    attempts = 0;
+    const unread = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 0, stdout: "not json", stderr: "" };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(unread.state, "failed");
+    assert.equal(unread.message, "Scanner exited 0 without a readable result.");
+
+    fs.rmSync(path.join(temp, "data", "cache", "ats-full-checkpoint.json"), { force: true });
+    attempts = 0;
+    const noCheckpoint = executeJob(temp, job, {
+      spawnFn: () => {
+        attempts += 1;
+        return { status: 0, signal: null, stdout: "", stderr: "", error: timedOut };
+      },
+    });
+    assert.equal(attempts, 1);
+    assert.equal(noCheckpoint.state, "failed");
+    assert.equal(noCheckpoint.message, "Sweep stopped before it finished.");
+
+    const reported = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedEarly: true,
+          saved: true,
+          postingsKept: 2,
+          checkpointAvailable: false,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(reported.rolesFound, 2);
+    assert.equal(reported.message, "Sweep stopped before it finished. Saved 2 matching roles.");
+
+    const resumable = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedEarly: true,
+          saved: true,
+          postingsKept: 2,
+          checkpointAvailable: true,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(resumable.rolesFound, 2);
+    assert.equal(resumable.message, "Sweep stopped before it finished. Saved 2 matching roles. The next run continues this sweep.");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("a resolver outage is an incomplete sweep, and a missed checkpoint does not promise a resume", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "career-ops-scheduled-outage-"));
+  writePortals(temp);
+  const job = { id: JOB_ID, engine: "full", filters: {}, timezone: "UTC" };
+  try {
+    const kept = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedByOutage: true,
+          saved: true,
+          postingsKept: 4,
+          outageCheckpointWritten: true,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(kept.state, "failed");
+    assert.equal(kept.rolesFound, 4);
+    assert.equal(kept.message, "Resolver stopped the sweep. Saved 4 matching roles. The next run continues this sweep.");
+
+    const uncheckpointed = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedByOutage: true,
+          saved: true,
+          postingsKept: 4,
+          outageCheckpointWritten: false,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(uncheckpointed.state, "failed");
+    assert.equal(uncheckpointed.rolesFound, 4);
+    assert.equal(uncheckpointed.message, "Resolver stopped the sweep. Saved 4 matching roles.");
+
+    const unsaved = executeJob(temp, job, {
+      spawnFn: () => ({
+        status: 0,
+        stdout: JSON.stringify({
+          stoppedByOutage: true,
+          saved: false,
+          postingsKept: 2,
+          outageCheckpointWritten: false,
+        }),
+        stderr: "",
+      }),
+    });
+    assert.equal(unsaved.state, "failed");
+    assert.equal(unsaved.rolesFound, 0);
+    assert.equal(unsaved.message, "Resolver stopped the sweep. 2 matching roles were not saved.");
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});

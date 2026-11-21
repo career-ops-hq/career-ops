@@ -25,6 +25,8 @@ import { LINKEDIN_DOCTOR_LABEL, linkedInPluginFix } from './lib/linkedin-import.
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
+const explicitTarget = flagValue(argv, '--target') || null;
+const codeRoot = explicitTarget ? resolve(explicitTarget) : __dirname;
 
 // path-resolver.mjs refuses an explicit data root inside a plugin install copy,
 // and some modules loaded below resolve the root as they load. Ask once, first,
@@ -38,6 +40,8 @@ try {
     // onboardingNeeded stays true so nothing proceeds on this root.
     console.log(JSON.stringify({
       onboardingNeeded: true,
+      data_root: null,
+      project_root: codeRoot,
       missing: [],
       unpersonalized: [],
       warnings: [err.message],
@@ -58,7 +62,7 @@ try {
 // from the very check that exists to report missing dependencies. Loading them
 // dynamically lets that failure be caught and reported with the fix.
 let hasYamlContent, loadYaml, dotenv, AGENT_CLIS, validateProfile, EXAMPLE_PATH;
-let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv;
+let resolveExtractorMode, auditUserTemplates, browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv, checkRemotePageBrowser;
 try {
   [
     { hasYamlContent, loadYaml },
@@ -68,6 +72,7 @@ try {
     { resolveExtractorMode },
     { auditUserTemplates },
     { browserLaunchOptions, resolveBrowserExecutable, snapshotBrowserProcessEnv },
+    { checkRemotePageBrowser },
   ] = await Promise.all([
     import('./lib/yaml-document.mjs'),
     import('dotenv'),
@@ -76,6 +81,7 @@ try {
     import('./browser-extract.mjs'),
     import('./cv-templates.mjs'),
     import('./lib/browser-launch.mjs'),
+    import('./lib/remote-page-browser-check.mjs'),
   ]);
 } catch (err) {
   let missing = [];
@@ -120,8 +126,7 @@ CLIs: ${AGENT_CLIS.join(', ')}`;
 // shared message.
 validateFlags(argv, KNOWN_FLAGS, USAGE, { valueFlags: VALUE_FLAGS, requireOperand: true });
 
-const explicitTarget = flagValue(argv, '--target') || null;
-const projectRoot = explicitTarget || getCareerOpsRoot();
+const projectRoot = explicitTarget ? resolve(explicitTarget) : getCareerOpsRoot();
 // --target diagnoses a whole other checkout, so that checkout's profile is the
 // one that counts; otherwise CAREER_OPS_PROFILE applies as it does everywhere.
 // With no override the path is the root the doctor started from: the human run
@@ -147,7 +152,6 @@ const profileFromEnvFile = (root) => {
 // the one case that means "diagnose this whole other checkout" — code layer
 // included — so it keeps pointing both roots at the same place, matching how
 // tests/doctor-tracked-bak-files.test.mjs already exercises it.
-const codeRoot = explicitTarget || __dirname;
 const JSON_OUT = argv.includes('--json');
 const INIT_TEMPLATES = argv.includes('--init-templates');
 if (INIT_TEMPLATES && !JSON_OUT) {
@@ -490,7 +494,13 @@ function playwrightDepsFix() {
   return `Run: ${sudo}npx playwright install-deps chromium`;
 }
 
+// Set by the suites that spawn doctor many times to test other checks: each
+// browser launch costs seconds, and two per run add up to timeouts under load.
+const SKIP_BROWSER_ENV = 'CAREER_OPS_DOCTOR_SKIP_BROWSER';
+const skipBrowserLaunch = () => Boolean(process.env[SKIP_BROWSER_ENV]);
+
 async function checkPlaywright(browserProcessEnv) {
+  if (skipBrowserLaunch()) return { pass: true, label: `Playwright chromium: skipped (${SKIP_BROWSER_ENV} is set)` };
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
@@ -513,13 +523,14 @@ async function checkPlaywright(browserProcessEnv) {
   // tests the exact binary the runtime uses and catches stub-installs (directory
   // present but no binary — just ABOUT + LICENSE files).
   let browser;
-  // The configured browser, so the check tests what the rest of the repo will
-  // actually launch rather than always probing the bundled Chromium.
+  // The browser PDF rendering launches: the configured one or the bundled
+  // Chromium. checkRemotePageBrowser covers the launch third-party pages get,
+  // which can succeed on the system Chrome with this one missing.
   const override = resolveBrowserExecutable({ projectRoot, processEnv: browserProcessEnv });
   try {
     browser = await chromium.launch(browserLaunchOptions(
       { headless: true },
-      { projectRoot, processEnv: browserProcessEnv },
+      { projectRoot, processEnv: browserProcessEnv, localContentOnly: true },
     ));
     return {
       pass: true,
@@ -578,6 +589,9 @@ const MCP_CONFIGS = [
   // configured" (#2252).
   { cli: 'opencode', files: ['opencode.json', 'opencode.jsonc'], userFiles: () => opencodeUserConfigFiles() },
   { cli: 'omp',      files: ['.omp/mcp.json', '.omp/.mcp.json', 'mcp.json', '.mcp.json'] },
+  // Antigravity (agy) keeps its servers in one user-level file, which
+  // `agy mcp add` writes. It has no project-level MCP file.
+  { cli: 'antigravity', files: [], antigravityUser: true },
 ];
 
 // Server qualifies if its definition references the @playwright/mcp package,
@@ -616,6 +630,24 @@ function readConfigIfPresent(file) {
 // the tests point it at a tmpdir so this never reads the real machine.
 function claudeConfigDir() {
   return process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+}
+
+// Antigravity's user-level MCP file, written by `agy mcp add`. The shape is
+// `{ "mcpServers": { "<name>": { "command", "args", "disabled" } } }`: the same
+// bucket Claude uses, but a server is switched off with `disabled: true`
+// (`agy mcp disable`), not `enabled: false`.
+function antigravityUserConfigFiles() {
+  return [join(homedir(), '.gemini', 'config', 'mcp_config.json')];
+}
+
+function hasPlaywrightInAntigravity(configs) {
+  return configs.some((cfg) => {
+    const servers = cfg && typeof cfg === 'object' ? cfg.mcpServers : null;
+    if (!servers || typeof servers !== 'object') return false;
+    return Object.values(servers).some((def) => def
+      && def.disabled !== true && def.disabled !== 'true'
+      && isPlaywrightServer(def, { allowDisabled: true }));
+  });
 }
 
 // OpenCode's USER-level config sources, in ASCENDING precedence order
@@ -987,6 +1019,9 @@ function isPlaywrightMcpFromClaudeJson(root) {
 function isPlaywrightMcpConfigured(root, activeCli) {
   const entry = MCP_CONFIGS.find((c) => c.cli === activeCli);
   if (!entry) return false; // known CLI but no MCP file mapping; caller warns
+  if (entry.antigravityUser) {
+    return hasPlaywrightInAntigravity(antigravityUserConfigFiles().map(readConfigIfPresent).filter(Boolean));
+  }
   // OpenCode reads every source below (user-level configs, then the project)
   // and MERGES them, so the question is about the effective server map — not
   // whether any one file mentions the package (hasPlaywrightInMergedOpenCode).
@@ -1163,11 +1198,15 @@ function checkPlaywrightMcp(root, activeCli) {
     warn: true,
     label: `Playwright MCP tools not detected (active CLI: ${activeCli})`,
     fix: [
-      entry.plugins
+      activeCli === 'antigravity'
+        ? 'No enabled Playwright MCP server was found in ~/.gemini/config/mcp_config.json (the file `agy mcp add` writes).'
+        : entry.plugins
         ? `No project-level MCP config, no server in .claude.json (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json when set), and no enabled plugin providing one, was detected for ${activeCli}.`
         : `No project-level MCP config was detected for ${activeCli}.`,
       activeCli === 'opencode'
         ? 'Add the Playwright MCP server to opencode.json (project; see opencode.example.json) or to the global ~/.config/opencode/opencode.json[c] (or $OPENCODE_CONFIG), or pass --cli <name> if you actually run a different CLI.'
+        : activeCli === 'antigravity'
+          ? 'Add it with: agy mcp add playwright -- npx @playwright/mcp@latest (add --browser msedge to use Edge), or pass --cli <name> if you actually run a different CLI.'
         : activeCli === 'omp'
           ? 'Add the Playwright MCP server to .omp/mcp.json, or pass --cli <name> if you actually run a different CLI.'
           : `Add the Playwright MCP server to your ${activeCli} config, or install a plugin that provides it (e.g. /plugin install playwright@claude-plugins-official).`,
@@ -1630,6 +1669,8 @@ async function main() {
   const pluginInstall = checkPluginInstall(projectRoot);
   const userLayerWritable = !pluginInstall || pluginInstall.pass;
 
+  const playwrightCheck = await checkPlaywright(browserProcessEnv);
+
   const checks = [
     checkNodeVersion(),
     // Devuelve null salvo que el CLI activo sea Gemini: el filter(Boolean) de
@@ -1641,7 +1682,10 @@ async function main() {
     checkWebDependencies(),
     checkTrackedBakFiles(codeRoot),
     checkSkillEntrypoints(codeRoot),
-    await checkPlaywright(browserProcessEnv),
+    playwrightCheck,
+    ...(skipBrowserLaunch()
+      ? []
+      : await checkRemotePageBrowser({ probe: { projectRoot, processEnv: browserProcessEnv }, bundledCheckPassed: playwrightCheck.pass === true })),
     checkPlaywrightMcp(process.cwd(), activeCli),
     checkScanExtractor(projectRoot),
     ...USER_LAYER_PREREQS.map(checkPrereq),
@@ -1750,11 +1794,13 @@ const PERSONALIZATION_FILES = [
     path: 'modes/_profile.md',
     template: 'modes/_profile.template.md',
     impact: 'evaluations score against the template author\'s targeting, not yours',
+    emptyImpact: 'evaluations have no archetypes or targeting from your modes/_profile.md',
   },
   {
     path: 'modes/_brief.md',
     template: 'modes/_brief.template.md',
     impact: 'triage reads literal {placeholders} instead of your archetypes',
+    emptyImpact: 'triage has none of your archetypes',
   },
 ];
 
@@ -1769,7 +1815,7 @@ function templatePlaceholders(text) {
 // content. Missing files are NOT reported here — that is `missing`'s job.
 function unpersonalizedFiles(root) {
   const out = [];
-  for (const { path, template, impact } of PERSONALIZATION_FILES) {
+  for (const { path, template, impact, emptyImpact } of PERSONALIZATION_FILES) {
     const targetPath = join(root, ...path.split('/'));
     // The checkout's template first, as the web reads it, so doctor and the web
     // agree on which sections are still template text even when a separate data
@@ -1789,7 +1835,7 @@ function unpersonalizedFiles(root) {
     // placeholder, so it would pass as personalized while the web asks for
     // every section (#5340).
     if (!target.trim()) {
-      out.push({ path, reason: 'is empty', impact });
+      out.push({ path, reason: 'is empty', impact: emptyImpact });
       continue;
     }
     if (path === 'modes/_profile.md') {
@@ -1975,6 +2021,8 @@ function onboardingState(root) {
   } catch { plugins = []; }
   return {
     onboardingNeeded: missing.length > 0,
+    data_root: root,
+    project_root: codeRoot,
     missing,
     // Non-blocking by design: career-ops is meant to work out of the box, so an
     // unedited personalization file must not gate the whole system. It DOES have

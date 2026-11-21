@@ -24,7 +24,7 @@ Per-URL loop에 들어가기 전에, 대기 중인 LinkedIn 외 URL을 zero-toke
 - **`economy` tier:** Gate가 없습니다. 이미 가장 저렴한 tier이므로 남은 대기 URL은 모두 바로 전체 evaluation으로 갑니다.
 - 이 gate는 pipeline/batch 처리에만 적용됩니다. 단일 interactive evaluation에는 절대 적용하지 않습니다.
 
-**Discard log (감사 가능):** Gate가 걸러낸 모든 공고는 한 줄짜리 이유와 함께 반드시 기록해서, 사전 필터링이 보이지 않는 black box가 되지 않게 합니다. `data/discard.log`(없으면 생성)에 `{ISO8601 timestamp}\t{url}\t{reason}` 형식으로 한 줄을 추가합니다(tab으로 구분된 세 field. Interactive pipeline 모드에는 batch job ID가 없으므로 `id` field를 생략합니다. Batch 모드의 `batch/batch-runner.sh`는 job ID를 포함한 네 field 형식으로 별도의 `batch/logs/discard.log`를 씁니다). 위에서 "처리 완료"에 쓰는 `skipped` item과는 별도로 기록합니다. 이 log는 gate가 무엇을 왜 버렸는지 보여주는 감사 기록입니다. Gate가 너무 공격적이거나 느슨하면 주기적으로 검토해서 North Star archetype을 조정합니다. `node discard-analytics.mjs`가 이유별, domain별, 날짜별 건수와 직접 확인할 만한 가장 빈번한 `title_mismatch` URL을 요약해 줍니다.
+**Discard log (감사 가능):** Gate가 걸러낸 모든 공고는 한 줄짜리 이유와 함께 반드시 기록해서, 사전 필터링이 보이지 않는 black box가 되지 않게 합니다. `data/discard.log`(없으면 생성)에 `{ISO8601 timestamp}\t{url}\t{reason}` 형식으로 한 줄을 추가합니다(tab으로 구분된 세 field. Interactive pipeline 모드에는 batch job ID가 없으므로 `id` field를 생략합니다. Batch 모드의 `batch/batch-runner.sh`는 job ID를 포함한 네 field 형식으로 별도의 `batch/logs/discard.log`를 씁니다). 위에서 "처리 완료"에 쓰는 `skipped` item과는 별도로 기록합니다. 이 log는 gate가 무엇을 왜 버렸는지 보여주는 감사 기록입니다. Gate가 너무 공격적이거나 느슨하면 주기적으로 검토해서 North Star archetype을 조정합니다. `node discard-analytics.mjs`가 이유별, domain별, 날짜별 건수와 직접 확인할 만한 가장 많이 걸러진 URL(최근 이유 포함)을 요약해 줍니다. title keyword 조정은 `node filter-audit.mjs`로 합니다. scanner의 title filter는 이 로그가 아니라 `data/scan-history.tsv`에 기록합니다.
 
 ## Workflow
 

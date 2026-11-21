@@ -2,6 +2,7 @@
 /** @typedef {import('./_types.js').Provider} Provider */
 import { decodeEntities } from './_html-entities.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Deutsche Bahn provider — single-company (pattern: ibm/dassault/rheinmetall).
 // DB's postings live in an Avature tenant (jobs.deutschebahngroup.careers,
@@ -48,7 +49,7 @@ const SORT = 'pubExternalDate_tdt'; // newest first; see header for why not `sco
 
 /** @param {string} s */
 function clean(s) {
-  return decodeEntities(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(s.replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
 }
 
 // Resolve the search-config base from api:/careers_url. Accepts either a full
@@ -209,6 +210,12 @@ export default {
     if (!cfg) throw new Error(`deutschebahn: cannot resolve db.jobs search id for ${entry.name}`);
 
     const maxPages = resolveMaxPages(entry);
+    // verify-portals' and audit-portals' health probe sets ctx.maxPages (1): it
+    // only needs to know the board answers, so it reads that many pages, each a
+    // multi-megabyte document, and never reports a max_pages cut. Kept apart
+    // from maxPages, which a probe on a max_pages: 1 entry would equal (#7180).
+    const probing = Number.isInteger(ctx?.maxPages) && ctx.maxPages > 0;
+    const pagesToFetch = probing ? Math.min(maxPages, ctx.maxPages) : maxPages;
     const jobs = [];
     const seen = new Set();
 
@@ -220,7 +227,7 @@ export default {
     // an exit below names another reason.
     let stopReason = 'cap';
     let lastHtml = '';
-    for (let page = 0; page < maxPages; page++) {
+    for (let page = 0; page < pagesToFetch; page++) {
       if (page > 0) await sleep(PAGE_DELAY_MS, ctx);
       const url = `${cfg.searchBase}?qli=true&query=&sort=${SORT}&itemsPerPage=${ITEMS_PER_PAGE}&pageNum=${page}`;
       let html;
@@ -252,6 +259,7 @@ export default {
           const count = parseResultCount(html);
           if (count !== null && page * ITEMS_PER_PAGE < count) {
             console.warn(`deutschebahn: ${entry.name}: page ${page} came back empty with ${count} postings reported — keeping the ${jobs.length} collected so far`);
+            stopReason = 'source-reports-more';
           }
         }
         break; // past the last page
@@ -283,13 +291,24 @@ export default {
     }
     // max_pages ran out on a full page: warn so a truncated board doesn't
     // pass as complete, unless the reported total shows the walk already
-    // covered the whole board.
-    if (stopReason === 'cap') {
+    // covered the whole board. A probe stopping at ctx.maxPages is not that.
+    let capCut = false;
+    if (stopReason === 'cap' && !probing) {
       const count = parseResultCount(lastHtml);
       if (count === null || maxPages * ITEMS_PER_PAGE < count) {
         console.warn(`deutschebahn: ${entry.name}: stopped at ${maxPages} pages (${jobs.length} postings); raise max_pages on this entry`);
+        capCut = true;
       }
     }
-    return jobs.slice(0, MAX_JOBS);
+    const result = jobs.slice(0, MAX_JOBS);
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs). The stops
+    // marked are the ones warned about above: a later page that failed, an
+    // empty page inside the reported total, and max_pages cutting a larger
+    // board. A probe is never marked: it stops at ctx.maxPages on purpose, and
+    // a failed page under a probe throws instead of keeping partials.
+    const partial = stopReason === 'fetch-error' || stopReason === 'source-reports-more' ? stopReason : capCut ? 'page-cap' : null;
+    if (partial && !probing) markTruncated(result, partial, { fetched: result.length });
+    return result;
   },
 };

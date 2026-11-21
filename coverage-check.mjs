@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // coverage-check.mjs — when the user brings in a posting the scanners did not
 // surface, say WHY, and propose the one change that would have caught it.
-// Zero-network: it reads portals.yml, data/scan-history.tsv, data/pipeline.md
-// and the reverse-sweep company lists cached under data/cache/ats-companies/,
-// and loads the provider modules only to run their offline detect().
+// Zero-network: it reads portals.yml, data/scan-history.tsv, data/pipeline.md,
+// the tracker and the reverse-sweep company lists cached under
+// data/cache/ats-companies/, and loads the provider modules only to run their
+// offline detect().
 //
 // It proposes, never edits portals.yml. The verdict is a closed set (GAPS), so
 // data/coverage-misses.tsv can be counted later to see which channel keeps
@@ -14,10 +15,11 @@ import { appendFileSync, existsSync, readFileSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { loadYaml } from './lib/yaml-document.mjs';
-import { buildLocationFilter, seenJobKey, PORTALS_PATH, SCAN_HISTORY_PATH, PIPELINE_PATH } from './scan.mjs';
+import { buildLocationFilter, extractPipelineCompanyRole, seenJobKey, APPLICATIONS_PATH, PORTALS_PATH, SCAN_HISTORY_PATH, PIPELINE_PATH } from './scan.mjs';
 import { buildTitleFilter } from './title-keywords.mjs';
 import { loadProviders, resolveProvider } from './providers/_registry.mjs';
 import { mergeProviderPlugins } from './plugins/_engine.mjs';
+import { parseTrackerRow, resolveColumns } from './tracker-parse.mjs';
 import { normalizeCompany } from './tracker-utils.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { localToday } from './lib/local-today.mjs';
@@ -62,19 +64,38 @@ export function atsFromUrl(url) {
   const decode = (segment) => { try { return decodeURIComponent(segment); } catch { return segment; } };
   const seg = u.pathname.split('/').filter(Boolean).map(decode);
   if (/(^|\.)greenhouse\.io$/.test(host)) {
+    if (seg[0] === 'v1' && seg[1] === 'boards' && seg[2]) return { ats: 'greenhouse', slug: seg[2].toLowerCase(), host };
     if (seg[0] && !['embed', 'v1'].includes(seg[0])) return { ats: 'greenhouse', slug: seg[0].toLowerCase(), host };
     const forParam = u.searchParams.get('for');
     if (forParam) return { ats: 'greenhouse', slug: forParam.toLowerCase(), host };
   }
-  if (/(^|\.)lever\.co$/.test(host) && seg[0]) return { ats: 'lever', slug: seg[0].toLowerCase(), host };
+  if (/^api\.(?:eu\.)?lever\.co$/.test(host)) {
+    if (seg[0] === 'v0' && seg[1] === 'postings' && seg[2]) return { ats: 'lever', slug: seg[2].toLowerCase(), host };
+  } else if (/(^|\.)lever\.co$/.test(host) && seg[0]) {
+    return { ats: 'lever', slug: seg[0].toLowerCase(), host };
+  }
   if (host === 'jobs.ashbyhq.com' && seg[0]) return { ats: 'ashby', slug: seg[0].toLowerCase(), host };
-  if (host === 'apply.workable.com' && seg[0]) return { ats: 'workable', slug: seg[0].toLowerCase(), host };
+  if (host === 'api.ashbyhq.com' && seg[0] === 'posting-api' && seg[1] === 'job-board' && seg[2]) {
+    return { ats: 'ashby', slug: seg[2].toLowerCase(), host };
+  }
+  if (host === 'apply.workable.com' && seg[0]) {
+    if (seg[0].toLowerCase() === 'j' && seg[1] && seg[1].toLowerCase() !== 'j') return { ats: 'workable', slug: null, host };
+    if (seg[0].toLowerCase() === 'api') {
+      const accIdx = seg.findIndex(s => s.toLowerCase() === 'accounts');
+      if (accIdx > 0 && seg[accIdx + 1]) return { ats: 'workable', slug: seg[accIdx + 1].toLowerCase(), host };
+    } else {
+      return { ats: 'workable', slug: seg[0].toLowerCase(), host };
+    }
+  }
   const wd = host.match(/^([^.]+)\.(wd\d+)\.myworkdayjobs\.com$/);
   if (wd) {
-    // /{locale}/{site}/job/... or /{site}/job/...: the site is the segment before "job".
+    // /wday/cxs/{tenant}/{site}/..., /{locale}/{site}/job/... or /{site}/job/...:
+    const isCxs = seg[0]?.toLowerCase() === 'wday' && seg[1]?.toLowerCase() === 'cxs';
     const jobIdx = seg.indexOf('job');
-    const site = (jobIdx > 0 ? seg[jobIdx - 1] : seg.find(s => !/^[a-z]{2}-[A-Z]{2}$/.test(s))) || '';
-    return { ats: 'workday', slug: `${wd[1]}|${wd[2]}|${site}`.toLowerCase(), host };
+    const site = isCxs
+      ? (seg[3] || '')
+      : ((jobIdx > 0 ? seg[jobIdx - 1] : (seg.length > 1 && /^[a-z]{2}-[a-z]{2}$/i.test(seg[0]) ? seg[1] : seg[0])) || '');
+    if (site) return { ats: 'workday', slug: `${wd[1]}|${wd[2]}|${site}`.toLowerCase(), host };
   }
   const ic = host.match(/^(?:careers-)?([^.]+)\.icims\.com$/);
   if (ic) return { ats: 'icims', slug: ic[1].toLowerCase(), host };
@@ -116,10 +137,84 @@ export function findTrackedEntry(entries, { ats, slug, company }) {
     || null;
 }
 
+const hostOf = (url) => {
+  try { return new URL(url).hostname.toLowerCase().replace(/^www\./, ''); } catch { return null; }
+};
+
+// Every posting on disk that names a URL: scan history, pipeline and tracker.
+function knownPostings(ctx) {
+  const rows = [...ctx.history.values()].map(row => ({ url: row[0], company: row[4], source: 'scan history' }));
+  for (const line of ctx.pipelineText.split('\n')) {
+    const entry = extractPipelineCompanyRole(line);
+    if (entry) rows.push({ url: entry.url, company: entry.company, source: 'pipeline' });
+  }
+  const trackerLines = (ctx.trackerText || '').split('\n');
+  const colmap = resolveColumns(trackerLines);
+  for (const line of trackerLines) {
+    const row = parseTrackerRow(line, colmap);
+    if (row?.url) rows.push({ url: row.url, company: row.company, source: 'tracker' });
+  }
+  return rows;
+}
+
+// What else is on disk for the posting's host. Hosts match exactly, so tenants
+// on their own subdomains (acme.example.com, beta.example.com) don't count as
+// one site: without a public-suffix list, co.uk would look like a site too.
+function othersOnHost(posting, ctx) {
+  const host = hostOf(posting.url);
+  const self = seenJobKey(posting.url);
+  const selfCompany = companyKey(posting.company);
+  const postings = new Set();
+  const sources = new Set();
+  const companies = new Map();
+  for (const { url, company, source } of knownPostings(ctx)) {
+    if (hostOf(url) !== host || seenJobKey(url) === self) continue;
+    postings.add(seenJobKey(url));
+    sources.add(source);
+    const key = companyKey(company);
+    if (key && key !== selfCompany && !companies.has(key)) companies.set(key, String(company).trim());
+  }
+  return { host, postings: postings.size, sources: [...sources], companies: [...companies.values()] };
+}
+
+// A provider that already reads this site. detect() alone misses some: it knows
+// a careers page, and a posting URL can differ (Dover's /Acme/careers/<uuid> vs
+// /apply/Acme/<id>), so a provider named after a label of the host counts too.
+function siteProvider(posting, host, providers) {
+  const resolved = resolveProvider({ name: posting.company, careers_url: posting.url }, providers);
+  if (resolved && !resolved.error) return resolved.provider.id;
+  const labels = host.split('.');
+  return [...providers.keys()].find(id => labels.includes(id)) || null;
+}
+
+const MAX_NAMED_COMPANIES = 5;
+
+// For a site no job-site rule recognizes: the host evidence, and whether a
+// provider for the site is the better fix than one company's portals.yml line.
+// A provider covers every company on a multi-tenant site at once, and only an
+// outside look at the site can say if it has a source a provider may read.
+function siteVerdict(posting, target, ctx) {
+  if (target.ats || !target.host) return { provider: null, reads: '', count: '', lead: '' };
+  const { host, postings, sources, companies } = othersOnHost(posting, ctx);
+  const provider = siteProvider(posting, host, ctx.providers);
+  const reads = provider ? `provider ${provider} looks like it reads ${host}` : `no provider reads ${host}`;
+  const named = companies.slice(0, MAX_NAMED_COMPANIES).join(', ');
+  const more = companies.length > MAX_NAMED_COMPANIES ? `, +${companies.length - MAX_NAMED_COMPANIES} more` : '';
+  const count = postings > 0
+    ? `${postings} other posting${postings === 1 ? '' : 's'} on ${host} (${sources.join(', ')})${named ? `: ${named}${more}` : ''}`
+    : '';
+  const others = companies.length === 1 ? '1 other company posts' : `${companies.length} other companies post`;
+  const lead = companies.length && !provider
+    ? `${others} on ${host} too: one provider could cover all of them, if the site has a public, no-auth source (providers/ADDING_A_PROVIDER.md). For "${posting.company}" alone: `
+    : '';
+  return { provider, reads, count, lead };
+}
+
 /**
  * @param {{url: string, company: string, title: string, location?: string}} posting
  * @param {{config: any, entries: any[], providers: Map<string, any>, history: Map<string, string[]>,
- *          historyCompanies: Map<string, Set<string>>, pipelineText: string, datasets: Map<string, Set<string>>}} ctx
+ *          historyCompanies: Map<string, Set<string>>, pipelineText: string, trackerText?: string,
+ *          datasets: Map<string, Set<string>>}} ctx
  */
 export function diagnose(posting, ctx) {
   const { url, company, title, location } = posting;
@@ -168,9 +263,19 @@ export function diagnose(posting, ctx) {
         evidence.push(resolved?.error || `no provider detects ${entry.careers_url || entry.name}`
           + (entry.scan_method === 'websearch' ? ' (scan_method: websearch, so only a WebSearch pass covers it)' : ''));
         const better = careersUrlFor(target);
+        if (better) {
+          return { gap: 'tracked-no-provider', evidence, fix: `point "${entry.name}".careers_url at ${better} (the posting lives on ${target.ats})` };
+        }
+        if (target.ats === 'workable') {
+          return { gap: 'tracked-no-provider', evidence, fix: `point "${entry.name}".careers_url at https://apply.workable.com/<account> (share link carries no account slug)` };
+        }
+        const site = siteVerdict(posting, target, ctx);
+        if (site.count) evidence.push(site.count);
         return {
           gap: 'tracked-no-provider', evidence,
-          fix: better ? `point "${entry.name}".careers_url at ${better} (the posting lives on ${target.ats})` : 'none zero-token: no provider reads this site; WebSearch only',
+          fix: site.provider
+            ? `point "${entry.name}".careers_url at its careers page on ${target.host}: provider ${site.provider} looks like it reads that site`
+            : `${site.lead}none zero-token: no provider reads this site; WebSearch only`,
         };
       }
       evidence.push(`no provider for the portals.yml entry, but scanned as ${scanners.join(', ')}`);
@@ -208,10 +313,15 @@ export function diagnose(posting, ctx) {
   const caveat = locationOk === false ? ' (location_filter would still drop this posting)' : '';
   const careersUrl = careersUrlFor(target);
   if (!careersUrl) {
-    evidence.push(target.ats ? `${target.ats} posting on a custom domain, board token unknown` : `no provider reads ${target.host || 'this URL'}`);
+    const site = siteVerdict(posting, target, ctx);
+    const unknownSlugEvidence = target.ats === 'workable'
+      ? 'workable share link, account slug not in URL'
+      : `${target.ats} posting on a custom domain, board token unknown`;
+    evidence.push(target.ats ? unknownSlugEvidence : site.reads || 'no provider reads this URL');
+    if (site.count) evidence.push(site.count);
     return {
       gap: 'untracked-unsupported-ats', evidence,
-      fix: `add "${company}" with its careers page; if no provider resolves it, scan_method: websearch${caveat}`,
+      fix: `${site.lead}add "${company}" with its careers page; if no provider resolves it, scan_method: websearch${caveat}`,
     };
   }
   const resolves = resolveProvider({ name: company, careers_url: careersUrl }, ctx.providers);
@@ -238,7 +348,8 @@ export function loadContext() {
   }
   const datasets = loadDatasets(DATASET_DIR);
   const pipelineText = existsSync(PIPELINE_PATH) ? readFileSync(PIPELINE_PATH, 'utf8') : '';
-  return { config, entries, history, historyCompanies, datasets, pipelineText };
+  const trackerText = existsSync(APPLICATIONS_PATH) ? readFileSync(APPLICATIONS_PATH, 'utf8') : '';
+  return { config, entries, history, historyCompanies, datasets, pipelineText, trackerText };
 }
 
 // The reverse sweep's company lists are optional evidence: a file truncated

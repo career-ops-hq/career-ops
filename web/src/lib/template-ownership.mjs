@@ -14,12 +14,20 @@ const inside = (child, parent) => child === parent || child.startsWith(parent + 
  * Refuse to change a template that is not really inside the user's templates
  * directory. The folder holding it is checked by default, which is what a delete,
  * rename or its cleanup touches. A save also writes through the file itself, so
- * it passes `file: true` to check where the file really is as well.
+ * it passes `file: true`: the file must not be a symlink at all, and must really
+ * be inside the directory.
  * @param {{path: string}} entry
  * @param {string} userDir
  * @param {{file?: boolean}} [opts]
  */
 export async function assertInsideUserDir(entry, userDir, { file = false } = {}) {
+  // A save replaces the file atomically, which swaps a symlink for a regular file
+  // even when it points inside the user's directory: the target would never get
+  // the edit and the alias would stop following it. Refuse, as for a link that
+  // points outside, rather than write through it.
+  if (file && (await fs.lstat(entry.path)).isSymbolicLink()) {
+    throw new TemplateRefusal("This template is a link to another file, so it is changed where that file lives, not here.");
+  }
   const root = await fs.realpath(userDir);
   const real = await fs.realpath(file ? entry.path : path.dirname(entry.path));
   if (!inside(real, root)) {

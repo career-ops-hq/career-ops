@@ -44,6 +44,49 @@ test('cover-letter achievements retain DOM order in the PDF text stream', async 
   expectInOrder(text, ['OPENINGMARK', 'PROFILEMARK', '• FIRSTACHIEVEMENT', '• SECONDACHIEVEMENT', 'PROBLEMMARK', 'CLOSINGMARK']);
 });
 
+const nameFirstCv = {
+  PAGE_WIDTH: '8.5in',
+  LANG: 'en',
+  NAME: 'Alex Rivera',
+  TITLE_BLOCK: '<div class="header-title">Operations lead</div>',
+  LOCATION: 'Springfield, IL',
+  SECTION_SUMMARY: 'Summary',
+  SUMMARY_TEXT: 'Builds internal tools for a small team.',
+  SECTION_EXPERIENCE: 'Experience',
+  EXPERIENCE: `
+    <div class="job">
+      <div class="job-header">
+        <span class="job-company">Fixture Co</span>
+        <span class="job-period">2022-2024</span>
+      </div>
+      <div class="job-role">Program Coordinator</div>
+      <div class="job-context">Internal tools</div>
+      <div class="job-location">Springfield, IL</div>
+      <ul><li>Kept the release board current.</li></ul>
+    </div>
+    <div class="job">
+      <div class="job-header">
+        <span class="job-company">Fixture Beta</span>
+        <span class="job-period">2020-2022</span>
+      </div>
+      <div class="job-role">Staff Assistant</div>
+      <div class="job-location">Springfield, IL</div>
+      <ul><li>Scheduled the weekly review.</li></ul>
+    </div>`,
+};
+
+function flatPdfText(text) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+for (const template of ['cv-template.jake.html', 'cv-template.leadership.html']) {
+  test(`${template} extracted text starts with the candidate name`, async ({ page }) => {
+    const text = flatPdfText(await rawPdfText(page, fillTemplate(template, nameFirstCv)));
+    expect(text.toLowerCase().startsWith('alex rivera')).toBe(true);
+    expect(text.toLowerCase().indexOf('program coordinator')).toBeGreaterThan('alex rivera'.length);
+  });
+}
+
 test('modern CV headings precede their section bodies in the PDF text stream', async ({ page }) => {
   const values = {};
   const sections = [

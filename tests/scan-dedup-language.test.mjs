@@ -175,7 +175,7 @@ const historyRow = (url, { requisition = '', language = '', location = 'Hamburg,
     [pairs, ['R3'], ['en'], false, 'an unseen requisition → kept'],
     [pairs, ['R1'], [], true, 'switch off, R1 seen → duplicate'],
     [seed([[1, '', 'de'], [2, 'R2', 'en']]), ['R1'], ['en'], false, 'a German posting of unknown requisition does not make the English R1 a duplicate'],
-    [seed([[1, '', ''], [2, 'R2', 'en']]), ['R1'], ['en'], true, 'a posting of unknown requisition and language keeps the duplicate'],
+    [seed([[1, '', ''], [2, 'R2', 'en']]), ['R1'], ['en'], false, 'a blank requisition does not hide a later labelled id'],
   ];
   for (const [state, requisition, language, want, label] of cases) {
     check(matchesSeenCompanyRole(state, requisition, language) === want, `matchesSeenCompanyRole: ${label}`, `expected ${want}`);

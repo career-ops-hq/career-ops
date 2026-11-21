@@ -235,7 +235,7 @@ Nama field di header (`Date`, `URL`, `Archetype`, `Score`, `Legitimacy`, `PDF`) 
 ## Score Evidence
 (lima dimensi, status bukti, pertanyaan terbuka, Evidence confidence, prioritas)
 
-## H) Draft jawaban untuk lamaran
+## H) Draft jawaban untuk lamaran (draft)
 (hanya jika score >= 4.5 -- draft jawaban untuk formulir lamaran)
 
 ---

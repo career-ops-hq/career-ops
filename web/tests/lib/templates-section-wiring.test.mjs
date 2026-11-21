@@ -36,3 +36,48 @@ test("no ref is written during render", () => {
 test("the load success handler records that a list has loaded", () => {
   assert.match(src, /hasListRef\.current = true/);
 });
+
+// The <button> element that carries a given onClick call, and the expression in
+// its own disabled={...} attribute (brace-balanced, so it may contain objects and
+// arrow functions). A title that mentions editLocks must not satisfy a check on
+// disabled.
+function buttonOf(call) {
+  const at = src.indexOf(call);
+  assert.ok(at >= 0, `found ${call}`);
+  const start = src.lastIndexOf("<button", at);
+  return src.slice(start, src.indexOf("</button>", at));
+}
+function disabledOf(button) {
+  const key = button.indexOf("disabled={");
+  assert.ok(key >= 0, "the button has a disabled attribute");
+  let depth = 0;
+  for (let i = key + "disabled=".length; i < button.length; i++) {
+    if (button[i] === "{") depth++;
+    if (button[i] === "}" && --depth === 0) return button.slice(key + "disabled={".length, i);
+  }
+  assert.fail("unbalanced disabled attribute");
+}
+
+test("Edit, Rename and Delete each take their own lock in their disabled expression", () => {
+  assert.match(src, /import\s*{[^}]*\beditLocks\b[^}]*}\s*from\s*"@\/lib\/templates-state\.mjs"/);
+  const actions = {
+    edit: "setEditing(t.name)",
+    rename: 'ask(t.name, "rename")',
+    remove: 'ask(t.name, "delete")',
+  };
+  for (const [lock, call] of Object.entries(actions)) {
+    assert.ok(disabledOf(buttonOf(call)).includes(`editLocks(editing, t.name).${lock}`), `${lock}'s disabled expression uses its lock`);
+  }
+});
+
+test("a button whose title mentions the lock but whose disabled does not is caught", () => {
+  const sample = '<button type="button" disabled={busy !== null} title={editLocks(editing, t.name).edit ? "x" : undefined} onClick={() => setEditing(t.name)}>Edit</button>';
+  assert.ok(!disabledOf(sample).includes("editLocks(editing, t.name).edit"));
+});
+
+test("opening the editor remembers the control that opened it, and closing returns focus there", () => {
+  assert.match(buttonOf("setEditing(t.name)"), /returnFocus\.current = e\.currentTarget/);
+  const closeAt = src.indexOf("onClose={");
+  assert.ok(closeAt >= 0, "found the editor's onClose");
+  assert.match(src.slice(closeAt, src.indexOf("/>", closeAt)), /returnFocus\.current\?\.focus\(\)/);
+});

@@ -7,14 +7,9 @@ import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import { evaluationGateForJob } from "@/lib/job-gate.mjs";
+import { postedAgo } from "@/lib/inbox";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
-
-function freshness(postedAt: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(postedAt)) return "";
-  const days = Math.max(0, Math.round((Date.now() - new Date(postedAt + "T00:00:00Z").getTime()) / 86_400_000));
-  return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
-}
 
 // Real company logo (favicon) via the localhost proxy, cached on disk FOREVER per
 // company — so once it resolves it's instant for this card AND every other card,
@@ -40,7 +35,19 @@ function Logo({ company }: { company: string }) {
 // What a running worker is doing on this exact posting → the live CTA label.
 const WORKER_LABEL: Record<string, string> = { evaluate: "Evaluating…", pdf: "Preparing CV…", research: "Researching…", apply: "Filling…" };
 
-export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: DiscoveredOffer; inPipeline: boolean; evaluatedN?: string }) {
+export function DiscoveryCard({
+  offer,
+  inPipeline,
+  evaluatedN,
+  layout = "card",
+}: {
+  offer: DiscoveredOffer;
+  inPipeline: boolean;
+  evaluatedN?: string;
+  /** "row" lays the same content out as one wide row, for the list view. */
+  layout?: "card" | "row";
+}) {
+  const row = layout === "row";
   const { added, adding, addToPipeline } = useExplore();
   const { jobs, startJob } = useJobs();
 
@@ -60,7 +67,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const employer = CHINA_SOURCES.includes(offer.source);
-  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+  const fresh = postedAgo(offer.postedAt, Date.now()) || offer.postedHint || "";
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
@@ -68,8 +75,13 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
   };
 
   return (
-    <div className="co-rise group flex min-w-0 flex-col gap-2.5 rounded-xl border border-border bg-surface/40 p-3.5 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm">
-      <div className="flex items-start gap-3">
+    <div
+      className={cn(
+        "co-rise group flex min-w-0 rounded-xl border border-border bg-surface/40 text-left transition-all hover:-translate-y-0.5 hover:border-brand/30 hover:shadow-sm",
+        row ? "flex-wrap items-center gap-x-4 gap-y-1.5 p-3" : "flex-col gap-2.5 p-3.5",
+      )}
+    >
+      <div className={cn("flex items-start gap-3", row && "min-w-0 flex-1 basis-60")}>
         {employer ? <div aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-lg bg-brand-soft text-brand-text">{offer.company.charAt(0)}</div> : <Logo company={offer.company} />}
         <a href={offer.url} target="_blank" rel="noopener noreferrer" className="block min-w-0 flex-1 max-sm:min-h-[44px]">
           <h3 className={`${instrumentSerif.className} truncate text-[17px] leading-tight text-foreground transition-colors group-hover:text-brand-text`}>{offer.title}</h3>
@@ -90,7 +102,7 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
         </a>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+      <div className={cn("flex flex-wrap items-center gap-1.5 text-[11px]", row && "shrink-0 basis-72")}>
         <span className="rounded border border-border px-1.5 py-0.5 font-medium text-muted">{ATS_LABEL[offer.ats as AtsSource] ?? EMPLOYER_LABEL[offer.ats as keyof typeof EMPLOYER_LABEL] ?? offer.ats}</span>
         {(fresh || employer) && <span className="text-faint">{fresh || "Posting date unknown"}</span>}
         {unverified && (
@@ -122,13 +134,13 @@ export function DiscoveryCard({ offer, inPipeline, evaluatedN }: { offer: Discov
       </div>
 
       {offer.why && (
-        <p className="flex items-start gap-1.5 text-[12px] leading-snug text-brand-text">
+        <p className={cn("flex items-start gap-1.5 text-[12px] leading-snug text-brand-text", row && "order-last basis-full")}>
           <Sparkles className="mt-0.5 size-3 shrink-0" />
           {offer.why}
         </p>
       )}
 
-      <div className="mt-0.5">
+      <div className={row ? "w-60 shrink-0" : "mt-0.5"}>
         {evaluatedN || doneEval ? (
           <a
             href={evaluatedN ? `/pipeline/${evaluatedN}` : job ? `/jobs/${job.id}` : "/pipeline"}

@@ -62,7 +62,7 @@
  *   node scan-dayforce.mjs --tenant gnghcm   # scan a single configured tenant
  */
 
-import { chromium } from 'playwright';
+import { chromium } from './lib/hardened-chromium.mjs';
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { loadYaml } from './lib/yaml-document.mjs';
@@ -95,6 +95,7 @@ import { decodeEntities } from './providers/_html-entities.mjs';
 import { BOT_CHALLENGE_PATTERNS } from './liveness-core.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { browserLaunchOptions } from './lib/browser-launch.mjs';
+import { printScanSummaryHeader } from './lib/scan-summary-marker.mjs';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -722,9 +723,7 @@ async function main() {
     await appendUnrecordedToScanHistory(dupeSkipped, date, 'skipped_dup');
   }
 
-  console.log(`\n${'━'.repeat(45)}`);
-  console.log(`Dayforce Scan — ${date}`);
-  console.log(`${'━'.repeat(45)}`);
+  printScanSummaryHeader('Dayforce Scan', date);
   console.log(`Boards scanned:     ${boards.length}`);
   console.log(`Total found:        ${totalFound}`);
   console.log(`Filtered by title:  ${titleSkipped.length}`);

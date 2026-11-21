@@ -64,7 +64,9 @@ export type DiscoveredOffer = {
   matchedKeyword?: string;
   /** free, zero-token triage hint computed at discovery time from the posting
    *  TITLE vs config/profile.yml target roles (#3260). Recommendation layer
-   *  only — never filters or orders anything; Evaluate gives the real A–F.
+   *  only — filters or orders results only when the user picks a fit filter or
+   *  the Fit sort, and never replaces the evaluation score; Evaluate gives the
+   *  real A–F.
    *  Scan offers only; AI offers already carry why + confidence. */
   fit?: { band: FitBand; score: number };
   /** optional free-text ranking signal preserved to pipeline.md by the canonical
@@ -119,6 +121,7 @@ export type ScanEvent =
 // with the test suite without a TypeScript runner. Import for internal use
 // and re-export for external consumers (filter-builder.tsx, etc.).
 import { cleanChips } from "./clean-chips.mjs";
+import { joinChipParam, splitChipParam } from "./chip-text.mjs";
 export { cleanChips };
 
 function clampNum(v: unknown, lo: number, hi: number, fallback: number): number {
@@ -178,12 +181,14 @@ export function filtersToParams(f: ExploreFilters): string {
     sp.set("preset", f.preset);
     sp.set("employers", (f.employers ?? []).join(","));
   }
-  if (f.positive.length) sp.set("q", f.positive.join(","));
-  if (f.negative.length) sp.set("not", f.negative.join(","));
-  if (f.allow.length) sp.set("loc", f.allow.join(","));
-  if (f.block.length) sp.set("noloc", f.block.join(","));
-  if (f.blockHard.length) sp.set("hardno", f.blockHard.join(","));
-  if (f.alwaysAllow.length) sp.set("home", f.alwaysAllow.join(","));
+  // An entry that holds a comma ("Portland, OR") is written in quotes, so the
+  // reader does not split it in two (#7424). Others are written as before.
+  if (f.positive.length) sp.set("q", joinChipParam(f.positive));
+  if (f.negative.length) sp.set("not", joinChipParam(f.negative));
+  if (f.allow.length) sp.set("loc", joinChipParam(f.allow));
+  if (f.block.length) sp.set("noloc", joinChipParam(f.block));
+  if (f.blockHard.length) sp.set("hardno", joinChipParam(f.blockHard));
+  if (f.alwaysAllow.length) sp.set("home", joinChipParam(f.alwaysAllow));
   if (f.sinceDays !== DEFAULT_FILTERS.sinceDays) sp.set("since", String(f.sinceDays));
   if (f.ats.length !== ATS_SOURCES.length) sp.set("ats", f.ats.join(","));
   if (f.limitPerAts !== DEFAULT_FILTERS.limitPerAts) sp.set("limit", String(f.limitPerAts));
@@ -191,7 +196,7 @@ export function filtersToParams(f: ExploreFilters): string {
 }
 
 export function paramsToFilters(sp: URLSearchParams, base: ExploreFilters = DEFAULT_FILTERS): ExploreFilters {
-  const split = (s: string | null) => (s ? s.split(",") : undefined);
+  const split = (s: string | null) => (s ? splitChipParam(s) : undefined);
   return parseExplorePatch(
     {
       preset: sp.get("preset") ?? undefined,

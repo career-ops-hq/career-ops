@@ -446,21 +446,87 @@ try {
 
   // ── fetch(): recall-first — one failed keyword does not abort the others ──
   {
-    const fetched = await platsbanken.fetch(
-      { provider: 'platsbanken', name: 'Partial failure', platsbanken: { keywords: ['bad', 'good'] } },
-      {
-        sleep: async () => {},
-        fetchJson: async (url) => {
-          if (new URL(url).searchParams.get('q') === 'bad') throw new Error('network error');
-          return response([ad({ id: '12345678', headline: 'ok' })]);
+    const captureStderr = async (run) => {
+      const original = console.error;
+      const lines = [];
+      console.error = (...args) => lines.push(args.join(' '));
+      try {
+        await run();
+      } finally {
+        console.error = original;
+      }
+      return lines;
+    };
+
+    let fetched;
+    const warnings = await captureStderr(async () => {
+      fetched = await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'Partial failure', platsbanken: { keywords: ['bad', 'good'] } },
+        {
+          sleep: async () => {},
+          fetchJson: async (url) => {
+            if (new URL(url).searchParams.get('q') === 'bad') throw new Error('network error');
+            return response([ad({ id: '12345678', headline: 'ok' })]);
+          },
         },
-      },
-    );
+      );
+    });
+    // The marker below only reaches scan.mjs; the person scanning has to be
+    // told which keyword was not read, and why.
+    if (warnings.length === 1 && /Partial failure/.test(warnings[0]) && /"bad": network error/.test(warnings[0]) && !/"good"/.test(warnings[0])) {
+      pass('platsbanken.fetch() warns once, naming the entry and the failed keyword, when the board comes back partial');
+    } else {
+      fail(`a failed keyword should be named in one warning, got ${JSON.stringify(warnings)}`);
+    }
+
+    const quiet = await captureStderr(async () => {
+      await platsbanken.fetch(
+        { provider: 'platsbanken', name: 'All answer', platsbanken: { keywords: ['a', 'b'] } },
+        { sleep: async () => {}, fetchJson: async () => response([ad({ id: '12345678', headline: 'ok' })]) },
+      );
+    });
+    if (quiet.length === 0) pass('platsbanken.fetch() prints nothing when every keyword answers');
+    else fail(`platsbanken.fetch() printed with every keyword answering: ${JSON.stringify(quiet)}`);
+
     if (fetched.length === 1 && fetched[0].title === 'ok') {
       pass('platsbanken.fetch(): a failed keyword does not abort keywords that still succeed');
     } else {
       fail(`platsbanken.fetch() with one failing keyword returned ${JSON.stringify(fetched.map((j) => j.title))}`);
     }
+    // The failed keyword's share of the board was never read, so the board is
+    // partial, not complete (#6820).
+    if (fetched.truncated && fetched.truncated.reason === 'fetch-error' && fetched.truncated.fetched === 1) {
+      pass('platsbanken.fetch() marks the board truncated (fetch-error) when one keyword fails on its first page');
+    } else {
+      fail(`a keyword failing on page 1 should mark jobs.truncated = { reason: 'fetch-error', fetched: 1 }, got ${JSON.stringify(fetched.truncated)}`);
+    }
+  }
+
+  // The first cause seen still wins: a cap hit by the first keyword is not
+  // overwritten by a later keyword's failure.
+  {
+    const fetched = await platsbanken.fetch(
+      { provider: 'platsbanken', name: 'Cap then failure', platsbanken: { keywords: ['capped', 'bad'] }, max_pages: 1 },
+      {
+        sleep: async () => {},
+        fetchJson: async (url) => {
+          if (new URL(url).searchParams.get('q') === 'bad') throw new Error('network error');
+          return response(Array.from({ length: 100 }, (_, i) => ad({ id: `6${i}` })));
+        },
+      },
+    );
+    if (fetched.truncated?.reason === 'page-cap') pass('platsbanken.fetch(): the first truncation cause seen wins over a later keyword failure');
+    else fail(`first cause should win: got ${JSON.stringify(fetched.truncated)}`);
+  }
+
+  // A probe whose keywords all answer stays unmarked.
+  {
+    const fetched = await platsbanken.fetch(
+      { provider: 'platsbanken', name: 'Probe ok', platsbanken: { keywords: ['a', 'b'] } },
+      { maxPages: 1, sleep: async () => {}, fetchJson: async () => response([ad({ id: '55555555', headline: 'ok' })]) },
+    );
+    if (!fetched.truncated) pass('platsbanken.fetch(): a health probe whose keywords answer is not marked truncated');
+    else fail(`a probe was marked truncated: ${JSON.stringify(fetched.truncated)}`);
   }
 
   // A later-page failure keeps the pages already collected.

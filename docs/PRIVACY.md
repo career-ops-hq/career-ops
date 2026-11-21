@@ -180,10 +180,15 @@ career-ops itself.
 export PRIVACY_REDACT=1
 ```
 
-Instead of blocking, this replaces **configured** values with placeholder tokens
-on the way out and rehydrates them in the response. It is not the default because
-silently altering a prompt changes what the model was asked. Prefer blocking,
-or narrowing your config.
+Instead of blocking, this replaces **configured text** values with placeholder
+tokens on the way out and rehydrates them in `text()` and `json()` responses.
+Configured numbers and enabled `auto_detect` patterns still block requests, as
+they cannot be safely tokenized or rehydrated. Streaming consumers (such as
+`openai-eval.mjs`) read directly from the response stream and receive tokens
+without rehydration.
+
+Redact mode is not the default because silently altering a prompt changes what
+the model was asked. Prefer blocking, or narrowing your config.
 
 ---
 
@@ -191,8 +196,19 @@ or narrowing your config.
 
 The guard protects requests **career-ops itself makes**. It cannot see a CLI
 agent reading `cv.md` and `config/profile.yml` from disk with its own file tools.
-If you use an interactive coding CLI, ensure you do not ask it to send files
-containing personal data you want kept off external servers.
+`pii-workspace.mjs` is the manual companion for that gap:
+
+```bash
+node pii-workspace.mjs status    # tokenized or holding real PII?
+node pii-workspace.mjs scrub     # replace configured text values with tokens (numbers remain readable)
+node pii-workspace.mjs restore   # put the real values back
+```
+
+> **`scrub` mutates your CV and profile in place.** A crash or a forgotten
+> `restore` leaves those files tokenized. Always run `restore` when the session
+> ends. The token map (`.pii-token-map.json`, gitignored) holds your real values,
+> so treat it exactly as you treat `cv.md`. Warn CLI agents not to read the token
+> map, or place `CAREER_OPS_ROOT` outside the agent workspace.
 
 ---
 
@@ -215,7 +231,8 @@ Read these. The guard is useful precisely because its edges are stated.
    does not cover a different transport.
 5. **Not a guarantee of anonymity.** It reduces the chance that recognized
    personal data leaves your machine. It does not make you anonymous to the
-   provider, and it does not see what a CLI agent does with the files on disk.
+   provider, and it does not see what a CLI agent does with the files on disk
+   unless you use `pii-workspace.mjs`.
 6. **Your provider still sees your prompt.** Anything not caught by the guard —
    and everything you deliberately allow — reaches the provider as usual.
 7. **Redact mode rehydrates only `text()` and `json()`.** In opt-in redact mode
@@ -223,6 +240,9 @@ Read these. The guard is useful precisely because its edges are stated.
    methods on the live response object. A caller that reads `response.body` as a
    stream receives the placeholder tokens, not your real values. Blocking mode —
    the default — has no equivalent gap.
+8. **`pii-workspace.mjs scrub` tokenizes configured text values only.** Configured
+   numeric values (such as salaries and phone numbers) cannot be tokenized and
+   remain readable on disk.
 
 ---
 
@@ -236,6 +256,7 @@ Read these. The guard is useful precisely because its edges are stated.
 | `config/privacy.example.yml` | Committed sample (fictional values only) |
 | `config/privacy.yml` | Your real config — **gitignored** |
 | `privacy-status.mjs` | Diagnostic — reports counts, never values |
+| `pii-workspace.mjs` | Manual on-disk tokenization for CLI sessions |
 
 Design reference: the `PIIGuard` class in the
 [`hunter`](https://github.com/asimthaha/hunter) project — the flattening,

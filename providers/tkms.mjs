@@ -119,7 +119,7 @@ export function parseQuery(json, cfg) {
     const d = item?.data;
     if (!d) continue;
     const id = d.id != null ? String(d.id) : '';
-    const title = decodeEntities(String(d.title || '').replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
+    const title = decodeEntities(String(d.title || '').replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))).replace(/\s+/g, ' ').trim();
     if (!id || !title) continue;
     // A lone surrogate in id throws URIError out of encodeURIComponent and
     // aborts this loop; id is also the dedup key. Drop this row on a null.

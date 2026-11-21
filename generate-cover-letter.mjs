@@ -23,6 +23,7 @@ import { resolveTemplate } from "./cv-templates.mjs";
 import { isMainModule } from "./lib/is-main-module.mjs";
 import { PAGE_FORMATS, normalizePageFormat, pageFormatForCountry } from "./lib/page-format.mjs";
 import { getCareerOpsRoot } from "./path-resolver.mjs";
+import { buildOutputName, slugFromReport } from "./lib/output-names.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // output/ is a USER-layer directory. Anchoring it to the script directory made
@@ -504,6 +505,82 @@ function collectInputText(value) {
 /** A cover letter is one page by convention; a CV's default budget is 2. */
 export const DEFAULT_COVER_MAX_PAGES = 1;
 
+/**
+ * The writing check a CV gets, applied to a letter, as notes and never as a stop.
+ *
+ * generate-pdf.mjs refuses a CV that carries stock wording the candidate never
+ * wrote ("spearheaded", "leveraged"). A letter went through the fact gate only,
+ * so a draft could keep that wording and the long dashes cover mode bans, and
+ * nothing said so. A letter is not refused here: it quotes the posting, and a
+ * posting uses words a candidate would not choose. The notes name the words and
+ * the PDF still builds.
+ *
+ * Wording is allowed when cv.md, voice-dna.md, cv-facts.json or the candidate's
+ * own answers for this letter already use it. Read before the ATS pass, which
+ * replaces long dashes and would hide them.
+ *
+ * @param {string} html - The letter's HTML before the ATS text pass.
+ * @param {{root?: string, payload?: object}} [options]
+ * @returns {Promise<string[]>} One note per kind of finding; empty when clean.
+ */
+export async function coverLetterVoiceNotes(html, { root = getCareerOpsRoot(), payload = {} } = {}) {
+  const { voiceIssues, candidateOwnWords } = await import("./cv-voice.mjs");
+  const cvPath = join(root, "cv.md");
+  const cv = existsSync(cvPath) ? readFileSync(cvPath, "utf-8") : "";
+  const ownWords = [cv, candidateOwnWords(root), ...letterInputTexts(payload)].join("\n");
+  const issues = voiceIssues(html, ownWords);
+  const notes = [];
+  const phrases = [...new Set(issues.filter((issue) => issue.kind === "banned-phrase").map((issue) => issue.value))];
+  if (phrases.length) {
+    notes.push(
+      `Voice check warning for cover letter: ${phrases.map((phrase) => `"${phrase}"`).join(", ")}. `
+      + "That wording is not in your CV or your own words, and it reads as stock text. The PDF still builds.",
+    );
+  }
+  const dashes = [...new Set(issues.filter((issue) => issue.kind === "em-dash").map((issue) => issue.value))];
+  if (dashes.length) {
+    notes.push(
+      `Voice check warning for cover letter: ${dashes.map((dash) => `an ${dash}`).join(", ")}. `
+      + "Cover mode bans long dashes. The PDF replaces them, but the draft and any text you paste elsewhere keep them.",
+    );
+  }
+  return notes;
+}
+
+function localDate() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/**
+ * Default output basename when neither --out nor payload.output_path is set.
+ * With --report and a report file to read the company slug from, this is the
+ * standard artifact name (lib/output-names.mjs, #6667). Otherwise it is the
+ * legacy `{company}-{role}-cover.pdf`, so a run without a report is unchanged.
+ */
+function defaultCoverName(payload, report) {
+  if (report) {
+    const company = slugFromReport(report, resolve(getCareerOpsRoot(), "reports"));
+    const candidate = payload.candidate?.name;
+    if (company && typeof candidate === "string" && candidate.trim()) {
+      try {
+        return buildOutputName({ report, company, kind: "cover", candidate, date: localDate() });
+      } catch {
+        // fall through to the legacy name
+      }
+    }
+  }
+  const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .slice(0, 30);
+  return `${company}-${role}-cover.pdf`;
+}
+
 const USAGE = `
 Usage:
   node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf] [--format letter|a4] [--country XX] [--report NNN] [--max-pages N] [--strict-pages]
@@ -514,7 +591,9 @@ Usage:
                   config/profile.yml page_format, then letter.
   --country       Employer's ISO 3166-1 country code (e.g. DE). Picks the sheet
                   only when page_format is "auto". Defaults to the payload's country.
-  --report        Link the PDF to a tracker report number in data/pdf-index.tsv
+  --report        Link the PDF to a tracker report number in data/pdf-index.tsv.
+                  With no --out or output_path, also names the file
+                  {NNN}-{company}-cover-{candidate}-{date}.pdf
   --max-pages     Preferred letter length in pages (default: ${DEFAULT_COVER_MAX_PAGES})
   --strict-pages  Fail instead of warning when the letter is longer than --max-pages
 `;
@@ -617,14 +696,7 @@ async function main() {
   }
 
   if (!payload.output_path) {
-    const company = (typeof payload.letter?.company === "string" ? payload.letter.company : "company")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-");
-    const role = (typeof payload.letter?.role_title === "string" ? payload.letter.role_title : "role")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .slice(0, 30);
-    payload.output_path = join(OUTPUT_ROOT, `${company}-${role}-cover.pdf`);
+    payload.output_path = join(OUTPUT_ROOT, defaultCoverName(payload, args.report));
   } else {
     try {
       payload.output_path = safeOutputPath(payload.output_path);
@@ -654,6 +726,19 @@ async function main() {
     if (factCheck.verdict === "warn") {
       console.error(`CV fact check warning: cover letter`);
       printFactWarnings(factCheck, console.error);
+    }
+    // The wording check a CV gets, as notes only: a note never stops the PDF.
+    try {
+      for (const note of await coverLetterVoiceNotes(html, { payload })) console.error(note);
+    } catch (err) {
+      console.error(`Voice check skipped: ${err.message}`);
+    }
+    // The person's own habits, from data/writing-profile.json when they built one.
+    try {
+      const { loadProfile, profileNotes } = await import("./writing-profile.mjs");
+      for (const note of profileNotes(loadProfile(), html)) console.error(note);
+    } catch (err) {
+      console.error(`Writing profile check skipped: ${err.message}`);
     }
     // Imported only after fact validation so a failed gate does not load
     // Playwright or create a PDF artifact.

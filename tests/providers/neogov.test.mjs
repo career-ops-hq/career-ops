@@ -127,6 +127,8 @@ try {
     out = await neogov.fetch(entry, ctx);
     if (out.length === 10 && calls.length === 2) pass('neogov.fetch() stops when a page repeats what it already has (no runaway loop)');
     else fail(`neogov.fetch() repeating page: ${calls.length} calls, ${out.length} jobs`);
+    if (out.truncated === undefined) pass('neogov.fetch() leaves a board that stopped on a repeated page unmarked');
+    else fail(`neogov.fetch() repeating page was marked: ${JSON.stringify(out.truncated)}`);
 
     // every page brings new postings forever → the provider's OWN ceiling (30) stops it and warns
     calls = [];
@@ -137,10 +139,33 @@ try {
     else fail(`neogov.fetch() ceiling: ${calls.length} calls, ${out.length} jobs`);
     if (warnings.some((w) => /raise max_pages/.test(w))) pass('neogov.fetch() warns "raise max_pages" when its ceiling truncated the board');
     else fail(`neogov.fetch() ceiling warning missing: ${JSON.stringify(warnings)}`);
+    // The warned cut is also marked, so scan.mjs logs the board partial, not reachable.
+    if (out.truncated?.reason === 'page-cap' && out.truncated.fetched === 300) pass('neogov.fetch() marks the board page-cap when its ceiling truncated it');
+    else fail(`neogov.fetch() ceiling cut: truncated = ${JSON.stringify(out.truncated)}`);
     calls = [];
     await neogov.fetch({ ...entry, max_pages: 2 }, ctx);
     if (calls.length === 2) pass('neogov.fetch() honours entry.max_pages');
     else fail(`neogov.fetch() max_pages:2 made ${calls.length} calls`);
+    // a short page at the ceiling is the board's end, not a cap: no warning, no mark
+    calls = [];
+    warnings.length = 0;
+    const shortAtCeiling = await neogov.fetch({ ...entry, max_pages: 2 }, { fetchText: async (url) => { calls.push(url); return pageNo(url) === 1 ? pageOf(10, 10) : pageOf(20, 3); }, sleep: noSleep });
+    if (calls.length === 2 && shortAtCeiling.length === 13 && !warnings.some((w) => /raise max_pages/.test(w)) && shortAtCeiling.truncated === undefined) {
+      pass('neogov.fetch() treats a short page at the ceiling as the end of the board: no warning, no mark');
+    } else {
+      fail(`neogov.fetch() short page at the ceiling: ${calls.length} calls, ${shortAtCeiling.length} jobs, warnings ${JSON.stringify(warnings)}, truncated = ${JSON.stringify(shortAtCeiling.truncated)}`);
+    }
+    // fullness counts the cards the source sent: one untitled card on a full
+    // ten-card page does not make it short, so the cut is still warned and marked
+    calls = [];
+    warnings.length = 0;
+    const withBadCard = (start) => `<ul class="search-results-listing-container">${Array.from({ length: 9 }, (_, i) => item(start + i, `job-${start + i}`, `Job ${start + i}`, 'Vancouver, WA')).join('')}${item(start + 9, `job-${start + 9}`, '', 'Vancouver, WA')}</ul>`;
+    const malformedFull = await neogov.fetch({ ...entry, max_pages: 2 }, { fetchText: async (url) => { calls.push(url); return pageNo(url) === 1 ? pageOf(10, 10) : withBadCard(20); }, sleep: noSleep });
+    if (calls.length === 2 && malformedFull.length === 19 && warnings.some((w) => /raise max_pages/.test(w)) && malformedFull.truncated?.reason === 'page-cap' && malformedFull.truncated.fetched === 19) {
+      pass('neogov.fetch() still treats a full page with one malformed card as a cut: warned and marked');
+    } else {
+      fail(`neogov.fetch() full page with a malformed card: ${calls.length} calls, ${malformedFull.length} jobs, warnings ${JSON.stringify(warnings)}, truncated = ${JSON.stringify(malformedFull.truncated)}`);
+    }
     calls = [];
     await neogov.fetch({ ...entry, max_pages: 1_000_000 }, ctx);
     if (calls.length === 200) pass('neogov.fetch() caps a user max_pages at MAX_PAGES_CAP (200)');
@@ -149,11 +174,33 @@ try {
     // ctx.maxPages (health probe): one list request, and no max_pages blame
     calls = [];
     warnings.length = 0;
-    await neogov.fetch(entry, { ...ctx, maxPages: 1 });
+    const probed = await neogov.fetch(entry, { ...ctx, maxPages: 1 });
     if (calls.length === 1) pass('neogov.fetch() stops after ctx.maxPages (1) list request');
     else fail(`neogov.fetch() ctx.maxPages:1 made ${calls.length} calls`);
     if (!warnings.some((w) => /raise max_pages/.test(w))) pass('neogov.fetch() does not blame max_pages for a ctx.maxPages probe cap');
     else fail('neogov.fetch() warned about max_pages during a probe');
+    if (probed.truncated === undefined) pass('neogov.fetch() leaves the ctx.maxPages probe unmarked');
+    else fail(`neogov.fetch() probe was marked: ${JSON.stringify(probed.truncated)}`);
+
+    // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+    // It is still a probe, so nothing warns and nothing is marked (#7180).
+    calls = [];
+    warnings.length = 0;
+    const probedAtCap = await neogov.fetch({ ...entry, max_pages: 1 }, { ...ctx, maxPages: 1 });
+    if (calls.length === 1 && !warnings.some((w) => /raise max_pages/.test(w)) && probedAtCap.truncated === undefined) {
+      pass('neogov.fetch() warns nothing and marks nothing for a probe on a max_pages: 1 entry');
+    } else {
+      fail(`neogov.fetch() probe at max_pages: 1 made ${calls.length} calls, truncated=${JSON.stringify(probedAtCap.truncated)}, warnings ${JSON.stringify(warnings)}`);
+    }
+    // The same entry in a real scan is still cut by its own ceiling.
+    calls = [];
+    warnings.length = 0;
+    const scannedAtCap = await neogov.fetch({ ...entry, max_pages: 1 }, ctx);
+    if (calls.length === 1 && warnings.some((w) => /raise max_pages/.test(w)) && scannedAtCap.truncated?.reason === 'page-cap') {
+      pass('neogov.fetch() still warns and marks page-cap for a real scan of a max_pages: 1 entry');
+    } else {
+      fail(`neogov.fetch() scan at max_pages: 1 made ${calls.length} calls, truncated=${JSON.stringify(scannedAtCap.truncated)}, warnings ${JSON.stringify(warnings)}`);
+    }
 
     // unwrapped rejection while probing
     class ProbeSentinel extends Error {}
