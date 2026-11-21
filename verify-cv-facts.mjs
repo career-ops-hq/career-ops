@@ -3479,7 +3479,9 @@ export function verifyFacts(targetText, {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
-  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  // Read once, so the evidence below cites the same text the gate checked.
+  const rawSources = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd)));
+  const sourceTexts = rawSources.map(latexBody);
   // Separate files with a blank line, not a bare newline: a file with no
   // trailing newline would otherwise soft-wrap into the next file's opening
   // line when the drift and authorship checks join soft wraps.
@@ -3584,7 +3586,7 @@ export function verifyFacts(targetText, {
           .filter(value => sourceNamesZhTool(sourceLookup, value))
           .map(value => ({ kind: 'tool', value, zhList: true })),
       ],
-      sourcePaths.map(path => ({ path, text: readIfExists(resolveInputPath(path, cwd)) })),
+      sourcePaths.map((path, index) => ({ path, text: rawSources[index] })),
     ),
   } : {};
   return {
