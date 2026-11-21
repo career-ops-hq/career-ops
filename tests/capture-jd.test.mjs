@@ -602,7 +602,10 @@ test('pipeline atomic writing retains intentional symlink semantics', async (t) 
   const result = await captureJd({ url: 'https://acme.test/jobs/pipeline-link', dataRoot: root, commit: false });
   assert.equal(result.appended, true);
   assert.equal(lstatSync(pipeline).isSymbolicLink(), true);
-  assert.ok(readFileSync(target, 'utf8').includes('https://acme.test/jobs/pipeline-link'));
+  const targetRowUrls = readFileSync(target, 'utf8').split(/\r?\n/)
+    .map((line) => /^\s*-\s*\[[ xX!]\]\s+(\S+)/.exec(line)?.[1])
+    .filter(Boolean);
+  assert.deepEqual(targetRowUrls, ['https://acme.test/jobs/pipeline-link'], 'the row was written through the symlink');
 });
 
 // --- review follow-ups ------------------------------------------------------
@@ -669,7 +672,7 @@ test('startEvaluation on win32 keeps the URL on one quoted command-line argument
   assert.ok(args.every((arg) => !/[\r\n]/.test(arg)), 'no newline survives to cmd.exe');
   const prompt = args[args.length - 1];
   assert.ok(prompt.startsWith('"') && prompt.endsWith('"'), 'prompt is one quoted argument');
-  assert.ok(prompt.includes(url), 'the URL reaches the spawned CLI');
+  assert.ok(prompt.split(/[\s"]+/).some((token) => token === url), 'the URL reaches the spawned CLI as a whole token');
 });
 
 test('startEvaluation on win32 refuses a URL with cmd.exe metacharacters', () => {
@@ -690,6 +693,6 @@ test('startEvaluation off win32 spawns without a shell and passes the URL unquot
   const result = startEvaluation({ url, dataRoot: root, cli: 'claude', platform: 'linux', spawnFn: (bin, args, options) => { calls.push({ args, options }); return { unref() {} }; } });
   assert.equal(result.started, true);
   assert.notEqual(calls[0].options.shell, true);
-  assert.ok(calls[0].args[1].includes(url));
+  assert.ok(calls[0].args[1].split(/\s+/).some((token) => token === url), 'the URL reaches the spawned CLI as a whole token');
   assert.ok(!/\n/.test(calls[0].args[1]));
 });
