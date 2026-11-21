@@ -42,10 +42,16 @@ try {
   writeFileSync(body, `This job is no longer available. ${long}`);
   const hiddenExpiry = join(dir, 'hidden-expiry.html');
   writeFileSync(hiddenExpiry, `<section class="job-expire-view"><h2>This job is no longer available.</h2></section><main>${long}</main>`);
+  const ambiguousClosure = join(dir, 'ambiguous-closure.html');
+  writeFileSync(ambiguousClosure, `<main>This job is no longer available.</main><script type="application/ld+json">${JSON.stringify([
+    { '@type': 'JobPosting', title: 'Role A', url: posting },
+    { '@type': 'JobPosting', title: 'Role B', url: 'https://boards.greenhouse.io/acme/jobs/7654321' },
+  ])}</script>`);
   const cli = (...args) => spawnSync(NODE, ['batch/prefilter-url.mjs', ...args], { cwd: ROOT, encoding: 'utf-8' });
   const gone = cli('200', posting, posting, body);
   eq('CLI prints decision<TAB>code<TAB>reason', gone.stdout.split('\t')[0], 'skip-dead');
   eq('CLI ignores a closure phrase inside a hidden expiry template', cli('200', posting, posting, hiddenExpiry).stdout.split('\t')[0], 'proceed');
+  eq('CLI does not attribute a closure banner on an ambiguous multi-posting page', cli('200', posting, posting, ambiguousClosure).stdout.split('\t')[0], 'proceed');
   eq('CLI output is one line', gone.stdout.trim().split('\n').length, 1);
   eq('CLI: a missing body file fails open', cli('200', posting, posting, join(dir, 'nope.txt')).stdout.split('\t')[0], 'proceed');
   eq('CLI: --help prints usage and does not run the filter', /^Usage:/.test(cli('--help').stdout), true);

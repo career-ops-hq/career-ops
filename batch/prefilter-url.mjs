@@ -26,17 +26,18 @@
 
 import { readFileSync } from 'node:fs';
 import { classifyLiveness, isUnreadableVerdict } from '../liveness-core.mjs';
-import { sameDocument, visibleTextForLiveness } from '../lib/jd-page-fetch.mjs';
+import { pageClosureEvidence, sameDocument, visibleTextForLiveness } from '../lib/jd-page-fetch.mjs';
 
 // Strong expiry signals only. The soft and listing heuristics depend on an
 // apply-control check that this curl-only path cannot run.
 const DEAD_CODES = new Set(['http_gone', 'expired_url', 'expired_body', 'deadline_passed']);
+const BODY_CLOSURE_CODES = new Set(['expired_body', 'deadline_passed']);
 
 /**
- * @param {{status?: number, requestedUrl?: string, finalUrl?: string, bodyText?: string}} input
+ * @param {{status?: number, requestedUrl?: string, finalUrl?: string, bodyText?: string, bodyClosureTrusted?: boolean}} input
  * @returns {{decision: 'proceed'|'skip-dead'|'skip-blocked'|'retry-later', code: string, reason: string}}
  */
-export function decide({ status = 0, requestedUrl = '', finalUrl = '', bodyText = '' } = {}) {
+export function decide({ status = 0, requestedUrl = '', finalUrl = '', bodyText = '', bodyClosureTrusted = true } = {}) {
   // Curl received no HTTP response (DNS, TLS, connect or transfer failure).
   // Its last attempted redirect URL is not page evidence, so let the runner's
   // existing transport/thin-JD handling decide whether to retry or WebFetch.
@@ -49,7 +50,8 @@ export function decide({ status = 0, requestedUrl = '', finalUrl = '', bodyText 
   const { result, code, reason } = verdict;
   let decision;
   if (result === 'expired') {
-    decision = !isUnreadableVerdict(verdict) && DEAD_CODES.has(code) ? 'skip-dead' : 'proceed';
+    const bodyClosureAllowed = !BODY_CLOSURE_CODES.has(code) || bodyClosureTrusted;
+    decision = !isUnreadableVerdict(verdict) && DEAD_CODES.has(code) && bodyClosureAllowed ? 'skip-dead' : 'proceed';
   } else if (code === 'redirected_off_posting') {
     // The requested URL carried a job id and the final URL does not: what curl
     // downloaded is a board listing, not this posting. A worker handed that file
@@ -76,13 +78,19 @@ function main() {
   }
   const [statusRaw, requestedUrl = '', finalUrl = '', bodyFile = ''] = process.argv.slice(2);
   const status = Number.parseInt(statusRaw, 10) || 0;
+  let bodyHtml = '';
   let bodyText = '';
   try {
-    bodyText = visibleTextForLiveness(readFileSync(bodyFile, 'utf-8'));
+    bodyHtml = readFileSync(bodyFile, 'utf-8');
+    bodyText = visibleTextForLiveness(bodyHtml);
   } catch {
     bodyText = '';
   }
-  const { decision, code, reason } = decide({ status, requestedUrl, finalUrl, bodyText });
+  // Text alone cannot say which posting it belongs to. Preserve the page-fetch
+  // ambiguity and identity gates before treating body closure evidence as
+  // terminal; status and expired-URL evidence stay independently decisive.
+  const bodyClosureTrusted = Boolean(bodyHtml) && Boolean(pageClosureEvidence(bodyHtml, requestedUrl, finalUrl));
+  const { decision, code, reason } = decide({ status, requestedUrl, finalUrl, bodyText, bodyClosureTrusted });
   process.stdout.write(`${decision}\t${code}\t${reason}\n`);
 }
 
