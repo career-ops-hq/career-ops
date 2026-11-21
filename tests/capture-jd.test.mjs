@@ -661,7 +661,7 @@ test('startEvaluation on win32 keeps the URL on one quoted command-line argument
   const calls = [];
   const fakeSpawn = (bin, args, options) => {
     calls.push({ bin, args, options });
-    return { unref() {} };
+    return { on() { return this; }, unref() {} };
   };
   const url = 'https://acme.test/jobs/42?id=5';
   const result = startEvaluation({ url, dataRoot: root, cli: 'opencode', platform: 'win32', spawnFn: fakeSpawn });
@@ -679,7 +679,7 @@ test('startEvaluation on win32 refuses a URL with cmd.exe metacharacters', () =>
   const root = scratch();
   for (const url of ['https://acme.test/jobs?a=1&b=2', 'https://acme.test/%PATH%', 'https://acme.test/a"b', 'https://acme.test/a^b', 'https://acme.test/<x>']) {
     const calls = [];
-    const result = startEvaluation({ url, dataRoot: root, cli: 'opencode', platform: 'win32', spawnFn: (...a) => { calls.push(a); return { unref() {} }; } });
+    const result = startEvaluation({ url, dataRoot: root, cli: 'opencode', platform: 'win32', spawnFn: (...a) => { calls.push(a); return { on() { return this; }, unref() {} }; } });
     assert.equal(result.started, false, url);
     assert.match(result.reason, /cmd\.exe|unsafe/i);
     assert.equal(calls.length, 0, `${url} must not spawn`);
@@ -690,7 +690,7 @@ test('startEvaluation off win32 spawns without a shell and passes the URL unquot
   const root = scratch();
   const calls = [];
   const url = 'https://acme.test/jobs?a=1&b=2';
-  const result = startEvaluation({ url, dataRoot: root, cli: 'claude', platform: 'linux', spawnFn: (bin, args, options) => { calls.push({ args, options }); return { unref() {} }; } });
+  const result = startEvaluation({ url, dataRoot: root, cli: 'claude', platform: 'linux', spawnFn: (bin, args, options) => { calls.push({ args, options }); return { on() { return this; }, unref() {} }; } });
   assert.equal(result.started, true);
   assert.notEqual(calls[0].options.shell, true);
   assert.ok(calls[0].args[1].split(/\s+/).some((token) => token === url), 'the URL reaches the spawned CLI as a whole token');
@@ -764,4 +764,15 @@ test('the CLI pushes only with --push', () => {
   assert.equal(pushed.status, 0, pushed.stderr);
   assert.equal(JSON.parse(pushed.stdout).pushed, true);
   assert.equal(remoteHead(), git('rev-parse', 'HEAD').stdout.trim());
+});
+
+test('startEvaluation keeps the server alive when the spawned child emits error', async () => {
+  const { EventEmitter } = await import('node:events');
+  const root = scratch();
+  const child = Object.assign(new EventEmitter(), { unref() {} });
+  const result = startEvaluation({ url: 'https://acme.test/jobs/1', dataRoot: root, cli: 'claude', platform: 'linux', spawnFn: () => child });
+  assert.equal(result.started, true);
+  assert.ok(child.listenerCount('error') > 0, 'an error listener is attached');
+  assert.doesNotThrow(() => child.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' })));
+  assert.match(readFileSync(path.join(root, 'data', 'capture-evals.log'), 'utf-8'), /ENOENT/);
 });

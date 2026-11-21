@@ -34,7 +34,7 @@
  * run is not something this server should do by default.
  */
 
-import { existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, openSync, closeSync, readFileSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -170,6 +170,15 @@ export function startEvaluation({ url, dataRoot, cli, platform = process.platfor
       stdio: ['ignore', fd, fd],
       shell: useShell,
       env: { ...process.env, CAREER_OPS_CLI: '' },
+    });
+    // A missing CLI surfaces as an asynchronous 'error' event; without a
+    // listener Node rethrows it and takes the capture server down. The capture
+    // is already saved, so record the failure and keep serving.
+    child.on('error', (err) => {
+      const line = `[capture] evaluation failed to start: ${err?.message || err}`;
+      console.error(line);
+      try { appendFileSync(logPath, `${line}
+`); } catch { /* log unavailable */ }
     });
     child.unref();
     closeSync(fd);
