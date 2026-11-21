@@ -68,6 +68,7 @@ const PATH_HOSTS = Object.freeze({
   'jobs.smartrecruiters.com': 'smartrecruiters',
   'ats.rippling.com': 'rippling',
   'jobs.jobvite.com': 'jobvite',
+  'myjobs.adp.com': 'adp-myjobs',
 });
 /** ATS whose board is the company's subdomain. */
 const SUBDOMAIN_HOSTS = Object.freeze({
@@ -90,6 +91,7 @@ const SUBDOMAIN_HOSTS = Object.freeze({
   'recruiterbox.com': 'trakstar',
   'turbohire.co': 'turbohire',
   'avature.net': 'avature',
+  'eightfold.ai': 'eightfold',
 });
 /**
  * ATS whose board is the company's subdomain on one of several hosts: the ATS,

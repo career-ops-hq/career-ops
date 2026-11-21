@@ -64,11 +64,13 @@ import zohoRecruit from '../providers/zoho-recruit.mjs';
 import avature from '../providers/avature.mjs';
 import clearcompany from '../providers/clearcompany.mjs';
 import jobvite from '../providers/jobvite.mjs';
+import eightfold from '../providers/eightfold.mjs';
+import adpMyjobs from '../providers/adp-myjobs.mjs';
 
 const PROVIDERS = {
   greenhouse, ashby, lever, workable, smartrecruiters, rippling, join: joinProvider,
   recruitee, breezy, bamboohr, pinpoint, applicantpro, hibob, hirehive, homerun, jazzhr, keka, personio,
-  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, workday,
+  prevueaps, schoolspring, taleez, teamtailor, trakstar, turbohire, 'zoho-recruit': zohoRecruit, avature, clearcompany, jobvite, eightfold, 'adp-myjobs': adpMyjobs, workday,
 };
 
 const VALIDATOR = join(ROOT, 'seeds', 'employers-validate.mjs');
