@@ -3409,7 +3409,10 @@ function sourceSpellsFact(sourceText, value) {
  * which are read the way CommonMark reads them (see the rules below).
  * A bracket pair with no link target after it is left alone.
  */
-export function collapseMarkdownLinks(text) {
+export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
+  // keepLines puts back the line breaks a removed span held, so the result
+  // has the same line numbers as the input (claimEvidence cites lines).
+  const breaks = (span) => (keepLines ? span.replace(/[^\n]/g, '') : '');
   let out = '';
   let i = 0;
   const opener = /\[\s*([^\][]*?)\s*\]\(/y;
@@ -3427,7 +3430,7 @@ export function collapseMarkdownLinks(text) {
           j++;
         }
         if (depth === 0) {
-          out += m[1];
+          out += m[1] + breaks(text.slice(i, j));
           i = j;
           continue;
         }
@@ -3435,7 +3438,7 @@ export function collapseMarkdownLinks(text) {
     }
     out += text[i++];
   }
-  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1');
+  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, (link, label) => label + breaks(link));
   // A definition is dropped whole. Anything that is not one, as CommonMark
   // reads it, is text a reader sees and stays:
   //   - it starts its line, after at most three spaces, and cannot interrupt a
@@ -3454,7 +3457,7 @@ export function collapseMarkdownLinks(text) {
   const definition = new RegExp(String.raw`^(?<!${paragraphAbove})${sp}{0,3}\[[^\][]+\]:${sp}*(?:\r?\n${sp}*)?(?:<[^<>\r\n]*>|\S+)(?:(?:${sp}+|${sp}*\r?\n${sp}*)${title})?${sp}*(?=\r?$)`, 'gm');
   for (let before = ''; before !== out;) {
     before = out;
-    out = out.replace(definition, ' ');
+    out = out.replace(definition, (span) => (keepLines ? blankSpan(span) : ' '));
   }
   return out;
 }
@@ -3572,7 +3575,7 @@ export function verifyFacts(targetText, {
         // are exactly the ones with a source line.
         ...zhToolClaims(stripMarkup(targetText))
           .filter(value => sourceNamesZhTool(sourceLookup, value))
-          .map(value => ({ kind: 'tool', value })),
+          .map(value => ({ kind: 'tool', value, zhList: true })),
       ],
       sourcePaths.map(path => ({ path, text: readIfExists(resolveInputPath(path, cwd)) })),
     ),
@@ -3608,15 +3611,20 @@ function claimEvidence(claims, files) {
   const lines = files.flatMap(({ path, text }) => sourceFileLines(path, text));
   for (const entry of lines) {
     entry.metrics = sourceMetricClaims(entry.text);
-    entry.lookup = normalizeFact(collapseMarkdownLinks(stripMarkup(entry.text)));
+    entry.lookup = normalizeFact(stripMarkup(entry.text));
   }
   const seen = new Set();
   const found = [];
-  for (const { kind, value } of claims) {
+  const supports = (entry, { kind, value, zhList }) => (
+    kind === 'metric' ? entry.metrics.has(value)
+      : zhList ? sourceNamesZhTool(entry.lookup, value)
+        : sourceContainsFact(entry.lookup, value));
+  for (const claim of claims) {
+    const { kind, value } = claim;
     const key = `${kind}\n${value}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const hit = lines.find(entry => (kind === 'metric' ? entry.metrics.has(value) : sourceNamesZhTool(entry.lookup, value)));
+    const hit = lines.find(entry => supports(entry, claim));
     found.push({ kind, value, source: hit?.path ?? null, line: hit?.number ?? null, text: hit?.raw.trim() ?? null });
   }
   return found;
@@ -3629,8 +3637,9 @@ function blankSpan(span) {
 
 /**
  * Numbered lines of one source file, holding only the text the gate reads: for
- * a LaTeX document the body without comments, and never a script or style
- * block. A delimiter line keeps the text beside the delimiter.
+ * a LaTeX document the body without comments, never a script or style block,
+ * and markdown links reduced to their text. A delimiter line keeps the text
+ * beside the delimiter.
  */
 function sourceFileLines(path, text) {
   let visible = String(text);
@@ -3643,7 +3652,7 @@ function sourceFileLines(path, text) {
       visible = blankSpan(visible.slice(0, start)) + visible.slice(start, end) + blankSpan(visible.slice(end));
     }
   }
-  visible = visible.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, blankSpan);
+  visible = collapseMarkdownLinks(visible.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, blankSpan), { keepLines: true });
   const raw = String(text).split(/\r?\n/);
   const lines = [];
   visible.split(/\r?\n/).forEach((line, index) => {
