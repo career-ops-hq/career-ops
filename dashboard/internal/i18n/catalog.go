@@ -17,17 +17,18 @@ type Catalog struct {
 	LoadingPreview string
 
 	// Tabs & filters
-	TabAll        string
-	TabEvaluated  string
-	TabApplied    string
-	TabInterview  string
-	TabResponded  string
-	TabAssessment string
-	TabTop        string
-	TabSkip       string
-	TabRejected   string
-	TabDiscarded  string
-	TabOther      string
+	TabAll         string
+	TabEvaluated   string
+	TabSpeculative string
+	TabApplied     string
+	TabInterview   string
+	TabResponded   string
+	TabAssessment  string
+	TabTop         string
+	TabSkip        string
+	TabRejected    string
+	TabDiscarded   string
+	TabOther       string
 
 	// Table column headers
 	ColFit      string
@@ -102,17 +103,18 @@ type Catalog struct {
 	TimeDaysAgo   string
 
 	// Status display names
-	StatusEvaluated  string
-	StatusApplied    string
-	StatusResponded  string
-	StatusAssessment string
-	StatusInterview  string
-	StatusOffer      string
-	StatusRejected   string
-	StatusDiscarded  string
-	StatusSkip       string
-	StatusHired      string
-	StatusOther      string
+	StatusEvaluated   string
+	StatusSpeculative string
+	StatusApplied     string
+	StatusResponded   string
+	StatusAssessment  string
+	StatusInterview   string
+	StatusOffer       string
+	StatusRejected    string
+	StatusDiscarded   string
+	StatusSkip        string
+	StatusHired       string
+	StatusOther       string
 
 	// Additional UI strings
 	NoData        string
@@ -129,6 +131,11 @@ type Catalog struct {
 	HelpRefresh    string
 	HelpReport     string
 	HelpOpenURL    string
+	HelpQueue      string
+	HelpSkip       string
+	HelpUndoSkip   string
+	HelpRankRow    string
+	HelpRankAll    string
 	HelpOpenPDF    string
 	HelpCopyPDF    string
 	HelpRegenPDF   string
@@ -177,6 +184,66 @@ type Catalog struct {
 	SortPosted   string
 	ViewGrouped  string
 	ViewFlat     string
+
+	// Inbox tab (#5269): the Pending rows of data/pipeline.md
+	TabInbox               string
+	ColRank                string
+	SortRank               string
+	LabelRank              string
+	LabelURL               string
+	InboxEmpty             string
+	InboxNotRanked         string
+	InboxSummary           string
+	InboxNoWebURL          string
+	InboxUnavailable       string
+	InboxStatusQueued      string
+	InboxStatusRunning     string
+	InboxStatusPaused      string
+	InboxStatusNeedsAnswer string
+	InboxStatusFailed      string
+	InboxStatusDone        string
+
+	// Inbox `e`: queue the selected row in batch/batch-input.tsv (#5269)
+	InboxQueueing         string
+	InboxQueued           string
+	InboxQueueFailed      string
+	InboxQueueAlready     string
+	InboxQueueRetryFailed string
+	InboxQueueUnreadable  string
+	InboxQueueNoWebURL    string
+
+	// Inbox `x` and `u`: skip the selected row in data/pipeline.md, and undo
+	// the last skip of the session (#5269)
+	InboxSkipping       string
+	InboxSkipped        string
+	InboxSkipUnchanged  string
+	InboxSkipUnreadable string
+	InboxSkipFailed     string
+	InboxSkipNoWebURL   string
+	InboxUndoNothing    string
+	InboxUndoing        string
+	InboxUndone         string
+	InboxUndoUnchanged  string
+	InboxUndoGone       string
+	InboxUndoFailed     string
+
+	// Inbox `a` and `A`: rank the selected row, or the unranked rows, through
+	// rank-pipeline.mjs after a `y` (#5269)
+	InboxRankAskRow     string
+	InboxRankAskAll     string
+	InboxRankAskSome    string
+	InboxRankCancelled  string
+	InboxRanking        string
+	InboxRankRunning    string
+	InboxRankBusy       string
+	InboxRankAlready    string
+	InboxRankNone       string
+	InboxRankFailed     string
+	InboxRankNotPending string
+	InboxRankedRow      string
+	InboxRankNoScore    string
+	InboxRankedAll      string
+	InboxRankReadFailed string
 }
 
 // SortModeLabel returns the localized display label for a sort mode ("score", "date", etc.).
@@ -234,6 +301,8 @@ func (c *Catalog) StatusLabel(norm string) string {
 		return c.StatusApplied
 	case "evaluated":
 		return c.StatusEvaluated
+	case "speculative":
+		return c.StatusSpeculative
 	case "skip":
 		return c.StatusSkip
 	case "rejected":
@@ -322,17 +391,18 @@ var En = Catalog{
 	LoadingPreview: "Loading preview...",
 
 	// Tabs & filters
-	TabAll:        "ALL",
-	TabEvaluated:  "EVALUATED",
-	TabApplied:    "APPLIED",
-	TabInterview:  "INTERVIEW",
-	TabResponded:  "RESPONDED",
-	TabAssessment: "ASSESSMENT",
-	TabTop:        "TOP ≥4",
-	TabSkip:       "SKIP",
-	TabRejected:   "REJECTED",
-	TabDiscarded:  "DISCARDED",
-	TabOther:      "OTHER",
+	TabAll:         "ALL",
+	TabEvaluated:   "EVALUATED",
+	TabSpeculative: "SPEC",
+	TabApplied:     "APPLIED",
+	TabInterview:   "INTERVIEW",
+	TabResponded:   "RESPONDED",
+	TabAssessment:  "ASSESSMENT",
+	TabTop:         "TOP ≥4",
+	TabSkip:        "SKIP",
+	TabRejected:    "REJECTED",
+	TabDiscarded:   "DISCARDED",
+	TabOther:       "OTHER",
 
 	// Table column headers
 	ColFit:      "FIT",
@@ -407,17 +477,18 @@ var En = Catalog{
 	TimeDaysAgo:   "%dd ago",
 
 	// Status display names
-	StatusEvaluated:  "Evaluated",
-	StatusApplied:    "Applied",
-	StatusResponded:  "Responded",
-	StatusAssessment: "Assessment",
-	StatusInterview:  "Interview",
-	StatusOffer:      "Offer",
-	StatusRejected:   "Rejected",
-	StatusDiscarded:  "Discarded",
-	StatusSkip:       "SKIP",
-	StatusHired:      "Hired",
-	StatusOther:      "Other",
+	StatusEvaluated:   "Evaluated",
+	StatusSpeculative: "Speculative",
+	StatusApplied:     "Applied",
+	StatusResponded:   "Responded",
+	StatusAssessment:  "Assessment",
+	StatusInterview:   "Interview",
+	StatusOffer:       "Offer",
+	StatusRejected:    "Rejected",
+	StatusDiscarded:   "Discarded",
+	StatusSkip:        "SKIP",
+	StatusHired:       "Hired",
+	StatusOther:       "Other",
 
 	// Additional UI strings
 	NoData:        "No data",
@@ -434,6 +505,11 @@ var En = Catalog{
 	HelpRefresh:    " refresh  ",
 	HelpReport:     " report  ",
 	HelpOpenURL:    " open URL  ",
+	HelpQueue:      " queue  ",
+	HelpSkip:       " skip  ",
+	HelpUndoSkip:   " undo skip  ",
+	HelpRankRow:    " rank  ",
+	HelpRankAll:    " rank all  ",
 	HelpOpenPDF:    " open PDF  ",
 	HelpCopyPDF:    " copy PDF path  ",
 	HelpRegenPDF:   " regen PDF  ",
@@ -482,6 +558,61 @@ var En = Catalog{
 	SortPosted:   "posted",
 	ViewGrouped:  "grouped",
 	ViewFlat:     "flat",
+
+	// Inbox tab
+	TabInbox:               "INBOX",
+	ColRank:                "RANK",
+	SortRank:               "rank",
+	LabelRank:              "Rank: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No pending rows in data/pipeline.md",
+	InboxNotRanked:         "not ranked",
+	InboxSummary:           "%d pending · %d not ranked",
+	InboxNoWebURL:          "Not a web address, nothing opened: %s",
+	InboxUnavailable:       "Inbox unavailable; showing previous rows: %s",
+	InboxStatusQueued:      "Queued",
+	InboxStatusRunning:     "Running",
+	InboxStatusPaused:      "Paused",
+	InboxStatusNeedsAnswer: "Needs answer",
+	InboxStatusFailed:      "Failed",
+	InboxStatusDone:        "Done",
+
+	InboxQueueing:         "Queueing %s ...",
+	InboxQueued:           "Queued. Run batch/batch-runner.sh to evaluate it: %s",
+	InboxQueueFailed:      "Could not queue the row: %s",
+	InboxQueueAlready:     "Already in the batch files, nothing queued: %s",
+	InboxQueueRetryFailed: "Failed in the batch; retry with batch/batch-runner.sh --retry-failed: %s",
+	InboxQueueUnreadable:  "Not queued: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
+	InboxQueueNoWebURL:    "Not a web address, nothing queued: %s",
+
+	InboxSkipping:       "Skipping %s ...",
+	InboxSkipped:        "Skipped; u puts it back: %s",
+	InboxSkipUnchanged:  "Already skipped in data/pipeline.md, nothing changed: %s",
+	InboxSkipUnreadable: "Not skipped: the URL must come first after \"- [ ] \" in data/pipeline.md: %s",
+	InboxSkipFailed:     "Could not skip the row: %s",
+	InboxSkipNoWebURL:   "Not a web address, nothing skipped: %s",
+	InboxUndoNothing:    "Nothing to undo: no row was skipped in this session",
+	InboxUndoing:        "Putting back %s ...",
+	InboxUndone:         "Back in the Inbox: %s",
+	InboxUndoUnchanged:  "Not skipped any more, nothing to undo: %s",
+	InboxUndoGone:       "Not put back: the row is no longer in the Pending section of data/pipeline.md: %s",
+	InboxUndoFailed:     "Could not undo the skip; u tries again: %s",
+
+	InboxRankAskRow:     "Rank this row with your agent CLI? Uses tokens. y: yes, other key: no",
+	InboxRankAskAll:     "Rank %d row(s) with your agent CLI? Uses tokens. y: yes, other key: no",
+	InboxRankAskSome:    "Rank the next %d rows with your agent CLI? Uses tokens. y: yes, other key: no",
+	InboxRankCancelled:  "Cancelled, nothing ranked",
+	InboxRanking:        "Ranking %d row(s) with your agent CLI ...",
+	InboxRankRunning:    "ranking %d ...",
+	InboxRankBusy:       "A rank is already running; wait for it to finish",
+	InboxRankAlready:    "Already ranked, nothing to do: %s",
+	InboxRankNone:       "Every row is ranked, nothing to do",
+	InboxRankFailed:     "Could not rank: %s",
+	InboxRankNotPending: "Not ranked: the URL must come first after \"- [ ] \" in data/pipeline.md, with no rank yet: %s",
+	InboxRankedRow:      "Ranked %.1f/5: %s",
+	InboxRankNoScore:    "No score came back; a tries again: %s",
+	InboxRankedAll:      "Rank run finished; %d row(s) still not ranked",
+	InboxRankReadFailed: "Ranking finished, but the Inbox could not be read: %s",
 }
 
 // Tr is the static Turkish translation catalog.
@@ -493,17 +624,18 @@ var Tr = Catalog{
 	LoadingPreview: "Önizleme yükleniyor...",
 
 	// Tabs & filters
-	TabAll:        "TÜMÜ",
-	TabEvaluated:  "DEĞERLENDİRİLDİ",
-	TabApplied:    "BAŞVURULDU",
-	TabInterview:  "MÜLAKAT",
-	TabResponded:  "YANIT VERİLDİ",
-	TabAssessment: "DEĞERLENDİRME",
-	TabTop:        "EN İYİ ≥4",
-	TabSkip:       "UYGUN DEĞİL",
-	TabRejected:   "REDDEDİLDİ",
-	TabDiscarded:  "İPTAL",
-	TabOther:      "DİĞER",
+	TabAll:         "TÜMÜ",
+	TabEvaluated:   "DEĞERLENDİRİLDİ",
+	TabSpeculative: "SPEKÜLATİF",
+	TabApplied:     "BAŞVURULDU",
+	TabInterview:   "MÜLAKAT",
+	TabResponded:   "YANIT VERİLDİ",
+	TabAssessment:  "DEĞERLENDİRME",
+	TabTop:         "EN İYİ ≥4",
+	TabSkip:        "UYGUN DEĞİL",
+	TabRejected:    "REDDEDİLDİ",
+	TabDiscarded:   "İPTAL",
+	TabOther:       "DİĞER",
 
 	// Table column headers
 	ColFit:      "UYUM",
@@ -578,17 +710,18 @@ var Tr = Catalog{
 	TimeDaysAgo:   "%d gün önce",
 
 	// Status display names
-	StatusEvaluated:  "Değerlendirildi",
-	StatusApplied:    "Başvuruldu",
-	StatusResponded:  "Yanıt Verildi",
-	StatusAssessment: "Değerlendirme",
-	StatusInterview:  "Mülakat",
-	StatusOffer:      "Teklif",
-	StatusRejected:   "Reddedildi",
-	StatusDiscarded:  "İptal Edildi",
-	StatusSkip:       "Uygun Değil",
-	StatusHired:      "İşe Alındı",
-	StatusOther:      "Diğer",
+	StatusEvaluated:   "Değerlendirildi",
+	StatusSpeculative: "Spekülatif",
+	StatusApplied:     "Başvuruldu",
+	StatusResponded:   "Yanıt Verildi",
+	StatusAssessment:  "Değerlendirme",
+	StatusInterview:   "Mülakat",
+	StatusOffer:       "Teklif",
+	StatusRejected:    "Reddedildi",
+	StatusDiscarded:   "İptal Edildi",
+	StatusSkip:        "Uygun Değil",
+	StatusHired:       "İşe Alındı",
+	StatusOther:       "Diğer",
 
 	// Additional UI strings
 	NoData:        "Veri yok",
@@ -605,6 +738,11 @@ var Tr = Catalog{
 	HelpRefresh:    " yenile  ",
 	HelpReport:     " rapor  ",
 	HelpOpenURL:    " URL aç  ",
+	HelpQueue:      " sıraya al  ",
+	HelpSkip:       " atla  ",
+	HelpUndoSkip:   " atlamayı geri al  ",
+	HelpRankRow:    " puanla  ",
+	HelpRankAll:    " tümünü puanla  ",
 	HelpOpenPDF:    " PDF'i aç  ",
 	HelpCopyPDF:    " PDF yolunu kopyala  ",
 	HelpRegenPDF:   " PDF üret  ",
@@ -653,6 +791,61 @@ var Tr = Catalog{
 	SortPosted:   "yayın",
 	ViewGrouped:  "gruplu",
 	ViewFlat:     "düz",
+
+	// Inbox tab
+	TabInbox:               "GELEN",
+	ColRank:                "SIRA",
+	SortRank:               "sıra",
+	LabelRank:              "Sıra: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "data/pipeline.md içinde bekleyen satır yok",
+	InboxNotRanked:         "sıralanmadı",
+	InboxSummary:           "%d bekleyen · %d sıralanmadı",
+	InboxNoWebURL:          "Web adresi değil, hiçbir şey açılmadı: %s",
+	InboxUnavailable:       "Gelen kutusu okunamadı; önceki satırlar gösteriliyor: %s",
+	InboxStatusQueued:      "Sırada",
+	InboxStatusRunning:     "Çalışıyor",
+	InboxStatusPaused:      "Duraklatıldı",
+	InboxStatusNeedsAnswer: "Yanıt bekliyor",
+	InboxStatusFailed:      "Başarısız",
+	InboxStatusDone:        "Tamamlandı",
+
+	InboxQueueing:         "Sıraya alınıyor: %s ...",
+	InboxQueued:           "Sıraya alındı. Değerlendirmek için batch/batch-runner.sh çalıştırın: %s",
+	InboxQueueFailed:      "Satır sıraya alınamadı: %s",
+	InboxQueueAlready:     "Zaten toplu iş dosyalarında, sıraya alınmadı: %s",
+	InboxQueueRetryFailed: "Toplu işte başarısız; batch/batch-runner.sh --retry-failed ile yeniden deneyin: %s",
+	InboxQueueUnreadable:  "Sıraya alınmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
+	InboxQueueNoWebURL:    "Web adresi değil, sıraya alınmadı: %s",
+
+	InboxSkipping:       "Atlanıyor: %s ...",
+	InboxSkipped:        "Atlandı; u ile geri gelir: %s",
+	InboxSkipUnchanged:  "data/pipeline.md içinde zaten atlanmış, değişiklik yok: %s",
+	InboxSkipUnreadable: "Atlanmadı: data/pipeline.md içinde URL \"- [ ] \" ifadesinden hemen sonra gelmeli: %s",
+	InboxSkipFailed:     "Satır atlanamadı: %s",
+	InboxSkipNoWebURL:   "Web adresi değil, atlanmadı: %s",
+	InboxUndoNothing:    "Geri alınacak bir şey yok: bu oturumda hiçbir satır atlanmadı",
+	InboxUndoing:        "Geri getiriliyor: %s ...",
+	InboxUndone:         "Yeniden gelen kutusunda: %s",
+	InboxUndoUnchanged:  "Artık atlanmış değil, geri alınacak bir şey yok: %s",
+	InboxUndoGone:       "Geri getirilmedi: satır artık data/pipeline.md dosyasının Pending bölümünde değil: %s",
+	InboxUndoFailed:     "Atlama geri alınamadı; u ile yeniden deneyin: %s",
+
+	InboxRankAskRow:     "Bu satır ajan CLI'nizle puanlansın mı? Token harcar. y: evet, diğer: hayır",
+	InboxRankAskAll:     "%d satır ajan CLI'nizle puanlansın mı? Token harcar. y: evet, diğer: hayır",
+	InboxRankAskSome:    "Sonraki %d satır CLI'nizle puanlansın mı? Token harcar. y: evet, diğer: hayır",
+	InboxRankCancelled:  "İptal edildi, hiçbir satır puanlanmadı",
+	InboxRanking:        "%d satır ajan CLI'nizle puanlanıyor ...",
+	InboxRankRunning:    "%d puanlanıyor ...",
+	InboxRankBusy:       "Bir puanlama zaten sürüyor; bitmesini bekleyin",
+	InboxRankAlready:    "Zaten puanlanmış, yapılacak bir şey yok: %s",
+	InboxRankNone:       "Tüm satırlar puanlanmış, yapılacak bir şey yok",
+	InboxRankFailed:     "Puanlanamadı: %s",
+	InboxRankNotPending: "Puanlanmadı: URL, data/pipeline.md içinde \"- [ ] \" ifadesinden hemen sonra gelmeli ve henüz puanı olmamalı: %s",
+	InboxRankedRow:      "Puanlandı %.1f/5: %s",
+	InboxRankNoScore:    "Puan dönmedi; a ile yeniden deneyin: %s",
+	InboxRankedAll:      "Puanlama bitti; %d satır hâlâ sıralanmadı",
+	InboxRankReadFailed: "Puanlama bitti, ama Inbox okunamadı: %s",
 }
 
 // Es is the static Spanish translation catalog.
@@ -664,17 +857,18 @@ var Es = Catalog{
 	LoadingPreview: "Cargando vista previa...",
 
 	// Tabs & filters
-	TabAll:        "TODAS",
-	TabEvaluated:  "EVALUADAS",
-	TabApplied:    "APLICADAS",
-	TabInterview:  "ENTREVISTA",
-	TabResponded:  "RESPONDIDAS",
-	TabAssessment: "PRUEBA",
-	TabTop:        "TOP ≥4",
-	TabSkip:       "OMITIR",
-	TabRejected:   "RECHAZADAS",
-	TabDiscarded:  "DESCARTADAS",
-	TabOther:      "OTRAS",
+	TabAll:         "TODAS",
+	TabEvaluated:   "EVALUADAS",
+	TabSpeculative: "ESPECULATIVAS",
+	TabApplied:     "APLICADAS",
+	TabInterview:   "ENTREVISTA",
+	TabResponded:   "RESPONDIDAS",
+	TabAssessment:  "PRUEBA",
+	TabTop:         "TOP ≥4",
+	TabSkip:        "OMITIR",
+	TabRejected:    "RECHAZADAS",
+	TabDiscarded:   "DESCARTADAS",
+	TabOther:       "OTRAS",
 
 	// Table column headers
 	ColFit:      "AJUSTE",
@@ -749,17 +943,18 @@ var Es = Catalog{
 	TimeDaysAgo:   "hace %dd",
 
 	// Status display names
-	StatusEvaluated:  "Evaluada",
-	StatusApplied:    "Aplicada",
-	StatusResponded:  "Respondida",
-	StatusAssessment: "Prueba",
-	StatusInterview:  "Entrevista",
-	StatusOffer:      "Oferta",
-	StatusRejected:   "Rechazada",
-	StatusDiscarded:  "Descartada",
-	StatusSkip:       "OMITIR",
-	StatusHired:      "Contratada",
-	StatusOther:      "Otras",
+	StatusEvaluated:   "Evaluada",
+	StatusSpeculative: "Especulativa",
+	StatusApplied:     "Aplicada",
+	StatusResponded:   "Respondida",
+	StatusAssessment:  "Prueba",
+	StatusInterview:   "Entrevista",
+	StatusOffer:       "Oferta",
+	StatusRejected:    "Rechazada",
+	StatusDiscarded:   "Descartada",
+	StatusSkip:        "OMITIR",
+	StatusHired:       "Contratada",
+	StatusOther:       "Otras",
 
 	// Additional UI strings
 	NoData:        "Sin datos",
@@ -776,6 +971,11 @@ var Es = Catalog{
 	HelpRefresh:    " actualizar  ",
 	HelpReport:     " informe  ",
 	HelpOpenURL:    " abrir URL  ",
+	HelpQueue:      " encolar  ",
+	HelpSkip:       " omitir  ",
+	HelpUndoSkip:   " deshacer omisión  ",
+	HelpRankRow:    " rango  ",
+	HelpRankAll:    " rango a todas  ",
 	HelpOpenPDF:    " abrir PDF  ",
 	HelpCopyPDF:    " copiar ruta del PDF  ",
 	HelpRegenPDF:   " regenerar PDF  ",
@@ -824,6 +1024,61 @@ var Es = Catalog{
 	SortPosted:   "publicado",
 	ViewGrouped:  "agrupado",
 	ViewFlat:     "plano",
+
+	// Inbox tab
+	TabInbox:               "BANDEJA",
+	ColRank:                "RANGO",
+	SortRank:               "rango",
+	LabelRank:              "Rango: ",
+	LabelURL:               "URL: ",
+	InboxEmpty:             "No hay filas pendientes en data/pipeline.md",
+	InboxNotRanked:         "sin rango",
+	InboxSummary:           "%d pendientes · %d sin rango",
+	InboxNoWebURL:          "No es una dirección web; no se abrió nada: %s",
+	InboxUnavailable:       "Bandeja no disponible; se muestran las filas anteriores: %s",
+	InboxStatusQueued:      "En cola",
+	InboxStatusRunning:     "En curso",
+	InboxStatusPaused:      "En pausa",
+	InboxStatusNeedsAnswer: "Falta respuesta",
+	InboxStatusFailed:      "Fallida",
+	InboxStatusDone:        "Hecha",
+
+	InboxQueueing:         "Encolando %s ...",
+	InboxQueued:           "En cola. Ejecuta batch/batch-runner.sh para evaluarla: %s",
+	InboxQueueFailed:      "No se pudo encolar la fila: %s",
+	InboxQueueAlready:     "Ya está en los archivos de batch; no se encoló nada: %s",
+	InboxQueueRetryFailed: "Falló en el batch; reinténtalo con batch/batch-runner.sh --retry-failed: %s",
+	InboxQueueUnreadable:  "No se encoló: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
+	InboxQueueNoWebURL:    "No es una dirección web; no se encoló nada: %s",
+
+	InboxSkipping:       "Omitiendo %s ...",
+	InboxSkipped:        "Omitida; u la devuelve: %s",
+	InboxSkipUnchanged:  "Ya estaba omitida en data/pipeline.md; no cambió nada: %s",
+	InboxSkipUnreadable: "No se omitió: en data/pipeline.md la URL debe ir justo después de \"- [ ] \": %s",
+	InboxSkipFailed:     "No se pudo omitir la fila: %s",
+	InboxSkipNoWebURL:   "No es una dirección web; no se omitió nada: %s",
+	InboxUndoNothing:    "Nada que deshacer: no se omitió ninguna fila en esta sesión",
+	InboxUndoing:        "Devolviendo %s ...",
+	InboxUndone:         "De vuelta en la bandeja: %s",
+	InboxUndoUnchanged:  "Ya no está omitida; nada que deshacer: %s",
+	InboxUndoGone:       "No se devolvió: la fila ya no está en la sección Pending de data/pipeline.md: %s",
+	InboxUndoFailed:     "No se pudo deshacer la omisión; u lo intenta de nuevo: %s",
+
+	InboxRankAskRow:     "¿Dar rango a esta fila con tu CLI de agente? Usa tokens. y: sí, otra: no",
+	InboxRankAskAll:     "¿Dar rango a %d fila(s) con tu CLI de agente? Usa tokens. y: sí, otra: no",
+	InboxRankAskSome:    "¿Dar rango a las %d filas siguientes con tu CLI? Usa tokens. y: sí, otra: no",
+	InboxRankCancelled:  "Cancelado, ninguna fila recibió rango",
+	InboxRanking:        "Asignando rango a %d fila(s) con tu CLI de agente ...",
+	InboxRankRunning:    "asignando rango a %d ...",
+	InboxRankBusy:       "Ya hay una asignación de rango en curso; espera a que termine",
+	InboxRankAlready:    "Ya tiene rango, nada que hacer: %s",
+	InboxRankNone:       "Todas las filas tienen rango, nada que hacer",
+	InboxRankFailed:     "No se pudo asignar rango: %s",
+	InboxRankNotPending: "Sin rango: la URL debe ir justo después de \"- [ ] \" en data/pipeline.md y sin rango previo: %s",
+	InboxRankedRow:      "Rango %.1f/5: %s",
+	InboxRankNoScore:    "No llegó ninguna puntuación; a lo intenta de nuevo: %s",
+	InboxRankedAll:      "Asignación de rango terminada; %d fila(s) siguen sin rango",
+	InboxRankReadFailed: "Asignación de rango terminada, pero no se pudo leer el Inbox: %s",
 }
 
 // Current points to the active language catalog. Defaults to English (&En).

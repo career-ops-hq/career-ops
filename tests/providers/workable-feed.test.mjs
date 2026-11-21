@@ -144,6 +144,10 @@ const all = () => true;
   check(companies.map((c) => c.company).join('|') === 'Acme GmbH|ExampleCo' && acme.website === 'https://acme.example', 'postings are grouped per employer, sorted, with the website kept');
   check(stats.rows === 8 && stats.staleRows === 1 && stats.postings === 2, 'stats count rows read, stale rows and postings kept', JSON.stringify(stats));
 
+  const none = await loadWorkableFeed({ cutoffMs: CUTOFF, titleFilter: () => false, fetchStream: streamOf(text) });
+  check(none.companies.map((c) => `${c.company}:${c.jobs.length}`).join('|') === 'Acme GmbH:0|ExampleCo:0' && none.companies[0].website === 'https://acme.example',
+    'every employer in the feed is returned, with no postings when none passed', JSON.stringify(none.companies));
+
   const withUndated = await loadWorkableFeed({ cutoffMs: CUTOFF, includeUndated: true, titleFilter: all, fetchStream: streamOf(text) });
   check(withUndated.companies.some((c) => c.jobs.some((j) => j.title === 'QA Intern' && j.postedAt === undefined)), 'includeUndated keeps an undated posting, with no date');
 }

@@ -47,7 +47,7 @@ test("Follow-ups holds the table's place while the cadence loads", {
     });
     const response = await page.goto(`${origin.origin}/followups`);
     assert.equal(response.status(), 200);
-    await visible(page.getByRole("heading", { name: "Follow-up Tracker", exact: true })).waitFor();
+    await visible(page.getByRole("heading", { name: "Follow-ups", exact: true })).waitFor();
     await busyBody.waitFor({ timeout: 15_000 });
     const started = Date.now();
     while (!requested) {

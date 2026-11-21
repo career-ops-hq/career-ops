@@ -42,7 +42,7 @@ export const CROSSLIST_WINDOW_DAYS = 90;
 export function normalizeJdText(text) {
   return String(text ?? '')
     .toLowerCase()
-    .replace(/<[^>]*>/g, ' ')
+    .replace(/<[^>]*(>?)/g, (tag, close) => (close ? ' ' : tag))
     .replace(/&[a-z#0-9]+;/gi, ' ')
     .replace(/https?:\/\/\S+/g, ' ')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')

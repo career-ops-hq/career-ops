@@ -746,7 +746,7 @@ I am happy to discuss further at your convenience.
 ## Score Evidence
 (五个评分维度：证据状态与来源、未解决问题、Evidence confidence 等级、核验优先级)
 
-## H) 开放性问题拟答草稿
+## H) 开放性问题拟答草稿 (draft)
 (仅在评分 >= 4.5 时生成 —— 为申请表单起草的回答)
 
 ---

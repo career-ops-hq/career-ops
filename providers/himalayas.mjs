@@ -9,6 +9,8 @@
 // Wire in via a `job_boards:` entry with `provider: himalayas`.
 
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
+import { normalizeEmploymentType } from './_employment-type.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 const FEED_URL = 'https://himalayas.app/jobs/api?limit=20';
 const TRUSTED_HOST = 'himalayas.app';
@@ -123,6 +125,9 @@ export default {
     }
     if (probeCap === Infinity) {
       console.error(`⚠️  himalayas: ${entry.name || 'Himalayas'} truncated at max_pages=${maxPages} (${jobs.length} jobs)`);
+      // A cursor was left when max_pages ran out: the result says so too, so
+      // scan.mjs logs the board partial instead of reachable (lib/board-truncation.mjs).
+      markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
     return jobs;
   },
@@ -133,11 +138,13 @@ export default {
  *
  * Shape: `{ jobs: [...] }`, where each job currently carries `title`,
  * `companyName`, `locationRestrictions`, `applicationLink`, `guid`,
- * `pubDate`, and `companySlug`. `applicationLink` is preferred over `guid`
- * and used as the dedup key after HTTPS + host validation.
+ * `pubDate`, `companySlug` and `employmentType`. `applicationLink` is
+ * preferred over `guid` and used as the dedup key after HTTPS + host
+ * validation. `employmentType` is normalized (_employment-type.mjs) and set
+ * only when it names a known type.
  *
  * @param {unknown} json - raw parsed API response
- * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number}>}
+ * @returns {Array<{title: string, url: string, company: string, location: string, postedAt?: number, employmentType?: string}>}
  */
 export function parseHimalayasResponse(json) {
   if (!json || typeof json !== 'object' || !Array.isArray(json.jobs)) return [];
@@ -152,13 +159,20 @@ export function parseHimalayasResponse(json) {
     const url = cleanHimalayasUrl(item.applicationLink) || cleanHimalayasUrl(item.guid);
     if (!url) continue;
 
-    jobs.push({
+    /** @type {{title: string, url: string, company: string, location: string, postedAt?: number, employmentType?: import('./_employment-type.mjs').EmploymentType}} */
+    const job = {
       title,
       url,
       company: cleanText(item.companyName),
       location: locationText(item.locationRestrictions),
       postedAt: toEpochMs(item.pubDate),
-    });
+    };
+    // "Full Time" | "Part Time" | "Contractor" | "Temporary" | "Intern" |
+    // "Volunteer" | "Other", per the API docs. The last two name no type
+    // _employment-type.mjs knows, so they leave the field off.
+    const employmentType = normalizeEmploymentType(item.employmentType);
+    if (employmentType) job.employmentType = employmentType;
+    jobs.push(job);
   }
 
   return jobs;

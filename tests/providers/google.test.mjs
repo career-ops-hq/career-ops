@@ -116,9 +116,9 @@ try {
     const { ctx, calls } = recordingCtx((c) => linkPage(fullPageIds(1000 + Number(pageOf(c.url) || '1') * PAGE_SIZE)));
     let jobs;
     const logged = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 2 }, ctx); });
-    calls.length === 2 && jobs.length === PAGE_SIZE * 2
-      ? pass('google.fetch() stops at max_pages when every page is full')
-      : fail(`google max_pages cap: ${calls.length} requests, ${jobs?.length} jobs`);
+    calls.length === 2 && jobs.length === PAGE_SIZE * 2 && jobs.truncated?.reason === 'page-cap' && jobs.truncated?.fetched === PAGE_SIZE * 2
+      ? pass('google.fetch() stops at max_pages when every page is full and marks page-cap')
+      : fail(`google max_pages cap: ${calls.length} requests, ${jobs?.length} jobs, truncated=${JSON.stringify(jobs?.truncated)}`);
     logged.some((l) => /hit the 2-page cap on at least one query — raise max_pages/.test(l))
       ? pass('google.fetch() warns when the page cap truncated a query')
       : fail(`google cap warning: ${JSON.stringify(logged)}`);
@@ -236,9 +236,9 @@ try {
     const { ctx } = recordingCtx((c) => query(c.url));
     let jobs; let logged;
     logged = await captureErrors(async () => { jobs = await provider.fetch({ name: 'Google', google: { queries: ['strategy'] }, max_pages: 5 }, ctx); });
-    jobs?.length === PAGE_SIZE && logged.some((l) => /stopped "strategy" at page 2/.test(l)) && !logged.some((l) => /raise max_pages/.test(l))
-      ? pass('google.fetch() keeps the pages collected when a later page fails, warns, and does not blame max_pages')
-      : fail(`google later-page failure: ${jobs?.length} jobs, ${JSON.stringify(logged)}`);
+    jobs?.length === PAGE_SIZE && jobs.truncated?.reason === 'fetch-error' && jobs.truncated?.fetched === PAGE_SIZE && logged.some((l) => /stopped "strategy" at page 2/.test(l)) && !logged.some((l) => /raise max_pages/.test(l))
+      ? pass('google.fetch() keeps the pages collected when a later page fails, warns, and marks fetch-error')
+      : fail(`google later-page failure: ${jobs?.length} jobs, ${JSON.stringify(logged)}, truncated=${JSON.stringify(jobs?.truncated)}`);
   }
   {
     // A later query whose first request fails keeps the earlier query's jobs,
@@ -250,9 +250,38 @@ try {
     const logged = await captureErrors(async () => {
       try { jobs = await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] } }, ctx); } catch (e) { threw = e; }
     });
-    !threw && jobs?.length === 2 && logged.some((l) => /stopped "beta" at page 1/.test(l))
-      ? pass('google.fetch() keeps an earlier query\'s jobs when a later query\'s first request fails, and warns')
-      : fail(`google later-query failure: threw=${threw?.message} jobs=${jobs?.length} ${JSON.stringify(logged)}`);
+    !threw && jobs?.length === 2 && jobs.truncated?.reason === 'fetch-error' && logged.some((l) => /stopped "beta" at page 1/.test(l))
+      ? pass('google.fetch() keeps an earlier query\'s jobs when a later query\'s first request fails, warns, and marks fetch-error')
+      : fail(`google later-query failure: threw=${threw?.message} jobs=${jobs?.length} ${JSON.stringify(logged)}, truncated=${JSON.stringify(jobs?.truncated)}`);
+  }
+  {
+    // An earlier query whose first request fails keeps a later query's jobs,
+    // warns, and does not throw.
+    const err404 = Object.assign(new Error('Not Found'), { status: 404 });
+    const query = (url) => { if (qOf(url) === 'alpha') throw err404; return linkPage(['5000', '5001']); };
+    const { ctx } = recordingCtx((c) => query(c.url));
+    let jobs; let threw = null;
+    const logged = await captureErrors(async () => {
+      try { jobs = await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] } }, ctx); } catch (e) { threw = e; }
+    });
+    !threw && jobs?.length === 2 && jobs.truncated?.reason === 'fetch-error' && logged.some((l) => /stopped "alpha" at page 1/.test(l))
+      ? pass('google.fetch() keeps a later query\'s jobs when an earlier query\'s first request fails, warns, and marks fetch-error')
+      : fail(`google earlier-query failure: threw=${threw?.message} jobs=${jobs?.length} ${JSON.stringify(logged)}, truncated=${JSON.stringify(jobs?.truncated)}`);
+  }
+  {
+    // When EVERY query fails on page 1, throws the first query's error (total outage).
+    const errAlpha = Object.assign(new Error('alpha failed'), { status: 503 });
+    const errBeta = Object.assign(new Error('beta failed'), { status: 500 });
+    const query = (url) => {
+      if (qOf(url) === 'alpha') throw errAlpha;
+      throw errBeta;
+    };
+    const { ctx } = recordingCtx((c) => query(c.url));
+    let threw = null;
+    try { await provider.fetch({ name: 'Google', google: { queries: ['alpha', 'beta'] } }, ctx); } catch (e) { threw = e; }
+    threw === errAlpha
+      ? pass('google.fetch() throws the first failure when every query fails on page 1 (total outage)')
+      : fail(`google total outage: threw=${threw?.message}, expected alpha failed`);
   }
   {
     // While probing, a rejection propagates unwrapped (verify-portals needs it).

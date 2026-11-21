@@ -198,7 +198,19 @@ export async function checkRegistryFreshness(root, { fetchRelease = fetchLatestR
   return out;
 }
 
+const USAGE = `Usage: node validate-plugin-registry.mjs [--deep] [--check-stale]
+
+Checks the plugin registry (plugins-registry/<id>.json) for shape and uniqueness,
+without network access. Exits 1 when it finds a problem.
+  --deep         also clone each entry at its pinned SHA (network) and audit it
+  --check-stale  also compare each pin with the plugin's latest release (network)`;
+
 if (isMainModule(import.meta.url)) {
+  // Before any check: --help used to run the full validation and print its verdict.
+  if (process.argv.includes('--help') || process.argv.includes('-h')) {
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
+  }
   const root = process.cwd();
   const deep = process.argv.includes('--deep');
   const problems = validateRegistry(root);
@@ -208,7 +220,8 @@ if (isMainModule(import.meta.url)) {
     const { auditRegistryEntry } = await import('./plugin-install.mjs');
     const { loadRegistry } = await import('./plugins/_registry.mjs');
     for (const e of loadRegistry(root).plugins) {
-      for (const p of auditRegistryEntry(e.repo, e.sha, e.id)) problems.push(`${e.name}: ${p}`);
+      const warn = (w) => console.log(`⚠ ${e.name}: ${w}`);
+      for (const p of auditRegistryEntry(e.repo, e.sha, e.id, warn)) problems.push(`${e.name}: ${p}`);
     }
   }
   // --check-stale: compare each pin against the plugin's latest published

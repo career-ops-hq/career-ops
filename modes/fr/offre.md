@@ -235,7 +235,7 @@ Les libelles de l'en-tete (`**Date:**`, `**URL:**`, `**Archetype:**`, `**Score:*
 ## Score Evidence
 (cinq dimensions, statut de la preuve, questions ouvertes, Evidence confidence, priorites)
 
-## H) Brouillons de reponses pour la candidature
+## H) Brouillons de reponses pour la candidature (draft)
 (uniquement si score >= 4.5 -- brouillons de reponses pour le formulaire de candidature)
 
 ---

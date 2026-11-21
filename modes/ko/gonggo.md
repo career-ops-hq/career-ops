@@ -237,7 +237,7 @@ report를 저장하고 tracker에 기록한 뒤, `modes/oferta.md` -> Cover Lett
 ## Score Evidence
 (다섯 가지 항목, 근거 상태, 남은 질문, Evidence confidence, 우선순위)
 
-## H) 지원서 답변 초안
+## H) 지원서 답변 초안 (draft)
 (score >= 4.5일 때만 -- 지원서 폼 답변 초안)
 
 ---

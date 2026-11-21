@@ -21,7 +21,7 @@ const requiredGuardrails = [
 // day it lands. This hand-kept list used to BE the census, and it had already
 // drifted: modes/vi (#4727) shipped a _shared.md this file never opened.
 const expectedLocalizedModes = [
-  'ar', 'da', 'de', 'es', 'fr', 'hi', 'id', 'it', 'ja',
+  'ar', 'at', 'da', 'de', 'es', 'fr', 'hi', 'id', 'in', 'it', 'ja',
   'ko', 'nb', 'nl', 'pl', 'pt', 'ru', 'sg', 'tr', 'ua', 'vi', 'zh-TW', 'zh',
 ];
 

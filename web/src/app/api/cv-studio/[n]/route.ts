@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { readJsonObject } from "@/lib/json-body";
-import { keywordsInText, loadStudio, missingDataFolderMessage, renderEditedPdf, saveEdits } from "@/lib/cv-studio/server";
+import { keywordsInText, loadStudio, missingDataFolderMessage, recordPdfExport, renderEditedPdf, restoreIndexedFullPdf, saveEdits } from "@/lib/cv-studio/server";
 import { acquireTrackerWrite, releaseTrackerWrite } from "@/lib/core/run-registry";
 import { parseEdits } from "@/lib/cv-studio/studio.mjs";
 import { createPutOrder } from "@/lib/cv-studio/put-order.mjs";
@@ -52,6 +52,22 @@ export async function POST(req: Request, { params }: RouteContext) {
     const keywords = await keywordsInText(n, body.text);
     return keywords ? NextResponse.json({ keywords }) : NextResponse.json({ error: "no-report" }, { status: 404 });
   }
+  if (body.op === "restore-full-pdf") {
+    const load = await loadStudio(n);
+    if (!load.ok) return NextResponse.json({ error: load.reason }, { status: NOT_FOUND[load.reason] });
+    // Save for apply holds this set for the whole render. Reset must not
+    // publish the full PDF and then lose the race to that render's index write.
+    if (saving.has(load.reportNum)) return NextResponse.json({ error: "busy" }, { status: 409 });
+    saving.add(load.reportNum);
+    try {
+      return NextResponse.json(await restoreIndexedFullPdf(load.reportNum));
+    } catch (err) {
+      if (err instanceof Error && err.name === "LockTimeoutError") return NextResponse.json({ error: "busy" }, { status: 409 });
+      throw err;
+    } finally {
+      saving.delete(load.reportNum);
+    }
+  }
   if (body.op !== "save") return NextResponse.json({ error: "unknown op" }, { status: 400 });
   const load = await loadStudio(n);
   if (!load.ok) return NextResponse.json({ error: load.reason }, { status: NOT_FOUND[load.reason] });
@@ -66,7 +82,13 @@ export async function POST(req: Request, { params }: RouteContext) {
     if (!putOrder.accept(load.reportNum, body.tab, body.rev)) return NextResponse.json({ ok: true, superseded: true });
     saveEdits(load.reportNum, parsed.edits);
     const result = await renderEditedPdf(load, parsed.edits);
-    return result.ok ? NextResponse.json(result) : NextResponse.json({ error: result.error.slice(0, 600) }, { status: 422 });
+    if (result.ok) {
+      recordPdfExport(load.reportNum, null);
+      return NextResponse.json(result);
+    }
+    const error = result.error.slice(0, 600);
+    recordPdfExport(load.reportNum, { ok: false, error });
+    return NextResponse.json({ error }, { status: 422 });
   } finally {
     saving.delete(load.reportNum);
     releaseTrackerWrite(token);

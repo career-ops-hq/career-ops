@@ -46,6 +46,8 @@ import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { validateFlags } from './lib/cli-flags.mjs';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { LEGAL_SUFFIXES, GENERIC_DESCRIPTORS } from './tracker-utils.mjs';
+import { inviteEvidence } from './lib/invite-evidence.mjs';
+import { parseDate } from './lib/parse-date.mjs';
 
 const CAREER_OPS = getCareerOpsRoot();
 // Sibling scripts live next to this file in the *code* checkout, which is a
@@ -313,21 +315,25 @@ export function extractCompany(text) {
  * not necessarily the email send date). Only matches unambiguous ISO or
  * "Month D, YYYY" forms — anything else is left for the human to read.
  *
+ * A date that does not exist on the calendar ("February 31, 2026",
+ * "2026-13-45") is skipped rather than reported: it is a typo or not a date,
+ * and returning it would show the user a day that cannot be the interview.
+ *
  * @param {string} text
  * @returns {string|null} YYYY-MM-DD or null.
  */
 export function extractDate(text) {
   if (!text) return null;
-  const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-  if (iso) return iso[0];
+  for (const iso of text.matchAll(/\b(\d{4})-(\d{2})-(\d{2})\b/g)) {
+    if (parseDate(iso[0])) return iso[0];
+  }
 
-  const months = 'January|February|March|April|May|June|July|August|September|October|November|December';
-  const named = text.match(new RegExp(`\\b(${months})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, 'i'));
-  if (named) {
-    const monthIdx = new Date(`${named[1]} 1, 2000`).getMonth() + 1;
+  const months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+  for (const named of text.matchAll(new RegExp(`\\b(${months.join('|')})\\s+(\\d{1,2}),?\\s+(\\d{4})\\b`, 'gi'))) {
+    const month = String(months.indexOf(named[1].toLowerCase()) + 1).padStart(2, '0');
     const day = String(named[2]).padStart(2, '0');
-    const month = String(monthIdx).padStart(2, '0');
-    return `${named[3]}-${month}-${day}`;
+    const date = `${named[3]}-${month}-${day}`;
+    if (parseDate(date)) return date;
   }
   return null;
 }
@@ -734,16 +740,19 @@ function extractPanel(text) {
  * an invite (so unrelated text does not gain a spurious constraint).
  *
  * @param {string} text
+ * @param {{classification?: string}} [options] - the caller's final classification
+ *   (analyzeInvite's evidence pass can promote an email to `invite`); defaults to classifyEmail's.
  * @returns {Array<{key: string, tag: string, detail?: string}>}
  */
-export function extractConstraints(text) {
+export function extractConstraints(text, options = {}) {
   if (!text || typeof text !== 'string') return [];
   const out = [];
   const add = (key, detail) => out.push({ key, tag: `[constraint:${key}]`, ...(detail ? { detail } : {}) });
   for (const { key, test } of CONSTRAINT_DETECTORS) if (test(text)) add(key);
   const panel = extractPanel(text);
   if (panel) add('panel', panel.join('; '));
-  if (classifyEmail(text).classification === 'invite' && !statesDuration(text)) add('length-not-stated');
+  const classification = options.classification ?? classifyEmail(text).classification;
+  if (classification === 'invite' && !statesDuration(text)) add('length-not-stated');
   return out;
 }
 
@@ -996,11 +1005,25 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
     // unaffected.
     isAIInterviewer: isAIInterviewerPlatform(text),
   };
-  // Additive (#5732): top-level so every existing key keeps its shape.
-  const constraints = extractConstraints(text);
   const rows = trackerRows ?? loadTracker();
   const candidates = matchInvite(signals, rows);
-  const { classification, matchedPhrases, phraseStrength } = classifyEmail(text);
+  const phrases = classifyEmail(text);
+  const { matchedPhrases, phraseStrength } = phrases;
+  // Evidence pass (#6167): a calendar invite, a booking link or a proposed time
+  // makes an invite of text the phrase list missed, and receipt or process
+  // wording with no such signal ("if there is a match, we will invite you")
+  // stops a confirmation reading as one. A rejection stays a rejection.
+  // A pasted email often keeps its headers: the Subject line is evidence too.
+  const subject = (String(text || '').match(/^[ \t]*(?:subject|betreff|тема)[ \t]*:[ \t]*(.+)$/im) || [])[1] || '';
+  const evidence = inviteEvidence({ subject: subject.trim(), text });
+  let classification = phrases.classification;
+  if (classification !== 'rejection') {
+    if (evidence.invite) classification = 'invite';
+    else if (classification === 'invite' && evidence.receipt) classification = 'unknown';
+  }
+  // Additive (#5732): top-level so every existing key keeps its shape. Read after
+  // the evidence pass, so a promoted invite still gets length-not-stated.
+  const constraints = extractConstraints(text, { classification });
   const result = { signals, classification, matchedPhrases, phraseStrength, candidates, constraints };
   // Additive (#6092): appended last so every existing key keeps its position.
   // null unless the text is an invite and the draft was not suppressed.
@@ -1012,7 +1035,8 @@ export function analyzeInvite(text, trackerRows = null, options = {}) {
       readReport: options.readReport ?? (r => readReportHeader(r.report, [dirname(APPS_FILE), CAREER_OPS])),
     });
   }
-  return { ...result, clarificationDraft };
+  // Additive (#6167): appended last, after clarificationDraft.
+  return { ...result, clarificationDraft, inviteEvidence: evidence };
 }
 
 /**

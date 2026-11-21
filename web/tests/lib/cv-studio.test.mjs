@@ -15,6 +15,7 @@ import {
   isStudioUndoKey,
   pushUndo,
   resolveStudio,
+  restoredId,
   studioReducer,
   UNDO_LIMIT,
   wordDiff,
@@ -266,6 +267,59 @@ test("moving a bullet reorders it in the render", () => {
   ]);
 });
 
+// #7343: an added-back bullet used to be pinned after the tailored ones, in the
+// editor and in the PDF, because it was never part of the item's order.
+test("an added-back bullet moves among the tailored bullets, in the render too", () => {
+  const { tree, doc } = studio();
+  const id = restoredId("s2i0", 0);
+  const siblings = ["s2i0b0", "s2i0b1", "s2i0b2", id];
+  let edits = studioReducer(emptyEdits("h1"), { type: "restore", item: "s2i0", index: 0 }, doc);
+  edits = studioReducer(edits, { type: "move", parent: "s2i0", id, by: -1, siblings }, doc);
+  edits = studioReducer(edits, { type: "move", parent: "s2i0", id, by: -1, siblings: edits.order.s2i0 }, doc);
+  assert.deepEqual(edits.order.s2i0, ["s2i0b0", id, "s2i0b1", "s2i0b2"]);
+
+  const { view, added } = resolveStudio(doc, edits);
+  assert.deepEqual(added, { s2i0: [{ id, text: "Ran the on-call rotation for the model serving stack" }] });
+  const html = renderBlocks(tree, view, { added });
+  assert.deepEqual(visibleBullets(html).slice(1, 5), [
+    "Led MLOps platform team (3 engineers): model registry, feature store",
+    "Ran the on-call rotation for the model serving stack",
+    "Designed fraud pipeline on Kafka & Flink",
+    "Mentored new engineers in Python",
+  ]);
+  assert.match(html, /<li>Led MLOps[^\n]*<\/li>\n {4}<li>Ran the on-call/, "the added bullet reuses the list's own spacing");
+});
+
+test("an added-back bullet with no saved position still lands after the tailored bullets", () => {
+  const { tree, doc } = studio();
+  const edits = studioReducer(emptyEdits("h1"), { type: "restore", item: "s2i0", index: 0 }, doc);
+  const { view, added } = resolveStudio(doc, edits);
+  assert.equal(visibleBullets(renderBlocks(tree, view, { added }))[4], "Ran the on-call rotation for the model serving stack");
+});
+
+test("removing an added-back bullet drops it from the order, so moves stay one click", () => {
+  const { doc } = studio();
+  const id = restoredId("s2i0", 0);
+  let edits = studioReducer(emptyEdits("h1"), { type: "restore", item: "s2i0", index: 0 }, doc);
+  edits = studioReducer(edits, { type: "move", parent: "s2i0", id, by: -1, siblings: ["s2i0b0", "s2i0b1", "s2i0b2", id] }, doc);
+  edits = studioReducer(edits, { type: "unrestore", item: "s2i0", index: 0 }, doc);
+  assert.deepEqual(edits.order.s2i0, ["s2i0b0", "s2i0b1", "s2i0b2"]);
+
+  // An order saved before this fix can still name the removed bullet; a move skips it.
+  const stale = { ...emptyEdits("h1"), order: { s2i0: ["s2i0b0", "s2i0b1", id, "s2i0b2"] } };
+  const moved = studioReducer(stale, { type: "move", parent: "s2i0", id: "s2i0b2", by: -1, siblings: ["s2i0b0", "s2i0b1", "s2i0b2"] }, doc);
+  assert.deepEqual(moved.order.s2i0, ["s2i0b0", "s2i0b2", "s2i0b1"]);
+});
+
+test("an added-back bullet can follow an entry's only tailored bullet", () => {
+  const tree = parseBlocks(HTML);
+  const item = tree.sections[2].items[1];
+  const view = { hidden: new Set(), order: { [item.id]: ["x", item.bullets[0].id] }, text: {} };
+  const out = renderBlocks(tree, view, { added: { [item.id]: [{ id: "x", text: "Shipped <the> thing" }] } });
+  assert.deepEqual(parseBlocks(out).sections[2].items[1].bullets.map((b) => b.text), ["Shipped <the> thing", "Built NLP pipeline"]);
+  assert.match(out, /<li>Shipped &lt;the&gt; thing<\/li>\n {4}<li>Built NLP pipeline<\/li>/);
+});
+
 test("the one-page preset hides trailing bullets until the user shows one again", () => {
   const { doc } = studio();
   const onePage = studioReducer(emptyEdits("h1"), { type: "preset", preset: { length: "one-page" } }, doc);
@@ -294,13 +348,26 @@ test("edits saved against another version of the CV are dropped, not misapplied"
   assert.deepEqual(parseEdits({ v: 1, sourceHash: "old", use: { a: { kind: "custom" }, b: { kind: "base" } } }, "old").edits.use, { b: { kind: "base" } });
 });
 
-test("wordDiff marks removed and inserted words", () => {
+test("wordDiff marks removed and inserted words and keeps a space between the runs", () => {
   assert.deepEqual(wordDiff("Led ML platform team", "Led MLOps platform team"), [
     { op: "same", text: "Led " },
     { op: "del", text: "ML" },
+    { op: "same", text: " " },
     { op: "ins", text: "MLOps" },
     { op: "same", text: " platform team" },
   ]);
+});
+
+test("wordDiff does not glue a rewritten sentence", () => {
+  const parts = wordDiff(
+    "Coordinator who keeps a weekly review on time and writes the notes people actually read.",
+    "Coordinator who keeps a weekly review on time, writes stakeholder updates, and turns a messy board into release notes people finish.",
+  );
+  const shown = parts.map((part) => part.text).join("");
+  assert.equal(shown.includes("thewrites"), false);
+  assert.equal(shown.includes("read.messy"), false);
+  assert.match(shown, /the writes/);
+  assert.match(shown, /read\. messy/);
 });
 
 test("htmlText collapses nested tag shapes so no live tag remains", () => {
@@ -361,6 +428,7 @@ test("wordDiff keeps a trailing comma apart from its word", () => {
 test("wordDiff folds a short unchanged run only when it sits between a deletion and an insertion", () => {
   assert.deepEqual(wordDiff("built internal MLOps tooling: model registry", "as technical lead, mentoring the model registry"), [
     { op: "del", text: "built internal MLOps tooling:" },
+    { op: "same", text: " " },
     { op: "ins", text: "as technical lead, mentoring" },
     { op: "same", text: " " },
     { op: "ins", text: "the " },

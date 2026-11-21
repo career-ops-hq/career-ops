@@ -3,6 +3,7 @@
 import { coerceId } from './_ids.mjs';
 import { htmlToText } from './_html-to-text.mjs';
 import { fetchTextWithRetry, sleep } from './_http.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 // Google provider — Google Careers is server-rendered, so the results page HTML
 // contains every job link:
@@ -140,6 +141,9 @@ export default {
     const byId = new Map();
     let requestsMade = 0;
     let truncated = false;
+    let fetchFailed = false;
+    let firstPageFailures = 0;
+    let firstPageError;
 
     for (const q of queriesToRun) {
       // IDs seen in THIS query's walk: a page that adds none is Google
@@ -158,11 +162,16 @@ export default {
         try {
           html = await fetchTextWithRetry(ctx, url, { redirect: 'error' });
         } catch (err) {
-          // The first request failing means the board is broken, not empty, and
-          // a probe needs the rejection unwrapped so its request-budget sentinel
-          // keeps its identity. Otherwise keep the queries already collected
-          // rather than lose them to one bad search, and move to the next query.
-          if (probing || requestsMade === 0) throw err;
+          // While probing, a rejection propagates unwrapped (verify-portals needs it).
+          // Track page-1 failures across all queries: if every query fails on page 1,
+          // throw the first error (a total outage). Otherwise, keep the jobs collected
+          // from successful queries, warn, and move to the next query.
+          if (probing) throw err;
+          fetchFailed = true;
+          if (page === 1) {
+            if (firstPageFailures === 0) firstPageError = err;
+            firstPageFailures += 1;
+          }
           const cause = err instanceof Error ? err.message : String(err);
           console.error(`⚠️  google: ${entry.name} stopped "${q}" at page ${page} (${byId.size} jobs so far): ${cause}`);
           break;
@@ -187,9 +196,17 @@ export default {
         if (page === maxPages && !probing) truncated = true;
       }
     }
+    if (firstPageFailures === queriesToRun.length && firstPageError) {
+      throw firstPageError;
+    }
+    let jobs = [...byId.values()];
     if (truncated) {
       console.error(`⚠️  google: ${entry.name} hit the ${maxPages}-page cap on at least one query — raise max_pages on this entry for more`);
+      jobs = markTruncated(jobs, 'page-cap', { fetched: jobs.length });
     }
-    return [...byId.values()];
+    if (fetchFailed) {
+      jobs = markTruncated(jobs, 'fetch-error', { fetched: jobs.length });
+    }
+    return jobs;
   },
 };

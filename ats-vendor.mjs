@@ -25,6 +25,7 @@ export const ATS_HOST_PATTERNS = [
   { id: 'smartrecruiters', test: (h) => hostIs(h, 'smartrecruiters.com') },
   { id: 'csod', test: (h) => hostIs(h, 'csod.com') },
   { id: 'hirehive', test: (h) => hostIs(h, 'hirehive.com') },
+  { id: 'talentlink', test: (h) => hostIs(h, 'recruitmentplatform.com') },
   {
     id: 'oraclecloud',
     test: (h) => /(^|\.)oraclecloud(?:[1-9]|[1-9]\d)?\.com$/.test(h),

@@ -4,13 +4,17 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+// A literal path, so the static audit can read what this test loads. If your
+// manifest sets a different `entry`, change it here too.
+import hooks from '../index.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const KINDS = ['provider', 'ingest', 'search', 'notify', 'export'];
 
 const manifest = JSON.parse(readFileSync(path.join(here, '..', 'manifest.json'), 'utf8'));
-const mod = await import(path.join(here, '..', manifest.entry || 'index.mjs'));
-const hooks = mod.default;
+// The literal import above no longer follows manifest.entry: catch a plugin
+// that changes its entry and forgets this test.
+assert.equal(manifest.entry ?? 'index.mjs', 'index.mjs', 'manifest.entry changed: update the import at the top of this test');
 
 assert(hooks && typeof hooks === 'object', 'default export must be an object of hooks');
 const keys = Object.keys(hooks);

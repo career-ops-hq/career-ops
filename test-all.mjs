@@ -88,6 +88,7 @@ import { SCRATCH_PREFIX, markScratchOwner, sweepScratchDirs } from './lib/scratc
 import { MARKER_FILE } from './tests/data-root-guard.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { holdTestQueue } from './lib/test-queue.mjs';
+import { nodeFloor } from './lib/node-floor.mjs';
 
 /**
  * Read a repo-relative text file as UTF-8.
@@ -333,12 +334,19 @@ async function runDiscovered(filter = null, tools = null) {
       continue;
     }
     if (kind === 'node-test') {
-      const out = run(NODE, ['--test', f]);
+      // node:test suites get the same FACTOR-scaled budget the parallel loop
+      // gives each spawned suite: they spawn child processes per test, which
+      // a bare 30s script budget cannot cover on slow-spawn platforms
+      // (Windows). Derived from the helpers constant so sandbox runs that
+      // shrink the default shrink this budget with it.
+      const out = run(NODE, ['--test', f], { timeout: DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR });
       const failure = lastRunFailure();
-      // run()'s timeout is DEFAULT_SCRIPT_TIMEOUT_MS. Said the way the parallel
-      // loop says it, since a killed suite has no exit status to print.
+      // run()'s timeout for node:test suites is the FACTOR-scaled budget above.
+      // Said the way the parallel loop says it, since a killed suite has no
+      // exit status to print — and the line reports the budget actually given.
+      const budgetMs = DEFAULT_SCRIPT_TIMEOUT_MS * PARALLEL_NODE_TEST_BUDGET_FACTOR;
       const how = failure?.code === 'ETIMEDOUT'
-        ? `killed after ${DEFAULT_SCRIPT_TIMEOUT_MS / 1000}s`
+        ? `killed after ${budgetMs / 1000}s`
         : `exit ${failure?.status ?? '?'}`;
       reportNodeTestSuite(rel, out !== null, out ?? '', failure, how);
       continue;
@@ -636,6 +644,70 @@ async function runDiscoveredParallel(files, jobs, { withInlineSections = false }
   }
 }
 
+// Every flag this file reads. An unrecognized one is a usage error: unknown
+// tokens used to fall through to a full run, so `--help` executed the whole
+// suite and a mistyped `--only` ran everything and could report green — which
+// reads as "the subset passed". Same rule as the KNOWN_FLAGS precedent
+// (#1633/#1635) and reply-watch.mjs: an unknown flag outranks --help, so
+// `--help --bogus` is still an error (#2745). `-h` is the only single-dash
+// flag, since the suite has no short flags for it to collide with.
+const FLAGS_WITH_VALUE = new Set(['--only', '--needs', '--jobs', '--inline-child']);
+const KNOWN_FLAGS = new Set([...FLAGS_WITH_VALUE, '--quick', '--help']);
+const USAGE = [
+  'Usage:',
+  '  node test-all.mjs                       Run all tests',
+  '  node test-all.mjs --quick               Skip the dashboard build',
+  '  node test-all.mjs --only <substring>    Run only the discovered tests/**/*.test.mjs whose path matches',
+  '  node test-all.mjs --needs <tool,...>    Run only the suites that declare one of these tools',
+  '  node test-all.mjs --jobs <N>            At most N discovered suites at a time',
+].join('\n');
+const ARGS = process.argv.slice(2);
+const UNKNOWN_FLAGS = [];
+let WANTS_HELP = false;
+for (let at = 0; at < ARGS.length; at++) {
+  const arg = ARGS[at];
+  if (arg.startsWith('--')) {
+    const eq = arg.indexOf('=');
+    const flag = eq === -1 ? arg : arg.slice(0, eq);
+    // An attached value belongs only to a flag that takes one: `--help=1` is a
+    // typo, not a help request, and must not fall through to a full run.
+    if (!KNOWN_FLAGS.has(flag) || (eq !== -1 && !FLAGS_WITH_VALUE.has(flag))) {
+      UNKNOWN_FLAGS.push(arg);
+      continue;
+    }
+    if (flag === '--help') { WANTS_HELP = true; continue; }
+    // A known flag owns its operand whatever it looks like, so `--jobs -1`
+    // stays the --jobs error it already was and `--only -h` never reads as
+    // help.
+    if (eq === -1 && FLAGS_WITH_VALUE.has(flag)) at++;
+    continue;
+  }
+  if (arg === '-h') { WANTS_HELP = true; continue; }
+  if (arg.startsWith('-')) UNKNOWN_FLAGS.push(arg);
+}
+if (UNKNOWN_FLAGS.length > 0) {
+  console.log(`  ❌ unknown flag ${UNKNOWN_FLAGS[0]} — run with --help to see the flags this suite takes`);
+  process.exit(1);
+}
+if (WANTS_HELP) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
+// Below the project's Node floor (lib/node-floor.mjs, #4801) the tracker's
+// node:sqlite cannot load, so every suite that runs tracker.mjs or doctor.mjs
+// fails, each with the cause buried in its own output, and only after a full
+// run. Say so once, up front, the way doctor.mjs does, and run nothing. Called
+// where each kind of run starts, after its own flag checks, so a usage error
+// is still reported as one on any Node.
+function requireNodeFloor() {
+  const floor = nodeFloor(process.versions.node);
+  if (floor.pass) return;
+  console.log(`  ❌ ${floor.label}`);
+  for (const line of floor.fix ?? []) console.log(`     → ${line}`);
+  process.exit(1);
+}
+
 // Set in the process a run with more than one job starts for the inline
 // sections: the file its counters go to. See startInlineSections().
 const INLINE_CHILD = hasFlag(process.argv, '--inline-child') ? (flagValue(process.argv, '--inline-child') ?? '') : null;
@@ -732,6 +804,7 @@ if (NEEDS !== null) {
   }
   // Set before any suite starts: children inherit it, and toolRequired()
   // reads it on every call in this process.
+  requireNodeFloor();
   for (const tool of tools) process.env[REQUIRED_TOOL_ENV[tool]] = '1';
   console.log(`\n🧪 career-ops test suite (--needs ${tools.join(',')}${ONLY ? ` --only ${ONLY}` : ''})\n`);
   await runDiscovered(ONLY || null, tools);
@@ -743,6 +816,7 @@ if (ONLY !== null) {
     console.log('  ❌ --only requires a path substring, e.g. --only providers/themuse');
     process.exit(1);
   }
+  requireNodeFloor();
   console.log('\n🧪 career-ops test suite (--only ' + ONLY + ')\n');
   await runDiscovered(ONLY);
   finish();
@@ -753,6 +827,7 @@ if (ONLY !== null) {
 // lib/test-queue.mjs. Not in the inline sections' child, whose parent holds the
 // queue already.
 if (INLINE_CHILD === null) {
+  requireNodeFloor();
   try {
     await holdTestQueue();
   } catch (err) {
@@ -893,13 +968,16 @@ const scripts = [
   { name: 'reconcile-pipeline.mjs --dry-run', expectExit: 0 },
   { name: 'analyze-patterns.mjs --self-test', expectExit: 0 },
   { name: 'keyword-match.mjs --self-test', expectExit: 0 },
+  { name: 'verify-all.mjs --self-test', expectExit: 0 },
   { name: 'calibrate.mjs --self-test', expectExit: 0 },
   { name: 'check-table-freshness.mjs --self-test', expectExit: 0 },
   { name: 'check-jd-archive.mjs --self-test', expectExit: 0 },
+  { name: 'check-output-names.mjs --self-test', expectExit: 0 },
   { name: 'upskill.mjs --self-test', expectExit: 0 },
   { name: 'detect-reposts.mjs --self-test', expectExit: 0 },
   { name: 'rank-pipeline.mjs --self-test', expectExit: 0 },
   { name: 'discover-ats.mjs --self-test', expectExit: 0 },
+  { name: 'harvest-buildlist.mjs --self-test', expectExit: 0 },
   { name: 'process-quality.mjs --self-test', expectExit: 0 },
   { name: 'company-history.mjs --self-test', expectExit: 0 },
   { name: 'rejection-latency.mjs --self-test', expectExit: 0 },
@@ -910,6 +988,7 @@ const scripts = [
   { name: 'img-to-pdf.mjs --self-test', expectExit: 0 },
   { name: 'assessment-log.mjs --self-test', expectExit: 0 },
   { name: 'weekly-digest.mjs --self-test', expectExit: 0 },
+  { name: 'interview-jd-terms.mjs --self-test', expectExit: 0 },
   { name: 'build-cv-html.mjs --test', expectExit: 0 },
   { name: 'jd-skill-gap.mjs --self-test', expectExit: 0 },
   { name: 'story-provenance-check.mjs --self-test', expectExit: 0 },
@@ -926,7 +1005,7 @@ const scripts = [
   { name: 'tracker-sync-check.mjs --self-test', expectExit: 0 },
   { name: 'linkedin-join.mjs --self-test', expectExit: 0 },
   { name: 'validate-profile.mjs --self-test', expectExit: 0 },
-  { name: 'updater-migration-tests.mjs', expectExit: 0 },
+  { name: 'updater-migration-tests.mjs', expectExit: 0, timeoutMs: 300_000 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   { name: 'validate-system-paths-coverage.mjs --self-test', expectExit: 0 },
   // The bare coverage run is NOT here on purpose: this section executes each
@@ -2009,13 +2088,15 @@ try {
   // guard calls the ESM namespace bindings of `dns/promises`, which no mock can
   // reach, so the previous `mock.method(dnsModule.default, …)` stub never
   // applied. The test passed anyway — the real resolver found nothing for
-  // `ssrf-blocked-host.local` and the guard blocked on the empty address list,
+  // `ssrf-blocked-host.example` and the guard blocked on the empty address list,
   // so the loopback-rejection branch under test was never executed, and each
   // run spent ~12s waiting for mDNS/LLMNR to time out. The injected resolver
   // hands back a loopback address, which is the case that matters, and keeps
-  // the whole section off the network.
+  // the whole section off the network. The name is not a `.local` one: those
+  // are refused by name before any lookup (isPrivateUseName), which would skip
+  // the DNS layer this case exists to exercise.
   const restoreHostResolver = setHostResolver(async (hostname) => {
-    if (hostname === 'ssrf-blocked-host.local') return ['127.0.0.1'];
+    if (hostname === 'ssrf-blocked-host.example') return ['127.0.0.1'];
     // A shut-down analytics vendor: the name still appears in the page, but it
     // resolves to nothing at all. Distinct from the loopback case above, which
     // resolves fine and is blocked for being private.
@@ -2035,7 +2116,7 @@ try {
         if (routeCallback) {
           let aborted = false;
           const mockRoute = {
-            request: () => ({ url: () => 'http://ssrf-blocked-host.local/sensitive-internal' }),
+            request: () => ({ url: () => 'http://ssrf-blocked-host.example/sensitive-internal' }),
             abort: async () => {
               aborted = true;
             },
@@ -2282,10 +2363,10 @@ try {
   //    that resolves into loopback. Without the DNS layer this hop is allowed,
   //    which is the whole reason validateUrlSecurity is reused here.
   const restoreArchiveResolver = setHostResolver(async (hostname) => (
-    hostname === 'ssrf-blocked-host.local' ? ['127.0.0.1'] : ['93.184.216.34']
+    hostname === 'ssrf-blocked-host.example' ? ['127.0.0.1'] : ['93.184.216.34']
   ));
   try {
-    const dnsHop = await runGuard('http://ssrf-blocked-host.local/sensitive-internal');
+    const dnsHop = await runGuard('http://ssrf-blocked-host.example/sensitive-internal');
     if (dnsHop.verdict?.action === 'abort' && dnsHop.verdict.code === 'blockedbyclient') {
       pass('archive-posting egress guard blocks a hostname that resolves to loopback');
     } else {
@@ -2683,6 +2764,12 @@ const allowedFiles = new Set([
   'dashboard/internal/ui/screens/pipeline.go',
   'dashboard/internal/ui/screens/progress.go',
   'dashboard/internal/ui/screens/stats.go',
+  // An employer registry manifest names who granted its license, by design
+  // (signed_by, employers/README.md). This one is the maintainer's own.
+  'employers/contributions/2026-11-08-santifer.json',
+  // The registry README names its licensor and the address an employer writes
+  // to for removal, by design (employers/README.md, License and Removal).
+  'employers/README.md',
 ]);
 
 // The English README and every localized translation at the repo root
@@ -3511,7 +3598,7 @@ const expectedModes = [
   'batch.md', 'apply.md', 'auto-pipeline.md', 'contacto.md', 'deep.md',
   'ofertas.md', 'pipeline.md', 'project.md', 'tracker.md', 'training.md',
   'interview.md', 'latex.md', 'latex-tex.md', 'email.md', 'add.md', 'titles.md',
-  'expand.md', 'discover.md',
+  'expand.md', 'discover.md', 'gambit.md',
   'regional/eu-swe.md',
 ];
 
@@ -4074,8 +4161,9 @@ if (
         /New York State|not\s+NYC|not\s+sufficient/i.test(nyRow.candidate_residency_condition);
 
       // CodeRabbit finding 2 (#2896): the EU AI Act's high-risk obligations
-      // for stand-alone Annex III systems were provisionally deferred (May
-      // 2026 Digital Omnibus agreement) from 2026-08-02 to 2027-12-02, and
+      // for stand-alone Annex III systems were deferred (Regulation (EU)
+      // 2026/1744, the Digital Omnibus on AI, final law) from 2026-08-02 to
+      // 2027-12-02, and
       // official_source.url must point at an actual EU institutional source
       // (EUR-Lex or a *.europa.eu page) — not a third-party summary site.
       const euRow = j['EU'];
@@ -4086,16 +4174,17 @@ if (
         /europa\.eu/i.test(euRow.official_source.url) &&
         /Digital Omnibus/i.test(euRow.enforcement_notes || '') &&
         /2026-08-02/.test(euRow.enforcement_notes || '') &&
-        /provisional/i.test(euRow.enforcement_notes || '');
+        /2026\/1744/.test(euRow.enforcement_notes || '') &&
+        !/provisional/i.test(euRow.enforcement_notes || '');
 
       if (
         nyRowCityKeyed &&
         rowComplete(j['US-IL']) && j['US-IL'].law_name.includes('820 ILCS 42') &&
         euRowCorrected
       ) {
-        pass('jurisdiction-ai-screening-disclosure.yml parses and all three seeds carry corrected facts: US-NY-NYC (Local Law 144, city-keyed with explicit job_location_condition + candidate_residency_condition, no leftover state-wide US-NY key), US-IL (820 ILCS 42), EU AI Act 2024/1689 (effective 2027-12-02 per the provisional Digital Omnibus deferral, official_source on a europa.eu domain) (#2896 CodeRabbit findings 1+2)');
+        pass('jurisdiction-ai-screening-disclosure.yml parses and all three seeds carry corrected facts: US-NY-NYC (Local Law 144, city-keyed with explicit job_location_condition + candidate_residency_condition, no leftover state-wide US-NY key), US-IL (820 ILCS 42), EU AI Act 2024/1689 (effective 2027-12-02 per the final-law Digital Omnibus deferral, Regulation (EU) 2026/1744, official_source on a europa.eu domain) (#2896 CodeRabbit findings 1+2)');
       } else {
-        fail('jurisdiction-ai-screening-disclosure.yml seeds incomplete/incorrect — needs US-NY-NYC (not state-wide US-NY) with job_location_condition + candidate_residency_condition (five-boroughs, explicitly excluding a generic New York State match), US-IL (820 ILCS 42), and EU (AI Act 2024/1689, effective 2027-12-02, official_source.url on a europa.eu domain, enforcement_notes documenting the provisional Digital Omnibus deferral from the original 2026-08-02 date) (#2896)');
+        fail('jurisdiction-ai-screening-disclosure.yml seeds incomplete/incorrect — needs US-NY-NYC (not state-wide US-NY) with job_location_condition + candidate_residency_condition (five-boroughs, explicitly excluding a generic New York State match), US-IL (820 ILCS 42), and EU (AI Act 2024/1689, effective 2027-12-02, official_source.url on a europa.eu domain, enforcement_notes documenting the final-law Digital Omnibus deferral (Regulation (EU) 2026/1744) from the original 2026-08-02 date) (#2896)');
       }
 
       if (
@@ -5945,21 +6034,21 @@ try {
   }
 
   // ── 2. a16z HTML parsing ───────────────────────────────────────────
-  // Sample HTML fixture with data-company-name attributes (the most reliable strategy).
-  const a16zHtml = `
-    <div class="portfolio-grid">
-      <a href="https://github.com" data-company-name="GitHub" data-company-url="https://github.com" class="portfolio-card"></a>
-      <a href="https://lyft.com" data-company-name="Lyft" data-company-url="https://lyft.com" class="portfolio-card"></a>
-      <a href="https://slack.com" data-company-name="Slack" data-company-url="https://slack.com" class="portfolio-card"></a>
-    </div>
-  `;
+  // The live page embeds its list as HTML-escaped JSON in a data-companies
+  // attribute (tests/vc-portfolios-a16z.test.mjs covers the real markup).
+  const a16zList = [
+    { id: '1', name: 'GitHub', company_url: 'https://github.com', acquirer: '' },
+    { id: '2', name: 'Lyft', company_url: 'https://lyft.com', acquirer: '' },
+    { id: '3', name: 'Slack', company_url: 'https://slack.com', acquirer: '' },
+  ];
+  const a16zHtml = `<div x-data="wr25Portfolio()" data-companies="${JSON.stringify(a16zList).replace(/"/g, '&quot;')}"></div>`;
   const a16zEntries = parseA16zPayload(a16zHtml);
   const a16zOk =
     a16zEntries.length === 3 &&
     a16zEntries.some(e => e.name === 'GitHub' && e.source === 'a16z' && e.url === 'https://github.com') &&
     a16zEntries.some(e => e.name === 'Lyft' && e.source === 'a16z') &&
     a16zEntries.some(e => e.name === 'Slack' && e.source === 'a16z');
-  if (a16zOk) pass('parseA16zPayload: extracts companies from data-company-name HTML attributes');
+  if (a16zOk) pass('parseA16zPayload: extracts companies from the data-companies attribute');
   else fail(`parseA16zPayload: output wrong — got ${a16zEntries.length} entries: ${JSON.stringify(a16zEntries.map(e => e.name))}`);
 
   // parseSeedEntries() delegating to a16z.
@@ -6005,9 +6094,9 @@ try {
   // ── 5. toPortalEntry — no ATS hint, slug-based fallback ───────────
   const noHint = toPortalEntry({ name: 'NewCo', slug: 'newco', url: 'https://newco.io', source: 'yc' });
   const noHintOk =
-    noHint.careers_url === 'https://job-boards.greenhouse.io/newco' && // Greenhouse is the default probe
+    noHint.careers_url === 'https://jobs.ashbyhq.com/newco' && // first of the Ashby, Greenhouse, Lever slug probes
     noHint.name === 'NewCo';
-  if (noHintOk) pass('toPortalEntry: no ATS hint falls back to Greenhouse URL from slug (provider.detect() validates at scan time)');
+  if (noHintOk) pass('toPortalEntry: no ATS hint → first slug probe (Ashby); the scan also tries Greenhouse and Lever');
   else fail(`toPortalEntry fallback wrong — got: ${noHint.careers_url}`);
 
   // ── 5b. toPortalEntry — website fallback when slug is empty ───────
@@ -6114,14 +6203,163 @@ try {
   const dashboardWriter = readFile('dashboard/internal/data/status_writer.go');
   const runWriterStart = dashboardWriter.indexOf('func runStatusWriter(');
   const runWriterBody = runWriterStart === -1 ? '' : dashboardWriter.slice(runWriterStart);
+  // The row selector moved out of the writer into career.go's
+  // trackerIdentities, which names a row by its report link or, for a row with
+  // no report, by its tracker # — so check the flags there, not a literal in
+  // the writer. The selector must still be one of those two: a write that named
+  // a row any other way would be matching on something the tracker does not
+  // guarantee.
+  //
+  // Read the argv slice, not the whole function: `includes('ids[0].flag')` over
+  // the body also matches the parameter list, so an argv that hardcoded a flag
+  // and ignored the one it was handed would still have passed. And every
+  // selector-returning line must RESOLVE — an unparseable one fails the guard
+  // instead of being skipped, because a skipped bad branch beside a good one
+  // reads as a pass (#7331 review).
+  const dashboardSelector = readFile('dashboard/internal/data/career.go');
+  const selectorStart = dashboardSelector.indexOf('func trackerIdentities(');
+  // A function with nothing after it ends at EOF, not at index -1, which would
+  // silently drop its last character.
+  const selectorEnd = dashboardSelector.indexOf('\nfunc ', selectorStart + 1);
+  const selectorBody = selectorStart === -1
+    ? ''
+    : dashboardSelector.slice(selectorStart, selectorEnd === -1 ? undefined : selectorEnd);
+  // EVERY flag-shaped literal in the function, however it is written: a regex
+  // keyed to one return shape skips a branch spelled differently, and a skipped
+  // bad branch beside a good one reads as a pass.
+  const selectorSource = selectorBody.replace(/^\s*\/\/.*$/gm, '');
+  const selectorFlags = [...selectorSource.matchAll(/"(--[a-z-]+)"/g)].map((m) => m[1]);
+  // A flag-shaped literal ANYWHERE in the function is not the flag that gets
+  // sent: that is whatever sits in the first field of each trackerIdentity
+  // construction, and an expression there can rewrite a literal which still
+  // reads as correct — `strings.Replace("--row", "row", "report", 1)` keeps the
+  // `--row` the check above wants and sends `--report` (#7331 review). So read
+  // that field and require a BARE literal: an expression the guard cannot
+  // resolve fails it, rather than passing on the literal inside it.
+  // Keyed fields are a legitimate spelling and carry no order (`{value: v,
+  // flag: "--row"}` is the same selector), so find the named field wherever it
+  // sits and fall back to the first positional field.
+  const identityField = (construction, name, position) => {
+    const fields = construction.split(',').map((f) => f.trim());
+    const keyed = fields.find((f) => new RegExp(`^${name}\\s*:`).test(f));
+    if (keyed !== undefined) return keyed.replace(new RegExp(`^${name}\\s*:\\s*`), '');
+    // A positional construction cannot mix in keys: Go rejects that outright.
+    if (fields.some((f) => /^[a-z]\w*\s*:/.test(f))) return null;
+    return fields[position] ?? null;
+  };
+  const identityFlagField = (construction) => {
+    const flag = identityField(construction, 'flag', 0);
+    const bare = flag === null ? null : flag.match(/^"(--[a-z-]+)"$/);
+    return bare ? bare[1] : null;
+  };
+  const selectorIdentities = [...selectorSource.matchAll(/trackerIdentity\{([^}]*)\}/g)]
+    .map((m) => ({
+      flag: identityFlagField(m[1]),
+      value: identityField(m[1], 'value', 1),
+    }));
+  const selectorFlagFields = selectorIdentities.map((id) => id.flag);
+  // Presence of both flags is not enough: branches that SWAP their flag
+  // literals while keeping their values pass every presence check, and then a
+  // report linked as #7 on tracker row #32 sends `--row 7`, which the CLI
+  // accepts as a tracker selector (#7331 review). So pair each flag with the
+  // field it must carry.
+  // Matched as a whole field reference, not a substring: `app.ReportNumber`
+  // CONTAINS `Number`, so a substring test would accept
+  // `trackerIdentity{"--row", app.ReportNumber}` — a one-sided swap, which is
+  // the half of the swap the two-sided check would miss (#7331 review).
+  const selectorPairs = {
+    '--report-link': /\bapp\.ReportNumber\b/,
+    '--row': /\bapp\.Number\b/,
+  };
+  const mispaired = selectorIdentities
+    .filter(({ flag, value }) => flag !== null
+      && (value === null || !(selectorPairs[flag] ?? /(?!)/).test(value)))
+    .map(({ flag }) => flag);
+  const argsStart = runWriterBody.indexOf('args := []string{');
+  const argvLiteral = argsStart === -1
+    ? ''
+    : runWriterBody.slice(argsStart, runWriterBody.indexOf('}', argsStart) + 1);
+  // Presence of each token is not enough: the two checks below are independent,
+  // so `{script, ids[0].value, ids[0].flag, status, ...}` passes both while
+  // sending the status as the selector value (#7331 review). The flag must be
+  // the element immediately before its value — an argv the guard cannot split
+  // into elements resolves to none and fails closed.
+  const selectorArgvAdjacent = (literal) => {
+    const open = literal.indexOf('{');
+    if (open === -1 || !literal.endsWith('}')) return false;
+    const elements = literal.slice(open + 1, -1).split(',').map((f) => f.trim());
+    const flagAt = elements.indexOf('ids[0].flag');
+    return flagAt !== -1 && elements[flagAt + 1] === 'ids[0].value';
+  };
   const delegatesToCanonicalWriter = runWriterBody.includes('set-status.mjs')
     && runWriterBody.includes('exec.CommandContext')
-    && runWriterBody.includes('"--report-link"')
+    && argvLiteral.includes('ids[0].flag')
+    && argvLiteral.includes('ids[0].value')
+    && selectorArgvAdjacent(argvLiteral)
+    && !/"--(?:row|report|report-link)"/.test(argvLiteral)
+    && selectorFlags.every((flag) => flag === '--report-link' || flag === '--row')
+    // Every identity the selector builds must name its flag with a literal the
+    // guard can read, and there must be at least the two.
+    && selectorFlagFields.length >= 2
+    && selectorFlagFields.every((flag) => flag === '--report-link' || flag === '--row')
+    // Both must survive: losing --row is the bug #7331 fixed, and losing
+    // --report-link would renumber every existing row's writes.
+    && selectorFlagFields.includes('--report-link')
+    && selectorFlagFields.includes('--row')
+    && mispaired.length === 0
     && !/writeFile(?:Atomic|Sync)\s*\(/.test(runWriterBody);
   if (delegatesToCanonicalWriter) {
     pass('dashboard status writer delegates tracker mutations to set-status.mjs transaction scope');
   } else {
     fail('dashboard status writer bypasses the shared set-status transaction scope');
+  }
+
+  // The guard above is only as good as that flag-field read, and its failure
+  // mode is silent: a selector it cannot resolve would pass on a literal that
+  // merely sits nearby. So check the read itself against the shapes that
+  // motivated it — each one sends a flag the repo does not accept while leaving
+  // an acceptable literal in the text (#7331 review).
+  const resolvableFlagFields = [
+    ['a bare literal', '"--row", strconv.Itoa(app.Number)', '--row'],
+    ['keyed fields', 'flag: "--report-link", value: app.ReportNumber', '--report-link'],
+    ['keyed fields in the other order', 'value: strconv.Itoa(app.Number), flag: "--row"', '--row'],
+    ['rewritten at runtime', 'strings.Replace("--row", "row", "report", 1), strconv.Itoa(app.Number)', null],
+    ['built from a variable', 'rowFlag, strconv.Itoa(app.Number)', null],
+    ['concatenated', '"--" + "report", strconv.Itoa(app.Number)', null],
+    ['parenthesized', '("--report"), strconv.Itoa(app.Number)', null],
+  ];
+  // Pairing is checked on the same principle: each shape below sends a flag the
+  // repo does not accept while leaving an acceptable literal in the text.
+  const pairedValues = [
+    ['the row value', '--row', 'strconv.Itoa(app.Number)', true],
+    ['the report value', '--report-link', 'app.ReportNumber', true],
+    ['the report field under --row', '--row', 'app.ReportNumber', false],
+    ['the row field under --report-link', '--report-link', 'strconv.Itoa(app.Number)', false],
+    ['a value that names neither field', '--row', 'app.Company', false],
+  ];
+  const pairingMisreads = pairedValues
+    .filter(([, flag, value, want]) => (selectorPairs[flag] ?? /(?!)/).test(value) !== want)
+    .map(([name]) => name);
+  // Arrangement is checked on the same principle: each shape below contains
+  // both selector tokens, so the presence checks accept every one of them.
+  const argvArrangements = [
+    ['the flag before its value', 'args := []string{script, ids[0].flag, ids[0].value, status, "--json"}', true],
+    ['the flag and its value swapped', 'args := []string{script, ids[0].value, ids[0].flag, status, "--json"}', false],
+    ['the status between the two', 'args := []string{script, ids[0].flag, status, ids[0].value, "--json"}', false],
+    ['the value as the last element', 'args := []string{script, ids[0].flag, status, "--json", ids[0].value}', false],
+    ['an unsplittable argv', 'args := []string{script, ids[0].flag, ids[0].value', false],
+  ];
+  const argvMisreads = argvArrangements
+    .filter(([, literal, want]) => selectorArgvAdjacent(literal) !== want)
+    .map(([name]) => name);
+  const flagFieldMisreads = resolvableFlagFields
+    .filter(([, construction, want]) => identityFlagField(construction) !== want)
+    .map(([name]) => name);
+  const guardSelfCheck = [...flagFieldMisreads, ...pairingMisreads, ...argvMisreads];
+  if (guardSelfCheck.length === 0) {
+    pass('dashboard selector guard resolves every tracker-identity flag and value, or fails closed');
+  } else {
+    fail(`dashboard selector guard misreads a tracker identity: ${guardSelfCheck.join(', ')}`);
   }
 
 } catch (e) {
@@ -12103,11 +12341,13 @@ try {
     // more-advanced status (both below Applied, so the advanced-status safety
     // guard doesn't block the collapse), so dedup promotes #50's status and
     // rewrites the row — exercising rebuildRow() on a no-trailing-pipe row.
+    // Discarded still loses to Evaluated. Rejected does not: a title match
+    // keeps that row, so it no longer drives this rewrite.
     writeFileSync(tracker,
       '# Applications Tracker\n\n' +
       '| # | Date | Company | Role | Score | Status | PDF | Report | Notes |\n' +
       '|---|------|---------|------|-------|--------|-----|--------|-------|\n' +
-      '| 50 | 2026-02-01 | Globex | Widget Engineer | 4.5/5 | Rejected | ❌ | [50](../reports/050-widget.md) | KEEPER_NOTE_SENTINEL\n' +
+      '| 50 | 2026-02-01 | Globex | Widget Engineer | 4.5/5 | Discarded | ❌ | [50](../reports/050-widget.md) | KEEPER_NOTE_SENTINEL\n' +
       '| 51 | 2026-02-02 | Globex | Widget Engineer | 3.0/5 | Evaluated | ❌ | [51](../reports/051-widget.md) | dup row |\n');
 
     const r = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
@@ -12287,11 +12527,13 @@ try {
     const tracker = join(locTmp, 'data', 'applications.md');
     // Two dup rows (same company+role) with a Location column. Keeper #60 has the
     // higher score but the lower status; dedup must promote its Status cell.
+    // Discarded still loses to Evaluated. Rejected is kept on a title match,
+    // so it would not move the Status cell this check is watching.
     writeFileSync(tracker,
       '# Applications Tracker\n\n' +
       '| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |\n' +
       '|---|------|---------|------|----------|-------|--------|-----|--------|-------|\n' +
-      '| 60 | 2026-02-01 | Globex | Widget Engineer | Berlin | 4.5/5 | Rejected | ❌ | [60](r.md) | LOC_SENTINEL |\n' +
+      '| 60 | 2026-02-01 | Globex | Widget Engineer | Berlin | 4.5/5 | Discarded | ❌ | [60](r.md) | LOC_SENTINEL |\n' +
       '| 61 | 2026-02-02 | Globex | Widget Engineer | Berlin | 3.0/5 | Evaluated | ❌ | [61](r.md) | dup |\n');
 
     const r = run(NODE, ['dedup-tracker.mjs'], { env: { ...process.env, CAREER_OPS_TRACKER: tracker } });
@@ -14985,6 +15227,7 @@ try {
   }
 
   const cjkFilledTemplate = () => cjkTemplateSrc
+    .replace(/\{\{PAPER\}\}/g, 'letterpaper')
     .replace(/\{\{NAME\}\}/g, 'Test Candidate')
     .replace(/\{\{CONTACT_LINE\}\}/g, 'Toronto, ON')
     .replace(/\{\{EMAIL_URL\}\}/g, 'test@example.com')
@@ -16995,7 +17238,7 @@ try {
   // 55.3b below reads states.yml dynamically, so it inherits any such loss
   // instead of catching it: with `hired` removed both checks went green while
   // set-status.mjs would reject the terminal-success state as invalid.
-  const CANONICAL_STATE_IDS = ['evaluated', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
+  const CANONICAL_STATE_IDS = ['evaluated', 'speculative', 'applied', 'responded', 'assessment', 'interview', 'offer', 'hired', 'rejected', 'discarded', 'skip'];
   const missingStates = CANONICAL_STATE_IDS.filter((s) => !new RegExp(`^  - id: ${s}$`, 'm').test(statesSrc));
   if (missingStates.length === 0) {
     pass('templates/states.yml keeps every canonical status id (new ids may be appended)');
@@ -19418,10 +19661,24 @@ try {
   }
 
   const agentsDoc = readFile('AGENTS.md');
-  if (agentsDoc.includes('`check-table-freshness.mjs`')) {
+  // Only the table under the Main Files heading counts: the name in prose,
+  // another table or a fenced example does not list the script there.
+  const agentsLines = agentsDoc.split(/\r?\n/);
+  const mainFilesHeading = agentsLines.indexOf('### Main Files');
+  const mainFilesRows = [];
+  for (const line of mainFilesHeading < 0 ? [] : agentsLines.slice(mainFilesHeading + 1)) {
+    if (line.startsWith('|')) mainFilesRows.push(line);
+    else if (mainFilesRows.length > 0 || line.trim() !== '') break;
+  }
+  if (mainFilesRows.some((row) => row.startsWith('| `check-table-freshness.mjs` |'))) {
     pass('AGENTS.md Main Files table lists check-table-freshness.mjs');
   } else {
     fail('AGENTS.md Main Files table missing check-table-freshness.mjs');
+  }
+  if (mainFilesRows.some((row) => row.startsWith('| `add-entry.mjs` |'))) {
+    pass('AGENTS.md Main Files table lists add-entry.mjs');
+  } else {
+    fail('AGENTS.md Main Files table missing add-entry.mjs');
   }
 
   // Read-only import boundary: the ONLY fs capabilities the script may hold

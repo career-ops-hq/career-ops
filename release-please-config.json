@@ -49,6 +49,15 @@
         },
         {
           "type": "json",
+          "path": "gemini-extension.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "gemini-extension/CONTEXT.md"
+        },
+        {
+          "type": "json",
           "path": "claude-directory/.claude-plugin/plugin.json",
           "jsonpath": "$.version"
         },

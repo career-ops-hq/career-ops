@@ -52,7 +52,7 @@ import { getCareerOpsRoot, getProfilePath } from './path-resolver.mjs';
 import { resolveAtsApi, JD_TEXT_API_ATS } from './liveness-api.mjs';
 import { classifyLiveness, cloudflareInterstitial } from './liveness-core.mjs';
 import { decodeEntities } from './providers/_html-entities.mjs';
-import { HTML_TAG_RE } from './providers/_html-to-text.mjs';
+import { HTML_TAG_RE, stripHtmlComments } from './providers/_html-to-text.mjs';
 import { isWorkModelOnly } from './providers/greenhouse.mjs';
 import { buildLocation } from './providers/hirehive.mjs';
 import { isZohoRecordClosed, parseZohoDetailPage } from './providers/zoho-recruit.mjs';
@@ -196,7 +196,7 @@ const BLOCK_END_RE = /<\/(p|div|ul|ol|h[1-6]|tr|section|article|blockquote)\s*>/
  */
 export function jdHtmlToText(html) {
   if (typeof html !== 'string' || !html) return '';
-  const stripped = decodeEntities(html)
+  const stripped = stripHtmlComments(decodeEntities(html))
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<li[^>]*>/gi, '\n- ')
@@ -363,6 +363,9 @@ export function normalizeAshbyJob(json, jobId, postingUrl, textCap = JD_TEXT_CAP
     url: postingUrl,
     title: compactText(str(job.title), 300),
     text: compactText([meta.join('\n'), body].filter(Boolean).join('\n\n'), textCap),
+    // isListed:false is NOT closure: Ashby serves an unlisted posting by direct
+    // link and it can still take applications. The note in the text is the only
+    // carrier; closure needs independent evidence.
   };
 }
 
@@ -1156,7 +1159,7 @@ function emitJd(result, maxChars) {
   }
   // bodyText exists only for jdFailure(); drop it so the documented success
   // shape `{ url, title, text }` is unchanged.
-  const { bodyText: _bodyText, ...emitted } = result;
+  const { bodyText: _bodyText, closed: _closed, evidence: _evidence, ...emitted } = result;
   process.stdout.write(JSON.stringify(emitted));
 }
 
@@ -1409,7 +1412,7 @@ async function main() {
 
   let chromium;
   try {
-    ({ chromium } = await import('playwright'));
+    ({ chromium } = await import('./lib/hardened-chromium.mjs'));
   } catch {
     console.error(JSON.stringify({ error: 'playwright not installed', code: 'no_playwright' }));
     process.exit(1);

@@ -59,7 +59,11 @@ function linesOf(text) {
     .replace(/<\/(?:p|li|h\d|div|tr|section|article)>/gi, '\n');
   return stripMarkup(broken, { keepLineBreaks: true })
     .split(/\n+/)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
+    // stripMarkup turns each block tag into ". ", so a printed line starts with
+    // a period its source line never had. Left in, "I built it." in an answer
+    // and in the letter were two different lines, and the answer's own dash
+    // was still reported.
+    .map((line) => line.replace(/^(?:\.\s+)+/, '').replace(/\s+/g, ' ').trim())
     .filter(Boolean);
 }
 
@@ -138,7 +142,7 @@ export function candidateOwnWords(root) {
   const dnaPath = join(root, 'voice-dna.md');
   if (existsSync(dnaPath)) chunks.push(wordingFromVoiceDna(readFileSync(dnaPath, 'utf8')));
   const factsPath = join(root, 'config', 'cv-facts.json');
-  if (existsSync(factsPath)) chunks.push(wordingFromFacts(readFileSync(factsPath, 'utf8')));
+  if (existsSync(factsPath)) chunks.push(wordingFromFacts(readFileSync(factsPath, 'utf8').replace(/^\uFEFF/, '')));
   return chunks.filter(Boolean).join('\n');
 }
 

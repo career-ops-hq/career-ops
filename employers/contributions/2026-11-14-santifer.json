@@ -1,0 +1,18 @@
+{
+  "id": "2026-11-14-santifer",
+  "contributor": "santifer",
+  "signed_by": "career-ops maintainers",
+  "rows": 500,
+  "source": "web-index:wayback@2026-11-12",
+  "origin": "Board addresses on Greenhouse, Ashby and Lever found in the Wayback Machine's public index of 2026 captures, each checked live with one request, and matched to its employer by a web-search result on the employer's own website; checked on 2026-11-13 by an automated job of the maintainers, written with AI assistance: each board answered and listed at least one posting.",
+  "no_conflicting_contract": true,
+  "personal_data": false,
+  "exclusive": false,
+  "license": "CC-BY-4.0",
+  "also_permits": [
+    "ODbL-1.0",
+    "CC0-1.0"
+  ],
+  "attribution": "Found by the project's discoverer in a public web index",
+  "date": "2026-11-14"
+}

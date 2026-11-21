@@ -83,7 +83,7 @@ const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const HEADER_DATE_RE = /^\s*\*\*[^*\n]+?\*\*\s*:?\s*(\d{4}-\d{2}-\d{2})(?!\d)/;
 const FILENAME_DATE_RE = /(\d{4}-\d{2}-\d{2})\.md$/i;
 // merge-tracker.mjs mergeNotes(): `Re-eval 2026-10-02 (3.8→4.1)`.
-const REEVAL_MARKER_RE = /\bre-?eval(?:uated|uation)?\b[\s:]*(\d{4}-\d{2}-\d{2})(?!\d)/gi;
+const REEVAL_MARKER_RE = /\bre-?(?:evaluated|evaluation|eval)\b[\s:]*(\d{4}-\d{2}-\d{2})(?!\d)/gi;
 
 // Variables that tell git where a repository is. With one of them inherited
 // (a git hook sets GIT_DIR), the working directory would stop deciding which

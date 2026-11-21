@@ -503,6 +503,24 @@ try {
   if (capped.length === 1 && errs.length === 0) pass('ctx.maxPages caps paging below the entry\'s max_pages without a truncation warning');
   else fail(`ctx.maxPages=1 made ${capped.length} requests, warnings=${JSON.stringify(errs)}`);
 
+  // max_pages: 1 on the entry: the probe's one page is also the entry's last.
+  // It is still a probe, so it stays silent (#7180); a real scan still warns.
+  const probeAtCap = [];
+  const probeAtCapErrs = [];
+  console.error = (...a) => { probeAtCapErrs.push(a.join(' ')); };
+  try {
+    await tg.fetch({ channel: 'devjobs', max_pages: 1, since_days: 36500 }, { ...quiet, maxPages: 1, fetchText: async (url) => { probeAtCap.push(url); return page(P_LABEL, P_AT); } });
+  } finally { console.error = origError; }
+  if (probeAtCap.length === 1 && probeAtCapErrs.length === 0) pass('a probe on a max_pages: 1 entry gives no truncation warning');
+  else fail(`probe at max_pages: 1 made ${probeAtCap.length} requests, warnings=${JSON.stringify(probeAtCapErrs)}`);
+  const scanAtCapErrs = [];
+  console.error = (...a) => { scanAtCapErrs.push(a.join(' ')); };
+  try {
+    await tg.fetch({ channel: 'devjobs', max_pages: 1, since_days: 36500 }, { ...quiet, fetchText: async () => page(P_LABEL, P_AT) });
+  } finally { console.error = origError; }
+  if (scanAtCapErrs.length === 1 && /raise max_pages/.test(scanAtCapErrs[0])) pass('a real scan of a max_pages: 1 entry still warns that the inventory is a prefix');
+  else fail(`scan at max_pages: 1 warnings=${JSON.stringify(scanAtCapErrs)}`);
+
   // Rule 3: the entry's own cap reached before the window is a loud prefix.
   const warned = [];
   console.error = (...a) => { warned.push(a.join(' ')); };

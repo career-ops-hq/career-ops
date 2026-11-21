@@ -30,7 +30,9 @@ export function applyCvSource(root, pdfPath) {
   if (!rel) return null;
 
   const fromManifest = manifestHtml(root, rel);
-  if (fromManifest) {
+  // The web renderer records a temporary input path reused for every render
+  // of this report. It can now hold a new draft while the old PDF is attached.
+  if (fromManifest && !path.posix.normalize(fromManifest).startsWith(".career-ops-web/pdf-tmp/")) {
     const kept = keepInsideRoot(root, fromManifest);
     if (kept) return kept;
   }

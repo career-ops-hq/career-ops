@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, ChevronDown, RotateCcw, AlertTriangle, Sparkles, Settings } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
+import { pageFrameWidthClass } from "@/components/page-frame";
 import { instrumentSerif } from "@/lib/fonts";
 import { normalizeTextKey } from "@/lib/core/normalize-text-key.mjs";
+import { matchEvaluatedPosting } from "@/lib/evaluated-posting.mjs";
 import { paramsToFilters, paramsToAi, type ExploreFilters } from "@/lib/explore";
 import { CHINA_PRESET } from "@/lib/employer-preset.mjs";
 import { shouldStartScanOnLoad } from "@/lib/scan-on-load.mjs";
@@ -38,7 +40,7 @@ export function ExplorerView({
 }: {
   seed: { filters: ExploreFilters; seededFrom: string[] };
   inboxUrls: string[];
-  evaluated: { n: string; company: string; role: string }[];
+  evaluated: { n: string; company: string; role: string; url?: string }[];
   rootExists: boolean;
 }) {
   const { filters, setFilters, initFilters, phase, running, offers, discover, loadFresh, status, employerOutcome, error, scannerMissing, mode, setMode, aiIntent, setAiIntent, discoverAI, companiesScanned, companiesAvailable, capHit, droppedNoDate, partial } = useExplore();
@@ -93,13 +95,7 @@ export function ExplorerView({
     const trackedUrls = new Set(inboxUrls);
     return offers.map((o) => {
       const inPipeline = trackedUrls.has(o.url);
-      const c = norm(o.company);
-      const t = norm(o.title);
-      const ev = evaluated.find((a) => {
-        if (norm(a.company) !== c) return false;
-        const ar = norm(a.role);
-        return ar.length > 3 && (t.includes(ar) || ar.includes(t.split(" ").slice(0, 3).join(" ")));
-      });
+      const ev = matchEvaluatedPosting(evaluated, o, norm);
       return { ...o, inPipeline, evaluatedN: ev?.n };
     });
   }, [offers, inboxUrls, evaluated]);
@@ -116,7 +112,7 @@ export function ExplorerView({
   if (running && isAi) return <AiHuntView cliName={cli.name} />;
 
   return (
-    <div className={scanRunning ? undefined : "mx-auto max-w-5xl px-5 py-8 md:px-8"}>
+    <div className={scanRunning ? undefined : cn("mx-auto px-5 py-8 md:px-8", pageFrameWidthClass.wide)}>
       <p role="status" aria-live="polite" aria-atomic="true" className="mb-4 text-sm text-muted">{!isAi && (employerOutcome?.message || (employer && running ? "Scanning selected employers…" : ""))}</p>
       {scanRunning && <DiscoveringState />}
       {!scanRunning && (
@@ -126,7 +122,6 @@ export function ExplorerView({
           <div className="flex items-center gap-2.5">
             <Compass className="size-6 text-brand-text" />
             <h1 className={`${instrumentSerif.className} text-3xl text-foreground`}>Explore</h1>
-            <span className="rounded-full border border-brand/30 bg-brand-soft px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-text">New</span>
           </div>
           <div className="w-full sm:ml-auto sm:w-auto">
             <ExploreModeToggle mode={mode} onChange={setMode} cliConfigured={!!cli.id} />
@@ -215,7 +210,7 @@ export function ExplorerView({
       )}
 
       {showScanList && (
-        <div className={scanRunning ? "relative z-[1] mx-auto max-w-5xl px-5 pb-10 md:px-8" : undefined}>
+        <div className={scanRunning ? cn("relative z-[1] mx-auto px-5 pb-10 md:px-8", pageFrameWidthClass.wide) : undefined}>
           <ResultsList offers={enriched} />
         </div>
       )}

@@ -19,6 +19,14 @@ test("Assessment has its own engaged leaf and records a submitted application", 
     [{ num: 1, from: 'Assessment', to: 'Discarded' }]), 'discarded');
 });
 
+test("Speculative has its own leaf off Tracked and is not a submitted application", () => {
+  const graph = buildPipelineSankey([{ n: '1', status: 'Speculative' }]);
+  assert.equal(classifyLeaf({ n: '1', status: 'gambit' }, []), 'speculative');
+  assert.equal(graph.nodes.find(node => node.id === 'speculative')?.value, 1);
+  assert.ok(!graph.nodes.some(node => node.id === 'submitted'));
+  assert.ok(graph.links.some(link => link.source === 'tracked' && link.target === 'speculative' && link.value === 1));
+});
+
 test("statusToken uses canonStatus aliases (same map as Analytics)", () => {
   assert.equal(statusToken("Interview"), "INTERVIEW");
   assert.equal(statusToken("Interview 2026-08-20"), "INTERVIEW");
@@ -217,9 +225,12 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "sankey-tracker-"));
   const priorRoot = process.env.CAREER_OPS_ROOT;
   const priorTracker = process.env.CAREER_OPS_TRACKER;
+  const priorCodeRoot = process.env.CAREER_OPS_CODE_ROOT;
+  const codeRoot = path.resolve(import.meta.dirname, "../../..");
   const ledger = (num) => `${num}\t2026-08-26\tOffer\tRejected\tset-status\t\n`;
   try {
     process.env.CAREER_OPS_ROOT = root;
+    process.env.CAREER_OPS_CODE_ROOT = codeRoot;
     delete process.env.CAREER_OPS_TRACKER;
     for (const [dir, num] of [["", 1], ["data", 2], ["custom", 3]]) {
       fs.mkdirSync(path.join(root, dir), { recursive: true });
@@ -236,7 +247,7 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
     const custom = path.join(root, "custom/applications.md");
     process.env.CAREER_OPS_TRACKER = custom;
     check(3);
-    process.env.CAREER_OPS_TRACKER = path.relative(process.cwd(), custom);
+    process.env.CAREER_OPS_TRACKER = path.relative(codeRoot, custom);
     check(3);
     // A FILE symlink needs a privilege a non-elevated Windows shell lacks, and
     // a junction only links directories, so this one leg has no stand-in there.
@@ -258,6 +269,8 @@ test("Sankey and cumulative tiles read the same active tracker's ledger", { skip
     else process.env.CAREER_OPS_ROOT = priorRoot;
     if (priorTracker === undefined) delete process.env.CAREER_OPS_TRACKER;
     else process.env.CAREER_OPS_TRACKER = priorTracker;
+    if (priorCodeRoot === undefined) delete process.env.CAREER_OPS_CODE_ROOT;
+    else process.env.CAREER_OPS_CODE_ROOT = priorCodeRoot;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

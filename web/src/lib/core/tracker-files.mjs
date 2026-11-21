@@ -1,15 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
+import { resolveCodeRoot } from "./code-root.mjs";
 
 // The tracker path as given, before symlinks are resolved: path-resolver.mjs
 // `rawTrackerPath`, made absolute.
 function rawTrackerPath(root) {
   const override = process.env.CAREER_OPS_TRACKER?.trim();
-  return path.resolve(override || (
+  // Mirror the CLI's codebase-relative override even when the web process
+  // runs from web/ or an external deployment with CAREER_OPS_CODE_ROOT.
+  if (override) return path.resolve(resolveCodeRoot(process.cwd()), override);
+  return path.resolve(
     fs.existsSync(path.join(root, "data/applications.md"))
       ? path.join(root, "data/applications.md")
       : path.join(root, "applications.md")
-  ));
+  );
 }
 
 // Synchronous mirror of path-resolver.mjs for the synchronous web readers.

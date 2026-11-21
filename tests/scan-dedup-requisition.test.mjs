@@ -12,11 +12,14 @@
 // The halves this file gates:
 //   - the requisition parse: Workday URL tails and labelled notes agree, and
 //     Workday's `-N` repost suffix is the same requisition;
-//   - the decision is conservative: any seeded row without a requisition, or a
-//     candidate without one, keeps the historical "duplicate" answer;
+//   - a seeded row that named no requisition does not hide a later posting
+//     that names one, including an Applied row. A candidate that names none
+//     stays a duplicate;
 //   - end to end through the CLI: the labelled tracker row lets JR25853 through
-//     once (not again on a second run), and an unlabelled tracker row still
-//     suppresses both.
+//     once (not again on a second run), and an Applied row with no requisition
+//     lets later labelled openings through;
+//   - a pipeline row whose scan-history write never landed keeps the
+//     duplicate, since its requisition id was lost rather than absent.
 import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
@@ -24,9 +27,12 @@ import { join } from 'path';
 import { execFileSync } from 'child_process';
 import {
   ANY_REQUISITION,
+  appendToPipeline,
+  appendToScanHistory,
   collectSeenCompanyRoles,
   companyRoleDedupKey,
   isDistinctRequisition,
+  loadDedupSnapshot,
   matchesSeenCompanyRole,
   requisitionIdForDedup,
   requisitionIdsForDedup,
@@ -63,7 +69,15 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     [{ text: 'req REQ-2026-10' }, ['REQ-2026-10'], 'a two-digit tail on a hyphenated base is part of the ID: one form (#3882)'],
     [{ url: 'https://careers.walmart.com/us/en/job/R-2593225' }, [], 'non-Workday URL is not parsed as a requisition'],
     [{ url: 'https://job-boards.greenhouse.io/acme/jobs/4244715009' }, [], 'generic board posting id is not a requisition'],
+    [{ url: 'https://www.google.com/about/careers/applications/jobs/results/100000000000000001' }, ['100000000000000001'], 'Google careers job id in the URL path is the requisition'],
+    [{ url: 'https://www.google.com/about/careers/applications/jobs/results/100000000000000002-software-engineer?location=Zurich' }, ['100000000000000002'], 'Google slugged URL yields the same id as the id-only form'],
+    [{ url: 'https://www.google.com/about/careers/applications/jobs/results/?q=engineer' }, [], 'Google results page names no posting'],
+    [{ url: 'https://www.example.com/about/careers/applications/jobs/results/100000000000000001' }, [], 'the Google id shape on another host is not read'],
     [{ text: 'remote Canada; base CAD 140K' }, [], 'unlabelled note'],
+    [{ requisitionId: '*' }, [], 'a star id is the unknown marker, not a requisition'],
+    [{ requisitionId: ' * ' }, [], 'a padded star is the unknown marker'],
+    [{ requisitionId: '*', text: 'req JR25919' }, ['JR25919'], 'a star id falls through to labelled text'],
+    [{ requisitionId: 'JR25919' }, ['JR25919'], 'a supplied id is kept'],
   ];
   for (const [input, want, label] of cases) {
     const got = requisitionIdsForDedup(input);
@@ -85,7 +99,10 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     [new Set(['ABC123-1', 'ABC123']), ['ABC123-1'], false, 'ambiguous note seeded both forms: the Lever title form hits one'],
     [new Set(['ABC123-1', 'ABC123']), ['ABC123-2'], true, 'ambiguous note seeded both forms: the Lever sibling hits neither'],
     [new Set(['JR25919']), 'JR25919', false, 'a bare string candidate is still accepted'],
-    [new Set(['JR25919', ANY_REQUISITION]), 'JR25853', false, 'an unlabelled seed keeps the duplicate'],
+    [new Set(['JR25919', ANY_REQUISITION]), 'JR25853', true, 'an unlabelled seed does not hide a different labelled id'],
+    [new Set([ANY_REQUISITION]), 'JR25853', true, 'a seed that named no requisition does not hide a later id'],
+    [new Set([ANY_REQUISITION]), requisitionIdsForDedup({ requisitionId: '*' }), false, 'a star id against an unlabelled seed is the same opening'],
+    [new Set([ANY_REQUISITION]), null, false, 'a seed that named no requisition still hides a later row with no id'],
     [new Set(['JR25919']), null, false, 'an unlabelled candidate keeps the duplicate'],
     [undefined, 'JR25853', false, 'no seed data keeps the duplicate'],
   ];
@@ -110,6 +127,73 @@ const trackerWith = (notes, { company = 'UBC', role = 'Programmer Analyst I' } =
     pass('collectSeenCompanyRoles: tracker note, pipeline URL and scan-history URL all seed the same requisition');
   } else {
     fail(`collectSeenCompanyRoles seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], want [JR25919]`);
+  }
+}
+
+// ── 3a. Google: a second opening with the same title and city is not a duplicate
+{
+  const G = 'https://www.google.com/about/careers/applications/jobs/results/';
+  const seenOpening = `${G}100000000000000001-software-engineer`;
+  const seed = (scanHistoryText) => {
+    const requisitionsByBase = new Map();
+    const result = collectSeenCompanyRoles({ scanHistoryText }, {}, undefined, { requisitionsByBase });
+    return { requisitionsByBase, result, base: companyRoleDedupKey('Google', 'Software Engineer') };
+  };
+  const history = `url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${seenOpening}\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`;
+  const { requisitionsByBase, base } = seed(history);
+  const seeded = requisitionsByBase.get(base);
+  if (seeded && seeded.size === 1 && seeded.has('100000000000000001')) pass('collectSeenCompanyRoles: a Google scan-history URL seeds its job id');
+  else fail(`collectSeenCompanyRoles seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], want [100000000000000001]`);
+
+  const other = requisitionIdsForDedup({ url: `${G}200000000000000002-software-engineer` });
+  if (isDistinctRequisition(seeded, other)) pass('a Google opening under a new job id is a distinct requisition');
+  else fail('a Google opening under a new job id was treated as a duplicate');
+  const same = requisitionIdsForDedup({ url: `${G}100000000000000001` });
+  if (!isDistinctRequisition(seeded, same)) pass('the same Google job id, slugged or not, is still a duplicate');
+  else fail('the same Google job id was treated as a distinct requisition');
+  // A Google URL that names no posting (the results page) is a real row that
+  // names no requisition: it seeds the wildcard. That is not proof of which
+  // opening it was, so a later opening that names a job id comes back, and a
+  // later row that names none stays hidden.
+  const noId = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n${G}?q=software-engineer\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
+  const wildcard = noId.requisitionsByBase.get(noId.base);
+  if (wildcard && wildcard.size === 1 && wildcard.has(ANY_REQUISITION)) pass('a Google URL with no job id seeds the wildcard requisition');
+  else fail(`a Google URL with no job id seeded [${wildcard ? [...wildcard].join(', ') : 'nothing'}], want [${ANY_REQUISITION}]`);
+  if (wildcard && isDistinctRequisition(wildcard, other)) pass('a Google row with no job id lets a later opening that names one come back');
+  else fail('a Google row with no job id hid a later opening that names a job id');
+  if (wildcard && !isDistinctRequisition(wildcard, [])) pass('a Google row with no job id still hides a later row that names none');
+  else fail('a Google row with no job id let a later row with no id through');
+  // A row with an empty URL is skipped by the seeder outright, so it seeds
+  // nothing at all (kept apart from the wildcard case above).
+  const noUrl = seed(`url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation\n\t2026-10-01\tGoogle\tSoftware Engineer\tGoogle\tadded\tZurich\n`);
+  if (noUrl.requisitionsByBase.get(noUrl.base) === undefined) pass('a scan-history row with an empty URL seeds nothing');
+  else fail('a scan-history row with an empty URL was seeded');
+}
+
+// An Applied row with no requisition in its notes is not proof of which
+// opening was applied to. The same title posted again with an id comes back.
+// The same title posted again with no id stays hidden.
+{
+  const requisitionsByBase = new Map();
+  collectSeenCompanyRoles({
+    applicationsText: trackerWith('applied; hybrid unconfirmed'),
+  }, {}, undefined, { requisitionsByBase });
+  const key = companyRoleDedupKey('UBC', 'Programmer Analyst I');
+  const seeded = requisitionsByBase.get(key);
+  const state = {
+    key,
+    baseKey: key,
+    seen: new Set([key]),
+    requisitions: requisitionsByBase,
+    locatedRequisitions: new Map(),
+  };
+  const labelled = requisitionIdsForDedup({ url: `${WD}/Programmer-Analyst-I_JR25919` });
+  const comesBack = matchesSeenCompanyRole(state, labelled) === false;
+  const staysHidden = matchesSeenCompanyRole(state, []) === true;
+  if (seeded?.size === 1 && seeded.has(ANY_REQUISITION) && comesBack && staysHidden) {
+    pass('an Applied row with no requisition lets the same title come back once it names an id');
+  } else {
+    fail(`Applied row with no requisition: seeded [${seeded ? [...seeded].join(', ') : 'nothing'}], comesBack ${comesBack}, staysHidden ${staysHidden}`);
   }
 }
 
@@ -174,9 +258,13 @@ tracked_companies:
       script: ${board.script}
 `);
 
+    // An inherited CAREER_OPS_* override (a shell or CI setting) could point
+    // the child away from this temp folder, so none of them pass through.
+    const inherited = Object.fromEntries(Object.entries(process.env)
+      .filter(([k]) => !k.toUpperCase().startsWith('CAREER_OPS_')));
     const scan = () => execFileSync(NODE, [join(ROOT, 'scan.mjs')], {
       cwd: dir,
-      env: { ...process.env, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals },
+      env: { ...inherited, CAREER_OPS_ROOT: dir, CAREER_OPS_PORTALS: portals },
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -214,9 +302,12 @@ for (const notes of ['JR 25919; applied', 'JR:25919; applied', 'JR #25919; appli
 
 for (const notes of ['Req #25919; applied', 'req 25919; applied']) {
   const { afterFirst, afterSecond } = runScanTwice(notes);
-  if (afterFirst.length === 0 && afterSecond.length === 0) {
-    pass(`e2e: ambiguous numeric note ${notes} retains conservative company/role dedup`);
-  } else fail(`e2e numeric note: ${JSON.stringify({notes, afterFirst, afterSecond})}`);
+  const both = afterFirst.length === 2
+    && afterFirst.some((line) => line.includes('_JR25919'))
+    && afterFirst.some((line) => line.includes('_JR25853'))
+    && afterSecond.length === 2;
+  if (both) pass(`e2e: a note with no requisition id lets both openings through once (${notes})`);
+  else fail(`e2e numeric note: ${JSON.stringify({notes, afterFirst, afterSecond})}`);
 }
 
 {
@@ -269,10 +360,14 @@ for (const notes of ['Req #25919; applied', 'req 25919; applied']) {
 {
   try {
     const { afterFirst, afterSecond } = runScanTwice('applied; hybrid unconfirmed');
-    if (afterFirst.length === 0 && afterSecond.length === 0) {
-      pass('e2e control: an unlabelled tracker row still suppresses every same-titled posting');
+    const both = afterFirst.length === 2
+      && afterFirst.some((line) => line.includes('_JR25919'))
+      && afterFirst.some((line) => line.includes('_JR25853'))
+      && afterSecond.length === 2;
+    if (both) {
+      pass('e2e control: an unlabelled tracker row does not hide later openings that name a requisition');
     } else {
-      fail(`e2e control: ${afterFirst.length} entries after run 1, ${afterSecond.length} after run 2 (want 0 and 0)`);
+      fail(`e2e control: ${afterFirst.length} entries after run 1, ${afterSecond.length} after run 2 (want both requisitions, once)`);
     }
   } catch (err) {
     fail(`e2e scan run (unlabelled tracker) failed: ${err.message}`);
@@ -318,19 +413,22 @@ for (const notes of ['Req #25919; applied', 'req 25919; applied']) {
     isDistinctRequisition(new Set(ids({ url: lever, text: 'JR-25919' })), ids({ url: lever, text: 'JR25919' })), true);
 
   // 5c. Numeric-only text (`Req #25919`) may have dropped a prefix, so it is
-  // no proof of a distinct requisition in either direction: as a candidate it
-  // yields no form, as a seed it records the wildcard. A numeric Workday URL
-  // tail is still usable — the URL is authoritative.
+  // not a requisition id. As a candidate it yields no form and stays a
+  // duplicate. As a seed it records only the wildcard, which does not hide a
+  // later row that names an id. A numeric Workday URL tail is still usable.
   for (const text of ['Req #25919', 'req 25919', 'req 25919-1']) {
     eq(`numeric-only note: "${text}" yields no form`, ids({ text }), []);
     eq(`numeric-only note: "${text}" as a candidate is never distinct`,
       isDistinctRequisition(new Set(['JR25919']), ids({ text })), false);
     const requisitions = new Map();
     collectSeenCompanyRoles({
-      applicationsText: `| Company | Role | Notes |\n|---|---|---|\n| Acme | Engineer | ${text} |\n`,
+      applicationsText: trackerWith(text, { company: 'Acme', role: 'Engineer' }),
     }, {}, undefined, { requisitionsByBase: requisitions });
-    eq(`numeric-only note: "${text}" as a seed keeps every same-titled posting a duplicate`,
-      isDistinctRequisition(requisitions.get(companyRoleDedupKey('Acme', 'Engineer')), ['JR25919']), false);
+    const seeded = requisitions.get(companyRoleDedupKey('Acme', 'Engineer'));
+    eq(`numeric-only note: "${text}" seeds only the wildcard`,
+      seeded instanceof Set && seeded.size === 1 && seeded.has(ANY_REQUISITION), true);
+    eq(`numeric-only note: "${text}" does not hide a later labelled id`,
+      isDistinctRequisition(seeded, ['JR25919']), true);
   }
   eq('numeric Workday URL tail is still a form', ids({ url: 'https://acme.wd1.myworkdayjobs.com/jobs/job/Engineer_25919' }), ['25919']);
 
@@ -374,12 +472,75 @@ ${workday.replace('London', 'New-York')}_JR200\t2026-09-22\tAcme\tEngineer\tAcme
       requisitions.get(companyRoleDedupKey('Acme', 'Engineer', undefined, 'New York')).add(ANY_REQUISITION);
       locatedRequisitions.get(baseKey).add(ANY_REQUISITION);
       eq('located keys: an unlabelled New York row does not poison London', matches('London', ['JR200']), false);
-      eq('located keys: an unlabelled located row does catch a locationless candidate', matches(undefined, ['JR300']), true);
+      eq('located keys: an unlabelled located row does not hide a later labelled id', matches(undefined, ['JR300']), false);
       seen.add(baseKey);
       requisitions.set(baseKey, new Set(['JR200']));
       eq('located keys: a locationless JR200 wildcard row catches London JR200', matches('London', ['JR200']), true);
       requisitions.set(baseKey, new Set([ANY_REQUISITION]));
-      eq('located keys: an unlabelled locationless row catches every city', matches('Paris', ['JR300']), true);
+      eq('located keys: an unlabelled locationless row does not hide a later labelled id', matches('Paris', ['JR300']), false);
+      eq('located keys: an unlabelled locationless row still hides a later row with no id', matches('Paris', []), true);
     }
   }
+}
+
+// ── 6. Only the pipeline write landed (PR #7138 review) ──────────────────────
+// The scanner writes pipeline.md first and scan-history second, and a
+// provider-only requisition id lives in scan-history alone. When the history
+// write fails, the pipeline row has lost its id, not named none, so a new URL
+// for the same requisition must stay a duplicate. Once history has the row,
+// the id is back; a history row that names no id lets a labelled opening in.
+{
+  const offer = (url, requisitionId) => ({
+    url, company: 'Acme', title: 'Engineer', source: 'fixture', ...(requisitionId ? { requisitionId } : {}),
+  });
+  const seenOpening = 'https://jobs.example.com/acme/1001';
+  const candidate = (snapshot, requisition) => matchesSeenCompanyRole({
+    key: companyRoleDedupKey('Acme', 'Engineer'),
+    baseKey: companyRoleDedupKey('Acme', 'Engineer'),
+    seen: snapshot.seenCompanyRoles,
+    requisitions: snapshot.seenCompanyRoleRequisitions,
+    locatedRequisitions: snapshot.locatedRequisitionsByBase,
+  }, requisition);
+  const run = async (historyOffer) => {
+    const dir = mkdtempSync(join(tmpdir(), 'scan-reqdedup-pipeline-only-'));
+    try {
+      const pipelinePath = join(dir, 'pipeline.md');
+      const scanHistoryPath = join(dir, 'scan-history.tsv');
+      const applicationsPath = join(dir, 'applications.md');
+      await appendToPipeline([offer(seenOpening, 'JR100')], { pipelinePath, scanHistoryPath, historyPolicy: {} });
+      if (historyOffer) await appendToScanHistory([historyOffer], '2026-11-02', 'added', { historyPath: scanHistoryPath, historyPolicy: {} });
+      return loadDedupSnapshot({}, undefined, { pipelinePath, scanHistoryPath, applicationsPath });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+  const eq = (label, actual, expected) => {
+    if (actual === expected) pass(label);
+    else fail(`${label}: got ${actual}, want ${expected}`);
+  };
+
+  const pipelineOnly = await run(null);
+  eq('pipeline-only write: a new URL for JR100 stays a duplicate', candidate(pipelineOnly, ['JR100']), true);
+
+  const skippedOnlyDir = mkdtempSync(join(tmpdir(), 'scan-reqdedup-skipped-only-'));
+  try {
+    const pipelinePath = join(skippedOnlyDir, 'pipeline.md');
+    const scanHistoryPath = join(skippedOnlyDir, 'scan-history.tsv');
+    const applicationsPath = join(skippedOnlyDir, 'applications.md');
+    await appendToScanHistory([offer(seenOpening)], '2026-11-01', 'skipped_title', { historyPath: scanHistoryPath, historyPolicy: {} });
+    await appendToPipeline([offer(seenOpening, 'JR100')], { pipelinePath, scanHistoryPath, historyPolicy: {} });
+    const skippedOnly = loadDedupSnapshot({}, undefined, { pipelinePath, scanHistoryPath, applicationsPath });
+    eq('an older skipped row is not the accepted write: JR100 stays a duplicate', candidate(skippedOnly, ['JR100']), true);
+  } finally {
+    rmSync(skippedOnlyDir, { recursive: true, force: true });
+  }
+  eq('pipeline-only write: a new URL with no id stays a duplicate', candidate(pipelineOnly, []), true);
+
+  const both = await run(offer(seenOpening, 'JR100'));
+  eq('both writes: a new URL for JR100 is a duplicate', candidate(both, ['JR100']), true);
+  eq('both writes: JR200 under the same title is a different opening', candidate(both, ['JR200']), false);
+
+  const noId = await run(offer(seenOpening));
+  eq('history names no id: a labelled JR100 opening is not hidden', candidate(noId, ['JR100']), false);
+  eq('history names no id: a later row with no id stays a duplicate', candidate(noId, []), true);
 }

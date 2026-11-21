@@ -473,6 +473,281 @@ try {
     fail(`expected only "Good Role" through, got ${JSON.stringify(filteredJobs.map(j => j.title))}`);
   }
 
+  // listingIdentity (#6908): the widget payload's shortcode becomes the strong
+  // ATS-native identity. It is read from the payload, never from the URL, and
+  // it sits on the posting after location rows have been merged by URL.
+  {
+    const { workableListingIdentity } = workableModule;
+    const { isOfferSeen, markOfferSeen, listingIdentityToken, seenJobKey } = await import(pathToFileURL(join(ROOT, 'scan.mjs')).href);
+
+    const widgetCtx = (jobs) => ({
+      transport: 'http',
+      sleep: async () => {},
+      fetchJson: async () => ({ jobs }),
+      fetchText: async () => { throw new Error('markdown feed should not be used when the widget payload is readable'); },
+    });
+
+    const [row] = await workable.fetch(
+      { name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets' },
+      widgetCtx([{
+        title: 'Staff Engineer',
+        // The shortcode and the URL token differ on purpose: posting_id must
+        // be the payload field, and board_slug the resolved account, not a
+        // slug or id parsed out of either URL.
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/URLTOKEN',
+        url: 'https://apply.workable.com/other-co/jobs/view/URLTOKEN',
+        city: 'Ghent', country: 'Belgium',
+      }]),
+    );
+    const identity = row?.listingIdentity;
+    if (identity?.ats_provider === 'workable'
+        && identity?.board_slug === 'acme-widgets'
+        && identity?.posting_id === '801183DB79'
+        && Object.keys(identity).length === 3
+        && row.url === 'https://apply.workable.com/j/URLTOKEN') {
+      pass('fetch() returns exactly workable/<account slug>/<shortcode> and does not parse it from the URL');
+    } else {
+      fail(`workable identity = ${JSON.stringify(identity)}, url = ${JSON.stringify(row?.url)}`);
+    }
+
+    const [parsed] = parseWorkableWidget({
+      jobs: [{
+        title: 'Staff Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/j/URLTOKEN',
+        city: 'Ghent', country: 'Belgium',
+      }],
+    }, 'Acme', 'acme-widgets');
+    const parsedIdentity = parsed?.listingIdentity;
+    if (parsedIdentity?.ats_provider === 'workable'
+        && parsedIdentity?.board_slug === 'acme-widgets'
+        && parsedIdentity?.posting_id === '801183DB79'
+        && Object.keys(parsedIdentity).length === 3) {
+      pass('parseWorkableWidget returns exactly workable/<account slug>/<shortcode> from the payload');
+    } else {
+      fail(`parsed identity = ${JSON.stringify(parsedIdentity)}`);
+    }
+
+    // The same posting reached at the markdown view URL (or any other URL)
+    // is one listing. URL dedup cannot join these; only the shortcode can.
+    const viewPage = { ...row, url: 'https://apply.workable.com/acme-widgets/jobs/view/801183DB79' };
+    const seen = new Set();
+    if (seenJobKey(row.url) === seenJobKey(viewPage.url)) {
+      fail('the two Workable URLs already share a URL key, so this check would pass without listingIdentity');
+    } else {
+      markOfferSeen(row, seen);
+      if (isOfferSeen(viewPage, seen)) {
+        pass('the same Workable posting under another URL is already seen (one row, not two)');
+      } else {
+        fail(`view URL not seen; identity = ${JSON.stringify(row?.listingIdentity)}`);
+      }
+    }
+
+    // The same shortcode on another account is a different listing. The URLs
+    // differ too, so a pass here is the board_slug and not URL dedup.
+    const [otherBoard] = await workable.fetch(
+      { name: 'Other', careers_url: 'https://apply.workable.com/other-co' },
+      widgetCtx([{
+        title: 'Staff Engineer',
+        shortcode: '801183DB79',
+        shortlink: 'https://apply.workable.com/other-co/j/801183DB79',
+      }]),
+    );
+    if (listingIdentityToken(otherBoard)
+        && listingIdentityToken(otherBoard) !== listingIdentityToken(row)
+        && seenJobKey(otherBoard.url) !== seenJobKey(row.url)
+        && !isOfferSeen(otherBoard, seen)) {
+      pass('the same Workable shortcode on another account is a different listing');
+    } else {
+      fail(`other-board token = ${listingIdentityToken(otherBoard)}`);
+    }
+
+    // A bad shortcode or slug keeps the row and leaves identity off.
+    const keptWithoutIdentity = (slug, job) => {
+      const rows = slug === undefined
+        ? parseWorkableWidget({ jobs: [job] }, 'Acme')
+        : parseWorkableWidget({ jobs: [job] }, 'Acme', slug);
+      return rows.length === 1 && rows[0].title === job.title && rows[0].url && !('listingIdentity' in rows[0]);
+    };
+    const base = { title: 'Kept', shortlink: 'https://apply.workable.com/j/KEPT', country: 'Spain' };
+    const badCases = [
+      ['missing shortcode', 'acme', { ...base }],
+      ['empty shortcode', 'acme', { ...base, shortcode: '' }],
+      ['whitespace shortcode', 'acme', { ...base, shortcode: '   ' }],
+      ['padded shortcode', 'acme', { ...base, shortcode: ' KEPT ' }],
+      ['control-character shortcode', 'acme', { ...base, shortcode: 'KE\u0007PT' }],
+      ['numeric shortcode', 'acme', { ...base, shortcode: 15 }],
+      ['padded slug', ' acme ', { ...base, shortcode: 'KEPT' }],
+      ['control-character slug', 'ac\u0007me', { ...base, shortcode: 'KEPT' }],
+      ['empty slug', '', { ...base, shortcode: 'KEPT' }],
+      ['slash slug', 'acme/other', { ...base, shortcode: 'KEPT' }],
+      ['dotted slug', 'acme.com', { ...base, shortcode: 'KEPT' }],
+      ['omitted slug', undefined, { ...base, shortcode: 'KEPT' }],
+    ];
+    const badFailures = badCases.filter(([label, slug, job]) => !keptWithoutIdentity(slug, job)).map(([label]) => label);
+    if (badFailures.length === 0) {
+      pass('an invalid, missing, padded or control-character shortcode or slug keeps the row and leaves listingIdentity off');
+    } else {
+      fail(`identity leaked or the row was dropped for: ${badFailures.join(', ')}`);
+    }
+
+    // The markdown feed has no shortcode field. Its view URL must not become one.
+    if (jobs[0]?.url === 'https://apply.workable.com/acme-widgets/jobs/view/ABC123' && !('listingIdentity' in jobs[0])) {
+      pass('the markdown fallback does not invent a posting id from the view URL');
+    } else {
+      fail(`markdown row = ${JSON.stringify(jobs[0])}`);
+    }
+
+    // Fan-out: one posting per location, merged by URL. Identity is on that
+    // one merged posting, and the locations are still all there.
+    const merged = parseWorkableWidget(fanOutPayload, 'DigitalGenius', 'digitalgenius');
+    const impl = merged.find(j => j.title === 'Implementation Engineer');
+    const solutions = merged.find(j => j.title === 'Solutions Engineer');
+    if (merged.length === 2
+        && impl?.location === 'London, United Kingdom · Romania · Poland · Croatia · Remote'
+        && impl?.listingIdentity?.ats_provider === 'workable'
+        && impl?.listingIdentity?.board_slug === 'digitalgenius'
+        && impl?.listingIdentity?.posting_id === '801183DB79'
+        && Object.keys(impl.listingIdentity).length === 3
+        && solutions?.listingIdentity?.posting_id === 'E8064EA4C7'
+        && solutions?.location === 'Romania · Portugal · Remote') {
+      pass('listingIdentity sits on the URL-merged posting, once, not on each location row');
+    } else {
+      fail(`merged identities = ${JSON.stringify(merged.map(j => ({ title: j.title, location: j.location, listingIdentity: j.listingIdentity })))}`);
+    }
+
+    // Callers that omit the slug (the existing fan-out assertions above, the
+    // public XML feed) keep today's shape: a merged row, no identity.
+    if (implRole && !('listingIdentity' in implRole)) {
+      pass('parseWorkableWidget without a board slug still merges and leaves listingIdentity off');
+    } else {
+      fail(`slug-less merged row = ${JSON.stringify(implRole)}`);
+    }
+
+    if (workableListingIdentity('acme', '801183DB79')?.posting_id === '801183DB79'
+        && workableListingIdentity('AcmeWidgets', '801183DB79')?.board_slug === 'AcmeWidgets'
+        && workableListingIdentity('acme', 15) === undefined
+        && workableListingIdentity('acme', ' 15 ') === undefined
+        && workableListingIdentity('acme', '15\u0007') === undefined
+        && workableListingIdentity('acme', '') === undefined
+        && workableListingIdentity('acme', '   ') === undefined
+        && workableListingIdentity(' acme', '15') === undefined
+        && workableListingIdentity('acme ', '15') === undefined
+        && workableListingIdentity('ac\u0007me', '15') === undefined
+        && workableListingIdentity('acme/other', '15') === undefined
+        && workableListingIdentity('acme.com', '15') === undefined
+        && workableListingIdentity('', '15') === undefined
+        && workableListingIdentity(null, '15') === undefined
+        && workableListingIdentity(undefined, '15') === undefined) {
+      pass('workableListingIdentity() accepts only an account slug and an opaque shortcode string');
+    } else {
+      fail('workableListingIdentity() accepted a shortcode or slug that cannot form a strong identity');
+    }
+  }
+
+  // Share links (/j/<shortcode>) carry no account slug, and Workable API URLs
+  // (/api/v1/widget/accounts/<slug>, /api/v3/accounts/<slug>/jobs) carry the
+  // slug after /accounts/ rather than in segment 0; entry.api takes precedence.
+  {
+    const { resolveWorkableSlug } = workableModule;
+    const shareInputs = [
+      'https://apply.workable.com/j/801183DB79',
+      'https://apply.workable.com/J/801183DB79',
+      'https://apply.workable.com/j/',
+    ];
+    const shareHits = shareInputs
+      .map(url => [url, resolveWorkableSlug({ name: 'Acme', careers_url: url }), workable.detect({ name: 'Acme', careers_url: url })])
+      .filter(([, slug, hit]) => slug !== null || hit !== null);
+    if (shareHits.length === 0) {
+      pass('resolveWorkableSlug() and detect() reject /j/ share links instead of treating "j" as an account slug');
+    } else {
+      fail(`share links were wrongly accepted: ${JSON.stringify(shareHits)}`);
+    }
+
+    const accountPosting = resolveWorkableSlug({ name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets/j/801183DB79/' });
+    if (accountPosting === 'acme-widgets') {
+      pass('resolveWorkableSlug() still extracts the account slug from /<account>/j/<shortcode>');
+    } else {
+      fail(`account-scoped posting slug = ${JSON.stringify(accountPosting)}`);
+    }
+
+    const apiCases = [
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/accounts/acme-widgets/jobs/801183DB79' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v3/accounts/acme-widgets/jobs' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets/' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/acme-widgets' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/API/v3/accounts/AcmeWidgets/jobs' }, 'AcmeWidgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/old-slug', api: 'https://apply.workable.com/api/v1/widget/accounts/new-slug' }, 'new-slug'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: '   ' }, 'acme-widgets'],
+      [{ name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: null }, 'acme-widgets'],
+    ];
+    const apiFailures = apiCases
+      .map(([entry, want]) => [entry.api || entry.careers_url, want, resolveWorkableSlug(entry)])
+      .filter(([, want, got]) => got !== want);
+    if (apiFailures.length === 0) {
+      pass('resolveWorkableSlug() extracts account slugs from entry.api and careers_url API endpoints');
+    } else {
+      fail(`API URL resolution failures: ${JSON.stringify(apiFailures)}`);
+    }
+
+    const badApiCases = [
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v3/accounts' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v3/accounts//jobs' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts//jobs' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/api/v1/widget/accounts/bad.slug' },
+      { name: 'Acme', careers_url: 'https://apply.workable.com/acme-widgets', api: 'https://boards-api.greenhouse.io/v1/boards/acme/jobs' },
+    ];
+    const badApiHits = badApiCases
+      .map(entry => [entry.api || entry.careers_url, resolveWorkableSlug(entry)])
+      .filter(([, got]) => got !== null);
+    if (badApiHits.length === 0) {
+      pass('resolveWorkableSlug() rejects truncated/invalid Workable API paths and respects non-Workable entry.api pins');
+    } else {
+      fail(`invalid API URLs were accepted: ${JSON.stringify(badApiHits)}`);
+    }
+
+    let apiFetchedUrl = null;
+    const pinnedJobs = await workable.fetch(
+      { name: 'Acme', careers_url: 'https://acme.example/careers', api: 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' },
+      {
+        transport: 'http',
+        sleep: async () => {},
+        fetchJson: async (url) => { apiFetchedUrl = url; return widgetPayload; },
+        fetchText: async () => { throw new Error('markdown feed should not run'); },
+      },
+    );
+    if (apiFetchedUrl === 'https://apply.workable.com/api/v1/widget/accounts/acme-widgets?details=true' && pinnedJobs.length === 2) {
+      pass('workable.fetch() reads a corporate careers_url entry pinned via entry.api');
+    } else {
+      fail(`entry.api fetch got url=${JSON.stringify(apiFetchedUrl)} jobs=${pinnedJobs.length}`);
+    }
+
+    let shareFetched = 0;
+    try {
+      await workable.fetch(
+        { name: 'ShareLink', careers_url: 'https://apply.workable.com/j/801183DB79' },
+        {
+          transport: 'http',
+          fetchJson: async () => { shareFetched++; return widgetPayload; },
+          fetchText: async () => { shareFetched++; return ''; },
+        },
+      );
+      fail('workable.fetch() should reject a /j/ share link');
+    } catch (e) {
+      if (e.message.includes('cannot derive feed URL') && shareFetched === 0) {
+        pass('workable.fetch() rejects a /j/ share link before any request');
+      } else {
+        fail(`share-link fetch error=${e.message} calls=${shareFetched}`);
+      }
+    }
+  }
+
 } catch (e) {
   fail(`workable provider tests crashed: ${e.message}`);
 }

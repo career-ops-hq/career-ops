@@ -6,9 +6,10 @@ import { htmlToText } from './_html-to-text.mjs';
 import { fetchJsonWithRetry, sleep } from './_http.mjs';
 import { coerceId } from './_ids.mjs';
 import { safeEncodeURIComponent } from './_safe-url.mjs';
+import { markTruncated } from '../lib/board-truncation.mjs';
 
 
-const DARWINBOX_HOST_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.darwinbox\.in$/;
+const DARWINBOX_HOST_RE = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.darwinbox\.(?:in|com)$/;
 const CAREERS_PATH_RE = /^\/ms\/candidatev2\/([a-z0-9_-]+)\/careers(?:\/|$)/i;
 
 
@@ -157,7 +158,7 @@ export default {
   async fetch(entry, ctx) {
     const board = resolveBoard(entry);
     if (!board) {
-      throw new Error(`darwinbox: cannot derive a board for ${entry?.name} — set careers_url to https://<tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/allJobs`);
+      throw new Error(`darwinbox: cannot derive a board for ${entry?.name} — set careers_url to https://<tenant>.darwinbox.in/ms/candidatev2/<companyId>/careers/allJobs (or the same path on <tenant>.darwinbox.com)`);
     }
     const endpoint = `${board.origin}/ms/candidateapi/job/alljobs?companyId=${board.companyId}`;
 
@@ -169,7 +170,6 @@ export default {
     /** @type {import('./_types.js').Job[]} */
     const jobs = [];
     const seen = new Set();
-    let fetched = 0;
     let total;
     // Assume the budget runs out; a short page or a failed page says otherwise.
     let stopReason = 'cap';
@@ -203,21 +203,27 @@ export default {
         jobs.push(job);
       }
 
+      if (Number.isFinite(json.job_counts)) total = json.job_counts;
       // Count the rows the source returned, not the ones kept: a full page with
       // one malformed row is still a full page, and the board goes on.
-      fetched += json.data.length;
-      if (Number.isFinite(json.job_counts)) total = json.job_counts;
       if (json.data.length < PAGE_SIZE) {
         stopReason = 'complete';
         break;
       }
     }
 
-    // A full last page is only a truncation if the source says there is more.
-    if (stopReason === 'cap' && total !== undefined && fetched >= total) stopReason = 'complete';
+    // Only a short page proves the board ended, so a full page at the cap stays a
+    // page-cap stop whatever total the source reports. A total no larger than what
+    // was read says nothing about what is left, so it is not quoted.
+    const reportedTotal = total !== undefined && total > jobs.length ? total : undefined;
     if (stopReason === 'cap' && !probing) {
-      const summary = `${jobs.length}${total !== undefined ? ` of ${total}` : ''} jobs`;
+      const summary = `${jobs.length}${reportedTotal !== undefined ? ` of ${reportedTotal}` : ''} jobs`;
       console.error(`⚠️  darwinbox: ${entry.name} truncated at max_pages=${maxPages} (${summary}) — raise max_pages on this entry for more`);
+    }
+    // A partly read board says so in the return value, so scan.mjs logs it
+    // `partial` instead of `reachable` (lib/board-truncation.mjs).
+    if (!probing && stopReason !== 'complete') {
+      markTruncated(jobs, stopReason === 'cap' ? 'page-cap' : 'fetch-error', { fetched: jobs.length, ...(reportedTotal !== undefined ? { total: reportedTotal } : {}) });
     }
 
     return jobs;
