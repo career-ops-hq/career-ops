@@ -6,10 +6,47 @@ import { detectColumns, extractCellUrl, isHeaderRow, isSeparatorRow, linkedRepor
 import { getCareerOpsRoot, resolveTrackerPath } from './path-resolver.mjs';
 import { hireHiveTenantOf } from './providers/hirehive.mjs';
 import { resolveHibobTenant } from './providers/hibob.mjs';
+import { resolveHomerunFeedUrl } from './providers/homerun.mjs';
+import { resolveBoardUrl as resolvePaylocityBoardUrl } from './providers/paylocity.mjs';
 import { resolveBoard as resolveTalentlinkBoard } from './providers/talentlink.mjs';
+import { extractClient as extractTrakstarClient } from './providers/trakstar.mjs';
 import { resolveWorkspaceRoot } from './tracker-utils.mjs';
 
 const WEB_URL_RE = /https?:\/\/[^\s|)>]+/i;
+
+// Vendors whose provider reads only HTTPS boards. Every one serves its boards
+// over HTTPS, so an http:// posting link is upgraded instead of becoming a seed
+// detect() refuses after it has taken a --limit slot.
+const HTTPS_VENDORS = new Set([
+  'adp-workforcenow', 'applicantpro', 'breezy', 'comeet', 'gem', 'homerun', 'jazzhr',
+  'jobvite', 'join', 'keka', 'mokahr', 'paylocity', 'personio', 'pinpoint', 'polymer',
+  'prevueaps', 'recruitee', 'rippling', 'schoolspring', 'taleez', 'teamtailor',
+  'trakstar', 'turbohire', 'workable', 'zoho-recruit',
+]);
+
+// Vendors whose provider reads the board from the tenant subdomain alone, so
+// every posting on one board reduces to the same origin.
+const TENANT_ORIGIN_VENDORS = new Set([
+  'applicantpro', 'bamboohr', 'breezy', 'icims', 'jazzhr', 'keka', 'personio',
+  'pinpoint', 'prevueaps', 'recruitee', 'schoolspring', 'taleez', 'teamtailor',
+  'turbohire', 'zoho-recruit',
+]);
+
+// Vendors whose provider reads the board slug from the first path segment.
+// A first segment in the set is a platform route, not a board (Workable's
+// `/j/<shortcode>` feed links name no company).
+const FIRST_SEGMENT_VENDORS = new Map([
+  ['ashby', new Set()],
+  ['jobvite', new Set(['api'])],
+  ['lever', new Set()],
+  ['rippling', new Set(['api'])],
+  ['smartrecruiters', new Set()],
+  ['workable', new Set(['api', 'j'])],
+]);
+
+// Vendors with exactly one board host: a URL on the vendor's other (API) host
+// carries no board slug in its path.
+const BOARD_HOST_OF = { gem: 'jobs.gem.com', polymer: 'jobs.polymer.co' };
 
 function webUrlFrom(value) {
   const match = String(value ?? '').match(WEB_URL_RE);
@@ -26,6 +63,7 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
   let u;
   try { u = new URL(rawUrl); } catch { return null; }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+  if (HTTPS_VENDORS.has(vendor)) u.protocol = 'https:';
 
   const parts = u.pathname.split('/').filter(Boolean);
   if (vendor === 'greenhouse') {
@@ -35,15 +73,68 @@ export function atsBoardUrlOf(rawUrl, vendor = atsVendorOf(rawUrl)) {
       u.hostname = 'job-boards.greenhouse.io';
     }
     if (parts[0]) u.pathname = `/${parts[0]}`;
-  } else if (vendor === 'lever' || vendor === 'ashby' || vendor === 'smartrecruiters') {
-    if (parts[0]) u.pathname = `/${parts[0]}`;
+  } else if (FIRST_SEGMENT_VENDORS.has(vendor)) {
+    // The Jobvite provider reads a board from jobs.jobvite.com/<slug> only; an
+    // app.jobvite.com feed URL works as `api:`, never as a careers_url.
+    if (vendor === 'jobvite' && u.hostname.toLowerCase() !== 'jobs.jobvite.com') return null;
+    // A bare host names no board; the provider would refuse it.
+    if (!parts[0] || FIRST_SEGMENT_VENDORS.get(vendor).has(parts[0].toLowerCase())) return null;
+    u.pathname = `/${parts[0]}`;
+  } else if (Object.hasOwn(BOARD_HOST_OF, vendor)) {
+    if (u.hostname.toLowerCase() !== BOARD_HOST_OF[vendor] || !parts[0]) return null;
+    u.pathname = `/${parts[0]}`;
+  } else if (vendor === 'join') {
+    if (parts[0] !== 'companies' || !parts[1]) return null;
+    u.pathname = `/companies/${parts[1]}`;
+  } else if (vendor === 'homerun') {
+    // <slug>.homerun.co and feed.homerun.co/<slug> are one board; the provider
+    // maps both to the feed URL, so the seed uses that one spelling.
+    return resolveHomerunFeedUrl({ careers_url: u.href });
+  } else if (vendor === 'mokahr') {
+    // The board is /<kind>/<orgId>/<siteId>; the posting itself sits in the hash.
+    if (parts.length < 3) return null;
+    u.pathname = `/${parts.slice(0, 3).join('/')}`;
+  } else if (vendor === 'paylocity') {
+    // Only a board URL names the company GUID; a posting URL carries a job id.
+    // The provider rebuilds the board from a valid GUID in its own spelling,
+    // so letter case cannot split a board and a malformed GUID gives no seed.
+    return resolvePaylocityBoardUrl({ careers_url: u.href });
+  } else if (vendor === 'adp-workforcenow') {
+    // The tenant lives in the query (cid, ccId, lang), which the generic
+    // cleanup below would drop; keep those three and nothing else.
+    const cid = u.searchParams.get('cid');
+    const ccId = u.searchParams.get('ccId');
+    if (!cid || !ccId) return null;
+    const lang = u.searchParams.get('lang');
+    const board = new URL(`${u.origin}/mascsr/default/mdf/recruitment/recruitment.html`);
+    board.searchParams.set('cid', cid);
+    board.searchParams.set('ccId', ccId);
+    if (lang) board.searchParams.set('lang', lang);
+    return board.href;
+  } else if (vendor === 'comeet') {
+    // The provider reads only the careers-api URL with its secret token, which
+    // a posting URL never carries.
+    return null;
   } else if (vendor === 'workday') {
     const withoutLocale = /^[a-z]{2}-[A-Z]{2}$/.test(parts[0] || '') ? parts.slice(1) : parts;
     if (withoutLocale[0]) u.pathname = `/${withoutLocale[0]}`;
   } else if (vendor === 'successfactors') {
     const endpointAt = parts.findIndex((part) => /^(?:job|search|tile-search-results|services)$/i.test(part));
     u.pathname = endpointAt > 0 ? `/${parts.slice(0, endpointAt).join('/')}` : '/';
-  } else if (vendor === 'icims' || vendor === 'bamboohr') {
+  } else if (vendor === 'trakstar') {
+    // <client>.hire.trakstar.com, the legacy <client>.recruiterbox.com and the
+    // openings API's ?client_name= all name one board. The provider's parser
+    // applies its path, slug and reserved-label rules; the seed uses the
+    // current tenant host.
+    const client = extractTrakstarClient(u.href);
+    return client ? `https://${client}.hire.trakstar.com` : null;
+  } else if (TENANT_ORIGIN_VENDORS.has(vendor)) {
+    // www.applicantpro.com/openings/<tenant>/… is an alias of the tenant host.
+    if (vendor === 'applicantpro' && u.hostname.toLowerCase() === 'www.applicantpro.com') {
+      const tenant = parts[0]?.toLowerCase() === 'openings' ? parts[1]?.toLowerCase() : '';
+      if (!tenant || !/^[a-z0-9][a-z0-9-]*$/.test(tenant)) return null;
+      u.hostname = `${tenant}.applicantpro.com`;
+    }
     u.pathname = '/';
   } else if (vendor === 'hibob') {
     // Seeds are sampled under --limit before detect() runs, so a host the
