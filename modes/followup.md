@@ -77,7 +77,7 @@ Follow-up Cadence Dashboard — {date}
 ```
 
 Use visual indicators:
-- **URGENT** — respond within 24 hours (company replied)
+- **URGENT** — respond within 24 hours (company replied), or a thread where the company replied, a follow-up is due and the notes name someone to write to
 - **OVERDUE** — follow-up is past due
 - **waiting (X days)** — on track, follow-up scheduled
 - **COLD** — 2+ follow-ups sent, suggest closing
