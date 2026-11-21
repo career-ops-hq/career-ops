@@ -36,19 +36,25 @@ function detectUrl(entry) {
 }
 
 function normalizeLocation(posting) {
-  const parts = [];
-  if (posting?.fullyRemote || posting?.location?.fullyRemote) parts.push('Remote');
+  const places = [];
   if (Array.isArray(posting?.location?.places)) {
     for (const place of posting.location.places) {
+      const parts = [];
       const city = String(place?.city || '').trim();
       const province = String(place?.province || '').trim();
       const country = String(place?.country?.name || '').trim();
       if (city) parts.push(city);
       else if (province) parts.push(province);
-      else if (country) parts.push(country);
+      if (country) parts.push(country);
+      if (parts.length) places.push(parts.join(', '));
     }
   }
-  return [...new Set(parts.filter(Boolean))].join(', ');
+  const uniquePlaces = [...new Set(places)];
+  if (posting?.fullyRemote || posting?.location?.fullyRemote) {
+    if (!uniquePlaces.length) return 'Remote';
+    uniquePlaces[0] = `Remote, ${uniquePlaces[0]}`;
+  }
+  return uniquePlaces.join('; ');
 }
 
 function postedAtMillis(value) {
