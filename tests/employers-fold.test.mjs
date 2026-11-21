@@ -308,16 +308,19 @@ test('end to end: the committed boards plus new ones, imported, validated, folde
   const dir = mkdtempSync(join(tmpdir(), 'co-employers-e2e-'));
   try {
     copyEmployerRegistry(dir);
-    const urls = [];
+    const registered = [];
     for (const ats of readdirSync(join(dir, 'employers/boards'))) {
       for (const f of readdirSync(join(dir, 'employers/boards', ats))) {
-        for (const l of readFileSync(join(dir, 'employers/boards', ats, f), 'utf8').split('\n').filter(Boolean)) urls.push(JSON.parse(l).careers_url);
+        for (const l of readFileSync(join(dir, 'employers/boards', ats, f), 'utf8').split('\n').filter(Boolean)) {
+          const { careers_url, name } = JSON.parse(l);
+          registered.push(`${careers_url},"${name.replaceAll('"', '""')}"`);
+        }
       }
     }
-    assert.equal(urls.length, validateRegistry({ root: ROOT }).stats.rows);
+    assert.equal(registered.length, validateRegistry({ root: ROOT }).stats.rows);
     const list = join(dir, 'list.csv');
     const [one, two] = [unlistedEmployerBoard('lever', 'newco-one'), unlistedEmployerBoard('lever', 'newco-two')];
-    writeFileSync(list, ['url,name', ...urls.map((u) => `${u},`), `https://jobs.lever.co/${one},Newco One`, `https://jobs.eu.lever.co/${two}/abc,Newco Two`].join('\n'));
+    writeFileSync(list, ['url,name', ...registered, `https://jobs.lever.co/${one},Newco One`, `https://jobs.eu.lever.co/${two}/abc,Newco Two`].join('\n'));
     const imp = node(IMPORTER, [list, '--login', 'octocat', '--date', DATE], dir);
     assert.equal(imp.status, 0, imp.stderr);
 
@@ -325,16 +328,16 @@ test('end to end: the committed boards plus new ones, imported, validated, folde
     assert.equal(v1.status, 0, v1.stderr);
     // The warning is one for each inbox file, and a registry above the size of one file is imported in parts.
     const already = [...v1.stderr.matchAll(/: (\d+) boards? (?:is|are) already in the registry/g)].reduce((sum, m) => sum + Number(m[1]), 0);
-    assert.equal(already, urls.length);
+    assert.equal(already, registered.length);
 
     const dry = node(FOLD, [], dir);
     assert.equal(dry.status, 0, dry.stderr);
-    assert.match(dry.stdout, new RegExp(`2 new board\\(s\\), ${urls.length} already in the registry skipped`));
+    assert.match(dry.stdout, new RegExp(`2 new board\\(s\\), ${registered.length} already in the registry skipped`));
 
     const applied = node(FOLD, ['--apply'], dir);
     assert.equal(applied.status, 0, applied.stderr);
     const v2 = node(VALIDATOR, ['--base', ROOT], dir);
     assert.equal(v2.status, 0, v2.stderr);
-    assert.match(v2.stdout, new RegExp(`valid: ${urls.length + 2} rows`));
+    assert.match(v2.stdout, new RegExp(`valid: ${registered.length + 2} rows`));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

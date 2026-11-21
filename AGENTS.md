@@ -101,7 +101,7 @@ Every supported CLI reaches the same router, `.agents/skills/career-ops/SKILL.md
 
 ### Main Files
 
-`modes/_files.md` lists the main scripts and data files with what each does, and the `jds/` capture filenames. Read it when a task needs a script or data file that this document or the current mode does not name. `docs/SCRIPTS.md` has the npm commands and flags.
+`modes/_files.md` lists the main scripts and data files and the `jds/` capture filenames. Read it for a script or data file that this document or the current mode does not name. `docs/SCRIPTS.md` has the npm commands and flags.
 
 ### Plugins (optional)
 
@@ -123,9 +123,7 @@ Output: `{"onboardingNeeded": <bool>, "data_root": "<path>", "project_root": "<p
 
 The output above is the healthy shape. **`dataRootError` — a hard stop, not an onboarding invitation.** When the resolved data root is refused because it sits inside a Claude Code plugin install (the next plugin update deletes that copy), doctor exits non-zero and reports a different shape: `data_root` is null, `onboardingNeeded` stays true so that nothing proceeds on this root, `warnings[0]` carries the refusal, and `dataRootError` names it (`{code, source, root}`). Do not onboard on this state — no `--init-templates`, no `cv.md`, no tracker: every write to that root is lost on the next plugin update. Show the user the refusal from `warnings[0]`, and wait for them to point `dataRootError.source` at a folder outside `~/.claude/plugins` (or remove it to use the default data root). When the source is an environment variable (`CAREER_OPS_ROOT` or `CAREER_OPS_DATA_DIR`), a shell export does not reach an agent session that is already running: the session restarts from a shell that has the corrected value, and only then does a doctor rerun see it. When the source is the `.career-ops-data` marker file, editing the file is enough — doctor re-reads it on each run, so no restart is needed. Then run doctor again.
 
-**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that still carries template content, or a `config/profile.yml` or `portals.yml` that holds only comments. An unedited `_profile.md` scores every A-F evaluation against the **template author's** archetypes and North Star; an unedited `_brief.md` hands triage literal `{placeholders}`. It is a warning, not a gate, but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user:
-
-> "`modes/_profile.md` is still the shipped template, so evaluations would score against the template author's targeting rather than yours. Want me to personalize it from your CV first? (~1 min, and it changes every score.)"
+**`unpersonalized` — act on this even when `onboardingNeeded` is false.** Entries are `{path, reason, impact}` for a personalization file that still carries template content, or a `config/profile.yml` or `portals.yml` that holds only comments. An unedited `_profile.md` scores every A-F evaluation against the **template author's** archetypes and North Star; an unedited `_brief.md` hands triage literal `{placeholders}`. It is a warning, not a gate, but before running `scan`, `pipeline`, or `batch` with a non-empty `unpersonalized`, tell the user which files it lists, with each entry's `impact`, and offer to personalize them from their CV first. For `modes/_profile.md`, say that every score changes.
 
 `modes/_custom.md` is deliberately never reported — unedited house rules are a valid end state.
 
@@ -134,7 +132,7 @@ those inputs.** Do not proceed with an evaluation, scan, or application draft
 until the basics are in place. For read-only diagnosis, use
 `node doctor.mjs --json` to report missing prerequisites without creating user-layer files.
 
-When entering onboarding for one of these workflows, or when the user explicitly asks to set up their profile, read `modes/_onboarding.md` and follow its steps: it initializes missing personalization files with `node doctor.mjs --json --init-templates`, then walks the user through the CV, the profile, the portals and the tracker.
+When entering onboarding for one of these workflows, or when the user asks to set up their profile, read `modes/_onboarding.md` and follow its steps: it initializes missing personalization files with `node doctor.mjs --json --init-templates`, then walks the user through the CV, the profile, the portals and the tracker.
 
 ### Personalization
 
@@ -168,7 +166,7 @@ Two separate axes:
 
 > Write all human-facing output in `{language.output}` regardless of the language of these instructions or the job description. Keep market-specific terms from `language.modes_dir` when they are relevant, but explain them in the output language when needed.
 
-**Market mode sets.** `modes/` holds the English default. `modes/_markets.md` lists the market sets (`modes/de/`, `modes/fr/`, `modes/ja/` and the rest) with their evaluation and apply mode names. When `language.modes_dir` is a list (a candidate running campaigns in several markets at once), read the multi-market section of `modes/_markets.md` before selecting an evaluation mode. A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
+**Market mode sets.** `modes/` holds the English default. `modes/_markets.md` lists the market sets with their evaluation and apply mode names. When `language.modes_dir` is a list (a candidate running campaigns in several markets at once), read the multi-market section of `modes/_markets.md` before selecting an evaluation mode. A set is used when the user targets postings in that language or market, lives in that market, or asks for it. Any of these selects it:
 1. User says "use {market} modes" → layer that dir on the English `modes/` canon: read each mode-loaded English file first, then that dir's version when it provides one, and English workflow rules win conflicts
 2. User sets `language.modes_dir: modes/de` (or their market's dir) in `config/profile.yml` → always use that dir
 3. You detect a JD written in that language → *suggest* switching (the set's directory is in `modes/_markets.md`)
@@ -285,6 +283,7 @@ Job aggregators keep stale, filled, and ghost listings live long after the emplo
 **Before an aggregator listing is evaluated, applied to, or presented to the user as live:**
 
 1. Identify the employer, then locate the same role on the **employer's own careers page / ATS** (Greenhouse, Lever, Ashby, Workday, or the company's `/careers`). Same Playwright discipline as above.
+   **Start with `confirm-at-employer.mjs` (#6166):** `modes/_files.md` → "Confirming at the employer" has its input and verdicts.
 2. **Found at the employer → the employer URL is canonical.** Use it as the report `**URL:**` and apply direct, never through the aggregator.
 3. **Not found at the employer → treat as stale.** Do not apply and do not present it as live. Record it in `data/scan-history.tsv` with status `skipped_expired`, the status `check-liveness.mjs` records for a dead posting, so the next scan treats the URL as seen until `scan_history.recheck_after_days` releases it. Write the row through `appendToScanHistory` in `scan.mjs`, never by hand, and never put the posting's URL, role or company into a shell command: `modes/_files.md` → "Recording a stale listing" has the command. If it is already in the tracker, run `node set-status.mjs --report <report#> Discarded --note "not found at employer"` (or `"<company>"` for a row with no report) — never silently delete the record, since that is what stops it being re-added as new on the next scan.
 4. **Employer has no careers page / ATS you can find → leave it UNCONFIRMED, not stale.** Keep the aggregator URL and tell the user the role could not be confirmed at the employer.

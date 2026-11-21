@@ -40,6 +40,8 @@ Before running any evaluation, confirm the posting is still live. The Step 0 Pla
 
 Do not continue to Step 1 until this gate is resolved.
 
+**Aggregator URL (#6166):** when the URL is an aggregator listing (LinkedIn, Indeed, Wellfound and the like, see AGENTS.md → **Aggregator Listings -- Confirm at the Employer**), run its zero-token first pass before Block A: write `{"url", "company", "title"}` from the posting (plus `"origin"` when the posting links to the employer, e.g. an "apply on company site" link) to a JSON file with your file tool and run `node confirm-at-employer.mjs --input <file> --json`, then act on the verdict as that section says. With an employer URL in hand (`employer_url`, or a `found` you confirmed as AGENTS.md says), that URL is the report's canonical `**URL:**` and the gate above applies to it.
+
 ## Step 0.6 — Blacklist gate (#1742)
 
 If `data/blacklist.md` exists, check both the posting's company and posting URL against it before running any evaluation — the file is the candidate's own do-not-apply list (user layer, opt-in; absent file = skip this gate). For `Scope: company` (also the default for blank or unsupported scopes), match the company case- and punctuation-insensitively. For `Scope: domain`, treat the Company cell as a hostname suffix: compare it with the posting URL's hostname, ignoring case and a trailing dot, and match only the exact host or a subdomain (`ibm.com` matches `jobs.ibm.com`, never `notibm.com`). Keep dots and hyphens distinct. If the URL is missing or invalid, domain rules cannot match; still check company rules.

@@ -14,6 +14,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { isAbsolute, join, basename } from 'path';
+import { fileURLToPath } from 'url';
 import { isMainModule } from './lib/is-main-module.mjs';
 import { getCareerOpsRoot } from './path-resolver.mjs';
 import { findExperienceSections, headingText, boldLineText, toPlainText, normalizePandocLine } from './lib/cv-markdown.mjs';
@@ -3408,7 +3409,17 @@ function sourceSpellsFact(sourceText, value) {
  * which are read the way CommonMark reads them (see the rules below).
  * A bracket pair with no link target after it is left alone.
  */
-export function collapseMarkdownLinks(text) {
+export function collapseMarkdownLinks(text, { keepLines = false } = {}) {
+  // keepLines puts back the line breaks a removed span held, so the result
+  // has the same line numbers as the input (claimEvidence cites lines).
+  // A link kept as its label, with keepLines the line breaks around the label
+  // in place: those before it, then those after it.
+  const keep = (link, label) => {
+    if (!keepLines) return label;
+    const start = /^\[\s*/.exec(link)[0].length;
+    const lineBreaks = (span) => span.replace(/[^\n]/g, '');
+    return lineBreaks(link.slice(0, start)) + label + lineBreaks(link.slice(start + label.length));
+  };
   let out = '';
   let i = 0;
   const opener = /\[\s*([^\][]*?)\s*\]\(/y;
@@ -3426,7 +3437,7 @@ export function collapseMarkdownLinks(text) {
           j++;
         }
         if (depth === 0) {
-          out += m[1];
+          out += keep(text.slice(i, j), m[1]);
           i = j;
           continue;
         }
@@ -3434,7 +3445,7 @@ export function collapseMarkdownLinks(text) {
     }
     out += text[i++];
   }
-  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, '$1');
+  out = out.replace(/\[\s*([^\][]*?)\s*\]\s?\[[^\][]*\]/g, (link, label) => keep(link, label));
   // A definition is dropped whole. Anything that is not one, as CommonMark
   // reads it, is text a reader sees and stays:
   //   - it starts its line, after at most three spaces, and cannot interrupt a
@@ -3453,7 +3464,7 @@ export function collapseMarkdownLinks(text) {
   const definition = new RegExp(String.raw`^(?<!${paragraphAbove})${sp}{0,3}\[[^\][]+\]:${sp}*(?:\r?\n${sp}*)?(?:<[^<>\r\n]*>|\S+)(?:(?:${sp}+|${sp}*\r?\n${sp}*)${title})?${sp}*(?=\r?$)`, 'gm');
   for (let before = ''; before !== out;) {
     before = out;
-    out = out.replace(definition, ' ');
+    out = out.replace(definition, (span) => (keepLines ? blankSpan(span) : ' '));
   }
   return out;
 }
@@ -3463,11 +3474,14 @@ export function verifyFacts(targetText, {
   planTexts = [],
   configPath = DEFAULT_CONFIG,
   cwd = process.cwd(),
+  evidence = false,
 } = {}) {
   // Per file, before the join: stripMarkup keeps only the body of a LaTeX
   // document, and run on the joined text it would discard every source read
   // ahead of a .tex one as if it were that document's preamble.
-  const sourceTexts = sourcePaths.map(path => latexBody(readIfExists(resolveInputPath(path, cwd))));
+  // Read once, so the evidence below cites the same text the gate checked.
+  const rawSources = sourcePaths.map(path => readIfExists(resolveInputPath(path, cwd)));
+  const sourceTexts = rawSources.map(latexBody);
   // Separate files with a blank line, not a bare newline: a file with no
   // trailing newline would otherwise soft-wrap into the next file's opening
   // line when the drift and authorship checks join soft wraps.
@@ -3494,10 +3508,13 @@ export function verifyFacts(targetText, {
   const fieldClaims = structuredFieldClaims(targetText).filter(unsourced);
   const associations = structuredAssociationClaims(targetText, sourceTexts, config);
   const skillClaims = skillToolClaims(targetText);
-  const namedFacts = [
+  const namedCandidates = [
     ...factClaims(targetText, sourceLookup),
     ...skillClaims.filter(claim => claim.blocking),
     ...delegatedAuthorshipClaims(targetText, sourceText),
+  ];
+  const namedFacts = [
+    ...namedCandidates,
     ...fieldClaims.filter(claim => claim.blocking).map(({ kind, value }) => ({ kind, value })),
   ].filter(unsourced);
   // Scope and adoption claims resolve their own source evidence — a verb-tier
@@ -3555,6 +3572,23 @@ export function verifyFacts(targetText, {
       message: [priorCoverage?.message, ...associations.warnings].filter(Boolean).join(' ') }
     : priorCoverage;
   const blocked = invented.length || unsupportedFacts.length || forbidden.length;
+  // Only on request: the PDF generators and the text report never read it.
+  const sourceMetrics = evidence ? sourceMetricClaims(sourceText) : null;
+  const evidenceFields = evidence ? {
+    evidence: claimEvidence(
+      [
+        ...[...targetClaims].filter(claim => sourceMetrics.has(claim)).map(value => ({ kind: 'metric', value })),
+        ...[...namedCandidates, ...structuredFieldClaims(targetText), ...skillClaims.filter(claim => !claim.blocking)]
+          .filter(({ value }) => sourceContainsFact(sourceLookup, value)),
+        // factClaims leaves out the Chinese-list tools the sources name, which
+        // are exactly the ones with a source line.
+        ...zhToolClaims(stripMarkup(targetText))
+          .filter(value => sourceNamesZhTool(sourceLookup, value))
+          .map(value => ({ kind: 'tool', value, zhList: true })),
+      ],
+      sourcePaths.map((path, index) => ({ path, text: rawSources[index] })),
+    ),
+  } : {};
   return {
     verdict: blocked ? 'block' : (warnings.length || advisoryFacts.length || coverage) ? 'warn' : 'pass',
     invented,
@@ -3567,7 +3601,73 @@ export function verifyFacts(targetText, {
     // finding. It rides along so a caller can say the phrase lists were never
     // loaded instead of printing a clean result the reader takes for "checked".
     configMissing,
+    ...evidenceFields,
   };
+}
+
+/**
+ * The source line behind each claim the gate passed (#1033). A claim is listed
+ * with the first line of a source file that supports it on its own; a claim the
+ * sources support only across a wrapped line is listed with `source: null`.
+ * Claims passed only by allow_metrics, allow_facts or a cover letter's answers
+ * have no source line and are not listed. Nothing here changes the verdict.
+ *
+ * @param {{kind: string, value: string}[]} claims claims the gate found in the sources
+ * @param {{path: string, text: string}[]} files the raw source files, in order
+ * @returns {{kind: string, value: string, source: string|null, line: number|null, text: string|null}[]}
+ */
+function claimEvidence(claims, files) {
+  const lines = files.flatMap(({ path, text }) => sourceFileLines(path, text));
+  for (const entry of lines) {
+    entry.metrics = sourceMetricClaims(entry.text);
+    entry.lookup = normalizeFact(stripMarkup(entry.text));
+  }
+  const seen = new Set();
+  const found = [];
+  const supports = (entry, { kind, value, zhList }) => (
+    kind === 'metric' ? entry.metrics.has(value)
+      : zhList ? sourceNamesZhTool(entry.lookup, value)
+        : sourceContainsFact(entry.lookup, value));
+  for (const claim of claims) {
+    const { kind, value } = claim;
+    const key = `${kind}\n${value}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const hit = lines.find(entry => supports(entry, claim));
+    found.push({ kind, value, source: hit?.path ?? null, line: hit?.number ?? null, text: hit?.raw.trim() ?? null });
+  }
+  return found;
+}
+
+/** Blank a span of text and keep its line breaks, so line numbers stay put. */
+function blankSpan(span) {
+  return span.replace(/[^\n]/g, ' ');
+}
+
+/**
+ * Numbered lines of one source file, holding only the text the gate reads: for
+ * a LaTeX document the body without comments, never a script or style block,
+ * and markdown links reduced to their text. A delimiter line keeps the text
+ * beside the delimiter.
+ */
+function sourceFileLines(path, text) {
+  let visible = String(text);
+  if (LATEX_DOCUMENT_RE.test(visible)) {
+    visible = visible.replace(LATEX_COMMENT_RE, '');
+    const body = LATEX_BODY_RE.exec(visible);
+    if (body) {
+      const start = body.index + body[0].indexOf('{document}') + '{document}'.length;
+      const end = start + body[1].length;
+      visible = blankSpan(visible.slice(0, start)) + visible.slice(start, end) + blankSpan(visible.slice(end));
+    }
+  }
+  visible = collapseMarkdownLinks(visible.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1\b[^>]*>/gi, blankSpan), { keepLines: true });
+  const raw = String(text).split(/\r?\n/);
+  const lines = [];
+  visible.split(/\r?\n/).forEach((line, index) => {
+    if (line.trim()) lines.push({ path, number: index + 1, text: line, raw: raw[index] });
+  });
+  return lines;
 }
 
 /**
@@ -3737,7 +3837,8 @@ source bullet they restate) absent from source files.
 Default sources: cv.md and article-digest.md.
 A cover letter also reads the answers supplied for that letter, which support
 only a number the letter states as a plan. The rendered letter is not a source.
-Default config:  config/cv-facts.json (optional)`;
+Default config:  config/cv-facts.json (optional)
+--json also lists, under "evidence", the source line behind each claim that passed.`;
 }
 
 /** Exercise the metric extraction regressions that the shared gate depends on. */
@@ -3845,6 +3946,20 @@ function runSelfTest() {
     const r = verifyFacts(t, { sourcePaths: [], configPath: '/nonexistent' });
     return `${r.verdict}${r.coverage ? ' +' + r.coverage.reason : ''}`;
   };
+  // --json names the source line behind a claim that passed (#1033), and only
+  // when asked: the text report and the PDF generators get the same result.
+  const exampleCv = fileURLToPath(new URL('./examples/cv-example.md', import.meta.url));
+  const backed = verifyFacts('- Reduced model deployment time to 4 hours.', { sourcePaths: [exampleCv], configPath: '/nonexistent', evidence: true });
+  equal('a passing claim names the source line behind it', [backed.verdict, backed.evidence], ['pass', [{
+    kind: 'metric', value: '4 hours', source: exampleCv, line: 23,
+    text: '- Reduced model deployment time from 2 weeks to 4 hours with CI/CD pipeline (GitHub Actions + SageMaker)',
+  }]]);
+  equal('links keep their line numbers for evidence',
+    collapseMarkdownLinks('[Profile\nlink](https://example.invalid)\n[a\nb][ref]\n\n[ref]:\nhttps://x.invalid\nKafka', { keepLines: true }).split('\n').length, 8);
+  equal('a line break before a link label stays before it',
+    collapseMarkdownLinks('[\nKafka](https://example.invalid) [\nSpark][r]', { keepLines: true }), '\nKafka \nSpark');
+  equal('no evidence unless asked',
+    'evidence' in verifyFacts('- Reduced model deployment time to 4 hours.', { sourcePaths: [exampleCv], configPath: '/nonexistent' }), false);
   equal('two plan horizons do not trigger a coverage warning',
     verdictOf("I'd approach the first 90 days by listening, and the first 30 days by shipping."), 'pass');
   equal(
@@ -4466,6 +4581,7 @@ export function runCli(args = process.argv.slice(2)) {
     const result = verifyFacts(readFileSync(targetPath, 'utf-8'), {
       sourcePaths: parsed.sourcePaths.length ? parsed.sourcePaths : DEFAULT_SOURCES,
       configPath: parsed.configPath,
+      evidence: parsed.json,
     });
     // On stderr, before any verdict line and regardless of it: with no config
     // the phrase lists are empty, so "passed" below means the phrase check never
@@ -4512,7 +4628,7 @@ export function runCli(args = process.argv.slice(2)) {
     return 1;
   } catch (err) {
     if (parsed.json) {
-      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], advisoryFacts: [], forbidden: [], warnings: [], coverage: null, errors: [err.message] }));
+      console.log(JSON.stringify({ verdict: 'block', invented: [], unsupportedFacts: [], advisoryFacts: [], forbidden: [], warnings: [], coverage: null, evidence: [], errors: [err.message] }));
       return 1;
     }
     console.error(`ERROR: ${err.message}`);

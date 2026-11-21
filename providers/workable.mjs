@@ -120,12 +120,16 @@ function assertWorkableUrl(url) {
   return url;
 }
 
+const API_ACCOUNT_RE = /^\/api\/v\d+\/(?:widget\/)?accounts\/([^/]+)/i;
+
 /**
- * Extract the account slug from a tracked_companies entry's careers_url.
+ * Extract the account slug from a tracked_companies entry's api or careers_url.
  * @returns {string|null}
  */
 export function resolveWorkableSlug(entry) {
-  const raw = entry && typeof entry.careers_url === 'string' ? entry.careers_url : '';
+  const rawApi = typeof entry?.api === 'string' ? entry.api.trim() : '';
+  const rawCareers = typeof entry?.careers_url === 'string' ? entry.careers_url.trim() : '';
+  const raw = rawApi || rawCareers;
   if (!raw) return null;
   let parsed;
   try {
@@ -135,7 +139,10 @@ export function resolveWorkableSlug(entry) {
   }
   if (parsed.protocol !== 'https:') return null;
   if (parsed.hostname !== 'apply.workable.com') return null;
-  const slug = parsed.pathname.split('/').filter(Boolean)[0];
+  const segs = parsed.pathname.split('/').filter(Boolean);
+  const first = segs[0]?.toLowerCase();
+  if (!first || first === 'j') return null;
+  const slug = first === 'api' ? parsed.pathname.match(API_ACCOUNT_RE)?.[1] : segs[0];
   if (!slug || !SLUG_RE.test(slug)) return null;
   return slug;
 }

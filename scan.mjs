@@ -1408,22 +1408,90 @@ export const DEFAULT_VISA_NEGATIVE = [
   // (Relocation wording is deliberately excluded: relocation != sponsorship.)
   'citizens and permanent residents only',
   'permanent residents only',
-];
+  ...visaRefusalPhrases(),
+].filter((k, i, all) => all.indexOf(k) === i);
+
+// Refusals that contain a positive keyword. Negatives are checked first and
+// matching is a plain substring test, so a refusal has to be listed here or
+// the positive inside it ("visa sponsorship", "eligible for sponsorship")
+// wins: strict mode keeps a posting that says it will NOT sponsor, and
+// default mode keeps it too. Measured on 7,168 public Greenhouse, Ashby and
+// Lever postings (2026-11-19): strict mode kept 939, and in 93 of them every
+// mention of sponsorship was a refusal, most often "visa sponsorship is not
+// offered for this role" and "we are unable to offer visa sponsorship".
+// Curly apostrophes are folded to straight ones before matching, so "n't"
+// covers "can’t" and "won’t" as well.
+function visaRefusalPhrases() {
+  const sponsorship = ['sponsorship', 'visa sponsorship', 'work visa sponsorship'];
+  const anySponsorship = [...sponsorship, 'company sponsorship', 'employer sponsorship'];
+  const cross = (prefixes, objects) => prefixes.flatMap(p => objects.map(o => `${p} ${o}`));
+  return [
+    // "we are unable to offer visa sponsorship", "this role does not support
+    // visa sponsorship", "we can't provide sponsorship"
+    ...cross(
+      ['not', "n't", 'unable to', 'not able to', 'not currently able to', 'not in a position to']
+        .flatMap(neg => ['offer', 'provide', 'support'].map(verb => `${neg} ${verb}`)),
+      sponsorship,
+    ),
+    // "work authorization that does not require sponsorship", "applicants
+    // must not require visa sponsorship now or in the future". Only in these
+    // framings: "we sponsor visas and welcome those who do not require
+    // sponsorship" offers sponsorship, so a bare "not require sponsorship"
+    // would drop it.
+    ...cross(
+      [
+        ...['authorization', 'authorisation']
+          .flatMap(a => [`${a} that does not require`, `${a} that doesn't require`]),
+        'must not require',
+        'must not now or in the future require',
+      ],
+      anySponsorship,
+    ),
+    // "you must be able to work without requiring visa sponsorship"
+    ...cross(['without requiring', 'without needing', 'without the need for'], anySponsorship),
+    'without visa sponsorship',
+    // "this position is not eligible for visa sponsorship"
+    'not eligible for sponsorship',
+    'not eligible for visa sponsorship',
+    'ineligible for sponsorship',
+    'ineligible for visa sponsorship',
+    // "visa sponsorship is not offered for this role"
+    'sponsorship is not offered',
+    'sponsorship not offered',
+    'sponsorship is not provided',
+    'sponsorship not provided',
+    'sponsorship will not be offered',
+    'sponsorship will not be provided',
+    'sponsorship cannot be offered',
+    'sponsorship cannot be provided',
+    // "we won't sponsor visas", "we are not currently able to sponsor visas"
+    "n't sponsor",
+    'will not sponsor',
+    'not currently sponsor',
+    'not currently able to sponsor',
+    'not in a position to sponsor',
+  ];
+}
+
+// Fold curly apostrophes so "can’t" and "can't" match the same keyword.
+function foldApostrophes(text) {
+  return text.replace(/[\u2018\u2019\u02bc]/g, "'");
+}
 
 export function buildVisaFilter(visaFilter) {
   if (!visaFilter || visaFilter.enabled === false) return () => true;
-  const positive = visaFilter.positive != null
+  const positive = (visaFilter.positive != null
     ? normalizeKeywordList(visaFilter.positive)
-    : DEFAULT_VISA_POSITIVE.slice();
-  const negative = visaFilter.negative != null
+    : DEFAULT_VISA_POSITIVE.slice()).map(foldApostrophes);
+  const negative = (visaFilter.negative != null
     ? normalizeKeywordList(visaFilter.negative)
-    : DEFAULT_VISA_NEGATIVE.slice();
+    : DEFAULT_VISA_NEGATIVE.slice()).map(foldApostrophes);
   const requireMention = visaFilter.require_mention === true;
 
   return (description) => {
     const hasText = typeof description === 'string' && description.trim() !== '';
     if (!hasText) return !requireMention;
-    const lower = description.toLowerCase();
+    const lower = foldApostrophes(description.toLowerCase());
     if (negative.length > 0 && negative.some(k => lower.includes(k))) return false;
     if (!requireMention) return true;
     if (positive.length === 0) return true;
@@ -2696,6 +2764,49 @@ function defaultCompanyNormalizer(name) {
   return String(name ?? '').trim().toLowerCase();
 }
 
+// Longer forms first so "incorporated" is taken whole. The separator is only
+// the suffix boundary: punctuation inside the remaining name stays, so
+// "C++ Consulting" does not collapse into "C Consulting".
+const TRAILING_LEGAL_SUFFIX_RE = new RegExp(
+  `(?:^|[\\s,.])(?:${[...LEGAL_SUFFIXES].sort((a, b) => b.length - a.length).join('|')})\\.?$`,
+  'u',
+);
+
+function companyStemForDedup(name) {
+  let key = String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const folded = key;
+  let guard = 0;
+  while (key && guard++ < LEGAL_SUFFIXES.length + 1) {
+    const match = TRAILING_LEGAL_SUFFIX_RE.exec(key);
+    // A name that is only a suffix keeps that suffix. Stripping it would make
+    // every such label the same empty key.
+    if (!match || match.index === 0) break;
+    key = key.slice(0, match.index).replace(/[\s,.]+$/u, '').trim();
+  }
+  return key || folded;
+}
+
+// "Acme, Inc." and "Acme Inc." are the same explicit alias as "Acme Inc".
+// The suffix word stays, so the label is not the stem "acme". Punctuation
+// inside the remaining name stays.
+function companyAliasSpelling(name) {
+  const key = String(name ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+  const match = TRAILING_LEGAL_SUFFIX_RE.exec(key);
+  if (!match || match.index === 0) return key;
+  const suffixWord = match[0].replace(/^[\s,.]+/u, '').replace(/\.+$/u, '');
+  const head = key.slice(0, match.index).replace(/[\s,.]+$/u, '').trim();
+  if (!head || !suffixWord) return key;
+  return `${head} ${suffixWord}`;
+}
+
 /**
  * Build a company-name canonicalizer from `config.company_aliases`.
  *
@@ -2719,6 +2830,9 @@ function defaultCompanyNormalizer(name) {
  */
 export function buildCompanyCanonicalizer(aliases) {
   const map = new Map();
+  // An explicit alias claimed by two canonical names. Lookup returns that
+  // label unchanged, before the suffix stem can fold it into one of them.
+  const ambiguousExplicit = new Set();
   if (aliases && typeof aliases === 'object' && !Array.isArray(aliases)) {
     const entries = Object.entries(aliases);
     const canonicalKeys = new Set();
@@ -2731,23 +2845,45 @@ export function buildCompanyCanonicalizer(aliases) {
       canonicalKeys.add(canon);
     }
 
-    const aliasTargets = new Map();
+    const explicitTargets = new Map();
+    const stemTargets = new Map();
+    const claim = (bucket, form, canon) => {
+      // A canonical key keeps its own identity, even when it is also the
+      // suffix-stripped form of someone else's alias.
+      if (!form || canonicalKeys.has(form)) return;
+      if (!bucket.has(form)) bucket.set(form, new Set());
+      bucket.get(form).add(canon);
+    };
     for (const [canonical, list] of entries) {
       const canon = defaultCompanyNormalizer(canonical);
       if (!canon) continue;
       const arr = Array.isArray(list) ? list : [list];
       for (const a of arr) {
         const alias = defaultCompanyNormalizer(a);
-        if (!alias || canonicalKeys.has(alias)) continue;
-        if (!aliasTargets.has(alias)) aliasTargets.set(alias, new Set());
-        aliasTargets.get(alias).add(canon);
+        claim(explicitTargets, alias, canon);
+        const spelled = companyAliasSpelling(alias);
+        if (spelled !== alias) claim(explicitTargets, spelled, canon);
+        const stemmed = companyStemForDedup(alias);
+        if (stemmed && stemmed !== alias) claim(stemTargets, stemmed, canon);
       }
     }
 
-    // Ambiguous aliases fail open as their raw normalized label. This may allow
-    // a duplicate through, but it cannot silently suppress another company.
-    for (const [alias, targets] of aliasTargets) {
+    // An explicit alias wins over a stem inferred from a different alias.
+    // An ambiguous explicit alias stays out of the map. A punctuated form
+    // of that alias is the same collision, so it stays out too.
+    for (const [alias, targets] of explicitTargets) {
+      const spelled = companyAliasSpelling(alias);
+      if ((explicitTargets.get(spelled)?.size ?? 0) > 1) {
+        ambiguousExplicit.add(spelled);
+        if (spelled !== alias) ambiguousExplicit.add(alias);
+        continue;
+      }
       if (targets.size === 1) map.set(alias, targets.values().next().value);
+      else ambiguousExplicit.add(alias);
+    }
+    for (const [stem, targets] of stemTargets) {
+      if (explicitTargets.has(stem) || targets.size !== 1) continue;
+      map.set(stem, targets.values().next().value);
     }
   }
 
@@ -2759,7 +2895,18 @@ export function buildCompanyCanonicalizer(aliases) {
    */
   return function canonicalizeCompany(name) {
     const key = defaultCompanyNormalizer(name);
-    return map.get(key) ?? key;
+    const spelled = companyAliasSpelling(key);
+    // A canonical name keeps its identity. Any other spelling of an
+    // ambiguous alias stays unresolved, including "Acme Inc." when "acme inc"
+    // is already claimed twice.
+    const ownName = map.has(key) && map.get(key) === key;
+    if (!ownName && ambiguousExplicit.has(spelled)) return spelled;
+    if (ambiguousExplicit.has(key)) return key;
+    if (map.has(key)) return map.get(key);
+    if (spelled !== key && map.has(spelled)) return map.get(spelled);
+    const stemmed = companyStemForDedup(key);
+    if (stemmed !== key && map.has(stemmed)) return map.get(stemmed);
+    return key;
   };
 }
 
@@ -3061,7 +3208,7 @@ export function normalizeLocationForDedup(location) {
  * @returns {string} Stable dedupe key: `company::role`, or `company::role@@places`.
  */
 export function companyRoleDedupKey(company, role, canonicalize = defaultCompanyNormalizer, location = undefined) {
-  const base = `${canonicalize(company)}::${normalizeRoleForDedup(role)}`;
+  const base = `${companyStemForDedup(canonicalize(company))}::${normalizeRoleForDedup(role)}`;
   const places = normalizeLocationForDedup(location);
   // `@@` and not a third `::`: normalizeTextKey strips punctuation, so neither
   // the role nor the location component can ever contain the separator, and a
@@ -4864,6 +5011,7 @@ const USAGE = `Usage:
   node scan.mjs --verify --headed-fallback   # retry anti-bot-blocked URLs in a headed browser (needs a display)
   node scan.mjs --verify --throttle          # jittered ~5-10s gap between browser checks
   node scan.mjs --verify --throttle=8000     # custom base gap in ms (waits base..2*base)
+  node scan.mjs --verify --throttle 8000     # same gap, value as the next argument
   node scan.mjs --rediscover-404             # re-verify tracked URLs that 404/410 (rides on --verify)
   node scan.mjs --include-blacklisted        # let data/blacklist.md matches through (annotated)
   node scan.mjs --since 7                    # postings from the last 7 days
@@ -4875,6 +5023,32 @@ const USAGE = `Usage:
 
 Exit status: 0 when the scan ran, 1 on a configuration or fatal error, 2 when
 every target it tried failed (with --json: when any target failed).`;
+
+// --throttle stays out of VALUE_FLAGS. An equals form that is not a positive
+// integer has to remain an unrecognized flag, which is what the existing
+// throttle test locks. The space form is read here, after that check.
+export function readThrottleBaseMs(args) {
+  const eq = args.find((a) => typeof a === 'string' && a.startsWith('--throttle='));
+  if (eq && /^--throttle=0*[1-9]\d*$/.test(eq)) {
+    const raw = eq.slice('--throttle='.length);
+    const n = Number(raw);
+    if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: null };
+    // A digit string that does not fit a safe integer used to fall through and
+    // return ms: 0, which turns the pause off. The flag was present.
+    return { error: `Error: --throttle expects a positive number of milliseconds, got "${raw}"` };
+  }
+  const idx = args.indexOf('--throttle');
+  if (idx === -1) return { ms: 0, consumedIndex: null };
+  const next = args[idx + 1];
+  if (next === undefined || (typeof next === 'string' && next.startsWith('-'))) {
+    return { ms: 5000, consumedIndex: null };
+  }
+  if (typeof next === 'string' && /^0*[1-9]\d*$/.test(next)) {
+    const n = Number(next);
+    if (Number.isSafeInteger(n) && n > 0) return { ms: n, consumedIndex: idx + 1 };
+  }
+  return { error: `Error: --throttle expects a positive number of milliseconds, got "${next}"` };
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -4891,11 +5065,26 @@ async function main() {
   // URL in a headed browser. Off by default — headed Chromium needs a display, so
   // scheduled/unattended scans should not rely on it.
   const headedFallback = args.includes('--headed-fallback');
-  // --throttle or --throttle=<ms>: jittered gap between --verify checks to stay
-  // under rate-based WAF limits (pracuj.pl flags the session after a few rapid
-  // hits). Default base 5000ms. Off by default — most ATS feeds don't need it.
-  const throttleArg = args.find((a) => a === '--throttle' || a.startsWith('--throttle='));
-  const throttleBaseMs = throttleArg ? (Number(throttleArg.split('=')[1]) || 5000) : 0;
+  // --throttle or --throttle=<ms> or --throttle <ms>: jittered gap between
+  // --verify checks. Bare flag is 5000ms. Off when the flag is absent.
+  const throttle = readThrottleBaseMs(args);
+  if (throttle.error) {
+    console.error(throttle.error);
+    process.exit(1);
+  }
+  const throttleBaseMs = throttle.ms;
+  const consumed = new Set();
+  if (throttle.consumedIndex != null) consumed.add(throttle.consumedIndex);
+  args.forEach((token, idx) => {
+    if (!VALUE_FLAGS.includes(token)) return;
+    const next = args[idx + 1];
+    if (typeof next === 'string' && !next.startsWith('-')) consumed.add(idx + 1);
+  });
+  const unexpected = args.find((token, idx) => !consumed.has(idx) && typeof token === 'string' && !token.startsWith('-'));
+  if (unexpected) {
+    console.error(`Error: unexpected argument "${unexpected}". Pass a company with --company, for example --company ${unexpected}.`);
+    process.exit(1);
+  }
   // --rediscover-404: when a tracked company's URL 404/410s, search for the
   // moved role and re-verify before marking it expired. Opt-in; rides on --verify.
   const rediscover = args.includes('--rediscover-404');
