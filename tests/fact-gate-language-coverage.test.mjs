@@ -23,7 +23,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { verifyFacts, diagnoseCoverage } from '../verify-cv-facts.mjs';
+import { verifyFacts, diagnoseCoverage, metricClaims } from '../verify-cv-facts.mjs';
 
 // No sources and no config: this asks what the gate SEES, not what it allows.
 const BARE = { sourcePaths: [], configPath: 'config/__no_such_config__.json' };
@@ -225,6 +225,46 @@ test('the new nouns compare against an English source through the shared canonic
 
     const fr = verifyFacts('Encadré 45 candidats dans 10 écoles et conseillé 30 consultants.', opts);
     assert.deepEqual([...fr.invented], [], `invented: ${JSON.stringify([...fr.invented])}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a singular count of one matches its English source (#5406 review)', () => {
+  // A count of one is not a plural. Before this, a German "1 Standort" read as
+  // "1 locations" while the English source's "1 location" produced no claim at
+  // all, so the gate blocked a truthful translation.
+  assert.deepEqual([...verifyFacts('1 Standort.', BARE).invented], ['1 locations']);
+  assert.deepEqual([...verifyFacts('1 Ingenieur.', BARE).invented], ['1 engineers']);
+
+  const dir = mkdtempSync(join(tmpdir(), 'fact-singular-'));
+  try {
+    const source = join(dir, 'cv.md');
+    writeFileSync(source, 'Ran 1 location with 1 engineer and 1 consultant.');
+    const opts = { ...BARE, sourcePaths: [source] };
+    const ok = verifyFacts('1 Standort mit 1 Ingenieur und 1 Berater.', opts);
+    assert.deepEqual([...ok.invented], [], `invented: ${JSON.stringify([...ok.invented])}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // A time noun between the number and the noun still binds first: prose that
+  // says "10 years as engineer" is not a claim of ten engineers.
+  assert.deepEqual([...metricClaims('10 years as engineer.')], ['10 years']);
+});
+
+test('Bürogebäude compares against office buildings (#5406 review)', () => {
+  // A German "Bürogebäude" smuggled into the generic "facilities" bucket did
+  // not match the English source's "buildings", so a truthful line blocked.
+  assert.deepEqual([...verifyFacts('Verwaltete 3 Bürogebäude.', BARE).invented], ['3 buildings']);
+  assert.deepEqual([...verifyFacts('Verwaltete 3 Büros.', BARE).invented], ['3 facilities']);
+
+  const dir = mkdtempSync(join(tmpdir(), 'fact-buildings-'));
+  try {
+    const source = join(dir, 'cv.md');
+    writeFileSync(source, 'Managed 3 office buildings and 3 offices.');
+    const ok = verifyFacts('Verwaltete 3 Bürogebäude und 3 Büros.', { ...BARE, sourcePaths: [source] });
+    assert.deepEqual([...ok.invented], [], `invented: ${JSON.stringify([...ok.invented])}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

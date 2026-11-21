@@ -163,6 +163,15 @@ const METRIC_NOUNS = [
   'graduates', 'alumni', 'teachers', 'instructors', 'educators', 'faculty',
   'schools', 'districts', 'campuses', 'classrooms', 'programs', 'programmes',
   'workshops', 'assessments', 'exams',
+  // Singular English forms, plus one plural that had no entry (#5406 review).
+  // A count of one is not a plural: a German "1 Standort" read as "1 locations"
+  // while an English source saying "1 location" produced no claim at all, so a
+  // truthful translation was reported as invented. The lazy match still binds
+  // the NEAREST noun, so "10 years as engineer" stays "10 years" and never
+  // becomes ten engineers. "offices" is here for "3 Büros" against "3 offices":
+  // both fold to facilities. Each singular folds to its plural canonical in
+  // NOUN_SYNONYMS below.
+  'consultant', 'candidate', 'engineer', 'location', 'offices',
   // German (language.output: de / modes/de). Without these a German CV or cover
   // letter produced no count claim at all and only got the coverage warning,
   // so "45 Mitarbeiter" against a source saying 20 passed unchecked. Inflected
@@ -310,6 +319,14 @@ const NOUN_SYNONYMS = new Map([
   // restating a source's "20 staff" is a paraphrase, not a fabrication.
   ['personnel', 'staff'],
   ['labs', 'laboratories'],
+  // Singular English forms fold to the plural canonical the German and French
+  // blocks already use, so "1 Standort" and "1 location" compare equal (a count
+  // of one is not a plural), and "3 Büros" matches "3 offices" (#5406 review).
+  ['consultant', 'consultants'],
+  ['candidate', 'candidates'],
+  ['engineer', 'engineers'],
+  ['location', 'locations'],
+  ['offices', 'facilities'],
   // German forms fold to the English canonical noun (see METRIC_NOUNS).
   ['mitarbeiter', 'employees'],
   ['mitarbeitern', 'employees'],
@@ -348,7 +365,7 @@ const NOUN_SYNONYMS = new Map([
   ['personen', 'people'],
   ['ingenieur', 'engineers'],
   ['büros', 'facilities'],
-  ['bürogebäude', 'facilities'],
+  ['bürogebäude', 'buildings'],
   ['projekte', 'projects'],
   ['projekten', 'projects'],
   ['standorte', 'locations'],
