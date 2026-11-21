@@ -159,6 +159,28 @@ const OWN = [
     '2026-11-20',
     'a citation complete inside its own bracket does not take the date before it',
   ],
+  // Direction is a property of the GROUP, not of each pointer in it. Measured
+  // per pointer, the two here disagreed -- "row 51" read the comma before
+  // "row 52" as an appositive's and attached backward, "row 52" sat against the
+  // verb and attached forward -- so both dates were cited and the note was
+  // reported as stating none, with the resolver falling back to the ledger.
+  // Asserted in both directions, and after a nested group, since the group's
+  // closing bracket is what has to be found.
+  [
+    'Applied 2026-11-20 and (row 51, row 52) applied 2026-09-20',
+    '2026-11-20',
+    'two pointers in one bracket, reading forward',
+  ],
+  [
+    'Applied 2026-09-20 elsewhere (row 51, row 52), applied 2026-11-20 here',
+    '2026-11-20',
+    'two pointers in one bracket, reading backward',
+  ],
+  [
+    'Applied 2026-11-20 and (via Ashby (US), row 51, row 52) applied 2026-09-20',
+    '2026-11-20',
+    'two pointers in one bracket, after a nested group',
+  ],
   // A TRAILING pointer cites the date before it only when it is bracketed. Both
   // of these put a pointer after a date with nothing after it, so position
   // alone cannot separate an appositive citation from prose that merely

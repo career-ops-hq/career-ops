@@ -407,16 +407,32 @@ function unclosedGroupStart(text, from, to) {
   return stack.length > 0 ? stack[0] : -1;
 }
 
-// Whether `at` sits inside a closed bracket group within [from, to).
-function isBracketed(text, from, to, at) {
+// Where the OUTERMOST closed bracket group containing `at` ends within
+// [from, to), or -1 when `at` is not inside one. The offset just past the
+// closing bracket, so it can be compared with a date's offset directly.
+//
+// Outermost, and the group rather than the pointer, because direction is a
+// property of the whole aside: "(row 51, row 52) applied 2026-09-20" has two
+// pointers in one group, and measuring from each pointer gave them opposite
+// directions -- "row 51" read the comma before "row 52" as the end of an
+// appositive while "row 52" sat against the verb. One group, one reading.
+function bracketGroupEnd(text, from, to, at) {
+  let openedAt = -1;
   let depth = 0;
   for (let i = from; i < to; i += 1) {
-    if (i === at) return depth > 0;
     const ch = text[i];
-    if (ch === '(' || ch === '[') depth += 1;
-    else if ((ch === ')' || ch === ']') && depth > 0) depth -= 1;
+    if (ch === '(' || ch === '[') {
+      depth += 1;
+    } else if ((ch === ')' || ch === ']') && depth > 0) {
+      depth -= 1;
+      if (depth === 0 && openedAt !== -1) return i + 1;
+    }
+    if (i === at) {
+      if (depth === 0) return -1;
+      openedAt = i;
+    }
   }
-  return false;
+  return -1;
 }
 
 // The row pointers in [from, to), with absolute offsets.
@@ -439,7 +455,8 @@ function pointersIn(text, from, to) {
     // Notes column, kept in sync by being written the same way rather than
     // imported -- merge-tracker's regex also captures the id itself.
     if (m[0].startsWith('#') && REQ_LABELLED_HASH_RE.test(text.slice(from, at))) continue;
-    found.push({ index: at, text: m[0], bracketed: isBracketed(text, from, limit, at) });
+    const groupEnd = bracketGroupEnd(text, from, limit, at);
+    found.push({ index: at, text: m[0], bracketed: groupEnd !== -1, groupEnd });
   }
   return found;
 }
@@ -502,10 +519,13 @@ function pointerOwner(text, pointer, dates) {
     //   "Applied 2026-11-20 and (row 51) applied 2026-09-20"
     // which read the opposite ways round and are otherwise identical: a
     // bracketed pointer with a segment on either side of it.
-    const gap = following === null
-      ? null
-      : text.slice(pointer.index + pointer.text.length, following.index);
-    if (gap === null || !/^[)\]\s]*$/.test(gap)) {
+    // Measured from the end of the GROUP, so every pointer inside one bracket
+    // reads the same way. A date inside the group is the group's own, which is
+    // the subject reading too: "(row 51 applied 2026-09-20)".
+    const subjectOfFollowing = following !== null
+      && (following.index < pointer.groupEnd
+        || /^\s*$/.test(text.slice(pointer.groupEnd, following.index)));
+    if (!subjectOfFollowing) {
       const preceding = dates.filter(d => d.index < pointer.index).pop();
       if (preceding) return preceding;
     }
