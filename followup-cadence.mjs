@@ -497,14 +497,6 @@ function pointersIn(text, from, to) {
 //
 // Direction, not distance, is what the two differ by, so the rule is which way
 // a bracket faces rather than how far a scan may run.
-//
-// KNOWN LIMIT: a bracketed pointer that is the subject of a FOLLOWING date in
-// the same clause -- "Applied 2026-11-20 and (row 51) applied 2026-09-20" --
-// now cites November and returns September. The two are structurally identical
-// (bracketed pointer, a segment before it, a segment after it), so nothing
-// short of reading the prose separates them; the appositive wins because it is
-// the shape real notes are written in, while a parenthesised subject taking a
-// verb outside its own brackets is not attested on any row.
 function pointerOwner(text, pointer, dates) {
   // Inside an "applied ... date" span, the pointer names what that application
   // was for, so it owns that date whatever its form or punctuation.
