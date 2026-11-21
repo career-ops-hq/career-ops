@@ -80,3 +80,5 @@ contribution does not edit this file: maintainers regenerate it on main with
 - 2026-11-20 `2026-11-20-santifer.93` (24 boards, source `ats-directory`): ATS Career Page URLs by Latmay, CC BY 4.0: https://latmay.com
 - 2026-11-20 `2026-11-20-santifer.96` (159 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
 - 2026-11-20 `2026-11-20-santifer.97` (113 boards, source `ats-directory`): ats-scrapers company lists, MIT License, Copyright (c) 2026 Kalil Bouzigues: https://github.com/kalil0321/ats-scrapers
+- 2026-11-21 `2026-11-21-santifer` (11 boards, source `web-index:investor-portfolio@2026-11-21`): Employer websites from a public investor portfolio page
+- 2026-11-21 `2026-11-21-santifer.2` (3 boards, source `web-index:wikidata@2026-11-21`): Employer websites from Wikidata, CC0
