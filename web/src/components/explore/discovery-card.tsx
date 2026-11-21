@@ -7,15 +7,9 @@ import { instrumentSerif } from "@/lib/fonts";
 import { ATS_LABEL, type AtsSource, type DiscoveredOffer } from "@/lib/explore";
 import { CHINA_SOURCES, EMPLOYER_LABEL } from "@/lib/employer-preset.mjs";
 import { evaluationGateForJob } from "@/lib/job-gate.mjs";
-import { daysSince } from "@/lib/inbox";
+import { postedAgo } from "@/lib/inbox";
 import { useJobs } from "@/components/jobs/job-store";
 import { useExplore } from "./explore-provider";
-
-function freshness(postedAt: string): string {
-  const days = daysSince(postedAt, Date.now());
-  if (days == null) return "";
-  return days === 0 ? "today" : days === 1 ? "1d ago" : `${days}d ago`;
-}
 
 // Real company logo (favicon) via the localhost proxy, cached on disk FOREVER per
 // company — so once it resolves it's instant for this card AND every other card,
@@ -73,7 +67,7 @@ export function DiscoveryCard({
   const isAdding = adding.has(offer.url);
   const unverified = offer.verification === "unconfirmed";
   const employer = CHINA_SOURCES.includes(offer.source);
-  const fresh = freshness(offer.postedAt) || offer.postedHint || "";
+  const fresh = postedAgo(offer.postedAt, Date.now()) || offer.postedHint || "";
 
   const evaluate = () => {
     addToPipeline([offer]); // evaluating implies it's in the pipeline — record it
