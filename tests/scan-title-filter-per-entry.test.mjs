@@ -2,8 +2,8 @@
 //
 // A tracked_companies / job_boards entry's own title_filter replaces the global
 // filter for that entry only, including global negatives.
-import { pass, fail, ROOT, NODE } from './helpers.mjs';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'fs';
+import { pass, fail, ROOT, NODE, rmSync } from './helpers.mjs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
@@ -42,7 +42,11 @@ function runScan(portalsContent) {
       : [];
     return { stdout, urls };
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Under OS temp directory; handle locks on Windows should never crash the test suite
+    }
   }
 }
 
