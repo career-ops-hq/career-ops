@@ -630,3 +630,54 @@ test('a malformed copy that differs only in whitespace does not make the page am
   const out = jdFromPageHtml(`<html><script>{${valid},${malformed}}</script></html>`);
   assert.ok(out);
 });
+
+// #7507: when the headless worker's WebFetch is intercepted, the platform needs its own
+// read of a plain server-rendered page. Opt-in only: the default stays structured-data-only.
+const PLAIN = `<html><body><nav>Home Careers Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p></main></body></html>`;
+
+test('fetchJdFromPage ignores visible text unless visibleFallback is asked for', async () => {
+  const net = stubNetwork(() => html(PLAIN));
+  try {
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1'), null);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback returns the visible posting text of a plain page', async () => {
+  const net = stubNetwork(() => html(PLAIN));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.equal(jd.method, 'visible-text');
+    assert.match(jd.text, /production services/);
+    assert.doesNotMatch(jd.text, /<[a-z]/);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback refuses a stub page under the word floor', async () => {
+  const net = stubNetwork(() => html('<html><body><main>Staff Engineer Apply now</main></body></html>'));
+  try {
+    assert.equal(await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true }), null);
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback never scores a closed posting', async () => {
+  const closed = `<html><body><main><p>This job is no longer available.</p><p>${BODY}</p></main></body></html>`;
+  const net = stubNetwork(() => html(closed));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(!jd || jd.closed === true, 'closed evidence wins over visible text');
+    assert.ok(!jd || jd.text === '');
+  } finally { net.restore(); }
+});
+
+test('fetchJdFromPage visibleFallback drops the doctype and prefers the <main> region over page chrome', async () => {
+  const doc = `<!DOCTYPE html><html><head><title>Jobs</title></head><body><nav>Main menu Contact us Help Login</nav><main><h1>Staff Engineer</h1><p>${BODY}</p></main><footer>Privacy Terms</footer></body></html>`;
+  const net = stubNetwork(() => html(doc));
+  try {
+    const jd = await fetchJdFromPage('https://careers.example.com/job/1', 20_000, 15_000, { visibleFallback: true });
+    assert.ok(jd);
+    assert.doesNotMatch(jd.text, /doctype/i);
+    assert.doesNotMatch(jd.text, /Main menu|Privacy Terms/);
+    assert.match(jd.text, /Staff Engineer/);
+  } finally { net.restore(); }
+});

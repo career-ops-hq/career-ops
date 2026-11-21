@@ -85,3 +85,28 @@ test("prefetchJd does not start when the request is already aborted, and passes 
   await prefetchJd(url, async (_s, _a, opts) => { received = opts?.signal; return { code: 0, stdout: JD }; }, controller.signal);
   assert.equal(received, controller.signal, "the run must be able to kill the child on abort");
 });
+
+test("prefetchJd retries with --visible after a plain miss, so a blocked WebFetch is not the only reader (#7507)", async () => {
+  const url = "https://careers.example.com/job/1";
+  const seen = [];
+  const out = await prefetchJd(url, async (script, args) => {
+    seen.push(args);
+    return args.includes("--visible") ? { code: 0, stdout: JD } : { code: 1, stdout: "" };
+  });
+  assert.equal(out.text, JD.trim());
+  assert.deepEqual(seen, [[url], [url, "--visible"]]);
+});
+
+test("prefetchJd does not retry after a timeout, a spawn failure or a closed posting", async () => {
+  const url = "https://careers.example.com/job/1";
+  for (const res of [{ code: 1, stdout: "", timedOut: true }, { code: -1, stdout: "", spawnFailed: true }, { code: 3, stdout: "CLOSED_POSTING gone" }]) {
+    let calls = 0;
+    await prefetchJd(url, async () => { calls += 1; return res; });
+    assert.equal(calls, 1);
+  }
+});
+
+test("prefetchJd stays a miss when the --visible retry also misses", async () => {
+  const out = await prefetchJd("https://careers.example.com/job/1", async () => ({ code: 1, stdout: "" }));
+  assert.deepEqual(out, { text: null, closedEvidence: null });
+});
